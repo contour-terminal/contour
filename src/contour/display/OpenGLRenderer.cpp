@@ -66,20 +66,20 @@ namespace ZAxisDepths
 
 namespace
 {
-    struct CRISPY_PACKED vec2
+    struct CRISPY_PACKED vec2 // NOLINT
     {
         float x;
         float y;
     };
 
-    struct CRISPY_PACKED vec3
+    struct CRISPY_PACKED vec3 // NOLINT
     {
         float x;
         float y;
         float z;
     };
 
-    struct CRISPY_PACKED vec4
+    struct CRISPY_PACKED vec4 // NOLINT
     {
         float x;
         float y;
@@ -94,19 +94,19 @@ namespace
     }
 
     template <typename T, typename Fn>
-    inline void bound(T& _bindable, Fn&& _callable)
+    inline void bound(T& bindable, Fn&& callable)
     {
-        _bindable.bind();
+        bindable.bind();
         try
         {
-            _callable();
+            callable();
         }
         catch (...)
         {
-            _bindable.release();
+            bindable.release();
             throw;
         }
-        _bindable.release();
+        bindable.release();
     }
 
     template <typename F>
@@ -116,16 +116,16 @@ namespace
         region();
         auto err = GLenum {};
         while ((err = glGetError()) != GL_NO_ERROR)
-            DisplayLog(location)("OpenGL error {} for call.", err);
+            displayLog(location)("OpenGL error {} for call.", err);
     }
 
     QMatrix4x4 ortho(float left, float right, float bottom, float top)
     {
-        constexpr float nearPlane = -1.0f;
-        constexpr float farPlane = 1.0f;
+        constexpr float NearPlane = -1.0f;
+        constexpr float FarPlane = 1.0f;
 
         QMatrix4x4 mat;
-        mat.ortho(left, right, bottom, top, nearPlane, farPlane);
+        mat.ortho(left, right, bottom, top, NearPlane, FarPlane);
         return mat;
     }
 
@@ -142,19 +142,18 @@ namespace
 
     struct OpenGLContextGuard
     {
-        QOpenGLContext* _context;
-        QSurface* _surface;
+        QOpenGLContext* context;
+        QSurface* surface;
 
         OpenGLContextGuard():
-            _context { QOpenGLContext::currentContext() },
-            _surface { _context ? _context->surface() : nullptr }
+            context { QOpenGLContext::currentContext() }, surface { context ? context->surface() : nullptr }
         {
         }
 
         ~OpenGLContextGuard()
         {
-            if (_context)
-                _context->makeCurrent(_surface);
+            if (context)
+                context->makeCurrent(surface);
         }
     };
 
@@ -187,7 +186,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig textShaderConfig,
                                ShaderConfig rectShaderConfig,
                                crispy::image_size viewSize,
                                crispy::image_size targetSurfaceSize,
-                               crispy::image_size /*textureTileSize*/,
+                               [[maybe_unused]] crispy::image_size textureTileSize,
                                terminal::rasterizer::PageMargin margin):
     _startTime { chrono::steady_clock::now().time_since_epoch() },
     _viewSize { viewSize },
@@ -195,7 +194,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig textShaderConfig,
     _textShaderConfig { std::move(textShaderConfig) },
     _rectShaderConfig { std::move(rectShaderConfig) }
 {
-    DisplayLog()("OpenGLRenderer: Constructing with render size {}.", _renderTargetSize);
+    displayLog()("OpenGLRenderer: Constructing with render size {}.", _renderTargetSize);
     setRenderSize(targetSurfaceSize);
 }
 
@@ -210,7 +209,7 @@ void OpenGLRenderer::setRenderSize(crispy::image_size targetSurfaceSize)
                               /* bottom */ unbox<float>(_renderTargetSize.height),
                               /* top */ 0.0f);
 
-    DisplayLog()("Setting render target size to {}.", _renderTargetSize);
+    displayLog()("Setting render target size to {}.", _renderTargetSize);
 }
 
 void OpenGLRenderer::setTranslation(float x, float y, float z) noexcept
@@ -243,9 +242,9 @@ void OpenGLRenderer::initializeRectRendering()
     CHECKED_GL(glBindBuffer(GL_ARRAY_BUFFER, _rectVBO));
     CHECKED_GL(glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STREAM_DRAW));
 
-    auto constexpr BufferStride = 7 * sizeof(GLfloat);
-    auto const VertexOffset = (void const*) (0 * sizeof(GLfloat));
-    auto const ColorOffset = (void const*) (3 * sizeof(GLfloat));
+    constexpr auto const BufferStride = 7 * sizeof(GLfloat);
+    const auto* const VertexOffset = (void const*) (0 * sizeof(GLfloat)); // NOLINT
+    const auto* const ColorOffset = (void const*) (3 * sizeof(GLfloat));  // NOLINT
 
     // 0 (vec3): vertex buffer
     CHECKED_GL(glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, BufferStride, VertexOffset));
@@ -263,10 +262,10 @@ void OpenGLRenderer::initializeTextureRendering()
     CHECKED_GL(glGenVertexArrays(1, &_textVAO));
     CHECKED_GL(glBindVertexArray(_textVAO));
 
-    auto constexpr BufferStride = (3 + 4 + 4) * sizeof(GLfloat);
-    auto constexpr VertexOffset = (void const*) nullptr;
-    auto const* TexCoordOffset = (void const*) (3 * sizeof(GLfloat));
-    auto const* ColorOffset = (void const*) (7 * sizeof(GLfloat));
+    constexpr auto const BufferStride = (3 + 4 + 4) * sizeof(GLfloat);
+    constexpr auto* const VertexOffset = (void const*) nullptr;
+    const auto* const TexCoordOffset = (void const*) (3 * sizeof(GLfloat)); // NOLINT
+    const auto* const ColorOffset = (void const*) (7 * sizeof(GLfloat));    // NOLINT
 
     CHECKED_GL(glGenBuffers(1, &_textVBO));
     CHECKED_GL(glBindBuffer(GL_ARRAY_BUFFER, _textVBO));
@@ -297,7 +296,7 @@ void OpenGLRenderer::initializeTextureRendering()
 
 OpenGLRenderer::~OpenGLRenderer()
 {
-    DisplayLog()("~OpenGLRenderer");
+    displayLog()("~OpenGLRenderer");
     CHECKED_GL(glDeleteVertexArrays(1, &_rectVAO));
     CHECKED_GL(glDeleteBuffers(1, &_rectVBO));
 }
@@ -348,15 +347,15 @@ void OpenGLRenderer::logInfo()
     QOpenGLFunctions& glFunctions = *QOpenGLContext::currentContext()->functions();
 
     auto const openGLTypeString = QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES"sv : "OpenGL"sv;
-    DisplayLog()("[FYI] OpenGL type         : {}", openGLTypeString);
-    DisplayLog()("[FYI] OpenGL renderer     : {}", (char const*) glFunctions.glGetString(GL_RENDERER));
+    displayLog()("[FYI] OpenGL type         : {}", openGLTypeString);
+    displayLog()("[FYI] OpenGL renderer     : {}", (char const*) glFunctions.glGetString(GL_RENDERER));
 
     GLint versionMajor {};
     GLint versionMinor {};
     glFunctions.glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
     glFunctions.glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
-    DisplayLog()("[FYI] OpenGL version      : {}.{}", versionMajor, versionMinor);
-    DisplayLog()("[FYI] Widget size         : {} ({})", _renderTargetSize, _viewSize);
+    displayLog()("[FYI] OpenGL version      : {}.{}", versionMajor, versionMinor);
+    displayLog()("[FYI] Widget size         : {} ({})", _renderTargetSize, _viewSize);
 
     string glslVersions = (char const*) glFunctions.glGetString(GL_SHADING_LANGUAGE_VERSION);
 #if 0 // defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
@@ -377,7 +376,7 @@ void OpenGLRenderer::logInfo()
         glslVersions += ')';
     }
 #endif
-    DisplayLog()("[FYI] GLSL version        : {}", glslVersions);
+    displayLog()("[FYI] GLSL version        : {}", glslVersions);
 }
 
 void OpenGLRenderer::clearCache()
@@ -411,13 +410,13 @@ void OpenGLRenderer::configureAtlas(atlas::ConfigureAtlas atlas)
     _textureAtlas.textureSize = atlas.size;
     _textureAtlas.properties = atlas.properties;
 
-    DisplayLog()("configureAtlas: {} {}", atlas.size, atlas.properties.format);
+    displayLog()("configureAtlas: {} {}", atlas.size, atlas.properties.format);
 }
 
 void OpenGLRenderer::uploadTile(atlas::UploadTile tile)
 {
     // clang-format off
-    // DisplayLog()("uploadTile: atlas {} @ {}:{}",
+    // displayLog()("uploadTile: atlas {} @ {}:{}",
     //              tile.location.atlasID.value,
     //              tile.location.x.value,
     //              tile.location.y.value);
@@ -510,7 +509,7 @@ ImageSize OpenGLRenderer::renderBufferSize()
 
 struct ScopedRenderEnvironment
 {
-    QOpenGLExtraFunctions& gl;
+    QOpenGLExtraFunctions& _gl;
 
     bool savedBlend;          // QML seems to explicitly disable that, but we need it.
     GLenum savedDepthFunc {}; // Shuold be GL_LESS, but you never know.
@@ -518,33 +517,33 @@ struct ScopedRenderEnvironment
     GLenum savedBlendSource {};
     GLenum savedBlendDestination {};
 
-    ScopedRenderEnvironment(QOpenGLExtraFunctions& _gl):
-        gl { _gl }, // clang-format off
-        savedBlend { gl.glIsEnabled(GL_BLEND) != GL_FALSE } // clang-format on
+    ScopedRenderEnvironment(QOpenGLExtraFunctions& gl):
+        _gl { gl }, // clang-format off
+        savedBlend { _gl.glIsEnabled(GL_BLEND) != GL_FALSE } // clang-format on
     {
-        gl.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, (GLint*) &savedVAO);
+        _gl.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, (GLint*) &savedVAO);
 
-        gl.glGetIntegerv(GL_DEPTH_FUNC, (GLint*) &savedDepthFunc);
-        gl.glDepthFunc(GL_LEQUAL);
-        gl.glDepthMask(GL_FALSE);
+        _gl.glGetIntegerv(GL_DEPTH_FUNC, (GLint*) &savedDepthFunc);
+        _gl.glDepthFunc(GL_LEQUAL);
+        _gl.glDepthMask(GL_FALSE);
 
         // Enable color blending to allow drawing text/images on top of background.
-        gl.glGetIntegerv(GL_BLEND_SRC, (GLint*) &savedBlendSource);
-        gl.glGetIntegerv(GL_BLEND_DST, (GLint*) &savedBlendDestination);
-        gl.glEnable(GL_BLEND);
-        // gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE);
-        gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+        _gl.glGetIntegerv(GL_BLEND_SRC, (GLint*) &savedBlendSource);
+        _gl.glGetIntegerv(GL_BLEND_DST, (GLint*) &savedBlendDestination);
+        _gl.glEnable(GL_BLEND);
+        // _gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE);
+        _gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
     }
 
     ~ScopedRenderEnvironment()
     {
-        gl.glBlendFunc(savedBlendSource, savedBlendDestination);
-        gl.glDepthFunc(savedDepthFunc);
+        _gl.glBlendFunc(savedBlendSource, savedBlendDestination);
+        _gl.glDepthFunc(savedDepthFunc);
         if (!savedBlend)
-            gl.glDisable(GL_BLEND);
+            _gl.glDisable(GL_BLEND);
 
-        gl.glBindVertexArray(savedVAO);
-        gl.glDepthMask(GL_TRUE);
+        _gl.glBindVertexArray(savedVAO);
+        _gl.glDepthMask(GL_TRUE);
     }
 };
 
@@ -556,7 +555,7 @@ void OpenGLRenderer::execute(std::chrono::steady_clock::time_point now)
 
     auto const timeValue = uptime(now);
 
-    // DisplayLog()("execute {} rects, {} uploads, {} renders\n",
+    // displayLog()("execute {} rects, {} uploads, {} renders\n",
     //              _rectBuffer.size() / 7,
     //              _scheduledExecutions.uploadTiles.size(),
     //              _scheduledExecutions.renderBatch.renderTiles.size());
@@ -683,9 +682,9 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    auto constexpr target = GL_TEXTURE_2D;
-    auto constexpr levelOfDetail = 0;
-    auto constexpr type = GL_UNSIGNED_BYTE;
+    constexpr auto const Target = GL_TEXTURE_2D;
+    constexpr auto const LevelOfDetail = 0;
+    constexpr auto const Type = GL_UNSIGNED_BYTE;
     std::vector<uint8_t> stub;
     // {{{ fill stub
     stub.resize(param.size.area() * element_count(param.properties.format));
@@ -717,18 +716,18 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     // }}}
     GLenum const glFmt = GL_RGBA;
     GLint constexpr UnusedParam = 0;
-    CHECKED_GL(glTexImage2D(target,
-                            levelOfDetail,
+    CHECKED_GL(glTexImage2D(Target,
+                            LevelOfDetail,
                             (int) glFmt,
                             unbox<int>(param.size.width),
                             unbox<int>(param.size.height),
                             UnusedParam,
                             glFmt,
-                            type,
+                            Type,
                             stub.data()));
 #endif
 
-    DisplayLog()(
+    displayLog()(
         "GL configure atlas: {} {} GL texture Id {}", param.size, param.properties.format, textureAtlasId());
 }
 
@@ -737,21 +736,21 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
     Require(textureAtlasId() != 0);
 
     // clang-format off
-    // DisplayLog()("-> uploadTile: tex {} location {} format {} size {}",
+    // displayLog()("-> uploadTile: tex {} location {} format {} size {}",
     //              textureId, param.location, param.bitmapFormat, param.bitmapSize);
     // clang-format on
 
     // {{{ Force RGBA as OpenGL ES cannot implicitly convert on the driver-side.
-    auto bitmapData = (void const*) param.bitmap.data();
+    auto const* bitmapData = (void const*) param.bitmap.data();
     auto bitmapConverted = atlas::Buffer();
     switch (param.bitmapFormat)
     {
         case atlas::Format::Red: {
             bitmapConverted.resize(param.bitmapSize.area() * 4);
             bitmapData = bitmapConverted.data();
-            auto s = param.bitmap.data();
-            auto e = param.bitmap.data() + param.bitmap.size();
-            auto t = bitmapConverted.data();
+            auto const* s = param.bitmap.data();
+            auto const* const e = param.bitmap.data() + param.bitmap.size();
+            auto* t = bitmapConverted.data();
             while (s != e)
             {
                 *t++ = *s++; // red
@@ -764,9 +763,9 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
         case atlas::Format::RGB: {
             bitmapConverted.resize(param.bitmapSize.area() * 4);
             bitmapData = bitmapConverted.data();
-            auto s = param.bitmap.data();
-            auto e = param.bitmap.data() + param.bitmap.size();
-            auto t = bitmapConverted.data();
+            auto const* s = param.bitmap.data();
+            auto const* const e = param.bitmap.data() + param.bitmap.size();
+            auto* t = bitmapConverted.data();
             while (s != e)
             {
                 *t++ = *s++; // red
@@ -878,7 +877,7 @@ pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
     vector<uint8_t> buffer;
     buffer.resize(imageSize.area() * 4 /* 4 because RGBA */);
 
-    DisplayLog()("Capture screenshot ({}/{}).", imageSize, _renderTargetSize);
+    displayLog()("Capture screenshot ({}/{}).", imageSize, _renderTargetSize);
 
     CHECKED_GL(glReadPixels(0,
                             0,
@@ -921,26 +920,26 @@ GLuint OpenGLRenderer::createAndUploadImage(QSize imageSize,
     CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
     CHECKED_GL(glPixelStorei(GL_UNPACK_ALIGNMENT, rowAlignment));
 
-    auto constexpr target = GL_TEXTURE_2D;
-    auto constexpr levelOfDetail = 0;
-    auto constexpr type = GL_UNSIGNED_BYTE;
-    auto constexpr UnusedParam = 0;
-    auto constexpr internalFormat = GL_RGBA;
+    constexpr auto const Target = GL_TEXTURE_2D;
+    constexpr auto const LevelOfDetail = 0;
+    constexpr auto const Type = GL_UNSIGNED_BYTE;
+    constexpr auto const UnusedParam = 0;
+    constexpr auto const InternalFormat = GL_RGBA;
 
     auto const imageFormat = glFormat(format);
     auto const textureWidth = static_cast<GLsizei>(imageSize.width());
     auto const textureHeight = static_cast<GLsizei>(imageSize.height());
 
-    Require(imageFormat == internalFormat); // OpenGL ES cannot handle implicit conversion.
+    Require(imageFormat == InternalFormat); // OpenGL ES cannot handle implicit conversion.
 
-    CHECKED_GL(glTexImage2D(target,
-                            levelOfDetail,
-                            internalFormat,
+    CHECKED_GL(glTexImage2D(Target,
+                            LevelOfDetail,
+                            InternalFormat,
                             textureWidth,
                             textureHeight,
                             UnusedParam,
                             imageFormat,
-                            type,
+                            Type,
                             pixels));
     return textureId;
 }

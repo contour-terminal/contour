@@ -134,7 +134,7 @@ struct MouseTracker final: public BasicParserEvents
 
     parser::Parser<ParserEvents> vtInputParser;
 
-    MouseTracker(): savedTermios { detail::getTerminalSettings(STDIN_FILENO) }, vtInputParser { *this }
+    MouseTracker() noexcept: savedTermios { detail::getTerminalSettings(STDIN_FILENO) }, vtInputParser { *this }
     {
         auto tio = savedTermios;
         tio.c_lflag &= static_cast<tcflag_t>(~(ECHO | ICANON));
@@ -227,7 +227,7 @@ struct MouseTracker final: public BasicParserEvents
         fmt::print("Passive mouse tracking: {}\n", supported ? "supported" : "not supported");
     }
 
-    void writeToTTY(string_view s) { ::write(STDOUT_FILENO, s.data(), s.size()); }
+    void writeToTTY(string_view s) noexcept { ::write(STDOUT_FILENO, s.data(), s.size()); }
 
     void processInput()
     {

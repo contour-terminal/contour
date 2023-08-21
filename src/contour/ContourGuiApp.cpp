@@ -168,16 +168,16 @@ std::optional<fs::path> ContourGuiApp::dumpStateAtExit() const
     return fs::path(path);
 }
 
-void ContourGuiApp::onExit(TerminalSession& _session)
+void ContourGuiApp::onExit(TerminalSession& session)
 {
-    auto const* localProcess = dynamic_cast<terminal::Process const*>(&_session.terminal().device());
+    auto const* localProcess = dynamic_cast<terminal::Process const*>(&session.terminal().device());
     if (!localProcess)
         return;
 
     _exitStatus = localProcess->checkStatus();
 }
 
-QUrl ContourGuiApp::resolveResource(std::string_view path) const
+QUrl ContourGuiApp::resolveResource(std::string_view path)
 {
     auto const localPath = config::configHome() / fs::path(path.data());
     if (fs::exists(localPath))
@@ -198,8 +198,8 @@ bool ContourGuiApp::loadConfig(string const& target)
     auto const prefix = "contour." + target + ".";
 
     auto configFailures = int { 0 };
-    auto const configLogger = [&](string const& _msg) {
-        cerr << "Configuration failure. " << _msg << '\n';
+    auto const configLogger = [&](string const& msg) {
+        cerr << "Configuration failure. " << msg << '\n';
         ++configFailures;
     };
 
@@ -332,8 +332,8 @@ int ContourGuiApp::terminalGuiAction()
     {
         if (!_config.platformPlugin.empty())
         {
-            static constexpr auto platformArg = string_view("-platform");
-            qtArgsPtr.push_back(platformArg.data());
+            static constexpr auto PlatformArg = string_view("-platform");
+            qtArgsPtr.push_back(PlatformArg.data());
             qtArgsPtr.push_back(_config.platformPlugin.c_str());
         }
     }
@@ -367,9 +367,9 @@ int ContourGuiApp::terminalGuiAction()
     qRegisterMetaType<TerminalSession*>("TerminalSession*");
     // clang-format on
 
-    qmlEngine_ = make_unique<QQmlApplicationEngine>();
+    _qmlEngine = make_unique<QQmlApplicationEngine>();
 
-    QQmlContext* context = qmlEngine_->rootContext();
+    QQmlContext* context = _qmlEngine->rootContext();
     context->setContextProperty("terminalSessions", &_sessionManager);
 
     // auto const HTS = "\033H";
@@ -381,18 +381,18 @@ int ContourGuiApp::terminalGuiAction()
 
     if (auto const& bell = config().profile().bell; bell == "off")
     {
-        if (auto* bellAudioOutput = qmlEngine_->rootObjects().first()->findChild<QObject*>("BellAudioOutput");
+        if (auto* bellAudioOutput = _qmlEngine->rootObjects().first()->findChild<QObject*>("BellAudioOutput");
             bellAudioOutput)
             bellAudioOutput->setProperty("muted", true);
     }
     else if (bell != "default")
     {
         QUrl const path(bell.c_str());
-        if (auto* bellObject = qmlEngine_->rootObjects().first()->findChild<QObject*>("Bell"); bellObject)
+        if (auto* bellObject = _qmlEngine->rootObjects().first()->findChild<QObject*>("Bell"); bellObject)
             bellObject->setProperty("source", path);
     }
 
-    auto rv = app.exec();
+    auto rv = QApplication::exec();
 
     if (_exitStatus.has_value())
     {
@@ -403,7 +403,7 @@ int ContourGuiApp::terminalGuiAction()
     }
 
     // Explicitly destroy QML engine here to ensure it's being destructed before QGuiApplication.
-    qmlEngine_.reset();
+    _qmlEngine.reset();
 
     // printf("\r%s", TBC);
     return rv;
@@ -426,14 +426,14 @@ void ContourGuiApp::ensureTermInfoFile()
 
 void ContourGuiApp::newWindow()
 {
-    qmlEngine_->load(resolveResource("ui/main.qml"));
+    _qmlEngine->load(resolveResource("ui/main.qml"));
 }
 
-void ContourGuiApp::showNotification(std::string_view _title, std::string_view _content)
+void ContourGuiApp::showNotification(std::string_view title, std::string_view content)
 {
     // systrayIcon_->showMessage(
-    //     _title,
-    //     _content,
+    //     title,
+    //     content,
     //     QSystemTrayIcon::MessageIcon::Information,
     //     10 * 1000
     // );
@@ -444,19 +444,19 @@ void ContourGuiApp::showNotification(std::string_view _title, std::string_view _
     args.append("--urgency=low");
     args.append("--expire-time=10000");
     args.append("--category=terminal");
-    args.append(QString::fromStdString(string(_title)));
-    args.append(QString::fromStdString(string(_content)));
+    args.append(QString::fromStdString(string(title)));
+    args.append(QString::fromStdString(string(content)));
     QProcess::execute(QString::fromLatin1("notify-send"), args);
 #elif defined(__APPLE__)
     // TODO: use Growl?
-    (void) _title;
-    (void) _content;
+    (void) title;
+    (void) content;
 #elif defined(_WIN32)
     // TODO: use Toast
-    (void) _title;
-    (void) _content;
+    (void) title;
+    (void) content;
 #else
-    crispy::ignore_unused(_title, _content);
+    crispy::ignore_unused(title, content);
 #endif
 }
 

@@ -6,43 +6,40 @@
 class Vertex
 {
   public:
-    Q_DECL_CONSTEXPR Vertex();
+    Q_DECL_CONSTEXPR Vertex() = default;
     Q_DECL_CONSTEXPR explicit Vertex(const QVector3D& position);
 
-    Q_DECL_CONSTEXPR const QVector3D& position() const;
+    [[nodiscard]] Q_DECL_CONSTEXPR const QVector3D& position() const;
     void setPosition(const QVector3D& position);
 
     // OpenGL Helpers
-    static const int PositionTupleSize = 3;
+    static constexpr int PositionTupleSize = 3;
     static Q_DECL_CONSTEXPR int positionOffset();
     static Q_DECL_CONSTEXPR int stride();
 
   private:
-    QVector3D m_position;
+    QVector3D _position;
 };
 
 // Constructors
-Q_DECL_CONSTEXPR inline Vertex::Vertex()
-{
-}
-Q_DECL_CONSTEXPR inline Vertex::Vertex(const QVector3D& position): m_position(position)
+Q_DECL_CONSTEXPR inline Vertex::Vertex(const QVector3D& position): _position(position)
 {
 }
 
 // Accessors / Mutators
 Q_DECL_CONSTEXPR inline const QVector3D& Vertex::position() const
 {
-    return m_position;
+    return _position;
 }
 void inline Vertex::setPosition(const QVector3D& position)
 {
-    m_position = position;
+    _position = position;
 }
 
 // OpenGL Helpers
 Q_DECL_CONSTEXPR inline int Vertex::positionOffset()
 {
-    return offsetof(Vertex, m_position);
+    return offsetof(Vertex, _position);
 }
 Q_DECL_CONSTEXPR inline int Vertex::stride()
 {

@@ -14,7 +14,7 @@ class ContourApp: public crispy::app
   public:
     ContourApp();
 
-    crispy::cli::command parameterDefinition() const override;
+    [[nodiscard]] crispy::cli::command parameterDefinition() const override;
 
   private:
     int captureAction();

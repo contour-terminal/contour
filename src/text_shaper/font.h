@@ -249,9 +249,9 @@ struct glyph_index
 // NB: Ensure this struct does NOT contain padding (or adapt strong hash creation).
 struct glyph_key
 {
-    font_size size;
+    font_size size {};
     font_key font;
-    glyph_index index;
+    glyph_index index {};
 
 #if defined(GLYPH_KEY_DEBUG)
     std::u32string text = {};

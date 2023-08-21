@@ -88,7 +88,7 @@ class CaptureBufferCollector: public terminal::NullParserEvents
             }
             else
                 output.write(payload.data(), static_cast<streamsize>(payload.size()));
-            if (payload.size() == 0)
+            if (payload.empty())
                 done = true;
         }
     }
@@ -155,7 +155,7 @@ namespace
 #endif
         }
 
-        int wait(timeval* timeout)
+        int wait(timeval* timeout) const
         {
 #if defined(_WIN32)
             auto const fd0 = GetStdHandle(STD_INPUT_HANDLE);
@@ -180,32 +180,31 @@ namespace
 #endif
         }
 
-        int write(char const* _buf, size_t _size)
+        int write(char const* buf, size_t size)
         {
 #if defined(_WIN32)
             DWORD nwritten {};
-            if (WriteFile(
-                    GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr))
+            if (WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, static_cast<DWORD>(size), &nwritten, nullptr))
                 return static_cast<int>(nwritten);
             else
                 return -1;
 #else
-            return static_cast<int>(::write(fd, _buf, _size));
+            return static_cast<int>(::write(fd, buf, size));
 #endif
         }
 
-        int write(string_view _text) { return write(_text.data(), _text.size()); }
+        int write(string_view text) { return write(text.data(), text.size()); }
 
-        int read(void* _buf, size_t _size)
+        int read(void* buf, size_t size)
         {
 #if defined(_WIN32)
             DWORD nread {};
-            if (ReadFile(GetStdHandle(STD_INPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nread, nullptr))
+            if (ReadFile(GetStdHandle(STD_INPUT_HANDLE), buf, static_cast<DWORD>(size), &nread, nullptr))
                 return static_cast<int>(nread);
             else
                 return -1;
 #else
-            return static_cast<int>(::read(fd, _buf, _size));
+            return static_cast<int>(::read(fd, buf, size));
 #endif
         }
 
@@ -242,7 +241,7 @@ namespace
     };
 
     // Reads a response chunk.
-    bool readCaptureReply(TTY& _input, timeval* timeout, bool words, ostream& output)
+    bool readCaptureReply(TTY& input, timeval* timeout, bool words, ostream& output)
     {
         auto captureBufferCollector = CaptureBufferCollector { output, words };
         auto parser = terminal::parser::Parser<terminal::ParserEvents> { captureBufferCollector };
@@ -250,7 +249,7 @@ namespace
         // Response is of format: PM 314 ; <screen capture> ST`
         while (true)
         {
-            int rv = _input.wait(timeout);
+            int rv = input.wait(timeout);
             if (rv < 0)
             {
                 perror("select");
@@ -263,7 +262,7 @@ namespace
             }
 
             char buf[4096];
-            rv = _input.read(buf, sizeof(buf));
+            rv = input.read(buf, sizeof(buf));
             if (rv < 0)
             {
                 perror("read");
@@ -279,14 +278,14 @@ namespace
     }
 } // namespace
 
-bool captureScreen(CaptureSettings const& _settings)
+bool captureScreen(CaptureSettings const& settings)
 {
     auto tty = TTY {};
     if (!tty.configured)
         return false;
 
     auto constexpr MicrosPerSecond = 1'000'000;
-    auto const timeoutMicros = int(_settings.timeout * MicrosPerSecond);
+    auto const timeoutMicros = int(settings.timeout * MicrosPerSecond);
     auto timeout = timeval {};
     timeout.tv_sec = timeoutMicros / MicrosPerSecond;
     timeout.tv_usec = timeoutMicros % MicrosPerSecond;
@@ -299,27 +298,27 @@ bool captureScreen(CaptureSettings const& _settings)
     }
     auto const [numColumns, numLines] = screenSizeOpt.value();
 
-    if (_settings.verbosityLevel > 0)
+    if (settings.verbosityLevel > 0)
         cerr << fmt::format("Screen size: {}x{}. Capturing lines {} ({}) to file {}.\r\n",
                             numColumns,
                             numLines,
-                            _settings.logicalLines ? "logical" : "physical",
-                            _settings.lineCount,
-                            _settings.words ? "words" : "lines",
-                            _settings.outputFile.data());
+                            settings.logicalLines ? "logical" : "physical",
+                            settings.lineCount,
+                            settings.words ? "words" : "lines",
+                            settings.outputFile.data());
 
     // request screen capture
     reference_wrapper<ostream> output(cout);
     unique_ptr<ostream> customOutput;
-    if (_settings.outputFile != "-"sv)
+    if (settings.outputFile != "-"sv)
     {
-        customOutput = make_unique<ofstream>(_settings.outputFile.data(), std::ios::trunc);
+        customOutput = make_unique<ofstream>(settings.outputFile.data(), std::ios::trunc);
         output = *customOutput;
     }
 
-    tty.write(fmt::format("\033[>{};{}t", _settings.logicalLines ? '1' : '0', _settings.lineCount));
+    tty.write(fmt::format("\033[>{};{}t", settings.logicalLines ? '1' : '0', settings.lineCount));
 
-    return readCaptureReply(tty, &timeout, _settings.words, output);
+    return readCaptureReply(tty, &timeout, settings.words, output);
 }
 
 } // namespace contour

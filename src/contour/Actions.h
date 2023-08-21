@@ -130,7 +130,7 @@ using Action = std::variant<CancelSelection,
                             ViNormalMode,
                             WriteScreen>;
 
-std::optional<Action> fromString(std::string const& _name);
+std::optional<Action> fromString(std::string const& name);
 
 } // namespace contour::actions
 

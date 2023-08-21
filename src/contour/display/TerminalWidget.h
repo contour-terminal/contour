@@ -48,17 +48,17 @@ class TerminalWidget: public QQuickItem
     QML_ELEMENT
 #endif
 
-    TerminalSession* getSessionHelper() { return session_; }
+    TerminalSession* getSessionHelper() { return _session; }
 
   public:
     explicit TerminalWidget(QQuickItem* parent = nullptr);
     ~TerminalWidget() override;
 
     // {{{ QML property helper
-    QString title() const
+    [[nodiscard]] QString title() const
     {
-        if (session_)
-            return session_->title();
+        if (_session)
+            return _session->title();
         else
             return "No session";
     }
@@ -66,54 +66,54 @@ class TerminalWidget: public QQuickItem
 
     [[nodiscard]] config::TerminalProfile const& profile() const noexcept
     {
-        assert(session_ != nullptr);
-        return session_->profile();
+        assert(_session != nullptr);
+        return _session->profile();
     }
 
     [[nodiscard]] terminal::Terminal const& terminal() const noexcept
     {
-        assert(session_ != nullptr);
-        return session_->terminal();
+        assert(_session != nullptr);
+        return _session->terminal();
     }
 
     [[nodiscard]] terminal::Terminal& terminal() noexcept
     {
-        assert(session_ != nullptr);
-        return session_->terminal();
+        assert(_session != nullptr);
+        return _session->terminal();
     }
 
-    [[nodiscard]] bool hasSession() const noexcept { return session_ != nullptr; }
+    [[nodiscard]] bool hasSession() const noexcept { return _session != nullptr; }
 
     // NB: Use TerminalSession.attachDisplay, that one is calling this here.
     void setSession(TerminalSession* newSession);
 
     [[nodiscard]] TerminalSession& session() noexcept
     {
-        assert(session_ != nullptr);
-        return *session_;
+        assert(_session != nullptr);
+        return *_session;
     }
 
     [[nodiscard]] terminal::PageSize windowSize() const noexcept;
 
     // {{{ Input handling
-    void keyPressEvent(QKeyEvent* _keyEvent) override;
-    void wheelEvent(QWheelEvent* _wheelEvent) override;
-    void mousePressEvent(QMouseEvent* _mousePressEvent) override;
-    void mouseReleaseEvent(QMouseEvent* _mouseReleaseEvent) override;
-    void mouseMoveEvent(QMouseEvent* _mouseMoveEvent) override;
+    void keyPressEvent(QKeyEvent* keyEvent) override;
+    void wheelEvent(QWheelEvent* wheelEvent) override;
+    void mousePressEvent(QMouseEvent* mousePressEvent) override;
+    void mouseReleaseEvent(QMouseEvent* mouseReleaseEvent) override;
+    void mouseMoveEvent(QMouseEvent* mouseMoveEvent) override;
     void hoverMoveEvent(QHoverEvent* event) override;
-    void focusInEvent(QFocusEvent* _event) override;
-    void focusOutEvent(QFocusEvent* _event) override;
+    void focusInEvent(QFocusEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
 #if QT_CONFIG(im)
-    void inputMethodEvent(QInputMethodEvent* _event) override;
-    [[nodiscard]] QVariant inputMethodQuery(Qt::InputMethodQuery _query) const override;
+    void inputMethodEvent(QInputMethodEvent* event) override;
+    [[nodiscard]] QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
 #endif
-    bool event(QEvent* _event) override;
+    bool event(QEvent* event) override;
     // }}}
 
     // {{{ TerminalDisplay API
     void closeDisplay();
-    void post(std::function<void()> _fn);
+    void post(std::function<void()> fn);
 
     // Attributes
     [[nodiscard]] terminal::RefreshRate refreshRate() const;
@@ -125,23 +125,23 @@ class TerminalWidget: public QQuickItem
 
     // (user requested) actions
     terminal::FontDef getFontDef();
-    void copyToClipboard(std::string_view /*_data*/);
+    static void copyToClipboard(std::string_view /*_data*/);
     void inspect();
     void notify(std::string_view /*_title*/, std::string_view /*_body*/);
     void resizeWindow(terminal::LineCount, terminal::ColumnCount);
     void resizeWindow(terminal::Width, terminal::Height);
-    void setFonts(terminal::rasterizer::FontDescriptions _fontDescriptions);
-    bool setFontSize(text::font_size _size);
-    bool setPageSize(terminal::PageSize _newPageSize);
-    void setMouseCursorShape(MouseCursorShape _shape);
+    void setFonts(terminal::rasterizer::FontDescriptions fontDescriptions);
+    bool setFontSize(text::font_size newFontSize);
+    bool setPageSize(terminal::PageSize newPageSize);
+    void setMouseCursorShape(MouseCursorShape newCursorShape);
     void setWindowFullScreen();
     void setWindowMaximized();
     void setWindowNormal();
-    void setBlurBehind(bool _enable);
+    void setBlurBehind(bool enable);
     void toggleFullScreen();
     void toggleTitleBar();
-    void setHyperlinkDecoration(terminal::rasterizer::Decorator _normal,
-                                terminal::rasterizer::Decorator _hover);
+    void setHyperlinkDecoration(terminal::rasterizer::Decorator normal,
+                                terminal::rasterizer::Decorator hover);
 
     // terminal events
     void scheduleRedraw();
@@ -157,8 +157,8 @@ class TerminalWidget: public QQuickItem
 
     void releaseResources() override;
 
-    QString profileName() const { return QString::fromStdString(profileName_); }
-    void setProfileName(QString const& name) { profileName_ = name.toStdString(); }
+    [[nodiscard]] QString profileName() const { return QString::fromStdString(_profileName); }
+    void setProfileName(QString const& name) { _profileName = name.toStdString(); }
 
   public Q_SLOTS:
     void onSceneGrapheInitialized();
@@ -166,12 +166,12 @@ class TerminalWidget: public QQuickItem
     void onBeforeRendering();
     void paint();
 
-    void handleWindowChanged(QQuickWindow* win);
+    void handleWindowChanged(QQuickWindow* newWindow);
     void sizeChanged();
     void cleanup();
 
     void onAfterRendering();
-    void onScrollBarValueChanged(int _value);
+    void onScrollBarValueChanged(int value);
     void onRefreshRateChanged();
     void applyFontDPI();
     void onScreenChanged();
@@ -184,19 +184,19 @@ class TerminalWidget: public QQuickItem
     void sessionChanged(TerminalSession*);
     void terminalBufferChanged(terminal::ScreenType);
     void terminated();
-    void showNotification(QString const& _title, QString const& _body);
+    void showNotification(QString const& title, QString const& body);
 
   public:
     Q_INVOKABLE [[nodiscard]] int pageLineCount() const noexcept
     {
-        if (!session_)
+        if (!_session)
             return 1;
         return unbox(terminal().pageSize().lines);
     }
 
     Q_INVOKABLE [[nodiscard]] int historyLineCount() const noexcept
     {
-        if (!session_)
+        if (!_session)
             return 0;
         return unbox(terminal().currentScreen().historyLineCount());
     }
@@ -212,8 +212,8 @@ class TerminalWidget: public QQuickItem
 
     [[nodiscard]] terminal::PageSize pageSize() const
     {
-        assert(renderer_);
-        return pageSizeForPixels(pixelSize(), renderer_->gridMetrics().cellSize);
+        assert(_renderer);
+        return pageSizeForPixels(pixelSize(), _renderer->gridMetrics().cellSize);
     }
 
     void updateSizeProperties();
@@ -223,7 +223,7 @@ class TerminalWidget: public QQuickItem
 
     [[nodiscard]] terminal::rasterizer::GridMetrics const& gridMetrics() const noexcept
     {
-        return renderer_->gridMetrics();
+        return _renderer->gridMetrics();
     }
 
     /// Flags the screen as dirty.
@@ -235,30 +235,30 @@ class TerminalWidget: public QQuickItem
 #if defined(CONTOUR_PERF_STATS)
         stats_.updatesSinceRendering++;
 #endif
-        return state_.touch();
+        return _state.touch();
     }
 
     // private data fields
     //
-    std::string profileName_;
-    std::string programPath_;
-    TerminalSession* session_ = nullptr;
-    std::chrono::steady_clock::time_point startTime_;
-    text::DPI lastFontDPI_;
-    std::unique_ptr<terminal::rasterizer::Renderer> renderer_;
-    bool renderingPressure_ = false;
-    display::OpenGLRenderer* renderTarget_ = nullptr;
-    bool maximizedState_ = false;
+    std::string _profileName;
+    std::string _programPath;
+    TerminalSession* _session = nullptr;
+    std::chrono::steady_clock::time_point _startTime;
+    text::DPI _lastFontDPI;
+    std::unique_ptr<terminal::rasterizer::Renderer> _renderer;
+    bool _renderingPressure = false;
+    display::OpenGLRenderer* _renderTarget = nullptr;
+    bool _maximizedState = false;
 
     // update() timer used to animate the blinking cursor.
-    QTimer updateTimer_;
+    QTimer _updateTimer;
 
-    RenderStateManager state_;
+    RenderStateManager _state;
 
-    QFileSystemWatcher filesystemWatcher_;
-    QMediaPlayer mediaPlayer_;
+    QFileSystemWatcher _filesystemWatcher;
+    QMediaPlayer _mediaPlayer;
 
-    terminal::LineCount lastHistoryLineCount_ = terminal::LineCount(0);
+    terminal::LineCount _lastHistoryLineCount = terminal::LineCount(0);
 
     // ======================================================================
 

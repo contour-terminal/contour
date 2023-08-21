@@ -82,7 +82,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     // {{{ Model property helper
     float getOpacity() const noexcept
     {
-        return static_cast<float>(profile_.backgroundOpacity) / std::numeric_limits<uint8_t>::max();
+        return static_cast<float>(_profile.backgroundOpacity) / std::numeric_limits<uint8_t>::max();
     }
     QString pathToBackground() const
     {
@@ -96,9 +96,9 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     QColor getBackgroundColor() const noexcept
     {
         auto color = terminal().isModeEnabled(terminal::DECMode::ReverseVideo)
-                         ? profile_.colors.defaultForeground
-                         : profile_.colors.defaultBackground;
-        return QColor(color.red, color.green, color.blue, static_cast<uint8_t>(profile_.backgroundOpacity));
+                         ? _profile.colors.defaultForeground
+                         : _profile.colors.defaultBackground;
+        return QColor(color.red, color.green, color.blue, static_cast<uint8_t>(_profile.backgroundOpacity));
     }
     float getOpacityBackground() const noexcept
     {
@@ -130,7 +130,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
         if (profile().scrollbarPosition == config::ScrollBarPosition::Hidden)
             return false;
 
-        if ((currentScreenType_ == terminal::ScreenType::Alternate) && profile().hideScrollbarInAltScreen)
+        if ((_currentScreenType == terminal::ScreenType::Alternate) && profile().hideScrollbarInAltScreen)
             return false;
 
         return true;
@@ -139,9 +139,9 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     QString title() const { return QString::fromStdString(terminal().windowTitle()); }
     void setTitle(QString const& value) { terminal().setWindowTitle(value.toStdString()); }
 
-    int pageLineCount() const noexcept { return unbox(terminal_.pageSize().lines); }
+    int pageLineCount() const noexcept { return unbox(_terminal.pageSize().lines); }
 
-    int historyLineCount() const noexcept { return unbox(terminal_.currentScreen().historyLineCount()); }
+    int historyLineCount() const noexcept { return unbox(_terminal.currentScreen().historyLineCount()); }
 
     int scrollOffset() const noexcept { return unbox(terminal().viewport().scrollOffset()); }
     void setScrollOffset(int value)
@@ -167,13 +167,13 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     /**
      * Constructs a single terminal session.
      *
-     * @param _pty a PTY object (can be process, networked, mockup, ...)
-     * @param _display fronend display to render the terminal.
+     * @param pty a PTY object (can be process, networked, mockup, ...)
+     * @param display fronend display to render the terminal.
      */
-    TerminalSession(std::unique_ptr<terminal::Pty> _pty, ContourGuiApp& _app);
+    TerminalSession(std::unique_ptr<terminal::Pty> pty, ContourGuiApp& app);
     ~TerminalSession() override;
 
-    int id() const noexcept { return id_; }
+    int id() const noexcept { return _id; }
 
     /// Starts the VT background thread.
     void start();
@@ -181,19 +181,19 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     /// Initiates termination of this session, regardless of the underlying terminal state.
     void terminate();
 
-    config::Config const& config() const noexcept { return config_; }
-    config::TerminalProfile const& profile() const noexcept { return profile_; }
+    config::Config const& config() const noexcept { return _config; }
+    config::TerminalProfile const& profile() const noexcept { return _profile; }
 
-    double contentScale() const noexcept { return contentScale_; }
-    void setContentScale(double value) noexcept { contentScale_ = value; }
+    double contentScale() const noexcept { return _contentScale; }
+    void setContentScale(double value) noexcept { _contentScale = value; }
 
-    terminal::Pty& pty() noexcept { return terminal_.device(); }
-    terminal::Terminal& terminal() noexcept { return terminal_; }
-    terminal::Terminal const& terminal() const noexcept { return terminal_; }
-    terminal::ScreenType currentScreenType() const noexcept { return currentScreenType_; }
+    terminal::Pty& pty() noexcept { return _terminal.device(); }
+    terminal::Terminal& terminal() noexcept { return _terminal; }
+    terminal::Terminal const& terminal() const noexcept { return _terminal; }
+    terminal::ScreenType currentScreenType() const noexcept { return _currentScreenType; }
 
-    display::TerminalWidget* display() noexcept { return display_; }
-    display::TerminalWidget const* display() const noexcept { return display_; }
+    display::TerminalWidget* display() noexcept { return _display; }
+    display::TerminalWidget const* display() const noexcept { return _display; }
 
     void attachDisplay(display::TerminalWidget& display);
     void detachDisplay(display::TerminalWidget& display);
@@ -211,37 +211,37 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     void renderBufferUpdated() override;
     void screenUpdated() override;
     terminal::FontDef getFontDef() override;
-    void setFontDef(terminal::FontDef const& _fontSpec) override;
-    void copyToClipboard(std::string_view _data) override;
+    void setFontDef(terminal::FontDef const& fontSpec) override;
+    void copyToClipboard(std::string_view data) override;
     void inspect() override;
-    void notify(std::string_view _title, std::string_view _body) override;
+    void notify(std::string_view title, std::string_view body) override;
     void onClosed() override;
     void pasteFromClipboard(unsigned count, bool strip) override;
     void onSelectionCompleted() override;
     void requestWindowResize(terminal::LineCount, terminal::ColumnCount) override;
     void requestWindowResize(terminal::Width, terminal::Height) override;
-    void setWindowTitle(std::string_view _title) override;
-    void setTerminalProfile(std::string const& _configProfileName) override;
+    void setWindowTitle(std::string_view title) override;
+    void setTerminalProfile(std::string const& configProfileName) override;
     void discardImage(terminal::Image const&) override;
     void inputModeChanged(terminal::ViMode mode) override;
     void updateHighlights() override;
-    void playSound(terminal::Sequence::Parameters const& params_) override;
+    void playSound(terminal::Sequence::Parameters const& params) override;
     void cursorPositionChanged() override;
 
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
-    void sendKeyPressEvent(terminal::Key _key, terminal::Modifier _modifier, Timestamp _now);
-    void sendCharPressEvent(char32_t _value, terminal::Modifier _modifier, Timestamp _now);
+    void sendKeyPressEvent(terminal::Key key, terminal::Modifier modifier, Timestamp now);
+    void sendCharPressEvent(char32_t value, terminal::Modifier modifier, Timestamp now);
 
-    void sendMousePressEvent(terminal::Modifier _modifier,
-                             terminal::MouseButton _button,
-                             terminal::PixelCoordinate _pixelPosition);
-    void sendMouseMoveEvent(terminal::Modifier _modifier,
-                            terminal::CellLocation _pos,
-                            terminal::PixelCoordinate _pixelPosition);
-    void sendMouseReleaseEvent(terminal::Modifier _modifier,
-                               terminal::MouseButton _button,
-                               terminal::PixelCoordinate _pixelPosition);
+    void sendMousePressEvent(terminal::Modifier modifier,
+                             terminal::MouseButton button,
+                             terminal::PixelCoordinate pixelPosition);
+    void sendMouseMoveEvent(terminal::Modifier modifier,
+                            terminal::CellLocation pos,
+                            terminal::PixelCoordinate pixelPosition);
+    void sendMouseReleaseEvent(terminal::Modifier modifier,
+                               terminal::MouseButton button,
+                               terminal::PixelCoordinate pixelPosition);
 
     void sendFocusInEvent();
     void sendFocusOutEvent();
@@ -282,7 +282,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     bool operator()(actions::ScrollToTop);
     bool operator()(actions::ScrollUp);
     bool operator()(actions::SearchReverse);
-    bool operator()(actions::SendChars const& _event);
+    bool operator()(actions::SendChars const& event);
     bool operator()(actions::ToggleAllKeyMaps);
     bool operator()(actions::ToggleFullscreen);
     bool operator()(actions::ToggleInputProtection);
@@ -293,24 +293,24 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     bool operator()(actions::TraceLeave);
     bool operator()(actions::TraceStep);
     bool operator()(actions::ViNormalMode);
-    bool operator()(actions::WriteScreen const& _event);
+    bool operator()(actions::WriteScreen const& event);
 
     void scheduleRedraw();
 
-    ContourGuiApp& app() noexcept { return app_; }
+    ContourGuiApp& app() noexcept { return _app; }
 
-    std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
+    std::chrono::steady_clock::time_point startTime() const noexcept { return _startTime; }
 
     float uptime() const noexcept
     {
         using namespace std::chrono;
         auto const now = steady_clock::now();
-        auto const uptimeMsecs = duration_cast<milliseconds>(now - startTime_).count();
+        auto const uptimeMsecs = duration_cast<milliseconds>(now - _startTime).count();
         auto const uptimeSecs = static_cast<float>(uptimeMsecs) / 1000.0f;
         return uptimeSecs;
     }
 
-    void requestPermission(config::Permission _allowedByConfig, GuardedRole role);
+    void requestPermission(config::Permission allowedByConfig, GuardedRole role);
     void executeRole(GuardedRole role, bool allow, bool remember);
 
   signals:
@@ -341,15 +341,15 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
 
   private:
     // helpers
-    bool reloadConfig(config::Config _newConfig, std::string const& _profileName);
-    int executeAllActions(std::vector<actions::Action> const& _actions);
-    bool executeAction(actions::Action const& _action);
-    void spawnNewTerminal(std::string const& _profileName);
-    void activateProfile(std::string const& _newProfileName);
-    bool reloadConfigWithProfile(std::string const& _profileName);
+    bool reloadConfig(config::Config newConfig, std::string const& profileName);
+    int executeAllActions(std::vector<actions::Action> const& actions);
+    bool executeAction(actions::Action const& action);
+    void spawnNewTerminal(std::string const& profileName);
+    void activateProfile(std::string const& newProfileName);
+    bool reloadConfigWithProfile(std::string const& profileName);
     bool resetConfig();
-    void followHyperlink(terminal::HyperlinkInfo const& _hyperlink);
-    void setFontSize(text::font_size _size);
+    void followHyperlink(terminal::HyperlinkInfo const& hyperlink);
+    void setFontSize(text::font_size size);
     void setDefaultCursor();
     void configureTerminal();
     void configureCursor(config::CursorConfig const& cursorConfig);
@@ -359,42 +359,42 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
 
     // private data
     //
-    int id_;
-    std::chrono::steady_clock::time_point startTime_;
-    config::Config config_;
-    std::string profileName_;
-    config::TerminalProfile profile_;
-    double contentScale_ = 1.0;
-    ContourGuiApp& app_;
+    int _id;
+    std::chrono::steady_clock::time_point _startTime;
+    config::Config _config;
+    std::string _profileName;
+    config::TerminalProfile _profile;
+    double _contentScale = 1.0;
+    ContourGuiApp& _app;
 
-    terminal::Terminal terminal_;
-    bool terminatedAndWaitingForKeyPress_ = false;
-    display::TerminalWidget* display_ = nullptr;
+    terminal::Terminal _terminal;
+    bool _terminatedAndWaitingForKeyPress = false;
+    display::TerminalWidget* _display = nullptr;
 
-    std::unique_ptr<QFileSystemWatcher> configFileChangeWatcher_;
+    std::unique_ptr<QFileSystemWatcher> _configFileChangeWatcher;
 
-    bool terminating_ = false;
-    std::thread::id mainLoopThreadID_ {};
-    std::unique_ptr<std::thread> screenUpdateThread_;
+    bool _terminating = false;
+    std::thread::id _mainLoopThreadID {};
+    std::unique_ptr<std::thread> _screenUpdateThread;
 
     // state vars
     //
-    terminal::ScreenType currentScreenType_ = terminal::ScreenType::Primary;
-    terminal::CellLocation currentMousePosition_ = terminal::CellLocation {};
-    bool allowKeyMappings_ = true;
-    Audio audio;
-    std::vector<int> musicalNotesBuffer_;
+    terminal::ScreenType _currentScreenType = terminal::ScreenType::Primary;
+    terminal::CellLocation _currentMousePosition = terminal::CellLocation {};
+    bool _allowKeyMappings = true;
+    Audio _audio;
+    std::vector<int> _musicalNotesBuffer;
 
-    terminal::LineCount lastHistoryLineCount_;
+    terminal::LineCount _lastHistoryLineCount;
 
     struct CaptureBufferRequest
     {
         terminal::LineCount lines;
         bool logical;
     };
-    std::optional<CaptureBufferRequest> pendingBufferCapture_;
-    std::optional<terminal::FontDef> pendingFontChange_;
-    PermissionCache rememberedPermissions_;
+    std::optional<CaptureBufferRequest> _pendingBufferCapture;
+    std::optional<terminal::FontDef> _pendingFontChange;
+    PermissionCache _rememberedPermissions;
 };
 
 } // namespace contour
