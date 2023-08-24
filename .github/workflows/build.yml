@@ -1100,6 +1100,30 @@ jobs:
       run: |
         exit ${{ steps.Xvfb-contour-notcurses.outputs.exitCode }}
 
+  check_package_ubuntu:
+    name: "Check packages for Ubuntu "
+    strategy:
+      fail-fast: false
+      matrix:
+        os_version: ['20.04', '22.04']
+    runs-on: ubuntu-${{ matrix.os_version}}
+    needs: [package_for_Ubuntu]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - uses: actions/download-artifact@v3
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version}}-amd64.deb"
+    - name: "Check install package"
+      run: |
+        sudo apt install "./contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version}}-amd64.deb"
+
   check_notcurses_test_matrix:
     if: ${{ always() }}
     runs-on: ubuntu-latest
