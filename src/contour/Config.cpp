@@ -1596,6 +1596,7 @@ namespace
                      "italic",
                      terminalProfile.fonts.italic);
 
+        terminalProfile.fonts.boldItalic = terminalProfile.fonts.regular;
         terminalProfile.fonts.boldItalic.weight = text::font_weight::bold;
         terminalProfile.fonts.boldItalic.slant = text::font_slant::italic;
         softLoadFont(terminalProfile.fonts.textShapingEngine,
