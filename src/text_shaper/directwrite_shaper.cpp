@@ -278,7 +278,7 @@ directwrite_shaper::directwrite_shaper(DPI _dpi, font_locator& _locator):
 
 optional<font_key> directwrite_shaper::load_font(font_description const& _description, font_size _size)
 {
-    locatorLog()("Loading font chain for: {}", _description);
+    locatorLog().operator()("Loading font chain for: {}", _description);
     font_source_list sources = d->locator_->locate(_description);
     if (sources.empty())
         return nullopt;

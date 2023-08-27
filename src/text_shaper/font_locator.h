@@ -74,37 +74,36 @@ class font_locator
 } // namespace text
 
 template <>
-struct fmt::formatter<text::font_path>
+struct fmt::formatter<text::font_path>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(text::font_path spec, format_context& ctx) -> format_context::iterator
+    auto format(text::font_path spec, format_context& ctx) -> format_context::iterator
     {
         auto weightMod = spec.weight ? fmt::format(" {}", spec.weight.value()) : "";
         auto slantMod = spec.slant ? fmt::format(" {}", spec.slant.value()) : "";
-        return fmt::format_to(ctx.out(), "path {}{}{}", spec.value, weightMod, slantMod);
+        return formatter<std::string>::format(fmt::format("path {}{}{}", spec.value, weightMod, slantMod),
+                                              ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::font_memory_ref>
+struct fmt::formatter<text::font_memory_ref>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(text::font_memory_ref ref, format_context& ctx) -> format_context::iterator
+    auto format(text::font_memory_ref ref, format_context& ctx) -> format_context::iterator
     {
-        return fmt::format_to(ctx.out(), "in-memory: {}", ref.identifier);
+        return formatter<std::string>::format(fmt::format("in-memory: {}", ref.identifier), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::font_source>
+struct fmt::formatter<text::font_source>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(text::font_source source, format_context& ctx) -> format_context::iterator
+    auto format(text::font_source source, format_context& ctx) -> format_context::iterator
     {
+        std::string text;
         if (std::holds_alternative<text::font_path>(source))
-            return fmt::format_to(ctx.out(), "{}", std::get<text::font_path>(source));
-        if (std::holds_alternative<text::font_memory_ref>(source))
-            return fmt::format_to(ctx.out(), "{}", std::get<text::font_memory_ref>(source));
-        return fmt::format_to(ctx.out(), "UNKNOWN SOURCE");
+            text = fmt::format("{}", std::get<text::font_path>(source));
+        else if (std::holds_alternative<text::font_memory_ref>(source))
+            text = fmt::format("{}", std::get<text::font_memory_ref>(source));
+        return formatter<std::string>::format(text, ctx);
     }
 };

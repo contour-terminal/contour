@@ -840,19 +840,21 @@ class Terminal
 } // namespace terminal
 
 template <>
-struct fmt::formatter<terminal::TraceHandler::PendingSequence>
+struct fmt::formatter<terminal::TraceHandler::PendingSequence>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(terminal::TraceHandler::PendingSequence const& pendingSequence, format_context& ctx)
+    auto format(terminal::TraceHandler::PendingSequence const& pendingSequence, format_context& ctx)
         -> format_context::iterator
     {
+        std::string value;
         if (auto const* p = std::get_if<terminal::Sequence>(&pendingSequence))
-            return fmt::format_to(ctx.out(), "{}", p->text());
+            value = fmt::format("{}", p->text());
         else if (auto const* p = std::get_if<terminal::TraceHandler::CodepointSequence>(&pendingSequence))
-            return fmt::format_to(ctx.out(), "\"{}\"", crispy::escape(p->text));
+            value = fmt::format("\"{}\"", crispy::escape(p->text));
         else if (auto const* p = std::get_if<char32_t>(&pendingSequence))
-            return fmt::format_to(ctx.out(), "'{}'", unicode::convert_to<char>(*p));
+            value = fmt::format("'{}'", unicode::convert_to<char>(*p));
         else
             crispy::unreachable();
+
+        return formatter<std::string>::format(value, ctx);
     }
 };

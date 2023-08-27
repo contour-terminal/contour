@@ -298,20 +298,23 @@ struct fmt::formatter<terminal::ImageStats>: formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<std::shared_ptr<terminal::Image const>>
+struct fmt::formatter<std::shared_ptr<terminal::Image const>>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(std::shared_ptr<terminal::Image const> const& image, format_context& ctx)
+    auto format(std::shared_ptr<terminal::Image const> const& image, format_context& ctx)
         -> format_context::iterator
     {
+        std::string text;
         if (!image)
-            return fmt::format_to(ctx.out(), "nullptr");
-        terminal::Image const& imageRef = *image;
-        return fmt::format_to(ctx.out(),
-                              "Image<#{}, {}, size={}>",
-                              imageRef.weak_from_this().use_count(),
-                              imageRef.id(),
-                              imageRef.size());
+            text = "nullptr";
+        else
+        {
+            terminal::Image const& imageRef = *image;
+            text = fmt::format("Image<#{}, {}, size={}>",
+                               imageRef.weak_from_this().use_count(),
+                               imageRef.id(),
+                               imageRef.size());
+        }
+        return formatter<std::string>::format(text, ctx);
     }
 };
 
@@ -370,14 +373,12 @@ struct fmt::formatter<terminal::RasterizedImage>: formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<terminal::ImageFragment>
+struct fmt::formatter<terminal::ImageFragment>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(const terminal::ImageFragment& fragment, format_context& ctx)
-        -> format_context::iterator
+    auto format(const terminal::ImageFragment& fragment, format_context& ctx) -> format_context::iterator
     {
-        return fmt::format_to(
-            ctx.out(), "ImageFragment<offset={}, {}>", fragment.offset(), fragment.rasterizedImage());
+        return formatter<std::string>::format(
+            fmt::format("ImageFragment<offset={}, {}>", fragment.offset(), fragment.rasterizedImage()), ctx);
     }
 };
 // }}}
