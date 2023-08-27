@@ -20,9 +20,9 @@ $ThirdParties =
         Macro   = ""
     };
     [ThirdParty]@{
-        Folder  = "Catch2-2.13.7";
-        Archive = "Catch2-2.13.7.zip";
-        URI     = "https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.zip";
+        Folder  = "Catch2-2.13.10";
+        Archive = "Catch2-2.13.10.zip";
+        URI     = "https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.10.zip";
         Macro   = ""
     };
     [ThirdParty]@{
