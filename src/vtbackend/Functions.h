@@ -3,10 +3,14 @@
 
 #include <vtbackend/VTType.h>
 
+#include <crispy/defines.h>
 #include <crispy/escape.h>
+#include <crispy/indexed.h>
 #include <crispy/sort.h>
 
 #include <fmt/format.h>
+
+#include <gsl/span>
 
 #include <array>
 #include <optional>
@@ -461,154 +465,161 @@ constexpr inline auto CaptureBufferCode = 314;
 
 // clang-format on
 
-inline auto const& functions() noexcept
+// HACK to get older compiler work (GCC 9.4)
+constexpr static auto allFunctionsArray() noexcept
 {
-    static auto const funcs = []() constexpr { // {{{
-        auto f = std::array {
-            // C0
-            EOT,
-            BEL,
-            BS,
-            TAB,
-            LF,
-            VT,
-            FF,
-            CR,
-            LS0,
-            LS1,
+    auto funcs = std::array {
+        // C0
+        EOT,
+        BEL,
+        BS,
+        TAB,
+        LF,
+        VT,
+        FF,
+        CR,
+        LS0,
+        LS1,
 
-            // ESC
-            DECALN,
-            DECBI,
-            DECFI,
-            DECKPAM,
-            DECKPNM,
-            DECRS,
-            DECSC,
-            HTS,
-            IND,
-            NEL,
-            RI,
-            RIS,
-            SCS_G0_SPECIAL,
-            SCS_G0_USASCII,
-            SCS_G1_SPECIAL,
-            SCS_G1_USASCII,
-            SS2,
-            SS3,
+        // ESC
+        DECALN,
+        DECBI,
+        DECFI,
+        DECKPAM,
+        DECKPNM,
+        DECRS,
+        DECSC,
+        HTS,
+        IND,
+        NEL,
+        RI,
+        RIS,
+        SCS_G0_SPECIAL,
+        SCS_G0_USASCII,
+        SCS_G1_SPECIAL,
+        SCS_G1_USASCII,
+        SS2,
+        SS3,
 
-            // CSI
-            ANSISYSSC,
-            XTCAPTURE,
-            CBT,
-            CHA,
-            CHT,
-            CNL,
-            CPL,
-            CPR,
-            CUB,
-            CUD,
-            CUF,
-            CUP,
-            CUU,
-            DA1,
-            DA2,
-            DA3,
-            DCH,
-            DECCARA,
-            DECCRA,
-            DECDC,
-            DECERA,
-            DECFRA,
-            DECIC,
-            DECSCA,
-            DECSED,
-            DECSERA,
-            DECSEL,
-            XTRESTORE,
-            XTSAVE,
-            DECPS,
-            DECRM,
-            DECRQM,
-            DECRQM_ANSI,
-            DECRQPSR,
-            DECSASD,
-            DECSCL,
-            DECSCPP,
-            DECSCUSR,
-            DECSLRM,
-            DECSM,
-            DECSNLS,
-            DECSSDT,
-            DECSTBM,
-            DECSTR,
-            DECXCPR,
-            DL,
-            ECH,
-            ED,
-            EL,
-            HPA,
-            HPR,
-            HVP,
-            ICH,
-            IL,
-            REP,
-            RM,
-            SCOSC,
-            SD,
-            SETMARK,
-            SGR,
-            SM,
-            SU,
-            TBC,
-            VPA,
-            WINMANIP,
-            XTPOPCOLORS,
-            XTPUSHCOLORS,
-            XTREPORTCOLORS,
-            XTSHIFTESCAPE,
-            XTSMGRAPHICS,
-            XTVERSION,
+        // CSI
+        ANSISYSSC,
+        XTCAPTURE,
+        CBT,
+        CHA,
+        CHT,
+        CNL,
+        CPL,
+        CPR,
+        CUB,
+        CUD,
+        CUF,
+        CUP,
+        CUU,
+        DA1,
+        DA2,
+        DA3,
+        DCH,
+        DECCARA,
+        DECCRA,
+        DECDC,
+        DECERA,
+        DECFRA,
+        DECIC,
+        DECSCA,
+        DECSED,
+        DECSERA,
+        DECSEL,
+        XTRESTORE,
+        XTSAVE,
+        DECPS,
+        DECRM,
+        DECRQM,
+        DECRQM_ANSI,
+        DECRQPSR,
+        DECSASD,
+        DECSCL,
+        DECSCPP,
+        DECSCUSR,
+        DECSLRM,
+        DECSM,
+        DECSNLS,
+        DECSSDT,
+        DECSTBM,
+        DECSTR,
+        DECXCPR,
+        DL,
+        ECH,
+        ED,
+        EL,
+        HPA,
+        HPR,
+        HVP,
+        ICH,
+        IL,
+        REP,
+        RM,
+        SCOSC,
+        SD,
+        SETMARK,
+        SGR,
+        SM,
+        SU,
+        TBC,
+        VPA,
+        WINMANIP,
+        XTPOPCOLORS,
+        XTPUSHCOLORS,
+        XTREPORTCOLORS,
+        XTSHIFTESCAPE,
+        XTSMGRAPHICS,
+        XTVERSION,
 
-            // DCS
-            STP,
-            DECRQSS,
-            DECSIXEL,
-            XTGETTCAP,
+        // DCS
+        STP,
+        DECRQSS,
+        DECSIXEL,
+        XTGETTCAP,
 
-            // OSC
-            SETICON,
-            SETTITLE,
-            SETWINTITLE,
-            SETXPROP,
-            SETCOLPAL,
-            SETCWD,
-            HYPERLINK,
-            COLORFG,
-            COLORBG,
-            COLORCURSOR,
-            COLORMOUSEFG,
-            COLORMOUSEBG,
-            SETFONT,
-            SETFONTALL,
-            CLIPBOARD,
-            RCOLPAL,
-            COLORSPECIAL,
-            RCOLORFG,
-            RCOLORBG,
-            RCOLORCURSOR,
-            RCOLORMOUSEFG,
-            RCOLORMOUSEBG,
-            RCOLORHIGHLIGHTFG,
-            RCOLORHIGHLIGHTBG,
-            NOTIFY,
-            DUMPSTATE,
-        };
-        crispy::sort(f, [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr {
+        // OSC
+        SETICON,
+        SETTITLE,
+        SETWINTITLE,
+        SETXPROP,
+        SETCOLPAL,
+        SETCWD,
+        HYPERLINK,
+        COLORFG,
+        COLORBG,
+        COLORCURSOR,
+        COLORMOUSEFG,
+        COLORMOUSEBG,
+        SETFONT,
+        SETFONTALL,
+        CLIPBOARD,
+        RCOLPAL,
+        COLORSPECIAL,
+        RCOLORFG,
+        RCOLORBG,
+        RCOLORCURSOR,
+        RCOLORMOUSEFG,
+        RCOLORMOUSEBG,
+        RCOLORHIGHLIGHTFG,
+        RCOLORHIGHLIGHTBG,
+        NOTIFY,
+        DUMPSTATE,
+    };
+    return funcs;
+}
+
+inline auto allFunctions() noexcept
+{
+    static auto const funcs = []() constexpr {
+        auto funcs = allFunctionsArray();
+        crispy::sort(funcs, [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr {
             return compare(a, b);
         });
-        return f;
-    }(); // }}}
+        return funcs;
+    }();
 
 #if 0
     for (auto [a, b] : crispy::indexed(funcs))
@@ -618,10 +629,86 @@ inline auto const& functions() noexcept
     return funcs;
 }
 
+// Class to store all supported VT sequence and support properly enabling/disabling them
+// The storage stores all available definition at all time and is partitioned into
+// two parts first part contains all active sequences and last part contains all
+// disabled sequences
+class SupportedSequences
+{
+
+  private:
+    [[nodiscard]] constexpr auto begin() noexcept { return _supportedSequences.data(); }
+
+    [[nodiscard]] constexpr auto end() noexcept { return begin() + _lastIndex; }
+
+    [[nodiscard]] constexpr auto cbegin() const noexcept { return _supportedSequences.data(); }
+
+    [[nodiscard]] constexpr auto cend() const noexcept { return cbegin() + _lastIndex; }
+
+  public:
+    [[nodiscard]] constexpr gsl::span<FunctionDefinition const> allSequences() const noexcept
+    {
+        return gsl::span<FunctionDefinition const>(cbegin(), _supportedSequences.size());
+    }
+
+    [[nodiscard]] constexpr gsl::span<FunctionDefinition const> activeSequences() const noexcept
+    {
+        return gsl::span<FunctionDefinition const>(cbegin(), _lastIndex);
+    }
+
+    CRISPY_CONSTEXPR void reset(VTType vt) noexcept
+    {
+        // Partition the array such that first half contains all sequences with VTType less than or
+        // equal to given VTTYpe.
+        auto itr = std::partition(
+            begin(),
+            _supportedSequences.data() + _supportedSequences.size(),
+            [vt](const FunctionDefinition& value) noexcept { return value.conformanceLevel <= vt; });
+
+        _lastIndex = std::distance(begin(), itr);
+        gsl::span<FunctionDefinition> availableDefinition(begin(), _lastIndex);
+        crispy::sort(
+            availableDefinition,
+            [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr { return compare(a, b); });
+    }
+
+    CRISPY_CONSTEXPR void disableSequence(FunctionDefinition seq) noexcept
+    {
+        auto seqIter = std::find(begin(), end(), seq);
+        if (seqIter != end())
+        {
+            // Move the disabled sequence to the end of array, keep the rest of active sequences sorted
+            std::rotate(seqIter, seqIter + 1, _supportedSequences.data() + _supportedSequences.size());
+            --_lastIndex;
+        }
+    }
+
+    CRISPY_CONSTEXPR void enableSequence(FunctionDefinition seq) noexcept
+    {
+        auto const endArray = _supportedSequences.data() + _supportedSequences.size();
+        auto seqIter = std::find(end(), endArray, seq);
+        if (seqIter != endArray)
+        {
+            // Maybe could be done better since rest of the data is sorted
+            std::iter_swap(end(), seqIter);
+            ++_lastIndex;
+            gsl::span<FunctionDefinition> arr(begin(), end());
+            crispy::sort(arr, [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr {
+                return compare(a, b);
+            });
+        }
+    }
+
+  private:
+    std::array<FunctionDefinition, allFunctionsArray().size()> _supportedSequences = allFunctions();
+    size_t _lastIndex = allFunctions().size(); // No of total active sequences
+};
+
 /// Selects a FunctionDefinition based on a FunctionSelector.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-FunctionDefinition const* select(FunctionSelector const& selector) noexcept;
+FunctionDefinition const* select(FunctionSelector const& selector,
+                                 gsl::span<FunctionDefinition const> availableDefinition) noexcept;
 
 /// Selects a FunctionDefinition based on given input Escape sequence fields.
 ///
@@ -631,9 +718,11 @@ FunctionDefinition const* select(FunctionSelector const& selector) noexcept;
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectEscape(char intermediate, char finalCharacter)
+inline FunctionDefinition const* selectEscape(char intermediate,
+                                              char finalCharacter,
+                                              gsl::span<FunctionDefinition const> availableDefinition)
 {
-    return select({ FunctionCategory::ESC, 0, 0, intermediate, finalCharacter });
+    return select({ FunctionCategory::ESC, 0, 0, intermediate, finalCharacter }, availableDefinition);
 }
 
 /// Selects a FunctionDefinition based on given input control sequence fields.
@@ -646,9 +735,13 @@ inline FunctionDefinition const* selectEscape(char intermediate, char finalChara
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectControl(char leader, int argc, char intermediate, char finalCharacter)
+inline FunctionDefinition const* selectControl(char leader,
+                                               int argc,
+                                               char intermediate,
+                                               char finalCharacter,
+                                               gsl::span<FunctionDefinition const> availableDefinition)
 {
-    return select({ FunctionCategory::CSI, leader, argc, intermediate, finalCharacter });
+    return select({ FunctionCategory::CSI, leader, argc, intermediate, finalCharacter }, availableDefinition);
 }
 
 /// Selects a FunctionDefinition based on given input control sequence fields.
@@ -658,9 +751,10 @@ inline FunctionDefinition const* selectControl(char leader, int argc, char inter
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectOSCommand(int id)
+inline FunctionDefinition const* selectOSCommand(int id,
+                                                 gsl::span<FunctionDefinition const> availableDefinition)
 {
-    return select({ FunctionCategory::OSC, 0, id, 0, 0 });
+    return select({ FunctionCategory::OSC, 0, id, 0, 0 }, availableDefinition);
 }
 
 } // namespace terminal

@@ -19,3 +19,17 @@
 #else
     #define CRISPY_REQUIRES(x) /*!*/
 #endif
+
+#if (defined(__cpp_consteval) && __cpp_consteval >= 201811L)
+    #define CRISPY_CONSTEVAL consteval
+#else
+    #define CRISPY_CONSTEVAL constexpr
+#endif
+
+// Use this only when constexpr std algorithm is not supported but we still
+// wanna mark function constexpr using the std algorithms in their body
+#if (defined(__cpp_lib_constexpr_algorithms) && __cpp_lib_constexpr_algorithms >= 201806L)
+    #define CRISPY_CONSTEXPR constexpr
+#else
+    #define CRISPY_CONSTEXPR /**/
+#endif
