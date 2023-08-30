@@ -811,13 +811,16 @@ struct fmt::formatter<terminal::FunctionDefinition>: fmt::formatter<std::string>
         {
             case terminal::FunctionCategory::C0:
                 value = fmt::format("{}", crispy::escape(static_cast<uint8_t>(f.finalSymbol)));
+                break;
             case terminal::FunctionCategory::ESC:
                 value = fmt::format("{} {} {}",
                                     f.category,
                                     f.intermediate ? f.intermediate : ' ',
                                     f.finalSymbol ? f.finalSymbol : ' ');
+                break;
             case terminal::FunctionCategory::OSC:
                 value = fmt::format("{} {}", f.category, f.maximumParameters);
+                break;
             case terminal::FunctionCategory::DCS:
             case terminal::FunctionCategory::CSI:
                 if (f.minimumParameters == f.maximumParameters)
@@ -842,6 +845,7 @@ struct fmt::formatter<terminal::FunctionDefinition>: fmt::formatter<std::string>
                                         f.maximumParameters,
                                         f.intermediate ? f.intermediate : ' ',
                                         f.finalSymbol);
+                break;
         }
         return formatter<std::string>::format(value, ctx);
     }
@@ -853,9 +857,12 @@ struct fmt::formatter<terminal::FunctionSelector>: fmt::formatter<std::string>
     auto format(const terminal::FunctionSelector f, format_context& ctx) -> format_context::iterator
     {
         std::string value;
+        // clang-format off
         switch (f.category)
         {
-            case terminal::FunctionCategory::OSC: value = fmt::format("{} {}", f.category, f.argc);
+            case terminal::FunctionCategory::OSC:
+                value = fmt::format("{} {}", f.category, f.argc);
+                break;
             default:
                 value = fmt::format("{} {} {} {} {}",
                                     f.category,
@@ -863,7 +870,9 @@ struct fmt::formatter<terminal::FunctionSelector>: fmt::formatter<std::string>
                                     f.argc,
                                     f.intermediate ? f.intermediate : ' ',
                                     f.finalSymbol ? f.finalSymbol : ' ');
+                break;
         }
+        // clang-format on
         return formatter<std::string>::format(value, ctx);
     }
 };
