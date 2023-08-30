@@ -42,20 +42,21 @@ struct lru_hashtable_stats
 
 // {{{ fmt
 template <>
-struct fmt::formatter<crispy::lru_hashtable_stats>
+struct fmt::formatter<crispy::lru_hashtable_stats>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(crispy::lru_hashtable_stats stats, format_context& ctx) -> format_context::iterator
+    auto format(crispy::lru_hashtable_stats stats, format_context& ctx) -> format_context::iterator
     {
-        return fmt::format_to(
-            ctx.out(),
-            "{} hits, {} misses, {} evictions, {:.3}% hit rate",
-            stats.hits,
-            stats.misses,
-            stats.recycles,
-            stats.hits + stats.misses != 0
-                ? 100.0 * (static_cast<double>(stats.hits) / static_cast<double>(stats.hits + stats.misses))
-                : 0.0);
+        return formatter<std::string>::format(
+            fmt::format(
+                "{} hits, {} misses, {} evictions, {:.3}% hit rate",
+                stats.hits,
+                stats.misses,
+                stats.recycles,
+                stats.hits + stats.misses != 0
+                    ? 100.0
+                          * (static_cast<double>(stats.hits) / static_cast<double>(stats.hits + stats.misses))
+                    : 0.0),
+            ctx);
     }
 };
 // }}}

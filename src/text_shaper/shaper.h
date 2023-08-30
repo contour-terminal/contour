@@ -156,54 +156,47 @@ class shaper
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<text::bitmap_format>
+struct fmt::formatter<text::bitmap_format>: fmt::formatter<std::string_view>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(text::bitmap_format value, format_context& ctx) -> format_context::iterator
+    auto format(text::bitmap_format value, format_context& ctx) -> format_context::iterator
     {
+        string_view name;
         switch (value)
         {
-            case text::bitmap_format::alpha_mask: return fmt::format_to(ctx.out(), "alpha_mask");
-            case text::bitmap_format::rgb: return fmt::format_to(ctx.out(), "rgb");
-            case text::bitmap_format::rgba: return fmt::format_to(ctx.out(), "rgba");
-            default: return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
+            case text::bitmap_format::alpha_mask: name = "alpha_mask"; break;
+            case text::bitmap_format::rgb: name = "rgb"; break;
+            case text::bitmap_format::rgba: name = "rgba"; break;
         }
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::glyph_position>
+struct fmt::formatter<text::glyph_position>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(text::glyph_position const& gpos, format_context& ctx) -> format_context::iterator
+    auto format(text::glyph_position const& gpos, format_context& ctx) -> format_context::iterator
     {
-        return fmt::format_to(ctx.out(),
-                              "({}+{}+{}|{}+{})",
-                              gpos.glyph.index.value,
-                              gpos.offset.x,
-                              gpos.offset.y,
-                              gpos.advance.x,
-                              gpos.advance.y);
+        return formatter<std::string>::format(fmt::format("({}+{}+{}|{}+{})",
+                                                          gpos.glyph.index.value,
+                                                          gpos.offset.x,
+                                                          gpos.offset.y,
+                                                          gpos.advance.x,
+                                                          gpos.advance.y),
+                                              ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::rasterized_glyph>
+struct fmt::formatter<text::rasterized_glyph>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(text::rasterized_glyph const& glyph, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::rasterized_glyph const& glyph, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(),
-                              "rasterized_glyph({}, {}+{}, {})",
-                              glyph.index.value,
-                              glyph.bitmapSize,
-                              glyph.position,
-                              glyph.format);
+        return formatter<std::string>::format(fmt::format("rasterized_glyph({}, {}+{}, {})",
+                                                          glyph.index.value,
+                                                          glyph.bitmapSize,
+                                                          glyph.position,
+                                                          glyph.format),
+                                              ctx);
     }
 };
 // }}}

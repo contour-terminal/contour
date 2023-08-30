@@ -802,74 +802,69 @@ struct fmt::formatter<terminal::FunctionCategory>: fmt::formatter<std::string_vi
 };
 
 template <>
-struct fmt::formatter<terminal::FunctionDefinition>
+struct fmt::formatter<terminal::FunctionDefinition>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(const terminal::FunctionDefinition f, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::FunctionDefinition f, format_context& ctx) -> format_context::iterator
     {
+        std::string value;
         switch (f.category)
         {
             case terminal::FunctionCategory::C0:
-                return fmt::format_to(ctx.out(), "{}", crispy::escape(static_cast<uint8_t>(f.finalSymbol)));
+                value = fmt::format("{}", crispy::escape(static_cast<uint8_t>(f.finalSymbol)));
             case terminal::FunctionCategory::ESC:
-                return fmt::format_to(ctx.out(),
-                                      "{} {} {}",
-                                      f.category,
-                                      f.intermediate ? f.intermediate : ' ',
-                                      f.finalSymbol ? f.finalSymbol : ' ');
+                value = fmt::format("{} {} {}",
+                                    f.category,
+                                    f.intermediate ? f.intermediate : ' ',
+                                    f.finalSymbol ? f.finalSymbol : ' ');
             case terminal::FunctionCategory::OSC:
-                return fmt::format_to(ctx.out(), "{} {}", f.category, f.maximumParameters);
+                value = fmt::format("{} {}", f.category, f.maximumParameters);
             case terminal::FunctionCategory::DCS:
             case terminal::FunctionCategory::CSI:
                 if (f.minimumParameters == f.maximumParameters)
-                    return fmt::format_to(ctx.out(),
-                                          "{} {} {}    {} {}",
-                                          f.category,
-                                          f.leader ? f.leader : ' ',
-                                          f.minimumParameters,
-                                          f.intermediate ? f.intermediate : ' ',
-                                          f.finalSymbol);
+                    value = fmt::format("{} {} {}    {} {}",
+                                        f.category,
+                                        f.leader ? f.leader : ' ',
+                                        f.minimumParameters,
+                                        f.intermediate ? f.intermediate : ' ',
+                                        f.finalSymbol);
                 else if (f.maximumParameters == terminal::ArgsMax)
-                    return fmt::format_to(ctx.out(),
-                                          "{} {} {}..  {} {}",
-                                          f.category,
-                                          f.leader ? f.leader : ' ',
-                                          f.minimumParameters,
-                                          f.intermediate ? f.intermediate : ' ',
-                                          f.finalSymbol);
+                    value = fmt::format("{} {} {}..  {} {}",
+                                        f.category,
+                                        f.leader ? f.leader : ' ',
+                                        f.minimumParameters,
+                                        f.intermediate ? f.intermediate : ' ',
+                                        f.finalSymbol);
                 else
-                    return fmt::format_to(ctx.out(),
-                                          "{} {} {}..{} {} {}",
-                                          f.category,
-                                          f.leader ? f.leader : ' ',
-                                          f.minimumParameters,
-                                          f.maximumParameters,
-                                          f.intermediate ? f.intermediate : ' ',
-                                          f.finalSymbol);
+                    value = fmt::format("{} {} {}..{} {} {}",
+                                        f.category,
+                                        f.leader ? f.leader : ' ',
+                                        f.minimumParameters,
+                                        f.maximumParameters,
+                                        f.intermediate ? f.intermediate : ' ',
+                                        f.finalSymbol);
         }
-        return fmt::format_to(ctx.out(), "?");
+        return formatter<std::string>::format(value, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::FunctionSelector>
+struct fmt::formatter<terminal::FunctionSelector>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(const terminal::FunctionSelector f, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::FunctionSelector f, format_context& ctx) -> format_context::iterator
     {
+        std::string value;
         switch (f.category)
         {
-            case terminal::FunctionCategory::OSC:
-                return fmt::format_to(ctx.out(), "{} {}", f.category, f.argc);
+            case terminal::FunctionCategory::OSC: value = fmt::format("{} {}", f.category, f.argc);
             default:
-                return fmt::format_to(ctx.out(),
-                                      "{} {} {} {} {}",
-                                      f.category,
-                                      f.leader ? f.leader : ' ',
-                                      f.argc,
-                                      f.intermediate ? f.intermediate : ' ',
-                                      f.finalSymbol ? f.finalSymbol : ' ');
+                value = fmt::format("{} {} {} {} {}",
+                                    f.category,
+                                    f.leader ? f.leader : ' ',
+                                    f.argc,
+                                    f.intermediate ? f.intermediate : ' ',
+                                    f.finalSymbol ? f.finalSymbol : ' ');
         }
+        return formatter<std::string>::format(value, ctx);
     }
 };
 // }}}

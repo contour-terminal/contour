@@ -104,7 +104,7 @@ class message_builder
         return *this;
     }
     template <typename... T>
-    message_builder& operator()(fmt::format_string<T...> fmt, T&&... args)
+    message_builder& operator()(std::string_view fmt, T&&... args)
     {
         _buffer += fmt::vformat(fmt, fmt::make_format_args(args...));
         return *this;

@@ -694,40 +694,37 @@ struct fmt::formatter<terminal::rasterizer::atlas::Format>: formatter<std::strin
 };
 
 template <>
-struct fmt::formatter<terminal::rasterizer::atlas::TileLocation>
+struct fmt::formatter<terminal::rasterizer::atlas::TileLocation>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(terminal::rasterizer::atlas::TileLocation value, format_context& ctx)
+    auto format(terminal::rasterizer::atlas::TileLocation value, format_context& ctx)
         -> format_context::iterator
     {
-        return fmt::format_to(ctx.out(), "Tile {}x+{}y", value.x.value, value.y.value);
+        return formatter<std::string>::format(fmt::format("Tile {}x+{}y", value.x.value, value.y.value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::rasterizer::atlas::RenderTile>
+struct fmt::formatter<terminal::rasterizer::atlas::RenderTile>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(terminal::rasterizer::atlas::RenderTile const& value, format_context& ctx)
+    auto format(terminal::rasterizer::atlas::RenderTile const& value, format_context& ctx)
         -> format_context::iterator
     {
-        return fmt::format_to(
-            ctx.out(), "RenderTile({}x + {}y, {})", value.x.value, value.y.value, value.tileLocation);
+        return formatter<std::string>::format(
+            fmt::format("RenderTile({}x + {}y, {})", value.x.value, value.y.value, value.tileLocation), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::rasterizer::atlas::AtlasProperties>
+struct fmt::formatter<terminal::rasterizer::atlas::AtlasProperties>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(terminal::rasterizer::atlas::AtlasProperties const& value, format_context& ctx)
+    auto format(terminal::rasterizer::atlas::AtlasProperties const& value, format_context& ctx)
         -> format_context::iterator
     {
-        return fmt::format_to(ctx.out(),
-                              "tile size {}, format {}, direct-mapped {}",
-                              value.tileSize,
-                              value.format,
-                              value.directMappingCount);
+        return formatter<std::string>::format(fmt::format("tile size {}, format {}, direct-mapped {}",
+                                                          value.tileSize,
+                                                          value.format,
+                                                          value.directMappingCount),
+                                              ctx);
     }
 };
 // }}}

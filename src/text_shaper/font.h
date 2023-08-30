@@ -328,19 +328,18 @@ struct hash<text::font_description>
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<text::DPI>
+struct fmt::formatter<text::DPI>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(text::DPI dpi, format_context& ctx) -> format_context::iterator
+    auto format(text::DPI dpi, format_context& ctx) -> format_context::iterator
     {
-        return fmt::format_to(ctx.out(), "{}x{}", dpi.x, dpi.y);
+        return formatter<std::string>::format(fmt::format("{}x{}", dpi.x, dpi.y), ctx);
     }
 };
 
 template <>
 struct fmt::formatter<text::font_weight>: formatter<string_view>
 {
-    static auto format(text::font_weight value, format_context& ctx) -> format_context::iterator
+    auto format(text::font_weight value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -358,14 +357,14 @@ struct fmt::formatter<text::font_weight>: formatter<string_view>
             case text::font_weight::black: name = "Black"; break;
             case text::font_weight::extra_black: name = "ExtraBlack"; break;
         }
-        return fmt::formatter<string_view> {}.format(name, ctx);
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
 struct fmt::formatter<text::font_slant>: formatter<string_view>
 {
-    static auto format(text::font_slant value, format_context& ctx) -> format_context::iterator
+    auto format(text::font_slant value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -374,14 +373,14 @@ struct fmt::formatter<text::font_slant>: formatter<string_view>
             case text::font_slant::italic: name = "Italic"; break;
             case text::font_slant::oblique: name = "Oblique"; break;
         }
-        return fmt::formatter<string_view> {}.format(name, ctx);
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
 struct fmt::formatter<text::font_spacing>: formatter<string_view>
 {
-    static auto format(text::font_spacing value, format_context& ctx) -> format_context::iterator
+    auto format(text::font_spacing value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -389,149 +388,108 @@ struct fmt::formatter<text::font_spacing>: formatter<string_view>
             case text::font_spacing::proportional: name = "Proportional"; break;
             case text::font_spacing::mono: name = "Monospace"; break;
         }
-        return fmt::formatter<string_view> {}.format(name, ctx);
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::font_description>
+struct fmt::formatter<text::font_description>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(text::font_description const& desc, format_context& ctx) -> format_context::iterator
+    auto format(text::font_description const& desc, format_context& ctx) -> format_context::iterator
     {
-        return fmt::format_to(ctx.out(),
-                              "(family={} weight={} slant={} spacing={}, strict_spacing={})",
-                              desc.familyName,
-                              desc.weight,
-                              desc.slant,
-                              desc.spacing,
-                              desc.strict_spacing ? "yes" : "no");
+        return formatter<std::string>::format(
+            fmt::format("(family={} weight={} slant={} spacing={}, strict_spacing={})",
+                        desc.familyName,
+                        desc.weight,
+                        desc.slant,
+                        desc.spacing,
+                        desc.strict_spacing ? "yes" : "no"),
+            ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::font_metrics>
+struct fmt::formatter<text::font_metrics>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    auto parse(ParseContext& ctx)
+    auto format(text::font_metrics const& metrics, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::font_metrics const& metrics, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(),
-                              "({}, {}, {}, {}, {}, {})",
-                              metrics.line_height,
-                              metrics.advance,
-                              metrics.ascender,
-                              metrics.descender,
-                              metrics.underline_position,
-                              metrics.underline_thickness);
+        return formatter<std::string>::format(fmt::format("({}, {}, {}, {}, {}, {})",
+                                                          metrics.line_height,
+                                                          metrics.advance,
+                                                          metrics.ascender,
+                                                          metrics.descender,
+                                                          metrics.underline_position,
+                                                          metrics.underline_thickness),
+                                              ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::font_size>
+struct fmt::formatter<text::font_size>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    auto parse(ParseContext& ctx)
+    auto format(text::font_size size, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::font_size size, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}pt", size.pt);
+        return formatter<std::string>::format(fmt::format("{}pt", size.pt), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::font_key>
+struct fmt::formatter<text::font_key>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    auto parse(ParseContext& ctx)
+    auto format(text::font_key key, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::font_key key, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}", key.value);
+        return formatter<std::string>::format(fmt::format("{}", key.value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::glyph_index>
+struct fmt::formatter<text::glyph_index>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    auto parse(ParseContext& ctx)
+    auto format(text::glyph_index value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::glyph_index value, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}", value.value);
+        return formatter<std::string>::format(fmt::format("{}", value.value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::glyph_key>
+struct fmt::formatter<text::glyph_key>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::glyph_key const& key, FormatContext& ctx)
+    auto format(text::glyph_key const& key, format_context& ctx) -> format_context::iterator
     {
 #if defined(GLYPH_KEY_DEBUG)
-        return fmt::format_to(
-            ctx.out(),
-            "({}, {}:{}, \"{}\")",
-            key.size,
-            key.font,
-            key.index,
-            unicode::convert_to<char>(std::u32string_view(key.text.data(), key.text.size())));
+        return formatter<std::string>::format(
+            fmt::format("({}, {}:{}, \"{}\")",
+                        key.size,
+                        key.font,
+                        key.index,
+                        unicode::convert_to<char>(std::u32string_view(key.text.data(), key.text.size()))),
+            ctx);
 #else
-        return fmt::format_to(ctx.out(), "({}, {}, {})", key.font, key.size, key.index);
+        return formatter<std::string>::format(fmt::format("({}, {}, {})", key.font, key.size, key.index),
+                                              ctx);
 #endif
     }
 };
 
 template <>
-struct fmt::formatter<text::font_feature>
+struct fmt::formatter<text::font_feature>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    auto parse(ParseContext& ctx)
+    auto format(text::font_feature value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::font_feature value, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(),
-                              "{}{}{}{}{}",
-                              value.enabled ? '+' : '-',
-                              value.name[0],
-                              value.name[1],
-                              value.name[2],
-                              value.name[3]);
+        return formatter<std::string>::format(fmt::format("{}{}{}{}{}",
+                                                          value.enabled ? '+' : '-',
+                                                          value.name[0],
+                                                          value.name[1],
+                                                          value.name[2],
+                                                          value.name[3]),
+                                              ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::render_mode>
+struct fmt::formatter<text::render_mode>: fmt::formatter<std::string_view>
 {
-    template <typename ParseContext>
-    auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::render_mode value, FormatContext& ctx)
+    auto format(text::render_mode value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -542,7 +500,7 @@ struct fmt::formatter<text::render_mode>
             case text::render_mode::lcd: name = "LCD"; break;
             case text::render_mode::color: name = "Color"; break;
         }
-        return fmt::formatter<string_view> {}.format(name, ctx);
+        return fmt::formatter<string_view>::format(name, ctx);
     }
 };
 // }}}
