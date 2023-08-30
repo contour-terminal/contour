@@ -660,7 +660,7 @@ class SupportedSequences
     {
         // Partition the array such that first half contains all sequences with VTType less than or
         // equal to given VTTYpe.
-        auto itr = std::partition(
+        auto* itr = std::partition(
             begin(),
             _supportedSequences.data() + _supportedSequences.size(),
             [vt](const FunctionDefinition& value) noexcept { return value.conformanceLevel <= vt; });
@@ -674,7 +674,7 @@ class SupportedSequences
 
     CRISPY_CONSTEXPR void disableSequence(FunctionDefinition seq) noexcept
     {
-        auto seqIter = std::find(begin(), end(), seq);
+        auto* seqIter = std::find(begin(), end(), seq);
         if (seqIter != end())
         {
             // Move the disabled sequence to the end of array, keep the rest of active sequences sorted
@@ -685,8 +685,8 @@ class SupportedSequences
 
     CRISPY_CONSTEXPR void enableSequence(FunctionDefinition seq) noexcept
     {
-        auto const endArray = _supportedSequences.data() + _supportedSequences.size();
-        auto seqIter = std::find(end(), endArray, seq);
+        auto* const endArray = _supportedSequences.data() + _supportedSequences.size();
+        auto* seqIter = std::find(end(), endArray, seq);
         if (seqIter != endArray)
         {
             // Maybe could be done better since rest of the data is sorted
