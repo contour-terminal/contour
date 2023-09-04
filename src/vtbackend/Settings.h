@@ -65,6 +65,8 @@ struct Settings
     bool highlightDoubleClickedWord = true;
     // TODO: ^^^ make also use of it. probably rename to how VScode has named it.
 
+    std::string urlPattern = R"((https?|ftp|file)://[-A-Za-z0-9+&@#/%?=~_|!:,.;]*[-A-Za-z0-9+&@#/%=~_|])";
+
     struct PrimaryScreen
     {
         bool allowReflowOnResize = true;

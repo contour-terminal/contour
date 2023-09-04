@@ -103,6 +103,8 @@ target_link_libraries(vtbackend PUBLIC
     fmt::fmt-header-only
     range-v3::range-v3 
     ${LIBUNICODE_LIBS}  
+    regex_dfa
+    ctre::ctre
     vtparser 
     vtpty 
 )

@@ -18,6 +18,8 @@
 
 #include <vtparser/Parser.h>
 
+#include <regex_dfa/RegExpr.h>
+
 #include <fmt/format.h>
 
 #include <atomic>
@@ -26,6 +28,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <regex>
 #include <stack>
 #include <vector>
 
@@ -193,6 +196,7 @@ struct TerminalState
     // Hyperlink related
     //
     HyperlinkStorage hyperlinks {};
+    regex_dfa::RegExpr urlPattern;
 
     std::string windowTitle {};
     std::stack<std::string> savedWindowTitles {};

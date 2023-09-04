@@ -122,6 +122,7 @@ namespace
         settings.primaryScreen.allowReflowOnResize = config.reflowOnResize;
         settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord;
         settings.highlightTimeout = profile.highlightTimeout;
+        settings.urlPattern = profile.urlPattern;
 
         return settings;
     }

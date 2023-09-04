@@ -180,6 +180,8 @@ struct TerminalProfile
     bool highlightDoubleClickedWord = true;
     terminal::StatusDisplayType initialStatusDisplayType = terminal::StatusDisplayType::None;
 
+    std::string urlPattern = R"((https?|ftp|file)://[-A-Za-z0-9+&@#/%?=~_|!:,.;]*[-A-Za-z0-9+&@#/%=~_|])";
+
     terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur;                 // On Windows 10, this will enable Acrylic Backdrop.
 

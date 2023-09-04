@@ -108,6 +108,16 @@ fetch_and_unpack_termbenchpro()
         termbench_pro
 }
 
+fetch_and_unpack_ctre()
+{
+    local ctre_git_sha="0fdd96db416188a07833606b16633fb977c0cc11"
+    fetch_and_unpack \
+        compile-time-regular-expressions-$ctre_git_sha \
+        ctre-$ctre_git_sha.tar.gz \
+        https://github.com/hanickadot/compile-time-regular-expressions/archive/$ctre_git_sha.tar.gz \
+        ctre
+}
+
 fetch_and_unpack_boxed()
 {
     local boxed_cpp_git_sha="daa702e22e71f3da3eef838e4946b6c3df1f16b1"
@@ -573,6 +583,7 @@ main()
 
     fetch_and_unpack_boxed
     fetch_and_unpack_termbenchpro
+    fetch_and_unpack_ctre
 }
 
 main $*
