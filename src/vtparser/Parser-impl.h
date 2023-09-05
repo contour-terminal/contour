@@ -381,7 +381,8 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
         return { ProcessKind::FallbackToFSM, 0 };
 
     auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
-    auto const [cellCount, next, subStart, subEnd] = unicode::scan_text(_scanState, chunk, maxCharCount);
+    auto const [cellCount, subStart, subEnd] = unicode::scan_text(_scanState, chunk, maxCharCount);
+    auto const next = _scanState.next;
 
     if (next == input)
         return { ProcessKind::FallbackToFSM, 0 };
