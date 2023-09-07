@@ -3440,14 +3440,14 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             auto const ch = seq.param_or(0, Sequence::Parameter { 0 });
             // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
             auto const origin = this->origin();
-            auto const top = seq.param_or(0, origin.line);
-            auto const left = seq.param_or(1, origin.column);
+            auto const top = seq.param_or(1, origin.line);
+            auto const left = seq.param_or(2, origin.column);
 
             // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the
             // value is treated as the width or height of that page.
             auto const size = pageSize();
-            auto const bottom = min(seq.param_or(2, *size.lines), *size.lines);
-            auto const right = min(seq.param_or(3, *size.columns), *size.columns);
+            auto const bottom = min(seq.param_or(3, *size.lines), *size.lines);
+            auto const right = min(seq.param_or(4, *size.columns), *size.columns);
 
             fillArea(ch, *top, *left, bottom, right);
         }

@@ -1304,13 +1304,13 @@ TEST_CASE("DeleteLines", "[screen]")
     }
 }
 
-TEST_CASE("FillArea", "[screen]")
+TEST_CASE("DECFRA", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
-    screen.fillArea(L'.', 1, 1, 3, 3);
+    mock.writeToScreen("\033[46;1;1;3;3$x");
     CHECK(escape(mainPageText(screen)) == "12345\\n6...0\\nA...E\\nF...J\\nKLMNO\\n");
 }
 
