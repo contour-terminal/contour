@@ -498,6 +498,9 @@ install_deps_darwin()
     # due to all the other supported platforms.
     fetch_and_unpack_Catch2
 
+    # NB: yaml-cpp is available on brew, but gives linker error on Github CI.
+    fetch_and_unpack_yaml_cpp
+
     fetch_and_unpack_libunicode
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
@@ -511,8 +514,7 @@ install_deps_darwin()
         harfbuzz \
         pkg-config \
         qt$QTVER \
-        range-v3 \
-        yaml-cpp
+        range-v3
 }
 
 main()
