@@ -5,6 +5,7 @@
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/ControlCode.h>
 #include <vtbackend/InputGenerator.h>
+#include <vtbackend/TerminalState.h>
 #include <vtbackend/primitives.h>
 
 #include <vtpty/Process.h>
@@ -1775,6 +1776,29 @@ namespace
                     strValue = "file:" + strValue;
                 terminalProfile.bell = strValue;
             }
+        }
+
+        if (auto frozenDecModes = profile["frozen_dec_modes"]; frozenDecModes)
+        {
+            usedKeys.emplace(basePath + ".frozen_dec_modes");
+            if (frozenDecModes.IsMap())
+            {
+                for (auto const& modeNode: frozenDecModes)
+                {
+                    auto const modeNumber = std::stoi(modeNode.first.as<string>());
+                    if (!terminal::isValidDECMode(modeNumber))
+                    {
+                        errorLog()("Invalid frozen_dec_modes entry: {} (Invalid DEC mode number).",
+                                   modeNumber);
+                        continue;
+                    }
+                    auto const mode = static_cast<terminal::DECMode>(modeNumber);
+                    auto const frozenState = modeNode.second.as<bool>();
+                    terminalProfile.frozenModes[mode] = frozenState;
+                }
+            }
+            else
+                errorLog()("Invalid frozen_dec_modes entry.");
         }
     }
 

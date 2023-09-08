@@ -205,6 +205,25 @@ profiles:
         # Default: VT525
         terminal_id: VT525
 
+        # Defines a list of DEC modes to explicitly and permanently disable/enable support for.
+        #
+        # This is a developer-users-only option that may possibly help investigating problems.
+        # This option may also be used by regular users if they're asked to in order to disable
+        # a broken functionality. This is something we hardly try to avoid, of course.
+        #
+        # This can be an object with each key being the DEC mode number and its value a boolean,
+        # indicating whether this DEC mode is permanently set (enabled) or unset (disabled).
+        #
+        # Example:
+        #
+        #     frozen_dec_modes:
+        #         2026: false
+        #         2027: true
+        #
+        # Default: (empty object)
+        frozen_dec_modes:
+            2026: false
+
         # Determines the initial terminal size in characters.
         terminal_size:
             columns: 80

@@ -6,6 +6,7 @@
 #include <vtbackend/primitives.h>
 
 #include <chrono>
+#include <map>
 
 namespace terminal
 {
@@ -27,6 +28,9 @@ struct Settings
 {
     VTType terminalId = VTType::VT525;
     ColorPalette colorPalette; // NB: The default color palette can be taken from the factory settings.
+
+    // Set of DEC modes that are frozen and cannot be changed by the application.
+    std::map<terminal::DECMode, bool> frozenModes;
 
     // total page size available to this terminal.
     // This page size may differ from the main displays (primary/alternate screen) page size If

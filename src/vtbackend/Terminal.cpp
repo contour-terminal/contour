@@ -163,6 +163,9 @@ Terminal::Terminal(Events& eventListener,
     setMode(DECMode::VisibleCursor, true);
 #endif
     setMode(DECMode::LeftRightMargin, false);
+
+    for (auto const& [mode, frozen] : _settings.frozenModes)
+        freezeMode(mode, frozen);
 }
 
 void Terminal::setRefreshRate(RefreshRate refreshRate)
@@ -1761,6 +1764,9 @@ void Terminal::hardReset()
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::Unicode, true);
     setMode(DECMode::VisibleCursor, true);
+
+    for (auto const& [mode, frozen] : _settings.frozenModes)
+        freezeMode(mode, frozen);
 
     _primaryScreen.hardReset();
     _alternateScreen.hardReset();
