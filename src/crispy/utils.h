@@ -271,25 +271,30 @@ constexpr std::optional<T> to_integer(std::basic_string<C> text) noexcept
     return to_integer<Base, T, C>(std::basic_string_view<C>(text));
 }
 
-struct finally // NOLINT(readability-identifier-naming)
+class finally // NOLINT(readability-identifier-naming)
 {
-    std::function<void()> hook {};
+  public:
+    explicit finally(std::function<void()> hook): _hook(std::move(hook)) {}
 
-    void perform()
+    finally(finally const&) = delete;
+    finally& operator=(finally const&) = delete;
+    finally(finally&&) = delete;
+    finally& operator=(finally&&) = delete;
+
+    void run()
     {
-        if (hook)
+        if (_hook)
         {
-            auto hooked = std::move(hook);
-            hook = {};
+            auto hooked = std::move(_hook);
+            _hook = {};
             hooked();
         }
     }
 
-    ~finally()
-    {
-        if (hook)
-            hook();
-    }
+    ~finally() { run(); }
+
+  private:
+    std::function<void()> _hook {};
 };
 
 inline std::optional<unsigned> fromHexDigit(char value)
