@@ -20,9 +20,7 @@
 #include <sys/types.h>
 
 #include <chrono>
-#include <csignal>
 #include <cstdlib>
-#include <iostream>
 #include <utility>
 #include <variant>
 
@@ -159,12 +157,15 @@ Terminal::Terminal(Events& eventListener,
     hardReset();
 #else
     setMode(DECMode::AutoWrap, true);
-    setMode(DECMode::VisibleCursor, true);
-    setMode(DECMode::Unicode, true);
-    setMode(DECMode::TextReflow, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
+    setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
+    setMode(DECMode::Unicode, true);
+    setMode(DECMode::VisibleCursor, true);
 #endif
     setMode(DECMode::LeftRightMargin, false);
+
+    for (auto const& [mode, frozen] : _settings.frozenModes)
+        freezeMode(mode, frozen);
 }
 
 void Terminal::setRefreshRate(RefreshRate refreshRate)
@@ -209,7 +210,7 @@ void Terminal::setExecutionMode(ExecutionMode mode)
 bool Terminal::processInputOnce()
 {
     // clang-format off
-    switch (_state.executionMode)
+    switch (_state.executionMode.load())
     {
         case ExecutionMode::BreakAtEmptyQueue:
             _state.executionMode = ExecutionMode::Waiting;
@@ -307,7 +308,7 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
     auto const elapsed = _currentTime - _renderBuffer.lastUpdate;
     auto const avoidRefresh = elapsed < _refreshInterval.value;
 
-    switch (_renderBuffer.state)
+    switch (_renderBuffer.state.load())
     {
         case RenderBufferState::WaitingForRefresh:
             if (avoidRefresh)
@@ -1499,6 +1500,20 @@ void Terminal::setMode(DECMode mode, bool enable)
     if (!isValidDECMode(static_cast<unsigned int>(mode)))
         return;
 
+    auto const currentModeValue = _state.modes.get(mode);
+
+    if (currentModeValue == ModeValue::PermanentlyReset || currentModeValue == ModeValue::PermanentlySet)
+    {
+        if (isEnabled(currentModeValue) != enable)
+        {
+            terminalLog()("Attempt to change permanently {} mode {} to {}.",
+                          currentModeValue == ModeValue::PermanentlySet ? "set" : "reset",
+                          mode,
+                          enable ? ModeValue::Set : ModeValue::Reset);
+        }
+        return;
+    }
+
     switch (mode)
     {
         case DECMode::AutoWrap: _currentScreen.get().cursor().autoWrap = enable; break;
@@ -1745,10 +1760,13 @@ void Terminal::hardReset()
 
     _state.modes = Modes {};
     setMode(DECMode::AutoWrap, true);
-    setMode(DECMode::Unicode, true);
-    setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::SixelCursorNextToGraphic, true);
+    setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
+    setMode(DECMode::Unicode, true);
     setMode(DECMode::VisibleCursor, true);
+
+    for (auto const& [mode, frozen] : _settings.frozenModes)
+        freezeMode(mode, frozen);
 
     _primaryScreen.hardReset();
     _alternateScreen.hardReset();

@@ -122,6 +122,7 @@ namespace
         settings.primaryScreen.allowReflowOnResize = config.reflowOnResize;
         settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord;
         settings.highlightTimeout = profile.highlightTimeout;
+        settings.frozenModes = profile.frozenModes;
 
         return settings;
     }
@@ -327,7 +328,7 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
                 sessionLog()("Permission for {} requires asking user.", role);
                 switch (role)
                 {
-                    // clang-format off
+                        // clang-format off
                     case GuardedRole::ChangeFont: emit requestPermissionForFontChange(); break;
                     case GuardedRole::CaptureBuffer: emit requestPermissionForBufferCapture(); break;
                     case GuardedRole::ShowHostWritableStatusLine: emit requestPermissionForShowHostWritableStatusLine(); break;

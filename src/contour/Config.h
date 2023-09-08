@@ -193,6 +193,9 @@ struct TerminalProfile
     } hyperlinkDecoration;
 
     std::string bell = "default";
+
+    // Set of DEC modes that are frozen and cannot be changed by the application.
+    std::map<terminal::DECMode, bool> frozenModes;
 };
 
 enum class RenderingBackend
