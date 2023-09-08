@@ -14,7 +14,7 @@ target_include_directories(vtparser PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 
-option(VTPARSER_TESTING "Enables building of unittests for vtparser [default: ON]" ON)
+option(VTPARSER_TESTING "Enables building of unittests for vtparser [default: ON]" ${CONTOUR_TESTING})
 if(VTPARSER_TESTING)
     enable_testing()
     add_executable(vtparser_test

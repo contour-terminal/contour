@@ -88,6 +88,9 @@ else()
     message(STATUS "No sanitizer enabled.")
 endif()
 
+if(CONTOUR_TESTING)
+    enable_testing()
+endif()
 # ----------------------------------------------------------------------------
 
 include(ContourThirdParties)
