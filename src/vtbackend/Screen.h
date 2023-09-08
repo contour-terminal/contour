@@ -123,6 +123,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     // {{{ SequenceHandler overrides
     void writeText(char32_t codepoint) override;
     void writeText(std::string_view text, size_t cellCount) override;
+    void writeTextEnd() override;
     void executeControlCode(char controlCode) override;
     void processSequence(Sequence const& seq) override;
     // }}}
@@ -637,6 +638,11 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     Line<Cell>* _currentLine = nullptr;
 #endif
     std::unique_ptr<SixelImageBuilder> _sixelImageBuilder;
+
+#if defined(LIBTERMINAL_LOG_TRACE)
+    std::atomic<bool> _logCharTrace = true;
+    std::string _pendingCharTraceLog;
+#endif
 };
 
 template <typename Cell>

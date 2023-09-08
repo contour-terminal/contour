@@ -2239,6 +2239,10 @@ void TraceHandler::writeText(std::string_view codepoints, size_t cellCount)
     _pendingSequences.emplace_back(CodepointSequence { codepoints, cellCount });
 }
 
+void TraceHandler::writeTextEnd()
+{
+}
+
 void TraceHandler::flushAllPending()
 {
     for (auto const& pendingSequence: _pendingSequences)

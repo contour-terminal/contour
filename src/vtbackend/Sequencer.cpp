@@ -46,6 +46,11 @@ size_t Sequencer::print(string_view chars, size_t cellCount)
            - _terminal.currentScreen().cursor().position.column.as<size_t>();
 }
 
+void Sequencer::printEnd()
+{
+    _terminal.sequenceHandler().writeTextEnd();
+}
+
 void Sequencer::execute(char controlCode)
 {
     _terminal.sequenceHandler().executeControlCode(controlCode);

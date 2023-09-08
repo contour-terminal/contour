@@ -142,6 +142,7 @@ constexpr ParserTable ParserTable::get() // {{{
     t.event(State::Ground, Action::Print, Range { 0x20_b, 0x7F_b });
     t.event(State::Ground, Action::Print, Range { 0xA0_b, 0xFF_b });
     t.event(State::Ground, Action::Print, UnicodeRange);
+    t.exit(State::Ground, Action::PrintEnd);
 
     // EscapeIntermediate
     t.event(State::EscapeIntermediate,
@@ -482,6 +483,7 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
         case Action::ESC_Dispatch: _eventListener.dispatchESC(ch); break;
         case Action::CSI_Dispatch: _eventListener.dispatchCSI(ch); break;
         case Action::Print: printUtf8Byte(ch); break;
+        case Action::PrintEnd: _eventListener.printEnd(); break;
         case Action::OSC_Start: _eventListener.startOSC(); break;
         case Action::OSC_Put: _eventListener.putOSC(ch); break;
         case Action::OSC_End: _eventListener.dispatchOSC(); break;

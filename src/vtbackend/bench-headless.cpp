@@ -268,7 +268,7 @@ class ContourHeadlessBench: public crispy::app
             stopTime = steady_clock::now();
         }
 
-        cleanupReader.perform();
+        cleanupReader.run();
 
         // Create summary
         auto const elapsedTime = stopTime - startTime;

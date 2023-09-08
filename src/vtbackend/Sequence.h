@@ -362,6 +362,7 @@ class SequenceHandler
     virtual void processSequence(Sequence const& sequence) = 0;
     virtual void writeText(char32_t codepoint) = 0;
     virtual void writeText(std::string_view codepoints, size_t cellCount) = 0;
+    virtual void writeTextEnd() = 0;
 };
 
 } // namespace terminal

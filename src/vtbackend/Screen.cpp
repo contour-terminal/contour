@@ -438,8 +438,15 @@ void Screen<Cell>::writeText(string_view text, size_t cellCount)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (vtTraceSequenceLog)
-        vtTraceSequenceLog()("text({} bytes, {} cells): \"{}\"", text.size(), cellCount, escape(text));
+        vtTraceSequenceLog()("text: ({} bytes, {} cells): \"{}\"", text.size(), cellCount, escape(text));
+
+    // Do not log individual characters, as we already logged the whole string above
+    _logCharTrace = false;
+    auto const _ = crispy::finally { [&]() {
+        _logCharTrace = true;
+    } };
 #endif
+
     assert(cellCount <= static_cast<size_t>(pageSize().columns.value - _cursor.position.column.value));
 
     text = tryEmplaceChars(text, cellCount);
@@ -452,6 +459,22 @@ void Screen<Cell>::writeText(string_view text, size_t cellCount)
 
     for (char const ch: text)
         _state.parser.printUtf8Byte(ch);
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void Screen<Cell>::writeTextEnd()
+{
+#if defined(LIBTERMINAL_LOG_TRACE)
+    // Do not log individual characters, as we already logged the whole string above
+    if (_pendingCharTraceLog.empty())
+        return;
+
+    if (vtTraceSequenceLog)
+        vtTraceSequenceLog()("text: \"{}\"", _pendingCharTraceLog);
+
+    _pendingCharTraceLog.clear();
+#endif
 }
 
 template <typename Cell>
@@ -485,8 +508,8 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::writeText(char32_t codepoint)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (vtTraceSequenceLog)
-        vtTraceSequenceLog()("char: \'{}\'", unicode::convert_to<char>(codepoint));
+    if (vtTraceSequenceLog && _logCharTrace.load())
+        _pendingCharTraceLog += unicode::convert_to<char>(codepoint);
 #endif
 
     return writeTextInternal(codepoint);
@@ -3282,7 +3305,9 @@ void Screen<Cell>::processSequence(Sequence const& seq)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (vtTraceSequenceLog)
-        vtTraceSequenceLog()("Handle VT sequence: {}", seq);
+        vtTraceSequenceLog()("Processing {:<14} {}",
+                             seq.functionDefinition(_terminal.activeSequences())->mnemonic,
+                             seq.text());
 #endif
 
     // std::cerr << fmt::format("\t{} \t; {}\n", seq,
