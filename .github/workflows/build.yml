@@ -1,6 +1,7 @@
 name: Build
 
 on:
+  merge_group:
   push:
     paths-ignore:
       - 'docs/**'
