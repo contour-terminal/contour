@@ -207,7 +207,7 @@ void Terminal::setExecutionMode(ExecutionMode mode)
 bool Terminal::processInputOnce()
 {
     // clang-format off
-    switch (_state.executionMode)
+    switch (_state.executionMode.load())
     {
         case ExecutionMode::BreakAtEmptyQueue:
             _state.executionMode = ExecutionMode::Waiting;
@@ -305,7 +305,7 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
     auto const elapsed = _currentTime - _renderBuffer.lastUpdate;
     auto const avoidRefresh = elapsed < _refreshInterval.value;
 
-    switch (_renderBuffer.state)
+    switch (_renderBuffer.state.load())
     {
         case RenderBufferState::WaitingForRefresh:
             if (avoidRefresh)
