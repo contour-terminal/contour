@@ -164,7 +164,7 @@ Terminal::Terminal(Events& eventListener,
 #endif
     setMode(DECMode::LeftRightMargin, false);
 
-    for (auto const& [mode, frozen] : _settings.frozenModes)
+    for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
 }
 
@@ -1765,7 +1765,7 @@ void Terminal::hardReset()
     setMode(DECMode::Unicode, true);
     setMode(DECMode::VisibleCursor, true);
 
-    for (auto const& [mode, frozen] : _settings.frozenModes)
+    for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
 
     _primaryScreen.hardReset();
