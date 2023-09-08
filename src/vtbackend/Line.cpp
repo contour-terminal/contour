@@ -215,6 +215,7 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
     }
 
     assert(columns.size() == unbox<size_t>(input.usedColumns));
+    assert(unbox(input.displayWidth) > 0);
 
     while (columns.size() < unbox<size_t>(input.displayWidth))
         columns.emplace_back(Cell { input.fillAttributes });
