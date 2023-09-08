@@ -109,7 +109,7 @@ endif()
 # --------------------------------------------------------------------------------------------------------
 # crispy_test
 
-option(CRISPY_TESTING "Enables building of unittests for crispy library [default: ON]" ON)
+option(CRISPY_TESTING "Enables building of unittests for crispy library [default: ON]" ${CONTOUR_TESTING})
 if(CRISPY_TESTING)
     enable_testing()
     add_executable(crispy_test

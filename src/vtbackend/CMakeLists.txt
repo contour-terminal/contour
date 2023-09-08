@@ -1,10 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 
-#project(libterminal VERSION "0.0.0" LANGUAGES CXX)
-
 find_package(Threads)
 
-option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ON]" ON)
+option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ON]" ${CONTOUR_TESTING})
 option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" ON)
 option(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER "Enables caching the pointer to the current line, which should improve performance. [default: OFF]" OFF)
 
@@ -129,7 +127,7 @@ if(LIBTERMINAL_TESTING)
         Capabilities_test.cpp
         Color_test.cpp
         InputGenerator_test.cpp
-		Selector_test.cpp
+        Selector_test.cpp
         Functions_test.cpp
         Grid_test.cpp
         Line_test.cpp
