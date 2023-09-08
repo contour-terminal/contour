@@ -157,10 +157,10 @@ Terminal::Terminal(Events& eventListener,
     hardReset();
 #else
     setMode(DECMode::AutoWrap, true);
-    setMode(DECMode::VisibleCursor, true);
-    setMode(DECMode::Unicode, true);
-    setMode(DECMode::TextReflow, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
+    setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
+    setMode(DECMode::Unicode, true);
+    setMode(DECMode::VisibleCursor, true);
 #endif
     setMode(DECMode::LeftRightMargin, false);
 }
@@ -1757,9 +1757,9 @@ void Terminal::hardReset()
 
     _state.modes = Modes {};
     setMode(DECMode::AutoWrap, true);
-    setMode(DECMode::Unicode, true);
-    setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::SixelCursorNextToGraphic, true);
+    setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
+    setMode(DECMode::Unicode, true);
     setMode(DECMode::VisibleCursor, true);
 
     _primaryScreen.hardReset();
