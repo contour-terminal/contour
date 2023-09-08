@@ -1260,12 +1260,9 @@ void TerminalWidget::scheduleRedraw()
         _lastHistoryLineCount = currentHistoryLineCount;
     }
 
-    if (setScreenDirty())
-    {
-        // QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
-        if (window())
-            post([this]() { window()->update(); });
-    }
+    // QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+    if (window())
+        post([this]() { window()->update(); });
 }
 
 void TerminalWidget::renderBufferUpdated()
