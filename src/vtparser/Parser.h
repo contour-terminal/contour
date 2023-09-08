@@ -234,6 +234,11 @@ enum class Action : uint8_t
     Print,
 
     /**
+     * This action only occurs in ground state and marks the end of printing characters.
+     */
+    PrintEnd,
+
+    /**
      * The C0 or C1 control function should be executed, which may have any one of a variety of
      * effects, including changing the cursor position, suspending or resuming communications or
      * changing the shift states in effect. There are no parameters to this action.
@@ -412,6 +417,7 @@ constexpr std::string_view to_string(Action action)
         case Action::Ignore: return "Ignore";
         case Action::Execute: return "Execute";
         case Action::Print: return "Print";
+        case Action::PrintEnd: return "PrintEnd";
         case Action::Clear: return "Clear";
         case Action::Collect: return "Collect";
         case Action::CollectLeader: return "CollectLeader";

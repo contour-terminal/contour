@@ -9,7 +9,7 @@
 using namespace std;
 using namespace terminal;
 
-class MockParserEvents: public terminal::NullParserEvents
+class MockParserEvents final: public terminal::NullParserEvents
 {
   public:
     std::string text;

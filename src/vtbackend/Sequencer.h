@@ -129,6 +129,7 @@ class Sequencer
     void error(std::string_view errorString);
     void print(char32_t codepoint);
     size_t print(std::string_view chars, size_t cellCount);
+    void printEnd();
     void execute(char controlCode);
     void clear() noexcept;
     void collect(char ch);

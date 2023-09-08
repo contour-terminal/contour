@@ -37,6 +37,8 @@ class ParserEvents
      */
     virtual size_t print(std::string_view chars, size_t cellCount) = 0;
 
+    virtual void printEnd() = 0;
+
     /**
      * Returns the number of terminal columns (cells) that are still available in the current line
      * until the right page margin would be hit.
@@ -166,6 +168,7 @@ class NullParserEvents: public ParserEvents
     void error(std::string_view const&) override {}
     void print(char32_t) override {}
     size_t print(std::string_view, size_t) override { return 0; }
+    void printEnd() override {}
     // clang-format off
     [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept override { return std::numeric_limits<size_t>::max(); }
     // clang-format on

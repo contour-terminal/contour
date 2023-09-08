@@ -66,6 +66,7 @@ class TraceHandler: public SequenceHandler
     void processSequence(Sequence const& sequence) override;
     void writeText(char32_t codepoint) override;
     void writeText(std::string_view codepoints, size_t cellCount) override;
+    void writeTextEnd() override;
 
     struct CodepointSequence
     {
