@@ -20,9 +20,7 @@
 #include <sys/types.h>
 
 #include <chrono>
-#include <csignal>
 #include <cstdlib>
-#include <iostream>
 #include <utility>
 #include <variant>
 
@@ -1498,6 +1496,20 @@ void Terminal::setMode(DECMode mode, bool enable)
 {
     if (!isValidDECMode(static_cast<unsigned int>(mode)))
         return;
+
+    auto const currentModeValue = _state.modes.get(mode);
+
+    if (currentModeValue == ModeValue::PermanentlyReset || currentModeValue == ModeValue::PermanentlySet)
+    {
+        if (isEnabled(currentModeValue) != enable)
+        {
+            terminalLog()("Attempt to change permanently {} mode {} to {}.",
+                          currentModeValue == ModeValue::PermanentlySet ? "set" : "reset",
+                          mode,
+                          enable ? ModeValue::Set : ModeValue::Reset);
+        }
+        return;
+    }
 
     switch (mode)
     {

@@ -155,6 +155,12 @@ class Terminal
     bool isModeEnabled(DECMode m) const noexcept { return _state.modes.enabled(m); }
     void setMode(AnsiMode mode, bool enable);
     void setMode(DECMode mode, bool enable);
+    void freezeMode(DECMode mode, bool enable)
+    {
+        setMode(mode, enable);
+        _state.modes.freezeMode(mode, enable);
+    }
+    void unfreezeMode(DECMode mode) { _state.modes.unfreezeMode(mode); }
 
     void setTopBottomMargin(std::optional<LineOffset> top, std::optional<LineOffset> bottom);
     void setLeftRightMargin(std::optional<ColumnOffset> left, std::optional<ColumnOffset> right);
