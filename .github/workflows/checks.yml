@@ -1,6 +1,7 @@
 name: Checks
 
 on:
+  merge_group:
   push:
     paths-ignore:
     - '.github/ISSUE_TEMPLATE/**'
