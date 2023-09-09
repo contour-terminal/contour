@@ -158,9 +158,9 @@ class Terminal
     void freezeMode(DECMode mode, bool enable)
     {
         setMode(mode, enable);
-        _state.modes.freezeMode(mode, enable);
+        _state.modes.freeze(mode);
     }
-    void unfreezeMode(DECMode mode) { _state.modes.unfreezeMode(mode); }
+    void unfreezeMode(DECMode mode) { _state.modes.unfreeze(mode); }
 
     void setTopBottomMargin(std::optional<LineOffset> top, std::optional<LineOffset> bottom);
     void setLeftRightMargin(std::optional<ColumnOffset> left, std::optional<ColumnOffset> right);

@@ -22,6 +22,7 @@
 #include <fmt/format.h>
 
 #include <atomic>
+#include <bitset>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -36,40 +37,59 @@ namespace terminal
 class Terminal;
 
 // {{{ Modes
-enum class ModeValue : char
-{
-    Reset,
-    Set,
-    PermanentlyReset,
-    PermanentlySet,
-};
-
-constexpr bool isEnabled(ModeValue const mode) noexcept
-{
-    return mode == ModeValue::Set || mode == ModeValue::PermanentlySet;
-}
-
 /// API for setting/querying terminal modes.
 ///
 /// This abstracts away the actual implementation for more intuitive use and easier future adaptability.
 class Modes
 {
   public:
-    // clang-format off
-    void set(AnsiMode mode, bool enabled) { set(mode, enabled ? ModeValue::Set : ModeValue::Reset); }
-    void set(DECMode mode, bool enabled) { set(mode, enabled ? ModeValue::Set : ModeValue::Reset); }
+    void set(AnsiMode mode, bool enabled) { _ansi.set(static_cast<size_t>(mode), enabled); }
 
-    [[nodiscard]] bool enabled(AnsiMode mode) const noexcept { return isEnabled(_ansi[static_cast<size_t>(mode)]); }
-    [[nodiscard]] bool enabled(DECMode mode) const noexcept { return isEnabled(_dec[static_cast<size_t>(mode)]); }
+    bool set(DECMode mode, bool enabled)
+    {
+        if (_decFrozen[static_cast<size_t>(mode)])
+        {
+            errorLog()("Attempt to change frozen DEC mode {}. Ignoring.", mode);
+            return false;
+        }
+        _dec.set(static_cast<size_t>(mode), enabled);
+        return true;
+    }
 
-    [[nodiscard]] ModeValue get(AnsiMode mode) const noexcept { return _ansi.at(static_cast<size_t>(mode)); }
-    [[nodiscard]] ModeValue get(DECMode mode) const noexcept { return _dec.at(static_cast<size_t>(mode)); }
-    // clang-format on
+    [[nodiscard]] bool enabled(AnsiMode mode) const noexcept { return _ansi[static_cast<size_t>(mode)]; }
+    [[nodiscard]] bool enabled(DECMode mode) const noexcept { return _dec[static_cast<size_t>(mode)]; }
+
+    [[nodiscard]] bool frozen(DECMode mode) const noexcept
+    {
+        assert(isValidDECMode(static_cast<unsigned int>(mode)));
+        return _decFrozen.test(static_cast<size_t>(mode));
+    }
+
+    void freeze(DECMode mode)
+    {
+        assert(isValidDECMode(static_cast<unsigned int>(mode)));
+
+        if (mode == DECMode::BatchedRendering)
+        {
+            errorLog()("Attempt to freeze batched rendering. Ignoring.");
+            return;
+        }
+
+        _decFrozen.set(static_cast<size_t>(mode), true);
+        terminalLog()("Freezing {} DEC mode to permanently-{}.", mode, enabled(mode) ? "set" : "reset");
+    }
+
+    void unfreeze(DECMode mode)
+    {
+        assert(isValidDECMode(static_cast<unsigned int>(mode)));
+        _decFrozen.set(static_cast<size_t>(mode), false);
+        terminalLog()("Unfreezing permanently-{} DEC mode {}.", mode, enabled(mode));
+    }
 
     void save(std::vector<DECMode> const& modes)
     {
         for (DECMode const mode: modes)
-            _savedModes[mode].push_back(get(mode));
+            _savedModes[mode].push_back(enabled(mode));
     }
 
     void restore(std::vector<DECMode> const& modes)
@@ -79,47 +99,17 @@ class Modes
             if (auto i = _savedModes.find(mode); i != _savedModes.end() && !i->second.empty())
             {
                 auto& saved = i->second;
-                _dec.at(static_cast<size_t>(mode)) = saved.back();
+                set(mode, saved.back());
                 saved.pop_back();
             }
         }
     }
 
-    void freezeMode(DECMode mode, bool enable)
-    {
-        if (!isValidDECMode(static_cast<unsigned int>(mode)))
-            return;
-
-        if (mode == DECMode::BatchedRendering && enable)
-        {
-            errorLog()("Attempt to permanently enable batched rendering. Ignoring.");
-            return;
-        }
-
-        auto const newModeValue = enable ? ModeValue::PermanentlySet : ModeValue::PermanentlyReset;
-        set(mode, newModeValue);
-        terminalLog()("Setting DEC mode {} to {}.", mode, newModeValue);
-    }
-
-    void unfreezeMode(DECMode mode)
-    {
-        if (!isValidDECMode(static_cast<unsigned int>(mode)))
-            return;
-
-        auto const currentModeValue = get(mode);
-        set(mode, isEnabled(currentModeValue));
-        terminalLog()("Unfreezing permanently {} DEC mode {}.",
-                      currentModeValue == ModeValue::PermanentlySet ? "set" : "reset",
-                      mode);
-    }
-
   private:
-    void set(AnsiMode mode, ModeValue value) { _ansi.at(static_cast<size_t>(mode)) = value; }
-    void set(DECMode mode, ModeValue value) { _dec.at(static_cast<size_t>(mode)) = value; }
-
-    std::array<ModeValue, 32> _ansi;                       // AnsiMode
-    std::array<ModeValue, 8452 + 1> _dec;                  // DECMode
-    std::map<DECMode, std::vector<ModeValue>> _savedModes; //!< saved DEC modes
+    std::bitset<32> _ansi;                            // AnsiMode
+    std::bitset<8452 + 1> _dec;                       // DECMode
+    std::bitset<8452 + 1> _decFrozen;                 // DECMode
+    std::map<DECMode, std::vector<bool>> _savedModes; // saved DEC modes
 };
 // }}}
 
@@ -269,23 +259,6 @@ struct fmt::formatter<terminal::DECMode>: fmt::formatter<std::string>
     auto format(terminal::DECMode mode, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(mode), ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<terminal::ModeValue>: fmt::formatter<std::string_view>
-{
-    auto format(terminal::ModeValue value, format_context& ctx) -> format_context::iterator
-    {
-        string_view name;
-        switch (value)
-        {
-            case terminal::ModeValue::Reset: name = "Reset"; break;
-            case terminal::ModeValue::Set: name = "Set"; break;
-            case terminal::ModeValue::PermanentlyReset: name = "PermanentlyReset"; break;
-            case terminal::ModeValue::PermanentlySet: name = "PermanentlySet"; break;
-        }
-        return formatter<string_view>::format(name, ctx);
     }
 };
 
