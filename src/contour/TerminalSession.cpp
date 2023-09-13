@@ -1462,7 +1462,7 @@ void TerminalSession::followHyperlink(terminal::HyperlinkInfo const& hyperlink)
         QProcess::execute(QString::fromStdString(_app.programPath()), args);
     }
     else if (isLocal)
-        QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromUtf8(string(hyperlink.path()).c_str())));
+        QDesktopServices::openUrl(QUrl(hyperlink.uri.c_str()));
     else
         QDesktopServices::openUrl(QString::fromUtf8(hyperlink.uri.c_str()));
 }
