@@ -28,6 +28,31 @@ ContourTerminal
         focus : false
     }
 
+
+
+    Rectangle {
+        Timer {
+            id: sizeWidgetTimer
+            interval: 1000;
+            running: false;
+            onTriggered: sizeWidget.visible = false
+        }
+        id : sizeWidget
+        anchors.centerIn: parent
+        width:  80
+        height: 30
+        color: "white"
+        visible : false
+        focus : false
+        Text {
+            id : sizeWidgetText
+            anchors.centerIn: parent
+            font.pointSize: 12
+            text :  session.displaytColumnsCount.toString() + "x" + session.displayLinesCount.toString()
+        }
+    }
+
+
     Image {
         id: backgroundImage
         width:  vtWidget.width
@@ -146,6 +171,12 @@ ContourTerminal
         let totalLineCount = (vt.pageLineCount + vt.historyLineCount);
 
         vbar.position = (vt.historyLineCount - vt.scrollOffset) / totalLineCount;
+    }
+
+    function updateSizeWidget() {
+        sizeWidget.visible = true
+        sizeWidgetTimer.running = true
+        sizeWidgetText.text =  vtWidget.session.displayColumnsCount.toString() + "x" + vtWidget.session.displayLinesCount.toString()
     }
 
     onTerminated: {

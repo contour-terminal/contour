@@ -75,11 +75,14 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     Q_PROPERTY(QColor backgroundColor READ getBackgroundColor NOTIFY backgroundColorChanged)
     Q_PROPERTY(bool isScrollbarRight READ getIsScrollbarRight NOTIFY isScrollbarRightChanged)
     Q_PROPERTY(bool isScrollbarVisible READ getIsScrollbarVisible NOTIFY isScrollbarVisibleChanged)
+    Q_PROPERTY(int displayColumnsCount READ displayColumnsCount)
+    Q_PROPERTY(int displayLinesCount READ displayLinesCount)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
   public:
     // {{{ Model property helper
+
     float getOpacity() const noexcept
     {
         return static_cast<float>(_profile.backgroundOpacity) / std::numeric_limits<uint8_t>::max();
@@ -140,6 +143,10 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     void setTitle(QString const& value) { terminal().setWindowTitle(value.toStdString()); }
 
     int pageLineCount() const noexcept { return unbox(_terminal.pageSize().lines); }
+
+    int displayColumnsCount() const noexcept { return unbox(profile().terminalSize.columns); }
+
+    int displayLinesCount() const noexcept { return unbox(profile().terminalSize.lines); }
 
     int historyLineCount() const noexcept { return unbox(_terminal.currentScreen().historyLineCount()); }
 
