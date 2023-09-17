@@ -117,6 +117,7 @@
           <li>Fixes `show_title_bar` config option (#1153)</li>
           <li>Adds config option `profile.*.bell` to adjust BEL behavior and fixes (#1162) and (#1163).</li>
           <li>Adds config option `profile.*.frozen_dec_modes` to permanently enable/disable certain DEC modes.</li>
+          <li>Adds capital `A` and `I` keys to switch from normal mode back to insert mode, too.</li>
         </ul>
       </description>
     </release>

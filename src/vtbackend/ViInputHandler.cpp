@@ -156,6 +156,8 @@ void ViInputHandler::registerAllCommands()
         registerCommand(modeSelect, ",", [this]() { _executor.moveCursor(ViMotion::RepeatCharMoveReverse, count()); });
     }
 
+    registerCommand(ModeSelect::Normal, "A", [this]() { setMode(ViMode::Insert); });
+    registerCommand(ModeSelect::Normal, "I", [this]() { setMode(ViMode::Insert); });
     registerCommand(ModeSelect::Normal, "a", [this]() { setMode(ViMode::Insert); });
     registerCommand(ModeSelect::Normal, "i", [this]() { setMode(ViMode::Insert); });
     registerCommand(ModeSelect::Normal, "<Insert>", [this]() { setMode(ViMode::Insert); });
