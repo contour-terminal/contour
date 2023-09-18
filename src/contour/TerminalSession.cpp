@@ -827,6 +827,8 @@ bool TerminalSession::operator()(actions::DecreaseFontSize)
 {
     auto constexpr OnePt = text::font_size { 1.0 };
     setFontSize(profile().fonts.size - OnePt);
+
+    emit fontSizeChanged();
     // auto const currentFontSize = view().renderer().fontDescriptions().size;
     // auto const newFontSize = currentFontSize - OnePt;
     // setFontSize(newFontSize);
@@ -882,6 +884,8 @@ bool TerminalSession::operator()(actions::IncreaseFontSize)
     // auto const currentFontSize = view().renderer().fontDescriptions().size;
     // auto const newFontSize = currentFontSize + OnePt;
     // setFontSize(newFontSize);
+
+    emit fontSizeChanged();
     setFontSize(profile().fonts.size + OnePt);
     return true;
 }

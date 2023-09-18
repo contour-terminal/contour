@@ -39,16 +39,20 @@ ContourTerminal
         }
         id : sizeWidget
         anchors.centerIn: parent
-        width:  80
-        height: 30
+        border.width: 1
+        border.color: "black"
+        property int minWidth: 70
+        property int minHeight: 30
+        width:  vtWidget.width * 0.1 < minWidth ? minWidth : vtWidget.width * 0.1
+        height: vtWidget.height * 0.1 < minHeight ? minHeight : vtWidget.height * 0.1
         color: "white"
         visible : false
         focus : false
         Text {
             id : sizeWidgetText
             anchors.centerIn: parent
-            font.pointSize: 12
-            text :  session.displaytColumnsCount.toString() + "x" + session.displayLinesCount.toString()
+            font.pointSize: vtWidget.fontSize
+            text :  "Size: " + session.pageColumnsCount.toString() + " x " + session.pageLineCount.toString()
         }
     }
 
@@ -174,9 +178,12 @@ ContourTerminal
     }
 
     function updateSizeWidget() {
-        sizeWidget.visible = true
-        sizeWidgetTimer.running = true
-        sizeWidgetText.text =  vtWidget.session.displayColumnsCount.toString() + "x" + vtWidget.session.displayLinesCount.toString()
+        if (vtWidget.session.upTime > 1.0)
+        {
+            sizeWidget.visible = true
+            sizeWidgetTimer.running = true
+            sizeWidgetText.text = "Size: " + vtWidget.session.pageColumnsCount.toString() + " x " + vtWidget.session.pageLineCount.toString()
+        }
     }
 
     onTerminated: {
@@ -188,6 +195,12 @@ ContourTerminal
         if(bellSoundEffect.playbackState === MediaPlayer.PlayingState)
             bellSoundEffect.stop()
         bellSoundEffect.play()
+    }
+
+    function updateFontSize() {
+        sizeWidgetText.font.pointSize = vtWidget.session.fontSize
+        sizeWidget.minWidth = vtWidget.session.fontSize * 10
+        sizeWidget.minHeight = vtWidget.session.fontSize * 3
     }
 
     onSessionChanged: (s) => {
@@ -211,6 +224,10 @@ ContourTerminal
 
         // Update the scrollbar's position whenever the VT's viewport changes.
         vt.onScrollOffsetChanged.connect(updateScrollBarPosition);
+
+        // Update font size of elements
+        vt.fontSizeChanged.connect(updateFontSize);
+        updateFontSize();
 
         // Permission-wall related hooks.
         vt.requestPermissionForFontChange.connect(requestFontChangeDialog.open);
