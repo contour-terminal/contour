@@ -300,10 +300,7 @@ class Line
     {
         return std::holds_alternative<TrivialBuffer>(_storage);
     }
-    [[nodiscard]] bool isInflatedBuffer() const noexcept
-    {
-        return !std::holds_alternative<TrivialBuffer>(_storage);
-    }
+    [[nodiscard]] bool isInflatedBuffer() const noexcept { return !isTrivialBuffer(); }
 
     void setBuffer(Storage buffer) noexcept { _storage = std::move(buffer); }
 
@@ -457,8 +454,8 @@ constexpr LineFlags operator&(LineFlags a, LineFlags b) noexcept
 template <typename Cell>
 inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
 {
-    if (std::holds_alternative<TrivialBuffer>(_storage))
-        _storage = inflate<Cell>(std::get<TrivialBuffer>(_storage));
+    if (auto trivialbuffer = std::get_if<TrivialBuffer>(&_storage))
+        _storage = inflate<Cell>(*trivialbuffer);
     return std::get<InflatedBuffer>(_storage);
 }
 
