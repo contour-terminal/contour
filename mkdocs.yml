@@ -102,6 +102,7 @@ nav:
     - Line marks: demo/line-marks.md
     - Status line: demo/statusline.md
     - Input modes: input-modes.md
+    - Size indicator: demo/size_indicator.md
   - VT extensions:
     - vt-extensions/index.md
     - vt-extensions/clickable-links.md
