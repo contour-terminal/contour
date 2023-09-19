@@ -64,6 +64,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     Q_OBJECT
     Q_PROPERTY(int id READ id)
     Q_PROPERTY(int pageLineCount READ pageLineCount NOTIFY lineCountChanged)
+    Q_PROPERTY(int pageColumnsCount READ pageColumnsCount NOTIFY columnsCountChanged)
     Q_PROPERTY(int historyLineCount READ historyLineCount NOTIFY historyLineCountChanged)
     Q_PROPERTY(int scrollOffset READ scrollOffset WRITE setScrollOffset NOTIFY scrollOffsetChanged)
     Q_PROPERTY(QString title READ title WRITE setTitle NOTIFY titleChanged)
@@ -75,11 +76,22 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     Q_PROPERTY(QColor backgroundColor READ getBackgroundColor NOTIFY backgroundColorChanged)
     Q_PROPERTY(bool isScrollbarRight READ getIsScrollbarRight NOTIFY isScrollbarRightChanged)
     Q_PROPERTY(bool isScrollbarVisible READ getIsScrollbarVisible NOTIFY isScrollbarVisibleChanged)
+    Q_PROPERTY(int fontSize READ getFontSize)
+    Q_PROPERTY(int upTime READ getUptime)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
   public:
     // {{{ Model property helper
+
+    int getUptime() const noexcept
+    {
+        auto const now = std::chrono::steady_clock::now();
+        auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
+        return diff.count();
+    }
+
+    int getFontSize() const noexcept { return static_cast<int>(_profile.fonts.size.pt); }
     float getOpacity() const noexcept
     {
         return static_cast<float>(_profile.backgroundOpacity) / std::numeric_limits<uint8_t>::max();
@@ -140,6 +152,8 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     void setTitle(QString const& value) { terminal().setWindowTitle(value.toStdString()); }
 
     int pageLineCount() const noexcept { return unbox(_terminal.pageSize().lines); }
+
+    int pageColumnsCount() const noexcept { return unbox(_terminal.pageSize().columns); }
 
     int historyLineCount() const noexcept { return unbox(_terminal.currentScreen().historyLineCount()); }
 
@@ -317,6 +331,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     void sessionClosed(TerminalSession&);
     void profileNameChanged(QString newValue);
     void lineCountChanged(int newValue);
+    void columnsCountChanged(int newValue);
     void historyLineCountChanged(int newValue);
     void scrollOffsetChanged(int newValue);
     void titleChanged(QString const& value);
@@ -333,6 +348,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     void requestPermissionForBufferCapture();
     void requestPermissionForShowHostWritableStatusLine();
     void showNotification(QString const& title, QString const& content);
+    void fontSizeChanged();
 
   public slots:
     void onConfigReload();

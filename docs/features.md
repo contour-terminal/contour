@@ -25,3 +25,4 @@
 :material-check-bold:{.check-mark}  Builtin [Fira Code inspired progress bar](https://github.com/contour-terminal/contour/issues/521) support. <br/>
 :material-check-bold:{.check-mark}  Read-only mode, protecting against accidental user-input to the running application, such as <kbd>Ctrl</kbd>+<kbd>C</kbd>. <br/>
 :material-check-bold:{.check-mark}  [VT320 Host-programmable and Indicator statusline support](demo/statusline.md) <br/>
+:material-check-bold:{.check-mark}  [Size indicator on resize](demo/size_indicator.md) <br/>

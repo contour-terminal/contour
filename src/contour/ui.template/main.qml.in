@@ -39,11 +39,13 @@ ApplicationWindow
     onWidthChanged : function() {
         vtui.width = width
         vtui.session.requestWindowResize(width, height)
+        vtui.updateSizeWidget()
     }
 
     onHeightChanged: function() {
         vtui.height = height
         vtui.session.requestWindowResize(width, height)
+        vtui.updateSizeWidget()
     }
 
     function applyOpacity() {
