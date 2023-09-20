@@ -434,6 +434,8 @@ void applyResize(terminal::ImageSize newPixelSize,
     auto const viewSize = cellSize * newPageSize;
     displayLog()("Applying resize: {} (new pixel size) {} (view size)", newPixelSize, viewSize);
 
+    auto const l = scoped_lock { terminal };
+
     if (newPageSize == terminal.pageSize())
         return;
 

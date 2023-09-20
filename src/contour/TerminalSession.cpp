@@ -191,6 +191,7 @@ void TerminalSession::attachDisplay(display::TerminalWidget& newDisplay)
     // auto const pixels =
     //     ImageSize { _display->cellSize().width * boxed_cast<Width>(_terminal.pageSize().columns),
     //                 _display->cellSize().height * boxed_cast<Height>(_terminal.pageSize().lines) };
+    auto const l = scoped_lock { _terminal };
     _terminal.resizeScreen(_terminal.pageSize(), pixels);
     _terminal.setRefreshRate(_display->refreshRate());
 }
@@ -565,7 +566,7 @@ void TerminalSession::requestWindowResize(LineCount lines, ColumnCount columns)
     if (!_display)
         return;
 
-    sessionLog()("Application request to resize window: {}x{} px", columns, lines);
+    sessionLog()("Application request to resize window: {}x{}", columns, lines);
     _display->post([this, lines, columns]() { _display->resizeWindow(lines, columns); });
 }
 

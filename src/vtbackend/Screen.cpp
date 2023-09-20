@@ -3545,8 +3545,14 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case DECSCPP:
             if (auto const columnCount = seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
             {
-                // EXTENSION: only 80 and 132 are specced, but we allow any.
-                _terminal.resizeColumns(ColumnCount(columnCount), false);
+                // If the cursor is beyond the width of the new page,
+                // then the cursor moves to the right column of the new page.
+                if (*cursor().position.column >= columnCount)
+                    cursor().position.column = ColumnOffset::cast_from(columnCount) - 1;
+
+                _terminal.requestWindowResize(
+                    PageSize { _terminal.totalPageSize().lines,
+                               ColumnCount::cast_from(columnCount ? columnCount : 80) });
                 return ApplyResult::Ok;
             }
             else

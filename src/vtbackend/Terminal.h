@@ -241,10 +241,6 @@ class Terminal
     /// Important! In case a status line is currently visible, the status line count is being
     /// accumulated into the screen size, too.
     void resizeScreen(PageSize totalPageSize, std::optional<ImageSize> pixels = std::nullopt);
-    void resizeScreenInternal(PageSize totalPageSize, std::optional<ImageSize> pixels);
-
-    /// Implements semantics for  DECCOLM / DECSCPP.
-    void resizeColumns(ColumnCount newColumnCount, bool clear);
 
     void clearScreen();
 

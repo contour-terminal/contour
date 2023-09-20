@@ -914,7 +914,7 @@ void TerminalWidget::updateSizeProperties()
 
     // implicit width/height
     auto const dpr = contentScale();
-    auto const implicitViewSize = _renderer->cellSize() * _session->terminal().pageSize() * (1.0 / dpr);
+    auto const implicitViewSize = _renderer->cellSize() * _session->terminal().totalPageSize() * (1.0 / dpr);
     setImplicitWidth(unbox<qreal>(implicitViewSize.width));
     setImplicitHeight(unbox<qreal>(implicitViewSize.height));
 
@@ -924,7 +924,7 @@ void TerminalWidget::updateSizeProperties()
     auto constexpr MinimumGridSize = PageSize { LineCount(5), ColumnCount(10) };
     auto const minSize =
         ImageSize { Width::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.columns),
-                    Height::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.columns) };
+                    Height::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.lines) };
     auto const scaledMinSize = minSize / dpr;
 
     window()->setMinimumSize(QSize(scaledMinSize.width.as<int>(), scaledMinSize.height.as<int>()));
@@ -1114,6 +1114,7 @@ void TerminalWidget::resizeWindow(terminal::Width newWidth, terminal::Height new
                                                          * unbox<int>(gridMetrics().cellSize.width)),
                               terminal::Height::cast_from(unbox(requestedPageSize.lines)
                                                           * unbox<int>(gridMetrics().cellSize.height)) };
+    auto const l = scoped_lock { terminal() };
     terminal().resizeScreen(requestedPageSize, pixels);
 }
 
@@ -1125,20 +1126,18 @@ void TerminalWidget::resizeWindow(terminal::LineCount newLineCount, terminal::Co
         return;
     }
 
-    auto requestedPageSize = terminal().pageSize();
+    auto requestedPageSize = terminal().totalPageSize();
     if (*newColumnCount)
         requestedPageSize.columns = newColumnCount;
     if (*newLineCount)
         requestedPageSize.lines = newLineCount;
 
-    // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
-    const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
-    _renderer->setPageSize(requestedPageSize);
     auto const pixels = terminal::ImageSize {
         terminal::Width(unbox<unsigned>(requestedPageSize.columns) * *gridMetrics().cellSize.width),
         terminal::Height(unbox<unsigned>(requestedPageSize.lines) * *gridMetrics().cellSize.height)
     };
-    terminal().resizeScreen(requestedPageSize, pixels);
+
+    window()->resize(QSize(pixels.width.as<int>(), pixels.height.as<int>()));
 }
 
 void TerminalWidget::setFonts(terminal::rasterizer::FontDescriptions fontDescriptions)
@@ -1189,6 +1188,7 @@ bool TerminalWidget::setPageSize(PageSize newPageSize)
         ImageSize { Width(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.columns)),
                     Height(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.columns)) };
     _renderer->setPageSize(newPageSize);
+    auto const l = scoped_lock { terminal() };
     terminal().resizeScreen(newPageSize, viewSize);
     return true;
 }
