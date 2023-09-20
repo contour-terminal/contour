@@ -3234,34 +3234,26 @@ void Screen<Cell>::executeControlCode(char controlCode)
     {
         case 0x00: // NUL
             break;
-        case 0x07: // BEL
-            _terminal.bell();
-            break;
-        case 0x08: // BS
-            backspace();
-            break;
-        case 0x09: // TAB
-            moveCursorToNextTab();
-            break;
-        case 0x0A: // LF
-            linefeed();
-            break;
-        case 0x0B: // VT
+        case BEL.finalSymbol: _terminal.bell(); break;
+        case BS.finalSymbol: backspace(); break;
+        case TAB.finalSymbol: moveCursorToNextTab(); break;
+        case LF.finalSymbol: linefeed(); break;
+        case VT.finalSymbol:
             // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
             [[fallthrough]];
-        case 0x0C: // FF
+        case FF.finalSymbol:
             // Even though FF means Form Feed, it seems that xterm is doing an IND instead.
             index();
             break;
-        case LS1.finalSymbol: // LS1 (SO)
+        case LS1.finalSymbol: // (SO)
             // Invokes G1 character set into GL. G1 is designated by a select-character-set (SCS) sequence.
             _cursor.charsets.lockingShift(CharsetTable::G1);
             break;
-        case LS0.finalSymbol: // LSO (SI)
+        case LS0.finalSymbol: // (SI)
             // Invoke G0 character set into GL. G0 is designated by a select-character-set sequence (SCS).
             _cursor.charsets.lockingShift(CharsetTable::G0);
             break;
-        case 0x0D: moveCursorToBeginOfLine(); break;
+        case CR.finalSymbol: moveCursorToBeginOfLine(); break;
         case 0x37: saveCursor(); break;
         case 0x38: restoreCursor(); break;
         default:
