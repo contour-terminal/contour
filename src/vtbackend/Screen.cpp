@@ -1774,9 +1774,9 @@ void Screen<Cell>::screenAlignmentPattern()
 {
     // sets the margins to the extremes of the page
     margin().vertical.from = LineOffset(0);
-    margin().vertical.to = boxed_cast<LineOffset>(_settings.pageSize.lines) - LineOffset(1);
+    margin().vertical.to = boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1);
     margin().horizontal.from = ColumnOffset(0);
-    margin().horizontal.to = boxed_cast<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1);
+    margin().horizontal.to = boxed_cast<ColumnOffset>(pageSize().columns) - ColumnOffset(1);
 
     // and moves the cursor to the home position
     moveCursorTo({}, {});
