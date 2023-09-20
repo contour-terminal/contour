@@ -2234,7 +2234,7 @@ void Screen<Cell>::inspect(std::string const& message, std::ostream& os) const
 {
     auto const hline = [&]() {
         for_each(crispy::times(*_settings.pageSize.columns), [&](auto) { os << '='; });
-        os << endl;
+        os << '\n';
     };
 
     auto const gridInfoLine = [&](Grid<Cell> const& grid) {
@@ -2250,7 +2250,7 @@ void Screen<Cell>::inspect(std::string const& message, std::ostream& os) const
     if (!message.empty())
     {
         hline();
-        os << "\033[1;37;41m" << message << "\033[m" << endl;
+        os << "\033[1;37;41m" << message << "\033[m" << '\n';
         hline();
     }
 
