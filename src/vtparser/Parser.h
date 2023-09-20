@@ -522,9 +522,14 @@ class Parser
     using ParseError = std::function<void(std::string const&)>;
     using iterator = uint8_t const*;
 
-    /// Parses the input string in UTF-8 encoding and emits VT events while processing.
-    /// With respect to text, only up to @c EventListener::maxBulkTextSequenceWidth() UTF-32 codepoints will
-    /// be processed.
+    /**
+     * Parses the input string in UTF-8 encoding and emits VT events while processing.
+     *
+     * @param data UTF-8 encoded string to be parsed.
+     *
+     * With respect to text, only up to @c EventListener::maxBulkTextSequenceWidth()
+     * Unicode grapheme clusters will be processed.
+     */
     void parseFragment(gsl::span<char const> data);
 
     [[nodiscard]] State state() const noexcept { return _state; }
