@@ -1097,12 +1097,6 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
-    auto const _ = std::lock_guard { *this };
-    resizeScreenInternal(totalPageSize, pixels);
-}
-
-void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageSize> pixels)
-{
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
     auto const mainDisplayPageSize = totalPageSize - statusLineHeight();
@@ -1136,31 +1130,6 @@ void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageS
     _state.viCommands.cursorPosition = clampToScreen(_state.viCommands.cursorPosition);
 
     verifyState();
-}
-
-void Terminal::resizeColumns(ColumnCount newColumnCount, bool clear)
-{
-    // DECCOLM / DECSCPP
-    if (clear)
-    {
-        // Sets the left, right, top and bottom scrolling margins to their default positions.
-        setTopBottomMargin({}, unbox<LineOffset>(_settings.pageSize.lines) - LineOffset(1));       // DECSTBM
-        setLeftRightMargin({}, unbox<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1)); // DECRLM
-
-        // Erases all data in page memory
-        clearScreen();
-    }
-
-    // resets vertical split screen mode (DECLRMM) to unavailable
-    setMode(DECMode::LeftRightMargin, false); // DECSLRM
-
-    // Pre-resize in case the event callback right after is not actually resizing the window
-    // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
-    auto const newSize = PageSize { _settings.pageSize.lines, newColumnCount };
-    auto const pixels = cellPixelSize() * newSize;
-    resizeScreen(newSize, pixels);
-
-    requestWindowResize(newSize);
 }
 
 void Terminal::verifyState()
@@ -1531,20 +1500,36 @@ void Terminal::setMode(DECMode mode, bool enable)
             }
             break;
         case DECMode::Origin: _currentScreen.get().cursor().originMode = enable; break;
-        case DECMode::Columns132:
+        case DECMode::Columns132: {
             if (!isModeEnabled(DECMode::AllowColumns80to132))
-                break;
-            if (enable != isModeEnabled(DECMode::Columns132))
             {
-                auto const clear = enable != isModeEnabled(mode);
-
-                // sets the number of columns on the page to 80 or 132 and selects the
-                // corresponding 80- or 132-column font
-                auto const columns = ColumnCount(enable ? 132 : 80);
-
-                resizeColumns(columns, clear);
+                terminalLog()("Ignoring DECCOLM because DECCOLM is not allowed by mode setting.");
+                break;
             }
-            break;
+
+            // sets the number of columns on the page to 80 or 132 and selects the
+            // corresponding 80- or 132-column font
+            auto const columns = ColumnCount(enable ? 132 : 80);
+
+            terminalLog()("DECCOLM: Setting columns to {}", columns);
+
+            // Sets the left, right, top and bottom scrolling margins to their default positions.
+            setTopBottomMargin(std::nullopt, std::nullopt); // DECSTBM
+            setLeftRightMargin(std::nullopt, std::nullopt); // DECRLM
+
+            // resets vertical split screen mode (DECLRMM) to unavailable
+            setMode(DECMode::LeftRightMargin, false); // DECSLRM
+
+            // DECCOLM clears data from the status line if the status line is set to host-writable.
+            if (_state.statusDisplayType == StatusDisplayType::HostWritable)
+                _hostWritableStatusLineScreen.clearScreen();
+
+            // Erases all data in page memory
+            clearScreen();
+
+            requestWindowResize(PageSize { totalPageSize().lines, columns });
+        }
+        break;
         case DECMode::BatchedRendering:
             if (_state.modes.enabled(DECMode::BatchedRendering) != enable)
                 synchronizedOutput(enable);
@@ -1975,7 +1960,7 @@ void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
     _state.statusDisplayType = statusDisplayType;
 
     if (statusLineVisibleBefore != statusLineVisibleAfter)
-        resizeScreenInternal(_settings.pageSize, nullopt);
+        resizeScreen(_settings.pageSize, nullopt);
 }
 
 void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
