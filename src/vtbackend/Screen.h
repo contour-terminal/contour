@@ -387,6 +387,12 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return { clampedLine(coord.line), clampedColumn(coord.column) };
     }
 
+    [[nodiscard]] CellLocation clampToMargin(CellLocation pos) const noexcept
+    {
+        return { std::clamp(pos.line, margin().vertical.from, margin().vertical.to),
+                 std::clamp(pos.column, margin().horizontal.from, margin().horizontal.to) };
+    }
+
     // Tests if given coordinate is within the visible screen area.
     [[nodiscard]] bool contains(CellLocation coord) const noexcept override
     {

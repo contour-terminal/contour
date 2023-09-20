@@ -52,6 +52,11 @@ struct Margin
             return from == rhs.from && to == rhs.to;
         }
         [[nodiscard]] constexpr bool operator!=(Horizontal rhs) const noexcept { return !(*this == rhs); }
+
+        [[nodiscard]] constexpr ColumnOffset clamp(ColumnOffset value) const noexcept
+        {
+            return std::clamp(value, from, to);
+        }
     };
 
     struct Vertical
@@ -75,6 +80,11 @@ struct Margin
         [[nodiscard]] constexpr bool operator!=(Vertical const& rhs) const noexcept
         {
             return !(*this == rhs);
+        }
+
+        [[nodiscard]] constexpr LineOffset clamp(LineOffset value) const noexcept
+        {
+            return std::clamp(value, from, to);
         }
     };
 
