@@ -114,7 +114,9 @@
           <li>Fixes VT sequence DECFRA (#1189).</li>
           <li>Fixes VT sequence DECSCPP and DECCOLM (#1205).</li>
           <li>Fixes VT sequence DECALN to properly reset margins when statusline is shown</li>
+          <li>Fixes VT sequence SM ?1003 (Any Event mouse tracking) not reporting mouse move events.</li>
           <li>Fixes VT sequences CUU/CUD/CUF/CUB to better respect margins (#1201)</li>
+          <li>Adds percentage value to Indicator Statusline to indicate scroll offset in scrollback buffer.</li>
           <li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
           <li>Clear search term when switch to insert vi mode (#1135)</li>
           <li>Delete dpi_scale entry in configuration (#1137)</li>

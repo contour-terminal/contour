@@ -595,7 +595,11 @@ void Terminal::updateIndicatorStatusLine()
     if (isPrimaryScreen())
     {
         if (viewport().scrollOffset().value)
-            rightString += fmt::format("{}/{}", viewport().scrollOffset(), _primaryScreen.historyLineCount());
+            rightString += fmt::format(
+                "{}/{} {:3}%",
+                viewport().scrollOffset(),
+                _primaryScreen.historyLineCount(),
+                int((double(viewport().scrollOffset()) / double(_primaryScreen.historyLineCount())) * 100));
         else
             rightString += fmt::format("{}", _primaryScreen.historyLineCount());
     }
@@ -822,13 +826,10 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
         updateHoveringHyperlinkState();
     }
 
-    if (!_leftMouseButtonPressed)
-        return;
-
     auto const shouldExtendSelection = shouldExtendSelectionByMouse(newPosition, pixelPosition);
 
     auto relativePos = _viewport.translateScreenToGridCoordinate(newPosition);
-    if (shouldExtendSelection)
+    if (shouldExtendSelection && _leftMouseButtonPressed)
     {
         _state.viCommands.cursorPosition = relativePos;
         _viewport.makeVisible(_state.viCommands.cursorPosition.line);
@@ -844,18 +845,22 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
             return;
     }
 
-    if (!selectionAvailable())
-        setSelector(
-            std::make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
-    else if (selector()->state() != Selection::State::Complete && shouldExtendSelection)
+    if (_leftMouseButtonPressed)
     {
-        if (currentScreen().isCellEmpty(relativePos) && !currentScreen().compareCellTextAt(relativePos, 0x20))
-            relativePos.column = ColumnOffset { 0 } + *(_settings.pageSize.columns - 1);
-        _state.viCommands.cursorPosition = relativePos;
-        if (_state.inputHandler.mode() != ViMode::Insert)
-            _state.inputHandler.setMode(selector()->viMode());
-        if (selector()->extend(relativePos))
-            breakLoopAndRefreshRenderBuffer();
+        if (!selectionAvailable())
+            setSelector(
+                std::make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
+        else if (selector()->state() != Selection::State::Complete && shouldExtendSelection)
+        {
+            if (currentScreen().isCellEmpty(relativePos)
+                && !currentScreen().compareCellTextAt(relativePos, 0x20))
+                relativePos.column = ColumnOffset { 0 } + *(_settings.pageSize.columns - 1);
+            _state.viCommands.cursorPosition = relativePos;
+            if (_state.inputHandler.mode() != ViMode::Insert)
+                _state.inputHandler.setMode(selector()->viMode());
+            if (selector()->extend(relativePos))
+                breakLoopAndRefreshRenderBuffer();
+        }
     }
 }
 
