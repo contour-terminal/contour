@@ -1758,7 +1758,7 @@ TEST_CASE("ScrollDown", "[screen]")
     }
 }
 
-TEST_CASE("MoveCursorUp", "[screen]")
+TEST_CASE("Sequence.CUU", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
@@ -1767,48 +1767,54 @@ TEST_CASE("MoveCursorUp", "[screen]")
     screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 
-    SECTION("no-op")
+    SECTION("default")
     {
-        screen.moveCursorUp(LineCount(0));
-        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
+        mock.writeToScreen(CUU());
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
+    }
+
+    SECTION("0")
+    {
+        mock.writeToScreen(CUU());
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
     }
 
     SECTION("in-range")
     {
-        screen.moveCursorUp(LineCount(1));
+        mock.writeToScreen(CUU(1));
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
     }
 
     SECTION("overflow")
     {
-        screen.moveCursorUp(LineCount(5));
+        mock.writeToScreen(CUU(5));
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
     }
 
     SECTION("with margins")
     {
-        mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
-        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
+        mock.writeToScreen(DECSTBM(2, 4));
+        mock.writeToScreen(CUP(3, 2));
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 
         SECTION("in-range")
         {
-            screen.moveCursorUp(LineCount(1));
+            mock.writeToScreen(CUU(1));
             REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
         }
 
         SECTION("overflow")
         {
-            screen.moveCursorUp(LineCount(5));
+            mock.writeToScreen(CUU(5));
             REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
         }
     }
 
     SECTION("cursor already above margins")
     {
-        mock.terminal.setTopBottomMargin(LineOffset { 2 }, LineOffset { 3 });
-        screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
-        screen.moveCursorUp(LineCount(1));
+        mock.writeToScreen(DECSTBM(3, 4));
+        mock.writeToScreen(CUP(2, 3));
+        mock.writeToScreen(CUU(1));
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
     }
 }
