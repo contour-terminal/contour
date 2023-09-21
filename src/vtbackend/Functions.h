@@ -48,6 +48,35 @@ struct FunctionDefinition // TODO: rename Function
     std::string_view mnemonic;
     std::string_view comment;
 
+    template <typename... Args>
+    std::string operator()(Args&&... parameters) const
+    {
+        assert(static_cast<size_t>(minimumParameters) <= sizeof...(Args));
+        assert(sizeof...(Args) <= static_cast<size_t>(maximumParameters));
+        std::string result;
+        result.reserve(8);
+        switch (category)
+        {
+            case FunctionCategory::C0: break;
+            case FunctionCategory::ESC: result += "\033"; break;
+            case FunctionCategory::CSI: result += "\033["; break;
+            case FunctionCategory::OSC: result += "\033]"; break;
+            case FunctionCategory::DCS: result += "\033P"; break;
+        }
+        if (leader)
+            result += leader;
+        if constexpr (sizeof...(Args) > 0)
+        {
+            result.reserve(sizeof...(Args) * 4);
+            ((result += fmt::format("{};", std::forward<Args>(parameters))), ...);
+            result.pop_back(); // remove trailing ';'
+        }
+        if (intermediate)
+            result += intermediate;
+        result += finalSymbol;
+        return result;
+    }
+
     using id_type = uint32_t;
 
     [[nodiscard]] constexpr id_type id() const noexcept
