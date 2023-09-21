@@ -49,6 +49,7 @@ class MockTerm: public Terminal::Events
 
     void writeToScreen(std::string_view text)
     {
+        ptyOutLog()("writeToScreen: {}", crispy::escape(text));
         mockPty().appendStdOutBuffer(text);
         while (mockPty().isStdoutDataAvailable())
             terminal.processInputOnce();

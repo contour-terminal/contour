@@ -48,6 +48,35 @@ struct FunctionDefinition // TODO: rename Function
     std::string_view mnemonic;
     std::string_view comment;
 
+    template <typename... Args>
+    std::string operator()(Args&&... parameters) const
+    {
+        assert(static_cast<size_t>(minimumParameters) <= sizeof...(Args));
+        assert(sizeof...(Args) <= static_cast<size_t>(maximumParameters));
+        std::string result;
+        result.reserve(8);
+        switch (category)
+        {
+            case FunctionCategory::C0: break;
+            case FunctionCategory::ESC: result += "\033"; break;
+            case FunctionCategory::CSI: result += "\033["; break;
+            case FunctionCategory::OSC: result += "\033]"; break;
+            case FunctionCategory::DCS: result += "\033P"; break;
+        }
+        if (leader)
+            result += leader;
+        if constexpr (sizeof...(Args) > 0)
+        {
+            result.reserve(sizeof...(Args) * 4);
+            ((result += fmt::format("{};", std::forward<Args>(parameters))), ...);
+            result.pop_back(); // remove trailing ';'
+        }
+        if (intermediate)
+            result += intermediate;
+        result += finalSymbol;
+        return result;
+    }
+
     using id_type = uint32_t;
 
     [[nodiscard]] constexpr id_type id() const noexcept
@@ -186,16 +215,16 @@ namespace detail // {{{
                        std::string_view mnemonic,
                        std::string_view description) noexcept
     {
-        return FunctionDefinition { FunctionCategory::ESC,
-                                    0,
-                                    intermediate.value_or(0),
-                                    finalCharacter,
-                                    0,
-                                    0,
-                                    vt,
-                                    VTExtension::None,
-                                    mnemonic,
-                                    description };
+        return FunctionDefinition { .category = FunctionCategory::ESC,
+                                    .leader = 0,
+                                    .intermediate = intermediate.value_or(0),
+                                    .finalSymbol = finalCharacter,
+                                    .minimumParameters = 0,
+                                    .maximumParameters = 0,
+                                    .conformanceLevel = vt,
+                                    .extension = VTExtension::None,
+                                    .mnemonic = mnemonic,
+                                    .comment = description };
     }
 
     constexpr auto CSI(std::optional<char> leader,
@@ -208,16 +237,16 @@ namespace detail // {{{
                        std::string_view description) noexcept
     {
         // TODO: static_assert on leader/intermediate range-or-null
-        return FunctionDefinition { FunctionCategory::CSI,
-                                    leader.value_or(0),
-                                    intermediate.value_or(0),
-                                    finalCharacter,
-                                    argc0,
-                                    argc1,
-                                    vt,
-                                    VTExtension::None,
-                                    mnemonic,
-                                    description };
+        return FunctionDefinition { .category = FunctionCategory::CSI,
+                                    .leader = leader.value_or(0),
+                                    .intermediate = intermediate.value_or(0),
+                                    .finalSymbol = finalCharacter,
+                                    .minimumParameters = argc0,
+                                    .maximumParameters = argc1,
+                                    .conformanceLevel = vt,
+                                    .extension = VTExtension::None,
+                                    .mnemonic = mnemonic,
+                                    .comment = description };
     }
 
     constexpr auto CSI(std::optional<char> leader,
@@ -230,16 +259,16 @@ namespace detail // {{{
                        std::string_view description) noexcept
     {
         // TODO: static_assert on leader/intermediate range-or-null
-        return FunctionDefinition { FunctionCategory::CSI,
-                                    leader.value_or(0),
-                                    intermediate.value_or(0),
-                                    finalCharacter,
-                                    argc0,
-                                    argc1,
-                                    VTType::VT100,
-                                    ext,
-                                    mnemonic,
-                                    description };
+        return FunctionDefinition { .category = FunctionCategory::CSI,
+                                    .leader = leader.value_or(0),
+                                    .intermediate = intermediate.value_or(0),
+                                    .finalSymbol = finalCharacter,
+                                    .minimumParameters = argc0,
+                                    .maximumParameters = argc1,
+                                    .conformanceLevel = VTType::VT100,
+                                    .extension = ext,
+                                    .mnemonic = mnemonic,
+                                    .comment = description };
     }
 
     constexpr auto DCS(std::optional<char> leader,
@@ -252,16 +281,16 @@ namespace detail // {{{
                        std::string_view description) noexcept
     {
         // TODO: static_assert on leader/intermediate range-or-null
-        return FunctionDefinition { FunctionCategory::DCS,
-                                    leader.value_or(0),
-                                    intermediate.value_or(0),
-                                    finalCharacter,
-                                    argc0,
-                                    argc1,
-                                    vt,
-                                    VTExtension::None,
-                                    mnemonic,
-                                    description };
+        return FunctionDefinition { .category = FunctionCategory::DCS,
+                                    .leader = leader.value_or(0),
+                                    .intermediate = intermediate.value_or(0),
+                                    .finalSymbol = finalCharacter,
+                                    .minimumParameters = argc0,
+                                    .maximumParameters = argc1,
+                                    .conformanceLevel = vt,
+                                    .extension = VTExtension::None,
+                                    .mnemonic = mnemonic,
+                                    .comment = description };
     }
 
     constexpr auto DCS(std::optional<char> leader,
@@ -274,16 +303,16 @@ namespace detail // {{{
                        std::string_view description) noexcept
     {
         // TODO: static_assert on leader/intermediate range-or-null
-        return FunctionDefinition { FunctionCategory::DCS,
-                                    leader.value_or(0),
-                                    intermediate.value_or(0),
-                                    finalCharacter,
-                                    argc0,
-                                    argc1,
-                                    VTType::VT100,
-                                    ext,
-                                    mnemonic,
-                                    description };
+        return FunctionDefinition { .category = FunctionCategory::DCS,
+                                    .leader = leader.value_or(0),
+                                    .intermediate = intermediate.value_or(0),
+                                    .finalSymbol = finalCharacter,
+                                    .minimumParameters = argc0,
+                                    .maximumParameters = argc1,
+                                    .conformanceLevel = VTType::VT100,
+                                    .extension = ext,
+                                    .mnemonic = mnemonic,
+                                    .comment = description };
     }
 } // namespace detail
 

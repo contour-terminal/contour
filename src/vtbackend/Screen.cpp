@@ -1401,12 +1401,9 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorUp(LineCount n)
 {
     _cursor.wrapPending = false;
-    auto const sanitizedN = min(n.as<LineOffset>(),
-                                logicalCursorPosition().line > margin().vertical.from
-                                    ? logicalCursorPosition().line - margin().vertical.from
-                                    : logicalCursorPosition().line);
-
-    _cursor.position.line -= sanitizedN;
+    _cursor.position.line = margin().vertical.contains(_cursor.position.line)
+                                ? margin().vertical.clamp(_cursor.position.line - n.as<LineOffset>())
+                                : clampedLine(_cursor.position.line - n.as<LineOffset>());
     updateCursorIterator();
 }
 
@@ -1415,14 +1412,9 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorDown(LineCount n)
 {
     _cursor.wrapPending = false;
-    auto const currentLineNumber = logicalCursorPosition().line;
-    auto const sanitizedN =
-        min(n.as<LineOffset>(),
-            currentLineNumber <= margin().vertical.to
-                ? margin().vertical.to - currentLineNumber
-                : (boxed_cast<LineOffset>(_settings.pageSize.lines) - 1) - currentLineNumber);
-
-    _cursor.position.line += sanitizedN;
+    _cursor.position.line = margin().vertical.contains(_cursor.position.line)
+                                ? margin().vertical.clamp(_cursor.position.line + n.as<LineOffset>())
+                                : clampedLine(_cursor.position.line + n.as<LineOffset>());
     updateCursorIterator();
 }
 
@@ -1430,8 +1422,11 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorForward(ColumnCount n)
 {
+    if (margin().horizontal.contains(_cursor.position.column))
+        _cursor.position.column = margin().horizontal.clamp(_cursor.position.column + n.as<ColumnOffset>());
+    else
+        _cursor.position.column = clampedColumn(_cursor.position.column + boxed_cast<ColumnOffset>(n));
     _cursor.wrapPending = false;
-    _cursor.position.column = min(_cursor.position.column + n.as<ColumnOffset>(), margin().horizontal.to);
 }
 
 template <typename Cell>
@@ -1439,11 +1434,11 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorBackward(ColumnCount n)
 {
     // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
+    if (margin().horizontal.contains(_cursor.position.column))
+        _cursor.position.column = margin().horizontal.clamp(_cursor.position.column - n.as<ColumnOffset>());
+    else
+        _cursor.position.column = clampedColumn(_cursor.position.column + boxed_cast<ColumnOffset>(n));
     _cursor.wrapPending = false;
-
-    // TODO: skip cells that in counting when iterating backwards over a wide cell (such as emoji)
-    auto const sanitizedN = min(n.as<ColumnOffset>(), _cursor.position.column);
-    setCurrentColumn(_cursor.position.column - sanitizedN);
 }
 
 template <typename Cell>
@@ -1774,9 +1769,9 @@ void Screen<Cell>::screenAlignmentPattern()
 {
     // sets the margins to the extremes of the page
     margin().vertical.from = LineOffset(0);
-    margin().vertical.to = boxed_cast<LineOffset>(_settings.pageSize.lines) - LineOffset(1);
+    margin().vertical.to = boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1);
     margin().horizontal.from = ColumnOffset(0);
-    margin().horizontal.to = boxed_cast<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1);
+    margin().horizontal.to = boxed_cast<ColumnOffset>(pageSize().columns) - ColumnOffset(1);
 
     // and moves the cursor to the home position
     moveCursorTo({}, {});
@@ -2234,7 +2229,7 @@ void Screen<Cell>::inspect(std::string const& message, std::ostream& os) const
 {
     auto const hline = [&]() {
         for_each(crispy::times(*_settings.pageSize.columns), [&](auto) { os << '='; });
-        os << endl;
+        os << '\n';
     };
 
     auto const gridInfoLine = [&](Grid<Cell> const& grid) {
@@ -2250,7 +2245,7 @@ void Screen<Cell>::inspect(std::string const& message, std::ostream& os) const
     if (!message.empty())
     {
         hline();
-        os << "\033[1;37;41m" << message << "\033[m" << endl;
+        os << "\033[1;37;41m" << message << "\033[m" << '\n';
         hline();
     }
 
@@ -3234,34 +3229,26 @@ void Screen<Cell>::executeControlCode(char controlCode)
     {
         case 0x00: // NUL
             break;
-        case 0x07: // BEL
-            _terminal.bell();
-            break;
-        case 0x08: // BS
-            backspace();
-            break;
-        case 0x09: // TAB
-            moveCursorToNextTab();
-            break;
-        case 0x0A: // LF
-            linefeed();
-            break;
-        case 0x0B: // VT
+        case BEL.finalSymbol: _terminal.bell(); break;
+        case BS.finalSymbol: backspace(); break;
+        case TAB.finalSymbol: moveCursorToNextTab(); break;
+        case LF.finalSymbol: linefeed(); break;
+        case VT.finalSymbol:
             // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
             [[fallthrough]];
-        case 0x0C: // FF
+        case FF.finalSymbol:
             // Even though FF means Form Feed, it seems that xterm is doing an IND instead.
             index();
             break;
-        case LS1.finalSymbol: // LS1 (SO)
+        case LS1.finalSymbol: // (SO)
             // Invokes G1 character set into GL. G1 is designated by a select-character-set (SCS) sequence.
             _cursor.charsets.lockingShift(CharsetTable::G1);
             break;
-        case LS0.finalSymbol: // LSO (SI)
+        case LS0.finalSymbol: // (SI)
             // Invoke G0 character set into GL. G0 is designated by a select-character-set sequence (SCS).
             _cursor.charsets.lockingShift(CharsetTable::G0);
             break;
-        case 0x0D: moveCursorToBeginOfLine(); break;
+        case CR.finalSymbol: moveCursorToBeginOfLine(); break;
         case 0x37: saveCursor(); break;
         case 0x38: restoreCursor(); break;
         default:

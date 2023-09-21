@@ -23,16 +23,9 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <bitset>
-#include <deque>
 #include <functional>
-#include <list>
-#include <map>
 #include <memory>
 #include <optional>
-#include <set>
-#include <sstream>
-#include <stack>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -392,6 +385,12 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] CellLocation clampToScreen(CellLocation coord) const noexcept
     {
         return { clampedLine(coord.line), clampedColumn(coord.column) };
+    }
+
+    [[nodiscard]] CellLocation clampToMargin(CellLocation pos) const noexcept
+    {
+        return { std::clamp(pos.line, margin().vertical.from, margin().vertical.to),
+                 std::clamp(pos.column, margin().horizontal.from, margin().horizontal.to) };
     }
 
     // Tests if given coordinate is within the visible screen area.

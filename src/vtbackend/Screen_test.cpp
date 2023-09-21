@@ -847,47 +847,56 @@ TEST_CASE("DECFI", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
+
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
-    mock.terminal.setMode(DECMode::LeftRightMargin, true);
-    mock.terminal.setLeftRightMargin(ColumnOffset(1), ColumnOffset(3));
-    mock.terminal.setTopBottomMargin(LineOffset(1), LineOffset(3));
     REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(4) });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
-    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen(DECSM(69)); // Enable left right margin mode
+    REQUIRE(mock.terminal.isModeEnabled(DECMode::LeftRightMargin));
+
+    mock.writeToScreen(DECSLRM(2, 4)); // Set left/right margin
+    REQUIRE(mock.terminal.currentScreen().margin().horizontal
+            == Margin::Horizontal { ColumnOffset(1), ColumnOffset(3) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+
+    mock.writeToScreen(DECSTBM(2, 4)); // Set top/bottom margin
+    REQUIRE(mock.terminal.currentScreen().margin().vertical
+            == Margin::Vertical { LineOffset(1), LineOffset(3) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // from 0,0 to 0,1 (from outside margin to left border)
-    mock.writeToScreen("\0339");
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
+    mock.writeToScreen(DECFI());
+    CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,1 to 0,2
-    mock.writeToScreen("\0339");
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
+    mock.writeToScreen(DECFI());
+    CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,2 to 0,3
-    mock.writeToScreen("\0339");
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
+    mock.writeToScreen(DECFI());
+    CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left
-    mock.writeToScreen("\0339");
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
+    mock.writeToScreen(DECFI());
+    CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
     REQUIRE("12345\n689 0\nACD E\nFHI J\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left
-    mock.writeToScreen("\0339");
+    mock.writeToScreen(DECFI());
     REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
     REQUIRE("12345\n69  0\nAD  E\nFI  J\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left (now all empty)
-    mock.writeToScreen("\0339");
+    mock.writeToScreen(DECFI());
     REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
     REQUIRE("12345\n6   0\nA   E\nF   J\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left (looks just like before)
-    mock.writeToScreen("\0339");
+    mock.writeToScreen(DECFI());
     REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
     REQUIRE("12345\n6   0\nA   E\nF   J\nKLMNO\n" == screen.renderMainPageText());
 }
@@ -1749,7 +1758,7 @@ TEST_CASE("ScrollDown", "[screen]")
     }
 }
 
-TEST_CASE("MoveCursorUp", "[screen]")
+TEST_CASE("Sequence.CUU", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
@@ -1758,48 +1767,54 @@ TEST_CASE("MoveCursorUp", "[screen]")
     screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 
-    SECTION("no-op")
+    SECTION("default")
     {
-        screen.moveCursorUp(LineCount(0));
-        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
+        mock.writeToScreen(CUU());
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
+    }
+
+    SECTION("0")
+    {
+        mock.writeToScreen(CUU());
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
     }
 
     SECTION("in-range")
     {
-        screen.moveCursorUp(LineCount(1));
+        mock.writeToScreen(CUU(1));
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
     }
 
     SECTION("overflow")
     {
-        screen.moveCursorUp(LineCount(5));
+        mock.writeToScreen(CUU(5));
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
     }
 
     SECTION("with margins")
     {
-        mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
-        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
+        mock.writeToScreen(DECSTBM(2, 4));
+        mock.writeToScreen(CUP(3, 2));
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 
         SECTION("in-range")
         {
-            screen.moveCursorUp(LineCount(1));
+            mock.writeToScreen(CUU(1));
             REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
         }
 
         SECTION("overflow")
         {
-            screen.moveCursorUp(LineCount(5));
+            mock.writeToScreen(CUU(5));
             REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
         }
     }
 
     SECTION("cursor already above margins")
     {
-        mock.terminal.setTopBottomMargin(LineOffset { 2 }, LineOffset { 3 });
-        screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
-        screen.moveCursorUp(LineCount(1));
+        mock.writeToScreen(DECSTBM(3, 4));
+        mock.writeToScreen(CUP(2, 3));
+        mock.writeToScreen(CUU(1));
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
     }
 }

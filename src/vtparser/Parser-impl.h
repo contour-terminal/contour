@@ -8,7 +8,6 @@
 #include <crispy/utils.h>
 
 #include <array>
-#include <cctype>
 #include <string_view>
 #include <tuple>
 
@@ -373,7 +372,7 @@ template <typename EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
     -> std::tuple<ProcessKind, size_t>
 {
-    const auto* input = begin;
+    auto const* input = begin;
     if (_state != State::Ground)
         return { ProcessKind::FallbackToFSM, 0 };
 
@@ -415,9 +414,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     if (_scanState.utf8.expectedLength == 0)
     {
         if (!text.empty())
-        {
             _eventListener.print(text, cellCount);
-        }
 
         // This optimization is for the `cat`-people.
         // It further optimizes the throughput performance by bypassing
@@ -427,17 +424,9 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
         if (input != end && *input == '\n')
             _eventListener.execute(*input++);
     }
-    else
-    {
-        // fmt::print("Parser.text: incomplete UTF-8 sequence at end: {}/{}\n",
-        //            _scanState.utf8.currentLength,
-        //            _scanState.utf8.expectedLength);
 
-        // for (char const ch: text)
-        //     printUtf8Byte(ch);
-    }
-
-    return { ProcessKind::ContinueBulk, static_cast<size_t>(std::distance(input, next)) };
+    auto const count = static_cast<size_t>(std::distance(input, next));
+    return { ProcessKind::ContinueBulk, count };
 }
 
 template <typename EventListener, bool TraceStateChanges>
