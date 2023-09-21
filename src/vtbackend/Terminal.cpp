@@ -595,7 +595,11 @@ void Terminal::updateIndicatorStatusLine()
     if (isPrimaryScreen())
     {
         if (viewport().scrollOffset().value)
-            rightString += fmt::format("{}/{}", viewport().scrollOffset(), _primaryScreen.historyLineCount());
+            rightString += fmt::format(
+                "{}/{} {:3}%",
+                viewport().scrollOffset(),
+                _primaryScreen.historyLineCount(),
+                int((double(viewport().scrollOffset()) / double(_primaryScreen.historyLineCount())) * 100));
         else
             rightString += fmt::format("{}", _primaryScreen.historyLineCount());
     }
