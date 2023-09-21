@@ -104,10 +104,9 @@
 
     -->
 
-    <release version="0.3.13" urgency="medium" type="development">
+    <release version="0.4.0" urgency="medium" type="development">
       <description>
         <ul>
-          <li>Do not clear search term when entering search editor again.</li>
           <li>Fixes search term rendering highlighting for search terms containing whitespaces (#966).</li>
           <li>Fixes rendering in cases of glyphs with inverted orientation (#1115).</li>
           <li>Fixes VT sequence DECSTBM and DECSLRM defaulting parameters (#1164).</li>
@@ -116,16 +115,17 @@
           <li>Fixes VT sequence DECALN to properly reset margins when statusline is shown</li>
           <li>Fixes VT sequence SM ?1003 (Any Event mouse tracking) not reporting mouse move events.</li>
           <li>Fixes VT sequences CUU/CUD/CUF/CUB to better respect margins (#1201)</li>
-          <li>Adds percentage value to Indicator Statusline to indicate scroll offset in scrollback buffer.</li>
-          <li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
+          <li>Fixes URI re-encoding of local files in `OSC 8` (#1199)</li>
+          <li>Do not clear search term when entering search editor again.</li>
           <li>Clear search term when switch to insert vi mode (#1135)</li>
           <li>Delete dpi_scale entry in configuration (#1137)</li>
           <li>Fixes `show_title_bar` config option (#1153)</li>
+          <li>Adds percentage value to Indicator Statusline to indicate scroll offset in scrollback buffer.</li>
+          <li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
           <li>Adds config option `profile.*.bell` to adjust BEL behavior and fixes (#1162) and (#1163).</li>
           <li>Adds config option `profile.*.frozen_dec_modes` to permanently enable/disable certain DEC modes.</li>
           <li>Adds capital `A` and `I` keys to switch from normal mode back to insert mode, too.</li>
           <li>Adds size indicator window on resize (#1203).</li>
-          <li>Fixes uri re-encoding of local files in `OSC 8` (#1199)</li>
         </ul>
       </description>
     </release>
