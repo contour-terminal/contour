@@ -20,6 +20,9 @@ using namespace terminal;
 TEST_CASE("Functions.SCOSC", "[Functions]")
 {
     SupportedSequences availableSequences;
+    // The problem with SCOSC vs DECSLRM is, that the former is a subset of the latter
+    // when no arguments are given.
+    availableSequences.disableSequence(DECSLRM);
     FunctionDefinition const* f = terminal::selectControl(0, 0, 0, 's', availableSequences.activeSequences());
     REQUIRE(f);
     CHECK(*f == SCOSC);

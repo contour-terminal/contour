@@ -51,6 +51,10 @@ struct Settings
     std::chrono::milliseconds cursorBlinkInterval = std::chrono::milliseconds { 500 };
     RefreshRate refreshRate = { 30.0 };
 
+    // Defines the time to wait before the terminal executes the line feed (LF) command.
+    // This is used to implement the DECSCLM (slow scroll) mode.
+    std::chrono::milliseconds smoothLineScrolling { 100 };
+
     // Size in bytes per PTY Buffer Object.
     //
     // Defaults to 1 MB, that's roughly 10k lines when column count is 100.

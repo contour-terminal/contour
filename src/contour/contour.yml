@@ -224,6 +224,13 @@ profiles:
         frozen_dec_modes:
             2026: false
 
+        # Defines the number of milliseconds to wait before
+        # actually executing the LF (linefeed) control code
+        # in case DEC mode `DECSCLM` is enabled.
+        #
+        # Default: 100
+        slow_scrolling_time: 100
+
         # Determines the initial terminal size in characters.
         terminal_size:
             columns: 80
