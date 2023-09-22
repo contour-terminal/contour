@@ -684,6 +684,11 @@ void TerminalWidget::paint()
 
         terminal().tick(steady_clock::now());
         _renderer->render(terminal(), _renderingPressure);
+        if (_doDumpState)
+        {
+            doDumpStateInternal();
+            _doDumpState = false;
+        }
     }
     catch (exception const& e)
     {
@@ -996,6 +1001,12 @@ void TerminalWidget::inspect()
 
 void TerminalWidget::doDumpState()
 {
+    _doDumpState = true;
+}
+
+void TerminalWidget::doDumpStateInternal()
+{
+
     auto finally = crispy::finally { [this] {
         if (_session->terminal().device().isClosed() && _session->app().dumpStateAtExit().has_value())
             _session->terminate();
@@ -1079,7 +1090,10 @@ void TerminalWidget::doDumpState()
 
     auto screenshotFilePath = targetDir / "screenshot.png";
     displayLog()("Saving screenshot to: {}", screenshotFilePath.generic_string());
-    window()->grabWindow().save(QString::fromStdString(screenshotFilePath.generic_string()));
+    auto [size, image] = _renderTarget->takeScreenshot();
+    QImage(image.data(), size.width.as<int>(), size.height.as<int>(), QImage::Format_RGBA8888_Premultiplied)
+        .mirrored(false, true)
+        .save(QString::fromStdString(screenshotFilePath.string()));
 }
 
 void TerminalWidget::notify(std::string_view /*_title*/, std::string_view /*_body*/)

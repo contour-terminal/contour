@@ -204,6 +204,7 @@ class TerminalWidget: public QQuickItem
   private:
     // helper methods
     //
+    void doDumpStateInternal();
     void createRenderer();
     [[nodiscard]] QMatrix4x4 createModelMatrix() const;
     void configureScreenHooks();
@@ -254,6 +255,7 @@ class TerminalWidget: public QQuickItem
     QTimer _updateTimer;
 
     RenderStateManager _state;
+    bool _doDumpState = false;
 
     QFileSystemWatcher _filesystemWatcher;
     QMediaPlayer _mediaPlayer;
