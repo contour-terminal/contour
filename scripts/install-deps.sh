@@ -283,7 +283,9 @@ install_deps_ubuntu()
             qtdeclarative5-dev
             qtmultimedia5-dev
             qtquickcontrols2-5-dev
+            qml-module-qtmultimedia
             qml-module-qtquick-controls
+            qml-module-qtquick-controls2
             qml-module-qt-labs-platform
         "
     fi

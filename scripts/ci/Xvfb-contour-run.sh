@@ -35,7 +35,6 @@ $CONTOUR_PREFIX \
         debug "$LOG" \
         display ${DISPLAY} \
         early-exit-threshold 0 \
-        dump-state-at-exit "${DUMP_DIR}" \
         ${@}
 
 # ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses
