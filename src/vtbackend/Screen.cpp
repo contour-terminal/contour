@@ -33,6 +33,10 @@
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/word_segmenter.h>
 
+#if defined(_WIN32)
+    #include <Windows.h>
+#endif
+
 using namespace std::string_view_literals;
 
 using crispy::escape;
@@ -81,8 +85,34 @@ auto const inline vtCaptureBufferLog = logstore::category("vt.ext.capturebuffer"
                                                           logstore::category::state::Disabled,
                                                           logstore::category::visibility::Hidden);
 
+#define SAFE_SYS_CALL(x)                \
+    while ((x) == -1 && errno == EINTR) \
+    {                                   \
+    }
+
 namespace // {{{ helper
 {
+    template <typename Rep, typename Period>
+    inline void sleep_for(std::chrono::duration<Rep, Period> const& rtime)
+    {
+#if defined(USE_SLEEP_FOR_FROM_STD_CHRONO)
+        std::this_thread::sleep_for(rtime);
+#else
+        if (rtime.count() <= 0)
+            return;
+    #if defined(_WIN32)
+        auto const ms = std::chrono::duration_cast<std::chrono::milliseconds>(rtime);
+        Sleep(ms.count());
+    #else
+        auto const s = std::chrono::duration_cast<std::chrono::seconds>(rtime);
+        auto const ns = std::chrono::duration_cast<std::chrono::nanoseconds>(rtime - s);
+        struct ::timespec ts = { .tv_sec = static_cast<std::time_t>(s.count()),
+                                 .tv_nsec = static_cast<long>(ns.count()) };
+        SAFE_SYS_CALL(::nanosleep(&ts, &ts));
+    #endif
+#endif
+    }
+
     std::string vtSequenceParameterString(GraphicsAttributes const& sgr)
     {
         std::string output;
@@ -781,6 +811,16 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::linefeed()
 {
+    if (_terminal.isModeEnabled(DECMode::SmoothScroll)
+        && _terminal.settings().smoothLineScrolling.count() != 0)
+    {
+        _terminal.unlock();
+        auto const _ = crispy::finally([&]() { _terminal.lock(); });
+        if (!_terminal.isModeEnabled(DECMode::BatchedRendering))
+            _terminal.screenUpdated();
+        sleep_for(_terminal.settings().smoothLineScrolling);
+    }
+
     // If coming through stdout-fastpipe, the LF acts like CRLF.
     auto const newColumnOffset =
         _state.usingStdoutFastPipe || _terminal.isModeEnabled(AnsiMode::AutomaticNewLine)
@@ -795,6 +835,35 @@ void Screen<Cell>::backspace()
 {
     if (_cursor.position.column.value)
         _cursor.position.column--;
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void Screen<Cell>::setScrollSpeed(int speed)
+{
+    if (speed >= 9)
+    {
+        // Speed value 9 defined by spec to be at maximum speed.
+        _terminal.settings().smoothLineScrolling = {};
+        return;
+    }
+
+    std::array<float, 9> constexpr NumberOfLinesPerSecond = { {
+        1,  // 0
+        2,  // 1
+        9,  // 2 | defined by spec to be 18 lines per second
+        13, // 3
+        18, // 4 | defined by spec to be 18 lines per second
+        22, // 5
+        27, // 6
+        31, // 7
+        36, // 8
+    } };
+
+    auto const index = std::clamp(speed, 0, 8);
+    auto const delay = int(1000.0f / NumberOfLinesPerSecond[index]);
+
+    _terminal.settings().smoothLineScrolling = std::chrono::milliseconds { delay };
 }
 
 template <typename Cell>
@@ -3554,6 +3623,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             moveCursorTo({}, {});
         }
         break;
+        case DECSSCLS: setScrollSpeed(seq.param_or(0, 2)); break;
         case DECSM: {
             ApplyResult r = ApplyResult::Ok;
             crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {

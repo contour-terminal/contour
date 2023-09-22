@@ -176,6 +176,7 @@ struct TerminalProfile
         InputModeConfig normal;
         InputModeConfig visual;
     } inputModes;
+    std::chrono::milliseconds smoothLineScrolling { 100 };
     std::chrono::milliseconds highlightTimeout { 300 };
     bool highlightDoubleClickedWord = true;
     terminal::StatusDisplayType initialStatusDisplayType = terminal::StatusDisplayType::None;

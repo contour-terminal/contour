@@ -415,6 +415,7 @@ constexpr inline auto DECSCPP     = detail::CSI(std::nullopt, 0, 1, '$', '|', VT
 constexpr inline auto DECSNLS     = detail::CSI(std::nullopt, 0, 1, '*', '|', VTType::VT420, "DECSNLS", "Select number of lines per screen.");
 constexpr inline auto DECSCUSR    = detail::CSI(std::nullopt, 0, 1, ' ', 'q', VTType::VT520, "DECSCUSR", "Set Cursor Style");
 constexpr inline auto DECSLRM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 's', VTType::VT420, "DECSLRM", "Set left/right margin");
+constexpr inline auto DECSSCLS    = detail::CSI(std::nullopt, 0, 1, ' ', 'p', VTType::VT510, "DECSSCLS", "Set Scroll Speed");
 constexpr inline auto DECSM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'h', VTType::VT100, "DECSM", "Set DEC-mode");
 constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, "DECSTBM", "Set top/bottom margin");
 constexpr inline auto DECSTR      = detail::CSI(std::nullopt, 0, 0, '!', 'p', VTType::VT100, "DECSTR", "Soft terminal reset");
@@ -570,6 +571,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECSCPP,
         DECSCUSR,
         DECSLRM,
+        DECSSCLS,
         DECSM,
         DECSNLS,
         DECSSDT,

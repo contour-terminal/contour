@@ -214,6 +214,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void reverseIndex(); // RI
 
     void setMark();
+    void setScrollSpeed(int speed);      // DECSSCLS
     void deviceStatusReport();           // DSR
     void reportCursorPosition();         // CPR
     void reportExtendedCursorPosition(); // DECXCPR

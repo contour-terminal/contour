@@ -1778,6 +1778,23 @@ namespace
             }
         }
 
+        if (auto value = profile["slow_scrolling_time"])
+        {
+            usedKeys.emplace(basePath + ".slow_scrolling_time");
+            if (value.IsScalar())
+            {
+                auto time = value.as<unsigned>();
+                if (time < 10 || time > 2000)
+                {
+                    logger("slow_scrolling_time must be between 10 and 2000 milliseconds. Defaulting to 100");
+                    time = 100;
+                }
+                terminalProfile.smoothLineScrolling = chrono::milliseconds(time);
+            }
+            else
+                logger("Invalid value for config entry {}", "slow_scrolling_time");
+        }
+
         if (auto frozenDecModes = profile["frozen_dec_modes"]; frozenDecModes)
         {
             usedKeys.emplace(basePath + ".frozen_dec_modes");
