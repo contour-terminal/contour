@@ -350,7 +350,6 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
 {
     if (tileCreateData.bitmapSize.width <= _textureAtlas->tileSize().width)
         return;
-
     // Shrink the image's width by recreating it.
     // TODO: In the longer term it would be nice to simply touch the pitch value in order to shrink.
     //       But this requires extending the data structure to also provide a pitch value.
