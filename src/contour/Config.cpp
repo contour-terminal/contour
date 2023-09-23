@@ -1366,6 +1366,12 @@ namespace
         tryLoadChildRelative(usedKeys,
                              profile,
                              basePath,
+                             "size_indicator_on_resize",
+                             terminalProfile.sizeIndicatorOnResize,
+                             logger);
+        tryLoadChildRelative(usedKeys,
+                             profile,
+                             basePath,
                              "draw_bold_text_with_bright_colors",
                              terminalProfile.colors.useBrightColors,
                              logger);

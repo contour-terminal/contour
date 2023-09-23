@@ -41,10 +41,7 @@ ContourTerminal
         anchors.centerIn: parent
         border.width: 1
         border.color: "black"
-        property int minWidth: 70
-        property int minHeight: 30
-        width:  vtWidget.width * 0.1 < minWidth ? minWidth : vtWidget.width * 0.1
-        height: vtWidget.height * 0.1 < minHeight ? minHeight : vtWidget.height * 0.1
+        property int margin: 10
         color: "white"
         visible : false
         focus : false
@@ -178,11 +175,13 @@ ContourTerminal
     }
 
     function updateSizeWidget() {
-        if (vtWidget.session.upTime > 1.0)
+        if (vtWidget.session.upTime > 1.0 && vtWidget.session.showResizeIndicator)
         {
             sizeWidget.visible = true
             sizeWidgetTimer.running = true
             sizeWidgetText.text = "Size: " + vtWidget.session.pageColumnsCount.toString() + " x " + vtWidget.session.pageLineCount.toString()
+            sizeWidget.width = sizeWidgetText.contentWidth + sizeWidget.margin
+            sizeWidget.height = sizeWidgetText.contentHeight
         }
     }
 
@@ -199,8 +198,6 @@ ContourTerminal
 
     function updateFontSize() {
         sizeWidgetText.font.pointSize = vtWidget.session.fontSize
-        sizeWidget.minWidth = vtWidget.session.fontSize * 10
-        sizeWidget.minHeight = vtWidget.session.fontSize * 3
     }
 
     onSessionChanged: (s) => {
