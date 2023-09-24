@@ -59,6 +59,14 @@ profiles:
 ```
 
 
+### `size_indicator_on_resize`
+configuration option determines whether or not the size indicator will be shown when terminal will resized.
+``` yaml
+profiles:
+  profile_name:
+    size_indicator_on_resize: true
+```
+
 
 ### `fullscreen`
 configuration option determines whether the terminal's screen should be put into fullscreen mode when the terminal profile is activated. Fullscreen mode expands the terminal window to occupy the entire screen, providing a distraction-free environment for your terminal sessions.

@@ -65,6 +65,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     Q_PROPERTY(int id READ id)
     Q_PROPERTY(int pageLineCount READ pageLineCount NOTIFY lineCountChanged)
     Q_PROPERTY(int pageColumnsCount READ pageColumnsCount NOTIFY columnsCountChanged)
+    Q_PROPERTY(bool showResizeIndicator READ showResizeIndicator)
     Q_PROPERTY(int historyLineCount READ historyLineCount NOTIFY historyLineCountChanged)
     Q_PROPERTY(int scrollOffset READ scrollOffset WRITE setScrollOffset NOTIFY scrollOffsetChanged)
     Q_PROPERTY(QString title READ title WRITE setTitle NOTIFY titleChanged)
@@ -154,6 +155,8 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     int pageLineCount() const noexcept { return unbox(_terminal.pageSize().lines); }
 
     int pageColumnsCount() const noexcept { return unbox(_terminal.pageSize().columns); }
+
+    bool showResizeIndicator() const noexcept { return _config.profile().sizeIndicatorOnResize; }
 
     int historyLineCount() const noexcept { return unbox(_terminal.currentScreen().historyLineCount()); }
 
