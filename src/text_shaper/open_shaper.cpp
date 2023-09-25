@@ -202,22 +202,21 @@ namespace
         return int(ceil(double(maxAdvance) / 64.0));
     }
 
-    int ftBestStrikeIndex(FT_Face face, int fontWidth) noexcept
+    int ftBestStrikeIndex(FT_Face face, double pt, DPI dpi) noexcept
     {
-        int best = 0;
-        int diff = numeric_limits<int>::max();
-        for (int i = 0; i < face->num_fixed_sizes; ++i)
+        auto const targetLength = static_cast<int>(pt * dpi.y / 72.0);
+        int bestIndex = 0;
+        int bestDiff = std::abs(int(face->available_sizes[0].width) - targetLength);
+        for (int i = 1; i < face->num_fixed_sizes; ++i)
         {
-            auto const currentWidth = face->available_sizes[i].width;
-            auto const theDiff =
-                currentWidth > fontWidth ? currentWidth - fontWidth : fontWidth - currentWidth;
-            if (theDiff < diff)
+            auto const diff = std::abs(int(face->available_sizes[i].width) - targetLength);
+            if (diff < bestDiff)
             {
-                diff = theDiff;
-                best = i;
+                bestDiff = diff;
+                bestIndex = i;
             }
         }
-        return best;
+        return bestIndex;
     }
 
     optional<ft_face_ptr> loadFace(font_source const& source, font_size fontSize, DPI dpi, FT_Library ft)
@@ -259,20 +258,24 @@ namespace
 
         if (FT_HAS_COLOR(ftFace))
         {
-            auto const strikeIndex =
-                ftBestStrikeIndex(ftFace, int(fontSize.pt)); // TODO: should be font width (not height)
-
+            auto const strikeIndex = ftBestStrikeIndex(ftFace, fontSize.pt, dpi);
             FT_Error const ec = FT_Select_Size(ftFace, strikeIndex);
             if (ec != FT_Err_Ok)
                 errorLog()(
                     "Failed to FT_Select_Size(index={}, source {}): {}", strikeIndex, source, ftErrorStr(ec));
+            else
+                rasterizerLog()("Picked color font's strike index {} ({}x{}) from {}\n",
+                                strikeIndex,
+                                ftFace->available_sizes[strikeIndex].width,
+                                ftFace->available_sizes[strikeIndex].height,
+                                source);
         }
         else
         {
             auto const size = static_cast<FT_F26Dot6>(ceil(fontSize.pt * 64.0));
 
             if (FT_Error const ec = FT_Set_Char_Size(
-                    ftFace, 0, size, static_cast<FT_UInt>(dpi.x), static_cast<FT_UInt>(dpi.y));
+                    ftFace, size, 0, static_cast<FT_UInt>(dpi.x), static_cast<FT_UInt>(dpi.y));
                 ec != FT_Err_Ok)
             {
                 errorLog()("Failed to FT_Set_Char_Size(size={}, dpi {}, source {}): {}\n",
@@ -783,7 +786,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
         }
         case FT_PIXEL_MODE_LCD: {
             auto const& ftBitmap = ftFace->glyph->bitmap;
-            // RasterizerLog()("Rasterizing using pixel mode: {}, rows={}, width={}, pitch={}, mode={}",
+            // rasterizerLog()("Rasterizing using pixel mode: {}, rows={}, width={}, pitch={}, mode={}",
             //                 "lcd",
             //                 ftBitmap.rows,
             //                 ftBitmap.width,
@@ -815,6 +818,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
         case FT_PIXEL_MODE_BGRA: {
             auto const width = output.bitmapSize.width;
             auto const height = output.bitmapSize.height;
+            // rasterizerLog()("rasterize.RGBA: {} + {}\n", output.bitmapSize, output.position);
 
             output.format = bitmap_format::rgba;
             output.bitmap.resize(output.bitmapSize.area() * 4);

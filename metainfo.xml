@@ -110,6 +110,7 @@
           <li>Fixes GUI terminating on idle input in some conditions.</li>
           <li>Fixes search term rendering highlighting for search terms containing whitespaces (#966).</li>
           <li>Fixes rendering in cases of glyphs with inverted orientation (#1115).</li>
+          <li>Fixes Emoji rendering being too small on OS/X (#1215)</li>
           <li>Fixes VT sequence DECSTBM and DECSLRM defaulting parameters (#1164).</li>
           <li>Fixes VT sequence DECFRA (#1189).</li>
           <li>Fixes VT sequence DECSCPP and DECCOLM (#1205).</li>
