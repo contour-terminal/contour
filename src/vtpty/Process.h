@@ -93,7 +93,7 @@ class [[nodiscard]] Process: public Pty
     [[nodiscard]] PtySlave& slave() noexcept override { return pty().slave(); }
     void close() override { pty().close(); }
     [[nodiscard]] bool isClosed() const noexcept override { return pty().isClosed(); }
-    [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage, std::chrono::milliseconds timeout, size_t n) override { return pty().read(storage, timeout, n); }
+    [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage, std::optional<std::chrono::milliseconds> timeout, size_t n) override { return pty().read(storage, timeout, n); }
     void wakeupReader() override { return pty().wakeupReader(); }
     [[nodiscard]] int write(std::string_view data) override { return pty().write(data); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
