@@ -261,15 +261,16 @@ Pty::ReadResult UnixPty::read(crispy::buffer_object<char>& storage,
                               std::chrono::milliseconds timeout,
                               size_t size)
 {
-    if (auto const fd = _readSelector.wait_one(timeout); fd.has_value())
-    {
-        auto const l = scoped_lock { storage };
-        if (auto x = readSome(*fd, storage.hotEnd(), min(size, storage.bytesAvailable())))
-            return { tuple { x.value(), *fd == _stdoutFastPipe.reader() } };
-    }
+    auto const fd = _readSelector.wait_one(timeout);
+    if (!fd)
+        return nullopt;
 
-    errno = EAGAIN;
-    return nullopt;
+    auto const storageLock = scoped_lock { storage };
+    auto receivedData = readSome(*fd, storage.hotEnd(), min(size, storage.bytesAvailable()));
+    if (!receivedData)
+        return nullopt;
+
+    return { tuple { *receivedData, *fd == _stdoutFastPipe.reader() } };
 }
 
 int UnixPty::write(std::string_view data)
