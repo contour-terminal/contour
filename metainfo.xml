@@ -126,6 +126,7 @@
           <li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
           <li>Adds config option `profile.*.bell` to adjust BEL behavior and fixes (#1162) and (#1163).</li>
           <li>Adds config option `profile.*.frozen_dec_modes` to permanently enable/disable certain DEC modes.</li>
+          <li>Adds config option `profile.*.option_as_meta` to allow remapping Option key to Alt on MacOS.</li>
           <li>Adds capital `A` and `I` keys to switch from normal mode back to insert mode, too.</li>
           <li>Adds size indicator window on resize (#1203).</li>
           <li>Adds config entry `profile.*.size_indicator_on_resize` to control size indicator on resize and makes resize indicator small.</li>
