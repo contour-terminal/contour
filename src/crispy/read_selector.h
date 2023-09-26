@@ -64,12 +64,17 @@ class posix_read_selector
         if (auto const fd = try_pop_pending(); fd.has_value())
             return fd;
 
+        using namespace std::chrono_literals;
         auto tv = timeval {};
-        tv.tv_sec = timeout.value().count() / 1000;
-        tv.tv_usec = (timeout.value().count() % 1000) * 1000;
+        timeval* tp = nullptr;
+        if (timeout.has_value())
+        {
+            tp = &tv;
+            tv.tv_sec = timeout->count() / 1000;
+            tv.tv_usec = static_cast<int>((timeout->count() % 1000) * 1000);
+        }
 
-        auto const result =
-            ::select(_fds.back() + 1, &_reader, &_writer, &_except, timeout.has_value() ? &tv : nullptr);
+        auto const result = ::select(_fds.back() + 1, &_reader, &_writer, &_except, tp);
 
         if (result <= 0)
             return std::nullopt;
