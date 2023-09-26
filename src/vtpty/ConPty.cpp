@@ -132,7 +132,7 @@ void ConPty::close()
 }
 
 Pty::ReadResult ConPty::read(crispy::buffer_object<char>& buffer,
-                             std::chrono::milliseconds timeout,
+                             std::optional<std::chrono::milliseconds> timeout,
                              size_t size)
 {
     // TODO: wait for timeout time at most AND got woken up upon wakeupReader() invokcation.

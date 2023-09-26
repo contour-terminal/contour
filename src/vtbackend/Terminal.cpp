@@ -181,10 +181,14 @@ void Terminal::setLastMarkRangeOffset(LineOffset value) noexcept
 
 Pty::ReadResult Terminal::readFromPty()
 {
-    auto const timeout = _renderBuffer.state == RenderBufferState::WaitingForRefresh && !_screenDirty
-                             ? chrono::seconds(4)
-                             //: _refreshInterval : chrono::seconds(0)
-                             : chrono::seconds(30);
+    auto const timeout =
+#if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+        (_renderBuffer.state == RenderBufferState::WaitingForRefresh && !_screenDirty)
+            ? std::optional { _refreshInterval.value }
+            : std::chrono::milliseconds(0);
+#else
+        std::optional<std::chrono::milliseconds> { std::nullopt };
+#endif
 
     // Request a new Buffer Object if the current one cannot sufficiently
     // store a single text line.

@@ -22,7 +22,7 @@ PtySlave& MockPty::slave() noexcept
 }
 
 Pty::ReadResult MockPty::read(crispy::buffer_object<char>& storage,
-                              std::chrono::milliseconds /*timeout*/,
+                              std::optional<std::chrono::milliseconds> /*timeout*/,
                               size_t size)
 {
     auto const n = min(size, min(_outputBuffer.size() - _outputReadOffset, storage.bytesAvailable()));

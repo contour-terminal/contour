@@ -24,7 +24,7 @@ PtySlave& MockViewPty::slave() noexcept
 }
 
 optional<tuple<string_view, bool>> MockViewPty::read(crispy::buffer_object<char>& storage,
-                                                     std::chrono::milliseconds /*timeout*/,
+                                                     std::optional<std::chrono::milliseconds> /*timeout*/,
                                                      size_t size)
 {
     auto const n = min(min(_outputBuffer.size(), storage.bytesAvailable()), size);
