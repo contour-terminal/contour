@@ -107,6 +107,7 @@
       <description>
         <ul>
           <li>Do not clear search term when entering search editor again.</li>
+          <li>Fixes GUI terminating on idle input in some conditions.</li>
           <li>Fixes search term rendering highlighting for search terms containing whitespaces (#966).</li>
           <li>Fixes rendering in cases of glyphs with inverted orientation (#1115).</li>
           <li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
