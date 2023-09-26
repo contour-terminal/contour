@@ -94,7 +94,10 @@ class posix_read_selector
     std::optional<int> try_pop_pending() noexcept
     {
         if (_pending.empty())
+        {
+            errno = EAGAIN;
             return std::nullopt;
+        }
 
         auto const fd = _pending.front();
         _pending.pop_front();
