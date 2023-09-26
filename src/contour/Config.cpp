@@ -1653,6 +1653,8 @@ namespace
         else
             terminalProfile.maxHistoryLineCount = LineCount(0);
 
+        tryLoadChildRelative(usedKeys, profile, basePath, "option_as_alt", terminalProfile.optionKeyAsAlt, logger);
+
         strValue = fmt::format("{}", ScrollBarPosition::Right);
         if (tryLoadChildRelative(usedKeys, profile, basePath, "scrollbar.position", strValue, logger))
         {

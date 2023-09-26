@@ -190,6 +190,12 @@ profiles:
         # Defines the class part of the WM_CLASS property of the window.
         wm_class: "contour"
 
+        # Tells Contour how to handle Option-Key events on MacOS.
+        # This value is ignored on other platforms.
+        #
+        # Default: false
+        option_as_alt: false
+
         # Environment variables to be passed to the shell.
         # environment:
         #     TERM: contour

@@ -154,6 +154,7 @@ struct TerminalProfile
     terminal::StatusDisplayPosition statusDisplayPosition = terminal::StatusDisplayPosition::Bottom;
     bool syncWindowTitleWithHostWritableStatusDisplay = false;
     bool hideScrollbarInAltScreen = true;
+    bool optionKeyAsAlt = false;
 
     bool autoScrollOnUpdate;
 

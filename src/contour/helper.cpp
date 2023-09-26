@@ -222,7 +222,15 @@ bool sendKeyEvent(QKeyEvent* event, TerminalSession& session)
         return true;
     }
 
-    if (modifiers.control() && key >= 0x20 && key < 0x80)
+    auto const optionKeyAsAlt =
+#if !defined(__APPLE__)
+        true
+#else
+        session.profile().optionKeyAsAlt
+#endif
+        ;
+
+    if (0x20 <= key && key < 0x80 && (modifiers.control() || (modifiers.alt() && optionKeyAsAlt)))
     {
         session.sendCharPressEvent(static_cast<char32_t>(key), modifiers, now);
         return true;
