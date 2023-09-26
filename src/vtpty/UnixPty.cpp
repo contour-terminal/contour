@@ -394,6 +394,7 @@ Pty::ReadResult UnixPty::read(crispy::BufferObject<char>& storage,
             return { tuple { x.value(), fd == _stdoutFastPipe.reader() } };
     }
 
+    errno = EAGAIN;
     return nullopt;
 }
 
