@@ -236,9 +236,7 @@ inline std::optional<int> epoll_read_selector::wait_one(
         if (auto fd = try_pop_pending(); fd.has_value())
             return fd;
 
-        if (piped)
-            errno = EINTR;
-
+        errno = piped ? EINTR : EAGAIN;
         return std::nullopt;
     }
 }
