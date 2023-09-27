@@ -181,7 +181,8 @@ inline void epoll_read_selector::cancel_read(int fd) noexcept
 
 inline void epoll_read_selector::wakeup() const noexcept
 {
-    write(_event_fd, "x", 1);
+    auto const value = eventfd_t { 1 };
+    write(_event_fd, &value, sizeof(value));
 }
 
 inline std::optional<int> epoll_read_selector::try_pop_pending() noexcept
@@ -225,7 +226,7 @@ inline std::optional<int> epoll_read_selector::wait_one(
         {
             if (events[i].data.fd == _event_fd)
             {
-                uint64_t dummy {};
+                eventfd_t dummy {};
                 piped = ::read(_event_fd, &dummy, sizeof(dummy)) > 0;
             }
             else
