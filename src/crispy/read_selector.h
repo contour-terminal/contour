@@ -64,17 +64,15 @@ class posix_read_selector
         if (auto const fd = try_pop_pending(); fd.has_value())
             return fd;
 
-        using namespace std::chrono_literals;
-        auto tv = timeval {};
-        timeval* tp = nullptr;
+        auto tv = std::unique_ptr<timeval>();
         if (timeout.has_value())
         {
-            tp = &tv;
-            tv.tv_sec = timeout->count() / 1000;
-            tv.tv_usec = static_cast<int>((timeout->count() % 1000) * 1000);
+            tv = std::make_unique<timeval>(
+                timeval { .tv_sec = timeout->count() / 1000,
+                          .tv_usec = static_cast<int>((timeout->count() % 1000) * 1000) });
         }
 
-        auto const result = ::select(_fds.back() + 1, &_reader, &_writer, &_except, tp);
+        auto const result = ::select(_fds.back() + 1, &_reader, &_writer, &_except, tv.get());
 
         if (result <= 0)
             return std::nullopt;
@@ -183,7 +181,8 @@ inline void epoll_read_selector::cancel_read(int fd) noexcept
 
 inline void epoll_read_selector::wakeup() const noexcept
 {
-    write(_event_fd, "x", 1);
+    auto const value = eventfd_t { 1 };
+    write(_event_fd, &value, sizeof(value));
 }
 
 inline std::optional<int> epoll_read_selector::try_pop_pending() noexcept
@@ -227,7 +226,7 @@ inline std::optional<int> epoll_read_selector::wait_one(
         {
             if (events[i].data.fd == _event_fd)
             {
-                uint64_t dummy {};
+                eventfd_t dummy {};
                 piped = ::read(_event_fd, &dummy, sizeof(dummy)) > 0;
             }
             else
@@ -237,9 +236,7 @@ inline std::optional<int> epoll_read_selector::wait_one(
         if (auto fd = try_pop_pending(); fd.has_value())
             return fd;
 
-        if (piped)
-            errno = EINTR;
-
+        errno = piped ? EINTR : EAGAIN;
         return std::nullopt;
     }
 }

@@ -267,8 +267,8 @@ Pty::ReadResult UnixPty::read(crispy::buffer_object<char>& storage,
         if (auto x = readSome(*fd, storage.hotEnd(), min(size, storage.bytesAvailable())))
             return { tuple { x.value(), *fd == _stdoutFastPipe.reader() } };
     }
-
-    errno = EAGAIN;
+    else
+        errno = EAGAIN;
     return nullopt;
 }
 
