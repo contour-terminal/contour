@@ -205,7 +205,11 @@ int ContourApp::infoVT()
             // This could be much more improved in good looking and informationally.
             // We can also print short/longer description, minimum required VT level,
             // colored output for easier reading, and maybe more.
-            fmt::print("{:<20} {:<15} {} ({})\n", fn.mnemonic, fmt::format("{}", fn), fn.comment, level);
+            fmt::print("{:<20} {:<15} {} ({})\n",
+                       fn.documentation.mnemonic,
+                       fmt::format("{}", fn),
+                       fn.documentation.comment,
+                       level);
         }
         fmt::print("\n");
     }

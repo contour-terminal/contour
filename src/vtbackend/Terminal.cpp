@@ -2317,8 +2317,8 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
         if (auto const* functionDefinition = seq->functionDefinition(_terminal->activeSequences()))
             fmt::print("\t{:<20} ; {:<18} ; {}\n",
                        seq->text(),
-                       functionDefinition->mnemonic,
-                       functionDefinition->comment);
+                       functionDefinition->documentation.mnemonic,
+                       functionDefinition->documentation.comment);
         else
             fmt::print("\t{:<20}\n", seq->text());
         _terminal->activeDisplay().processSequence(*seq);

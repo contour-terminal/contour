@@ -3405,7 +3405,7 @@ void Screen<Cell>::processSequence(Sequence const& seq)
     {
         if (auto const* fd = seq.functionDefinition(_terminal->activeSequences()))
         {
-            vtTraceSequenceLog()("Processing {:<14} {}", fd->mnemonic, seq.text());
+            vtTraceSequenceLog()("Processing {:<14} {}", fd->documentation.mnemonic, seq.text());
         }
         else
             vtTraceSequenceLog()("Processing unknown sequence: {}", seq.text());
