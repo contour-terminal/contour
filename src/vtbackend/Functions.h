@@ -47,6 +47,9 @@ struct FunctionDefinition // TODO: rename Function
     std::string_view mnemonic;
     std::string_view comment;
 
+    // VT sequence documentation in markdown format
+    std::string_view documentation {};
+
     template <typename... Args>
     std::string operator()(Args&&... parameters) const
     {
@@ -188,10 +191,16 @@ namespace detail // {{{
                       std::string_view description,
                       VTType vt = VTType::VT100) noexcept
     {
-        // clang-format off
-        return FunctionDefinition { FunctionCategory::C0, 0, 0, finalCharacter, 0, 0, vt,
-                                    VTExtension::None, mnemonic, description };
-        // clang-format on
+        return FunctionDefinition { .category = FunctionCategory::C0,
+                                    .leader = 0,
+                                    .intermediate = 0,
+                                    .finalSymbol = finalCharacter,
+                                    .minimumParameters = 0,
+                                    .maximumParameters = 0,
+                                    .conformanceLevel = vt,
+                                    .extension = VTExtension::None,
+                                    .mnemonic = mnemonic,
+                                    .comment = description };
     }
 
     constexpr auto OSC(uint16_t code,
@@ -199,13 +208,16 @@ namespace detail // {{{
                        std::string_view mnemonic,
                        std::string_view description) noexcept
     {
-        // clang-format off
-        return FunctionDefinition { FunctionCategory::OSC, 0, 0, 0, 0, code,
-                                    VTType::VT100,
-                                    ext,
-                                    mnemonic,
-                                    description };
-        // clang-format on
+        return FunctionDefinition { .category = FunctionCategory::OSC,
+                                    .leader = 0,
+                                    .intermediate = 0,
+                                    .finalSymbol = 0,
+                                    .minimumParameters = 0,
+                                    .maximumParameters = code,
+                                    .conformanceLevel = VTType::VT100,
+                                    .extension = ext,
+                                    .mnemonic = mnemonic,
+                                    .comment = description };
     }
 
     constexpr auto ESC(std::optional<char> intermediate,
