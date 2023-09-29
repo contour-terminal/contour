@@ -385,6 +385,10 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
     tileCreateData.metadata.targetSize = {};
     tileCreateData.bitmapSize = targetSize;
     tileCreateData.bitmap = std::move(slicedBitmap);
+
+    // NB: Also adjust the normalized width to not render the empty space.
+    auto const atlasSize = _textureScheduler->atlasSize();
+    tileCreateData.metadata.normalizedLocation.width = unbox<float>(tileCreateData.bitmapSize.width) / unbox<float>(atlasSize.width);
 }
 
 void TextRenderer::initializeDirectMapping()
