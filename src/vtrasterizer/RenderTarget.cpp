@@ -66,7 +66,7 @@ auto Renderable::sliceTileData(Renderable::TextureAtlas::TileCreateData const& c
         uint8_t const* sourceRow =
             createData.bitmap.data() + rowIndex * pitch + uintptr_t(sliceIndex.beginX) * colorComponentCount;
         Require(sourceRow + subPitch <= createData.bitmap.data() + createData.bitmap.size());
-        std::memcpy(targetRow, sourceRow, subPitch);
+        std::copy_n(sourceRow, subPitch, targetRow);
     }
 
     return createTileData(tileLocation,

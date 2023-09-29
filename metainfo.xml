@@ -118,6 +118,7 @@
           <li>Fixes VT sequence SM ?1003 (Any Event mouse tracking) not reporting mouse move events.</li>
           <li>Fixes VT sequences CUU/CUD/CUF/CUB to better respect margins (#1201)</li>
           <li>Fixes URI re-encoding of local files in `OSC 8` (#1199)</li>
+          <li>Fixes LCD subpixel rendering for overly wide US-ASCII glyphs (#1022)</li>
           <li>Do not clear search term when entering search editor again.</li>
           <li>Clear search term when switch to insert vi mode (#1135)</li>
           <li>Delete dpi_scale entry in configuration (#1137)</li>

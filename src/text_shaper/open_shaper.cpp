@@ -789,7 +789,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
             // rasterizerLog()("Rasterizing using pixel mode: {}, rows={}, width={}, pitch={}, mode={}",
             //                 "lcd",
             //                 ftBitmap.rows,
-            //                 ftBitmap.width,
+            //                 ftBitmap.width / 3,
             //                 ftBitmap.pitch,
             //                 ftBitmap.pixel_mode);
 

@@ -120,9 +120,11 @@ Making use of reserved glyph slots
 #include <text_shaper/fontconfig_locator.h>
 #include <text_shaper/mock_font_locator.h>
 
-#include "crispy/StrongHash.h"
-#include "crispy/StrongLRUHashtable.h"
-#include "crispy/point.h"
+#include <crispy/StrongHash.h>
+#include <crispy/StrongLRUHashtable.h>
+#include <crispy/point.h>
+
+#include <range/v3/view/iota.hpp>
 
 #if defined(_WIN32)
     #include <text_shaper/directwrite_locator.h>
@@ -350,39 +352,43 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
 {
     if (tileCreateData.bitmapSize.width <= _textureAtlas->tileSize().width)
         return;
-
     // Shrink the image's width by recreating it.
     // TODO: In the longer term it would be nice to simply touch the pitch value in order to shrink.
     //       But this requires extending the data structure to also provide a pitch value.
 
-    auto const bitmapFormat = tileCreateData.bitmapFormat;
-    auto const colorComponentCount = atlas::element_count(bitmapFormat);
+    auto const colorComponentCount = atlas::element_count(tileCreateData.bitmapFormat);
 
-    auto const subWidth = _textureAtlas->tileSize().width;
-    auto const subSize = ImageSize { subWidth, tileCreateData.bitmapSize.height };
-    auto const subPitch = unbox<uintptr_t>(subSize.width) * colorComponentCount;
-    auto const xOffset = 0;
+    auto const targetSize = ImageSize { _textureAtlas->tileSize().width, tileCreateData.bitmapSize.height };
+    auto const targetPitch = unbox<uintptr_t>(targetSize.width) * colorComponentCount;
     auto const sourcePitch = unbox<uintptr_t>(tileCreateData.bitmapSize.width) * colorComponentCount;
 
-    auto slicedBitmap = vector<uint8_t>(subSize.area() * colorComponentCount);
+    Require(targetPitch < sourcePitch);
+
+    auto slicedBitmap = vector<uint8_t>(targetSize.area() * colorComponentCount);
 
     if (rasterizerLog)
-        rasterizerLog()("Cutting off oversized {} tile from {} down to {}.",
+        rasterizerLog()("Cutting off oversized {} ({}) tile from {} ({}) down to {}.",
                         tileCreateData.bitmapFormat,
+                        colorComponentCount,
                         tileCreateData.bitmapSize,
-                        _textureAtlas->tileSize());
+                        tileCreateData.metadata.targetSize,
+                        targetSize);
 
-    for (uintptr_t rowIndex = 0; rowIndex < unbox<uintptr_t>(subSize.height); ++rowIndex)
+    for (auto const rowIndex: ranges::views::iota(uintptr_t { 0 }, unbox<uintptr_t>(targetSize.height)))
     {
-        uint8_t* targetRow = slicedBitmap.data() + rowIndex * subPitch;
-        uint8_t const* sourceRow =
-            tileCreateData.bitmap.data() + rowIndex * sourcePitch + uintptr_t(xOffset) * colorComponentCount;
-        Require(sourceRow + subPitch <= tileCreateData.bitmap.data() + tileCreateData.bitmap.size());
-        std::memcpy(targetRow, sourceRow, subPitch);
+        uint8_t* targetRow = slicedBitmap.data() + rowIndex * targetPitch;
+        uint8_t const* sourceRow = tileCreateData.bitmap.data() + rowIndex * sourcePitch;
+        Require(sourceRow + targetPitch <= tileCreateData.bitmap.data() + tileCreateData.bitmap.size());
+        std::copy_n(sourceRow, targetPitch, targetRow);
     }
 
-    tileCreateData.bitmapSize = subSize;
+    tileCreateData.metadata.targetSize = {};
+    tileCreateData.bitmapSize = targetSize;
     tileCreateData.bitmap = std::move(slicedBitmap);
+
+    // NB: Also adjust the normalized width to not render the empty space.
+    auto const atlasSize = _textureScheduler->atlasSize();
+    tileCreateData.metadata.normalizedLocation.width = unbox<float>(tileCreateData.bitmapSize.width) / unbox<float>(atlasSize.width);
 }
 
 void TextRenderer::initializeDirectMapping()
@@ -425,8 +431,8 @@ Renderable::AtlasTileAttributes const* TextRenderer::ensureRasterizedIfDirectMap
     if (!tileCreateData)
         return nullptr;
 
-    // Require(tileCreateData->bitmapSize.width <= textureAtlas().tileSize().width);
     restrictToTileSize(*tileCreateData);
+    Require(tileCreateData->bitmapSize.width <= textureAtlas().tileSize().width);
 
     // fmt::print("Initialize direct mapping {} ({}) for {}; {}; {}\n",
     //            tileIndex,
