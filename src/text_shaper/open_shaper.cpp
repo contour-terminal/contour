@@ -12,6 +12,7 @@
 #include <range/v3/view/iota.hpp>
 
 #include <limits>
+#include <optional>
 
 #include <libunicode/convert.h>
 #include <libunicode/ucd_fmt.h>
@@ -202,10 +203,13 @@ namespace
         return int(ceil(double(maxAdvance) / 64.0));
     }
 
-    int ftBestStrikeIndex(FT_Face face, double pt, DPI dpi) noexcept
+    std::optional<int> ftBestStrikeIndex(FT_Face face, double pt, DPI dpi) noexcept
     {
         auto const targetLength = static_cast<int>(pt * dpi.y / 72.0);
         int bestIndex = 0;
+        if (face->num_fixed_sizes == 0)
+            return nullopt;
+
         int bestDiff = std::abs(int(face->available_sizes[0].width) - targetLength);
         for (int i = 1; i < face->num_fixed_sizes; ++i)
         {
@@ -258,7 +262,14 @@ namespace
 
         if (FT_HAS_COLOR(ftFace))
         {
-            auto const strikeIndex = ftBestStrikeIndex(ftFace, fontSize.pt, dpi);
+            auto const strikeIndexOpt = ftBestStrikeIndex(ftFace, fontSize.pt, dpi);
+            if (!strikeIndexOpt.has_value())
+            {
+                FT_Done_Face(ftFace);
+                return nullopt;
+            }
+
+            auto const strikeIndex = strikeIndexOpt.value();
             FT_Error const ec = FT_Select_Size(ftFace, strikeIndex);
             if (ec != FT_Err_Ok)
                 errorLog()(
