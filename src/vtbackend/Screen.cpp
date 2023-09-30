@@ -75,7 +75,7 @@ using std::tuple;
 using std::unique_ptr;
 using std::vector;
 
-namespace terminal
+namespace vtbackend
 {
 
 auto constexpr inline TabWidth = ColumnCount(8);
@@ -3993,10 +3993,10 @@ bool Screen<Cell>::isCursorInsideMargins() const noexcept
     return insideVerticalMargin && insideHorizontalMargin;
 }
 
-} // namespace terminal
+} // namespace vtbackend
 
 #include <vtbackend/cell/CompactCell.h>
-template class terminal::Screen<terminal::CompactCell>;
+template class vtbackend::Screen<vtbackend::CompactCell>;
 
 #include <vtbackend/cell/SimpleCell.h>
-template class terminal::Screen<terminal::SimpleCell>;
+template class vtbackend::Screen<vtbackend::SimpleCell>;

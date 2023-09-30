@@ -29,7 +29,7 @@ using namespace std;
 
 namespace fs = std::filesystem;
 
-namespace terminal
+namespace vtpty
 {
 
 namespace
@@ -60,7 +60,7 @@ namespace
     class InheritingEnvBlock
     {
       public:
-        using Environment = terminal::Process::Environment;
+        using Environment = vtpty::Process::Environment;
 
         explicit InheritingEnvBlock(Environment const& newValues)
         {
@@ -332,4 +332,4 @@ string Process::workingDirectory() const
     return "."s;
 }
 
-} // namespace terminal
+} // namespace vtpty

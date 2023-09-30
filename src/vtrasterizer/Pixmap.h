@@ -14,7 +14,7 @@
 #include <algorithm>
 #include <functional>
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 // Helper to write ratios like 1/8_th
@@ -46,7 +46,7 @@ constexpr RatioBlock left(double r) noexcept  { return RatioBlock { { 0, 0 },   
 constexpr RatioBlock right(double r) noexcept { return RatioBlock { { 1.f - r, 0.f }, { 1.f, 1.f } }; }
 // clang-format on
 
-constexpr crispy::point operator*(ImageSize a, Ratio b) noexcept
+constexpr crispy::point operator*(vtbackend::ImageSize a, Ratio b) noexcept
 {
     return crispy::point { static_cast<int>(a.width.as<double>() * b.x),
                            static_cast<int>(a.height.as<double>() * b.y) };
@@ -85,7 +85,7 @@ enum Arc
 };
 
 template <typename F>
-auto makeDraw4WaySymmetric(Arc arc, ImageSize size, F putpixel)
+auto makeDraw4WaySymmetric(Arc arc, vtbackend::ImageSize size, F putpixel)
 {
     return [=](int x, int y) {
         auto const w = unbox<int>(size.width);
@@ -166,7 +166,10 @@ constexpr void drawEllipse(F doDraw4WaySymmetric, crispy::point radius)
 }
 
 template <typename PutPixel>
-constexpr void drawEllipseArc(PutPixel putpixel, ImageSize imageSize, crispy::point radius, Arc arc)
+constexpr void drawEllipseArc(PutPixel putpixel,
+                              vtbackend::ImageSize imageSize,
+                              crispy::point radius,
+                              Arc arc)
 {
     drawEllipse(makeDraw4WaySymmetric(arc, imageSize, std::move(putpixel)), radius);
 }
@@ -175,8 +178,8 @@ constexpr void drawEllipseArc(PutPixel putpixel, ImageSize imageSize, crispy::po
 struct Pixmap
 {
     atlas::Buffer buffer {};
-    ImageSize size {};
-    ImageSize downsampledSize {};
+    vtbackend::ImageSize size {};
+    vtbackend::ImageSize downsampledSize {};
     std::function<int(int, int)> filler = [](int, int) {
         return 0xFF;
     };
@@ -229,7 +232,7 @@ struct Pixmap
 };
 
 template <std::size_t SupersamplingFactor = 1>
-inline Pixmap blockElement(ImageSize size)
+inline Pixmap blockElement(vtbackend::ImageSize size)
 {
     auto const superSize = size * SupersamplingFactor;
     return Pixmap { atlas::Buffer(superSize.width.as<size_t>() * superSize.height.as<size_t>(), 0x00),
@@ -238,7 +241,7 @@ inline Pixmap blockElement(ImageSize size)
 }
 
 template <size_t N, typename F>
-Pixmap blockElement(ImageSize size, F f)
+Pixmap blockElement(vtbackend::ImageSize size, F f)
 {
     auto p = blockElement<N>(size);
     p.filler = f;
@@ -293,14 +296,14 @@ Pixmap& Pixmap::segment_bar(int which, More... more)
 }
 // }}}
 
-} // end namespace terminal::rasterizer
+} // end namespace vtrasterizer
 
 template <>
-struct fmt::formatter<terminal::rasterizer::Arc>: fmt::formatter<string_view>
+struct fmt::formatter<vtrasterizer::Arc>: fmt::formatter<string_view>
 {
-    auto format(terminal::rasterizer::Arc value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::Arc value, format_context& ctx) -> format_context::iterator
     {
-        using terminal::rasterizer::Arc;
+        using vtrasterizer::Arc;
         string_view name;
         switch (value)
         {

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/ImageSize.h>
 #include <vtpty/PageSize.h>
 
 #include <crispy/BufferObject.h>
-#include <crispy/ImageSize.h>
 #include <crispy/logstore.h>
 
 #include <chrono>
@@ -13,7 +13,7 @@
 
 #include <boxed-cpp/boxed.hpp>
 
-namespace terminal
+namespace vtpty
 {
 
 namespace detail
@@ -102,13 +102,13 @@ class Pty
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
 
     /// Resizes underlying window buffer by given character width and height.
-    virtual void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) = 0;
+    virtual void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) = 0;
 };
 
-[[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<crispy::image_size> viewSize);
+[[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);
 
 auto const inline ptyLog = logstore::category("pty", "Logs general PTY informations.");
 auto const inline ptyInLog = logstore::category("pty.input", "Logs PTY raw input.");
 auto const inline ptyOutLog = logstore::category("pty.output", "Logs PTY raw output.");
 
-} // namespace terminal
+} // namespace vtpty

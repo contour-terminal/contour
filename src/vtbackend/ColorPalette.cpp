@@ -8,7 +8,7 @@
 
 using namespace std;
 
-namespace terminal
+namespace vtbackend
 {
 
 namespace
@@ -125,4 +125,4 @@ RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target
     return mode == ColorMode::Dimmed ? defaultColor * 0.75 : defaultColor;
 }
 
-} // namespace terminal
+} // namespace vtbackend

@@ -749,8 +749,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
     }
 
     auto output = rasterized_glyph {};
-    output.bitmapSize.width = crispy::width::cast_from(ftFace->glyph->bitmap.width);
-    output.bitmapSize.height = crispy::height::cast_from(ftFace->glyph->bitmap.rows);
+    output.bitmapSize.width = vtbackend::Width::cast_from(ftFace->glyph->bitmap.width);
+    output.bitmapSize.height = vtbackend::Height::cast_from(ftFace->glyph->bitmap.rows);
     output.position.x = ftFace->glyph->bitmap_left;
     output.position.y = ftFace->glyph->bitmap_top;
 
@@ -806,7 +806,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
 
             output.format = bitmap_format::rgb; // LCD
             output.bitmap.resize(static_cast<size_t>(ftBitmap.width) * static_cast<size_t>(ftBitmap.rows));
-            output.bitmapSize.width /= crispy::width(3);
+            output.bitmapSize.width /= vtbackend::Width(3);
 
             auto const* s = ftBitmap.buffer;
             auto* t = output.bitmap.data();

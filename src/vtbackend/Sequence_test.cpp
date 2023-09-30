@@ -5,8 +5,8 @@
 
 #include <string_view>
 
-using terminal::SequenceParameterBuilder;
-using terminal::SequenceParameters;
+using vtbackend::SequenceParameterBuilder;
+using vtbackend::SequenceParameters;
 using namespace std::string_view_literals;
 
 TEST_CASE("SequenceParameterBuilder.empty")

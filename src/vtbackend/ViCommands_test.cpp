@@ -29,7 +29,7 @@
 // - [ ] i{TextObject}
 // - [ ] a{TextObject}
 
-using namespace terminal::test;
+using namespace vtbackend::test;
 
 // {{{ helpers
 namespace
@@ -40,21 +40,21 @@ namespace
 // The text cursor is ensured to be in home position (top left), and
 // input mode is set to normal mode.
 auto setupMockTerminal(std::string_view text,
-                       terminal::PageSize pageSize = terminal::PageSize { terminal::LineCount(6),
-                                                                          terminal::ColumnCount(40) },
-                       terminal::LineCount history = terminal::LineCount(0))
+                       vtbackend::PageSize pageSize = vtbackend::PageSize { vtbackend::LineCount(6),
+                                                                            vtbackend::ColumnCount(40) },
+                       vtbackend::LineCount history = vtbackend::LineCount(0))
 {
-    return terminal::MockTerm<terminal::MockPty> {
-        terminal::PageSize { // increment line count by one for indicator statusline.
-                             pageSize.lines + 1,
-                             pageSize.columns },
+    return vtbackend::MockTerm<vtpty::MockPty> {
+        vtpty::PageSize { // increment line count by one for indicator statusline.
+                          pageSize.lines + 1,
+                          pageSize.columns },
         history,
         1024, // ptyReadBufferSize
         [text](auto& mock) {
-            mock.terminal.setStatusDisplay(terminal::StatusDisplayType::Indicator);
+            mock.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
             mock.writeToScreen(text);
             mock.writeToScreen("\033[H");
-            mock.terminal.inputHandler().setMode(terminal::ViMode::Normal);
+            mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
             // logScreenTextAlways(mock);
             REQUIRE(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
             REQUIRE(mock.terminal.state().viCommands.cursorPosition.column.value == 0);
@@ -68,8 +68,9 @@ auto setupMockTerminal(std::string_view text,
 TEST_CASE("vi.motions: |", "[vi]")
 {
     // The meaning of this code shall not be questioned. It's purely for testing.
-    auto mock = setupMockTerminal("auto pi_times(unsigned factor) noexcept;",
-                                  terminal::PageSize { terminal::LineCount(2), terminal::ColumnCount(40) });
+    auto mock =
+        setupMockTerminal("auto pi_times(unsigned factor) noexcept;",
+                          vtbackend::PageSize { vtbackend::LineCount(2), vtbackend::ColumnCount(40) });
 
     // middle
     mock.sendCharPressSequence("15|");
@@ -100,13 +101,14 @@ TEST_CASE("vi.motions: |", "[vi]")
 TEST_CASE("vi.motions: text objects", "[vi]")
 {
     // The meaning of this code shall not be questioned. It's purely for testing.
-    auto mock = setupMockTerminal("auto pi_times(unsigned factor) noexcept\r\n"
-                                  "{\r\n"
-                                  "    auto constexpr pi = 3.1415;\r\n"
-                                  "    return pi + ((factor - 1) * //\r\n"
-                                  "                                pi);\r\n"
-                                  "}",
-                                  terminal::PageSize { terminal::LineCount(6), terminal::ColumnCount(40) });
+    auto mock =
+        setupMockTerminal("auto pi_times(unsigned factor) noexcept\r\n"
+                          "{\r\n"
+                          "    auto constexpr pi = 3.1415;\r\n"
+                          "    return pi + ((factor - 1) * //\r\n"
+                          "                                pi);\r\n"
+                          "}",
+                          vtbackend::PageSize { vtbackend::LineCount(6), vtbackend::ColumnCount(40) });
 
     SECTION("vi( across multiple lines, nested")
     {
@@ -116,7 +118,7 @@ TEST_CASE("vi.motions: text objects", "[vi]")
         mock.sendCharPressSequence("vi("); // cursor is now placed at the end of the selection
         CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 33_columnOffset);
         REQUIRE(mock.terminal.selector() != nullptr);
-        terminal::Selection const& selection = *mock.terminal.selector();
+        vtbackend::Selection const& selection = *mock.terminal.selector();
         CHECK(selection.from() == 3_lineOffset + 17_columnOffset);
         CHECK(selection.to() == 4_lineOffset + 33_columnOffset);
     }
@@ -129,7 +131,7 @@ TEST_CASE("vi.motions: text objects", "[vi]")
         mock.sendCharPressSequence("vi)"); // cursor is now placed at the end of the selection
         CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 33_columnOffset);
         REQUIRE(mock.terminal.selector() != nullptr);
-        terminal::Selection const& selection = *mock.terminal.selector();
+        vtbackend::Selection const& selection = *mock.terminal.selector();
         CHECK(selection.from() == 3_lineOffset + 17_columnOffset);
         CHECK(selection.to() == 4_lineOffset + 33_columnOffset);
     }
@@ -137,8 +139,8 @@ TEST_CASE("vi.motions: text objects", "[vi]")
 
 TEST_CASE("vi.motions: M", "[vi]")
 {
-    auto mock = setupMockTerminal("Hello\r\n",
-                                  terminal::PageSize { terminal::LineCount(10), terminal::ColumnCount(40) });
+    auto mock = setupMockTerminal(
+        "Hello\r\n", vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
 
     // first move cursor by one right, to also ensure that column is preserved
     mock.sendCharPressSequence("lM");
@@ -151,9 +153,10 @@ TEST_CASE("vi.motions: M", "[vi]")
 
 TEST_CASE("vi.motion: t{char}", "[vi]")
 {
-    auto mock = setupMockTerminal("One.Two..Three and more\r\n"
-                                  "   On the next line.",
-                                  terminal::PageSize { terminal::LineCount(10), terminal::ColumnCount(40) });
+    auto mock =
+        setupMockTerminal("One.Two..Three and more\r\n"
+                          "   On the next line.",
+                          vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
     mock.sendCharPressSequence("te"); // jump to the char before first `e`, which is `n`.
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 1_columnOffset);
 
@@ -163,9 +166,10 @@ TEST_CASE("vi.motion: t{char}", "[vi]")
 
 TEST_CASE("vi.motion: b", "[vi]")
 {
-    auto mock = setupMockTerminal("One.Two..Three and more\r\n"
-                                  "   On the next line.",
-                                  terminal::PageSize { terminal::LineCount(10), terminal::ColumnCount(40) });
+    auto mock =
+        setupMockTerminal("One.Two..Three and more\r\n"
+                          "   On the next line.",
+                          vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
     mock.sendCharPressSequence("j$"); // jump to line 2, at the right-most non-space character.
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 1_lineOffset + 19_columnOffset);
 
@@ -192,13 +196,13 @@ TEST_CASE("vi.motion: b", "[vi]")
 
 TEST_CASE("ViCommands:modeChanged", "[vi]")
 {
-    auto mock = setupMockTerminal("Hello\r\n",
-                                  terminal::PageSize { terminal::LineCount(10), terminal::ColumnCount(40) });
+    auto mock = setupMockTerminal(
+        "Hello\r\n", vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
 
     SECTION("clearSearch() must be invoked when switch to ViMode::Insert")
     {
         mock.terminal.setNewSearchTerm(U"search_term", true);
-        mock.terminal.state().inputHandler.setMode(terminal::ViMode::Insert);
+        mock.terminal.state().inputHandler.setMode(vtbackend::ViMode::Insert);
         REQUIRE(mock.terminal.state().searchMode.pattern.empty());
     }
 }

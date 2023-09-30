@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-namespace terminal::test
+namespace vtbackend::test
 {
 
 constexpr LineOffset operator""_lineOffset(unsigned long long value) noexcept
@@ -38,16 +38,16 @@ template <typename S>
 }
 
 /// Takes a textual screenshot using the terminals render buffer.
-[[nodiscard]] inline std::vector<std::string> textScreenshot(terminal::Terminal const& terminal)
+[[nodiscard]] inline std::vector<std::string> textScreenshot(vtbackend::Terminal const& terminal)
 {
-    terminal::RenderBufferRef renderBuffer = terminal.renderBuffer();
+    vtbackend::RenderBufferRef renderBuffer = terminal.renderBuffer();
 
     std::vector<std::string> lines;
     lines.resize(terminal.pageSize().lines.as<size_t>());
 
-    terminal::CellLocation lastPos = {};
+    vtbackend::CellLocation lastPos = {};
     size_t lastCount = 0;
-    for (terminal::RenderCell const& cell: renderBuffer.buffer.cells)
+    for (vtbackend::RenderCell const& cell: renderBuffer.buffer.cells)
     {
         auto const gap = (cell.position.column + static_cast<int>(lastCount) - 1) - lastPos.column;
         auto& currentLine = lines.at(unbox<size_t>(cell.position.line));
@@ -58,7 +58,7 @@ template <typename S>
         lastPos = cell.position;
         lastCount = 1;
     }
-    for (terminal::RenderLine const& line: renderBuffer.buffer.lines)
+    for (vtbackend::RenderLine const& line: renderBuffer.buffer.lines)
     {
         auto& currentLine = lines.at(unbox<size_t>(line.lineOffset));
         currentLine = line.text;
@@ -128,9 +128,9 @@ void logScreenText(Screen<T> const& screen, std::string const& headline = "")
         UNSCOPED_INFO(fmt::format("[{}] \"{}\"", line, screen.grid().lineText(LineOffset::cast_from(line))));
 }
 
-inline void logScreenText(terminal::Terminal const& terminal, std::string const& headline = "")
+inline void logScreenText(vtbackend::Terminal const& terminal, std::string const& headline = "")
 {
     logScreenText(terminal.primaryScreen(), headline);
 }
 
-} // namespace terminal::test
+} // namespace vtbackend::test

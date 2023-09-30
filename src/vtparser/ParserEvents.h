@@ -4,7 +4,7 @@
 #include <limits>
 #include <string_view>
 
-namespace terminal
+namespace vtparser
 {
 
 /**
@@ -196,4 +196,4 @@ class NullParserEvents: public ParserEvents
     void dispatchPM() override {}
 };
 
-} // end namespace terminal
+} // end namespace vtparser

@@ -20,7 +20,7 @@
 #include <vtbackend/Image.h>
 #include <vtbackend/primitives.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 #include <concepts>
@@ -90,7 +90,7 @@ concept CellConcept = requires(T t, T const& u)
 };
 
 
-} // namespace terminal
+} // namespace vtbackend
 
 // clang-format on
 #endif

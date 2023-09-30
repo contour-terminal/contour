@@ -1,10 +1,10 @@
 #pragma once
 
-#include <crispy/ImageSize.h>
+#include <vtpty/ImageSize.h>
 
 #include <boxed-cpp/boxed.hpp>
 
-namespace terminal
+namespace vtpty
 {
 
 namespace detail::tags
@@ -51,15 +51,14 @@ constexpr bool operator!=(PageSize a, PageSize b) noexcept
     return !(a == b);
 }
 
-constexpr crispy::image_size operator*(crispy::image_size a, PageSize b) noexcept
+constexpr ImageSize operator*(ImageSize a, PageSize b) noexcept
 {
-    return crispy::image_size { a.width * boxed_cast<crispy::width>(b.columns),
-                                a.height * boxed_cast<crispy::height>(b.lines) };
+    return ImageSize { a.width * boxed_cast<Width>(b.columns), a.height * boxed_cast<Height>(b.lines) };
 }
 
-constexpr crispy::image_size operator/(crispy::image_size a, PageSize s) noexcept
+constexpr ImageSize operator/(ImageSize a, PageSize s) noexcept
 {
-    return { crispy::width::cast_from(unbox(a.width) / unbox(s.columns)),
-             crispy::height::cast_from(unbox(a.height) / unbox(s.lines)) };
+    return { Width::cast_from(unbox(a.width) / unbox(s.columns)),
+             Height::cast_from(unbox(a.height) / unbox(s.lines)) };
 }
-} // namespace terminal
+} // namespace vtpty

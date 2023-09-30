@@ -6,7 +6,7 @@
 
 #include <optional>
 
-namespace terminal
+namespace vtbackend
 {
 
 /**
@@ -134,4 +134,4 @@ class RenderBufferBuilder
     size_t _searchPatternOffset = 0;
 };
 
-} // namespace terminal
+} // namespace vtbackend

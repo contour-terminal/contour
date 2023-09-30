@@ -2,7 +2,7 @@
 #pragma once
 
 #include <vtbackend/Color.h>
-#include <vtbackend/primitives.h> // ImageSize
+#include <vtbackend/primitives.h>
 
 #include <crispy/StrongHash.h>
 #include <crispy/StrongLRUHashtable.h>
@@ -15,7 +15,7 @@
 
 #include <boxed-cpp/boxed.hpp>
 
-namespace terminal::rasterizer::atlas
+namespace vtrasterizer::atlas
 {
 
 using Buffer = std::vector<uint8_t>;
@@ -100,7 +100,7 @@ struct AtlasProperties
     Format format {};
 
     // Size in pixels of a tile.
-    ImageSize tileSize {};
+    vtbackend::ImageSize tileSize {};
 
     // Number of hashtable slots to map to the texture tiles.
     // Larger values may increase performance, but too large may also decrease.
@@ -124,7 +124,7 @@ struct AtlasProperties
 struct ConfigureAtlas
 {
     // Texture atlas size in pixels.
-    crispy::image_size size {};
+    vtbackend::ImageSize size {};
 
     AtlasProperties properties {};
 };
@@ -134,7 +134,7 @@ struct UploadTile
 {
     TileLocation location;
     Buffer bitmap; // texture data to be uploaded
-    ImageSize bitmapSize;
+    vtbackend::ImageSize bitmapSize;
     Format bitmapFormat;
     int rowAlignment = 1; // byte-alignment per row
 };
@@ -147,19 +147,19 @@ struct RenderTile
     struct Y { int value; };
     // clang-format on
 
-    X x {};                       // target X coordinate to start rendering to
-    Y y {};                       // target Y coordinate to start rendering to
-    ImageSize bitmapSize {};      // bitmap size inside the tile (must not exceed the grid's tile size)
-    ImageSize targetSize {};      // dimensions of the bitmap on the render target surface
-    std::array<float, 4> color;   // optional; a color being associated with this texture
-    TileLocation tileLocation {}; // what tile to render from which texture atlas
+    X x {};                             // target X coordinate to start rendering to
+    Y y {};                             // target Y coordinate to start rendering to
+    vtbackend::ImageSize bitmapSize {}; // bitmap size inside the tile (must not exceed the grid's tile size)
+    vtbackend::ImageSize targetSize {}; // dimensions of the bitmap on the render target surface
+    std::array<float, 4> color;         // optional; a color being associated with this texture
+    TileLocation tileLocation {};       // what tile to render from which texture atlas
 
     NormalizedTileLocation normalizedLocation {};
 
     uint32_t fragmentShaderSelector {};
 };
 
-constexpr std::array<float, 4> normalize(terminal::RGBColor color, float alpha) noexcept
+constexpr std::array<float, 4> normalize(vtbackend::RGBColor color, float alpha) noexcept
 {
     return std::array<float, 4> { static_cast<float>(color.red) / 255.f,
                                   static_cast<float>(color.green) / 255.f,
@@ -167,7 +167,7 @@ constexpr std::array<float, 4> normalize(terminal::RGBColor color, float alpha) 
                                   alpha };
 }
 
-constexpr std::array<float, 4> normalize(terminal::RGBAColor color) noexcept
+constexpr std::array<float, 4> normalize(vtbackend::RGBAColor color) noexcept
 {
     return std::array<float, 4> { static_cast<float>(color.red()) / 255.f,
                                   static_cast<float>(color.green()) / 255.f,
@@ -188,7 +188,7 @@ class AtlasBackend
   public:
     virtual ~AtlasBackend() = default;
 
-    [[nodiscard]] virtual ImageSize atlasSize() const noexcept = 0;
+    [[nodiscard]] virtual vtbackend::ImageSize atlasSize() const noexcept = 0;
 
     /// Creates a new texture atlas, effectively destroying any prior existing one
     /// as there  can be only one atlas.
@@ -206,7 +206,7 @@ template <typename Metadata>
 struct TileAttributes
 {
     TileLocation location;
-    ImageSize bitmapSize; // size of the bitmap inside the tile
+    vtbackend::ImageSize bitmapSize; // size of the bitmap inside the tile
     Metadata metadata;
 };
 
@@ -237,8 +237,8 @@ class TextureAtlas
 
     [[nodiscard]] AtlasBackend& backend() noexcept { return _backend; }
 
-    [[nodiscard]] ImageSize atlasSize() const noexcept { return _atlasSize; }
-    [[nodiscard]] ImageSize tileSize() const noexcept { return _atlasProperties.tileSize; }
+    [[nodiscard]] vtbackend::ImageSize atlasSize() const noexcept { return _atlasSize; }
+    [[nodiscard]] vtbackend::ImageSize tileSize() const noexcept { return _atlasProperties.tileSize; }
 
     // Tests in LRU-cache if the tile
     [[nodiscard]] constexpr bool contains(crispy::strong_hash const& id) const noexcept;
@@ -248,7 +248,10 @@ class TextureAtlas
     {
         TileCreateData(): bitmapFormat {}, bitmapSize {}, metadata {} {}
 
-        TileCreateData(Buffer bitmap, Format bitmapFormat, ImageSize bitmapSize, Metadata metadata):
+        TileCreateData(Buffer bitmap,
+                       Format bitmapFormat,
+                       vtbackend::ImageSize bitmapSize,
+                       Metadata metadata):
             bitmap(std::move(bitmap)),
             bitmapFormat(bitmapFormat),
             bitmapSize(bitmapSize),
@@ -258,7 +261,7 @@ class TextureAtlas
 
         Buffer bitmap; // RGBA bitmap data
         Format bitmapFormat;
-        ImageSize bitmapSize;
+        vtbackend::ImageSize bitmapSize;
         Metadata metadata;
     };
 
@@ -313,7 +316,7 @@ class TextureAtlas
 
     AtlasBackend& _backend;
     AtlasProperties _atlasProperties;
-    ImageSize _atlasSize;
+    vtbackend::ImageSize _atlasSize;
     uint32_t _tilesInX;
     uint32_t _tilesInY;
 
@@ -382,17 +385,17 @@ struct TileSliceIndex
 
 /// Constructs a container to conveniently iterate over sliced tiles of the given
 /// input `bitmapSize`.
-constexpr auto sliced(Width tileWidth, uint32_t offsetX, ImageSize bitmapSize)
+constexpr auto sliced(vtbackend::Width tileWidth, uint32_t offsetX, vtbackend::ImageSize bitmapSize)
 {
     struct Container
     {
-        Width tileWidth;
+        vtbackend::Width tileWidth;
         uint32_t offsetX;
-        ImageSize bitmapSize;
+        vtbackend::ImageSize bitmapSize;
 
         struct iterator // NOLINT(readability-identifier-naming)
         {
-            Width tileWidth;
+            vtbackend::Width tileWidth;
             TileSliceIndex value;
             constexpr TileSliceIndex const& operator*() const noexcept { return value; }
             constexpr bool operator==(iterator const& rhs) const noexcept
@@ -443,7 +446,7 @@ constexpr auto sliced(Width tileWidth, uint32_t offsetX, ImageSize bitmapSize)
 
 // {{{ implementation
 
-inline ImageSize computeAtlasSize(AtlasProperties const& atlasProperties) noexcept
+inline vtbackend::ImageSize computeAtlasSize(AtlasProperties const& atlasProperties) noexcept
 {
     using std::ceil;
     using std::sqrt;
@@ -452,9 +455,9 @@ inline ImageSize computeAtlasSize(AtlasProperties const& atlasProperties) noexce
     auto const totalTileCount = crispy::nextPowerOfTwo(1 + atlasProperties.tileCount.value + atlasProperties.directMappingCount);
     //auto const totalTileCount = atlasProperties.tileCount.value + atlasProperties.directMappingCount;
     auto const squareEdgeCount = static_cast<uint32_t>(ceil(sqrt(totalTileCount)));
-    auto const width = Width::cast_from(crispy::nextPowerOfTwo(static_cast<uint32_t>(
+    auto const width = vtbackend::Width::cast_from(crispy::nextPowerOfTwo(static_cast<uint32_t>(
         squareEdgeCount * unbox(atlasProperties.tileSize.width))));
-    auto const height = Height::cast_from(crispy::nextPowerOfTwo(static_cast<uint32_t>(
+    auto const height = vtbackend::Height::cast_from(crispy::nextPowerOfTwo(static_cast<uint32_t>(
         squareEdgeCount * unbox(atlasProperties.tileSize.height))));
     // clang-format on
 
@@ -466,7 +469,7 @@ inline ImageSize computeAtlasSize(AtlasProperties const& atlasProperties) noexce
     //            height,
     //            atlasProperties.tileSize);
 
-    return ImageSize { width, height };
+    return vtbackend::ImageSize { width, height };
 }
 
 template <typename Metadata>
@@ -674,40 +677,38 @@ void TextureAtlas<Metadata>::inspect(std::ostream& output) const
 
 // }}}
 
-} // namespace terminal::rasterizer::atlas
+} // namespace vtrasterizer::atlas
 
 // {{{ fmt support
 template <>
-struct fmt::formatter<terminal::rasterizer::atlas::Format>: formatter<std::string_view>
+struct fmt::formatter<vtrasterizer::atlas::Format>: formatter<std::string_view>
 {
-    auto format(terminal::rasterizer::atlas::Format value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::atlas::Format value, format_context& ctx) -> format_context::iterator
     {
         std::string_view name;
         switch (value)
         {
-            case terminal::rasterizer::atlas::Format::Red: name = "R"; break;
-            case terminal::rasterizer::atlas::Format::RGB: name = "RGB"; break;
-            case terminal::rasterizer::atlas::Format::RGBA: name = "RGBA"; break;
+            case vtrasterizer::atlas::Format::Red: name = "R"; break;
+            case vtrasterizer::atlas::Format::RGB: name = "RGB"; break;
+            case vtrasterizer::atlas::Format::RGBA: name = "RGBA"; break;
         }
         return formatter<std::string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::rasterizer::atlas::TileLocation>: fmt::formatter<std::string>
+struct fmt::formatter<vtrasterizer::atlas::TileLocation>: fmt::formatter<std::string>
 {
-    auto format(terminal::rasterizer::atlas::TileLocation value, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtrasterizer::atlas::TileLocation value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("Tile {}x+{}y", value.x.value, value.y.value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::rasterizer::atlas::RenderTile>: fmt::formatter<std::string>
+struct fmt::formatter<vtrasterizer::atlas::RenderTile>: fmt::formatter<std::string>
 {
-    auto format(terminal::rasterizer::atlas::RenderTile const& value, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtrasterizer::atlas::RenderTile const& value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format("RenderTile({}x + {}y, {})", value.x.value, value.y.value, value.tileLocation), ctx);
@@ -715,9 +716,9 @@ struct fmt::formatter<terminal::rasterizer::atlas::RenderTile>: fmt::formatter<s
 };
 
 template <>
-struct fmt::formatter<terminal::rasterizer::atlas::AtlasProperties>: fmt::formatter<std::string>
+struct fmt::formatter<vtrasterizer::atlas::AtlasProperties>: fmt::formatter<std::string>
 {
-    auto format(terminal::rasterizer::atlas::AtlasProperties const& value, format_context& ctx)
+    auto format(vtrasterizer::atlas::AtlasProperties const& value, format_context& ctx)
         -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("tile size {}, format {}, direct-mapped {}",

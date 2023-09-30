@@ -4,7 +4,7 @@
 #include <limits>
 #include <string_view>
 
-namespace terminal::ControlCode
+namespace vtbackend::ControlCode
 {
 
 enum class C0 : char
@@ -296,27 +296,27 @@ constexpr std::string_view to_string(C1_8bit code)
     }
 }
 
-} // namespace terminal::ControlCode
+} // namespace vtbackend::ControlCode
 
 namespace std
 {
 
 template <>
-struct numeric_limits<terminal::ControlCode::C0>
+struct numeric_limits<vtbackend::ControlCode::C0>
 {
     static constexpr size_t min() noexcept { return 0x00; }
     static constexpr size_t max() noexcept { return 0x1F; }
 };
 
 template <>
-struct numeric_limits<terminal::ControlCode::C1_7bit>
+struct numeric_limits<vtbackend::ControlCode::C1_7bit>
 {
     static constexpr size_t min() noexcept { return 0x28; }
     static constexpr size_t max() noexcept { return 0x5F; }
 };
 
 template <>
-struct numeric_limits<terminal::ControlCode::C1_8bit>
+struct numeric_limits<vtbackend::ControlCode::C1_8bit>
 {
     static constexpr size_t min() noexcept { return 0x80; }
     static constexpr size_t max() noexcept { return 0x9F; }

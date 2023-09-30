@@ -1,7 +1,7 @@
 #include <vtbackend/MatchModes.h>
 #include <vtbackend/Terminal.h>
 
-namespace terminal
+namespace vtbackend
 {
 
-} // namespace terminal
+} // namespace vtbackend

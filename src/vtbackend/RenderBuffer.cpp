@@ -5,7 +5,7 @@
 
 #include <mutex>
 
-namespace terminal
+namespace vtbackend
 {
 
 bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point now) noexcept
@@ -33,4 +33,4 @@ bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point now) 
     return true;
 }
 
-} // namespace terminal
+} // namespace vtbackend

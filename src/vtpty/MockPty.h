@@ -7,7 +7,7 @@
 
 #include <string>
 
-namespace terminal
+namespace vtpty
 {
 
 /// Mock-PTY, to be used in unit tests.
@@ -24,7 +24,7 @@ class MockPty: public Pty
     void wakeupReader() override;
     int write(std::string_view data) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override;
 
     void start() override;
     void close() override;
@@ -53,7 +53,7 @@ class MockPty: public Pty
 
   private:
     PageSize _pageSize;
-    std::optional<crispy::image_size> _pixelSize;
+    std::optional<ImageSize> _pixelSize;
     std::string _inputBuffer;
     std::string _outputBuffer;
     std::size_t _outputReadOffset = 0;
@@ -61,4 +61,4 @@ class MockPty: public Pty
     PtySlaveDummy _slave;
 };
 
-} // namespace terminal
+} // namespace vtpty

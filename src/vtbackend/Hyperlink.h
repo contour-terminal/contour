@@ -10,7 +10,7 @@
 
 #include <boxed-cpp/boxed.hpp>
 
-namespace terminal
+namespace vtbackend
 {
 
 enum class HyperlinkState
@@ -37,8 +37,8 @@ struct HyperlinkInfo
 
     [[nodiscard]] std::string_view host() const noexcept
     {
-        if (auto const i = uri.find("://"); i != terminal::URI::npos)
-            if (auto const j = uri.find('/', i + 3); j != terminal::URI::npos)
+        if (auto const i = uri.find("://"); i != vtbackend::URI::npos)
+            if (auto const j = uri.find('/', i + 3); j != vtbackend::URI::npos)
                 return std::string_view { uri.data() + i + 3, j - i - 3 };
 
         return "";
@@ -46,8 +46,8 @@ struct HyperlinkInfo
 
     [[nodiscard]] std::string_view path() const noexcept
     {
-        if (auto const i = uri.find("://"); i != terminal::URI::npos)
-            if (auto const j = uri.find('/', i + 3); j != terminal::URI::npos)
+        if (auto const i = uri.find("://"); i != vtbackend::URI::npos)
+            if (auto const j = uri.find('/', i + 3); j != vtbackend::URI::npos)
                 return std::string_view { uri.data() + j };
 
         return "";
@@ -55,7 +55,7 @@ struct HyperlinkInfo
 
     [[nodiscard]] std::string_view scheme() const noexcept
     {
-        if (auto const i = uri.find("://"); i != terminal::URI::npos)
+        if (auto const i = uri.find("://"); i != vtbackend::URI::npos)
             return std::string_view { uri.data(), i };
         else
             return {};
@@ -109,4 +109,4 @@ struct HyperlinkStorage
     }
 };
 
-} // namespace terminal
+} // namespace vtbackend

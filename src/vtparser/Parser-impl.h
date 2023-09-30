@@ -13,7 +13,7 @@
 
 #include <libunicode/utf8.h>
 
-namespace terminal::parser
+namespace vtparser
 {
 
 auto const inline vtTraceParserLog =
@@ -490,4 +490,4 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
     }
 }
 
-} // namespace terminal::parser
+} // namespace vtparser

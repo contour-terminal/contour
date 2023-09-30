@@ -12,7 +12,7 @@
 
 using namespace std;
 
-namespace terminal
+namespace vtbackend
 {
 
 using crispy::beginsWith;
@@ -628,10 +628,10 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset li
     matchSearchPattern(screenCell);
 }
 
-} // namespace terminal
+} // namespace vtbackend
 
 #include <vtbackend/cell/CompactCell.h>
-template class terminal::RenderBufferBuilder<terminal::CompactCell>;
+template class vtbackend::RenderBufferBuilder<vtbackend::CompactCell>;
 
 #include <vtbackend/cell/SimpleCell.h>
-template class terminal::RenderBufferBuilder<terminal::SimpleCell>;
+template class vtbackend::RenderBufferBuilder<vtbackend::SimpleCell>;

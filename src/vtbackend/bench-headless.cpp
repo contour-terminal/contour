@@ -7,6 +7,7 @@
 #include <vtpty/MockViewPty.h>
 
 #include <crispy/App.h>
+#include <crispy/BufferObject.h>
 #include <crispy/CLI.h>
 #include <crispy/utils.h>
 
@@ -14,10 +15,8 @@
 
 #include <iostream>
 #include <optional>
-#include <random>
 #include <thread>
 
-#include "crispy/BufferObject.h"
 #include <libtermbench/termbench.h>
 
 using namespace std;
@@ -163,11 +162,11 @@ class ContourHeadlessBench: public crispy::app
     static int showMetaInfo()
     {
         // Show any interesting meta information.
-        fmt::print("SimpleCell  : {} bytes\n", sizeof(terminal::SimpleCell));
-        fmt::print("CompactCell : {} bytes\n", sizeof(terminal::CompactCell));
-        fmt::print("CellExtra   : {} bytes\n", sizeof(terminal::CellExtra));
-        fmt::print("CellFlags   : {} bytes\n", sizeof(terminal::CellFlags));
-        fmt::print("Color       : {} bytes\n", sizeof(terminal::Color));
+        fmt::print("SimpleCell  : {} bytes\n", sizeof(vtbackend::SimpleCell));
+        fmt::print("CompactCell : {} bytes\n", sizeof(vtbackend::CompactCell));
+        fmt::print("CellExtra   : {} bytes\n", sizeof(vtbackend::CellExtra));
+        fmt::print("CellFlags   : {} bytes\n", sizeof(vtbackend::CellFlags));
+        fmt::print("Color       : {} bytes\n", sizeof(vtbackend::Color));
         return EXIT_SUCCESS;
     }
 
@@ -185,12 +184,12 @@ class ContourHeadlessBench: public crispy::app
 
     int benchGrid()
     {
-        auto pageSize = terminal::PageSize { terminal::LineCount(25), terminal::ColumnCount(80) };
+        auto pageSize = vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) };
         size_t const ptyReadBufferSize = 1'000'000;
-        auto maxHistoryLineCount = terminal::LineCount(4000);
-        auto vt = terminal::MockTerm<terminal::MockViewPty>(pageSize, maxHistoryLineCount, ptyReadBufferSize);
-        auto* pty = dynamic_cast<terminal::MockViewPty*>(&vt.terminal.device());
-        vt.terminal.setMode(terminal::DECMode::AutoWrap, true);
+        auto maxHistoryLineCount = vtbackend::LineCount(4000);
+        auto vt = vtbackend::MockTerm<vtpty::MockViewPty>(pageSize, maxHistoryLineCount, ptyReadBufferSize);
+        auto* pty = dynamic_cast<vtpty::MockViewPty*>(&vt.terminal.device());
+        vt.terminal.setMode(vtbackend::DECMode::AutoWrap, true);
 
         auto const rv = baseBenchmark(
             [&](char const* a, size_t b) -> bool {
@@ -214,11 +213,11 @@ class ContourHeadlessBench: public crispy::app
     static int benchPTY()
     {
         using std::chrono::steady_clock;
-        using terminal::ColumnCount;
-        using terminal::createPty;
-        using terminal::LineCount;
-        using terminal::PageSize;
-        using terminal::Pty;
+        using vtpty::ColumnCount;
+        using vtpty::createPty;
+        using vtpty::LineCount;
+        using vtpty::PageSize;
+        using vtpty::Pty;
 
         // Benchmark configuration
         // TODO make these values CLI configurable.
@@ -296,8 +295,8 @@ class ContourHeadlessBench: public crispy::app
 
     int benchParserOnly()
     {
-        auto po = terminal::NullParserEvents {};
-        auto parser = terminal::parser::Parser<terminal::ParserEvents> { po };
+        auto po = vtparser::NullParserEvents {};
+        auto parser = vtparser::Parser<vtparser::ParserEvents> { po };
         return baseBenchmark(
             [&](char const* a, size_t b) -> bool {
                 parser.parseFragment(string_view(a, b));

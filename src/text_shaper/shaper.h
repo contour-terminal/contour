@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/primitives.h>
+
 #include <text_shaper/font.h>
 
-#include <crispy/ImageSize.h>
 #include <crispy/logstore.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
@@ -54,8 +55,8 @@ constexpr size_t pixel_size(bitmap_format format) noexcept
 struct rasterized_glyph
 {
     glyph_index index;
-    crispy::image_size bitmapSize; // Glyph bitmap size in pixels.
-    crispy::point position;        // top-left position of the bitmap, relative to the basline's origin.
+    vtbackend::ImageSize bitmapSize; // Glyph bitmap size in pixels.
+    crispy::point position;          // top-left position of the bitmap, relative to the basline's origin.
     bitmap_format format;
     std::vector<uint8_t> bitmap;
 
@@ -67,7 +68,7 @@ struct rasterized_glyph
     }
 };
 
-std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::image_size boundingBox);
+std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::ImageSize boundingBox);
 
 struct glyph_position
 {

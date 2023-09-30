@@ -6,7 +6,7 @@
 
 #include <crispy/BufferObject.h>
 
-namespace terminal
+namespace vtpty
 {
 
 class MockViewPty: public Pty
@@ -24,7 +24,7 @@ class MockViewPty: public Pty
     void wakeupReader() override;
     int write(std::string_view data) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override;
 
     void start() override;
     void close() override;
@@ -35,11 +35,11 @@ class MockViewPty: public Pty
 
   private:
     PageSize _pageSize;
-    std::optional<crispy::image_size> _pixelSize;
+    std::optional<ImageSize> _pixelSize;
     std::string _inputBuffer;
     std::string_view _outputBuffer;
     bool _closed = false;
     PtySlaveDummy _slave;
 };
 
-} // namespace terminal
+} // namespace vtpty

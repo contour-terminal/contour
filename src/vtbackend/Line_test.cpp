@@ -8,7 +8,7 @@
 
 using namespace std;
 
-using namespace terminal;
+using namespace vtbackend;
 using namespace crispy;
 
 // Default cell type for testing.

@@ -21,7 +21,7 @@
 
 #include <libunicode/convert.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 enum class LineFlags : uint8_t
@@ -465,22 +465,22 @@ inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::inflatedBuffer() c
     return const_cast<Line<Cell>*>(this)->inflatedBuffer();
 }
 
-} // namespace terminal
+} // namespace vtbackend
 
 template <>
-struct fmt::formatter<terminal::LineFlags>: formatter<std::string>
+struct fmt::formatter<vtbackend::LineFlags>: formatter<std::string>
 {
-    auto format(const terminal::LineFlags flags, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::LineFlags flags, format_context& ctx) -> format_context::iterator
     {
-        static const std::array<std::pair<terminal::LineFlags, std::string_view>, 3> nameMap = {
-            std::pair { terminal::LineFlags::Wrappable, std::string_view("Wrappable") },
-            std::pair { terminal::LineFlags::Wrapped, std::string_view("Wrapped") },
-            std::pair { terminal::LineFlags::Marked, std::string_view("Marked") },
+        static const std::array<std::pair<vtbackend::LineFlags, std::string_view>, 3> nameMap = {
+            std::pair { vtbackend::LineFlags::Wrappable, std::string_view("Wrappable") },
+            std::pair { vtbackend::LineFlags::Wrapped, std::string_view("Wrapped") },
+            std::pair { vtbackend::LineFlags::Marked, std::string_view("Marked") },
         };
         std::string s;
         for (auto const& mapping: nameMap)
         {
-            if ((mapping.first & flags) != terminal::LineFlags::None)
+            if ((mapping.first & flags) != vtbackend::LineFlags::None)
             {
                 if (!s.empty())
                     s += ",";

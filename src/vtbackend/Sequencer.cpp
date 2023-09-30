@@ -15,7 +15,7 @@ using std::string_view;
 
 using namespace std::string_view_literals;
 
-namespace terminal
+namespace vtbackend
 {
 
 Sequencer::Sequencer(Terminal& terminal): _terminal { terminal }, _parameterBuilder { _sequence.parameters() }
@@ -112,7 +112,7 @@ void Sequencer::putOSC(char ch)
 
 void Sequencer::dispatchOSC()
 {
-    auto const [code, skipCount] = parser::extractCodePrefix(_sequence.intermediateCharacters());
+    auto const [code, skipCount] = vtparser::extractCodePrefix(_sequence.intermediateCharacters());
     _parameterBuilder.set(static_cast<Sequence::Parameter>(code));
     _sequence.intermediateCharacters().erase(0, skipCount);
     handleSequence();
@@ -163,4 +163,4 @@ void Sequencer::handleSequence()
     _terminal.sequenceHandler().processSequence(_sequence);
 }
 
-} // namespace terminal
+} // namespace vtbackend

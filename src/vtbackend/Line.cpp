@@ -11,7 +11,7 @@ using std::get;
 using std::holds_alternative;
 using std::min;
 
-namespace terminal
+namespace vtbackend
 {
 
 template <typename Cell>
@@ -222,10 +222,10 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 
     return columns;
 }
-} // end namespace terminal
+} // end namespace vtbackend
 
 #include <vtbackend/cell/CompactCell.h>
-template class terminal::Line<terminal::CompactCell>;
+template class vtbackend::Line<vtbackend::CompactCell>;
 
 #include <vtbackend/cell/SimpleCell.h>
-template class terminal::Line<terminal::SimpleCell>;
+template class vtbackend::Line<vtbackend::SimpleCell>;

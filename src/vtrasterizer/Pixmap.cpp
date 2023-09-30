@@ -8,7 +8,7 @@ using std::min;
 using std::move;
 using std::swap;
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 namespace
@@ -156,4 +156,4 @@ Pixmap& Pixmap::segment_bar(int which)
     return *this;
 }
 
-} // end namespace terminal::rasterizer
+} // end namespace vtrasterizer

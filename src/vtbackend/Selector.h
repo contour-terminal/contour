@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace terminal
+namespace vtbackend
 {
 
 struct SelectionHelper
@@ -179,13 +179,13 @@ void renderSelection(Selection const& selection, Renderer&& render)
 }
 // }}}
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmtlib custom formatter support
 template <>
-struct fmt::formatter<terminal::Selection::State>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::Selection::State>: formatter<std::string_view>
 {
-    using State = terminal::Selection::State;
+    using State = vtbackend::Selection::State;
     auto format(State state, format_context& ctx) -> format_context::iterator
     {
         string_view name;
@@ -200,18 +200,18 @@ struct fmt::formatter<terminal::Selection::State>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<terminal::Selection>: formatter<std::string>
+struct fmt::formatter<vtbackend::Selection>: formatter<std::string>
 {
-    auto format(const terminal::Selection& selector, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::Selection& selector, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format("{}({} from {} to {})",
-                        dynamic_cast<terminal::WordWiseSelection const*>(&selector)   ? "WordWiseSelection"
-                        : dynamic_cast<terminal::FullLineSelection const*>(&selector) ? "FullLineSelection"
-                        : dynamic_cast<terminal::RectangularSelection const*>(&selector)
+                        dynamic_cast<vtbackend::WordWiseSelection const*>(&selector)   ? "WordWiseSelection"
+                        : dynamic_cast<vtbackend::FullLineSelection const*>(&selector) ? "FullLineSelection"
+                        : dynamic_cast<vtbackend::RectangularSelection const*>(&selector)
                             ? "RectangularSelection"
-                        : dynamic_cast<terminal::LinearSelection const*>(&selector) ? "LinearSelection"
-                                                                                    : "Selection",
+                        : dynamic_cast<vtbackend::LinearSelection const*>(&selector) ? "LinearSelection"
+                                                                                     : "Selection",
                         selector.state(),
                         selector.from(),
                         selector.to()),

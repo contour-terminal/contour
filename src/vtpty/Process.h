@@ -16,7 +16,7 @@
 #include <variant>
 #include <vector>
 
-namespace terminal
+namespace vtpty
 {
 
 /**
@@ -97,7 +97,7 @@ class [[nodiscard]] Process: public Pty
     void wakeupReader() override { return pty().wakeupReader(); }
     [[nodiscard]] int write(std::string_view data) override { return pty().write(data); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
-    void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }
+    void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }
     // clang-format on
 
   private:
@@ -105,19 +105,19 @@ class [[nodiscard]] Process: public Pty
     std::unique_ptr<Private, void (*)(Private*)> _d;
 };
 
-} // namespace terminal
+} // namespace vtpty
 
 template <>
-struct fmt::formatter<terminal::Process::ExitStatus>
+struct fmt::formatter<vtpty::Process::ExitStatus>
 {
     static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(terminal::Process::ExitStatus const& status, format_context& ctx)
+    static auto format(vtpty::Process::ExitStatus const& status, format_context& ctx)
         -> format_context::iterator
     {
-        return std::visit(overloaded { [&](terminal::Process::NormalExit exit) {
+        return std::visit(overloaded { [&](vtpty::Process::NormalExit exit) {
                                           return fmt::format_to(ctx.out(), "{} (normal exit)", exit.exitCode);
                                       },
-                                       [&](terminal::Process::SignalExit exit) {
+                                       [&](vtpty::Process::SignalExit exit) {
                                            char buf[256];
 #if defined(_WIN32)
                                            strerror_s(buf, sizeof(buf), errno);

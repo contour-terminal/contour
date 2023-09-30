@@ -11,7 +11,7 @@
 
 #include "crispy/BufferObject.h"
 
-using namespace terminal;
+using namespace vtbackend;
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 using std::string;
@@ -124,7 +124,7 @@ constexpr Margin fullPageMargin(PageSize pageSize)
 Grid<Cell> setupGridForResizeTests2x3xN(LineCount maxHistoryLineCount)
 {
     auto constexpr ReflowOnResize = true;
-    auto constexpr PageSize = terminal::PageSize { LineCount(2), ColumnCount(3) };
+    auto constexpr PageSize = vtbackend::PageSize { LineCount(2), ColumnCount(3) };
 
     return setupGrid(PageSize, ReflowOnResize, maxHistoryLineCount, { "ABC", "DEF", "GHI", "JKL" });
 }
@@ -197,7 +197,7 @@ TEST_CASE("LogicalLines.iterator", "[grid]")
 {
     auto constexpr ReflowOnResize = true;
     auto constexpr MaxHistoryLineCount = LineCount(5);
-    auto constexpr PageSize = terminal::PageSize { LineCount(2), ColumnCount(3) };
+    auto constexpr PageSize = vtbackend::PageSize { LineCount(2), ColumnCount(3) };
 
     auto grid = setupGrid(PageSize,
                           ReflowOnResize,
@@ -267,7 +267,7 @@ TEST_CASE("LogicalLines.reverse_iterator", "[grid]")
 {
     auto constexpr ReflowOnResize = true;
     auto constexpr MaxHistoryLineCount = LineCount(5);
-    auto constexpr PageSize = terminal::PageSize { LineCount(2), ColumnCount(3) };
+    auto constexpr PageSize = vtbackend::PageSize { LineCount(2), ColumnCount(3) };
 
     auto grid = setupGrid(PageSize,
                           ReflowOnResize,

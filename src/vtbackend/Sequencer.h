@@ -19,7 +19,7 @@
 #include <libunicode/convert.h>
 #include <libunicode/utf8.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 // {{{ TODO: refactor me
@@ -196,35 +196,36 @@ inline void Sequencer::paramSubSeparator() noexcept
 }
 // }}}
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<terminal::RequestStatusString>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::RequestStatusString>: formatter<std::string_view>
 {
-    auto format(terminal::RequestStatusString value, format_context& ctx) noexcept -> format_context::iterator
+    auto format(vtbackend::RequestStatusString value, format_context& ctx) noexcept
+        -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::RequestStatusString::SGR: name = "SGR"; break;
-            case terminal::RequestStatusString::DECSCL: name = "DECSCL"; break;
-            case terminal::RequestStatusString::DECSCUSR: name = "DECSCUSR"; break;
-            case terminal::RequestStatusString::DECSCA: name = "DECSCA"; break;
-            case terminal::RequestStatusString::DECSTBM: name = "DECSTBM"; break;
-            case terminal::RequestStatusString::DECSLRM: name = "DECSLRM"; break;
-            case terminal::RequestStatusString::DECSLPP: name = "DECSLPP"; break;
-            case terminal::RequestStatusString::DECSCPP: name = "DECSCPP"; break;
-            case terminal::RequestStatusString::DECSNLS: name = "DECSNLS"; break;
-            case terminal::RequestStatusString::DECSASD: name = "DECSASD"; break;
-            case terminal::RequestStatusString::DECSSDT: name = "DECSSDT"; break;
+            case vtbackend::RequestStatusString::SGR: name = "SGR"; break;
+            case vtbackend::RequestStatusString::DECSCL: name = "DECSCL"; break;
+            case vtbackend::RequestStatusString::DECSCUSR: name = "DECSCUSR"; break;
+            case vtbackend::RequestStatusString::DECSCA: name = "DECSCA"; break;
+            case vtbackend::RequestStatusString::DECSTBM: name = "DECSTBM"; break;
+            case vtbackend::RequestStatusString::DECSLRM: name = "DECSLRM"; break;
+            case vtbackend::RequestStatusString::DECSLPP: name = "DECSLPP"; break;
+            case vtbackend::RequestStatusString::DECSCPP: name = "DECSCPP"; break;
+            case vtbackend::RequestStatusString::DECSNLS: name = "DECSNLS"; break;
+            case vtbackend::RequestStatusString::DECSASD: name = "DECSASD"; break;
+            case vtbackend::RequestStatusString::DECSSDT: name = "DECSSDT"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::Sequence>
+struct fmt::formatter<vtbackend::Sequence>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -232,7 +233,7 @@ struct fmt::formatter<terminal::Sequence>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::Sequence const& seq, FormatContext& ctx)
+    auto format(vtbackend::Sequence const& seq, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(), "{}", seq.text());
     }

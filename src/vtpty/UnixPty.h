@@ -18,7 +18,7 @@
     #include <pty.h>
 #endif
 
-namespace terminal
+namespace vtpty
 {
 
 class UnixPty final: public Pty
@@ -46,7 +46,7 @@ class UnixPty final: public Pty
         PtySlaveHandle slave;
     };
 
-    UnixPty(PageSize pageSize, std::optional<crispy::image_size> pixels);
+    UnixPty(PageSize pageSize, std::optional<ImageSize> pixels);
     ~UnixPty() override;
 
     PtySlave& slave() noexcept override;
@@ -61,7 +61,7 @@ class UnixPty final: public Pty
                                   size_t size) override;
     int write(std::string_view data) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override;
 
     UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
 
@@ -74,8 +74,8 @@ class UnixPty final: public Pty
     UnixPipe _stdoutFastPipe;
     crispy::read_selector _readSelector;
     PageSize _pageSize;
-    std::optional<crispy::image_size> _pixels;
+    std::optional<ImageSize> _pixels;
     std::unique_ptr<Slave> _slave;
 };
 
-} // namespace terminal
+} // namespace vtpty

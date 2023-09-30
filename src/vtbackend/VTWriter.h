@@ -14,7 +14,7 @@
 
 #include <libunicode/convert.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 // Serializes text and SGR attributes into a valid VT stream.
@@ -82,4 +82,4 @@ inline void VTWriter::crlf()
     write("\r\n");
 }
 
-} // namespace terminal
+} // namespace vtbackend

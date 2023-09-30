@@ -14,12 +14,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <mutex>
-#include <numeric>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 
 #if !defined(__FreeBSD__)
     #include <utmp.h>
@@ -48,7 +45,7 @@ using crispy::trimRight;
 
 namespace fs = std::filesystem;
 
-namespace terminal
+namespace vtpty
 {
 
 namespace
@@ -389,4 +386,4 @@ string Process::workingDirectory() const
 #endif
 }
 
-} // namespace terminal
+} // namespace vtpty

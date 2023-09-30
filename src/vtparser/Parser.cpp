@@ -9,7 +9,7 @@
 #include <map>
 #include <ostream>
 
-namespace terminal::parser
+namespace vtparser
 {
 
 using namespace std;
@@ -106,6 +106,6 @@ void parserTableDot(std::ostream& os) // {{{
 }
 // }}}
 
-} // namespace terminal::parser
+} // namespace vtparser
 
-template class terminal::parser::Parser<terminal::ParserEvents>;
+template class vtparser::Parser<vtparser::ParserEvents>;

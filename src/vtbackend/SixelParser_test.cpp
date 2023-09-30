@@ -8,7 +8,7 @@
 #include <array>
 #include <string_view>
 
-using namespace terminal;
+using namespace vtbackend;
 
 namespace
 {
@@ -359,6 +359,6 @@ TEST_CASE("SixelParser.vertical_cursor_advance", "[sixel]")
     sp.parseFragment("$-$-$-$-");
     sp.done();
 
-    REQUIRE(ib.size() == terminal::ImageSize { Width(1), Height(24) });
+    REQUIRE(ib.size() == vtbackend::ImageSize { Width(1), Height(24) });
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(24), ColumnOffset { 0 } });
 }

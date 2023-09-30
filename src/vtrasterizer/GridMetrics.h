@@ -8,7 +8,7 @@
 
 #include <fmt/format.h>
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 /**
@@ -37,8 +37,8 @@ struct PageMargin
 /// GridMetrics contains any valuable metrics required to calculate positions on the grid.
 struct GridMetrics
 {
-    PageSize pageSize;  // page size in column- and line count
-    ImageSize cellSize; // grid cell size in pixels
+    vtbackend::PageSize pageSize;  // page size in column- and line count
+    vtbackend::ImageSize cellSize; // grid cell size in pixels
 
     int baseline = 0; // glyph's baseline position relative to cell bottom.
 
@@ -57,19 +57,23 @@ struct GridMetrics
     /// @param line screen coordinate's line (between 0 and number of screen lines minus 1)
     ///
     /// @return 2D point into the grid cell's top left in drawing system coordinates.
-    constexpr crispy::point map(LineOffset line, ColumnOffset column) const noexcept
+    constexpr crispy::point map(vtbackend::LineOffset line, vtbackend::ColumnOffset column) const noexcept
     {
         return mapTopLeft(line, column);
     }
 
-    constexpr crispy::point map(CellLocation pos) const noexcept { return map(pos.line, pos.column); }
+    constexpr crispy::point map(vtbackend::CellLocation pos) const noexcept
+    {
+        return map(pos.line, pos.column);
+    }
 
-    constexpr crispy::point mapTopLeft(CellLocation pos) const noexcept
+    constexpr crispy::point mapTopLeft(vtbackend::CellLocation pos) const noexcept
     {
         return mapTopLeft(pos.line, pos.column);
     }
 
-    constexpr crispy::point mapTopLeft(LineOffset line, ColumnOffset column) const noexcept
+    constexpr crispy::point mapTopLeft(vtbackend::LineOffset line,
+                                       vtbackend::ColumnOffset column) const noexcept
     {
         auto const x = pageMargin.left + *column * cellSize.width.as<int>();
         auto const y = pageMargin.top + *line * cellSize.height.as<int>();
@@ -77,23 +81,23 @@ struct GridMetrics
         return { x, y };
     }
 
-    constexpr crispy::point mapBottomLeft(CellLocation pos) const noexcept
+    constexpr crispy::point mapBottomLeft(vtbackend::CellLocation pos) const noexcept
     {
         return mapBottomLeft(pos.line, pos.column);
     }
-    constexpr crispy::point mapBottomLeft(LineOffset line, ColumnOffset column) const noexcept
+    constexpr crispy::point mapBottomLeft(vtbackend::LineOffset line,
+                                          vtbackend::ColumnOffset column) const noexcept
     {
         return mapTopLeft(line + 1, column);
     }
 };
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer
 
 template <>
-struct fmt::formatter<terminal::rasterizer::GridMetrics>: formatter<std::string>
+struct fmt::formatter<vtrasterizer::GridMetrics>: formatter<std::string>
 {
-    auto format(terminal::rasterizer::GridMetrics const& v, fmt::format_context& ctx)
-        -> format_context::iterator
+    auto format(vtrasterizer::GridMetrics const& v, fmt::format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format(

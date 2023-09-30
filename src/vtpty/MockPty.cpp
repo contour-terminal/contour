@@ -9,7 +9,7 @@ using std::optional;
 using std::string_view;
 using std::tuple;
 
-namespace terminal
+namespace vtpty
 {
 
 MockPty::MockPty(PageSize size): _pageSize { size }
@@ -49,7 +49,7 @@ PageSize MockPty::pageSize() const noexcept
     return _pageSize;
 }
 
-void MockPty::resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels)
+void MockPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
     _pageSize = cells;
     _pixelSize = pixels;
@@ -70,4 +70,4 @@ bool MockPty::isClosed() const noexcept
     return _closed;
 }
 
-} // namespace terminal
+} // namespace vtpty

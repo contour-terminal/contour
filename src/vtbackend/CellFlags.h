@@ -8,7 +8,7 @@
 #include <string_view>
 #include <utility>
 
-namespace terminal
+namespace vtbackend
 {
 
 enum class CellFlags : uint32_t
@@ -75,32 +75,32 @@ constexpr bool operator!(CellFlags a) noexcept
     return static_cast<unsigned>(a) == 0;
 }
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{
 template <>
-struct fmt::formatter<terminal::CellFlags>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::CellFlags>: fmt::formatter<std::string>
 {
-    auto format(const terminal::CellFlags flags, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::CellFlags flags, format_context& ctx) -> format_context::iterator
     {
-        static const std::array<std::pair<terminal::CellFlags, std::string_view>, 17> nameMap = {
-            std::pair { terminal::CellFlags::Bold, std::string_view("Bold") },
-            std::pair { terminal::CellFlags::Faint, std::string_view("Faint") },
-            std::pair { terminal::CellFlags::Italic, std::string_view("Italic") },
-            std::pair { terminal::CellFlags::Underline, std::string_view("Underline") },
-            std::pair { terminal::CellFlags::Blinking, std::string_view("Blinking") },
-            std::pair { terminal::CellFlags::RapidBlinking, std::string_view("RapidBlinking") },
-            std::pair { terminal::CellFlags::Inverse, std::string_view("Inverse") },
-            std::pair { terminal::CellFlags::Hidden, std::string_view("Hidden") },
-            std::pair { terminal::CellFlags::CrossedOut, std::string_view("CrossedOut") },
-            std::pair { terminal::CellFlags::DoublyUnderlined, std::string_view("DoublyUnderlined") },
-            std::pair { terminal::CellFlags::CurlyUnderlined, std::string_view("CurlyUnderlined") },
-            std::pair { terminal::CellFlags::DottedUnderline, std::string_view("DottedUnderline") },
-            std::pair { terminal::CellFlags::DashedUnderline, std::string_view("DashedUnderline") },
-            std::pair { terminal::CellFlags::Framed, std::string_view("Framed") },
-            std::pair { terminal::CellFlags::Encircled, std::string_view("Encircled") },
-            std::pair { terminal::CellFlags::Overline, std::string_view("Overline") },
-            std::pair { terminal::CellFlags::CharacterProtected, std::string_view("CharacterProtected") },
+        static const std::array<std::pair<vtbackend::CellFlags, std::string_view>, 17> nameMap = {
+            std::pair { vtbackend::CellFlags::Bold, std::string_view("Bold") },
+            std::pair { vtbackend::CellFlags::Faint, std::string_view("Faint") },
+            std::pair { vtbackend::CellFlags::Italic, std::string_view("Italic") },
+            std::pair { vtbackend::CellFlags::Underline, std::string_view("Underline") },
+            std::pair { vtbackend::CellFlags::Blinking, std::string_view("Blinking") },
+            std::pair { vtbackend::CellFlags::RapidBlinking, std::string_view("RapidBlinking") },
+            std::pair { vtbackend::CellFlags::Inverse, std::string_view("Inverse") },
+            std::pair { vtbackend::CellFlags::Hidden, std::string_view("Hidden") },
+            std::pair { vtbackend::CellFlags::CrossedOut, std::string_view("CrossedOut") },
+            std::pair { vtbackend::CellFlags::DoublyUnderlined, std::string_view("DoublyUnderlined") },
+            std::pair { vtbackend::CellFlags::CurlyUnderlined, std::string_view("CurlyUnderlined") },
+            std::pair { vtbackend::CellFlags::DottedUnderline, std::string_view("DottedUnderline") },
+            std::pair { vtbackend::CellFlags::DashedUnderline, std::string_view("DashedUnderline") },
+            std::pair { vtbackend::CellFlags::Framed, std::string_view("Framed") },
+            std::pair { vtbackend::CellFlags::Encircled, std::string_view("Encircled") },
+            std::pair { vtbackend::CellFlags::Overline, std::string_view("Overline") },
+            std::pair { vtbackend::CellFlags::CharacterProtected, std::string_view("CharacterProtected") },
         };
         std::string s;
         for (auto const& mapping: nameMap)

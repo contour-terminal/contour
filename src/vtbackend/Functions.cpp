@@ -29,7 +29,7 @@ using std::string;
 using std::string_view;
 using std::stringstream;
 
-namespace terminal
+namespace vtbackend
 {
 
 FunctionDefinition const* select(FunctionSelector const& selector,
@@ -58,4 +58,4 @@ FunctionDefinition const* select(FunctionSelector const& selector,
     return nullptr;
 }
 
-} // namespace terminal
+} // namespace vtbackend

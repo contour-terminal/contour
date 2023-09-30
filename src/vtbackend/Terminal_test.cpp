@@ -21,15 +21,15 @@
 
 using namespace std;
 using namespace std::chrono_literals;
-using terminal::CellFlags;
-using terminal::ColumnCount;
-using terminal::ColumnOffset;
-using terminal::LineCount;
-using terminal::LineOffset;
-using terminal::MockTerm;
-using terminal::PageSize;
+using vtbackend::CellFlags;
+using vtbackend::ColumnCount;
+using vtbackend::ColumnOffset;
+using vtbackend::LineCount;
+using vtbackend::LineOffset;
+using vtbackend::MockTerm;
+using vtbackend::PageSize;
 
-using namespace terminal::test;
+using namespace vtbackend::test;
 
 // TODO: Test case posibilities:
 //
@@ -50,7 +50,7 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 {
     auto mc = MockTerm { ColumnCount { 6 }, LineCount { 4 } };
     auto& terminal = mc.terminal;
-    terminal.setCursorDisplay(terminal::CursorDisplay::Blink);
+    terminal.setCursorDisplay(vtbackend::CursorDisplay::Blink);
     auto constexpr BlinkInterval = chrono::milliseconds(500);
     terminal.setCursorBlinkingInterval(BlinkInterval);
 
@@ -79,7 +79,7 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 
         // type something into the terminal
         auto const clockAtInputEvent = clockBase + BlinkInterval + chrono::milliseconds(10);
-        terminal.sendCharPressEvent('x', terminal::Modifier {}, clockAtInputEvent);
+        terminal.sendCharPressEvent('x', vtbackend::Modifier {}, clockAtInputEvent);
 
         // now the cursor is visible before the interval has passed
         terminal.tick(clockBeforeTurn);
@@ -133,8 +133,8 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
             auto const colorDec = fmt::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
             INFO(fmt::format("at line {} column {}, flags {}", line, column, someCell.flags()));
             CHECK(colorDec == "171/178/191");
-            CHECK(someCell.isFlagEnabled(terminal::CellFlags::Bold));
-            CHECK(someCell.isFlagEnabled(terminal::CellFlags::Underline));
+            CHECK(someCell.isFlagEnabled(vtbackend::CellFlags::Bold));
+            CHECK(someCell.isFlagEnabled(vtbackend::CellFlags::Underline));
             // clang-format on
         }
 }
@@ -183,7 +183,7 @@ TEST_CASE("Terminal.CaptureScreenBuffer")
 
 TEST_CASE("Terminal.RIS", "[terminal]")
 {
-    using namespace terminal;
+    using namespace vtbackend;
 
     constexpr auto RIS = "\033c"sv;
 
@@ -229,7 +229,7 @@ TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
 
 TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 {
-    using namespace terminal;
+    using namespace vtbackend;
 
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
     auto& vtState = mc.terminal.state();
@@ -388,9 +388,9 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
     CHECK("12345\n67890\nABCDE\nabcde\nfghij" == trimmedTextScreenshot(mock));
 
     // Perform selection
-    using namespace terminal;
+    using namespace vtbackend;
     auto constexpr UiHandledHint = false;
-    auto constexpr PixelCoordinate = terminal::PixelCoordinate {};
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
 
     mock.terminal.tick(1s);
     mock.terminal.sendMouseMoveEvent(

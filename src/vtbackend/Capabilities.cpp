@@ -17,10 +17,10 @@ using std::string;
 using std::string_view;
 using std::u32string_view;
 
-using namespace terminal::capabilities::literals;
+using namespace vtbackend::capabilities::literals;
 using namespace std::string_view_literals;
 
-namespace terminal::capabilities
+namespace vtbackend::capabilities
 {
 
 template <typename T>
@@ -504,4 +504,4 @@ string StaticDatabase::terminfo() const
     return output.str();
 }
 
-} // namespace terminal::capabilities
+} // namespace vtbackend::capabilities

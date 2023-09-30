@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <array>
 #include <cerrno>
 
 #if defined(__APPLE__)
@@ -12,7 +13,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-namespace terminal::detail
+namespace vtpty::util
 {
 
 termios getTerminalSettings(int fd) noexcept;
@@ -90,14 +91,14 @@ inline void saveDup2(int a, int b) noexcept
 }
 // }}}
 
-} // namespace terminal::detail
+} // namespace vtpty::util
 
-namespace terminal
+namespace vtpty
 {
 
 struct UnixPipe
 {
-    int pfd[2];
+    std::array<int, 2> pfd;
 
     explicit UnixPipe(unsigned flags = 0);
     UnixPipe(UnixPipe&&) noexcept;
@@ -147,13 +148,13 @@ inline void UnixPipe::close()
 
 inline void UnixPipe::closeReader() noexcept
 {
-    detail::saveClose(&pfd[0]);
+    util::saveClose(&pfd[0]);
 }
 
 inline void UnixPipe::closeWriter() noexcept
 {
-    detail::saveClose(&pfd[1]);
+    util::saveClose(&pfd[1]);
 }
 // }}}
 
-} // namespace terminal
+} // namespace vtpty

@@ -41,18 +41,18 @@ using crispy::point;
 using crispy::size;
 using crispy::Zero;
 
-using terminal::Height;
-using terminal::ImageSize;
-using terminal::PageSize;
-using terminal::PixelCoordinate;
-using terminal::Width;
+using vtbackend::Height;
+using vtbackend::ImageSize;
+using vtbackend::PageSize;
+using vtbackend::PixelCoordinate;
+using vtbackend::Width;
 
 namespace contour
 {
 
 namespace
 {
-    terminal::CellLocation makeMouseCellLocation(int x, int y, TerminalSession const& session) noexcept
+    vtbackend::CellLocation makeMouseCellLocation(int x, int y, TerminalSession const& session) noexcept
     {
         auto constexpr MarginTop = 0;
         auto constexpr MarginLeft = 0;
@@ -64,10 +64,10 @@ namespace
         auto const sx = int(double(x) * dpr);
         auto const sy = int(double(y) * dpr);
 
-        auto const row =
-            terminal::LineOffset(clamp((sy - MarginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
+        auto const row = vtbackend::LineOffset(
+            clamp((sy - MarginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
 
-        auto const col = terminal::ColumnOffset(
+        auto const col = vtbackend::ColumnOffset(
             clamp((sx - MarginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
 
         return { row, col };
@@ -145,8 +145,8 @@ namespace
 
 bool sendKeyEvent(QKeyEvent* event, TerminalSession& session)
 {
-    using terminal::Key;
-    using terminal::Modifier;
+    using vtbackend::Key;
+    using vtbackend::Modifier;
 
     auto const now = steady_clock::now();
 
@@ -270,7 +270,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     if (yDelta)
     {
         auto const modifier = makeModifier(event->modifiers());
-        auto const button = yDelta > 0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
+        auto const button = yDelta > 0 ? vtbackend::MouseButton::WheelUp : vtbackend::MouseButton::WheelDown;
         auto const pixelPosition = makeMousePixelPosition(event, session.contentScale());
 
         session.sendMousePressEvent(modifier, button, pixelPosition);
@@ -347,7 +347,7 @@ void spawnNewTerminal(string const& programPath,
     QProcess::startDetached(program, args);
 }
 
-terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& renderer)
+vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer)
 {
     auto const fontByStyle = [&](text::font_weight weight,
                                  text::font_slant slant) -> text::font_description const& {
@@ -378,9 +378,7 @@ terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& renderer)
              renderer.fontDescriptions().emoji.toPattern() };
 }
 
-terminal::rasterizer::PageMargin computeMargin(ImageSize cellSize,
-                                               PageSize charCells,
-                                               ImageSize pixels) noexcept
+vtrasterizer::PageMargin computeMargin(ImageSize cellSize, PageSize charCells, ImageSize pixels) noexcept
 {
     auto const usedHeight = unbox(charCells.lines) * unbox(cellSize.height);
     auto const freeHeight = unbox(pixels.height) - usedHeight;
@@ -394,8 +392,7 @@ terminal::rasterizer::PageMargin computeMargin(ImageSize cellSize,
     return { LeftMargin, topMargin, static_cast<int>(bottomMargin) };
 }
 
-terminal::rasterizer::FontDescriptions sanitizeFontDescription(terminal::rasterizer::FontDescriptions fonts,
-                                                               text::DPI dpi)
+vtrasterizer::FontDescriptions sanitizeFontDescription(vtrasterizer::FontDescriptions fonts, text::DPI dpi)
 {
     if (fonts.dpi.x <= 0 || fonts.dpi.y <= 0)
         fonts.dpi = dpi;
@@ -408,8 +405,8 @@ bool applyFontDescription(ImageSize cellSize,
                           PageSize pageSize,
                           ImageSize pixelSize,
                           text::DPI dpi,
-                          terminal::rasterizer::Renderer& renderer,
-                          terminal::rasterizer::FontDescriptions fontDescriptions)
+                          vtrasterizer::Renderer& renderer,
+                          vtrasterizer::FontDescriptions fontDescriptions)
 {
     if (renderer.fontDescriptions() == fontDescriptions)
         return false;
@@ -423,16 +420,16 @@ bool applyFontDescription(ImageSize cellSize,
     return true;
 }
 
-void applyResize(terminal::ImageSize newPixelSize,
+void applyResize(vtbackend::ImageSize newPixelSize,
                  TerminalSession& session,
-                 terminal::rasterizer::Renderer& renderer)
+                 vtrasterizer::Renderer& renderer)
 {
     if (*newPixelSize.width == 0 || *newPixelSize.height == 0)
         return;
 
     auto const newPageSize = pageSizeForPixels(newPixelSize, renderer.gridMetrics().cellSize);
-    terminal::Terminal& terminal = session.terminal();
-    terminal::ImageSize cellSize = renderer.gridMetrics().cellSize;
+    vtbackend::Terminal& terminal = session.terminal();
+    vtbackend::ImageSize cellSize = renderer.gridMetrics().cellSize;
 
     Require(renderer.hasRenderTarget());
     renderer.renderTarget().setRenderSize(newPixelSize);

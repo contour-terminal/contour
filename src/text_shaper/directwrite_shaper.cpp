@@ -509,8 +509,8 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
     RECT textureBounds {};
     glyphAnalysis->GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1, &textureBounds);
 
-    output.bitmapSize.width = crispy::width(textureBounds.right - textureBounds.left);
-    output.bitmapSize.height = crispy::height(textureBounds.bottom - textureBounds.top);
+    output.bitmapSize.width = vtbackend::Width(textureBounds.right - textureBounds.left);
+    output.bitmapSize.height = vtbackend::Height(textureBounds.bottom - textureBounds.top);
     output.position.x = textureBounds.left;
     output.position.y = -textureBounds.top;
 

@@ -11,7 +11,6 @@
 #include <array>
 #include <cstdint>
 #include <functional>
-#include <iterator>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -19,7 +18,7 @@
 #include <libunicode/convert.h>
 #include <libunicode/scan.h>
 
-namespace terminal::parser
+namespace vtparser
 {
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -443,23 +442,23 @@ constexpr std::string_view to_string(Action action)
     return "?";
 }
 
-} // namespace terminal::parser
+} // namespace vtparser
 
 namespace std
 {
 template <>
-struct numeric_limits<terminal::parser::State>
+struct numeric_limits<vtparser::State>
 {
-    using State = terminal::parser::State;
+    using State = vtparser::State;
     constexpr static State min() noexcept { return State::Ground; } // skip Undefined
     constexpr static State max() noexcept { return State::IgnoreUntilST; }
     constexpr static size_t size() noexcept { return 17; }
 };
 
 template <>
-struct numeric_limits<terminal::parser::Action>
+struct numeric_limits<vtparser::Action>
 {
-    using Action = terminal::parser::Action;
+    using Action = vtparser::Action;
     constexpr static Action min() noexcept { return Action::Ignore; } // skip Undefined
     constexpr static Action max() noexcept { return Action::OSC_End; }
     constexpr static size_t size() noexcept { return 19; }
@@ -468,18 +467,18 @@ struct numeric_limits<terminal::parser::Action>
 
 // {{{ fmtlib custom formatter specializations
 template <>
-struct fmt::formatter<terminal::parser::State>: formatter<std::string_view>
+struct fmt::formatter<vtparser::State>: formatter<std::string_view>
 {
-    auto format(terminal::parser::State state, format_context& ctx) -> format_context::iterator
+    auto format(vtparser::State state, format_context& ctx) -> format_context::iterator
     {
-        return formatter<std::string_view>::format(terminal::parser::to_string(state), ctx);
+        return formatter<std::string_view>::format(vtparser::to_string(state), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::parser::ActionClass>: formatter<std::string_view>
+struct fmt::formatter<vtparser::ActionClass>: formatter<std::string_view>
 {
-    auto format(terminal::parser::ActionClass value, format_context& ctx) -> format_context::iterator
+    auto format(vtparser::ActionClass value, format_context& ctx) -> format_context::iterator
     {
         auto constexpr Mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
         return formatter<std::string_view>::format(Mappings.at(static_cast<unsigned>(value)), ctx);
@@ -487,16 +486,16 @@ struct fmt::formatter<terminal::parser::ActionClass>: formatter<std::string_view
 };
 
 template <>
-struct fmt::formatter<terminal::parser::Action>: formatter<std::string_view>
+struct fmt::formatter<vtparser::Action>: formatter<std::string_view>
 {
-    auto format(terminal::parser::Action value, format_context& ctx) -> format_context::iterator
+    auto format(vtparser::Action value, format_context& ctx) -> format_context::iterator
     {
-        return formatter<std::string_view>::format(terminal::parser::to_string(value), ctx);
+        return formatter<std::string_view>::format(vtparser::to_string(value), ctx);
     }
 };
 // }}}
 
-namespace terminal::parser
+namespace vtparser
 {
 
 /**
@@ -584,6 +583,6 @@ inline std::pair<int, size_t> extractCodePrefix(T const& data) noexcept
 
 void parserTableDot(std::ostream& os);
 
-} // end namespace terminal::parser
+} // end namespace vtparser
 
 #include <vtparser/Parser-impl.h>

@@ -16,7 +16,7 @@
 
 #include <boxed-cpp/boxed.hpp>
 
-namespace terminal
+namespace vtbackend
 {
 
 class SequenceParameterBuilder;
@@ -365,4 +365,4 @@ class SequenceHandler
     virtual void writeTextEnd() = 0;
 };
 
-} // namespace terminal
+} // namespace vtbackend

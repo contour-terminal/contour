@@ -3,7 +3,7 @@
 
 #include <catch2/catch.hpp>
 
-using namespace terminal;
+using namespace vtbackend;
 
 TEST_CASE("Color.Bright", "[Color]")
 {

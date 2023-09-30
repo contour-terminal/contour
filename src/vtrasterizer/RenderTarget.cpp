@@ -3,8 +3,8 @@
 
 using namespace crispy;
 using namespace std;
-using namespace terminal::rasterizer;
-using namespace terminal;
+using namespace vtrasterizer;
+using namespace vtbackend;
 
 Renderable::Renderable(GridMetrics const& gridMetrics): _gridMetrics { gridMetrics }
 {

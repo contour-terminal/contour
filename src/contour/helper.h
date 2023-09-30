@@ -22,7 +22,7 @@
 #include <string>
 #include <string_view>
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 class Renderer;
 }
@@ -97,9 +97,9 @@ constexpr inline char32_t makeChar(Qt::Key key, Qt::KeyboardModifiers mods)
     return 0;
 }
 
-constexpr inline terminal::Modifier makeModifier(Qt::KeyboardModifiers qtModifiers)
+constexpr inline vtbackend::Modifier makeModifier(Qt::KeyboardModifiers qtModifiers)
 {
-    using terminal::Modifier;
+    using vtbackend::Modifier;
 
     Modifier modifiers {};
 
@@ -125,15 +125,15 @@ constexpr inline terminal::Modifier makeModifier(Qt::KeyboardModifiers qtModifie
     return modifiers;
 }
 
-constexpr inline terminal::MouseButton makeMouseButton(Qt::MouseButton button)
+constexpr inline vtbackend::MouseButton makeMouseButton(Qt::MouseButton button)
 {
     switch (button)
     {
-        case Qt::MouseButton::RightButton: return terminal::MouseButton::Right;
-        case Qt::MiddleButton: return terminal::MouseButton::Middle;
+        case Qt::MouseButton::RightButton: return vtbackend::MouseButton::Right;
+        case Qt::MiddleButton: return vtbackend::MouseButton::Middle;
         case Qt::LeftButton: [[fallthrough]];
         default: // d'oh
-            return terminal::MouseButton::Left;
+            return vtbackend::MouseButton::Left;
     }
 }
 
@@ -150,32 +150,32 @@ void spawnNewTerminal(std::string const& programPath,
                       std::string const& profileName,
                       std::string const& cwdUrl);
 
-terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& renderer);
+vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer);
 
-terminal::rasterizer::PageMargin computeMargin(terminal::ImageSize cellSize,
-                                               terminal::PageSize charCells,
-                                               terminal::ImageSize pixels) noexcept;
+vtrasterizer::PageMargin computeMargin(vtbackend::ImageSize cellSize,
+                                       vtbackend::PageSize charCells,
+                                       vtbackend::ImageSize pixels) noexcept;
 
-terminal::rasterizer::FontDescriptions sanitizeFontDescription(terminal::rasterizer::FontDescriptions fonts,
-                                                               text::DPI screenDPI);
+vtrasterizer::FontDescriptions sanitizeFontDescription(vtrasterizer::FontDescriptions fonts,
+                                                       text::DPI screenDPI);
 
-constexpr terminal::PageSize pageSizeForPixels(crispy::image_size viewSize,
-                                               crispy::image_size cellSize) noexcept
+constexpr vtbackend::PageSize pageSizeForPixels(vtbackend::ImageSize viewSize,
+                                                vtbackend::ImageSize cellSize) noexcept
 {
-    return terminal::PageSize { boxed_cast<terminal::LineCount>((viewSize / cellSize).height),
-                                boxed_cast<terminal::ColumnCount>((viewSize / cellSize).width) };
+    return vtbackend::PageSize { boxed_cast<vtbackend::LineCount>((viewSize / cellSize).height),
+                                 boxed_cast<vtbackend::ColumnCount>((viewSize / cellSize).width) };
 }
 
-void applyResize(terminal::ImageSize newPixelSize,
+void applyResize(vtbackend::ImageSize newPixelSize,
                  TerminalSession& session,
-                 terminal::rasterizer::Renderer& renderer);
+                 vtrasterizer::Renderer& renderer);
 
-bool applyFontDescription(terminal::ImageSize cellSize,
-                          terminal::PageSize pageSize,
-                          terminal::ImageSize pixelSize,
+bool applyFontDescription(vtbackend::ImageSize cellSize,
+                          vtbackend::PageSize pageSize,
+                          vtbackend::ImageSize pixelSize,
                           text::DPI dpi,
-                          terminal::rasterizer::Renderer& renderer,
-                          terminal::rasterizer::FontDescriptions fontDescriptions);
+                          vtrasterizer::Renderer& renderer,
+                          vtrasterizer::FontDescriptions fontDescriptions);
 
 constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape shape)
 {

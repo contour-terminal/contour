@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-namespace terminal
+namespace vtbackend
 {
 
 enum class FunctionCategory : uint8_t
@@ -788,22 +788,25 @@ inline FunctionDefinition const* selectOSCommand(int id,
     return select({ FunctionCategory::OSC, 0, id, 0, 0 }, availableDefinition);
 }
 
-} // namespace terminal
+} // namespace vtbackend
 
 template <>
-struct std::hash<terminal::FunctionDefinition>
+struct std::hash<vtbackend::FunctionDefinition>
 {
     /// This is actually perfect hashing.
-    constexpr uint32_t operator()(terminal::FunctionDefinition const& fun) const noexcept { return fun.id(); }
+    constexpr uint32_t operator()(vtbackend::FunctionDefinition const& fun) const noexcept
+    {
+        return fun.id();
+    }
 };
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<terminal::FunctionCategory>: fmt::formatter<std::string_view>
+struct fmt::formatter<vtbackend::FunctionCategory>: fmt::formatter<std::string_view>
 {
-    auto format(const terminal::FunctionCategory value, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::FunctionCategory value, format_context& ctx) -> format_context::iterator
     {
-        using terminal::FunctionCategory;
+        using vtbackend::FunctionCategory;
         string_view name;
         switch (value)
         {
@@ -833,27 +836,27 @@ struct fmt::formatter<terminal::FunctionCategory>: fmt::formatter<std::string_vi
 };
 
 template <>
-struct fmt::formatter<terminal::FunctionDefinition>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::FunctionDefinition>: fmt::formatter<std::string>
 {
-    auto format(const terminal::FunctionDefinition f, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::FunctionDefinition f, format_context& ctx) -> format_context::iterator
     {
         std::string value;
         switch (f.category)
         {
-            case terminal::FunctionCategory::C0:
+            case vtbackend::FunctionCategory::C0:
                 value = fmt::format("{}", crispy::escape(static_cast<uint8_t>(f.finalSymbol)));
                 break;
-            case terminal::FunctionCategory::ESC:
+            case vtbackend::FunctionCategory::ESC:
                 value = fmt::format("{} {} {}",
                                     f.category,
                                     f.intermediate ? f.intermediate : ' ',
                                     f.finalSymbol ? f.finalSymbol : ' ');
                 break;
-            case terminal::FunctionCategory::OSC:
+            case vtbackend::FunctionCategory::OSC:
                 value = fmt::format("{} {}", f.category, f.maximumParameters);
                 break;
-            case terminal::FunctionCategory::DCS:
-            case terminal::FunctionCategory::CSI:
+            case vtbackend::FunctionCategory::DCS:
+            case vtbackend::FunctionCategory::CSI:
                 if (f.minimumParameters == f.maximumParameters)
                     value = fmt::format("{} {} {}    {} {}",
                                         f.category,
@@ -861,7 +864,7 @@ struct fmt::formatter<terminal::FunctionDefinition>: fmt::formatter<std::string>
                                         f.minimumParameters,
                                         f.intermediate ? f.intermediate : ' ',
                                         f.finalSymbol);
-                else if (f.maximumParameters == terminal::ArgsMax)
+                else if (f.maximumParameters == vtbackend::ArgsMax)
                     value = fmt::format("{} {} {}..  {} {}",
                                         f.category,
                                         f.leader ? f.leader : ' ',
@@ -883,15 +886,15 @@ struct fmt::formatter<terminal::FunctionDefinition>: fmt::formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<terminal::FunctionSelector>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::FunctionSelector>: fmt::formatter<std::string>
 {
-    auto format(const terminal::FunctionSelector f, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::FunctionSelector f, format_context& ctx) -> format_context::iterator
     {
         std::string value;
         // clang-format off
         switch (f.category)
         {
-            case terminal::FunctionCategory::OSC:
+            case vtbackend::FunctionCategory::OSC:
                 value = fmt::format("{} {}", f.category, f.argc);
                 break;
             default:

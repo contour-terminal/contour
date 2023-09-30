@@ -56,9 +56,9 @@ enum class SelectionAction
 };
 
 using ActionList = std::vector<actions::Action>;
-using KeyInputMapping = terminal::InputBinding<terminal::Key, ActionList>;
-using CharInputMapping = terminal::InputBinding<char32_t, ActionList>;
-using MouseInputMapping = terminal::InputBinding<terminal::MouseButton, ActionList>;
+using KeyInputMapping = vtbackend::InputBinding<vtbackend::Key, ActionList>;
+using CharInputMapping = vtbackend::InputBinding<char32_t, ActionList>;
+using MouseInputMapping = vtbackend::InputBinding<vtbackend::MouseButton, ActionList>;
 
 struct InputMappings
 {
@@ -70,10 +70,10 @@ struct InputMappings
 namespace helper
 {
     inline bool testMatchMode(uint8_t actualModeFlags,
-                              terminal::MatchModes expected,
-                              terminal::MatchModes::Flag testFlag)
+                              vtbackend::MatchModes expected,
+                              vtbackend::MatchModes::Flag testFlag)
     {
-        using MatchModes = terminal::MatchModes;
+        using MatchModes = vtbackend::MatchModes;
         switch (expected.status(testFlag))
         {
             case MatchModes::Status::Enabled:
@@ -89,9 +89,9 @@ namespace helper
         return true;
     }
 
-    inline bool testMatchMode(uint8_t actualModeFlags, terminal::MatchModes expected)
+    inline bool testMatchMode(uint8_t actualModeFlags, vtbackend::MatchModes expected)
     {
-        using Flag = terminal::MatchModes::Flag;
+        using Flag = vtbackend::MatchModes::Flag;
         return testMatchMode(actualModeFlags, expected, Flag::AlternateScreen)
                && testMatchMode(actualModeFlags, expected, Flag::AppCursor)
                && testMatchMode(actualModeFlags, expected, Flag::AppKeypad)
@@ -104,12 +104,12 @@ namespace helper
 
 template <typename Input>
 std::vector<actions::Action> const* apply(
-    std::vector<terminal::InputBinding<Input, ActionList>> const& mappings,
+    std::vector<vtbackend::InputBinding<Input, ActionList>> const& mappings,
     Input input,
-    terminal::Modifier modifier,
+    vtbackend::Modifier modifier,
     uint8_t actualModeFlags)
 {
-    for (terminal::InputBinding<Input, ActionList> const& mapping: mappings)
+    for (vtbackend::InputBinding<Input, ActionList> const& mapping: mappings)
     {
         if (mapping.modifier == modifier && mapping.input == input
             && helper::testMatchMode(actualModeFlags, mapping.modes))
@@ -122,8 +122,8 @@ std::vector<actions::Action> const* apply(
 
 struct CursorConfig
 {
-    terminal::CursorShape cursorShape { terminal::CursorShape::Block };
-    terminal::CursorDisplay cursorDisplay { terminal::CursorDisplay::Steady };
+    vtbackend::CursorShape cursorShape { vtbackend::CursorShape::Block };
+    vtbackend::CursorDisplay cursorDisplay { vtbackend::CursorDisplay::Steady };
     std::chrono::milliseconds cursorBlinkInterval;
 };
 
@@ -134,31 +134,31 @@ struct InputModeConfig
 
 struct TerminalProfile
 {
-    terminal::Process::ExecInfo shell;
+    vtpty::Process::ExecInfo shell;
     bool maximized = false;
     bool fullscreen = false;
     bool show_title_bar = true;
     bool sizeIndicatorOnResize = true;
     bool mouse_hide_while_typing = true;
-    terminal::RefreshRate refreshRate = { 0.0 }; // 0=auto
-    terminal::LineOffset copyLastMarkRangeOffset = terminal::LineOffset(0);
+    vtbackend::RefreshRate refreshRate = { 0.0 }; // 0=auto
+    vtbackend::LineOffset copyLastMarkRangeOffset = vtbackend::LineOffset(0);
 
     std::string wmClass;
 
-    terminal::PageSize terminalSize = { terminal::LineCount(10), terminal::ColumnCount(40) };
-    terminal::VTType terminalId = terminal::VTType::VT525;
+    vtbackend::PageSize terminalSize = { vtbackend::LineCount(10), vtbackend::ColumnCount(40) };
+    vtbackend::VTType terminalId = vtbackend::VTType::VT525;
 
-    terminal::MaxHistoryLineCount maxHistoryLineCount;
-    terminal::LineCount historyScrollMultiplier = terminal::LineCount(3);
+    vtbackend::MaxHistoryLineCount maxHistoryLineCount;
+    vtbackend::LineCount historyScrollMultiplier = vtbackend::LineCount(3);
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
-    terminal::StatusDisplayPosition statusDisplayPosition = terminal::StatusDisplayPosition::Bottom;
+    vtbackend::StatusDisplayPosition statusDisplayPosition = vtbackend::StatusDisplayPosition::Bottom;
     bool syncWindowTitleWithHostWritableStatusDisplay = false;
     bool hideScrollbarInAltScreen = true;
     bool optionKeyAsAlt = false;
 
     bool autoScrollOnUpdate;
 
-    terminal::rasterizer::FontDescriptions fonts;
+    vtrasterizer::FontDescriptions fonts;
 
     struct
     {
@@ -168,9 +168,9 @@ struct TerminalProfile
     } permissions;
 
     bool drawBoldTextWithBrightColors = false;
-    terminal::ColorPalette colors {};
+    vtbackend::ColorPalette colors {};
 
-    terminal::LineCount modalCursorScrollOff { 8 };
+    vtbackend::LineCount modalCursorScrollOff { 8 };
 
     struct
     {
@@ -181,24 +181,24 @@ struct TerminalProfile
     std::chrono::milliseconds smoothLineScrolling { 100 };
     std::chrono::milliseconds highlightTimeout { 300 };
     bool highlightDoubleClickedWord = true;
-    terminal::StatusDisplayType initialStatusDisplayType = terminal::StatusDisplayType::None;
+    vtbackend::StatusDisplayType initialStatusDisplayType = vtbackend::StatusDisplayType::None;
 
-    terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
-    bool backgroundBlur;                 // On Windows 10, this will enable Acrylic Backdrop.
+    vtbackend::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
+    bool backgroundBlur;                  // On Windows 10, this will enable Acrylic Backdrop.
 
     std::optional<display::ShaderConfig> backgroundShader;
     std::optional<display::ShaderConfig> textShader;
 
     struct
     {
-        terminal::rasterizer::Decorator normal = terminal::rasterizer::Decorator::DottedUnderline;
-        terminal::rasterizer::Decorator hover = terminal::rasterizer::Decorator::Underline;
+        vtrasterizer::Decorator normal = vtrasterizer::Decorator::DottedUnderline;
+        vtrasterizer::Decorator hover = vtrasterizer::Decorator::Underline;
     } hyperlinkDecoration;
 
     std::string bell = "default";
 
     // Set of DEC modes that are frozen and cannot be changed by the application.
-    std::map<terminal::DECMode, bool> frozenModes;
+    std::map<vtbackend::DECMode, bool> frozenModes;
 };
 
 enum class RenderingBackend
@@ -251,7 +251,7 @@ struct Config
 
     bool reflowOnResize = true;
 
-    std::unordered_map<std::string, terminal::ColorPalette> colorschemes;
+    std::unordered_map<std::string, vtbackend::ColorPalette> colorschemes;
     std::unordered_map<std::string, TerminalProfile> profiles;
     std::string defaultProfileName;
 
@@ -288,9 +288,9 @@ struct Config
 
     // selection
     std::string wordDelimiters;
-    terminal::Modifier bypassMouseProtocolModifier = terminal::Modifier::Shift;
+    vtbackend::Modifier bypassMouseProtocolModifier = vtbackend::Modifier::Shift;
     SelectionAction onMouseSelection = SelectionAction::CopyToSelectionClipboard;
-    terminal::Modifier mouseBlockSelectionModifier = terminal::Modifier::Control;
+    vtbackend::Modifier mouseBlockSelectionModifier = vtbackend::Modifier::Control;
 
     // input mapping
     InputMappings inputMappings;
@@ -299,7 +299,7 @@ struct Config
     std::shared_ptr<logstore::sink> loggingSink;
 
     bool sixelScrolling = true;
-    terminal::ImageSize maxImageSize = {}; // default to runtime system screen size.
+    vtbackend::ImageSize maxImageSize = {}; // default to runtime system screen size.
     unsigned maxImageColorRegisters = 4096;
 
     std::set<std::string> experimentalFeatures;

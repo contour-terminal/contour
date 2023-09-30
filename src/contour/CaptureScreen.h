@@ -15,7 +15,7 @@ struct CaptureSettings
     double timeout = 1.0f;     // -t <timeout in seconds>
     std::string outputFile;    // -o <outputfile>
     int verbosityLevel = 0;    // -v, -q (XXX intentionally not parsed currently!)
-    terminal::LineCount lineCount = terminal::LineCount { 0 }; // (use terminal default)
+    vtbackend::LineCount lineCount = vtbackend::LineCount { 0 }; // (use terminal default)
 };
 
 bool captureScreen(CaptureSettings const& settings);

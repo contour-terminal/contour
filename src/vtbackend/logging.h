@@ -3,7 +3,7 @@
 
 #include <crispy/logstore.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 auto const inline terminalLog = logstore::category("vt.session", "Logs general terminal events.");
@@ -19,4 +19,4 @@ auto const inline vtTraceSequenceLog = logstore::category("vt.trace.sequence", "
 
 auto const inline renderBufferLog = logstore::category("vt.renderbuffer", "Render Buffer Objects");
 
-} // namespace terminal
+} // namespace vtbackend

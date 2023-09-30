@@ -11,20 +11,18 @@
 
 #include <crispy/size.h>
 
-#include <array>
-#include <memory>
 #include <optional>
 #include <vector>
 
-#include "crispy/ImageSize.h"
-
-namespace terminal
+namespace vtbackend
 {
 struct BackgroundImage;
 }
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
+
+using ImageSize = vtbackend::ImageSize;
 
 /**
  * Contains the read-out of the state of an texture atlas.
@@ -89,10 +87,10 @@ struct RenderTileAttributes
 class RenderTarget
 {
   public:
-    using RGBAColor = terminal::RGBAColor;
-    using Width = crispy::width;
-    using Height = crispy::height;
-    using TextureAtlas = terminal::rasterizer::atlas::TextureAtlas<RenderTileAttributes>;
+    using RGBAColor = vtbackend::RGBAColor;
+    using Width = vtbackend::Width;
+    using Height = vtbackend::Height;
+    using TextureAtlas = atlas::TextureAtlas<RenderTileAttributes>;
 
     virtual ~RenderTarget() = default;
 
@@ -120,7 +118,7 @@ class RenderTarget
     virtual void clearCache() = 0;
 
     /// Reads out the given texture atlas.
-    virtual std::optional<terminal::rasterizer::AtlasTextureScreenshot> readAtlas() = 0;
+    virtual std::optional<vtrasterizer::AtlasTextureScreenshot> readAtlas() = 0;
 
     virtual void inspect(std::ostream& output) const = 0;
 };
@@ -149,7 +147,7 @@ class Renderable
     [[nodiscard]] TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
                                                               std::vector<uint8_t> bitmap,
                                                               atlas::Format bitmapFormat,
-                                                              crispy::image_size bitmapSize,
+                                                              vtbackend::ImageSize bitmapSize,
                                                               RenderTileAttributes::X x,
                                                               RenderTileAttributes::Y y,
                                                               uint32_t fragmentShaderSelector);
@@ -157,8 +155,8 @@ class Renderable
     [[nodiscard]] TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
                                                               std::vector<uint8_t> bitmap,
                                                               atlas::Format bitmapFormat,
-                                                              crispy::image_size bitmapSize,
-                                                              crispy::image_size renderBitmapSize,
+                                                              vtbackend::ImageSize bitmapSize,
+                                                              vtbackend::ImageSize renderBitmapSize,
                                                               RenderTileAttributes::X x,
                                                               RenderTileAttributes::Y y,
                                                               uint32_t fragmentShaderSelector);
@@ -171,12 +169,12 @@ class Renderable
     [[nodiscard]] static atlas::RenderTile createRenderTile(
         atlas::RenderTile::X x,
         atlas::RenderTile::Y y,
-        RGBAColor color,
+        vtbackend::RGBAColor color,
         Renderable::AtlasTileAttributes const& attributes);
 
     void renderTile(atlas::RenderTile::X x,
                     atlas::RenderTile::Y y,
-                    RGBAColor color,
+                    vtbackend::RGBAColor color,
                     Renderable::AtlasTileAttributes const& attributes);
 
     [[nodiscard]] constexpr bool renderTargetAvailable() const noexcept { return _renderTarget; }
@@ -208,7 +206,7 @@ class Renderable
 inline Renderable::TextureAtlas::TileCreateData Renderable::createTileData(atlas::TileLocation tileLocation,
                                                                            std::vector<uint8_t> bitmap,
                                                                            atlas::Format bitmapFormat,
-                                                                           crispy::image_size bitmapSize,
+                                                                           vtbackend::ImageSize bitmapSize,
                                                                            RenderTileAttributes::X x,
                                                                            RenderTileAttributes::Y y,
                                                                            uint32_t fragmentShaderSelector)
@@ -217,14 +215,13 @@ inline Renderable::TextureAtlas::TileCreateData Renderable::createTileData(atlas
         tileLocation, std::move(bitmap), bitmapFormat, bitmapSize, bitmapSize, x, y, fragmentShaderSelector);
 }
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer
 
 // {{{ fmt
 template <>
-struct fmt::formatter<terminal::rasterizer::RenderTileAttributes>: fmt::formatter<std::string>
+struct fmt::formatter<vtrasterizer::RenderTileAttributes>: fmt::formatter<std::string>
 {
-    auto format(terminal::rasterizer::RenderTileAttributes value, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtrasterizer::RenderTileAttributes value, format_context& ctx) -> format_context::iterator
     {
         return fmt::formatter<std::string>::format(
             fmt::format("tile +{}x +{}y", value.x.value, value.y.value), ctx);
@@ -232,13 +229,11 @@ struct fmt::formatter<terminal::rasterizer::RenderTileAttributes>: fmt::formatte
 };
 
 template <>
-struct fmt::formatter<
-    terminal::rasterizer::atlas::TileAttributes<terminal::rasterizer::RenderTileAttributes>>:
+struct fmt::formatter<vtrasterizer::atlas::TileAttributes<vtrasterizer::RenderTileAttributes>>:
     fmt::formatter<std::string>
 {
-    auto format(
-        terminal::rasterizer::atlas::TileAttributes<terminal::rasterizer::RenderTileAttributes> const& value,
-        format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::atlas::TileAttributes<vtrasterizer::RenderTileAttributes> const& value,
+                format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format("(location {}; bitmap {}; {})", value.location, value.bitmapSize, value.metadata),

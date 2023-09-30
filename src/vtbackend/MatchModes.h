@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-namespace terminal
+namespace vtbackend
 {
 
 class MatchModes
@@ -104,32 +104,32 @@ constexpr bool operator!=(MatchModes a, MatchModes b) noexcept
     return !(a == b);
 }
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<terminal::MatchModes>: formatter<std::string>
+struct fmt::formatter<vtbackend::MatchModes>: formatter<std::string>
 {
-    auto format(terminal::MatchModes m, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::MatchModes m, format_context& ctx) -> format_context::iterator
     {
         std::string s;
-        auto const advance = [&](terminal::MatchModes::Flag cond, std::string_view text) {
+        auto const advance = [&](vtbackend::MatchModes::Flag cond, std::string_view text) {
             auto const status = m.status(cond);
-            if (status == terminal::MatchModes::Status::Any)
+            if (status == vtbackend::MatchModes::Status::Any)
                 return;
             if (!s.empty())
                 s += '|';
-            if (status == terminal::MatchModes::Status::Disabled)
+            if (status == vtbackend::MatchModes::Status::Disabled)
                 s += "~";
             s += text;
         };
-        advance(terminal::MatchModes::AppCursor, "AppCursor");
-        advance(terminal::MatchModes::AppKeypad, "AppKeypad");
-        advance(terminal::MatchModes::AlternateScreen, "AltScreen");
-        advance(terminal::MatchModes::Insert, "Insert");
-        advance(terminal::MatchModes::Select, "Select");
-        advance(terminal::MatchModes::Search, "Search");
-        advance(terminal::MatchModes::Trace, "Trace");
+        advance(vtbackend::MatchModes::AppCursor, "AppCursor");
+        advance(vtbackend::MatchModes::AppKeypad, "AppKeypad");
+        advance(vtbackend::MatchModes::AlternateScreen, "AltScreen");
+        advance(vtbackend::MatchModes::Insert, "Insert");
+        advance(vtbackend::MatchModes::Select, "Select");
+        advance(vtbackend::MatchModes::Search, "Search");
+        advance(vtbackend::MatchModes::Trace, "Trace");
         if (s.empty())
             s = "Any";
         return formatter<std::string>::format(s, ctx);

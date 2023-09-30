@@ -9,7 +9,7 @@
 
 using namespace std;
 
-namespace terminal
+namespace vtbackend
 {
 
 namespace // {{{ helper
@@ -301,4 +301,4 @@ bool FullLineSelection::extend(CellLocation to)
 }
 // }}}
 
-} // namespace terminal
+} // namespace vtbackend

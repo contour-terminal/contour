@@ -57,16 +57,17 @@ using crispy::toLower;
 using crispy::toUpper;
 using crispy::unescape;
 
-using terminal::Height;
-using terminal::ImageSize;
-using terminal::Process;
-using terminal::Width;
+using vtpty::Process;
 
-using terminal::CellRGBColorAndAlphaPair;
-using terminal::ColumnCount;
-using terminal::Infinite;
-using terminal::LineCount;
-using terminal::PageSize;
+using vtbackend::Height;
+using vtbackend::ImageSize;
+using vtbackend::Width;
+
+using vtbackend::CellRGBColorAndAlphaPair;
+using vtbackend::ColumnCount;
+using vtbackend::Infinite;
+using vtbackend::LineCount;
+using vtbackend::PageSize;
 
 using contour::actions::Action;
 
@@ -103,9 +104,9 @@ namespace
         }
     };
 
-    std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileName,
-                                                               float opacity,
-                                                               bool blur)
+    std::shared_ptr<vtbackend::BackgroundImage const> loadImage(string const& fileName,
+                                                                float opacity,
+                                                                bool blur)
     {
         auto const resolvedFileName = homeResolvedPath(fileName, Process::homeDirectory());
 
@@ -115,30 +116,30 @@ namespace
             return nullptr;
         }
 
-        auto backgroundImage = terminal::BackgroundImage {};
+        auto backgroundImage = vtbackend::BackgroundImage {};
         backgroundImage.location = resolvedFileName;
         backgroundImage.hash = crispy::strong_hash::compute(resolvedFileName.string());
         backgroundImage.opacity = opacity;
         backgroundImage.blur = blur;
 
-        return make_shared<terminal::BackgroundImage const>(std::move(backgroundImage));
+        return make_shared<vtbackend::BackgroundImage const>(std::move(backgroundImage));
     }
 
-    terminal::CellRGBColor parseCellColor(std::string const& text)
+    vtbackend::CellRGBColor parseCellColor(std::string const& text)
     {
         auto const upperText = toUpper(text);
         if (upperText == "CELLBACKGROUND"sv)
-            return terminal::CellBackgroundColor {};
+            return vtbackend::CellBackgroundColor {};
         if (upperText == "CELLFOREGROUND"sv)
-            return terminal::CellForegroundColor {};
-        return terminal::RGBColor(text);
+            return vtbackend::CellForegroundColor {};
+        return vtbackend::RGBColor(text);
     }
 
-    terminal::CellRGBColor parseCellColor(UsedKeys& usedKeys,
-                                          YAML::Node const& parentNode,
-                                          std::string const& parentPath,
-                                          std::string const& name,
-                                          terminal::CellRGBColor defaultValue)
+    vtbackend::CellRGBColor parseCellColor(UsedKeys& usedKeys,
+                                           YAML::Node const& parentNode,
+                                           std::string const& parentPath,
+                                           std::string const& name,
+                                           vtbackend::CellRGBColor defaultValue)
     {
         auto colorNode = parentNode[name];
         if (!colorNode || !colorNode.IsScalar())
@@ -147,11 +148,11 @@ namespace
         return parseCellColor(colorNode.as<string>());
     }
 
-    std::optional<terminal::RGBColorPair> parseRGBColorPair(UsedKeys& usedKeys,
-                                                            string const& basePath,
-                                                            YAML::Node const& baseNode,
-                                                            string const& childNodeName,
-                                                            terminal::RGBColorPair defaultPair)
+    std::optional<vtbackend::RGBColorPair> parseRGBColorPair(UsedKeys& usedKeys,
+                                                             string const& basePath,
+                                                             YAML::Node const& baseNode,
+                                                             string const& childNodeName,
+                                                             vtbackend::RGBColorPair defaultPair)
     {
         auto node = baseNode[childNodeName];
         if (!node || !node.IsMap())
@@ -197,7 +198,7 @@ namespace
         auto cellRGBColorAndAlphaPair = CellRGBColorAndAlphaPair {};
 
         cellRGBColorAndAlphaPair.foreground =
-            parseCellColor(usedKeys, node, childPath, "foreground", terminal::CellForegroundColor {});
+            parseCellColor(usedKeys, node, childPath, "foreground", vtbackend::CellForegroundColor {});
         if (auto alpha = node["foreground_alpha"]; alpha && alpha.IsScalar())
         {
             usedKeys.emplace(childPath + ".foreground_alpha");
@@ -205,7 +206,7 @@ namespace
         }
 
         cellRGBColorAndAlphaPair.background =
-            parseCellColor(usedKeys, node, childPath, "background", terminal::CellBackgroundColor {});
+            parseCellColor(usedKeys, node, childPath, "background", vtbackend::CellBackgroundColor {});
         if (auto alpha = node["background_alpha"]; alpha && alpha.IsScalar())
         {
             usedKeys.emplace(childPath + ".background_alpha");
@@ -528,9 +529,9 @@ namespace
         return paths;
     }
 
-    optional<terminal::Key> parseKey(string const& name)
+    optional<vtbackend::Key> parseKey(string const& name)
     {
-        using terminal::Key;
+        using vtbackend::Key;
         auto static constexpr Mappings = array { pair { "F1"sv, Key::F1 },
                                                  pair { "F2"sv, Key::F2 },
                                                  pair { "F3"sv, Key::F3 },
@@ -582,9 +583,9 @@ namespace
         return nullopt;
     }
 
-    optional<variant<terminal::Key, char32_t>> parseKeyOrChar(string const& name)
+    optional<variant<vtbackend::Key, char32_t>> parseKeyOrChar(string const& name)
     {
-        using namespace terminal::ControlCode;
+        using namespace vtbackend::ControlCode;
 
         if (auto const key = parseKey(name); key.has_value())
             return key.value();
@@ -638,21 +639,21 @@ namespace
         std::string strValue;
         tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue, errorLog());
         if (!strValue.empty())
-            cursorConfig.cursorShape = terminal::makeCursorShape(strValue);
+            cursorConfig.cursorShape = vtbackend::makeCursorShape(strValue);
 
-        bool boolValue = cursorConfig.cursorDisplay == terminal::CursorDisplay::Blink;
+        bool boolValue = cursorConfig.cursorDisplay == vtbackend::CursorDisplay::Blink;
         tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue, errorLog());
         cursorConfig.cursorDisplay =
-            boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+            boolValue ? vtbackend::CursorDisplay::Blink : vtbackend::CursorDisplay::Steady;
 
         auto uintValue = cursorConfig.cursorBlinkInterval.count();
         tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue, errorLog());
         cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
     }
 
-    optional<terminal::Modifier::Key> parseModifierKey(string const& key)
+    optional<vtbackend::Modifier::Key> parseModifierKey(string const& key)
     {
-        using terminal::Modifier;
+        using vtbackend::Modifier;
         auto const upperKey = toUpper(key);
         if (upperKey == "ALT")
             return Modifier::Key::Alt;
@@ -665,13 +666,13 @@ namespace
         return nullopt;
     }
 
-    optional<terminal::MatchModes> parseMatchModes(UsedKeys& usedKeys,
-                                                   string const& prefix,
-                                                   YAML::Node const& node)
+    optional<vtbackend::MatchModes> parseMatchModes(UsedKeys& usedKeys,
+                                                    string const& prefix,
+                                                    YAML::Node const& node)
     {
-        using terminal::MatchModes;
+        using vtbackend::MatchModes;
         if (!node)
-            return terminal::MatchModes {};
+            return vtbackend::MatchModes {};
         usedKeys.emplace(prefix);
         if (!node.IsScalar())
             return nullopt;
@@ -722,11 +723,11 @@ namespace
         return matchModes;
     }
 
-    optional<terminal::Modifier> parseModifier(UsedKeys& usedKeys,
-                                               string const& prefix,
-                                               YAML::Node const& node)
+    optional<vtbackend::Modifier> parseModifier(UsedKeys& usedKeys,
+                                                string const& prefix,
+                                                YAML::Node const& node)
     {
-        using terminal::Modifier;
+        using vtbackend::Modifier;
         if (!node)
             return nullopt;
         usedKeys.emplace(prefix);
@@ -735,7 +736,7 @@ namespace
         if (!node.IsSequence())
             return nullopt;
 
-        terminal::Modifier mods;
+        vtbackend::Modifier mods;
         for (const auto& i: node)
         {
             if (!i.IsScalar())
@@ -751,9 +752,9 @@ namespace
     }
 
     template <typename Input>
-    void appendOrCreateBinding(vector<terminal::InputBinding<Input, ActionList>>& bindings,
-                               terminal::MatchModes modes,
-                               terminal::Modifier modifier,
+    void appendOrCreateBinding(vector<vtbackend::InputBinding<Input, ActionList>>& bindings,
+                               vtbackend::MatchModes modes,
+                               vtbackend::Modifier modifier,
                                Input input,
                                Action action)
     {
@@ -766,13 +767,13 @@ namespace
             }
         }
 
-        bindings.emplace_back(terminal::InputBinding<Input, ActionList> {
+        bindings.emplace_back(vtbackend::InputBinding<Input, ActionList> {
             modes, modifier, input, ActionList { std::move(action) } });
     }
 
     bool tryAddKey(InputMappings& inputMappings,
-                   terminal::MatchModes modes,
-                   terminal::Modifier modifier,
+                   vtbackend::MatchModes modes,
+                   vtbackend::Modifier modifier,
                    YAML::Node const& node,
                    Action action)
     {
@@ -786,10 +787,10 @@ namespace
         if (!input.has_value())
             return false;
 
-        if (holds_alternative<terminal::Key>(*input))
+        if (holds_alternative<vtbackend::Key>(*input))
         {
             appendOrCreateBinding(
-                inputMappings.keyMappings, modes, modifier, get<terminal::Key>(*input), std::move(action));
+                inputMappings.keyMappings, modes, modifier, get<vtbackend::Key>(*input), std::move(action));
         }
         else if (holds_alternative<char32_t>(*input))
         {
@@ -802,7 +803,7 @@ namespace
         return true;
     }
 
-    optional<terminal::MouseButton> parseMouseButton(YAML::Node const& node)
+    optional<vtbackend::MouseButton> parseMouseButton(YAML::Node const& node)
     {
         if (!node)
             return nullopt;
@@ -811,11 +812,11 @@ namespace
             return nullopt;
 
         auto constexpr static Mappings = array {
-            pair { "WHEELUP"sv, terminal::MouseButton::WheelUp },
-            pair { "WHEELDOWN"sv, terminal::MouseButton::WheelDown },
-            pair { "LEFT"sv, terminal::MouseButton::Left },
-            pair { "MIDDLE"sv, terminal::MouseButton::Middle },
-            pair { "RIGHT"sv, terminal::MouseButton::Right },
+            pair { "WHEELUP"sv, vtbackend::MouseButton::WheelUp },
+            pair { "WHEELDOWN"sv, vtbackend::MouseButton::WheelDown },
+            pair { "LEFT"sv, vtbackend::MouseButton::Left },
+            pair { "MIDDLE"sv, vtbackend::MouseButton::Middle },
+            pair { "RIGHT"sv, vtbackend::MouseButton::Right },
         };
         auto const upperName = toUpper(node.as<string>());
         for (auto const& mapping: Mappings)
@@ -825,8 +826,8 @@ namespace
     }
 
     bool tryAddMouse(vector<MouseInputMapping>& bindings,
-                     terminal::MatchModes modes,
-                     terminal::Modifier modifier,
+                     vtbackend::MatchModes modes,
+                     vtbackend::Modifier modifier,
                      YAML::Node const& node,
                      Action action)
     {
@@ -953,7 +954,7 @@ namespace
                            Config& config,
                            YAML::Node const& mapping)
     {
-        using namespace terminal;
+        using namespace vtbackend;
 
         auto const action = parseAction(usedKeys, prefix, mapping);
         auto const mods = parseModifier(usedKeys, prefix + ".mods", mapping["mods"]);
@@ -976,7 +977,7 @@ namespace
         }
     }
 
-    void updateColorScheme(terminal::ColorPalette& colors,
+    void updateColorScheme(vtbackend::ColorPalette& colors,
                            UsedKeys& usedKeys,
                            string const& basePath,
                            YAML::Node const& node)
@@ -987,7 +988,7 @@ namespace
         ;
 
         usedKeys.emplace(basePath);
-        using terminal::RGBColor;
+        using vtbackend::RGBColor;
         if (auto def = node["default"]; def)
         {
             usedKeys.emplace(basePath + ".default");
@@ -1148,10 +1149,12 @@ namespace
             colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
     }
 
-    terminal::ColorPalette loadColorScheme(UsedKeys& usedKeys, string const& basePath, YAML::Node const& node)
+    vtbackend::ColorPalette loadColorScheme(UsedKeys& usedKeys,
+                                            string const& basePath,
+                                            YAML::Node const& node)
     {
 
-        terminal::ColorPalette colors;
+        vtbackend::ColorPalette colors;
         updateColorScheme(colors, usedKeys, basePath, node);
         return colors;
     }
@@ -1229,7 +1232,7 @@ namespace
         }
     }
 
-    void softLoadFont(terminal::rasterizer::TextShapingEngine textShapingEngine,
+    void softLoadFont(vtrasterizer::TextShapingEngine textShapingEngine,
                       UsedKeys& usedKeys,
                       string_view basePath,
                       YAML::Node const& parentNode,
@@ -1249,7 +1252,7 @@ namespace
             usedKeys.emplace(fmt::format("{}.{}", basePath, key));
             if (node["features"].IsSequence())
             {
-                using terminal::rasterizer::TextShapingEngine;
+                using vtrasterizer::TextShapingEngine;
                 switch (textShapingEngine)
                 {
                     case TextShapingEngine::OpenShaper: break;
@@ -1274,10 +1277,10 @@ namespace
         return false;
     }
 
-    optional<terminal::VTType> stringToVTType(std::string const& value)
+    optional<vtbackend::VTType> stringToVTType(std::string const& value)
     {
-        using Type = terminal::VTType;
-        auto constexpr static Mappings = array<tuple<string_view, terminal::VTType>, 10> {
+        using Type = vtbackend::VTType;
+        auto constexpr static Mappings = array<tuple<string_view, Type>, 10> {
             tuple { "VT100"sv, Type::VT100 }, tuple { "VT220"sv, Type::VT220 },
             tuple { "VT240"sv, Type::VT240 }, tuple { "VT330"sv, Type::VT330 },
             tuple { "VT340"sv, Type::VT340 }, tuple { "VT320"sv, Type::VT320 },
@@ -1295,7 +1298,7 @@ namespace
                                YAML::Node const& profile,
                                std::string const& parentPath,
                                std::string const& profileName,
-                               unordered_map<string, terminal::ColorPalette> const& colorschemes,
+                               unordered_map<string, vtbackend::ColorPalette> const& colorschemes,
                                logstore::message_builder logger)
     {
 
@@ -1520,20 +1523,20 @@ namespace
 
         auto constexpr NativeTextShapingEngine =
 #if defined(_WIN32)
-            terminal::rasterizer::TextShapingEngine::DWrite;
+            vtrasterizer::TextShapingEngine::DWrite;
 #elif defined(__APPLE__)
-            terminal::rasterizer::TextShapingEngine::CoreText;
+            vtrasterizer::TextShapingEngine::CoreText;
 #else
-            terminal::rasterizer::TextShapingEngine::OpenShaper;
+            vtrasterizer::TextShapingEngine::OpenShaper;
 #endif
 
         auto constexpr NativeFontLocator =
 #if defined(_WIN32)
-            terminal::rasterizer::FontLocatorEngine::DWrite;
+            vtrasterizer::FontLocatorEngine::DWrite;
 #elif defined(__APPLE__)
-            terminal::rasterizer::FontLocatorEngine::CoreText;
+            vtrasterizer::FontLocatorEngine::CoreText;
 #else
-            terminal::rasterizer::FontLocatorEngine::FontConfig;
+            vtrasterizer::FontLocatorEngine::FontConfig;
 #endif
 
         strValue = fmt::format("{}", terminalProfile.fonts.textShapingEngine);
@@ -1541,11 +1544,11 @@ namespace
         {
             auto const lwrValue = toLower(strValue);
             if (lwrValue == "dwrite" || lwrValue == "directwrite")
-                terminalProfile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::DWrite;
+                terminalProfile.fonts.textShapingEngine = vtrasterizer::TextShapingEngine::DWrite;
             else if (lwrValue == "core" || lwrValue == "coretext")
-                terminalProfile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::CoreText;
+                terminalProfile.fonts.textShapingEngine = vtrasterizer::TextShapingEngine::CoreText;
             else if (lwrValue == "open" || lwrValue == "openshaper")
-                terminalProfile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::OpenShaper;
+                terminalProfile.fonts.textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper;
             else if (lwrValue == "native")
                 terminalProfile.fonts.textShapingEngine = NativeTextShapingEngine;
             else
@@ -1560,15 +1563,15 @@ namespace
         {
             auto const lwrValue = toLower(strValue);
             if (lwrValue == "fontconfig")
-                terminalProfile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::FontConfig;
+                terminalProfile.fonts.fontLocator = vtrasterizer::FontLocatorEngine::FontConfig;
             else if (lwrValue == "coretext")
-                terminalProfile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::CoreText;
+                terminalProfile.fonts.fontLocator = vtrasterizer::FontLocatorEngine::CoreText;
             else if (lwrValue == "dwrite" || lwrValue == "directwrite")
-                terminalProfile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::DWrite;
+                terminalProfile.fonts.fontLocator = vtrasterizer::FontLocatorEngine::DWrite;
             else if (lwrValue == "native")
                 terminalProfile.fonts.fontLocator = NativeFontLocator;
             else if (lwrValue == "mock")
-                terminalProfile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::Mock;
+                terminalProfile.fonts.fontLocator = vtrasterizer::FontLocatorEngine::Mock;
             else
                 configLog()("Invalid value for configuration key {}.font.locator: {}", basePath, strValue);
         }
@@ -1699,13 +1702,13 @@ namespace
         float floatValue = 1.0;
         tryLoadChildRelative(usedKeys, profile, basePath, "background.opacity", floatValue, logger);
         terminalProfile.backgroundOpacity =
-            (terminal::Opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
+            (vtbackend::Opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
         tryLoadChildRelative(
             usedKeys, profile, basePath, "background.blur", terminalProfile.backgroundBlur, logger);
 
         strValue = "dotted-underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.normal);
         tryLoadChildRelative(usedKeys, profile, basePath, "hyperlink_decoration.normal", strValue, logger);
-        if (auto const pdeco = terminal::rasterizer::to_decorator(strValue); pdeco.has_value())
+        if (auto const pdeco = vtrasterizer::to_decorator(strValue); pdeco.has_value())
             terminalProfile.hyperlinkDecoration.normal = *pdeco;
 
         strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
@@ -1717,7 +1720,7 @@ namespace
         auto uintValue = terminalProfile.highlightTimeout.count();
         tryLoadChildRelative(usedKeys, profile, basePath, "vi_mode_highlight_timeout", uintValue, logger);
         terminalProfile.highlightTimeout = chrono::milliseconds(uintValue);
-        if (auto const pdeco = terminal::rasterizer::to_decorator(strValue); pdeco.has_value())
+        if (auto const pdeco = vtrasterizer::to_decorator(strValue); pdeco.has_value())
             terminalProfile.hyperlinkDecoration.hover = *pdeco;
 
         tryLoadChildRelative(usedKeys,
@@ -1754,9 +1757,9 @@ namespace
         strValue = "none";
         tryLoadChildRelative(usedKeys, profile, basePath, "status_line.display", strValue, logger);
         if (strValue == "indicator")
-            terminalProfile.initialStatusDisplayType = terminal::StatusDisplayType::Indicator;
+            terminalProfile.initialStatusDisplayType = vtbackend::StatusDisplayType::Indicator;
         else if (strValue == "none")
-            terminalProfile.initialStatusDisplayType = terminal::StatusDisplayType::None;
+            terminalProfile.initialStatusDisplayType = vtbackend::StatusDisplayType::None;
         else
             logger("Invalid value for config entry {}: {}", "status_line.display", strValue);
 
@@ -1764,9 +1767,9 @@ namespace
         {
             auto const literal = toLower(strValue);
             if (literal == "bottom")
-                terminalProfile.statusDisplayPosition = terminal::StatusDisplayPosition::Bottom;
+                terminalProfile.statusDisplayPosition = vtbackend::StatusDisplayPosition::Bottom;
             else if (literal == "top")
-                terminalProfile.statusDisplayPosition = terminal::StatusDisplayPosition::Top;
+                terminalProfile.statusDisplayPosition = vtbackend::StatusDisplayPosition::Top;
             else
                 logger("Invalid value for config entry {}: {}", "status_line.position", strValue);
         }
@@ -1812,13 +1815,13 @@ namespace
                 for (auto const& modeNode: frozenDecModes)
                 {
                     auto const modeNumber = std::stoi(modeNode.first.as<string>());
-                    if (!terminal::isValidDECMode(modeNumber))
+                    if (!vtbackend::isValidDECMode(modeNumber))
                     {
                         errorLog()("Invalid frozen_dec_modes entry: {} (Invalid DEC mode number).",
                                    modeNumber);
                         continue;
                     }
-                    auto const mode = static_cast<terminal::DECMode>(modeNumber);
+                    auto const mode = static_cast<vtbackend::DECMode>(modeNumber);
                     auto const frozenState = modeNode.second.as<bool>();
                     terminalProfile.frozenModes[mode] = frozenState;
                 }
@@ -1832,7 +1835,7 @@ namespace
                                         YAML::Node const& profile,
                                         std::string const& parentPath,
                                         std::string const& profileName,
-                                        unordered_map<string, terminal::ColorPalette> const& colorschemes)
+                                        unordered_map<string, vtbackend::ColorPalette> const& colorschemes)
     {
         auto terminalProfile = TerminalProfile {}; // default profile
         updateTerminalProfile(

@@ -29,21 +29,21 @@ using std::optional;
 using std::pair;
 using std::string;
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 namespace
 {
     auto constexpr CellFlagDecorationMappings = array {
-        pair { CellFlags::Underline, Decorator::Underline },
-        pair { CellFlags::DoublyUnderlined, Decorator::DoubleUnderline },
-        pair { CellFlags::CurlyUnderlined, Decorator::CurlyUnderline },
-        pair { CellFlags::DottedUnderline, Decorator::DottedUnderline },
-        pair { CellFlags::DashedUnderline, Decorator::DashedUnderline },
-        pair { CellFlags::Overline, Decorator::Overline },
-        pair { CellFlags::CrossedOut, Decorator::CrossedOut },
-        pair { CellFlags::Framed, Decorator::Framed },
-        pair { CellFlags::Encircled, Decorator::Encircle },
+        pair { vtbackend::CellFlags::Underline, Decorator::Underline },
+        pair { vtbackend::CellFlags::DoublyUnderlined, Decorator::DoubleUnderline },
+        pair { vtbackend::CellFlags::CurlyUnderlined, Decorator::CurlyUnderline },
+        pair { vtbackend::CellFlags::DottedUnderline, Decorator::DottedUnderline },
+        pair { vtbackend::CellFlags::DashedUnderline, Decorator::DashedUnderline },
+        pair { vtbackend::CellFlags::Overline, Decorator::Overline },
+        pair { vtbackend::CellFlags::CrossedOut, Decorator::CrossedOut },
+        pair { vtbackend::CellFlags::Framed, Decorator::Framed },
+        pair { vtbackend::CellFlags::Encircled, Decorator::Encircle },
     };
 }
 
@@ -91,23 +91,23 @@ void DecorationRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
-void DecorationRenderer::renderLine(RenderLine const& line)
+void DecorationRenderer::renderLine(vtbackend::RenderLine const& line)
 {
     for (auto const& mapping: CellFlagDecorationMappings)
         if (line.textAttributes.flags & mapping.first)
             renderDecoration(mapping.second,
-                             _gridMetrics.mapBottomLeft(CellLocation { line.lineOffset }),
+                             _gridMetrics.mapBottomLeft(vtbackend::CellLocation { line.lineOffset }),
                              line.usedColumns,
                              line.textAttributes.decorationColor);
 }
 
-void DecorationRenderer::renderCell(RenderCell const& cell)
+void DecorationRenderer::renderCell(vtbackend::RenderCell const& cell)
 {
     for (auto const& mapping: CellFlagDecorationMappings)
         if (cell.attributes.flags & mapping.first)
             renderDecoration(mapping.second,
                              _gridMetrics.mapBottomLeft(cell.position),
-                             ColumnCount(1),
+                             vtbackend::ColumnCount(1),
                              cell.attributes.decorationColor);
 }
 
@@ -142,7 +142,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const thicknessHalf = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
             auto const thickness = thicknessHalf * 2;
             auto const y0 = max(0, (underlinePosition() - static_cast<int>(thicknessHalf)));
-            auto const height = Height(y0 + thickness);
+            auto const height = vtbackend::Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(imageSize.area(), 0);
@@ -157,7 +157,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const y1 = max(0u, underlinePosition() + thickness);
             // y1 - 3 thickness can be negative
             auto const y0 = max(0, static_cast<int>(y1) - 3 * static_cast<int>(thickness));
-            auto const height = Height(y1 + thickness);
+            auto const height = vtbackend::Height(y1 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(imageSize.area(), 0);
@@ -173,7 +173,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             });
         }
         case Decorator::CurlyUnderline: {
-            auto const height = Height::cast_from(_gridMetrics.baseline);
+            auto const height = vtbackend::Height::cast_from(_gridMetrics.baseline);
             auto const h2 = max(unbox<int>(height) / 2, 1);
             auto const yScalar = h2 - 1;
             auto const xScalar = 2 * M_PI / *width;
@@ -201,7 +201,8 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         case Decorator::DottedUnderline: {
             auto const dotHeight = (unsigned) _gridMetrics.underline.thickness;
             auto const dotWidth = dotHeight;
-            auto const height = Height::cast_from((unsigned) _gridMetrics.underline.position + dotHeight);
+            auto const height =
+                vtbackend::Height::cast_from((unsigned) _gridMetrics.underline.position + dotHeight);
             auto const y0 = (unsigned) _gridMetrics.underline.position - dotHeight;
             auto const x0 = 0u;
             auto const x1 = unbox(width) / 2;
@@ -224,7 +225,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const thicknessHalf = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
             auto const thickness = max(1u, thicknessHalf * 2);
             auto const y0 = max(0, underlinePosition() - static_cast<int>(thicknessHalf));
-            auto const height = Height(y0 + thickness);
+            auto const height = vtbackend::Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
@@ -273,7 +274,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             });
         }
         case Decorator::CrossedOut: {
-            auto const height = Height(*_gridMetrics.cellSize.height / 2);
+            auto const height = vtbackend::Height(*_gridMetrics.cellSize.height / 2);
             auto const thickness = (unsigned) underlineThickness();
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
@@ -291,10 +292,10 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
 
 void DecorationRenderer::renderDecoration(Decorator decoration,
                                           crispy::point pos,
-                                          ColumnCount columnCount,
-                                          RGBColor const& color)
+                                          vtbackend::ColumnCount columnCount,
+                                          vtbackend::RGBColor const& color)
 {
-    for (auto i = ColumnCount(0); i < columnCount; ++i)
+    for (auto i = vtbackend::ColumnCount(0); i < columnCount; ++i)
     {
         auto const tileIndex = _directMapping.toTileIndex(static_cast<uint32_t>(decoration));
         auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
@@ -307,4 +308,4 @@ void DecorationRenderer::renderDecoration(Decorator decoration,
     }
 }
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

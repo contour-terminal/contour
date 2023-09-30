@@ -20,7 +20,7 @@
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 /// Rarely needed extra cell data.
@@ -472,12 +472,12 @@ inline bool beginsWith(std::u32string_view text, CompactCell const& cell) noexce
 }
 // }}}
 
-} // namespace terminal
+} // namespace vtbackend
 
 template <>
-struct fmt::formatter<terminal::CompactCell>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::CompactCell>: fmt::formatter<std::string>
 {
-    auto format(terminal::CompactCell const& cell, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::CompactCell const& cell, format_context& ctx) -> format_context::iterator
     {
         std::string codepoints;
         for (auto const i: crispy::times(cell.codepointCount()))

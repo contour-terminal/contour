@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace terminal
+namespace vtbackend
 {
 
 class Image;
@@ -81,4 +81,4 @@ class MockScreenEvents: public ScreenEvents
     std::string windowTitle;
 };
 
-} // namespace terminal
+} // namespace vtbackend

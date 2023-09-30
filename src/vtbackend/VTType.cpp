@@ -6,7 +6,7 @@
 
 using namespace std;
 
-namespace terminal
+namespace vtbackend
 {
 
 string to_string(DeviceAttributes v)
@@ -72,4 +72,4 @@ string to_params(DeviceAttributes v)
     return s;
 }
 
-} // namespace terminal
+} // namespace vtbackend

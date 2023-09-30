@@ -7,7 +7,7 @@ using std::string;
 using std::string_view;
 using std::vector;
 
-namespace terminal
+namespace vtbackend
 {
 
 // TODO: compare with old sgr value set instead to be more generic in reusing stuff
@@ -222,10 +222,10 @@ void VTWriter::write(Line<Cell> const& line)
     sgrAdd(GraphicsRendition::Reset);
 }
 
-} // namespace terminal
+} // namespace vtbackend
 
 #include <vtbackend/cell/CompactCell.h>
-template void terminal::VTWriter::write<terminal::CompactCell>(Line<CompactCell> const&);
+template void vtbackend::VTWriter::write<vtbackend::CompactCell>(Line<CompactCell> const&);
 
 #include <vtbackend/cell/SimpleCell.h>
-template void terminal::VTWriter::write<terminal::SimpleCell>(Line<SimpleCell> const&);
+template void vtbackend::VTWriter::write<vtbackend::SimpleCell>(Line<SimpleCell> const&);

@@ -8,7 +8,7 @@
 #include <chrono>
 #include <map>
 
-namespace terminal
+namespace vtbackend
 {
 
 struct RefreshRate
@@ -30,7 +30,7 @@ struct Settings
     ColorPalette colorPalette; // NB: The default color palette can be taken from the factory settings.
 
     // Set of DEC modes that are frozen and cannot be changed by the application.
-    std::map<terminal::DECMode, bool> frozenModes;
+    std::map<vtbackend::DECMode, bool> frozenModes;
 
     // total page size available to this terminal.
     // This page size may differ from the main displays (primary/alternate screen) page size If
@@ -83,4 +83,4 @@ struct Settings
     // statusline.
 };
 
-} // namespace terminal
+} // namespace vtbackend

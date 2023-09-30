@@ -6,7 +6,7 @@
 #include <optional>
 #include <utility>
 
-namespace terminal
+namespace vtbackend
 {
 
 class Terminal;
@@ -91,4 +91,4 @@ class ViCommands: public ViInputHandler::Executor
     bool _lastCursorVisible = true;
 };
 
-} // namespace terminal
+} // namespace vtbackend
