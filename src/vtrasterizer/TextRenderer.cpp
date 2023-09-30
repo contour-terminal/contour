@@ -388,7 +388,8 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
 
     // NB: Also adjust the normalized width to not render the empty space.
     auto const atlasSize = _textureScheduler->atlasSize();
-    tileCreateData.metadata.normalizedLocation.width = unbox<float>(tileCreateData.bitmapSize.width) / unbox<float>(atlasSize.width);
+    tileCreateData.metadata.normalizedLocation.width =
+        unbox<float>(tileCreateData.bitmapSize.width) / unbox<float>(atlasSize.width);
 }
 
 void TextRenderer::initializeDirectMapping()
