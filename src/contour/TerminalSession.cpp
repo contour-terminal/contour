@@ -478,8 +478,9 @@ void TerminalSession::onClosed()
     auto const now = steady_clock::now();
     auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
 
-    if (auto const* localProcess = dynamic_cast<terminal::Process const*>(&_terminal.device()))
+    if (auto* localProcess = dynamic_cast<terminal::Process *>(&_terminal.device()))
     {
+        localProcess->close();
         auto const exitStatus = localProcess->checkStatus();
         if (exitStatus)
             sessionLog()(
