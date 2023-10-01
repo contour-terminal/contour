@@ -31,7 +31,7 @@
 
 #include <libunicode/utf8.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 class Terminal;
@@ -232,7 +232,7 @@ struct TerminalState
     std::stack<std::string> savedWindowTitles {};
 
     Sequencer sequencer;
-    parser::Parser<Sequencer, false> parser;
+    vtparser::Parser<Sequencer, false> parser;
     uint64_t instructionCounter = 0;
 
     InputGenerator inputGenerator {};
@@ -241,43 +241,43 @@ struct TerminalState
     ViInputHandler inputHandler;
 };
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmt formatters
 template <>
-struct fmt::formatter<terminal::AnsiMode>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::AnsiMode>: fmt::formatter<std::string>
 {
-    auto format(terminal::AnsiMode mode, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::AnsiMode mode, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(mode), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::DECMode>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::DECMode>: fmt::formatter<std::string>
 {
-    auto format(terminal::DECMode mode, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::DECMode mode, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(mode), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::Cursor>: fmt::formatter<terminal::CellLocation>
+struct fmt::formatter<vtbackend::Cursor>: fmt::formatter<vtbackend::CellLocation>
 {
-    auto format(const terminal::Cursor cursor, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::Cursor cursor, format_context& ctx) -> format_context::iterator
     {
-        return formatter<terminal::CellLocation>::format(cursor.position, ctx);
+        return formatter<vtbackend::CellLocation>::format(cursor.position, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::DynamicColorName>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::DynamicColorName>: formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(terminal::DynamicColorName value, FormatContext& ctx)
+    auto format(vtbackend::DynamicColorName value, FormatContext& ctx)
     {
-        using terminal::DynamicColorName;
+        using vtbackend::DynamicColorName;
         string_view name;
         switch (value)
         {
@@ -294,17 +294,17 @@ struct fmt::formatter<terminal::DynamicColorName>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<terminal::ExecutionMode>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::ExecutionMode>: formatter<std::string_view>
 {
-    auto format(terminal::ExecutionMode value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ExecutionMode value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ExecutionMode::Normal: name = "NORMAL"; break;
-            case terminal::ExecutionMode::Waiting: name = "WAITING"; break;
-            case terminal::ExecutionMode::SingleStep: name = "SINGLE STEP"; break;
-            case terminal::ExecutionMode::BreakAtEmptyQueue: name = "BREAK AT EMPTY"; break;
+            case vtbackend::ExecutionMode::Normal: name = "NORMAL"; break;
+            case vtbackend::ExecutionMode::Waiting: name = "WAITING"; break;
+            case vtbackend::ExecutionMode::SingleStep: name = "SINGLE STEP"; break;
+            case vtbackend::ExecutionMode::BreakAtEmptyQueue: name = "BREAK AT EMPTY"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

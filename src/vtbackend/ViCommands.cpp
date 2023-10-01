@@ -10,7 +10,7 @@
 
 #include <libunicode/ucd.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 namespace
@@ -1125,4 +1125,4 @@ void ViCommands::moveCursorTo(CellLocation position)
     _terminal.screenUpdated();
 }
 
-} // namespace terminal
+} // namespace vtbackend

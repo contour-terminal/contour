@@ -17,7 +17,7 @@
 #include <utility>
 #include <variant>
 
-namespace terminal
+namespace vtbackend
 {
 
 enum class IndexedColor : uint8_t
@@ -352,7 +352,7 @@ std::string to_string(BrightColor color);
 std::string to_string(RGBColor c);
 std::string to_string(RGBAColor c);
 
-inline std::ostream& operator<<(std::ostream& os, terminal::Color value)
+inline std::ostream& operator<<(std::ostream& os, vtbackend::Color value)
 {
     return os << to_string(value);
 }
@@ -415,55 +415,55 @@ constexpr Opacity& operator--(Opacity& value) noexcept
 }
 // }}}
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmtlib custom formatter
 template <>
-struct fmt::formatter<terminal::Color>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::Color>: fmt::formatter<std::string>
 {
-    auto format(terminal::Color value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::Color value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::RGBColor>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::RGBColor>: fmt::formatter<std::string>
 {
-    auto format(terminal::RGBColor value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::RGBColor value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::RGBAColor>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::RGBAColor>: fmt::formatter<std::string>
 {
     template <typename FormatContext>
-    auto format(terminal::RGBAColor value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::RGBAColor value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::CellRGBColor>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::CellRGBColor>: fmt::formatter<std::string>
 {
-    auto format(terminal::CellRGBColor value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::CellRGBColor value, format_context& ctx) -> format_context::iterator
     {
-        if (std::holds_alternative<terminal::CellForegroundColor>(value))
+        if (std::holds_alternative<vtbackend::CellForegroundColor>(value))
             return formatter<std::string>::format("CellForeground", ctx);
-        else if (std::holds_alternative<terminal::CellBackgroundColor>(value))
+        else if (std::holds_alternative<vtbackend::CellBackgroundColor>(value))
             return formatter<std::string>::format("CellBackground", ctx);
         else
-            return formatter<std::string>::format(to_string(std::get<terminal::RGBColor>(value)), ctx);
+            return formatter<std::string>::format(to_string(std::get<vtbackend::RGBColor>(value)), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::RGBColorPair>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::RGBColorPair>: fmt::formatter<std::string>
 {
-    auto format(terminal::RGBColorPair value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::RGBColorPair value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}/{}", value.foreground, value.background), ctx);
     }

@@ -8,13 +8,13 @@
 using crispy::size;
 using namespace std;
 using namespace std::placeholders;
-using namespace terminal;
+using namespace vtbackend;
 
 namespace
 {
 
 template <typename T>
-struct TestSelectionHelper: public terminal::SelectionHelper
+struct TestSelectionHelper: public vtbackend::SelectionHelper
 {
     Screen<T>* screen;
     explicit TestSelectionHelper(Screen<T>& self): screen { &self } {}

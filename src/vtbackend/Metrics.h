@@ -7,7 +7,7 @@
 #include <map>
 #include <string>
 
-namespace terminal
+namespace vtbackend
 {
 
 /// Used for collecting VT sequence usage metrics.
@@ -36,4 +36,4 @@ struct Metrics
     }
 };
 
-} // namespace terminal
+} // namespace vtbackend

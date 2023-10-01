@@ -10,7 +10,7 @@ using std::invalid_argument;
 using std::string;
 using std::transform;
 
-namespace terminal
+namespace vtbackend
 {
 
 CursorShape makeCursorShape(string const& name)
@@ -33,4 +33,4 @@ CursorShape makeCursorShape(string const& name)
         throw invalid_argument { "Invalid cursor shape: " + name };
 }
 
-} // namespace terminal
+} // namespace vtbackend

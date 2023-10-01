@@ -11,16 +11,16 @@ using std::make_unique;
 using std::optional;
 using std::unique_ptr;
 
-namespace terminal
+namespace vtpty
 {
 
-unique_ptr<Pty> createPty(PageSize pageSize, optional<crispy::image_size> viewSize)
+unique_ptr<Pty> createPty(PageSize pageSize, optional<ImageSize> viewSize)
 {
 #if defined(_MSC_VER)
-    return make_unique<terminal::ConPty>(pageSize /*TODO: , viewSize*/);
+    return make_unique<ConPty>(pageSize /*TODO: , viewSize*/);
 #else
-    return make_unique<terminal::UnixPty>(pageSize, viewSize);
+    return make_unique<UnixPty>(pageSize, viewSize);
 #endif
 }
 
-} // namespace terminal
+} // namespace vtpty

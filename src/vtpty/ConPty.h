@@ -3,15 +3,15 @@
 
 #include <vtpty/Pty.h>
 
+#include <crispy/BufferObject.h>
+
 #include <memory>
 #include <mutex>
 #include <vector>
 
 #include <Windows.h>
 
-#include "crispy/BufferObject.h"
-
-namespace terminal
+namespace vtpty
 {
 
 /// ConPty implementation for newer Windows 10 versions.
@@ -31,7 +31,7 @@ class ConPty: public Pty
     void wakeupReader() override;
     int write(std::string_view data) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override;
 
     PtySlave& slave() noexcept override;
     HPCON master() const noexcept { return _master; }
@@ -46,4 +46,4 @@ class ConPty: public Pty
     std::unique_ptr<PtySlave> _slave;
 };
 
-} // namespace terminal
+} // namespace vtpty

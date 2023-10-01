@@ -20,12 +20,12 @@
 #include <utility>
 #include <variant>
 
-namespace terminal
+namespace vtbackend
 {
 
 struct ImageData
 {
-    terminal::ImageFormat format;
+    vtbackend::ImageFormat format;
     int rowAlignment = 1;
     ImageSize size;
     std::vector<uint8_t> pixels;
@@ -143,35 +143,35 @@ enum class ColorMode
 
 RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target, ColorMode mode) noexcept;
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmtlib custom formatter support
 template <>
-struct fmt::formatter<terminal::ColorMode>: fmt::formatter<std::string_view>
+struct fmt::formatter<vtbackend::ColorMode>: fmt::formatter<std::string_view>
 {
-    auto format(terminal::ColorMode value, fmt::format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ColorMode value, fmt::format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ColorMode::Normal: name = "Normal"; break;
-            case terminal::ColorMode::Dimmed: name = "Dimmed"; break;
-            case terminal::ColorMode::Bright: name = "Bright"; break;
+            case vtbackend::ColorMode::Normal: name = "Normal"; break;
+            case vtbackend::ColorMode::Dimmed: name = "Dimmed"; break;
+            case vtbackend::ColorMode::Bright: name = "Bright"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::ColorTarget>: fmt::formatter<std::string_view>
+struct fmt::formatter<vtbackend::ColorTarget>: fmt::formatter<std::string_view>
 {
-    auto format(terminal::ColorTarget value, fmt::format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ColorTarget value, fmt::format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ColorTarget::Foreground: name = "Foreground"; break;
-            case terminal::ColorTarget::Background: name = "Background"; break;
+            case vtbackend::ColorTarget::Foreground: name = "Foreground"; break;
+            case vtbackend::ColorTarget::Background: name = "Background"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

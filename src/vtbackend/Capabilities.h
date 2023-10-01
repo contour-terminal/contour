@@ -9,7 +9,7 @@
 #include <string>
 #include <string_view>
 
-namespace terminal::capabilities
+namespace vtbackend::capabilities
 {
 
 // TCap Code - terminal capability code, a unique 2-byte identifier.
@@ -103,12 +103,12 @@ class StaticDatabase: public Database
     [[nodiscard]] std::string terminfo() const override;
 };
 
-} // namespace terminal::capabilities
+} // namespace vtbackend::capabilities
 
 template <>
-struct fmt::formatter<terminal::capabilities::Code>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::capabilities::Code>: fmt::formatter<std::string>
 {
-    auto format(terminal::capabilities::Code value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::capabilities::Code value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(value.hex(), ctx);
     }

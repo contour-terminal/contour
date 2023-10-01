@@ -31,7 +31,7 @@ using ranges::views::filter;
 using ranges::views::iota;
 using ranges::views::zip;
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 namespace
@@ -736,7 +736,7 @@ namespace detail
         };
         void diagonalMosaic(Pixmap& pixmap, Ratio ra, Ratio rb, UpperOrLower location) noexcept
         {
-            auto const innerSize = pixmap.size - ImageSize { Width(1), Height(1) };
+            auto const innerSize = pixmap.size - ImageSize { vtbackend::Width(1), vtbackend::Height(1) };
 
             auto const condition =
                 [location, line = linearEq(innerSize * ra, innerSize * rb)](int x, int y) noexcept -> bool {
@@ -910,7 +910,10 @@ void BoxDrawingRenderer::clearCache()
     // to clear here anything. It's done for us already.
 }
 
-bool BoxDrawingRenderer::render(LineOffset line, ColumnOffset column, char32_t codepoint, RGBColor color)
+bool BoxDrawingRenderer::render(vtbackend::LineOffset line,
+                                vtbackend::ColumnOffset column,
+                                char32_t codepoint,
+                                vtbackend::RGBColor color)
 {
     Renderable::AtlasTileAttributes const* data = getOrCreateCachedTileAttributes(codepoint);
     if (!data)
@@ -1742,4 +1745,4 @@ void BoxDrawingRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

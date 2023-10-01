@@ -8,7 +8,7 @@
 
 #include <libunicode/width.h>
 
-namespace terminal::CellUtil
+namespace vtbackend::CellUtil
 {
 
 [[nodiscard]] inline RGBColorPair makeColors(ColorPalette const& colorPalette,
@@ -175,4 +175,4 @@ inline void applyGraphicsRendition(GraphicsRendition sgr, Cell& cell) noexcept
     cell.resetFlags(makeCellFlags(sgr, cell.flags()));
 }
 
-} // namespace terminal::CellUtil
+} // namespace vtbackend::CellUtil

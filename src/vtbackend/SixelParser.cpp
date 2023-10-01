@@ -12,7 +12,7 @@ using std::vector;
 // VT 340 sixel protocol is defined here: https://vt100.net/docs/vt3xx-gp/chapter14.html
 
 using namespace std;
-namespace terminal
+namespace vtbackend
 {
 
 namespace
@@ -498,4 +498,4 @@ void SixelImageBuilder::finalize()
     }
 }
 
-} // namespace terminal
+} // namespace vtbackend

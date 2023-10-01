@@ -16,7 +16,7 @@ using std::pair;
 using std::vector;
 using namespace std::string_view_literals;
 
-namespace terminal
+namespace vtbackend
 {
 
 // Possible future improvements (aka. nice TODO):
@@ -484,4 +484,4 @@ void ViInputHandler::toggleMode(ViMode newMode)
     setMode(newMode != _viMode ? newMode : ViMode::Normal);
 }
 
-} // namespace terminal
+} // namespace vtbackend

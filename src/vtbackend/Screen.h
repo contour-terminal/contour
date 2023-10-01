@@ -33,7 +33,7 @@
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/width.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 class ScreenBase: public SequenceHandler
@@ -660,4 +660,4 @@ inline bool Screen<Cell>::isContiguousToCurrentLine(std::string_view continuatio
     return line.isTrivialBuffer() && line.trivialBuffer().text.view().end() == continuationChars.begin();
 }
 
-} // namespace terminal
+} // namespace vtbackend

@@ -6,7 +6,7 @@
 
 #include <fmt/format.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 template <typename Input, typename Binding>
@@ -55,13 +55,13 @@ bool operator<(InputBinding<I, O> const& a, InputBinding<I, O> const& b) noexcep
     return false;
 }
 
-} // namespace terminal
+} // namespace vtbackend
 
 template <typename I, typename O>
-struct fmt::formatter<terminal::InputBinding<I, O>>
+struct fmt::formatter<vtbackend::InputBinding<I, O>>
 {
     static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(terminal::InputBinding<I, O> const& binding, format_context& ctx)
+    static auto format(vtbackend::InputBinding<I, O> const& binding, format_context& ctx)
         -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "{} {} {}", binding.modes, binding.modifier, binding.input);

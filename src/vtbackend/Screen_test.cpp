@@ -19,8 +19,8 @@
 
 using crispy::escape;
 using crispy::size;
-using namespace terminal;
-using namespace terminal::test;
+using namespace vtbackend;
+using namespace vtbackend::test;
 using namespace std;
 using namespace std::literals::chrono_literals;
 
@@ -110,25 +110,26 @@ void TextRenderBuilder::finish()
 {
 }
 
-MockTerm<MockPty> screenForDECRA()
+MockTerm<vtpty::MockPty> screenForDECRA()
 {
-    return MockTerm<MockPty> { PageSize { LineCount(5), ColumnCount(6) }, {}, 1024, [](auto& mock) {
-                                  mock.writeToScreen("ABCDEF\r\n"
-                                                     "abcdef\r\n"
-                                                     "123456\r\n");
-                                  mock.writeToScreen("\033[43m");
-                                  mock.writeToScreen("GHIJKL\r\n"
-                                                     "ghijkl");
-                                  mock.writeToScreen("\033[0m");
+    return MockTerm<vtpty::MockPty> { PageSize { LineCount(5), ColumnCount(6) }, {}, 1024, [](auto& mock) {
+                                         mock.writeToScreen("ABCDEF\r\n"
+                                                            "abcdef\r\n"
+                                                            "123456\r\n");
+                                         mock.writeToScreen("\033[43m");
+                                         mock.writeToScreen("GHIJKL\r\n"
+                                                            "ghijkl");
+                                         mock.writeToScreen("\033[0m");
 
-                                  auto const* const initialText = "ABCDEF\n"
-                                                                  "abcdef\n"
-                                                                  "123456\n"
-                                                                  "GHIJKL\n"
-                                                                  "ghijkl\n";
+                                         auto const* const initialText = "ABCDEF\n"
+                                                                         "abcdef\n"
+                                                                         "123456\n"
+                                                                         "GHIJKL\n"
+                                                                         "ghijkl\n";
 
-                                  CHECK(mock.terminal.primaryScreen().renderMainPageText() == initialText);
-                              } };
+                                         CHECK(mock.terminal.primaryScreen().renderMainPageText()
+                                               == initialText);
+                                     } };
 }
 
 } // namespace
@@ -664,7 +665,7 @@ TEST_CASE("Screen.isLineVisible", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) }, LineCount(5) };
     auto& screen = mock.terminal.primaryScreen();
-    auto viewport = terminal::Viewport { mock.terminal };
+    auto viewport = vtbackend::Viewport { mock.terminal };
 
     mock.writeToScreen("10203040");
     logScreenText(screen);
@@ -3507,7 +3508,7 @@ TEST_CASE("DECCRA.Left.intersecting", "[screen]")
 
 TEST_CASE("Screen.tcap.string", "[screen, tcap]")
 {
-    using namespace terminal;
+    using namespace vtbackend;
     auto mock = MockTerm(PageSize { LineCount(3), ColumnCount(5) }, LineCount(2));
     mock.writeToScreen("\033P+q687061\033\\"); // HPA
     REQUIRE(e(mock.terminal.peekInput()) == e("\033P1+r687061=1B5B2569257031256447\033\\"));

@@ -2,7 +2,7 @@
 #include <vtbackend/Terminal.h>
 #include <vtbackend/TerminalState.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 class Terminal;
@@ -83,4 +83,4 @@ std::string to_string(DECMode mode)
     return fmt::format("({})", static_cast<unsigned>(mode));
 }
 
-} // namespace terminal
+} // namespace vtbackend

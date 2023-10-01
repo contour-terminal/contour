@@ -9,7 +9,7 @@
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 /*
@@ -250,15 +250,15 @@ class ViInputHandler: public InputHandler
     Executor& _executor;
 };
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmtlib custom formatters
 template <>
-struct fmt::formatter<terminal::TextObjectScope>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::TextObjectScope>: formatter<std::string_view>
 {
-    auto format(terminal::TextObjectScope scope, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::TextObjectScope scope, format_context& ctx) -> format_context::iterator
     {
-        using TextObjectScope = terminal::TextObjectScope;
+        using TextObjectScope = vtbackend::TextObjectScope;
         string_view name;
         switch (scope)
         {
@@ -270,11 +270,11 @@ struct fmt::formatter<terminal::TextObjectScope>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<terminal::TextObject>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::TextObject>: formatter<std::string_view>
 {
-    auto format(terminal::TextObject textObject, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::TextObject textObject, format_context& ctx) -> format_context::iterator
     {
-        using TextObject = terminal::TextObject;
+        using TextObject = vtbackend::TextObject;
         string_view name;
         switch (textObject)
         {
@@ -295,12 +295,12 @@ struct fmt::formatter<terminal::TextObject>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<terminal::ViOperator>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::ViOperator>: formatter<std::string_view>
 {
-    auto format(terminal::ViOperator op, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ViOperator op, format_context& ctx) -> format_context::iterator
     {
         string_view name;
-        using terminal::ViOperator;
+        using vtbackend::ViOperator;
         switch (op)
         {
             case ViOperator::MoveCursor: name = "MoveCursor"; break;
@@ -314,12 +314,12 @@ struct fmt::formatter<terminal::ViOperator>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<terminal::ViMotion>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::ViMotion>: formatter<std::string_view>
 {
-    auto format(terminal::ViMotion motion, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ViMotion motion, format_context& ctx) -> format_context::iterator
     {
         string_view name;
-        using terminal::ViMotion;
+        using vtbackend::ViMotion;
         switch (motion)
         {
             case ViMotion::Explicit: name = "Explicit"; break;

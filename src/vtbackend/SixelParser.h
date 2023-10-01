@@ -14,7 +14,7 @@
 #include <string_view>
 #include <vector>
 
-namespace terminal
+namespace vtbackend
 {
 
 /// Sixel Stream Parser API.
@@ -187,4 +187,4 @@ class SixelImageBuilder: public SixelParser::Events
     unsigned int _sixelBandHeight;
 };
 
-} // namespace terminal
+} // namespace vtbackend

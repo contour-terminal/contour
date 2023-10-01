@@ -3,7 +3,7 @@
 
 #include <vtbackend/InputGenerator.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 /**
@@ -20,4 +20,4 @@ class InputHandler
     virtual bool sendCharPressEvent(char32_t codepoint, Modifier modifier) = 0;
 };
 
-} // namespace terminal
+} // namespace vtbackend

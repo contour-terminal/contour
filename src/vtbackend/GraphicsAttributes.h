@@ -7,7 +7,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace terminal
+namespace vtbackend
 {
 
 /// Character graphics rendition information.
@@ -32,4 +32,4 @@ constexpr bool operator!=(GraphicsAttributes const& a, GraphicsAttributes const&
     return !(a == b);
 }
 
-} // namespace terminal
+} // namespace vtbackend

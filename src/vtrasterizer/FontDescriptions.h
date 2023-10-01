@@ -4,7 +4,7 @@
 
 #include <crispy/point.h>
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 enum class TextShapingEngine
@@ -77,49 +77,46 @@ constexpr bool operator<(TextStyle a, TextStyle b) noexcept
     return static_cast<unsigned>(a) < static_cast<unsigned>(b);
 }
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<terminal::rasterizer::FontLocatorEngine>: fmt::formatter<std::string_view>
+struct fmt::formatter<vtrasterizer::FontLocatorEngine>: fmt::formatter<std::string_view>
 {
-    auto format(terminal::rasterizer::FontLocatorEngine value, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtrasterizer::FontLocatorEngine value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::rasterizer::FontLocatorEngine::CoreText: name = "CoreText"; break;
-            case terminal::rasterizer::FontLocatorEngine::DWrite: name = "DirectWrite"; break;
-            case terminal::rasterizer::FontLocatorEngine::FontConfig: name = "Fontconfig"; break;
-            case terminal::rasterizer::FontLocatorEngine::Mock: name = "Mock"; break;
+            case vtrasterizer::FontLocatorEngine::CoreText: name = "CoreText"; break;
+            case vtrasterizer::FontLocatorEngine::DWrite: name = "DirectWrite"; break;
+            case vtrasterizer::FontLocatorEngine::FontConfig: name = "Fontconfig"; break;
+            case vtrasterizer::FontLocatorEngine::Mock: name = "Mock"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::rasterizer::TextShapingEngine>: fmt::formatter<std::string_view>
+struct fmt::formatter<vtrasterizer::TextShapingEngine>: fmt::formatter<std::string_view>
 {
-    auto format(terminal::rasterizer::TextShapingEngine value, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtrasterizer::TextShapingEngine value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::rasterizer::TextShapingEngine::CoreText: name = "CoreText"; break;
-            case terminal::rasterizer::TextShapingEngine::DWrite: name = "DirectWrite"; break;
-            case terminal::rasterizer::TextShapingEngine::OpenShaper: name = "harfbuzz"; break;
+            case vtrasterizer::TextShapingEngine::CoreText: name = "CoreText"; break;
+            case vtrasterizer::TextShapingEngine::DWrite: name = "DirectWrite"; break;
+            case vtrasterizer::TextShapingEngine::OpenShaper: name = "harfbuzz"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::rasterizer::FontDescriptions>: fmt::formatter<std::string>
+struct fmt::formatter<vtrasterizer::FontDescriptions>: fmt::formatter<std::string>
 {
-    auto format(terminal::rasterizer::FontDescriptions const& fd, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtrasterizer::FontDescriptions const& fd, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("({}, {}, {}, {}, {}, {}, {}, {})",
                                                           fd.size,

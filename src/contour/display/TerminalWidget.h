@@ -70,13 +70,13 @@ class TerminalWidget: public QQuickItem
         return _session->profile();
     }
 
-    [[nodiscard]] terminal::Terminal const& terminal() const noexcept
+    [[nodiscard]] vtbackend::Terminal const& terminal() const noexcept
     {
         assert(_session != nullptr);
         return _session->terminal();
     }
 
-    [[nodiscard]] terminal::Terminal& terminal() noexcept
+    [[nodiscard]] vtbackend::Terminal& terminal() noexcept
     {
         assert(_session != nullptr);
         return _session->terminal();
@@ -93,7 +93,7 @@ class TerminalWidget: public QQuickItem
         return *_session;
     }
 
-    [[nodiscard]] terminal::PageSize windowSize() const noexcept;
+    [[nodiscard]] vtbackend::PageSize windowSize() const noexcept;
 
     // {{{ Input handling
     void keyPressEvent(QKeyEvent* keyEvent) override;
@@ -116,23 +116,23 @@ class TerminalWidget: public QQuickItem
     void post(std::function<void()> fn);
 
     // Attributes
-    [[nodiscard]] terminal::RefreshRate refreshRate() const;
+    [[nodiscard]] vtbackend::RefreshRate refreshRate() const;
     text::DPI fontDPI() const noexcept;
     [[nodiscard]] bool isFullScreen() const;
 
-    [[nodiscard]] terminal::ImageSize pixelSize() const;
-    [[nodiscard]] terminal::ImageSize cellSize() const;
+    [[nodiscard]] vtbackend::ImageSize pixelSize() const;
+    [[nodiscard]] vtbackend::ImageSize cellSize() const;
 
     // (user requested) actions
-    terminal::FontDef getFontDef();
+    vtbackend::FontDef getFontDef();
     static void copyToClipboard(std::string_view /*_data*/);
     void inspect();
     void notify(std::string_view /*_title*/, std::string_view /*_body*/);
-    void resizeWindow(terminal::LineCount, terminal::ColumnCount);
-    void resizeWindow(terminal::Width, terminal::Height);
-    void setFonts(terminal::rasterizer::FontDescriptions fontDescriptions);
+    void resizeWindow(vtbackend::LineCount, vtbackend::ColumnCount);
+    void resizeWindow(vtbackend::Width, vtbackend::Height);
+    void setFonts(vtrasterizer::FontDescriptions fontDescriptions);
     bool setFontSize(text::font_size newFontSize);
-    bool setPageSize(terminal::PageSize newPageSize);
+    bool setPageSize(vtbackend::PageSize newPageSize);
     void setMouseCursorShape(MouseCursorShape newCursorShape);
     void setWindowFullScreen();
     void setWindowMaximized();
@@ -140,15 +140,14 @@ class TerminalWidget: public QQuickItem
     void setBlurBehind(bool enable);
     void toggleFullScreen();
     void toggleTitleBar();
-    void setHyperlinkDecoration(terminal::rasterizer::Decorator normal,
-                                terminal::rasterizer::Decorator hover);
+    void setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover);
 
     // terminal events
     void scheduleRedraw();
     void renderBufferUpdated();
     void onSelectionCompleted();
-    void bufferChanged(terminal::ScreenType);
-    void discardImage(terminal::Image const&);
+    void bufferChanged(vtbackend::ScreenType);
+    void discardImage(vtbackend::Image const&);
     // }}}
 
     [[nodiscard]] double contentScale() const;
@@ -182,7 +181,7 @@ class TerminalWidget: public QQuickItem
     void profileNameChanged();
     void titleChanged(QString const&);
     void sessionChanged(TerminalSession*);
-    void terminalBufferChanged(terminal::ScreenType);
+    void terminalBufferChanged(vtbackend::ScreenType);
     void terminated();
     void showNotification(QString const& title, QString const& body);
 
@@ -211,7 +210,7 @@ class TerminalWidget: public QQuickItem
     void watchKdeDpiSetting();
     [[nodiscard]] float uptime() const noexcept;
 
-    [[nodiscard]] terminal::PageSize pageSize() const
+    [[nodiscard]] vtbackend::PageSize pageSize() const
     {
         assert(_renderer);
         return pageSizeForPixels(pixelSize(), _renderer->gridMetrics().cellSize);
@@ -222,7 +221,7 @@ class TerminalWidget: public QQuickItem
     void statsSummary();
     void doResize(crispy::size size);
 
-    [[nodiscard]] terminal::rasterizer::GridMetrics const& gridMetrics() const noexcept
+    [[nodiscard]] vtrasterizer::GridMetrics const& gridMetrics() const noexcept
     {
         return _renderer->gridMetrics();
     }
@@ -246,7 +245,7 @@ class TerminalWidget: public QQuickItem
     TerminalSession* _session = nullptr;
     std::chrono::steady_clock::time_point _startTime;
     text::DPI _lastFontDPI;
-    std::unique_ptr<terminal::rasterizer::Renderer> _renderer;
+    std::unique_ptr<vtrasterizer::Renderer> _renderer;
     bool _renderingPressure = false;
     display::OpenGLRenderer* _renderTarget = nullptr;
     bool _maximizedState = false;
@@ -260,7 +259,7 @@ class TerminalWidget: public QQuickItem
     QFileSystemWatcher _filesystemWatcher;
     QMediaPlayer _mediaPlayer;
 
-    terminal::LineCount _lastHistoryLineCount = terminal::LineCount(0);
+    vtbackend::LineCount _lastHistoryLineCount = vtbackend::LineCount(0);
 
     // ======================================================================
 

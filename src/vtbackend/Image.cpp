@@ -14,7 +14,7 @@ using std::ostream;
 using std::shared_ptr;
 using std::string;
 
-namespace terminal
+namespace vtbackend
 {
 
 ImageStats& ImageStats::get()
@@ -167,4 +167,4 @@ void ImagePool::inspect(ostream& os) const
     _imageNameToImageCache.inspect(os);
 }
 
-} // namespace terminal
+} // namespace vtbackend

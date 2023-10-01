@@ -53,12 +53,12 @@ using std::tuple;
 
 using namespace std::string_literals;
 
-namespace terminal
+namespace vtpty
 {
 
 namespace
 {
-    UnixPty::PtyHandles createUnixPty(PageSize const& windowSize, optional<crispy::image_size> pixels)
+    UnixPty::PtyHandles createUnixPty(PageSize const& windowSize, optional<ImageSize> pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
         assert(*windowSize.lines <= numeric_limits<unsigned short>::max());
@@ -66,8 +66,8 @@ namespace
 
         winsize const ws { unbox<unsigned short>(windowSize.lines),
                            unbox<unsigned short>(windowSize.columns),
-                           unbox<unsigned short>(pixels.value_or(crispy::image_size {}).width),
-                           unbox<unsigned short>(pixels.value_or(crispy::image_size {}).height) };
+                           unbox<unsigned short>(pixels.value_or(ImageSize {}).width),
+                           unbox<unsigned short>(pixels.value_or(ImageSize {}).height) };
 
 #if defined(__APPLE__)
         auto* wsa = const_cast<winsize*>(&ws);
@@ -111,7 +111,7 @@ PtySlaveHandle UnixPty::Slave::handle() const noexcept
 
 void UnixPty::Slave::close()
 {
-    detail::saveClose(&_slaveFd);
+    util::saveClose(&_slaveFd);
 }
 
 bool UnixPty::Slave::isClosed() const noexcept
@@ -121,7 +121,7 @@ bool UnixPty::Slave::isClosed() const noexcept
 
 bool UnixPty::Slave::configure() noexcept
 {
-    auto const tio = detail::constructTerminalSettings(_slaveFd);
+    auto const tio = util::constructTerminalSettings(_slaveFd);
     if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
         tcflush(_slaveFd, TCIOFLUSH);
     return true;
@@ -150,11 +150,11 @@ bool UnixPty::Slave::login()
     {
         if (_slaveFd != fd)
             ::close(fd);
-        detail::saveDup2(_slaveFd, fd);
+        util::saveDup2(_slaveFd, fd);
     }
 
     if (_slaveFd > 2)
-        detail::saveClose(&_slaveFd);
+        util::saveClose(&_slaveFd);
 
     return true;
 }
@@ -172,8 +172,7 @@ int UnixPty::Slave::write(std::string_view text) noexcept
 }
 // }}}
 
-UnixPty::UnixPty(PageSize pageSize, optional<crispy::image_size> pixels):
-    _pageSize { pageSize }, _pixels { pixels }
+UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels): _pageSize { pageSize }, _pixels { pixels }
 {
 }
 
@@ -183,10 +182,10 @@ void UnixPty::start()
     _masterFd = unbox<int>(handles.master);
     _slave = make_unique<Slave>(handles.slave);
 
-    if (!detail::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
+    if (!util::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
         throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
 
-    detail::setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
+    util::setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
     ptyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
 
     _readSelector.want_read(_masterFd);
@@ -200,7 +199,7 @@ void UnixPty::start()
 UnixPty::~UnixPty()
 {
     ptyLog()("PTY destroying master (file descriptor {}).", _masterFd);
-    detail::saveClose(&_masterFd);
+    util::saveClose(&_masterFd);
 }
 
 PtySlave& UnixPty::slave() noexcept
@@ -217,7 +216,7 @@ PtyMasterHandle UnixPty::handle() const noexcept
 void UnixPty::close()
 {
     ptyLog()("PTY closing master (file descriptor {}).", _masterFd);
-    detail::saveClose(&_masterFd);
+    util::saveClose(&_masterFd);
     wakeupReader();
 }
 
@@ -296,9 +295,9 @@ int UnixPty::write(std::string_view data)
 
     if (0 <= rv && static_cast<size_t>(rv) < size)
     {
-        detail::setFileBlocking(_masterFd, true);
+        util::setFileBlocking(_masterFd, true);
         auto const rv2 = ::write(_masterFd, buf + rv, size - rv);
-        detail::setFileBlocking(_masterFd, false);
+        util::setFileBlocking(_masterFd, false);
         if (rv2 >= 0)
         {
             if (ptyOutLog)
@@ -315,7 +314,7 @@ PageSize UnixPty::pageSize() const noexcept
     return _pageSize;
 }
 
-void UnixPty::resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels)
+void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
     if (_masterFd < 0)
         return;
@@ -336,4 +335,4 @@ void UnixPty::resizeScreen(PageSize cells, std::optional<crispy::image_size> pix
     _pageSize = cells;
 }
 
-} // namespace terminal
+} // namespace vtpty

@@ -35,7 +35,7 @@ string GetLastErrorAsString()
 }
 } // anonymous namespace
 
-namespace terminal
+namespace vtpty
 {
 
 struct ConPtySlave: public PtySlaveDummy
@@ -170,7 +170,7 @@ PageSize ConPty::pageSize() const noexcept
     return _size;
 }
 
-void ConPty::resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels)
+void ConPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
     if (!_slave)
         return;
@@ -193,4 +193,4 @@ PtySlave& ConPty::slave() noexcept
     return *_slave;
 }
 
-} // namespace terminal
+} // namespace vtpty

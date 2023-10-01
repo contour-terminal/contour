@@ -18,23 +18,21 @@
 
 #include <fmt/format.h>
 
-#include <chrono>
 #include <memory>
-#include <utility>
 #include <vector>
 
 #include "crispy/StrongLRUHashtable.h"
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 struct RenderCursor
 {
     crispy::point position;
-    CursorShape shape;
+    vtbackend::CursorShape shape;
     int width;
 
-    RenderCursor(crispy::point position, CursorShape shape, int width):
+    RenderCursor(crispy::point position, vtbackend::CursorShape shape, int width):
         position(position), shape(shape), width(width)
     {
     }
@@ -54,9 +52,9 @@ class Renderer
      * @p atlasDirectMapping Indicates whether or not direct mapped tiles are allowed.
      * @p atlasTileCount     Number of tiles guaranteed to be available in LRU cache.
      */
-    Renderer(PageSize pageSize,
+    Renderer(vtbackend::PageSize pageSize,
              FontDescriptions fontDescriptions,
-             ColorPalette const& colorPalette,
+             vtbackend::ColorPalette const& colorPalette,
              crispy::strong_hashtable_size atlasHashtableSlotCount,
              crispy::lru_capacity atlasTileCount,
              bool atlasDirectMapping,
@@ -84,7 +82,7 @@ class Renderer
         _decorationRenderer.setHyperlinkDecoration(normal, hover);
     }
 
-    void setPageSize(PageSize screenSize) noexcept { _gridMetrics.pageSize = screenSize; }
+    void setPageSize(vtbackend::PageSize screenSize) noexcept { _gridMetrics.pageSize = screenSize; }
 
     void setMargin(PageMargin margin) noexcept
     {
@@ -104,9 +102,9 @@ class Renderer
      *                       The user shall not notice that, because this frame
      *                       is known already to be updated right after again.
      */
-    void render(Terminal& terminal, bool pressureHint);
+    void render(vtbackend::Terminal& terminal, bool pressureHint);
 
-    void discardImage(Image const& image);
+    void discardImage(vtbackend::Image const& image);
 
     void clearCache();
 
@@ -128,8 +126,8 @@ class Renderer
 
   private:
     void configureTextureAtlas();
-    void renderCells(std::vector<RenderCell> const& renderableCells);
-    void renderLines(std::vector<RenderLine> const& renderableLines);
+    void renderCells(std::vector<vtbackend::RenderCell> const& renderableCells);
+    void renderLines(std::vector<vtbackend::RenderLine> const& renderableLines);
     void executeImageDiscards();
 
     crispy::strong_hashtable_size _atlasHashtableSlotCount;
@@ -147,10 +145,10 @@ class Renderer
 
     GridMetrics _gridMetrics;
 
-    ColorPalette const& _colorPalette;
+    vtbackend::ColorPalette const& _colorPalette;
 
-    std::mutex _imageDiscardLock;            //!< Lock guard for accessing _discardImageQueue.
-    std::vector<ImageId> _discardImageQueue; //!< List of images to be discarded.
+    std::mutex _imageDiscardLock;                       //!< Lock guard for accessing _discardImageQueue.
+    std::vector<vtbackend::ImageId> _discardImageQueue; //!< List of images to be discarded.
 
     BackgroundRenderer _backgroundRenderer;
     ImageRenderer _imageRenderer;
@@ -159,4 +157,4 @@ class Renderer
     CursorRenderer _cursorRenderer;
 };
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

@@ -7,7 +7,7 @@
 
 using namespace std;
 
-namespace terminal
+namespace vtbackend
 {
 
 string to_string(Color color)
@@ -130,4 +130,4 @@ string to_string(RGBAColor c)
     return fmt::format("#{:02X}{:02X}{:02X}{:02X}", c.red(), c.green(), c.blue(), c.alpha());
 }
 
-} // namespace terminal
+} // namespace vtbackend

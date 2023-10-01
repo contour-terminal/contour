@@ -9,38 +9,36 @@
 
 #include <crispy/point.h>
 
-#include <array>
-
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 /// Takes care of rendering the text cursor.
 class CursorRenderer: public Renderable
 {
   public:
-    CursorRenderer(GridMetrics const& gridMetrics, CursorShape shape);
+    CursorRenderer(GridMetrics const& gridMetrics, vtbackend::CursorShape shape);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void setTextureAtlas(TextureAtlas& atlas) override;
 
     void clearCache() override;
 
-    [[nodiscard]] CursorShape shape() const noexcept { return _shape; }
-    void setShape(CursorShape shape);
+    [[nodiscard]] vtbackend::CursorShape shape() const noexcept { return _shape; }
+    void setShape(vtbackend::CursorShape shape);
 
-    void render(crispy::point pos, int columnWidth, RGBColor color);
+    void render(crispy::point pos, int columnWidth, vtbackend::RGBColor color);
 
     void inspect(std::ostream& output) const override;
 
   private:
     void initializeDirectMapping();
     using Renderable::createTileData;
-    [[nodiscard]] TextureAtlas::TileCreateData createTileData(CursorShape shape,
+    [[nodiscard]] TextureAtlas::TileCreateData createTileData(vtbackend::CursorShape shape,
                                                               int columnWidth,
                                                               atlas::TileLocation tileLocation);
 
     DirectMapping _directMapping {};
-    CursorShape _shape;
+    vtbackend::CursorShape _shape;
 };
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

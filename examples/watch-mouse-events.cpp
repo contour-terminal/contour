@@ -27,9 +27,9 @@ using namespace std;
 namespace
 {
 
-using namespace terminal;
+using namespace vtbackend;
 
-struct BasicParserEvents: public NullParserEvents // {{{
+struct BasicParserEvents: public vtparser::NullParserEvents // {{{
 {
     Sequence _sequence {};
     SequenceParameterBuilder _parameterBuilder;
@@ -106,7 +106,7 @@ struct BasicParserEvents: public NullParserEvents // {{{
 
     void dispatchOSC() override
     {
-        auto const [code, skipCount] = parser::extractCodePrefix(_sequence.intermediateCharacters());
+        auto const [code, skipCount] = vtparser::extractCodePrefix(_sequence.intermediateCharacters());
         _parameterBuilder.set(static_cast<Sequence::Parameter>(code));
         _sequence.intermediateCharacters().erase(0, skipCount);
         executeSequenceHandler();
@@ -132,15 +132,16 @@ struct MouseTracker final: public BasicParserEvents
     bool uiHandledHint = false;
     termios savedTermios;
 
-    parser::Parser<ParserEvents> vtInputParser;
+    vtparser::Parser<vtparser::ParserEvents> vtInputParser;
 
-    MouseTracker() noexcept: savedTermios { detail::getTerminalSettings(STDIN_FILENO) }, vtInputParser { *this }
+    MouseTracker() noexcept:
+        savedTermios { vtpty::util::getTerminalSettings(STDIN_FILENO) }, vtInputParser { *this }
     {
         auto tio = savedTermios;
         tio.c_lflag &= static_cast<tcflag_t>(~(ECHO | ICANON));
         tio.c_cc[VMIN] = 1;  // Report as soon as 1 character is available.
         tio.c_cc[VTIME] = 0; // Disable timeout (no need).
-        detail::applyTerminalSettings(STDIN_FILENO, tio);
+        vtpty::util::applyTerminalSettings(STDIN_FILENO, tio);
 
         writeToTTY("\033[?2029h"); // enable passive mouse reporting
         writeToTTY("\033[?2030h"); // enable text selection reporting
@@ -154,7 +155,7 @@ struct MouseTracker final: public BasicParserEvents
 
     ~MouseTracker() override
     {
-        detail::applyTerminalSettings(STDIN_FILENO, savedTermios);
+        vtpty::util::applyTerminalSettings(STDIN_FILENO, savedTermios);
         writeToTTY("\033[?2029l"); // disable passive mouse reporting
         writeToTTY("\033[?2030l"); // disable text selection reporting
         writeToTTY("\033[?25h");   // show text cursor

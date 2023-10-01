@@ -40,7 +40,7 @@ using namespace std::placeholders;
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-namespace terminal
+namespace vtbackend
 {
 
 namespace // {{{ helpers
@@ -119,7 +119,7 @@ namespace // {{{ helpers
 // }}}
 
 Terminal::Terminal(Events& eventListener,
-                   std::unique_ptr<Pty> pty,
+                   std::unique_ptr<vtpty::Pty> pty,
                    Settings factorySettings,
                    chrono::steady_clock::time_point now):
     _eventListener { eventListener },
@@ -179,7 +179,7 @@ void Terminal::setLastMarkRangeOffset(LineOffset value) noexcept
     _settings.copyLastMarkRangeOffset = value;
 }
 
-Pty::ReadResult Terminal::readFromPty()
+vtpty::Pty::ReadResult Terminal::readFromPty()
 {
     auto const timeout =
 #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
@@ -194,9 +194,9 @@ Pty::ReadResult Terminal::readFromPty()
     // store a single text line.
     if (_currentPtyBuffer->bytesAvailable() < unbox<size_t>(_settings.pageSize.columns))
     {
-        if (ptyInLog)
-            ptyInLog()("Only {} bytes left in TBO. Allocating new buffer from pool.",
-                       _currentPtyBuffer->bytesAvailable());
+        if (vtpty::ptyInLog)
+            vtpty::ptyInLog()("Only {} bytes left in TBO. Allocating new buffer from pool.",
+                              _currentPtyBuffer->bytesAvailable());
         _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
     }
 
@@ -441,7 +441,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         baseLine += fillRenderBufferStatusLine(output, includeSelection, baseLine).as<LineOffset>();
 
     auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, _currentScreen };
-    auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
+    auto const mainDisplayReverseVideo = isModeEnabled(vtbackend::DECMode::ReverseVideo);
     auto const highlightSearchMatches =
         _state.searchMode.pattern.empty() ? HighlightSearchMatches::No : HighlightSearchMatches::Yes;
 
@@ -486,7 +486,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
 LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base)
 {
-    auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
+    auto const mainDisplayReverseVideo = isModeEnabled(vtbackend::DECMode::ReverseVideo);
     switch (_state.statusDisplayType)
     {
         case StatusDisplayType::None:
@@ -1229,13 +1229,13 @@ string Terminal::extractSelectionText() const
     if (isPrimaryScreen())
     {
         auto se = SelectionRenderer<PrimaryScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
-        terminal::renderSelection(*_selection, [&](CellLocation pos) { se(pos, _primaryScreen.at(pos)); });
+        vtbackend::renderSelection(*_selection, [&](CellLocation pos) { se(pos, _primaryScreen.at(pos)); });
         return se.finish();
     }
     else
     {
         auto se = SelectionRenderer<AlternateScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
-        terminal::renderSelection(*_selection, [&](CellLocation pos) { se(pos, _alternateScreen.at(pos)); });
+        vtbackend::renderSelection(*_selection, [&](CellLocation pos) { se(pos, _alternateScreen.at(pos)); });
         return se.finish();
     }
 }
@@ -2294,4 +2294,4 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
 }
 // }}}
 
-} // namespace terminal
+} // namespace vtbackend

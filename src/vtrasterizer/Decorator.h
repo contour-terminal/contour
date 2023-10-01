@@ -8,7 +8,7 @@
 #include <optional>
 #include <string>
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 /// Dectorator, to decorate a grid cell, eventually containing a character
@@ -65,12 +65,12 @@ inline std::optional<Decorator> to_decorator(std::string const& value) noexcept
 }
 // }}}
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer
 
 template <>
-struct std::numeric_limits<terminal::rasterizer::Decorator>
+struct std::numeric_limits<vtrasterizer::Decorator>
 {
-    using Decorator = terminal::rasterizer::Decorator;
+    using Decorator = vtrasterizer::Decorator;
     constexpr static Decorator min() noexcept { return Decorator::Underline; }
     constexpr static Decorator max() noexcept { return Decorator::Encircle; }
     constexpr static size_t count() noexcept
@@ -80,9 +80,9 @@ struct std::numeric_limits<terminal::rasterizer::Decorator>
 };
 
 template <>
-struct fmt::formatter<terminal::rasterizer::Decorator>: formatter<std::string_view>
+struct fmt::formatter<vtrasterizer::Decorator>: formatter<std::string_view>
 {
-    auto format(terminal::rasterizer::Decorator value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::Decorator value, format_context& ctx) -> format_context::iterator
     {
         auto constexpr Mappings = std::array {
             "underline", "double-underline", "curly-underline", "dotted-underline", "dashed-underline",

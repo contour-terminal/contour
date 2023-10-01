@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/ImageSize.h>
 #include <vtpty/PageSize.h>
 
-#include <crispy/ImageSize.h>
-
-#include <cassert>
-#include <cstdint>
 #include <limits>
 #include <ostream>
-#include <type_traits>
 #include <variant>
 
 #include <boxed-cpp/boxed.hpp>
@@ -18,8 +14,12 @@
 // - [ ] rename all History to Scrollback
 // - [ ] make sense out of all the semantically different line primitives.
 
-namespace terminal
+namespace vtbackend
 {
+
+using LineCount = vtpty::LineCount;
+using ColumnCount = vtpty::ColumnCount;
+using PageSize = vtpty::PageSize;
 
 namespace detail::tags // {{{
 {
@@ -424,9 +424,9 @@ constexpr Length length(Range range) noexcept
 // }}}
 // {{{ ImageSize types
 
-using Width = crispy::width;
-using Height = crispy::height;
-using ImageSize = crispy::image_size;
+using Width = vtpty::Width;
+using Height = vtpty::Height;
+using ImageSize = vtpty::ImageSize;
 
 // }}}
 // {{{ Mixed boxed types operator overloads
@@ -883,94 +883,94 @@ struct SearchResult
     size_t partialMatchLength = 0; // length of partial match that happens at either end
 };
 
-} // namespace terminal
+} // namespace vtbackend
 
 namespace std
 {
 template <>
-struct numeric_limits<terminal::CursorShape>
+struct numeric_limits<vtbackend::CursorShape>
 {
-    constexpr static terminal::CursorShape min() noexcept { return terminal::CursorShape::Block; }
-    constexpr static terminal::CursorShape max() noexcept { return terminal::CursorShape::Bar; }
+    constexpr static vtbackend::CursorShape min() noexcept { return vtbackend::CursorShape::Block; }
+    constexpr static vtbackend::CursorShape max() noexcept { return vtbackend::CursorShape::Bar; }
     constexpr static size_t count() noexcept { return 4; }
 };
 } // namespace std
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<terminal::CursorShape>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::CursorShape>: formatter<std::string_view>
 {
-    auto format(terminal::CursorShape value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::CursorShape value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::CursorShape::Bar: name = "Bar"; break;
-            case terminal::CursorShape::Block: name = "Block"; break;
-            case terminal::CursorShape::Rectangle: name = "Rectangle"; break;
-            case terminal::CursorShape::Underscore: name = "Underscore"; break;
+            case vtbackend::CursorShape::Bar: name = "Bar"; break;
+            case vtbackend::CursorShape::Block: name = "Block"; break;
+            case vtbackend::CursorShape::Rectangle: name = "Rectangle"; break;
+            case vtbackend::CursorShape::Underscore: name = "Underscore"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::CellLocation>: formatter<std::string>
+struct fmt::formatter<vtbackend::CellLocation>: formatter<std::string>
 {
-    auto format(terminal::CellLocation coord, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::CellLocation coord, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("({}, {})", coord.line, coord.column), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::PageSize>: formatter<std::string>
+struct fmt::formatter<vtbackend::PageSize>: formatter<std::string>
 {
-    auto format(terminal::PageSize value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::PageSize value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}x{}", value.columns, value.lines), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::GridSize>: formatter<std::string>
+struct fmt::formatter<vtbackend::GridSize>: formatter<std::string>
 {
-    auto format(terminal::GridSize value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::GridSize value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}x{}", value.columns, value.lines), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::ScreenType>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::ScreenType>: formatter<std::string_view>
 {
-    auto format(const terminal::ScreenType value, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::ScreenType value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ScreenType::Primary: name = "Primary"; break;
-            case terminal::ScreenType::Alternate: name = "Alternate"; break;
+            case vtbackend::ScreenType::Primary: name = "Primary"; break;
+            case vtbackend::ScreenType::Alternate: name = "Alternate"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::PixelCoordinate>: formatter<std::string>
+struct fmt::formatter<vtbackend::PixelCoordinate>: formatter<std::string>
 {
-    auto format(const terminal::PixelCoordinate coord, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::PixelCoordinate coord, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}:{}", coord.x.value, coord.y.value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::ViMode>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::ViMode>: formatter<std::string_view>
 {
-    auto format(terminal::ViMode mode, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ViMode mode, format_context& ctx) -> format_context::iterator
     {
-        using terminal::ViMode;
+        using vtbackend::ViMode;
         string_view name;
         switch (mode)
         {

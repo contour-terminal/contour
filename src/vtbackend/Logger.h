@@ -8,7 +8,7 @@
 #include <string>
 #include <variant>
 
-namespace terminal
+namespace vtbackend
 {
 
 struct ParserErrorEvent
@@ -57,15 +57,15 @@ using LogEvent = std::variant<ParserErrorEvent,
 
 using Logger = std::function<void(LogEvent)>;
 
-} // namespace terminal
+} // namespace vtbackend
 
 template <>
-struct fmt::formatter<terminal::LogEvent>
+struct fmt::formatter<vtbackend::LogEvent>
 {
     static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(const terminal::LogEvent& ev, format_context& ctx) -> format_context::iterator
+    static auto format(const vtbackend::LogEvent& ev, format_context& ctx) -> format_context::iterator
     {
-        using namespace terminal;
+        using namespace vtbackend;
         return std::visit(
             overloaded {
                 [&](ParserErrorEvent const& v) {

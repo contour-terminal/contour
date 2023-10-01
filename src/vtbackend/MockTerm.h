@@ -9,10 +9,10 @@
 
 #include <libunicode/convert.h>
 
-namespace terminal
+namespace vtbackend
 {
 
-template <typename PtyDevice = MockPty>
+template <typename PtyDevice = vtpty::MockPty>
 class MockTerm: public Terminal::Events
 {
   public:
@@ -49,7 +49,7 @@ class MockTerm: public Terminal::Events
 
     void writeToScreen(std::string_view text)
     {
-        ptyOutLog()("writeToScreen: {}", crispy::escape(text));
+        vtpty::ptyOutLog()("writeToScreen: {}", crispy::escape(text));
         mockPty().appendStdOutBuffer(text);
         while (mockPty().isStdoutDataAvailable())
             terminal.processInputOnce();
@@ -63,11 +63,11 @@ class MockTerm: public Terminal::Events
     // Events overrides
     void setWindowTitle(std::string_view title) override { windowTitle = title; }
 
-    static terminal::Settings createSettings(PageSize pageSize,
-                                             LineCount maxHistoryLineCount,
-                                             size_t ptyReadBufferSize)
+    static vtbackend::Settings createSettings(PageSize pageSize,
+                                              LineCount maxHistoryLineCount,
+                                              size_t ptyReadBufferSize)
     {
-        auto settings = terminal::Settings {};
+        auto settings = vtbackend::Settings {};
         settings.pageSize = pageSize;
         settings.maxHistoryLineCount = maxHistoryLineCount;
         settings.ptyReadBufferSize = ptyReadBufferSize;
@@ -99,4 +99,4 @@ inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
     }
 }
 
-} // namespace terminal
+} // namespace vtbackend

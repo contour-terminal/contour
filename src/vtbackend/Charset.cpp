@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Charset.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 constexpr CharsetMap usasciiCharset() noexcept
@@ -279,4 +279,4 @@ CharsetMap const* charsetMap(CharsetId id) noexcept
     return nullptr;
 }
 
-} // namespace terminal
+} // namespace vtbackend

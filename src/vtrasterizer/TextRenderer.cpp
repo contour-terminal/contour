@@ -172,7 +172,7 @@ using std::vector;
 using namespace std::placeholders;
 using namespace std::string_view_literals;
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 using text::locatorLog;
@@ -241,13 +241,13 @@ namespace
         return 0;
     }
 
-    constexpr TextStyle makeTextStyle(CellFlags mask)
+    constexpr TextStyle makeTextStyle(vtbackend::CellFlags mask)
     {
-        if (contains_all(mask, CellFlags::Bold | CellFlags::Italic))
+        if (contains_all(mask, vtbackend::CellFlags::Bold | vtbackend::CellFlags::Italic))
             return TextStyle::BoldItalic;
-        if (mask & CellFlags::Bold)
+        if (mask & vtbackend::CellFlags::Bold)
             return TextStyle::Bold;
-        if (mask & CellFlags::Italic)
+        if (mask & vtbackend::CellFlags::Italic)
             return TextStyle::Italic;
         return TextStyle::Regular;
     }
@@ -460,12 +460,12 @@ void TextRenderer::beginFrame()
     Require(_textClusterGroup.codepoints.empty());
     Require(_textClusterGroup.clusters.empty());
 
-    auto constexpr DefaultColor = RGBColor {};
+    auto constexpr DefaultColor = vtbackend::RGBColor {};
     _textClusterGroup.style = TextStyle::Invalid;
     _textClusterGroup.color = DefaultColor;
 }
 
-void TextRenderer::renderLine(RenderLine const& renderLine)
+void TextRenderer::renderLine(vtbackend::RenderLine const& renderLine)
 {
     if (renderLine.text.empty())
         return;
@@ -473,31 +473,31 @@ void TextRenderer::renderLine(RenderLine const& renderLine)
     auto const textStyle = makeTextStyle(renderLine.textAttributes.flags);
 
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(renderLine.text);
-    auto columnOffset = ColumnOffset(0);
+    auto columnOffset = vtbackend::ColumnOffset(0);
 
     _textClusterGroup.initialPenPosition =
-        _gridMetrics.mapBottomLeft(CellLocation { renderLine.lineOffset, columnOffset });
+        _gridMetrics.mapBottomLeft(vtbackend::CellLocation { renderLine.lineOffset, columnOffset });
 
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
-        auto const gridPosition = CellLocation { renderLine.lineOffset, columnOffset };
+        auto const gridPosition = vtbackend::CellLocation { renderLine.lineOffset, columnOffset };
         auto const width = graphemeClusterWidth(graphemeCluster);
         renderCell(gridPosition, graphemeCluster, textStyle, renderLine.textAttributes.foregroundColor);
 
         for (int i = 1; i < width; ++i)
-            renderCell(CellLocation { gridPosition.line, columnOffset + i },
+            renderCell(vtbackend::CellLocation { gridPosition.line, columnOffset + i },
                        U" ",
                        textStyle,
                        renderLine.textAttributes.foregroundColor);
 
-        columnOffset += ColumnOffset::cast_from(width);
+        columnOffset += vtbackend::ColumnOffset::cast_from(width);
     }
 
     if (!_textClusterGroup.codepoints.empty())
         flushTextClusterGroup();
 }
 
-void TextRenderer::renderCell(RenderCell const& cell)
+void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
 {
     if (cell.groupStart)
         _updateInitialPenPosition = true;
@@ -511,10 +511,10 @@ void TextRenderer::renderCell(RenderCell const& cell)
         flushTextClusterGroup();
 }
 
-void TextRenderer::renderCell(CellLocation position,
+void TextRenderer::renderCell(vtbackend::CellLocation position,
                               std::u32string_view graphemeCluster,
                               TextStyle textStyle,
-                              RGBColor foregroundColor)
+                              vtbackend::RGBColor foregroundColor)
 {
     if (_updateInitialPenPosition)
     {
@@ -584,7 +584,7 @@ point TextRenderer::applyGlyphPositionToPen(point pen,
  *
  */
 void TextRenderer::renderRasterizedGlyph(crispy::point pen,
-                                         RGBAColor color,
+                                         vtbackend::RGBAColor color,
                                          AtlasTileAttributes const& attributes)
 {
     // clang-format off
@@ -608,7 +608,9 @@ void TextRenderer::renderRasterizedGlyph(crispy::point pen,
     // clang-format on
 }
 
-void TextRenderer::appendCellTextToClusterGroup(u32string_view codepoints, TextStyle style, RGBColor color)
+void TextRenderer::appendCellTextToClusterGroup(u32string_view codepoints,
+                                                TextStyle style,
+                                                vtbackend::RGBColor color)
 {
     bool const attribsChanged = color != _textClusterGroup.color || style != _textClusterGroup.style;
     bool const hasText = !codepoints.empty() && codepoints[0] != 0x20;
@@ -746,7 +748,7 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
             [this, xOffset, tileWidth, &createData, colorComponentCount, bitmapFormat, pitch](
                 atlas::TileLocation tileLocation) {
                 auto const xNext = min(xOffset + tileWidth, unbox<uintptr_t>(createData.bitmapSize.width));
-                auto const subWidth = Width::cast_from(xNext - xOffset);
+                auto const subWidth = vtbackend::Width::cast_from(xNext - xOffset);
                 auto const subSize = ImageSize { subWidth, createData.bitmapSize.height };
                 auto const subPitch = unbox<uintptr_t>(subWidth) * colorComponentCount;
 
@@ -812,13 +814,16 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // As I only know of emoji being colored fonts, and those take up 2 cell with units.
 
     // Scale bitmap down overflowing in diemensions
-    auto const emojiBoundingBox =
-        ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
-                    Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
+    auto const emojiBoundingBox = ImageSize {
+        vtbackend::Width(_gridMetrics.cellSize.width.value * numCells),
+        vtbackend::Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline)
+    };
     if (glyph.format == text::bitmap_format::rgba)
     {
-        if (glyph.bitmapSize.height > Height::cast_from(unbox<double>(emojiBoundingBox.height) * 1.1)
-            || glyph.bitmapSize.width > Width::cast_from(unbox<double>(emojiBoundingBox.width) * 1.5))
+        if (glyph.bitmapSize.height
+                > vtbackend::Height::cast_from(unbox<double>(emojiBoundingBox.height) * 1.1)
+            || glyph.bitmapSize.width
+                   > vtbackend::Width::cast_from(unbox<double>(emojiBoundingBox.width) * 1.5))
         {
             if (rasterizerLog)
                 rasterizerLog()(
@@ -867,7 +872,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
             rowCount * unbox<size_t>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
         Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());
         rasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
-        glyph.bitmapSize.height += Height::cast_from(yMin);
+        glyph.bitmapSize.height += vtbackend::Height::cast_from(yMin);
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), (int) pixelCount)); // XXX asan hit (size = -2)
         Guarantee(glyph.valid());
@@ -876,9 +881,10 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
 
     if (rasterizerLog)
     {
-        auto const boundingBox =
-            ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
-                        Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
+        auto const boundingBox = ImageSize {
+            vtbackend::Width(_gridMetrics.cellSize.width.value * numCells),
+            vtbackend::Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline)
+        };
         // clang-format off
         rasterizerLog()("Inserting {} (bbox {}, numCells {}) id {} render mode {} {} yOverflow {} yMin {}.",
                         glyph,
@@ -982,4 +988,4 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
 }
 // }}}
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

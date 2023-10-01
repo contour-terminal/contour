@@ -27,7 +27,7 @@
 
 #include <libunicode/convert.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 // {{{ Margin
@@ -147,8 +147,8 @@ struct LogicalLine
     }
 
     // Searches from left to right, taking into account line wrapping
-    [[nodiscard]] std::optional<terminal::CellLocation> search(std::u32string_view searchText,
-                                                               ColumnOffset startPosition) const
+    [[nodiscard]] std::optional<vtbackend::CellLocation> search(std::u32string_view searchText,
+                                                                ColumnOffset startPosition) const
     {
         auto const lineLength = unbox<size_t>(lines.front().get().size());
         auto i = top;
@@ -195,8 +195,8 @@ struct LogicalLine
     }
 
     // Searches from right to left, taking into account line wrapping
-    [[nodiscard]] std::optional<terminal::CellLocation> searchReverse(std::u32string_view searchText,
-                                                                      ColumnOffset startPosition) const
+    [[nodiscard]] std::optional<vtbackend::CellLocation> searchReverse(std::u32string_view searchText,
+                                                                       ColumnOffset startPosition) const
     {
         auto i = bottom;
         auto const lineLength = unbox<size_t>(lines.front().get().size());
@@ -906,22 +906,22 @@ template <typename RendererT>
 }
 // }}}
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<terminal::Margin::Horizontal>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::Margin::Horizontal>: fmt::formatter<std::string>
 {
-    auto format(const terminal::Margin::Horizontal range, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::Margin::Horizontal range, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}..{}", range.from, range.to), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::Margin::Vertical>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::Margin::Vertical>: fmt::formatter<std::string>
 {
-    auto format(const terminal::Margin::Vertical range, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::Margin::Vertical range, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}..{}", range.from, range.to), ctx);
     }

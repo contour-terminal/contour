@@ -15,7 +15,7 @@
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 /// Terminal Cell, optimized for use with the alternate screen.
@@ -275,4 +275,4 @@ namespace CellUtil
 } // namespace CellUtil
 // }}}
 
-} // namespace terminal
+} // namespace vtbackend

@@ -8,7 +8,7 @@
 
 #include <memory>
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 class RenderTarget;
@@ -21,7 +21,7 @@ class BackgroundRenderer: public Renderable
     /// @param gridMetrics
     /// @param defaultColor
     /// @param renderTarget
-    BackgroundRenderer(GridMetrics const& gridMetrics, RGBColor const& defaultColor);
+    BackgroundRenderer(GridMetrics const& gridMetrics, vtbackend::RGBColor const& defaultColor);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
 
@@ -31,16 +31,16 @@ class BackgroundRenderer: public Renderable
     // because there is no need to detect bg/fg color more than once per grid cell!
 
     /// Queues up a render with given background
-    void renderCell(RenderCell const& cell);
+    void renderCell(vtbackend::RenderCell const& cell);
 
-    void renderLine(RenderLine const& line);
+    void renderLine(vtbackend::RenderLine const& line);
 
     void inspect(std::ostream& output) const override;
 
   private:
     // private data
-    RGBColor const& _defaultColor;
+    vtbackend::RGBColor const& _defaultColor;
     uint8_t _opacity = 255;
 };
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

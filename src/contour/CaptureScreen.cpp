@@ -10,7 +10,6 @@
 
 #include <fmt/format.h>
 
-#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -57,7 +56,7 @@ using namespace std::string_view_literals;
 namespace contour
 {
 
-class CaptureBufferCollector: public terminal::NullParserEvents
+class CaptureBufferCollector: public vtparser::NullParserEvents
 {
   public:
     std::ostream& output;
@@ -74,8 +73,8 @@ class CaptureBufferCollector: public terminal::NullParserEvents
 
     void dispatchPM() override
     {
-        auto const [code, offset] = terminal::parser::extractCodePrefix(capturedBuffer);
-        if (code == terminal::CaptureBufferCode)
+        auto const [code, offset] = vtparser::extractCodePrefix(capturedBuffer);
+        if (code == vtbackend::CaptureBufferCode)
         {
             auto const payload = string_view(capturedBuffer.data() + offset, capturedBuffer.size() - offset);
             if (splitByWord)
@@ -244,7 +243,7 @@ namespace
     bool readCaptureReply(TTY& input, timeval* timeout, bool words, ostream& output)
     {
         auto captureBufferCollector = CaptureBufferCollector { output, words };
-        auto parser = terminal::parser::Parser<terminal::ParserEvents> { captureBufferCollector };
+        auto parser = vtparser::Parser<vtparser::ParserEvents> { captureBufferCollector };
 
         // Response is of format: PM 314 ; <screen capture> ST`
         while (true)

@@ -19,7 +19,6 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <functional>
 #include <thread>
 #include <variant>
 
@@ -59,7 +58,7 @@ using PermissionCache = std::map<GuardedRole, bool>;
  * - text based displays (think of TMUX client)
  * - headless-mode (think of TMUX server)
  */
-class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Events
+class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Events
 {
     Q_OBJECT
     Q_PROPERTY(int id READ id)
@@ -108,7 +107,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     }
     QColor getBackgroundColor() const noexcept
     {
-        auto color = terminal().isModeEnabled(terminal::DECMode::ReverseVideo)
+        auto color = terminal().isModeEnabled(vtbackend::DECMode::ReverseVideo)
                          ? _profile.colors.defaultForeground
                          : _profile.colors.defaultBackground;
         return QColor(color.red, color.green, color.blue, static_cast<uint8_t>(_profile.backgroundOpacity));
@@ -143,7 +142,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
         if (profile().scrollbarPosition == config::ScrollBarPosition::Hidden)
             return false;
 
-        if ((_currentScreenType == terminal::ScreenType::Alternate) && profile().hideScrollbarInAltScreen)
+        if ((_currentScreenType == vtbackend::ScreenType::Alternate) && profile().hideScrollbarInAltScreen)
             return false;
 
         return true;
@@ -163,10 +162,10 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     int scrollOffset() const noexcept { return unbox(terminal().viewport().scrollOffset()); }
     void setScrollOffset(int value)
     {
-        terminal().viewport().scrollTo(terminal::ScrollOffset::cast_from(value));
+        terminal().viewport().scrollTo(vtbackend::ScrollOffset::cast_from(value));
     }
 
-    void onScrollOffsetChanged(terminal::ScrollOffset value) override
+    void onScrollOffsetChanged(vtbackend::ScrollOffset value) override
     {
         emit scrollOffsetChanged(unbox(value));
     }
@@ -187,7 +186,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
      * @param pty a PTY object (can be process, networked, mockup, ...)
      * @param display fronend display to render the terminal.
      */
-    TerminalSession(std::unique_ptr<terminal::Pty> pty, ContourGuiApp& app);
+    TerminalSession(std::unique_ptr<vtpty::Pty> pty, ContourGuiApp& app);
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
@@ -204,10 +203,10 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     double contentScale() const noexcept { return _contentScale; }
     void setContentScale(double value) noexcept { _contentScale = value; }
 
-    terminal::Pty& pty() noexcept { return _terminal.device(); }
-    terminal::Terminal& terminal() noexcept { return _terminal; }
-    terminal::Terminal const& terminal() const noexcept { return _terminal; }
-    terminal::ScreenType currentScreenType() const noexcept { return _currentScreenType; }
+    vtpty::Pty& pty() noexcept { return _terminal.device(); }
+    vtbackend::Terminal& terminal() noexcept { return _terminal; }
+    vtbackend::Terminal const& terminal() const noexcept { return _terminal; }
+    vtbackend::ScreenType currentScreenType() const noexcept { return _currentScreenType; }
 
     display::TerminalWidget* display() noexcept { return _display; }
     display::TerminalWidget const* display() const noexcept { return _display; }
@@ -220,45 +219,45 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     Q_INVOKABLE void executeShowHostWritableStatusLine(bool answer, bool remember);
     Q_INVOKABLE void requestWindowResize(QJSValue w, QJSValue h);
 
-    // Terminal::Events
+    // vtbackend::Events
     //
-    void requestCaptureBuffer(terminal::LineCount lineCount, bool logical) override;
+    void requestCaptureBuffer(vtbackend::LineCount lineCount, bool logical) override;
     void bell() override;
-    void bufferChanged(terminal::ScreenType) override;
+    void bufferChanged(vtbackend::ScreenType) override;
     void renderBufferUpdated() override;
     void screenUpdated() override;
-    terminal::FontDef getFontDef() override;
-    void setFontDef(terminal::FontDef const& fontSpec) override;
+    vtbackend::FontDef getFontDef() override;
+    void setFontDef(vtbackend::FontDef const& fontSpec) override;
     void copyToClipboard(std::string_view data) override;
     void inspect() override;
     void notify(std::string_view title, std::string_view body) override;
     void onClosed() override;
     void pasteFromClipboard(unsigned count, bool strip) override;
     void onSelectionCompleted() override;
-    void requestWindowResize(terminal::LineCount, terminal::ColumnCount) override;
-    void requestWindowResize(terminal::Width, terminal::Height) override;
+    void requestWindowResize(vtbackend::LineCount, vtbackend::ColumnCount) override;
+    void requestWindowResize(vtbackend::Width, vtbackend::Height) override;
     void setWindowTitle(std::string_view title) override;
     void setTerminalProfile(std::string const& configProfileName) override;
-    void discardImage(terminal::Image const&) override;
-    void inputModeChanged(terminal::ViMode mode) override;
+    void discardImage(vtbackend::Image const&) override;
+    void inputModeChanged(vtbackend::ViMode mode) override;
     void updateHighlights() override;
-    void playSound(terminal::Sequence::Parameters const& params) override;
+    void playSound(vtbackend::Sequence::Parameters const& params) override;
     void cursorPositionChanged() override;
 
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
-    void sendKeyPressEvent(terminal::Key key, terminal::Modifier modifier, Timestamp now);
-    void sendCharPressEvent(char32_t value, terminal::Modifier modifier, Timestamp now);
+    void sendKeyPressEvent(vtbackend::Key key, vtbackend::Modifier modifier, Timestamp now);
+    void sendCharPressEvent(char32_t value, vtbackend::Modifier modifier, Timestamp now);
 
-    void sendMousePressEvent(terminal::Modifier modifier,
-                             terminal::MouseButton button,
-                             terminal::PixelCoordinate pixelPosition);
-    void sendMouseMoveEvent(terminal::Modifier modifier,
-                            terminal::CellLocation pos,
-                            terminal::PixelCoordinate pixelPosition);
-    void sendMouseReleaseEvent(terminal::Modifier modifier,
-                               terminal::MouseButton button,
-                               terminal::PixelCoordinate pixelPosition);
+    void sendMousePressEvent(vtbackend::Modifier modifier,
+                             vtbackend::MouseButton button,
+                             vtbackend::PixelCoordinate pixelPosition);
+    void sendMouseMoveEvent(vtbackend::Modifier modifier,
+                            vtbackend::CellLocation pos,
+                            vtbackend::PixelCoordinate pixelPosition);
+    void sendMouseReleaseEvent(vtbackend::Modifier modifier,
+                               vtbackend::MouseButton button,
+                               vtbackend::PixelCoordinate pixelPosition);
 
     void sendFocusInEvent();
     void sendFocusOutEvent();
@@ -367,7 +366,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     void activateProfile(std::string const& newProfileName);
     bool reloadConfigWithProfile(std::string const& profileName);
     bool resetConfig();
-    void followHyperlink(terminal::HyperlinkInfo const& hyperlink);
+    void followHyperlink(vtbackend::HyperlinkInfo const& hyperlink);
     void setFontSize(text::font_size size);
     void setDefaultCursor();
     void configureTerminal();
@@ -386,7 +385,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     double _contentScale = 1.0;
     ContourGuiApp& _app;
 
-    terminal::Terminal _terminal;
+    vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;
     display::TerminalWidget* _display = nullptr;
 
@@ -398,21 +397,21 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
 
     // state vars
     //
-    terminal::ScreenType _currentScreenType = terminal::ScreenType::Primary;
-    terminal::CellLocation _currentMousePosition = terminal::CellLocation {};
+    vtbackend::ScreenType _currentScreenType = vtbackend::ScreenType::Primary;
+    vtbackend::CellLocation _currentMousePosition = vtbackend::CellLocation {};
     bool _allowKeyMappings = true;
     Audio _audio;
     std::vector<int> _musicalNotesBuffer;
 
-    terminal::LineCount _lastHistoryLineCount;
+    vtbackend::LineCount _lastHistoryLineCount;
 
     struct CaptureBufferRequest
     {
-        terminal::LineCount lines;
+        vtbackend::LineCount lines;
         bool logical;
     };
     std::optional<CaptureBufferRequest> _pendingBufferCapture;
-    std::optional<terminal::FontDef> _pendingFontChange;
+    std::optional<vtbackend::FontDef> _pendingFontChange;
     PermissionCache _rememberedPermissions;
 };
 

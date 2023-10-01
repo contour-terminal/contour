@@ -67,14 +67,14 @@ void initializeResourcesForContourFrontendOpenGL()
 namespace contour::display
 {
 
-using terminal::Height;
-using terminal::ImageSize;
-using terminal::Width;
+using vtbackend::Height;
+using vtbackend::ImageSize;
+using vtbackend::Width;
 
-using terminal::ColumnCount;
-using terminal::LineCount;
-using terminal::PageSize;
-using terminal::RGBAColor;
+using vtbackend::ColumnCount;
+using vtbackend::LineCount;
+using vtbackend::PageSize;
+using vtbackend::RGBAColor;
 
 using text::DPI;
 
@@ -289,17 +289,17 @@ void TerminalWidget::setSession(TerminalSession* newSession)
 
     window()->setFlag(Qt::FramelessWindowHint, !profile().show_title_bar);
 
-    _renderer = make_unique<terminal::rasterizer::Renderer>(
-        newSession->profile().terminalSize,
-        sanitizeFontDescription(profile().fonts, fontDPI()),
-        newSession->profile().colors,
-        newSession->config().textureAtlasHashtableSlots,
-        newSession->config().textureAtlasTileCount,
-        newSession->config().textureAtlasDirectMapping,
-        newSession->profile().hyperlinkDecoration.normal,
-        newSession->profile().hyperlinkDecoration.hover
-        // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
-    );
+    _renderer =
+        make_unique<vtrasterizer::Renderer>(newSession->profile().terminalSize,
+                                            sanitizeFontDescription(profile().fonts, fontDPI()),
+                                            newSession->profile().colors,
+                                            newSession->config().textureAtlasHashtableSlots,
+                                            newSession->config().textureAtlasTileCount,
+                                            newSession->config().textureAtlasDirectMapping,
+                                            newSession->profile().hyperlinkDecoration.normal,
+                                            newSession->profile().hyperlinkDecoration.hover
+                                            // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
+        );
 
     applyFontDPI();
     updateSizeProperties();
@@ -309,10 +309,10 @@ void TerminalWidget::setSession(TerminalSession* newSession)
     emit sessionChanged(newSession);
 }
 
-terminal::PageSize TerminalWidget::windowSize() const noexcept
+vtbackend::PageSize TerminalWidget::windowSize() const noexcept
 {
     if (!_session)
-        return terminal::PageSize { LineCount(25), ColumnCount(80) };
+        return vtbackend::PageSize { LineCount(25), ColumnCount(80) };
 
     return profile().terminalSize;
 }
@@ -326,7 +326,7 @@ void TerminalWidget::sizeChanged()
         "size changed to: {}x{} (session {})", width(), height(), _session ? "available" : "not attached");
 
     auto const qtBaseWidgetSize =
-        terminal::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
+        vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
     auto const newPixelSize = qtBaseWidgetSize * contentScale();
     displayLog()("Resizing view to {}x{} virtual ({} actual).", width(), height(), newPixelSize);
     applyResize(newPixelSize, *_session, *_renderer);
@@ -441,7 +441,7 @@ void TerminalWidget::applyFontDPI()
     if (!_renderTarget)
         return;
 
-    auto const newPixelSize = terminal::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
+    auto const newPixelSize = vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
 
     // Apply resize on same window metrics propagates proper recalculations and repaint.
     applyResize(newPixelSize, *_session, *_renderer);
@@ -458,7 +458,7 @@ void TerminalWidget::logDisplayInfo()
     auto const fontSizeInPx = static_cast<int>(ceil((
         profile().fonts.size.pt / 72.0) * average(fontDPI())
     ));
-    auto const normalScreenSize = crispy::image_size {
+    auto const normalScreenSize = vtbackend::ImageSize {
         Width::cast_from(window()->screen()->size().width()),
         Height::cast_from(window()->screen()->size().height())
     };
@@ -548,7 +548,7 @@ void TerminalWidget::createRenderer()
     Require(window());
 
     auto const textureTileSize = gridMetrics().cellSize;
-    auto const viewportMargin = terminal::rasterizer::PageMargin {}; // TODO margin
+    auto const viewportMargin = vtrasterizer::PageMargin {}; // TODO margin
     auto const precalculatedViewSize = [this]() -> ImageSize {
         auto const uiSize = ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
         return uiSize * contentScale();
@@ -611,7 +611,7 @@ void TerminalWidget::createRenderer()
     // {{{ Apply proper grid/pixel sizes to terminal
     {
         auto const qtBaseWidgetSize =
-            ImageSize { terminal::Width::cast_from(width()), terminal::Height::cast_from(height()) };
+            ImageSize { vtbackend::Width::cast_from(width()), vtbackend::Height::cast_from(height()) };
         _renderer->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseWidgetSize));
         // resize widget (same pixels, but adjusted terminal rows/columns and margin)
         auto const actualWidgetSize = qtBaseWidgetSize * contentScale();
@@ -880,7 +880,7 @@ bool TerminalWidget::event(QEvent* event)
 // {{{ helpers
 void TerminalWidget::onScrollBarValueChanged(int value)
 {
-    terminal().viewport().scrollTo(terminal::ScrollOffset::cast_from(value));
+    terminal().viewport().scrollTo(vtbackend::ScrollOffset::cast_from(value));
     scheduleRedraw();
 }
 
@@ -937,14 +937,14 @@ void TerminalWidget::updateSizeProperties()
 // }}}
 
 // {{{ TerminalDisplay: attributes
-terminal::RefreshRate TerminalWidget::refreshRate() const
+vtbackend::RefreshRate TerminalWidget::refreshRate() const
 {
     auto* const screen = window()->screen();
     if (!screen)
         return { profile().refreshRate.value != 0.0 ? profile().refreshRate
-                                                    : terminal::RefreshRate { 30.0 } };
+                                                    : vtbackend::RefreshRate { 30.0 } };
 
-    auto const systemRefreshRate = terminal::RefreshRate { static_cast<double>(screen->refreshRate()) };
+    auto const systemRefreshRate = vtbackend::RefreshRate { static_cast<double>(screen->refreshRate()) };
     if (1.0 < profile().refreshRate.value && profile().refreshRate.value < systemRefreshRate.value)
         return profile().refreshRate;
     else
@@ -961,13 +961,13 @@ bool TerminalWidget::isFullScreen() const
     return window()->visibility() == QQuickWindow::Visibility::FullScreen;
 }
 
-terminal::ImageSize TerminalWidget::pixelSize() const
+vtbackend::ImageSize TerminalWidget::pixelSize() const
 {
     assert(_session);
     return gridMetrics().cellSize * _session->terminal().pageSize();
 }
 
-terminal::ImageSize TerminalWidget::cellSize() const
+vtbackend::ImageSize TerminalWidget::cellSize() const
 {
     return gridMetrics().cellSize;
 }
@@ -979,7 +979,7 @@ void TerminalWidget::post(std::function<void()> fn)
     postToObject(this, std::move(fn));
 }
 
-terminal::FontDef TerminalWidget::getFontDef()
+vtbackend::FontDef TerminalWidget::getFontDef()
 {
     Require(_renderer);
     return getFontDefinition(*_renderer);
@@ -1069,7 +1069,7 @@ void TerminalWidget::doDumpStateInternal()
         Alpha
     };
 
-    terminal::rasterizer::RenderTarget& renderTarget = _renderer->renderTarget();
+    vtrasterizer::RenderTarget& renderTarget = _renderer->renderTarget();
 
     do
     {
@@ -1077,7 +1077,7 @@ void TerminalWidget::doDumpStateInternal()
         if (!infoOpt.has_value())
             break;
 
-        terminal::rasterizer::AtlasTextureScreenshot const& info = infoOpt.value();
+        vtrasterizer::AtlasTextureScreenshot const& info = infoOpt.value();
         auto const fileName = targetDir / "texture-atlas-rgba.png";
         displayLog()("Saving image {} to: {}", info.size, fileName.generic_string());
 
@@ -1101,7 +1101,7 @@ void TerminalWidget::notify(std::string_view /*_title*/, std::string_view /*_bod
     // TODO: showNotification callback to Controller?
 }
 
-void TerminalWidget::resizeWindow(terminal::Width newWidth, terminal::Height newHeight)
+void TerminalWidget::resizeWindow(vtbackend::Width newWidth, vtbackend::Height newHeight)
 {
     Require(_session != nullptr);
 
@@ -1113,26 +1113,26 @@ void TerminalWidget::resizeWindow(terminal::Width newWidth, terminal::Height new
 
     auto requestedPageSize = terminal().pageSize();
     auto const pixelSize =
-        terminal::ImageSize { terminal::Width(*newWidth ? *newWidth : (unsigned) width()),
-                              terminal::Height(*newHeight ? *newHeight : (unsigned) height()) };
+        vtbackend::ImageSize { vtbackend::Width(*newWidth ? *newWidth : (unsigned) width()),
+                               vtbackend::Height(*newHeight ? *newHeight : (unsigned) height()) };
     requestedPageSize.columns =
-        terminal::ColumnCount(unbox<int>(pixelSize.width) / unbox<int>(gridMetrics().cellSize.width));
+        vtbackend::ColumnCount(unbox<int>(pixelSize.width) / unbox<int>(gridMetrics().cellSize.width));
     requestedPageSize.lines =
-        terminal::LineCount(unbox<int>(pixelSize.height) / unbox<int>(gridMetrics().cellSize.height));
+        vtbackend::LineCount(unbox<int>(pixelSize.height) / unbox<int>(gridMetrics().cellSize.height));
 
     // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
     const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
     _renderer->setPageSize(requestedPageSize);
     auto const pixels =
-        terminal::ImageSize { terminal::Width::cast_from(unbox(requestedPageSize.columns)
-                                                         * unbox<int>(gridMetrics().cellSize.width)),
-                              terminal::Height::cast_from(unbox(requestedPageSize.lines)
-                                                          * unbox<int>(gridMetrics().cellSize.height)) };
+        vtbackend::ImageSize { vtbackend::Width::cast_from(unbox(requestedPageSize.columns)
+                                                           * unbox<int>(gridMetrics().cellSize.width)),
+                               vtbackend::Height::cast_from(unbox(requestedPageSize.lines)
+                                                            * unbox<int>(gridMetrics().cellSize.height)) };
     auto const l = scoped_lock { terminal() };
     terminal().resizeScreen(requestedPageSize, pixels);
 }
 
-void TerminalWidget::resizeWindow(terminal::LineCount newLineCount, terminal::ColumnCount newColumnCount)
+void TerminalWidget::resizeWindow(vtbackend::LineCount newLineCount, vtbackend::ColumnCount newColumnCount)
 {
     if (isFullScreen())
     {
@@ -1146,15 +1146,15 @@ void TerminalWidget::resizeWindow(terminal::LineCount newLineCount, terminal::Co
     if (*newLineCount)
         requestedPageSize.lines = newLineCount;
 
-    auto const pixels = terminal::ImageSize {
-        terminal::Width(unbox<unsigned>(requestedPageSize.columns) * *gridMetrics().cellSize.width),
-        terminal::Height(unbox<unsigned>(requestedPageSize.lines) * *gridMetrics().cellSize.height)
+    auto const pixels = vtbackend::ImageSize {
+        boxed_cast<vtbackend::Width>(requestedPageSize.columns) * gridMetrics().cellSize.width,
+        boxed_cast<vtbackend::Height>(requestedPageSize.lines) * gridMetrics().cellSize.height
     };
 
     window()->resize(QSize(pixels.width.as<int>(), pixels.height.as<int>()));
 }
 
-void TerminalWidget::setFonts(terminal::rasterizer::FontDescriptions fontDescriptions)
+void TerminalWidget::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
 {
     Require(_session != nullptr);
     Require(_renderTarget != nullptr);
@@ -1183,7 +1183,7 @@ bool TerminalWidget::setFontSize(text::font_size newFontSize)
         return false;
 
     auto const qtBaseWidgetSize =
-        ImageSize { terminal::Width::cast_from(width()), terminal::Height::cast_from(height()) };
+        ImageSize { vtbackend::Width::cast_from(width()), vtbackend::Height::cast_from(height()) };
     _renderer->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseWidgetSize));
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
     auto const actualWidgetSize = qtBaseWidgetSize * contentScale();
@@ -1257,8 +1257,7 @@ void TerminalWidget::toggleTitleBar()
     window()->setFlag(Qt::FramelessWindowHint, !currentlyFrameless);
 }
 
-void TerminalWidget::setHyperlinkDecoration(terminal::rasterizer::Decorator normal,
-                                            terminal::rasterizer::Decorator hover)
+void TerminalWidget::setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover)
 {
     _renderer->setHyperlinkDecoration(normal, hover);
 }
@@ -1300,9 +1299,9 @@ void TerminalWidget::onSelectionCompleted()
     }
 }
 
-void TerminalWidget::bufferChanged(terminal::ScreenType type)
+void TerminalWidget::bufferChanged(vtbackend::ScreenType type)
 {
-    using Type = terminal::ScreenType;
+    using Type = vtbackend::ScreenType;
     switch (type)
     {
         case Type::Primary: setCursor(Qt::IBeamCursor); break;
@@ -1312,7 +1311,7 @@ void TerminalWidget::bufferChanged(terminal::ScreenType type)
     // scheduleRedraw();
 }
 
-void TerminalWidget::discardImage(terminal::Image const& image)
+void TerminalWidget::discardImage(vtbackend::Image const& image)
 {
     _renderer->discardImage(image);
 }

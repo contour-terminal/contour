@@ -8,7 +8,7 @@
 
 #include <cstdlib>
 
-namespace terminal
+namespace vtbackend
 {
 
-} // namespace terminal
+} // namespace vtbackend

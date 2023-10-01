@@ -6,7 +6,7 @@
 #include <text_shaper/font_locator.h>
 #include <text_shaper/open_shaper.h>
 
-#include "crispy/StrongLRUHashtable.h"
+#include <crispy/StrongLRUHashtable.h>
 
 #if defined(_WIN32)
     #include <text_shaper/directwrite_shaper.h>
@@ -31,7 +31,7 @@ using std::unique_ptr;
 using std::vector;
 using std::chrono::steady_clock;
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 namespace
@@ -41,8 +41,8 @@ namespace
     {
         auto const m = textShaper.metrics(font);
 
-        gm.cellSize.width = Width::cast_from(m.advance);
-        gm.cellSize.height = Height::cast_from(m.line_height);
+        gm.cellSize.width = vtbackend::Width::cast_from(m.advance);
+        gm.cellSize.height = vtbackend::Height::cast_from(m.line_height);
         gm.baseline = m.line_height - m.ascender;
         gm.underline.position = gm.baseline + m.underline_position;
         gm.underline.thickness = m.underline_thickness;
@@ -50,7 +50,7 @@ namespace
         rendererLog()("Loading grid metrics {}", gm);
     }
 
-    GridMetrics loadGridMetrics(text::font_key font, PageSize pageSize, text::shaper& textShaper)
+    GridMetrics loadGridMetrics(text::font_key font, vtbackend::PageSize pageSize, text::shaper& textShaper)
     {
         auto gm = GridMetrics {};
 
@@ -109,9 +109,9 @@ namespace
 
 } // namespace
 
-Renderer::Renderer(PageSize pageSize,
+Renderer::Renderer(vtbackend::PageSize pageSize,
                    FontDescriptions fontDescriptions,
-                   terminal::ColorPalette const& colorPalette,
+                   vtbackend::ColorPalette const& colorPalette,
                    crispy::strong_hashtable_size atlasHashtableSlotCount,
                    crispy::lru_capacity atlasTileCount,
                    bool atlasDirectMapping,
@@ -133,7 +133,7 @@ Renderer::Renderer(PageSize pageSize,
     _imageRenderer { _gridMetrics, cellSize() },
     _textRenderer { _gridMetrics, *_textShaper, _fontDescriptions, _fonts, _imageRenderer },
     _decorationRenderer { _gridMetrics, hyperlinkNormal, hyperlinkHover },
-    _cursorRenderer { _gridMetrics, CursorShape::Block }
+    _cursorRenderer { _gridMetrics, vtbackend::CursorShape::Block }
 {
     _textRenderer.updateFontMetrics();
     _imageRenderer.setCellSize(cellSize());
@@ -196,7 +196,7 @@ void Renderer::configureTextureAtlas()
         renderable.get().setTextureAtlas(*_textureAtlas);
 }
 
-void Renderer::discardImage(Image const& image)
+void Renderer::discardImage(vtbackend::Image const& image)
 {
     // Defer rendering into the renderer thread & render stage, as this call might have
     // been coming out of bounds from another thread (e.g. the terminal's screen update thread)
@@ -276,7 +276,7 @@ void Renderer::updateFontMetrics()
     clearCache();
 }
 
-void Renderer::render(Terminal& terminal, bool pressure)
+void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 {
     auto const statusLineHeight = terminal.statusLineHeight();
     _gridMetrics.pageSize = terminal.pageSize() + statusLineHeight;
@@ -290,12 +290,12 @@ void Renderer::render(Terminal& terminal, bool pressure)
     terminal.refreshRenderBuffer();
 #endif // }}}
 
-    optional<terminal::RenderCursor> cursorOpt;
+    optional<vtbackend::RenderCursor> cursorOpt;
     _imageRenderer.beginFrame();
     _textRenderer.beginFrame();
     _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());
     {
-        RenderBufferRef const renderBuffer = terminal.renderBuffer();
+        vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
         renderCells(renderBuffer.get().cells);
         renderLines(renderBuffer.get().lines);
@@ -303,18 +303,18 @@ void Renderer::render(Terminal& terminal, bool pressure)
     _textRenderer.endFrame();
     _imageRenderer.endFrame();
 
-    if (cursorOpt && cursorOpt.value().shape != CursorShape::Block)
+    if (cursorOpt && cursorOpt.value().shape != vtbackend::CursorShape::Block)
     {
         // Note. Block cursor is implicitly rendered via standard grid cell rendering.
         auto const cursor = *cursorOpt;
         _cursorRenderer.setShape(cursor.shape);
         auto const cursorColor = [&]() {
-            if (holds_alternative<CellForegroundColor>(_colorPalette.cursor.color))
+            if (holds_alternative<vtbackend::CellForegroundColor>(_colorPalette.cursor.color))
                 return _colorPalette.defaultForeground;
-            else if (holds_alternative<CellBackgroundColor>(_colorPalette.cursor.color))
+            else if (holds_alternative<vtbackend::CellBackgroundColor>(_colorPalette.cursor.color))
                 return _colorPalette.defaultBackground;
             else
-                return get<RGBColor>(_colorPalette.cursor.color);
+                return get<vtbackend::RGBColor>(_colorPalette.cursor.color);
         }();
         _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursorColor);
     }
@@ -322,9 +322,9 @@ void Renderer::render(Terminal& terminal, bool pressure)
     _renderTarget->execute(terminal.currentTime());
 }
 
-void Renderer::renderCells(vector<RenderCell> const& renderableCells)
+void Renderer::renderCells(vector<vtbackend::RenderCell> const& renderableCells)
 {
-    for (RenderCell const& cell: renderableCells)
+    for (vtbackend::RenderCell const& cell: renderableCells)
     {
         _backgroundRenderer.renderCell(cell);
         _decorationRenderer.renderCell(cell);
@@ -334,9 +334,9 @@ void Renderer::renderCells(vector<RenderCell> const& renderableCells)
     }
 }
 
-void Renderer::renderLines(vector<RenderLine> const& renderableLines)
+void Renderer::renderLines(vector<vtbackend::RenderLine> const& renderableLines)
 {
-    for (RenderLine const& line: renderableLines)
+    for (vtbackend::RenderLine const& line: renderableLines)
     {
         _backgroundRenderer.renderLine(line);
         _decorationRenderer.renderLine(line);
@@ -351,4 +351,4 @@ void Renderer::inspect(std::ostream& textOutput) const
         renderable.get().inspect(textOutput);
 }
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

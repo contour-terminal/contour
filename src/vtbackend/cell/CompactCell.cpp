@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/cell/CompactCell.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 std::u32string CompactCell::codepoints() const
@@ -34,4 +34,4 @@ std::string CompactCell::toUtf8() const
     return text;
 }
 
-} // namespace terminal
+} // namespace vtbackend

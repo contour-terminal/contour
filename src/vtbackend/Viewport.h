@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <optional>
 
-namespace terminal
+namespace vtbackend
 {
 
 // #define CONTOUR_LOG_VIEWPORT 1
@@ -106,4 +106,4 @@ class Viewport
     LineCount _scrollOff = LineCount(8);
 };
 
-} // namespace terminal
+} // namespace vtbackend

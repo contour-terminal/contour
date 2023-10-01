@@ -180,9 +180,9 @@ auto withOutput(crispy::cli::flag_store const& flags, std::string const& name, C
 
 int ContourApp::infoVT()
 {
-    using category = terminal::FunctionCategory;
+    using category = vtbackend::FunctionCategory;
     using std::pair;
-    using terminal::VTExtension;
+    using vtbackend::VTExtension;
     using namespace std::string_view_literals;
 
     for (auto const& [category, headline]: { pair { category::C0, "Control Codes"sv },
@@ -194,7 +194,7 @@ int ContourApp::infoVT()
         fmt::print("{}\n", headline);
         fmt::print("{}\n\n", string(headline.size(), '='));
 
-        for (auto const& fn: terminal::allFunctions())
+        for (auto const& fn: vtbackend::allFunctions())
         {
             if (fn.category != category)
                 continue;
@@ -248,7 +248,7 @@ int ContourApp::configAction()
 int ContourApp::terminfoAction()
 {
     withOutput(parameters(), "contour.generate.terminfo.to", [](auto& stream) {
-        stream << terminal::capabilities::StaticDatabase {}.terminfo();
+        stream << vtbackend::capabilities::StaticDatabase {}.terminfo();
     });
     return EXIT_SUCCESS;
 }
@@ -260,7 +260,7 @@ int ContourApp::captureAction()
     captureSettings.logicalLines = parameters().get<bool>("contour.capture.logical");
     captureSettings.words = parameters().get<bool>("contour.capture.words");
     captureSettings.timeout = parameters().get<double>("contour.capture.timeout");
-    captureSettings.lineCount = terminal::LineCount::cast_from(parameters().get<unsigned>("contour.capture.lines"));
+    captureSettings.lineCount = vtbackend::LineCount::cast_from(parameters().get<unsigned>("contour.capture.lines"));
     captureSettings.outputFile = parameters().get<string>("contour.capture.to");
     // clang-format on
 
@@ -272,7 +272,7 @@ int ContourApp::captureAction()
 
 int ContourApp::parserTableAction()
 {
-    terminal::parser::parserTableDot(std::cout);
+    vtparser::parserTableDot(std::cout);
     return EXIT_SUCCESS;
 }
 

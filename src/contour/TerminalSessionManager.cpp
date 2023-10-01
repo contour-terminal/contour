@@ -15,9 +15,9 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app): _app { app }
 
 TerminalSession* TerminalSessionManager::createSession()
 {
-    auto pty = make_unique<terminal::Process>(
+    auto pty = make_unique<vtpty::Process>(
         _app.config().profile(_app.profileName())->shell,
-        terminal::createPty(_app.config().profile(_app.profileName())->terminalSize, nullopt));
+        vtpty::createPty(_app.config().profile(_app.profileName())->terminalSize, nullopt));
 
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessable from within QML.

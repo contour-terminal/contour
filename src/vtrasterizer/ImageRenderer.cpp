@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/ImageRenderer.h>
 
+#include <crispy/StrongHash.h>
 #include <crispy/algorithm.h>
 #include <crispy/times.h>
 
 #include <array>
-
-#include "crispy/StrongHash.h"
 
 using crispy::times;
 
@@ -14,7 +13,7 @@ using std::array;
 using std::nullopt;
 using std::optional;
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 ImageRenderer::ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize):
@@ -35,7 +34,7 @@ void ImageRenderer::setCellSize(ImageSize cellSize)
     // TODO: recompute rasterized images slices here?
 }
 
-void ImageRenderer::renderImage(crispy::point pos, ImageFragment const& fragment)
+void ImageRenderer::renderImage(crispy::point pos, vtbackend::ImageFragment const& fragment)
 {
     // std::cout << fmt::format("ImageRenderer.renderImage: {}\n", fragment);
 
@@ -46,7 +45,7 @@ void ImageRenderer::renderImage(crispy::point pos, ImageFragment const& fragment
     // clang-format off
     _pendingRenderTilesAboveText.emplace_back(createRenderTile(atlas::RenderTile::X { pos.x },
                                                                atlas::RenderTile::Y { pos.y },
-                                                               RGBAColor::White, *tileAttributes));
+                                                               vtbackend::RGBAColor::White, *tileAttributes));
     // clang-format on
 }
 
@@ -83,7 +82,7 @@ void ImageRenderer::endFrame()
 }
 
 Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttributes(
-    ImageFragment const& fragment)
+    vtbackend::ImageFragment const& fragment)
 {
     // using crispy::StrongHash;
     // auto const hash = StrongHash::compute(fragment.rasterizedImage().image().id().value)
@@ -108,7 +107,7 @@ Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttri
         });
 }
 
-void ImageRenderer::discardImage(ImageId /*imageId*/)
+void ImageRenderer::discardImage(vtbackend::ImageId /*imageId*/)
 {
     // We currently don't really discard.
     // Because the GPU texture atlas is resource-guarded by an LRU hashtable.
@@ -124,4 +123,4 @@ void ImageRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

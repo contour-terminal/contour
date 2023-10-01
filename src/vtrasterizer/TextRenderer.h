@@ -20,10 +20,6 @@
 #include <gsl/span>
 #include <gsl/span_ext>
 
-#include <functional>
-#include <list>
-#include <memory>
-#include <unordered_map>
 #include <vector>
 
 #include "crispy/StrongHash.h"
@@ -31,7 +27,7 @@
 #include <libunicode/convert.h>
 #include <libunicode/run_segmenter.h>
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 text::font_locator& createFontLocator(FontLocatorEngine engine);
@@ -79,14 +75,14 @@ class TextRenderer: public Renderable
 
     /// Renders a given terminal's grid cell that has been
     /// transformed into a RenderCell.
-    void renderCell(RenderCell const& cell);
+    void renderCell(vtbackend::RenderCell const& cell);
 
-    void renderCell(CellLocation position,
+    void renderCell(vtbackend::CellLocation position,
                     std::u32string_view graphemeCluster,
                     TextStyle textStyle,
-                    RGBColor foregroundColor);
+                    vtbackend::RGBColor foregroundColor);
 
-    void renderLine(RenderLine const& renderLine);
+    void renderLine(vtbackend::RenderLine const& renderLine);
 
     /// Must be invoked when rendering the terminal's text has finished for this frame.
     void endFrame();
@@ -96,7 +92,9 @@ class TextRenderer: public Renderable
 
     /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
     /// at the end of the currently filled line.
-    void appendCellTextToClusterGroup(std::u32string_view codepoints, TextStyle style, RGBColor color);
+    void appendCellTextToClusterGroup(std::u32string_view codepoints,
+                                      TextStyle style,
+                                      vtbackend::RGBColor color);
 
     /// Gets the text shaping result of the current text cluster group
     text::shape_result const& getOrCreateCachedGlyphPositions(crispy::strong_hash hash);
@@ -129,7 +127,9 @@ class TextRenderer: public Renderable
                                           AtlasTileAttributes const& tileAttributes,
                                           text::glyph_position const& gpos) const noexcept;
 
-    void renderRasterizedGlyph(crispy::point pen, RGBAColor color, AtlasTileAttributes const& attributes);
+    void renderRasterizedGlyph(crispy::point pen,
+                               vtbackend::RGBAColor color,
+                               AtlasTileAttributes const& attributes);
 
     // general properties
     //
@@ -177,7 +177,7 @@ class TextRenderer: public Renderable
         TextStyle style = TextStyle::Invalid;
 
         // uniform text color for this text group
-        RGBColor color {};
+        vtbackend::RGBColor color {};
 
         // codepoints within this text group with
         // uniform unicode properties (script, language, direction).
@@ -203,4 +203,4 @@ class TextRenderer: public Renderable
     bool _updateInitialPenPosition = false;
 };
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

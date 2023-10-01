@@ -7,7 +7,7 @@
 
 #include <string>
 
-namespace terminal
+namespace vtbackend
 {
 
 /**
@@ -76,43 +76,43 @@ std::string to_string(DeviceAttributes v);
 //! Generates a parameter list that can be used to generate the CSI response.
 std::string to_params(DeviceAttributes v);
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<terminal::VTType>: fmt::formatter<std::string_view>
+struct fmt::formatter<vtbackend::VTType>: fmt::formatter<std::string_view>
 {
-    auto format(const terminal::VTType id, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::VTType id, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (id)
         {
-            case terminal::VTType::VT100: name = "VT100"; break;
-            case terminal::VTType::VT220: name = "VT220"; break;
-            case terminal::VTType::VT240: name = "VT240"; break;
-            case terminal::VTType::VT320: name = "VT320"; break;
-            case terminal::VTType::VT330: name = "VT330"; break;
-            case terminal::VTType::VT340: name = "VT340"; break;
-            case terminal::VTType::VT420: name = "VT420"; break;
-            case terminal::VTType::VT510: name = "VT510"; break;
-            case terminal::VTType::VT520: name = "VT520"; break;
-            case terminal::VTType::VT525: name = "VT525"; break;
+            case vtbackend::VTType::VT100: name = "VT100"; break;
+            case vtbackend::VTType::VT220: name = "VT220"; break;
+            case vtbackend::VTType::VT240: name = "VT240"; break;
+            case vtbackend::VTType::VT320: name = "VT320"; break;
+            case vtbackend::VTType::VT330: name = "VT330"; break;
+            case vtbackend::VTType::VT340: name = "VT340"; break;
+            case vtbackend::VTType::VT420: name = "VT420"; break;
+            case vtbackend::VTType::VT510: name = "VT510"; break;
+            case vtbackend::VTType::VT520: name = "VT520"; break;
+            case vtbackend::VTType::VT525: name = "VT525"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 template <>
-struct fmt::formatter<terminal::VTExtension>: fmt::formatter<std::string_view>
+struct fmt::formatter<vtbackend::VTExtension>: fmt::formatter<std::string_view>
 {
-    auto format(const terminal::VTExtension id, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::VTExtension id, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (id)
         {
-            case terminal::VTExtension::None: name = "none"; break;
-            case terminal::VTExtension::Unknown: name = "unknown"; break;
-            case terminal::VTExtension::XTerm: name = "XTerm"; break;
-            case terminal::VTExtension::Contour: name = "Contour"; break;
+            case vtbackend::VTExtension::None: name = "none"; break;
+            case vtbackend::VTExtension::Unknown: name = "unknown"; break;
+            case vtbackend::VTExtension::XTerm: name = "XTerm"; break;
+            case vtbackend::VTExtension::Contour: name = "Contour"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

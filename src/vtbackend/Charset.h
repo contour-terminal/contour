@@ -5,7 +5,7 @@
 
 #include <array>
 
-namespace terminal
+namespace vtbackend
 {
 
 using CharsetMap = std::array<char32_t, 127>;
@@ -110,4 +110,4 @@ class CharsetMapping
     Tables _tables;
 };
 
-} // namespace terminal
+} // namespace vtbackend

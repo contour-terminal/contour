@@ -9,9 +9,7 @@
 
 #include <crispy/point.h>
 
-#include <array>
-
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 // TODO: I think I should cincerely rename this class to
@@ -36,7 +34,10 @@ class BoxDrawingRenderer: public Renderable
     /// Renders boxdrawing character.
     ///
     /// @param codepoint     the boxdrawing character's codepoint.
-    [[nodiscard]] bool render(LineOffset line, ColumnOffset column, char32_t codepoint, RGBColor color);
+    [[nodiscard]] bool render(vtbackend::LineOffset line,
+                              vtbackend::ColumnOffset column,
+                              char32_t codepoint,
+                              vtbackend::RGBColor color);
 
     void inspect(std::ostream& output) const override;
 
@@ -53,4 +54,4 @@ class BoxDrawingRenderer: public Renderable
     [[nodiscard]] std::optional<atlas::Buffer> buildElements(char32_t codepoint);
 };
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

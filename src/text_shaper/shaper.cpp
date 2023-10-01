@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/primitives.h>
+
 #include <text_shaper/shaper.h>
 
-#include <crispy/ImageSize.h>
 #include <crispy/logstore.h>
 
 #include <range/v3/view/iota.hpp>
@@ -23,8 +24,8 @@ namespace
 {
     template <std::size_t NumComponents>
     constexpr void scaleDownExplicit(vector<uint8_t> const& inputBitmap,
-                                     crispy::image_size inputSize,
-                                     crispy::image_size outputSize,
+                                     vtbackend::ImageSize inputSize,
+                                     vtbackend::ImageSize outputSize,
                                      size_t factor,
                                      vector<uint8_t>& outputBitmap) noexcept
     {
@@ -58,7 +59,7 @@ namespace
 
 } // namespace
 
-tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::image_size boundingBox)
+tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::ImageSize boundingBox)
 {
     // NB: We're only supporting down-scaling.
     assert(bitmap.bitmapSize.width >= boundingBox.width);
@@ -70,9 +71,10 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::ima
     auto const factor = static_cast<unsigned>(ceil(ratio));
 
     // Adjust new image size to respect ratio.
-    auto const newSize =
-        crispy::image_size { crispy::width::cast_from(unbox<double>(bitmap.bitmapSize.width) / ratio),
-                             crispy::height::cast_from(unbox<double>(bitmap.bitmapSize.height) / ratio) };
+    auto const newSize = vtbackend::ImageSize {
+        vtbackend::Width::cast_from(unbox<double>(bitmap.bitmapSize.width) / ratio),
+        vtbackend::Height::cast_from(unbox<double>(bitmap.bitmapSize.height) / ratio)
+    };
 
     rasterizerLog()("scaling {} from {} to {}, ratio {}x{} ({}), factor {}",
                     bitmap.format,

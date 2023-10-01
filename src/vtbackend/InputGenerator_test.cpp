@@ -14,9 +14,9 @@
 #include <libunicode/convert.h>
 
 using namespace std;
-using terminal::InputGenerator;
-using terminal::Modifier;
-using Buffer = terminal::InputGenerator::Sequence;
+using vtbackend::InputGenerator;
+using vtbackend::Modifier;
+using Buffer = vtbackend::InputGenerator::Sequence;
 using crispy::escape;
 
 TEST_CASE("InputGenerator.Modifier.encodings")

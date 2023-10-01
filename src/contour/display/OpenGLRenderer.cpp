@@ -4,9 +4,10 @@
 #include <contour/display/ShaderConfig.h>
 #include <contour/helper.h>
 
+#include <vtbackend/primitives.h>
+
 #include <vtrasterizer/TextureAtlas.h>
 
-#include <crispy/ImageSize.h>
 #include <crispy/algorithm.h>
 #include <crispy/assert.h>
 #include <crispy/defines.h>
@@ -45,15 +46,15 @@ using std::shared_ptr;
 using std::string;
 using std::vector;
 
-using terminal::Height;
-using terminal::ImageSize;
-using terminal::RGBAColor;
-using terminal::Width;
+using vtbackend::Height;
+using vtbackend::ImageSize;
+using vtbackend::RGBAColor;
+using vtbackend::Width;
 
 using namespace std::string_view_literals;
 
 namespace chrono = std::chrono;
-namespace atlas = terminal::rasterizer::atlas;
+namespace atlas = vtrasterizer::atlas;
 
 namespace contour::display
 {
@@ -129,12 +130,12 @@ namespace
         return mat;
     }
 
-    GLenum glFormat(terminal::ImageFormat format)
+    GLenum glFormat(vtbackend::ImageFormat format)
     {
         switch (format)
         {
-            case terminal::ImageFormat::RGB: return GL_RGB;
-            case terminal::ImageFormat::RGBA: return GL_RGBA;
+            case vtbackend::ImageFormat::RGB: return GL_RGB;
+            case vtbackend::ImageFormat::RGBA: return GL_RGBA;
         }
         Guarantee(false);
         crispy::unreachable();
@@ -184,10 +185,10 @@ namespace
 
 OpenGLRenderer::OpenGLRenderer(ShaderConfig textShaderConfig,
                                ShaderConfig rectShaderConfig,
-                               crispy::image_size viewSize,
-                               crispy::image_size targetSurfaceSize,
-                               [[maybe_unused]] crispy::image_size textureTileSize,
-                               terminal::rasterizer::PageMargin margin):
+                               vtbackend::ImageSize viewSize,
+                               vtbackend::ImageSize targetSurfaceSize,
+                               [[maybe_unused]] vtbackend::ImageSize textureTileSize,
+                               vtrasterizer::PageMargin margin):
     _startTime { chrono::steady_clock::now().time_since_epoch() },
     _viewSize { viewSize },
     _margin { margin },
@@ -198,7 +199,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig textShaderConfig,
     setRenderSize(targetSurfaceSize);
 }
 
-void OpenGLRenderer::setRenderSize(crispy::image_size targetSurfaceSize)
+void OpenGLRenderer::setRenderSize(vtbackend::ImageSize targetSurfaceSize)
 {
     if (_renderTargetSize == targetSurfaceSize)
         return;
@@ -223,7 +224,7 @@ void OpenGLRenderer::setModelMatrix(QMatrix4x4 matrix) noexcept
     _modelMatrix = matrix;
 }
 
-void OpenGLRenderer::setMargin(terminal::rasterizer::PageMargin margin) noexcept
+void OpenGLRenderer::setMargin(vtrasterizer::PageMargin margin) noexcept
 {
     _margin = margin;
 }
@@ -836,11 +837,11 @@ void OpenGLRenderer::renderRectangle(int ix, int iy, Width width, Height height,
     crispy::copy(vertices, back_inserter(_rectBuffer));
 }
 
-optional<terminal::rasterizer::AtlasTextureScreenshot> OpenGLRenderer::readAtlas()
+optional<vtrasterizer::AtlasTextureScreenshot> OpenGLRenderer::readAtlas()
 {
     // NB: to get all atlas pages, call this from instance base id up to and including current
     // instance id of the given allocator.
-    auto output = terminal::rasterizer::AtlasTextureScreenshot {};
+    auto output = vtrasterizer::AtlasTextureScreenshot {};
     output.atlasInstanceId = 0;
     output.size = _textureAtlas.textureSize;
     output.format = _textureAtlas.properties.format;
@@ -903,7 +904,7 @@ struct CRISPY_PACKED BackgroundShaderParams
 };
 
 GLuint OpenGLRenderer::createAndUploadImage(QSize imageSize,
-                                            terminal::ImageFormat format,
+                                            vtbackend::ImageFormat format,
                                             int rowAlignment,
                                             uint8_t const* pixels)
 {

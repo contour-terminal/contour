@@ -32,7 +32,7 @@ using std::string;
 using std::string_view;
 using std::vector;
 
-using terminal::Process;
+using vtpty::Process;
 
 using namespace std::string_literals;
 
@@ -170,7 +170,7 @@ std::optional<fs::path> ContourGuiApp::dumpStateAtExit() const
 
 void ContourGuiApp::onExit(TerminalSession& session)
 {
-    auto const* localProcess = dynamic_cast<terminal::Process const*>(&session.terminal().device());
+    auto const* localProcess = dynamic_cast<vtpty::Process const*>(&session.terminal().device());
     if (!localProcess)
         return;
 
@@ -269,7 +269,7 @@ int ContourGuiApp::fontConfigAction()
     if (!loadConfig("font-locator"))
         return EXIT_FAILURE;
 
-    terminal::rasterizer::FontDescriptions const& fonts = _config.profile(_config.defaultProfileName)->fonts;
+    vtrasterizer::FontDescriptions const& fonts = _config.profile(_config.defaultProfileName)->fonts;
     text::font_description const& fontDescription = fonts.regular;
     text::font_locator& fontLocator = createFontLocator(fonts.fontLocator);
     text::font_source_list fontSources = fontLocator.locate(fontDescription);
@@ -411,7 +411,7 @@ int ContourGuiApp::terminalGuiAction()
 
 void ContourGuiApp::ensureTermInfoFile()
 {
-    if (!terminal::Process::isFlatpak())
+    if (!vtpty::Process::isFlatpak())
         return;
 
     auto const hostTerminfoBaseDirectory =

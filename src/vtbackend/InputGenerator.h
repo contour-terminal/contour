@@ -17,7 +17,7 @@
 
 #include <libunicode/convert.h>
 
-namespace terminal
+namespace vtbackend
 {
 
 /// Mutualy exclusive mouse protocls.
@@ -396,32 +396,32 @@ inline std::string to_string(InputGenerator::MouseEventType value)
     return "???";
 }
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmtlib custom formatter support
 
 template <>
-struct fmt::formatter<terminal::MouseProtocol>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::MouseProtocol>: formatter<std::string_view>
 {
-    auto format(terminal::MouseProtocol value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::MouseProtocol value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::MouseProtocol::X10: name = "X10"; break;
-            case terminal::MouseProtocol::HighlightTracking: name = "HighlightTracking"; break;
-            case terminal::MouseProtocol::ButtonTracking: name = "ButtonTracking"; break;
-            case terminal::MouseProtocol::NormalTracking: name = "NormalTracking"; break;
-            case terminal::MouseProtocol::AnyEventTracking: name = "AnyEventTracking"; break;
+            case vtbackend::MouseProtocol::X10: name = "X10"; break;
+            case vtbackend::MouseProtocol::HighlightTracking: name = "HighlightTracking"; break;
+            case vtbackend::MouseProtocol::ButtonTracking: name = "ButtonTracking"; break;
+            case vtbackend::MouseProtocol::NormalTracking: name = "NormalTracking"; break;
+            case vtbackend::MouseProtocol::AnyEventTracking: name = "AnyEventTracking"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::Modifier>: formatter<std::string>
+struct fmt::formatter<vtbackend::Modifier>: formatter<std::string>
 {
-    auto format(terminal::Modifier modifier, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::Modifier modifier, format_context& ctx) -> format_context::iterator
     {
         std::string s;
         auto const advance = [&](bool cond, std::string_view text) {
@@ -442,17 +442,19 @@ struct fmt::formatter<terminal::Modifier>: formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<terminal::InputGenerator::MouseWheelMode>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::InputGenerator::MouseWheelMode>: formatter<std::string_view>
 {
-    auto format(terminal::InputGenerator::MouseWheelMode value, format_context& ctx)
+    auto format(vtbackend::InputGenerator::MouseWheelMode value, format_context& ctx)
         -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::InputGenerator::MouseWheelMode::Default: name = "Default"; break;
-            case terminal::InputGenerator::MouseWheelMode::NormalCursorKeys: name = "NormalCursorKeys"; break;
-            case terminal::InputGenerator::MouseWheelMode::ApplicationCursorKeys:
+            case vtbackend::InputGenerator::MouseWheelMode::Default: name = "Default"; break;
+            case vtbackend::InputGenerator::MouseWheelMode::NormalCursorKeys:
+                name = "NormalCursorKeys";
+                break;
+            case vtbackend::InputGenerator::MouseWheelMode::ApplicationCursorKeys:
                 name = "ApplicationCursorKeys";
                 break;
         }
@@ -461,114 +463,114 @@ struct fmt::formatter<terminal::InputGenerator::MouseWheelMode>: formatter<std::
 };
 
 template <>
-struct fmt::formatter<terminal::KeyMode>: public formatter<std::string_view>
+struct fmt::formatter<vtbackend::KeyMode>: public formatter<std::string_view>
 {
-    auto format(terminal::KeyMode value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::KeyMode value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::KeyMode::Normal: name = "Normal"; break;
-            case terminal::KeyMode::Application: name = "Application"; break;
+            case vtbackend::KeyMode::Normal: name = "Normal"; break;
+            case vtbackend::KeyMode::Application: name = "Application"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::MouseButton>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::MouseButton>: formatter<std::string_view>
 {
-    auto format(terminal::MouseButton value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::MouseButton value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::MouseButton::Left: name = "Left"; break;
-            case terminal::MouseButton::Right: name = "Right"; break;
-            case terminal::MouseButton::Middle: name = "Middle"; break;
-            case terminal::MouseButton::Release: name = "Release"; break;
-            case terminal::MouseButton::WheelUp: name = "WheelUp"; break;
-            case terminal::MouseButton::WheelDown: name = "WheelDown"; break;
+            case vtbackend::MouseButton::Left: name = "Left"; break;
+            case vtbackend::MouseButton::Right: name = "Right"; break;
+            case vtbackend::MouseButton::Middle: name = "Middle"; break;
+            case vtbackend::MouseButton::Release: name = "Release"; break;
+            case vtbackend::MouseButton::WheelUp: name = "WheelUp"; break;
+            case vtbackend::MouseButton::WheelDown: name = "WheelDown"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::MouseTransport>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::MouseTransport>: formatter<std::string_view>
 {
-    auto format(terminal::MouseTransport value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::MouseTransport value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::MouseTransport::Default: name = "Default"; break;
-            case terminal::MouseTransport::Extended: name = "Extended"; break;
-            case terminal::MouseTransport::SGR: name = "SGR"; break;
-            case terminal::MouseTransport::URXVT: name = "URXVT"; break;
-            case terminal::MouseTransport::SGRPixels: name = "SGR-Pixels"; break;
+            case vtbackend::MouseTransport::Default: name = "Default"; break;
+            case vtbackend::MouseTransport::Extended: name = "Extended"; break;
+            case vtbackend::MouseTransport::SGR: name = "SGR"; break;
+            case vtbackend::MouseTransport::URXVT: name = "URXVT"; break;
+            case vtbackend::MouseTransport::SGRPixels: name = "SGR-Pixels"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::Key>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::Key>: formatter<std::string_view>
 {
-    auto format(terminal::Key value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::Key value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::Key::F1: name = "F1"; break;
-            case terminal::Key::F2: name = "F2"; break;
-            case terminal::Key::F3: name = "F3"; break;
-            case terminal::Key::F4: name = "F4"; break;
-            case terminal::Key::F5: name = "F5"; break;
-            case terminal::Key::F6: name = "F6"; break;
-            case terminal::Key::F7: name = "F7"; break;
-            case terminal::Key::F8: name = "F8"; break;
-            case terminal::Key::F9: name = "F9"; break;
-            case terminal::Key::F10: name = "F10"; break;
-            case terminal::Key::F11: name = "F11"; break;
-            case terminal::Key::F12: name = "F12"; break;
-            case terminal::Key::F13: name = "F13"; break;
-            case terminal::Key::F14: name = "F14"; break;
-            case terminal::Key::F15: name = "F15"; break;
-            case terminal::Key::F16: name = "F16"; break;
-            case terminal::Key::F17: name = "F17"; break;
-            case terminal::Key::F18: name = "F18"; break;
-            case terminal::Key::F19: name = "F19"; break;
-            case terminal::Key::F20: name = "F20"; break;
-            case terminal::Key::DownArrow: name = "DownArrow"; break;
-            case terminal::Key::LeftArrow: name = "LeftArrow"; break;
-            case terminal::Key::RightArrow: name = "RightArrow"; break;
-            case terminal::Key::UpArrow: name = "UpArrow"; break;
-            case terminal::Key::Insert: name = "Insert"; break;
-            case terminal::Key::Delete: name = "Delete"; break;
-            case terminal::Key::Home: name = "Home"; break;
-            case terminal::Key::End: name = "End"; break;
-            case terminal::Key::PageUp: name = "PageUp"; break;
-            case terminal::Key::PageDown: name = "PageDown"; break;
-            case terminal::Key::Numpad_NumLock: name = "Numpad_NumLock"; break;
-            case terminal::Key::Numpad_Divide: name = "Numpad_Divide"; break;
-            case terminal::Key::Numpad_Multiply: name = "Numpad_Multiply"; break;
-            case terminal::Key::Numpad_Subtract: name = "Numpad_Subtract"; break;
-            case terminal::Key::Numpad_CapsLock: name = "Numpad_CapsLock"; break;
-            case terminal::Key::Numpad_Add: name = "Numpad_Add"; break;
-            case terminal::Key::Numpad_Decimal: name = "Numpad_Decimal"; break;
-            case terminal::Key::Numpad_Enter: name = "Numpad_Enter"; break;
-            case terminal::Key::Numpad_Equal: name = "Numpad_Equal"; break;
-            case terminal::Key::Numpad_0: name = "Numpad_0"; break;
-            case terminal::Key::Numpad_1: name = "Numpad_1"; break;
-            case terminal::Key::Numpad_2: name = "Numpad_2"; break;
-            case terminal::Key::Numpad_3: name = "Numpad_3"; break;
-            case terminal::Key::Numpad_4: name = "Numpad_4"; break;
-            case terminal::Key::Numpad_5: name = "Numpad_5"; break;
-            case terminal::Key::Numpad_6: name = "Numpad_6"; break;
-            case terminal::Key::Numpad_7: name = "Numpad_7"; break;
-            case terminal::Key::Numpad_8: name = "Numpad_8"; break;
-            case terminal::Key::Numpad_9: name = "Numpad_9"; break;
+            case vtbackend::Key::F1: name = "F1"; break;
+            case vtbackend::Key::F2: name = "F2"; break;
+            case vtbackend::Key::F3: name = "F3"; break;
+            case vtbackend::Key::F4: name = "F4"; break;
+            case vtbackend::Key::F5: name = "F5"; break;
+            case vtbackend::Key::F6: name = "F6"; break;
+            case vtbackend::Key::F7: name = "F7"; break;
+            case vtbackend::Key::F8: name = "F8"; break;
+            case vtbackend::Key::F9: name = "F9"; break;
+            case vtbackend::Key::F10: name = "F10"; break;
+            case vtbackend::Key::F11: name = "F11"; break;
+            case vtbackend::Key::F12: name = "F12"; break;
+            case vtbackend::Key::F13: name = "F13"; break;
+            case vtbackend::Key::F14: name = "F14"; break;
+            case vtbackend::Key::F15: name = "F15"; break;
+            case vtbackend::Key::F16: name = "F16"; break;
+            case vtbackend::Key::F17: name = "F17"; break;
+            case vtbackend::Key::F18: name = "F18"; break;
+            case vtbackend::Key::F19: name = "F19"; break;
+            case vtbackend::Key::F20: name = "F20"; break;
+            case vtbackend::Key::DownArrow: name = "DownArrow"; break;
+            case vtbackend::Key::LeftArrow: name = "LeftArrow"; break;
+            case vtbackend::Key::RightArrow: name = "RightArrow"; break;
+            case vtbackend::Key::UpArrow: name = "UpArrow"; break;
+            case vtbackend::Key::Insert: name = "Insert"; break;
+            case vtbackend::Key::Delete: name = "Delete"; break;
+            case vtbackend::Key::Home: name = "Home"; break;
+            case vtbackend::Key::End: name = "End"; break;
+            case vtbackend::Key::PageUp: name = "PageUp"; break;
+            case vtbackend::Key::PageDown: name = "PageDown"; break;
+            case vtbackend::Key::Numpad_NumLock: name = "Numpad_NumLock"; break;
+            case vtbackend::Key::Numpad_Divide: name = "Numpad_Divide"; break;
+            case vtbackend::Key::Numpad_Multiply: name = "Numpad_Multiply"; break;
+            case vtbackend::Key::Numpad_Subtract: name = "Numpad_Subtract"; break;
+            case vtbackend::Key::Numpad_CapsLock: name = "Numpad_CapsLock"; break;
+            case vtbackend::Key::Numpad_Add: name = "Numpad_Add"; break;
+            case vtbackend::Key::Numpad_Decimal: name = "Numpad_Decimal"; break;
+            case vtbackend::Key::Numpad_Enter: name = "Numpad_Enter"; break;
+            case vtbackend::Key::Numpad_Equal: name = "Numpad_Equal"; break;
+            case vtbackend::Key::Numpad_0: name = "Numpad_0"; break;
+            case vtbackend::Key::Numpad_1: name = "Numpad_1"; break;
+            case vtbackend::Key::Numpad_2: name = "Numpad_2"; break;
+            case vtbackend::Key::Numpad_3: name = "Numpad_3"; break;
+            case vtbackend::Key::Numpad_4: name = "Numpad_4"; break;
+            case vtbackend::Key::Numpad_5: name = "Numpad_5"; break;
+            case vtbackend::Key::Numpad_6: name = "Numpad_6"; break;
+            case vtbackend::Key::Numpad_7: name = "Numpad_7"; break;
+            case vtbackend::Key::Numpad_8: name = "Numpad_8"; break;
+            case vtbackend::Key::Numpad_9: name = "Numpad_9"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

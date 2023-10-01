@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <optional>
 
-namespace terminal
+namespace vtbackend
 {
 
 bool Viewport::scrollUp(LineCount numLines)
@@ -134,4 +134,4 @@ bool Viewport::scrollingDisabled() const noexcept
     return _terminal.isAlternateScreen();
 }
 
-} // namespace terminal
+} // namespace vtbackend

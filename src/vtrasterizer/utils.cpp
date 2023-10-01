@@ -6,12 +6,14 @@
 #include <algorithm> // max?
 #include <cassert>
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 using namespace std;
 
-vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap, ImageSize size, ImageSize newSize)
+vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap,
+                               vtbackend::ImageSize size,
+                               vtbackend::ImageSize newSize)
 {
     assert(size.width >= newSize.width);
     assert(size.height >= newSize.height);
@@ -66,8 +68,8 @@ vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap, ImageSize size, Im
 
 vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
                            uint8_t numComponents,
-                           ImageSize size,
-                           ImageSize newSize)
+                           vtbackend::ImageSize size,
+                           vtbackend::ImageSize newSize)
 {
     assert(size.width >= newSize.width);
     assert(size.height >= newSize.height);
@@ -116,7 +118,9 @@ vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
     return dest;
 }
 
-vector<uint8_t> downsample(vector<uint8_t> const& sourceBitmap, ImageSize targetSize, uint8_t factor)
+vector<uint8_t> downsample(vector<uint8_t> const& sourceBitmap,
+                           vtbackend::ImageSize targetSize,
+                           uint8_t factor)
 {
     vector<uint8_t> targetBitmap(*targetSize.width * *targetSize.height, 0);
 
@@ -145,4 +149,4 @@ vector<uint8_t> downsample(vector<uint8_t> const& sourceBitmap, ImageSize target
     return targetBitmap;
 }
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

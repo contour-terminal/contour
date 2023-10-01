@@ -5,11 +5,11 @@
 #include <contour/display/ShaderConfig.h>
 
 #include <vtbackend/Image.h>
+#include <vtbackend/primitives.h>
 
 #include <vtrasterizer/RenderTarget.h>
 #include <vtrasterizer/TextureAtlas.h>
 
-#include <crispy/ImageSize.h>
 #include <crispy/StrongHash.h>
 
 #include <QtGui/QMatrix4x4>
@@ -34,21 +34,21 @@ namespace contour::display
 
 class OpenGLRenderer final:
     public QObject,
-    public terminal::rasterizer::RenderTarget,
-    public terminal::rasterizer::atlas::AtlasBackend,
+    public vtrasterizer::RenderTarget,
+    public vtrasterizer::atlas::AtlasBackend,
     public QOpenGLExtraFunctions
 {
     Q_OBJECT
 
-    using ImageSize = terminal::ImageSize;
+    using ImageSize = vtbackend::ImageSize;
 
-    using AtlasTextureScreenshot = terminal::rasterizer::AtlasTextureScreenshot;
+    using AtlasTextureScreenshot = vtrasterizer::AtlasTextureScreenshot;
 
-    using AtlasTileID = terminal::rasterizer::atlas::AtlasTileID;
+    using AtlasTileID = vtrasterizer::atlas::AtlasTileID;
 
-    using ConfigureAtlas = terminal::rasterizer::atlas::ConfigureAtlas;
-    using UploadTile = terminal::rasterizer::atlas::UploadTile;
-    using RenderTile = terminal::rasterizer::atlas::RenderTile;
+    using ConfigureAtlas = vtrasterizer::atlas::ConfigureAtlas;
+    using UploadTile = vtrasterizer::atlas::UploadTile;
+    using RenderTile = vtrasterizer::atlas::RenderTile;
 
   public:
     /**
@@ -59,10 +59,10 @@ class OpenGLRenderer final:
      */
     OpenGLRenderer(ShaderConfig textShaderConfig,
                    ShaderConfig rectShaderConfig,
-                   crispy::image_size viewSize,
-                   crispy::image_size targetSurfaceSize,
-                   crispy::image_size textureTileSize,
-                   terminal::rasterizer::PageMargin margin);
+                   vtbackend::ImageSize viewSize,
+                   vtbackend::ImageSize targetSurfaceSize,
+                   vtbackend::ImageSize textureTileSize,
+                   vtrasterizer::PageMargin margin);
 
     ~OpenGLRenderer() override;
 
@@ -75,18 +75,18 @@ class OpenGLRenderer final:
     void renderTile(RenderTile tile) override;
 
     // RenderTarget implementation
-    void setRenderSize(crispy::image_size targetSurfaceSize) override;
+    void setRenderSize(vtbackend::ImageSize targetSurfaceSize) override;
     void setTranslation(float x, float y, float z) noexcept;
-    void setViewSize(crispy::image_size size) noexcept { _viewSize = size; }
+    void setViewSize(vtbackend::ImageSize size) noexcept { _viewSize = size; }
     void setModelMatrix(QMatrix4x4 matrix) noexcept;
-    void setMargin(terminal::rasterizer::PageMargin margin) noexcept override;
+    void setMargin(vtrasterizer::PageMargin margin) noexcept override;
     std::optional<AtlasTextureScreenshot> readAtlas() override;
     AtlasBackend& textureScheduler() override;
     void scheduleScreenshot(ScreenshotCallback callback) override;
     void renderRectangle(int x, int y, Width, Height, RGBAColor color) override;
     void execute(std::chrono::steady_clock::time_point now) override;
 
-    std::pair<crispy::image_size, std::vector<uint8_t>> takeScreenshot();
+    std::pair<vtbackend::ImageSize, std::vector<uint8_t>> takeScreenshot();
 
     void clearCache() override;
 
@@ -115,10 +115,10 @@ class OpenGLRenderer final:
     int maxTextureDepth();
     int maxTextureSize();
     int maxTextureUnits();
-    crispy::image_size renderBufferSize();
+    vtbackend::ImageSize renderBufferSize();
 
     GLuint createAndUploadImage(QSize imageSize,
-                                terminal::ImageFormat format,
+                                vtbackend::ImageFormat format,
                                 int rowAlignment,
                                 uint8_t const* pixels);
 
@@ -136,7 +136,7 @@ class OpenGLRenderer final:
     // {{{ scheduling data
     struct RenderBatch
     {
-        std::vector<terminal::rasterizer::atlas::RenderTile> renderTiles;
+        std::vector<vtrasterizer::atlas::RenderTile> renderTiles;
         std::vector<GLfloat> buffer;
         uint32_t userdata = 0;
 
@@ -149,8 +149,8 @@ class OpenGLRenderer final:
 
     struct Scheduler
     {
-        std::optional<terminal::rasterizer::atlas::ConfigureAtlas> configureAtlas = std::nullopt;
-        std::vector<terminal::rasterizer::atlas::UploadTile> uploadTiles {};
+        std::optional<vtrasterizer::atlas::ConfigureAtlas> configureAtlas = std::nullopt;
+        std::vector<vtrasterizer::atlas::UploadTile> uploadTiles {};
         RenderBatch renderBatch {};
 
         void clear()
@@ -166,13 +166,13 @@ class OpenGLRenderer final:
 
     bool _initialized = false;
     std::chrono::steady_clock::time_point _startTime;
-    crispy::image_size _viewSize;
-    crispy::image_size _renderTargetSize;
+    vtbackend::ImageSize _viewSize;
+    vtbackend::ImageSize _renderTargetSize;
     QMatrix4x4 _projectionMatrix;
     QMatrix4x4 _viewMatrix;
     QMatrix4x4 _modelMatrix;
 
-    terminal::rasterizer::PageMargin _margin {};
+    vtrasterizer::PageMargin _margin {};
 
     std::unique_ptr<QOpenGLShaderProgram> _textShader;
     int _textProjectionLocation = -1;
@@ -191,7 +191,7 @@ class OpenGLRenderer final:
         // QOpenGLTexture gpuTexture { QOpenGLTexture::Target::Target2D };
         GLuint textureId {};
         ImageSize textureSize {};
-        terminal::rasterizer::atlas::AtlasProperties properties {};
+        vtrasterizer::atlas::AtlasProperties properties {};
     };
     AtlasAttributes _textureAtlas {};
 
@@ -221,7 +221,7 @@ class OpenGLRenderer final:
     // render state cache
     struct
     {
-        terminal::RGBAColor backgroundColor {};
+        vtbackend::RGBAColor backgroundColor {};
         float backgroundImageOpacity = 1.0f;
         bool backgroundImageBlur = false;
         QSize backgroundResolution;

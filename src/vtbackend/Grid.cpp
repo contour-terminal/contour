@@ -16,7 +16,7 @@ using std::u32string;
 using std::u32string_view;
 using std::vector;
 
-namespace terminal
+namespace vtbackend
 {
 
 auto const inline gridLog = logstore::category(
@@ -1029,7 +1029,7 @@ std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid)
     for (int const lineOffset:
          ranges::views::iota(-unbox(grid.historyLineCount()), unbox(grid.pageSize().lines)))
     {
-        terminal::Line<Cell> const& lineAttribs = grid.lineAt(LineOffset(lineOffset));
+        vtbackend::Line<Cell> const& lineAttribs = grid.lineAt(LineOffset(lineOffset));
 
         os << fmt::format("[{:>2}] \"{}\" | {}\n",
                           lineOffset,
@@ -1179,12 +1179,14 @@ u32string Grid<Cell>::extractText(CellLocationRange range) const noexcept
     return output;
 }
 
-} // end namespace terminal
+} // end namespace vtbackend
 
 #include <vtbackend/cell/CompactCell.h>
-template class terminal::Grid<terminal::CompactCell>;
-template std::string terminal::dumpGrid<terminal::CompactCell>(terminal::Grid<terminal::CompactCell> const&);
+template class vtbackend::Grid<vtbackend::CompactCell>;
+template std::string vtbackend::dumpGrid<vtbackend::CompactCell>(
+    vtbackend::Grid<vtbackend::CompactCell> const&);
 
 #include <vtbackend/cell/SimpleCell.h>
-template class terminal::Grid<terminal::SimpleCell>;
-template std::string terminal::dumpGrid<terminal::SimpleCell>(terminal::Grid<terminal::SimpleCell> const&);
+template class vtbackend::Grid<vtbackend::SimpleCell>;
+template std::string vtbackend::dumpGrid<vtbackend::SimpleCell>(
+    vtbackend::Grid<vtbackend::SimpleCell> const&);

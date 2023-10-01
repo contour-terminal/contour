@@ -43,7 +43,7 @@ class ContourGuiApp: public QObject, public ContourApp
 
     std::string profileName() const;
 
-    std::optional<terminal::Process::ExitStatus> exitStatus() const noexcept { return _exitStatus; }
+    std::optional<vtpty::Process::ExitStatus> exitStatus() const noexcept { return _exitStatus; }
 
     std::optional<std::filesystem::path> dumpStateAtExit() const;
 
@@ -80,7 +80,7 @@ class ContourGuiApp: public QObject, public ContourApp
 
     int _argc = 0;
     char const** _argv = nullptr;
-    std::optional<terminal::Process::ExitStatus> _exitStatus;
+    std::optional<vtpty::Process::ExitStatus> _exitStatus;
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 };

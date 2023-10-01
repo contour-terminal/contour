@@ -16,7 +16,7 @@
 #include <memory>
 #include <vector>
 
-namespace terminal
+namespace vtbackend
 {
 
 // XXX DRAFT
@@ -267,28 +267,28 @@ class ImagePool
     OnImageRemove _onImageRemove;              //!< Callback to be invoked when image gets removed from pool.
 };
 
-} // namespace terminal
+} // namespace vtbackend
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<terminal::ImageFormat>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::ImageFormat>: formatter<std::string_view>
 {
-    auto format(terminal::ImageFormat value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ImageFormat value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ImageFormat::RGB: name = "RGB"; break;
-            case terminal::ImageFormat::RGBA: name = "RGBA"; break;
+            case vtbackend::ImageFormat::RGB: name = "RGB"; break;
+            case vtbackend::ImageFormat::RGBA: name = "RGBA"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::ImageStats>: formatter<std::string>
+struct fmt::formatter<vtbackend::ImageStats>: formatter<std::string>
 {
-    auto format(terminal::ImageStats stats, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ImageStats stats, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format(
@@ -298,9 +298,9 @@ struct fmt::formatter<terminal::ImageStats>: formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<std::shared_ptr<terminal::Image const>>: fmt::formatter<std::string>
+struct fmt::formatter<std::shared_ptr<vtbackend::Image const>>: fmt::formatter<std::string>
 {
-    auto format(std::shared_ptr<terminal::Image const> const& image, format_context& ctx)
+    auto format(std::shared_ptr<vtbackend::Image const> const& image, format_context& ctx)
         -> format_context::iterator
     {
         std::string text;
@@ -308,7 +308,7 @@ struct fmt::formatter<std::shared_ptr<terminal::Image const>>: fmt::formatter<st
             text = "nullptr";
         else
         {
-            terminal::Image const& imageRef = *image;
+            vtbackend::Image const& imageRef = *image;
             text = fmt::format("Image<#{}, {}, size={}>",
                                imageRef.weak_from_this().use_count(),
                                imageRef.id(),
@@ -319,48 +319,48 @@ struct fmt::formatter<std::shared_ptr<terminal::Image const>>: fmt::formatter<st
 };
 
 template <>
-struct fmt::formatter<terminal::ImageResize>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::ImageResize>: formatter<std::string_view>
 {
-    auto format(terminal::ImageResize value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ImageResize value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ImageResize::NoResize: name = "NoResize"; break;
-            case terminal::ImageResize::ResizeToFit: name = "ResizeToFit"; break;
-            case terminal::ImageResize::ResizeToFill: name = "ResizeToFill"; break;
-            case terminal::ImageResize::StretchToFill: name = "StretchToFill"; break;
+            case vtbackend::ImageResize::NoResize: name = "NoResize"; break;
+            case vtbackend::ImageResize::ResizeToFit: name = "ResizeToFit"; break;
+            case vtbackend::ImageResize::ResizeToFill: name = "ResizeToFill"; break;
+            case vtbackend::ImageResize::StretchToFill: name = "StretchToFill"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::ImageAlignment>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::ImageAlignment>: formatter<std::string_view>
 {
-    auto format(terminal::ImageAlignment value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ImageAlignment value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ImageAlignment::TopStart: name = "TopStart"; break;
-            case terminal::ImageAlignment::TopCenter: name = "TopCenter"; break;
-            case terminal::ImageAlignment::TopEnd: name = "TopEnd"; break;
-            case terminal::ImageAlignment::MiddleStart: name = "MiddleStart"; break;
-            case terminal::ImageAlignment::MiddleCenter: name = "MiddleCenter"; break;
-            case terminal::ImageAlignment::MiddleEnd: name = "MiddleEnd"; break;
-            case terminal::ImageAlignment::BottomStart: name = "BottomStart"; break;
-            case terminal::ImageAlignment::BottomCenter: name = "BottomCenter"; break;
-            case terminal::ImageAlignment::BottomEnd: name = "BottomEnd"; break;
+            case vtbackend::ImageAlignment::TopStart: name = "TopStart"; break;
+            case vtbackend::ImageAlignment::TopCenter: name = "TopCenter"; break;
+            case vtbackend::ImageAlignment::TopEnd: name = "TopEnd"; break;
+            case vtbackend::ImageAlignment::MiddleStart: name = "MiddleStart"; break;
+            case vtbackend::ImageAlignment::MiddleCenter: name = "MiddleCenter"; break;
+            case vtbackend::ImageAlignment::MiddleEnd: name = "MiddleEnd"; break;
+            case vtbackend::ImageAlignment::BottomStart: name = "BottomStart"; break;
+            case vtbackend::ImageAlignment::BottomCenter: name = "BottomCenter"; break;
+            case vtbackend::ImageAlignment::BottomEnd: name = "BottomEnd"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::RasterizedImage>: formatter<std::string>
+struct fmt::formatter<vtbackend::RasterizedImage>: formatter<std::string>
 {
-    auto format(terminal::RasterizedImage const& image, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::RasterizedImage const& image, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("RasterizedImage<{}, {}, {}, {}, {}>",
                                                           image.weak_from_this().use_count(),
@@ -373,9 +373,9 @@ struct fmt::formatter<terminal::RasterizedImage>: formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<terminal::ImageFragment>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::ImageFragment>: fmt::formatter<std::string>
 {
-    auto format(const terminal::ImageFragment& fragment, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::ImageFragment& fragment, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format("ImageFragment<offset={}, {}>", fragment.offset(), fragment.rasterizedImage()), ctx);

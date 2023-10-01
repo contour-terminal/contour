@@ -8,7 +8,7 @@
 #include <vtrasterizer/RenderTarget.h>
 #include <vtrasterizer/TextureAtlas.h>
 
-namespace terminal::rasterizer
+namespace vtrasterizer
 {
 
 struct GridMetrics;
@@ -35,13 +35,13 @@ class DecorationRenderer: public Renderable
         _hyperlinkHover = hover;
     }
 
-    void renderCell(RenderCell const& cell);
-    void renderLine(RenderLine const& line);
+    void renderCell(vtbackend::RenderCell const& cell);
+    void renderLine(vtbackend::RenderLine const& line);
 
     void renderDecoration(Decorator decoration,
                           crispy::point pos,
-                          ColumnCount columnCount,
-                          RGBColor const& color);
+                          vtbackend::ColumnCount columnCount,
+                          vtbackend::RGBColor const& color);
 
     [[nodiscard]] constexpr Decorator hyperlinkNormal() const noexcept { return _hyperlinkNormal; }
     [[nodiscard]] constexpr Decorator hyperlinkHover() const noexcept { return _hyperlinkHover; }
@@ -65,4 +65,4 @@ class DecorationRenderer: public Renderable
     Decorator _hyperlinkHover = Decorator::Underline;
 };
 
-} // namespace terminal::rasterizer
+} // namespace vtrasterizer

@@ -34,7 +34,7 @@
 
 #include "crispy/BufferObject.h"
 
-namespace terminal
+namespace vtbackend
 {
 
 template <typename Cell>
@@ -128,7 +128,7 @@ class Terminal
     };
 
     Terminal(Events& eventListener,
-             std::unique_ptr<Pty> pty,
+             std::unique_ptr<vtpty::Pty> pty,
              Settings factorySettings,
              std::chrono::steady_clock::time_point now /* = std::chrono::steady_clock::now()*/);
     ~Terminal() = default;
@@ -217,8 +217,8 @@ class Terminal
     [[nodiscard]] std::chrono::steady_clock::time_point currentTime() const noexcept { return _currentTime; }
 
     /// Retrieves reference to the underlying PTY device.
-    [[nodiscard]] Pty& device() noexcept { return *_pty; }
-    [[nodiscard]] Pty const& device() const noexcept { return *_pty; }
+    [[nodiscard]] vtpty::Pty& device() noexcept { return *_pty; }
+    [[nodiscard]] vtpty::Pty const& device() const noexcept { return *_pty; }
 
     [[nodiscard]] PageSize pageSize() const noexcept { return _pty->pageSize(); }
 
@@ -274,7 +274,7 @@ class Terminal
 
     void inputModeChanged(ViMode mode) { _eventListener.inputModeChanged(mode); }
     void updateHighlights() { _eventListener.updateHighlights(); }
-    void playSound(terminal::Sequence::Parameters const& params) { _eventListener.playSound(params); }
+    void playSound(vtbackend::Sequence::Parameters const& params) { _eventListener.playSound(params); }
 
     bool applicationCursorKeys() const noexcept { return _state.inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return _state.inputGenerator.applicationKeypad(); }
@@ -496,11 +496,11 @@ class Terminal
             return;
 
         if (isPrimaryScreen())
-            terminal::renderSelection(*_selection,
-                                      [&](CellLocation pos) { renderTarget(pos, _primaryScreen.at(pos)); });
+            vtbackend::renderSelection(*_selection,
+                                       [&](CellLocation pos) { renderTarget(pos, _primaryScreen.at(pos)); });
         else
-            terminal::renderSelection(*_selection,
-                                      [&](CellLocation pos) { renderTarget(pos, _alternateScreen.at(pos)); });
+            vtbackend::renderSelection(
+                *_selection, [&](CellLocation pos) { renderTarget(pos, _alternateScreen.at(pos)); });
     }
 
     void clearSelection();
@@ -641,7 +641,7 @@ class Terminal
         return _currentPtyBuffer;
     }
 
-    [[nodiscard]] terminal::SelectionHelper& selectionHelper() noexcept { return _selectionHelper; }
+    [[nodiscard]] vtbackend::SelectionHelper& selectionHelper() noexcept { return _selectionHelper; }
 
     [[nodiscard]] Selection::OnSelectionUpdated selectionUpdatedHelper()
     {
@@ -744,7 +744,7 @@ class Terminal
     }
 
     // Reads from PTY.
-    [[nodiscard]] Pty::ReadResult readFromPty();
+    [[nodiscard]] vtpty::Pty::ReadResult readFromPty();
 
     // Writes partially or all input data to the PTY buffer object and returns a string view to it.
     [[nodiscard]] std::string_view lockedWriteToPtyBuffer(std::string_view data);
@@ -770,14 +770,14 @@ class Terminal
     crispy::buffer_object_pool<char> _ptyBufferPool;
     crispy::buffer_object_ptr<char> _currentPtyBuffer;
     size_t _ptyReadBufferSize;
-    std::unique_ptr<Pty> _pty;
+    std::unique_ptr<vtpty::Pty> _pty;
     // }}}
 
     // {{{ mouse related state (helpers for detecting double/tripple clicks)
     std::chrono::steady_clock::time_point _lastClick {};
     unsigned int _speedClicks = 0;
-    terminal::CellLocation _currentMousePosition {}; // current mouse position
-    terminal::PixelCoordinate _lastMousePixelPositionOnLeftClick {};
+    vtbackend::CellLocation _currentMousePosition {}; // current mouse position
+    vtbackend::PixelCoordinate _lastMousePixelPositionOnLeftClick {};
     bool _leftMouseButtonPressed = false; // tracks left-mouse button pressed state (used for cell selection).
     bool _respectMouseProtocol = true;    // shift-click can disable that, button release sets it back to true
     // }}}
@@ -810,7 +810,7 @@ class Terminal
 
     // {{{ selection states
     std::unique_ptr<Selection> _selection;
-    struct SelectionHelper: public terminal::SelectionHelper
+    struct SelectionHelper: public vtbackend::SelectionHelper
     {
         Terminal* terminal;
         explicit SelectionHelper(Terminal* self): terminal { self } {}
@@ -840,18 +840,18 @@ class Terminal
     SupportedSequences _supportedVTSequences;
 };
 
-} // namespace terminal
+} // namespace vtbackend
 
 template <>
-struct fmt::formatter<terminal::TraceHandler::PendingSequence>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::TraceHandler::PendingSequence>: fmt::formatter<std::string>
 {
-    auto format(terminal::TraceHandler::PendingSequence const& pendingSequence, format_context& ctx)
+    auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence, format_context& ctx)
         -> format_context::iterator
     {
         std::string value;
-        if (auto const* p = std::get_if<terminal::Sequence>(&pendingSequence))
+        if (auto const* p = std::get_if<vtbackend::Sequence>(&pendingSequence))
             value = fmt::format("{}", p->text());
-        else if (auto const* p = std::get_if<terminal::TraceHandler::CodepointSequence>(&pendingSequence))
+        else if (auto const* p = std::get_if<vtbackend::TraceHandler::CodepointSequence>(&pendingSequence))
             value = fmt::format("\"{}\"", crispy::escape(p->text));
         else if (auto const* p = std::get_if<char32_t>(&pendingSequence))
             value = fmt::format("'{}'", unicode::convert_to<char>(*p));

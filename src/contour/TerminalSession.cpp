@@ -49,7 +49,7 @@
 
 using std::chrono::steady_clock;
 using namespace std;
-using namespace terminal;
+using namespace vtbackend;
 
 namespace fs = std::filesystem;
 
@@ -99,10 +99,10 @@ namespace
         return output;
     }
 
-    terminal::Settings createSettingsFromConfig(config::Config const& config,
-                                                config::TerminalProfile const& profile)
+    vtbackend::Settings createSettingsFromConfig(config::Config const& config,
+                                                 config::TerminalProfile const& profile)
     {
-        auto settings = terminal::Settings {};
+        auto settings = vtbackend::Settings {};
 
         settings.ptyBufferObjectSize = config.ptyBufferObjectSize;
         settings.ptyReadBufferSize = config.ptyReadBufferSize;
@@ -136,7 +136,7 @@ namespace
 
 } // namespace
 
-TerminalSession::TerminalSession(unique_ptr<Pty> pty, ContourGuiApp& app):
+TerminalSession::TerminalSession(unique_ptr<vtpty::Pty> pty, ContourGuiApp& app):
     _id { createSessionId() },
     _startTime { steady_clock::now() },
     _config { app.config() },
@@ -246,7 +246,7 @@ void TerminalSession::bell()
     emit onBell();
 }
 
-void TerminalSession::bufferChanged(terminal::ScreenType type)
+void TerminalSession::bufferChanged(vtbackend::ScreenType type)
 {
     if (!_display)
         return;
@@ -382,18 +382,18 @@ void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remembe
     if (!allow)
         return;
 
-    _terminal.setStatusDisplay(terminal::StatusDisplayType::HostWritable);
+    _terminal.setStatusDisplay(vtbackend::StatusDisplayType::HostWritable);
     displayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
     flushInput();
     _terminal.state().syncWindowTitleWithHostWritableStatusDisplay = false;
 }
 
-terminal::FontDef TerminalSession::getFontDef()
+vtbackend::FontDef TerminalSession::getFontDef()
 {
     return _display->getFontDef();
 }
 
-void TerminalSession::setFontDef(terminal::FontDef const& fontDef)
+void TerminalSession::setFontDef(vtbackend::FontDef const& fontDef)
 {
     if (!_display)
         return;
@@ -412,7 +412,7 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
         return;
 
     auto const& currentFonts = _profile.fonts;
-    terminal::rasterizer::FontDescriptions newFonts = currentFonts;
+    vtrasterizer::FontDescriptions newFonts = currentFonts;
 
     auto const spec = std::move(_pendingFontChange.value());
     _pendingFontChange.reset();
@@ -478,7 +478,7 @@ void TerminalSession::onClosed()
     auto const now = steady_clock::now();
     auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
 
-    if (auto* localProcess = dynamic_cast<terminal::Process *>(&_terminal.device()))
+    if (auto* localProcess = dynamic_cast<vtpty::Process*>(&_terminal.device()))
     {
         localProcess->close();
         auto const exitStatus = localProcess->checkStatus();
@@ -599,7 +599,7 @@ void TerminalSession::setTerminalProfile(string const& configProfileName)
     _display->post([this, name = string(configProfileName)]() { activateProfile(name); });
 }
 
-void TerminalSession::discardImage(terminal::Image const& image)
+void TerminalSession::discardImage(vtbackend::Image const& image)
 {
     if (!_display)
         return;
@@ -607,9 +607,9 @@ void TerminalSession::discardImage(terminal::Image const& image)
     _display->discardImage(image);
 }
 
-void TerminalSession::inputModeChanged(terminal::ViMode mode)
+void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
 {
-    using terminal::ViMode;
+    using vtbackend::ViMode;
     switch (mode)
     {
         case ViMode::Insert: configureCursor(_profile.inputModes.insert.cursor); break;
@@ -686,9 +686,9 @@ void TerminalSession::sendMousePressEvent(Modifier modifier,
         executeAllActions(*actions);
 }
 
-void TerminalSession::sendMouseMoveEvent(terminal::Modifier modifier,
-                                         terminal::CellLocation pos,
-                                         terminal::PixelCoordinate pixelPosition)
+void TerminalSession::sendMouseMoveEvent(vtbackend::Modifier modifier,
+                                         vtbackend::CellLocation pos,
+                                         vtbackend::PixelCoordinate pixelPosition)
 {
     // NB: This translation depends on the display's margin, so maybe
     //     the display should provide the translation?
@@ -755,7 +755,7 @@ void TerminalSession::onHighlightUpdate()
     _terminal.resetHighlight();
 }
 
-void TerminalSession::playSound(terminal::Sequence::Parameters const& params)
+void TerminalSession::playSound(vtbackend::Sequence::Parameters const& params)
 {
     auto range = params.range();
     _musicalNotesBuffer.clear();
@@ -1068,7 +1068,7 @@ bool TerminalSession::operator()(actions::SendChars const& event)
 {
     // auto const now = steady_clock::now();
     // for (auto const ch: event.chars)
-    //     terminal().sendCharPressEvent(static_cast<char32_t>(ch), terminal::Modifier::None, now);
+    //     terminal().sendCharPressEvent(static_cast<char32_t>(ch), vtbackend::Modifier::None, now);
     terminal().sendRawInput(event.chars);
     return true;
 }
@@ -1164,7 +1164,7 @@ void TerminalSession::setDefaultCursor()
     if (!_display)
         return;
 
-    using Type = terminal::ScreenType;
+    using Type = vtbackend::ScreenType;
     switch (terminal().screenType())
     {
         case Type::Primary: _display->setMouseCursorShape(MouseCursorShape::IBeam); break;
@@ -1231,7 +1231,7 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
 {
     auto const wd = [this]() -> string {
 #if !defined(_WIN32)
-        if (auto const* ptyProcess = dynamic_cast<Process const*>(&_terminal.device()))
+        if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
             return ptyProcess->workingDirectory();
 #else
         auto const _l = scoped_lock { _terminal };
@@ -1284,7 +1284,7 @@ void TerminalSession::configureTerminal()
     _terminal.setTerminalId(_profile.terminalId);
     _terminal.setMaxImageColorRegisters(_config.maxImageColorRegisters);
     _terminal.setMaxImageSize(_config.maxImageSize);
-    _terminal.setMode(terminal::DECMode::NoSixelScrolling, !_config.sixelScrolling);
+    _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.sixelScrolling);
     _terminal.setStatusDisplay(_profile.initialStatusDisplayType);
     sessionLog()("maxImageSize={}, sixelScrolling={}", _config.maxImageSize, _config.sixelScrolling);
 
@@ -1441,7 +1441,7 @@ bool TerminalSession::resetConfig()
     return reloadConfig(defaultConfig, defaultConfig.defaultProfileName);
 }
 
-void TerminalSession::followHyperlink(terminal::HyperlinkInfo const& hyperlink)
+void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
 {
     auto const fileInfo = QFileInfo(QString::fromStdString(string(hyperlink.path())));
     auto const isLocal = hyperlink.isLocal() && hyperlink.host() == QHostInfo::localHostName().toStdString();

@@ -19,7 +19,7 @@
 
 using namespace std;
 
-namespace terminal
+namespace vtbackend
 {
 
 namespace mappings
@@ -817,4 +817,4 @@ bool InputGenerator::generateMouseMove(Modifier modifier,
 }
 // }}}
 
-} // namespace terminal
+} // namespace vtbackend

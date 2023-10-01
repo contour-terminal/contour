@@ -15,7 +15,7 @@
 #include <optional>
 #include <vector>
 
-namespace terminal
+namespace vtbackend
 {
 
 struct RenderAttributes
@@ -139,4 +139,4 @@ struct RenderDoubleBuffer
     bool swapBuffers(std::chrono::steady_clock::time_point now) noexcept;
 };
 
-} // namespace terminal
+} // namespace vtbackend
