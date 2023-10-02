@@ -222,15 +222,16 @@ bool sendKeyEvent(QKeyEvent* event, TerminalSession& session)
         return true;
     }
 
-    auto const optionKeyAsAlt =
-#if !defined(__APPLE__)
-        false
-#else
-        session.profile().optionKeyAsAlt
+#if defined(__apple__)
+    if (0x20 <= key && key < 0x80 && (modifiers.alt() && session.profile().optionKeyAsAlt))
+    {
+        auto const ch = static_cast<char32_t>(modifiers.shift() ? std::toupper(key) : std::tolower(key));
+        session.sendCharPressEvent(ch, modifiers, now);
+        return true;
+    }
 #endif
-        ;
 
-    if (0x20 <= key && key < 0x80 && (modifiers.control() || (modifiers.alt() && optionKeyAsAlt)))
+    if (0x20 <= key && key < 0x80 && (modifiers.control()))
     {
         session.sendCharPressEvent(static_cast<char32_t>(key), modifiers, now);
         return true;
