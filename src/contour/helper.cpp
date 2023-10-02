@@ -224,7 +224,7 @@ bool sendKeyEvent(QKeyEvent* event, TerminalSession& session)
 
     auto const optionKeyAsAlt =
 #if !defined(__APPLE__)
-        true
+        false
 #else
         session.profile().optionKeyAsAlt
 #endif
