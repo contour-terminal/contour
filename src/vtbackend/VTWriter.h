@@ -74,7 +74,11 @@ class VTWriter
 template <typename... T>
 inline void VTWriter::write(fmt::format_string<T...> fmt, T&&... args)
 {
+#if defined(__APPLE__)
     write(fmt::vformat(fmt, fmt::make_format_args(args...)));
+#else
+    write(fmt::vformat(fmt, fmt::make_format_args(std::forward<T>(args)...)));
+#endif
 }
 
 inline void VTWriter::crlf()

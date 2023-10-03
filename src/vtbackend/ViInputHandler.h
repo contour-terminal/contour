@@ -9,6 +9,8 @@
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
 
+#include <gsl/pointers>
+
 namespace vtbackend
 {
 
@@ -247,7 +249,7 @@ class ViInputHandler: public InputHandler
     CommandHandlerMap _visualMode;
     unsigned _count = 0;
     char32_t _lastChar = 0;
-    Executor& _executor;
+    gsl::not_null<Executor*> _executor;
 };
 
 } // namespace vtbackend

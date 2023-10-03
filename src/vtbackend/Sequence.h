@@ -3,16 +3,13 @@
 
 #include <vtbackend/Functions.h>
 
+#include <gsl/pointers>
 #include <gsl/span>
 
-#include <algorithm>
 #include <cassert>
 #include <iterator>
-#include <memory>
 #include <string>
 #include <string_view>
-#include <type_traits>
-#include <vector>
 
 #include <boxed-cpp/boxed.hpp>
 
@@ -118,33 +115,33 @@ class SequenceParameterBuilder
     using Storage = SequenceParameters::Storage;
 
     explicit SequenceParameterBuilder(SequenceParameters& p):
-        _parameters { p }, _currentParameter { p._values.begin() }
+        _parameters { &p }, _currentParameter { p._values.begin() }
     {
     }
 
     void reset()
     {
-        _parameters.clear();
-        _currentParameter = _parameters._values.begin();
+        _parameters->clear();
+        _currentParameter = _parameters->_values.begin();
     }
 
     void nextParameter()
     {
-        if (_currentParameter != _parameters._values.end())
+        if (_currentParameter != _parameters->_values.end())
         {
             ++_currentParameter;
             *_currentParameter = 0;
-            _parameters._subParameterTest >>= 1;
+            _parameters->_subParameterTest >>= 1;
         }
     }
 
     void nextSubParameter()
     {
-        if (_currentParameter != _parameters._values.end())
+        if (_currentParameter != _parameters->_values.end())
         {
             ++_currentParameter;
             *_currentParameter = 0;
-            _parameters._subParameterTest = (_parameters._subParameterTest >> 1) | (1 << 15);
+            _parameters->_subParameterTest = (_parameters->_subParameterTest >> 1) | (1 << 15);
         }
     }
 
@@ -164,16 +161,16 @@ class SequenceParameterBuilder
 
     [[nodiscard]] constexpr bool isSubParameter(size_t index) const noexcept
     {
-        return (_parameters._subParameterTest & (1 << (count() - 1 - index))) != 0;
+        return (_parameters->_subParameterTest & (1 << (count() - 1 - index))) != 0;
     }
 
     [[nodiscard]] constexpr size_t count() const noexcept
     {
         auto const result =
-            std::distance(const_cast<SequenceParameterBuilder*>(this)->_parameters._values.begin(),
+            std::distance(const_cast<SequenceParameterBuilder*>(this)->_parameters->_values.begin(),
                           _currentParameter)
             + 1;
-        if (!(result == 1 && _parameters._values[0] == 0))
+        if (!(result == 1 && _parameters->_values[0] == 0))
             return static_cast<size_t>(result);
         else
             return 0;
@@ -181,12 +178,12 @@ class SequenceParameterBuilder
 
     constexpr void fixiate() noexcept
     {
-        _parameters._count = count();
-        _parameters._subParameterTest >>= 16 - _parameters._count;
+        _parameters->_count = count();
+        _parameters->_subParameterTest >>= 16 - _parameters->_count;
     }
 
   private:
-    SequenceParameters& _parameters;
+    gsl::not_null<SequenceParameters*> _parameters;
     Storage::iterator _currentParameter;
 };
 

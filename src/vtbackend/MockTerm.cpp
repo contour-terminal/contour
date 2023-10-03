@@ -6,8 +6,6 @@
 
 #include <crispy/App.h>
 
-#include <cstdlib>
-
 namespace vtbackend
 {
 

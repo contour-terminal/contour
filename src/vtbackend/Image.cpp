@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Image.h>
 
+#include <crispy/StrongLRUHashtable.h>
+
 #include <algorithm>
 #include <memory>
-
-#include "crispy/StrongLRUHashtable.h"
 
 using std::copy;
 using std::make_shared;

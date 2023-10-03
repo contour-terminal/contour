@@ -22,6 +22,8 @@
 
 #include <fmt/format.h>
 
+#include <gsl/pointers>
+
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -286,7 +288,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void requestDECMode(unsigned int mode);
 
     [[nodiscard]] PageSize pageSize() const noexcept { return _grid.pageSize(); }
-    [[nodiscard]] ImageSize pixelSize() const noexcept { return _state.cellPixelSize * _settings.pageSize; }
+    [[nodiscard]] ImageSize pixelSize() const noexcept { return _state->cellPixelSize * _settings->pageSize; }
 
     [[nodiscard]] Margin margin() const noexcept override { return _grid.margin(); }
     [[nodiscard]] Margin& margin() noexcept override { return _grid.margin(); }
@@ -459,7 +461,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] Cell& useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
     [[nodiscard]] Cell const& at(CellLocation p) const noexcept { return _grid.at(p.line, p.column); }
 
-    [[nodiscard]] std::string const& windowTitle() const noexcept { return _state.windowTitle; }
+    [[nodiscard]] std::string const& windowTitle() const noexcept { return _state->windowTitle; }
 
     /// Finds the next marker right after the given line position.
     ///
@@ -478,7 +480,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::optional<LineOffset> findMarkerUpwards(LineOffset startLine) const;
 
     /// ScreenBuffer's type, such as main screen or alternate screen.
-    [[nodiscard]] ScreenType bufferType() const noexcept { return _state.screenType; }
+    [[nodiscard]] ScreenType bufferType() const noexcept { return _state->screenType; }
 
     void scrollUp(LineCount n) { scrollUp(n, margin()); }
     void scrollDown(LineCount n) { scrollDown(n, margin()); }
@@ -494,13 +496,13 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return _grid.isLineWrapped(lineNumber);
     }
 
-    [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
-    [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return _state.colorPalette; }
+    [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state->colorPalette; }
+    [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return _state->colorPalette; }
 
-    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
+    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state->defaultColorPalette; }
     [[nodiscard]] ColorPalette const& defaultColorPalette() const noexcept
     {
-        return _state.defaultColorPalette;
+        return _state->defaultColorPalette;
     }
 
     [[nodiscard]] bool isCellEmpty(CellLocation position) const noexcept override
@@ -567,16 +569,16 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept override
     {
-        return _state.hyperlinks.hyperlinkById(hyperlinkIdAt(pos));
+        return _state->hyperlinks.hyperlinkById(hyperlinkIdAt(pos));
     }
 
-    [[nodiscard]] HyperlinkStorage const& hyperlinks() const noexcept { return _state.hyperlinks; }
+    [[nodiscard]] HyperlinkStorage const& hyperlinks() const noexcept { return _state->hyperlinks; }
 
-    void resetInstructionCounter() noexcept { _state.instructionCounter = 0; }
-    [[nodiscard]] uint64_t instructionCounter() const noexcept { return _state.instructionCounter; }
+    void resetInstructionCounter() noexcept { _state->instructionCounter = 0; }
+    [[nodiscard]] uint64_t instructionCounter() const noexcept { return _state->instructionCounter; }
     [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept
     {
-        return _state.parser.precedingGraphicCharacter();
+        return _state->parser.precedingGraphicCharacter();
     }
 
     void applyAndLog(FunctionDefinition const& function, Sequence const& seq);
@@ -627,9 +629,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
 
-    Terminal& _terminal;
-    Settings& _settings;
-    TerminalState& _state;
+    gsl::not_null<Terminal*> _terminal;
+    gsl::not_null<Settings*> _settings;
+    gsl::not_null<TerminalState*> _state;
     Grid<Cell> _grid;
 
     CellLocation _lastCursorPosition {};

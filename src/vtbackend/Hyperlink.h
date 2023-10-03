@@ -3,10 +3,8 @@
 
 #include <crispy/LRUCache.h>
 
-#include <list>
 #include <memory>
 #include <string>
-#include <unordered_map>
 
 #include <boxed-cpp/boxed.hpp>
 

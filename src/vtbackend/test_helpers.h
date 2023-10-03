@@ -47,7 +47,7 @@ template <typename S>
 
     vtbackend::CellLocation lastPos = {};
     size_t lastCount = 0;
-    for (vtbackend::RenderCell const& cell: renderBuffer.buffer.cells)
+    for (vtbackend::RenderCell const& cell: renderBuffer.buffer->cells)
     {
         auto const gap = (cell.position.column + static_cast<int>(lastCount) - 1) - lastPos.column;
         auto& currentLine = lines.at(unbox<size_t>(cell.position.line));
@@ -58,7 +58,7 @@ template <typename S>
         lastPos = cell.position;
         lastCount = 1;
     }
-    for (vtbackend::RenderLine const& line: renderBuffer.buffer.lines)
+    for (vtbackend::RenderLine const& line: renderBuffer.buffer->lines)
     {
         auto& currentLine = lines.at(unbox<size_t>(line.lineOffset));
         currentLine = line.text;

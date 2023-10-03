@@ -19,11 +19,8 @@
 #include <gsl/span_ext>
 
 #include <algorithm>
-#include <array>
-#include <sstream>
 #include <string>
 #include <string_view>
-#include <utility>
 
 #include <libunicode/convert.h>
 
@@ -866,9 +863,10 @@ bool Grid<Cell>::isLineWrapped(LineOffset line) const noexcept
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 template <typename RendererT>
-[[nodiscard]] RenderPassHints Grid<Cell>::render(RendererT&& render,
-                                                 ScrollOffset scrollOffset,
-                                                 HighlightSearchMatches highlightSearchMatches) const
+[[nodiscard]] RenderPassHints Grid<Cell>::render(
+    RendererT&& render, // NOLINT(cppcoreguidelines-missing-std-forward)
+    ScrollOffset scrollOffset,
+    HighlightSearchMatches highlightSearchMatches) const
 {
     assert(!scrollOffset || unbox<LineCount>(scrollOffset) <= historyLineCount());
 

@@ -3,8 +3,6 @@
 
 #include <crispy/overloaded.h>
 
-#include <cstdio>
-
 using namespace std;
 
 namespace vtbackend
@@ -28,8 +26,8 @@ string to_string(Color color)
                 case 6: return "bright-cyan";
                 case 7: return "bright-white";
                 case 8: return "bright-DEFAULT";
+                default: return "?";
             }
-            return "?";
         case Type::Default:
             switch (color.index())
             {
@@ -42,8 +40,8 @@ string to_string(Color color)
                 case 6: return "cyan";
                 case 7: return "white";
                 case 8: return "DEFAULT";
+                default: return "?";
             }
-            return "?";
         case Type::RGB:
             return fmt::format("#{:02X}{:02X}{:02X}", color.rgb().red, color.rgb().green, color.rgb().blue);
         case Type::Undefined: break;

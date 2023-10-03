@@ -7,13 +7,10 @@
 
 #include <fmt/format.h>
 
-#include <algorithm>
 #include <array>
 #include <iterator>
-#include <mutex>
 #include <string_view>
 #include <unordered_map>
-#include <utility>
 
 #include <libunicode/convert.h>
 
@@ -127,8 +124,7 @@ namespace mappings
         // clang-format on
     };
 
-    array<KeyMapping, 21> const applicationKeypad
-    {
+    array<KeyMapping, 21> const applicationKeypad {
         // clang-format off
         KeyMapping { Key::Numpad_NumLock, SS3 "P" },
         KeyMapping { Key::Numpad_Divide, SS3 "Q" },
@@ -151,11 +147,9 @@ namespace mappings
         KeyMapping { Key::Numpad_9, SS3 "y" },
         KeyMapping { Key::PageUp, CSI "5~" },
         KeyMapping { Key::PageDown, CSI "6~" },
-#if 0 // TODO
-        KeyMapping{Key::Space,    SS3 " "}, // TODO
-        KeyMapping{Key::Tab,      SS3 "I"},
-        KeyMapping{Key::Enter,    SS3 "M"},
-#endif
+        // KeyMapping{Key::Space,    SS3 " "}, // TODO
+        // KeyMapping{Key::Tab,      SS3 "I"}, // TODO
+        // KeyMapping{Key::Enter,    SS3 "M"}, // TODO
         // clang-format on
     };
 

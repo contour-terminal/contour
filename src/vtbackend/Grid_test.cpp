@@ -3,13 +3,11 @@
 #include <vtbackend/cell/CellConfig.h>
 #include <vtbackend/primitives.h>
 
+#include <crispy/BufferObject.h>
+
 #include <fmt/format.h>
 
 #include <catch2/catch.hpp>
-
-#include <iostream>
-
-#include "crispy/BufferObject.h"
 
 using namespace vtbackend;
 using namespace std::string_literals;
