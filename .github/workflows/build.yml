@@ -801,7 +801,11 @@ jobs:
   # {{{ Build fontconfig
   build_fontconfig:
     name: "Build patched fontconfig"
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os_version: ['20.04', '22.04']
+    runs-on: ubuntu-${{ matrix.os_version }}
     steps:
     - uses: actions/checkout@v3
     - name: "get source"
@@ -836,7 +840,7 @@ jobs:
     - name: "Uploading artifact"
       uses: actions/upload-artifact@v3
       with:
-        name: "patched-fontconfig"
+        name: "patched-fontconfig-${{ matrix.os_version }}"
         path: "/home/runner/opt/fontconfig"
         if-no-files-found: error
         retention-days: 3
@@ -844,7 +848,11 @@ jobs:
   # {{{ Build notcurses
   build_notcurses:
     name: "Build notcurses"
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os_version: ['20.04', '22.04']
+    runs-on: ubuntu-${{ matrix.os_version }}
     steps:
     - name: "update APT database"
       run: sudo apt -q update
@@ -892,7 +900,7 @@ jobs:
     - name: "Uploading artifact"
       uses: actions/upload-artifact@v3
       with:
-        name: "notcurses-install"
+        name: "notcurses-install-${{ matrix.os_version }}"
         path: ~/opt/notcurses
         if-no-files-found: error
         retention-days: 1
@@ -900,8 +908,12 @@ jobs:
   # {{{ GUI: test: contour quick shell exit
   test_quick_exit:
     name: "GUI: Quick Shell Exit"
-    runs-on: ubuntu-22.04
     needs: [package_for_Ubuntu, build_fontconfig]
+    strategy:
+      fail-fast: false
+      matrix:
+        os_version: ['20.04', '22.04']
+    runs-on: ubuntu-${{ matrix.os_version }}
     env:
       LD_LIBRARY_PATH: /home/runner/opt/fontconfig/lib
       # I'm giving up on eliminating all leaks for now.
@@ -927,12 +939,12 @@ jobs:
         name: "dist-packages"
     - uses: actions/download-artifact@v3
       with:
-        name: "patched-fontconfig"
+        name: "patched-fontconfig-${{ matrix.os_version }}"
         path: "/home/runner/opt/fontconfig"
     - name: "install dependencies"
       run: ./scripts/ci/notcurses-install-deps.sh
     - name: "install contour"
-      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
+      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
     - name: "contour executable test"
       run: |
         contour version
@@ -1050,11 +1062,11 @@ jobs:
         name: "dist-packages"
     - uses: actions/download-artifact@v3
       with:
-        name: "notcurses-install"
+        name: "notcurses-install-22.04"
         path: ~/opt/notcurses
     - uses: actions/download-artifact@v3
       with:
-        name: "patched-fontconfig"
+        name: "patched-fontconfig-22.04"
         path: "/home/runner/opt/fontconfig"
     - name: "fix executable bits"
       run: |

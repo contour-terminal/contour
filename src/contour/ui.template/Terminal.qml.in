@@ -86,7 +86,7 @@ ContourTerminal
         stepSize : 1.0 / (vtWidget.session.pageLineCount + vtWidget.session.historyLineCount)
     }
 
-    AudioOutput {
+    @qml_audio@ {
         id: bellAudioOutput
         objectName: "BellAudioOutput"
     }
@@ -95,7 +95,7 @@ ContourTerminal
         id: bellSoundEffect
         objectName: "Bell"
         source: "qrc:/contour/bell.wav"
-        audioOutput: bellAudioOutput
+        @qml_media_player@
     }
 
     RequestPermission {
