@@ -767,8 +767,8 @@ TEST_CASE("ClearToEndOfScreen", "[screen]")
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(2) });
 
     logScreenText(screen);
-    screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 1 });
-    screen.clearToEndOfScreen();
+    mock.writeToScreen(CUP(2, 2));
+    mock.writeToScreen(ED());
     logScreenText(screen);
 
     CHECK("ABC" == screen.grid().lineText(LineOffset(0)));

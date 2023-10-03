@@ -397,9 +397,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     // Tests if given coordinate is within the visible screen area.
     [[nodiscard]] bool contains(CellLocation coord) const noexcept override
     {
-        return LineOffset(0) <= coord.line && coord.line < boxed_cast<LineOffset>(_settings.pageSize.lines)
+        return LineOffset(0) <= coord.line && coord.line < boxed_cast<LineOffset>(pageSize().lines)
                && ColumnOffset(0) <= coord.column
-               && coord.column <= boxed_cast<ColumnOffset>(_settings.pageSize.columns);
+               && coord.column <= boxed_cast<ColumnOffset>(pageSize().columns);
     }
 
     [[nodiscard]] std::optional<CellLocation> search(std::u32string_view searchText,
