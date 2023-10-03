@@ -962,7 +962,7 @@ void Screen<Cell>::clearToEndOfScreen()
     clearToEndOfLine();
 
     for (auto const lineOffset:
-         ::ranges::views::iota(unbox(_cursor.position.line) + 1, unbox(_settings.pageSize.lines)))
+         ::ranges::views::iota(unbox(_cursor.position.line) + 1, unbox(pageSize().lines)))
     {
         Line<Cell>& line = _grid.lineAt(LineOffset::cast_from(lineOffset));
         line.reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
