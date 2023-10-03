@@ -847,11 +847,13 @@ void Screen<Cell>::setScrollSpeed(int speed)
         return;
     }
 
+    // NB: Match speeds as defined by old DEC VT1xx and VT2xx terminals.
+    // See https://github.com/contour-terminal/contour/pull/1212/files#r1344674416
     std::array<float, 9> constexpr NumberOfLinesPerSecond = { {
-        1,  // 0
-        2,  // 1
-        9,  // 2 | defined by spec to be 18 lines per second
-        13, // 3
+        3,  // 0
+        6,  // 1
+        9,  // 2 | defined by spec to be 9 lines per second
+        12, // 3
         18, // 4 | defined by spec to be 18 lines per second
         22, // 5
         27, // 6
