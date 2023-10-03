@@ -283,8 +283,8 @@ unsigned Screen<Cell>::numericCapability(capabilities::Code cap) const
 
     switch (cap)
     {
-        case "li"_tcap: return unbox<unsigned>(_settings.pageSize.lines);
-        case "co"_tcap: return unbox<unsigned>(_settings.pageSize.columns);
+        case "li"_tcap: return unbox<unsigned>(pageSize().lines);
+        case "co"_tcap: return unbox<unsigned>(pageSize().columns);
         case "it"_tcap: return unbox<unsigned>(TabWidth);
         default: return StaticDatabase::numericCapability(cap);
     }
@@ -297,8 +297,8 @@ void Screen<Cell>::verifyState() const
     Margin& m = const_cast<Screen*>(this)->margin();
     Require(0 <= *m.horizontal.from && *m.horizontal.to < *pageSize().columns);
     Require(0 <= *m.vertical.from && *m.vertical.to < *pageSize().lines);
-    Require(*_cursor.position.column < *_settings.pageSize.columns);
-    Require(*_cursor.position.line < *_settings.pageSize.lines);
+    Require(*_cursor.position.column < *pageSize().columns);
+    Require(*_cursor.position.line < *pageSize().lines);
 
     // verify cursor positions
     [[maybe_unused]] auto const clampedCursorPos = clampToScreen(_cursor.position);
@@ -453,7 +453,7 @@ void Screen<Cell>::advanceCursorAfterWrite(ColumnCount n) noexcept
     assert(_cursor.position.column.value + n.value <= margin().horizontal.to.value + 1);
     //  + 1 here because `to` is inclusive.
 
-    if (_cursor.position.column.value + n.value < _settings.pageSize.columns.value)
+    if (_cursor.position.column.value + n.value < pageSize().columns.value)
         _cursor.position.column.value += n.value;
     else
     {
@@ -608,9 +608,8 @@ void Screen<Cell>::clearAndAdvance(int offset) noexcept
 
     bool const cursorInsideMargin =
         _terminal.isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
-    auto const cellsAvailable = cursorInsideMargin
-                                    ? *(margin().horizontal.to - _cursor.position.column) - 1
-                                    : *_settings.pageSize.columns - *_cursor.position.column - 1;
+    auto const cellsAvailable = cursorInsideMargin ? *(margin().horizontal.to - _cursor.position.column) - 1
+                                                   : *pageSize().columns - *_cursor.position.column - 1;
     auto const n = min(offset, cellsAvailable);
 
     if (n == offset)
@@ -636,7 +635,7 @@ std::string Screen<Cell>::screenshot(function<string(LineOffset)> const& postLin
     auto result = std::stringstream {};
     auto writer = VTWriter(result);
 
-    for (int const line: ::ranges::views::iota(0, *_settings.pageSize.lines))
+    for (int const line: ::ranges::views::iota(0, *pageSize().lines))
     {
         writer.write(_grid.lineAt(LineOffset(line)));
         if (postLine)
@@ -657,7 +656,7 @@ optional<LineOffset> Screen<Cell>::findMarkerUpwards(LineOffset startLine) const
     if (*startLine <= -*historyLineCount())
         return nullopt;
 
-    startLine = min(startLine, boxed_cast<LineOffset>(_settings.pageSize.lines - 1));
+    startLine = min(startLine, boxed_cast<LineOffset>(pageSize().lines - 1));
 
     for (LineOffset i = startLine - 1; i >= -boxed_cast<LineOffset>(historyLineCount()); --i)
         if (_grid.lineAt(i).marked())
@@ -675,7 +674,7 @@ optional<LineOffset> Screen<Cell>::findMarkerDownwards(LineOffset startLine) con
 
     auto const top = std::clamp(startLine,
                                 -boxed_cast<LineOffset>(historyLineCount()),
-                                +boxed_cast<LineOffset>(_settings.pageSize.lines) - 1);
+                                +boxed_cast<LineOffset>(pageSize().lines) - 1);
 
     auto const bottom = LineOffset(0);
 
@@ -701,7 +700,7 @@ void Screen<Cell>::clearTabUnderCursor()
     // populate tabs vector in case of default tab width is used (until now).
     if (_state.tabs.empty() && *TabWidth != 0)
         for (auto column = boxed_cast<ColumnOffset>(TabWidth);
-             column < boxed_cast<ColumnOffset>(_settings.pageSize.columns);
+             column < boxed_cast<ColumnOffset>(pageSize().columns);
              column += boxed_cast<ColumnOffset>(TabWidth))
             _state.tabs.emplace_back(column - 1);
 
@@ -793,7 +792,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setCurrentColumn(ColumnOffset n)
 {
     auto const col = _cursor.originMode ? margin().horizontal.from + n : n;
-    auto const clampedCol = min(col, boxed_cast<ColumnOffset>(_settings.pageSize.columns) - 1);
+    auto const clampedCol = min(col, boxed_cast<ColumnOffset>(pageSize().columns) - 1);
     _cursor.wrapPending = false;
     _cursor.position.column = clampedCol;
 }
@@ -1003,8 +1002,7 @@ void Screen<Cell>::eraseCharacters(ColumnCount n)
     // TODO: See what xterm does ;-)
 
     // erase characters from current colum to the right
-    auto const columnsAvailable =
-        _settings.pageSize.columns - boxed_cast<ColumnCount>(realCursorPosition().column);
+    auto const columnsAvailable = pageSize().columns - boxed_cast<ColumnCount>(realCursorPosition().column);
     auto const clampedN = unbox<long>(clamp(n, ColumnCount(1), columnsAvailable));
 
     auto& line = currentLine();
@@ -1020,16 +1018,15 @@ void Screen<Cell>::selectiveEraseToEndOfLine()
     if (isFullHorizontalMargins() && _cursor.position.column.value == 0)
         selectiveEraseLine(_cursor.position.line);
     else
-        selectiveErase(_cursor.position.line,
-                       _cursor.position.column,
-                       ColumnOffset::cast_from(_settings.pageSize.columns));
+        selectiveErase(
+            _cursor.position.line, _cursor.position.column, ColumnOffset::cast_from(pageSize().columns));
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseToBeginOfLine()
 {
-    if (isFullHorizontalMargins() && _cursor.position.column.value == _settings.pageSize.columns.value)
+    if (isFullHorizontalMargins() && _cursor.position.column.value == pageSize().columns.value)
         selectiveEraseLine(_cursor.position.line);
     else
         selectiveErase(_cursor.position.line, ColumnOffset(0), _cursor.position.column + 1);
@@ -1039,17 +1036,16 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseLine(LineOffset line)
 {
-    if (containsProtectedCharacters(
-            line, ColumnOffset(0), ColumnOffset::cast_from(_settings.pageSize.columns)))
+    if (containsProtectedCharacters(line, ColumnOffset(0), ColumnOffset::cast_from(pageSize().columns)))
     {
-        selectiveErase(line, ColumnOffset(0), ColumnOffset::cast_from(_settings.pageSize.columns));
+        selectiveErase(line, ColumnOffset(0), ColumnOffset::cast_from(pageSize().columns));
         return;
     }
 
     currentLine().reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
 
     auto const left = ColumnOffset(0);
-    auto const right = boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1);
+    auto const right = boxed_cast<ColumnOffset>(pageSize().columns - 1);
     auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
     _terminal.markRegionDirty(area);
 }
@@ -1100,7 +1096,7 @@ void Screen<Cell>::selectiveEraseToEndOfScreen()
     selectiveEraseToEndOfLine();
 
     auto const lineStart = unbox(_cursor.position.line) + 1;
-    auto const lineEnd = unbox(_settings.pageSize.lines);
+    auto const lineEnd = unbox(pageSize().lines);
 
     for (auto const lineOffset: ::ranges::views::iota(lineStart, lineEnd))
         selectiveEraseLine(LineOffset::cast_from(lineOffset));
@@ -1120,7 +1116,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseScreen()
 {
-    for (auto const lineOffset: ::ranges::views::iota(0, *_settings.pageSize.lines))
+    for (auto const lineOffset: ::ranges::views::iota(0, *pageSize().lines))
         selectiveEraseLine(LineOffset::cast_from(lineOffset));
 }
 // }}}
@@ -1130,8 +1126,8 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseArea(Rect area)
 {
     auto const [top, left, bottom, right] = applyOriginMode(area).clampTo(_settings.pageSize);
-    assert(unbox(right) <= unbox(_settings.pageSize.columns));
-    assert(unbox(bottom) <= unbox(_settings.pageSize.lines));
+    assert(unbox(right) <= unbox(pageSize().columns));
+    assert(unbox(bottom) <= unbox(pageSize().lines));
 
     if (top.value > bottom.value || left.value > right.value)
         return;
@@ -1165,7 +1161,7 @@ void Screen<Cell>::clearToEndOfLine()
     }
 
     Cell* i = &at(_cursor.position);
-    Cell* e = i + unbox(_settings.pageSize.columns) - unbox(_cursor.position.column);
+    Cell* e = i + unbox(pageSize().columns) - unbox(_cursor.position.column);
     while (i != e)
     {
         i->reset(_cursor.graphicsRendition);
@@ -1174,7 +1170,7 @@ void Screen<Cell>::clearToEndOfLine()
 
     auto const line = _cursor.position.line;
     auto const left = _cursor.position.column;
-    auto const right = boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1);
+    auto const right = boxed_cast<ColumnOffset>(pageSize().columns - 1);
     auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
     _terminal.markRegionDirty(area);
 }
@@ -1206,7 +1202,7 @@ void Screen<Cell>::clearLine()
 
     auto const line = _cursor.position.line;
     auto const left = ColumnOffset(0);
-    auto const right = boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1);
+    auto const right = boxed_cast<ColumnOffset>(pageSize().columns - 1);
     auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
     _terminal.markRegionDirty(area);
 }
@@ -1329,8 +1325,8 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::eraseArea(int top, int left, int bottom, int right)
 {
-    assert(right <= unbox(_settings.pageSize.columns));
-    assert(bottom <= unbox(_settings.pageSize.lines));
+    assert(right <= unbox(pageSize().columns));
+    assert(bottom <= unbox(pageSize().lines));
 
     if (top > bottom || left > right)
         return;
@@ -1558,9 +1554,8 @@ void Screen<Cell>::moveCursorToNextTab()
         // default tab settings
         if (realCursorPosition().column < margin().horizontal.to)
         {
-            auto const n =
-                min((TabWidth - boxed_cast<ColumnCount>(_cursor.position.column) % TabWidth),
-                    _settings.pageSize.columns - boxed_cast<ColumnCount>(logicalCursorPosition().column));
+            auto const n = min((TabWidth - boxed_cast<ColumnCount>(_cursor.position.column) % TabWidth),
+                               pageSize().columns - boxed_cast<ColumnCount>(logicalCursorPosition().column));
             moveCursorForward(n);
         }
     }
@@ -1584,9 +1579,9 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
     // TODO: when capturing lineCount < screenSize.lines, start at the lowest non-empty line.
     auto const relativeStartLine =
         logicalLines ? _grid.computeLogicalLineNumberFromBottom(LineCount::cast_from(lineCount))
-                     : unbox(_settings.pageSize.lines - lineCount);
-    auto const startLine = LineOffset::cast_from(
-        clamp(relativeStartLine, -unbox(historyLineCount()), unbox(_settings.pageSize.lines)));
+                     : unbox(pageSize().lines - lineCount);
+    auto const startLine =
+        LineOffset::cast_from(clamp(relativeStartLine, -unbox(historyLineCount()), unbox(pageSize().lines)));
 
     vtCaptureBufferLog()("Capture buffer: {} lines {}", lineCount, logicalLines ? "logical" : "actual");
 
@@ -1607,7 +1602,7 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
         _terminal.reply(data);
         currentChunkSize += data.size();
     };
-    LineOffset const bottomLine = boxed_cast<LineOffset>(_settings.pageSize.lines - 1);
+    LineOffset const bottomLine = boxed_cast<LineOffset>(pageSize().lines - 1);
     vtCaptureBufferLog()("Capturing buffer. top: {}, bottom: {}", relativeStartLine, bottomLine);
 
     for (LineOffset line = startLine; line <= bottomLine; ++line)
@@ -1931,10 +1926,9 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
     // TODO: make use of imageOffset
     (void) imageOffset;
 
-    auto const linesAvailable =
-        _settings.pageSize.lines - topLeft.line.as<LineCount>() - _terminal.statusLineHeight();
+    auto const linesAvailable = pageSize().lines - topLeft.line.as<LineCount>();
     auto const linesToBeRendered = min(gridSize.lines, linesAvailable);
-    auto const columnsAvailable = *_settings.pageSize.columns - *topLeft.column;
+    auto const columnsAvailable = *pageSize().columns - *topLeft.column;
     auto const columnsToBeRendered = ColumnCount(min(columnsAvailable, *gridSize.columns));
     auto const gapColor = RGBAColor {}; // TODO: _cursor.graphicsRendition.backgroundColor;
 
@@ -1980,9 +1974,7 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
             {
                 auto const offset =
                     CellLocation { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset, columnOffset };
-                Cell& cell =
-                    at(boxed_cast<LineOffset>(_settings.pageSize.lines - _terminal.statusLineHeight()) - 1,
-                       topLeft.column + columnOffset);
+                Cell& cell = at(boxed_cast<LineOffset>(pageSize().lines) - 1, topLeft.column + columnOffset);
                 cell.setImageFragment(rasterizedImage, offset);
                 cell.setHyperlink(_cursor.hyperlink);
             };
@@ -2057,10 +2049,10 @@ void Screen<Cell>::requestCharacterSize(RequestPixelSize area)
     switch (area)
     {
         case RequestPixelSize::TextArea:
-            _terminal.reply("\033[8;{};{}t", _settings.pageSize.lines, _settings.pageSize.columns);
+            _terminal.reply("\033[8;{};{}t", pageSize().lines, pageSize().columns);
             break;
         case RequestPixelSize::WindowArea:
-            _terminal.reply("\033[9;{};{}t", _settings.pageSize.lines, _settings.pageSize.columns);
+            _terminal.reply("\033[9;{};{}t", pageSize().lines, pageSize().columns);
             break;
         case RequestPixelSize::CellArea:
             Guarantee(false
@@ -2118,8 +2110,8 @@ void Screen<Cell>::requestStatusString(RequestStatusString value)
             case RequestStatusString::DECSLPP:
                 // Ps >= 2 4  -> Resize to Ps lines (DECSLPP), VT340 and VT420.
                 // xterm adapts this by resizing its window.
-                if (*_settings.pageSize.lines >= 24)
-                    return fmt::format("{}t", _settings.pageSize.lines);
+                if (*pageSize().lines >= 24)
+                    return fmt::format("{}t", pageSize().lines);
                 errorLog()("Requesting device status for {} not with line count < 24 is undefined.");
                 return nullopt;
             case RequestStatusString::DECSTBM:
@@ -2128,8 +2120,8 @@ void Screen<Cell>::requestStatusString(RequestStatusString value)
                 return fmt::format("{};{}s", 1 + *margin().horizontal.from, *margin().horizontal.to);
             case RequestStatusString::DECSCPP:
                 // EXTENSION: Usually DECSCPP only knows about 80 and 132, but we take any.
-                return fmt::format("{}|$", _settings.pageSize.columns);
-            case RequestStatusString::DECSNLS: return fmt::format("{}*|", _settings.pageSize.lines);
+                return fmt::format("{}|$", pageSize().columns);
+            case RequestStatusString::DECSNLS: return fmt::format("{}*|", pageSize().lines);
             case RequestStatusString::SGR:
                 return fmt::format("0;{}m", vtSequenceParameterString(_cursor.graphicsRendition));
             case RequestStatusString::DECSCA: {
@@ -2178,7 +2170,7 @@ void Screen<Cell>::requestTabStops()
     else if (*TabWidth != 0)
     {
         dcs << 1;
-        for (auto column = *TabWidth + 1; column <= *_settings.pageSize.columns; column += *TabWidth)
+        for (auto column = *TabWidth + 1; column <= *pageSize().columns; column += *TabWidth)
             dcs << '/' << column;
     }
     dcs << "\033\\"sv; // ST
@@ -2297,7 +2289,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::inspect(std::string const& message, std::ostream& os) const
 {
     auto const hline = [&]() {
-        for_each(crispy::times(*_settings.pageSize.columns), [&](auto) { os << '='; });
+        for_each(crispy::times(*pageSize().columns), [&](auto) { os << '='; });
         os << '\n';
     };
 
@@ -3562,8 +3554,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case DECSERA: {
             auto const top = seq.param_or(0, Top(1)) - 1;
             auto const left = seq.param_or(1, Left(1)) - 1;
-            auto const bottom = seq.param_or(2, Bottom::cast_from(_settings.pageSize.lines)) - 1;
-            auto const right = seq.param_or(3, Right::cast_from(_settings.pageSize.columns)) - 1;
+            auto const bottom = seq.param_or(2, Bottom::cast_from(pageSize().lines)) - 1;
+            auto const right = seq.param_or(3, Right::cast_from(pageSize().columns)) - 1;
             selectiveEraseArea(Rect { top, left, bottom, right });
             return ApplyResult::Ok;
         }
