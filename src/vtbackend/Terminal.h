@@ -375,6 +375,15 @@ class Terminal
     [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
     [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
 
+    void setDefaultColorPalette(ColorPalette palette) noexcept
+    {
+        _state.defaultColorPalette = std::move(palette);
+    }
+
+    void setColorPalette(ColorPalette const& palette) noexcept { _state.colorPalette = palette; }
+
+    void resetColorPalette() noexcept { setColorPalette(defaultColorPalette()); }
+
     void pushColorPalette(size_t slot);
     void popColorPalette(size_t slot);
     void reportColorPaletteStack();
@@ -691,6 +700,7 @@ class Terminal
     [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
         CellLocation position) const noexcept;
 
+    Settings& factorySettings() noexcept { return _factorySettings; }
     Settings const& factorySettings() const noexcept { return _factorySettings; }
     Settings const& settings() const noexcept { return _settings; }
     Settings& settings() noexcept { return _settings; }

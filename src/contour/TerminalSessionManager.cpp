@@ -43,6 +43,12 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
     // Notify app if all sessions have been killed to trigger app termination.
 }
 
+void TerminalSessionManager::updateColorPreference(vtbackend::ColorPreference const& preference)
+{
+    for (auto& session: _sessions)
+        session->updateColorPreference(preference);
+}
+
 // {{{ QAbstractListModel
 QVariant TerminalSessionManager::data(const QModelIndex& index, int role) const
 {

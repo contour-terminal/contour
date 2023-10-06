@@ -4,16 +4,16 @@
 #include <contour/Config.h>
 #include <contour/ContourApp.h>
 #include <contour/TerminalSessionManager.h>
+#include <contour/helper.h>
 
 #include <vtpty/Process.h>
 
+#include <QtDBus/QDBusVariant>
 #include <QtQml/QQmlApplicationEngine>
 
 #include <filesystem>
-#include <list>
 #include <memory>
 #include <optional>
-#include <string_view>
 
 namespace contour
 {
@@ -55,7 +55,7 @@ class ContourGuiApp: public QObject, public ContourApp
     {
         if (const auto* const profile = config().profile(profileName()))
             return *profile;
-        fmt::print("Failed to access config profile.\n");
+        displayLog()("Failed to access config profile.");
         Require(false);
     }
 
@@ -69,6 +69,8 @@ class ContourGuiApp: public QObject, public ContourApp
 
     [[nodiscard]] static QUrl resolveResource(std::string_view path);
 
+    vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
+
   private:
     static void ensureTermInfoFile();
     bool loadConfig(std::string const& target);
@@ -81,6 +83,8 @@ class ContourGuiApp: public QObject, public ContourApp
     int _argc = 0;
     char const** _argv = nullptr;
     std::optional<vtpty::Process::ExitStatus> _exitStatus;
+
+    vtbackend::ColorPreference _colorPreference = vtbackend::ColorPreference::Dark;
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 };

@@ -363,12 +363,26 @@ profiles:
 
 
 ### `colors`
-section in the configuration file allows you to specify the colorscheme to use for the terminal. Alternatively, you can inline the color definitions within this section.
+section in the configuration file allows you to specify the colorscheme to use for the terminal.
 ``` yaml
 profiles:
   profile_name:
     colors: "default"
 ```
+
+To make the terminal's color scheme dependant on OS appearance (dark and light mode) settings,
+you need to specify two color schemes:
+
+```yaml
+profiles:
+  profile_name:
+    colors:
+      dark: "some_dark_scheme_name"
+      light: "some_light_scheme_name"
+```
+
+With this, the terminal will use the color scheme as specified in `dark` when OS dark mode is on,
+and `light`'s color scheme otherwise.
 
 ### `hyperlink_decoration:`
 section in the configuration file allows you to configure the styling and colorization of hyperlinks when they are displayed in the terminal and when they are hovered over by the cursor.

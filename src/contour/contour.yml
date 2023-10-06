@@ -452,7 +452,16 @@ profiles:
             blur: false
 
         # Specifies a colorscheme to use (alternatively the colors can be inlined).
-        colors: "default"
+        #
+        # This can be either the name to a single colorscheme to always use,
+        # or a map with two keys (dark and light) to determine the color scheme to use for each.
+        #
+        # The dark color scheme is used when the system is configured to prefer dark mode and light theme otherwise.
+        #
+        # Default: "default"
+        colors:
+            light: default
+            dark: default
 
         # Hyperlinks (via OSC-8) can be stylized and colorized on hover.
         hyperlink_decoration:

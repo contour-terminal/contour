@@ -132,6 +132,19 @@ struct InputModeConfig
     CursorConfig cursor;
 };
 
+struct DualColorConfig
+{
+    vtbackend::ColorPalette darkMode {};
+    vtbackend::ColorPalette lightMode {};
+};
+
+struct SimpleColorConfig
+{
+    vtbackend::ColorPalette colors {};
+};
+
+using ColorConfig = std::variant<SimpleColorConfig, DualColorConfig>;
+
 struct TerminalProfile
 {
     vtpty::Process::ExecInfo shell;
@@ -168,7 +181,7 @@ struct TerminalProfile
     } permissions;
 
     bool drawBoldTextWithBrightColors = false;
-    vtbackend::ColorPalette colors {};
+    ColorConfig colors = SimpleColorConfig {};
 
     vtbackend::LineCount modalCursorScrollOff { 8 };
 
