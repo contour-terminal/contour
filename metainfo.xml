@@ -122,6 +122,7 @@
           <li>Fixes URI re-encoding of local files in `OSC 8` (#1199)</li>
           <li>Fixes LCD subpixel rendering for overly wide US-ASCII glyphs (#1022)</li>
           <li>Fixes alive process when GUI is closed</li>
+          <li>Fixes vi mode `f` action freeze on last line</li>
           <li>Do not clear search term when entering search editor again.</li>
           <li>Clear search term when switch to insert vi mode (#1135)</li>
           <li>Delete dpi_scale entry in configuration (#1137)</li>

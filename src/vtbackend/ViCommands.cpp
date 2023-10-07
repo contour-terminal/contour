@@ -1042,13 +1042,17 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
 optional<CellLocation> ViCommands::toCharRight(CellLocation startPosition) const noexcept
 {
     auto result = next(startPosition);
-
+    auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>() - 1;
     while (true)
     {
+        // if on wrong line
         if (result.line != startPosition.line)
             return std::nullopt;
         if (_terminal.currentScreen().compareCellTextAt(result, _lastChar))
             return result;
+        // if reached end of the line
+        if (result.column == rightMargin)
+            return std::nullopt;
         result = next(result);
     }
 }
