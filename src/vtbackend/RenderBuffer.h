@@ -9,6 +9,8 @@
 
 #include <vtrasterizer/RenderTarget.h>
 
+#include <gsl/pointers>
+
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -82,17 +84,17 @@ struct RenderBuffer
 /// @see RenderBuffer
 struct RenderBufferRef
 {
-    RenderBuffer const& buffer;
-    std::mutex& guard;
+    gsl::not_null<RenderBuffer const*> buffer;
+    gsl::not_null<std::mutex*> guard;
 
-    [[nodiscard]] RenderBuffer const& get() const noexcept { return buffer; }
+    [[nodiscard]] RenderBuffer const& get() const noexcept { return *buffer; }
 
-    RenderBufferRef(RenderBuffer const& buf, std::mutex& lock): buffer { buf }, guard { lock }
+    RenderBufferRef(RenderBuffer const& buf, std::mutex& lock): buffer { &buf }, guard { &lock }
     {
-        guard.lock();
+        guard->lock();
     }
 
-    ~RenderBufferRef() { guard.unlock(); }
+    ~RenderBufferRef() { guard->unlock(); }
 };
 
 /// Reflects the current state of a RenderDoubleBuffer object.

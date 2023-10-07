@@ -24,15 +24,6 @@ auto const inline gridLog = logstore::category(
 
 namespace detail
 {
-    template <typename... Args>
-    void logf([[maybe_unused]] Args&&... args)
-    {
-#if 1 // !defined(NDEBUG)
-        fmt::print(std::forward<Args>(args)...);
-        fmt::print("\n");
-#endif
-    }
-
     template <typename Cell>
     gsl::span<Cell> trimRight(gsl::span<Cell> cells)
     {

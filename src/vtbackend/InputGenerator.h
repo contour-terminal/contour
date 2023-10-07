@@ -6,13 +6,10 @@
 #include <crispy/escape.h>
 #include <crispy/overloaded.h>
 
-#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
-#include <utility>
-#include <variant>
 #include <vector>
 
 #include <libunicode/convert.h>

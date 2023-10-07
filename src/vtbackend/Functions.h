@@ -15,7 +15,6 @@
 #include <array>
 #include <optional>
 #include <string>
-#include <vector>
 
 namespace vtbackend
 {
@@ -651,11 +650,6 @@ inline auto allFunctions() noexcept
         });
         return funcs;
     }();
-
-#if 0
-    for (auto [a, b] : crispy::indexed(funcs))
-        std::cout << fmt::format("{:>2}: {}\n", a, b);
-#endif
 
     return funcs;
 }

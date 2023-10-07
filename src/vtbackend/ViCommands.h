@@ -3,8 +3,9 @@
 
 #include <vtbackend/ViInputHandler.h>
 
+#include <gsl/pointers>
+
 #include <optional>
-#include <utility>
 
 namespace vtbackend
 {
@@ -83,7 +84,7 @@ class ViCommands: public ViInputHandler::Executor
     CellLocation cursorPosition {};
 
   private:
-    Terminal& _terminal;
+    gsl::not_null<Terminal*> _terminal;
     ViMode _lastMode = ViMode::Insert;
     CursorShape _lastCursorShape = CursorShape::Block;
     mutable char32_t _lastChar = U'\0';

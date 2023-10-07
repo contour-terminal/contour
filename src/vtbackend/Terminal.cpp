@@ -17,6 +17,8 @@
 
 #include <fmt/chrono.h>
 
+#include <gsl/pointers>
+
 #include <sys/types.h>
 
 #include <chrono>
@@ -153,15 +155,13 @@ Terminal::Terminal(Events& eventListener,
     _refreshInterval { _settings.refreshRate }
 {
     _state.savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
-#if 0
-    hardReset();
-#else
+
+    // TODO(should be this instead?): hardReset();
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::Unicode, true);
     setMode(DECMode::VisibleCursor, true);
-#endif
     setMode(DECMode::LeftRightMargin, false);
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
@@ -1183,17 +1183,19 @@ namespace
     template <typename Cell>
     struct SelectionRenderer
     {
-        Terminal const& term;
-        ColumnOffset rightPage;
+        gsl::not_null<Terminal const*> term;
+        ColumnOffset rightPage {};
         ColumnOffset lastColumn {};
         string text {};
         string currentLine {};
 
+        SelectionRenderer(Terminal const& term, ColumnOffset rightPage): term(&term), rightPage(rightPage) {}
+
         void operator()(CellLocation pos, Cell const& cell)
         {
             auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
-            bool const touchesRightPage = term.isSelected({ pos.line, rightPage });
-            if (isNewLine && (!term.isLineWrapped(pos.line) || !touchesRightPage))
+            bool const touchesRightPage = term->isSelected({ pos.line, rightPage });
+            if (isNewLine && (!term->isLineWrapped(pos.line) || !touchesRightPage))
             {
                 // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
                 trimSpaceRight(currentLine);
@@ -1212,7 +1214,7 @@ namespace
         {
             trimSpaceRight(currentLine);
             text += currentLine;
-            if (dynamic_cast<FullLineSelection const*>(term.selector()))
+            if (dynamic_cast<FullLineSelection const*>(term->selector()))
                 text += '\n';
             return std::move(text);
         }
@@ -2221,7 +2223,7 @@ void Terminal::popColorPalette(size_t slot)
 }
 
 // {{{ TraceHandler
-TraceHandler::TraceHandler(Terminal& terminal): _terminal { terminal }
+TraceHandler::TraceHandler(Terminal& terminal): _terminal { &terminal }
 {
 }
 
@@ -2272,24 +2274,24 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
 {
     if (auto const* seq = std::get_if<Sequence>(&pendingSequence))
     {
-        if (auto const* functionDefinition = seq->functionDefinition(_terminal.activeSequences()))
+        if (auto const* functionDefinition = seq->functionDefinition(_terminal->activeSequences()))
             fmt::print("\t{:<20} ; {:<18} ; {}\n",
                        seq->text(),
                        functionDefinition->mnemonic,
                        functionDefinition->comment);
         else
             fmt::print("\t{:<20}\n", seq->text());
-        _terminal.activeDisplay().processSequence(*seq);
+        _terminal->activeDisplay().processSequence(*seq);
     }
     else if (auto const* codepoint = std::get_if<char32_t>(&pendingSequence))
     {
         fmt::print("\t'{}'\n", unicode::convert_to<char>(*codepoint));
-        _terminal.activeDisplay().writeText(*codepoint);
+        _terminal->activeDisplay().writeText(*codepoint);
     }
     else if (auto const* codepoints = std::get_if<CodepointSequence>(&pendingSequence))
     {
         fmt::print("\t\"{}\"   ; {} cells\n", codepoints->text, codepoints->cellCount);
-        _terminal.activeDisplay().writeText(codepoints->text, codepoints->cellCount);
+        _terminal->activeDisplay().writeText(codepoints->text, codepoints->cellCount);
     }
 }
 // }}}

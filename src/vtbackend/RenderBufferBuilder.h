@@ -1,8 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/Terminal.h>
 #include <vtbackend/primitives.h>
+
+#include <gsl/pointers>
 
 #include <optional>
 
@@ -115,8 +119,8 @@ class RenderBufferBuilder
     enum class State { Gap, Sequence };
     // clang-format on
 
-    RenderBuffer& _output;
-    Terminal const& _terminal;
+    gsl::not_null<RenderBuffer*> _output;
+    gsl::not_null<Terminal const*> _terminal;
     std::optional<CellLocation> _cursorPosition;
     LineOffset _baseLine;
     bool _reverseVideo;

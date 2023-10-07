@@ -8,16 +8,10 @@
 
 #include <fmt/format.h>
 
-#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
 #include <filesystem>
-#include <initializer_list>
-#include <optional>
-#include <ostream>
-#include <string>
-#include <utility>
 #include <variant>
 
 namespace vtbackend

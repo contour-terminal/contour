@@ -22,6 +22,7 @@ struct Metrics
     [[nodiscard]] std::vector<std::pair<std::string, uint64_t>> ordered() const
     {
         std::vector<std::pair<std::string, uint64_t>> vec;
+        vec.reserve(sequences.size());
         for (auto const& [name, freq]: sequences)
             vec.emplace_back(name, freq);
 

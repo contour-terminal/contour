@@ -11,9 +11,6 @@
 
 #include <catch2/catch.hpp>
 
-#include <algorithm>
-#include <iostream>
-#include <iterator>
 #include <string>
 #include <vector>
 

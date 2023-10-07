@@ -96,7 +96,7 @@ bool Viewport::scrollMarkUp()
         return false;
 
     auto const newScrollOffset =
-        _terminal.primaryScreen().findMarkerUpwards(-boxed_cast<LineOffset>(_scrollOffset));
+        _terminal->primaryScreen().findMarkerUpwards(-boxed_cast<LineOffset>(_scrollOffset));
     if (newScrollOffset.has_value())
         return scrollTo(boxed_cast<ScrollOffset>(-*newScrollOffset));
 
@@ -109,7 +109,7 @@ bool Viewport::scrollMarkDown()
         return false;
 
     auto const newScrollOffset =
-        _terminal.primaryScreen().findMarkerDownwards(-boxed_cast<LineOffset>(_scrollOffset));
+        _terminal->primaryScreen().findMarkerDownwards(-boxed_cast<LineOffset>(_scrollOffset));
     if (newScrollOffset)
         return scrollTo(boxed_cast<ScrollOffset>(-*newScrollOffset));
     else
@@ -120,18 +120,18 @@ bool Viewport::scrollMarkDown()
 
 LineCount Viewport::historyLineCount() const noexcept
 {
-    return _terminal.currentScreen().historyLineCount();
+    return _terminal->currentScreen().historyLineCount();
 }
 
 LineCount Viewport::screenLineCount() const noexcept
 {
-    return _terminal.pageSize().lines;
+    return _terminal->pageSize().lines;
 }
 
 bool Viewport::scrollingDisabled() const noexcept
 {
     // TODO: make configurable
-    return _terminal.isAlternateScreen();
+    return _terminal->isAlternateScreen();
 }
 
 } // namespace vtbackend

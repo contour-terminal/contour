@@ -6,8 +6,7 @@
 
 #include <crispy/logstore.h>
 
-#include <algorithm>
-#include <optional>
+#include <gsl/pointers>
 
 namespace vtbackend
 {
@@ -24,7 +23,7 @@ class Viewport
     using ModifyEvent = std::function<void()>;
 
     explicit Viewport(Terminal& term, ModifyEvent onModify = {}):
-        _terminal { term }, _modified { onModify ? std::move(onModify) : []() {
+        _terminal { &term }, _modified { onModify ? std::move(onModify) : []() {
         } }
     {
     }
@@ -98,7 +97,7 @@ class Viewport
 
     // private fields
     //
-    Terminal& _terminal;
+    gsl::not_null<Terminal*> _terminal;
     ModifyEvent _modified;
     //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
     ScrollOffset _scrollOffset;

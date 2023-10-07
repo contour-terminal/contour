@@ -17,10 +17,13 @@
 
 #include <vtpty/Pty.h>
 
+#include <crispy/BufferObject.h>
 #include <crispy/assert.h>
 #include <crispy/defines.h>
 
 #include <fmt/format.h>
+
+#include <gsl/pointers>
 
 #include <atomic>
 #include <chrono>
@@ -29,10 +32,6 @@
 #include <memory>
 #include <mutex>
 #include <string_view>
-#include <type_traits>
-#include <vector>
-
-#include "crispy/BufferObject.h"
 
 namespace vtbackend
 {
@@ -83,7 +82,7 @@ class TraceHandler: public SequenceHandler
 
   private:
     void flushOne(PendingSequence const& pendingSequence);
-    Terminal& _terminal;
+    gsl::not_null<Terminal*> _terminal;
     PendingSequenceQueue _pendingSequences = {};
 };
 
@@ -397,7 +396,7 @@ class Terminal
     [[nodiscard]] SequenceHandler& sequenceHandler() noexcept
     {
         // TODO: avoid double-switch by introducing a `SequenceHandler& sequenceHandler` member.
-        switch (_state.executionMode)
+        switch (_state.executionMode.load())
         {
             case ExecutionMode::Normal: return activeDisplay();
             case ExecutionMode::BreakAtEmptyQueue:
@@ -592,7 +591,11 @@ class Terminal
     template <typename... T>
     void reply(fmt::format_string<T...> fmt, T&&... args)
     {
+#if defined(__APPLE__)
         reply(fmt::vformat(fmt, fmt::make_format_args(args...)));
+#else
+        reply(fmt::vformat(fmt, fmt::make_format_args(std::forward<T>(args)...)));
+#endif
     }
 
     void requestWindowResize(PageSize);
@@ -788,7 +791,7 @@ class Terminal
     struct BlinkerState
     {
         bool state = false;
-        std::chrono::milliseconds const interval; // NOLINT(readability-identifier-naming)
+        std::chrono::milliseconds interval;
     };
     mutable BlinkerState _slowBlinker { false, std::chrono::milliseconds { 500 } };
     mutable BlinkerState _rapidBlinker { false, std::chrono::milliseconds { 300 } };

@@ -60,7 +60,7 @@ namespace
 } // namespace
 
 ViInputHandler::ViInputHandler(Executor& theExecutor, ViMode initialMode):
-    _viMode { initialMode }, _executor { theExecutor }
+    _viMode { initialMode }, _executor { &theExecutor }
 {
     registerAllCommands();
 }
@@ -143,17 +143,17 @@ void ViInputHandler::registerAllCommands()
     {
         for (auto const& [motionChar, motion]: MotionMappings)
             registerCommand(
-                modeSelect, motionChar, [this, motion = motion]() { _executor.moveCursor(motion, count()); });
+                modeSelect, motionChar, [this, motion = motion]() { _executor->moveCursor(motion, count()); });
 
-        registerCommand(modeSelect, "J", [this]() { _executor.scrollViewport(ScrollOffset(-1)); _executor.moveCursor(ViMotion::LineDown, 1);});
-        registerCommand(modeSelect, "K", [this]() { _executor.scrollViewport(ScrollOffset(+1)); _executor.moveCursor(ViMotion::LineUp, 1);});
+        registerCommand(modeSelect, "J", [this]() { _executor->scrollViewport(ScrollOffset(-1)); _executor->moveCursor(ViMotion::LineDown, 1);});
+        registerCommand(modeSelect, "K", [this]() { _executor->scrollViewport(ScrollOffset(+1)); _executor->moveCursor(ViMotion::LineUp, 1);});
 
-        registerCommand(modeSelect, "t.", [this]() { _executor.moveCursor(ViMotion::TillBeforeCharRight, count(), _lastChar); });
-        registerCommand(modeSelect, "T.", [this]() { _executor.moveCursor(ViMotion::TillAfterCharLeft, count(), _lastChar); });
-        registerCommand(modeSelect, "f.", [this]() { _executor.moveCursor(ViMotion::ToCharRight, count(), _lastChar); });
-        registerCommand(modeSelect, "F.", [this]() { _executor.moveCursor(ViMotion::ToCharLeft, count(), _lastChar); });
-        registerCommand(modeSelect, ";", [this]() { _executor.moveCursor(ViMotion::RepeatCharMove, count()); });
-        registerCommand(modeSelect, ",", [this]() { _executor.moveCursor(ViMotion::RepeatCharMoveReverse, count()); });
+        registerCommand(modeSelect, "t.", [this]() { _executor->moveCursor(ViMotion::TillBeforeCharRight, count(), _lastChar); });
+        registerCommand(modeSelect, "T.", [this]() { _executor->moveCursor(ViMotion::TillAfterCharLeft, count(), _lastChar); });
+        registerCommand(modeSelect, "f.", [this]() { _executor->moveCursor(ViMotion::ToCharRight, count(), _lastChar); });
+        registerCommand(modeSelect, "F.", [this]() { _executor->moveCursor(ViMotion::ToCharLeft, count(), _lastChar); });
+        registerCommand(modeSelect, ";", [this]() { _executor->moveCursor(ViMotion::RepeatCharMove, count()); });
+        registerCommand(modeSelect, ",", [this]() { _executor->moveCursor(ViMotion::RepeatCharMoveReverse, count()); });
     }
 
     registerCommand(ModeSelect::Normal, "A", [this]() { setMode(ViMode::Insert); });
@@ -165,36 +165,36 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "V", [this]() { toggleMode(ViMode::VisualLine); });
     registerCommand(ModeSelect::Normal, "C-V", [this]() { toggleMode(ViMode::VisualBlock); });
     registerCommand(ModeSelect::Normal, "/", [this]() { startSearch(); });
-    registerCommand(ModeSelect::Normal, "#", [this]() { _executor.reverseSearchCurrentWord(); });
-    registerCommand(ModeSelect::Normal, "mm", [this]() { _executor.toggleLineMark(); });
-    registerCommand(ModeSelect::Normal, "*", [this]() { _executor.searchCurrentWord(); });
-    registerCommand(ModeSelect::Normal, "p", [this]() { _executor.paste(count(), false); });
-    registerCommand(ModeSelect::Normal, "P", [this]() { _executor.paste(count(), true); });
+    registerCommand(ModeSelect::Normal, "#", [this]() { _executor->reverseSearchCurrentWord(); });
+    registerCommand(ModeSelect::Normal, "mm", [this]() { _executor->toggleLineMark(); });
+    registerCommand(ModeSelect::Normal, "*", [this]() { _executor->searchCurrentWord(); });
+    registerCommand(ModeSelect::Normal, "p", [this]() { _executor->paste(count(), false); });
+    registerCommand(ModeSelect::Normal, "P", [this]() { _executor->paste(count(), true); });
 
-    registerCommand(ModeSelect::Normal, "Y", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
-    registerCommand(ModeSelect::Normal, "yy", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
-    registerCommand(ModeSelect::Normal, "yb", [this]() { _executor.execute(ViOperator::Yank, ViMotion::WordBackward, count()); });
-    registerCommand(ModeSelect::Normal, "ye", [this]() { _executor.execute(ViOperator::Yank, ViMotion::WordEndForward, count()); });
-    registerCommand(ModeSelect::Normal, "yw", [this]() { _executor.execute(ViOperator::Yank, ViMotion::WordForward, count()); });
-    registerCommand(ModeSelect::Normal, "yB", [this]() { _executor.execute(ViOperator::Yank, ViMotion::BigWordBackward, count()); });
-    registerCommand(ModeSelect::Normal, "yE", [this]() { _executor.execute(ViOperator::Yank, ViMotion::BigWordEndForward, count()); });
-    registerCommand(ModeSelect::Normal, "yW", [this]() { _executor.execute(ViOperator::Yank, ViMotion::BigWordForward, count()); });
-    registerCommand(ModeSelect::Normal, "yt.", [this]() { _executor.execute(ViOperator::Yank, ViMotion::TillBeforeCharRight, count(), _lastChar); });
-    registerCommand(ModeSelect::Normal, "yT.", [this]() { _executor.execute(ViOperator::Yank, ViMotion::TillAfterCharLeft, count(), _lastChar); });
-    registerCommand(ModeSelect::Normal, "yf.", [this]() { _executor.execute(ViOperator::Yank, ViMotion::ToCharRight, count(), _lastChar); });
-    registerCommand(ModeSelect::Normal, "yF.", [this]() { _executor.execute(ViOperator::Yank, ViMotion::ToCharLeft, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, "Y", [this]() { _executor->execute(ViOperator::Yank, ViMotion::FullLine, count()); });
+    registerCommand(ModeSelect::Normal, "yy", [this]() { _executor->execute(ViOperator::Yank, ViMotion::FullLine, count()); });
+    registerCommand(ModeSelect::Normal, "yb", [this]() { _executor->execute(ViOperator::Yank, ViMotion::WordBackward, count()); });
+    registerCommand(ModeSelect::Normal, "ye", [this]() { _executor->execute(ViOperator::Yank, ViMotion::WordEndForward, count()); });
+    registerCommand(ModeSelect::Normal, "yw", [this]() { _executor->execute(ViOperator::Yank, ViMotion::WordForward, count()); });
+    registerCommand(ModeSelect::Normal, "yB", [this]() { _executor->execute(ViOperator::Yank, ViMotion::BigWordBackward, count()); });
+    registerCommand(ModeSelect::Normal, "yE", [this]() { _executor->execute(ViOperator::Yank, ViMotion::BigWordEndForward, count()); });
+    registerCommand(ModeSelect::Normal, "yW", [this]() { _executor->execute(ViOperator::Yank, ViMotion::BigWordForward, count()); });
+    registerCommand(ModeSelect::Normal, "yt.", [this]() { _executor->execute(ViOperator::Yank, ViMotion::TillBeforeCharRight, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, "yT.", [this]() { _executor->execute(ViOperator::Yank, ViMotion::TillAfterCharLeft, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, "yf.", [this]() { _executor->execute(ViOperator::Yank, ViMotion::ToCharRight, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, "yF.", [this]() { _executor->execute(ViOperator::Yank, ViMotion::ToCharLeft, count(), _lastChar); });
     // clang-format on
 
     for (auto const& [scopeChar, scope]: ScopeMappings)
         for (auto const& [objectChar, obj]: TextObjectMappings)
             registerCommand(ModeSelect::Normal,
                             fmt::format("y{}{}", scopeChar, objectChar),
-                            [this, scope = scope, obj = obj]() { _executor.yank(scope, obj); });
+                            [this, scope = scope, obj = obj]() { _executor->yank(scope, obj); });
 
     // visual mode
     registerCommand(ModeSelect::Visual, "/", [this]() { startSearch(); });
     registerCommand(ModeSelect::Visual, "y", [this]() {
-        _executor.execute(ViOperator::Yank, ViMotion::Selection, count());
+        _executor->execute(ViOperator::Yank, ViMotion::Selection, count());
     });
     registerCommand(ModeSelect::Visual, "v", [this]() { toggleMode(ViMode::Normal); });
     registerCommand(ModeSelect::Visual, "V", [this]() { toggleMode(ViMode::VisualLine); });
@@ -204,7 +204,7 @@ void ViInputHandler::registerAllCommands()
         for (auto const& [objectChar, obj]: TextObjectMappings)
             registerCommand(ModeSelect::Visual,
                             fmt::format("{}{}", scopeChar, objectChar),
-                            [this, scope = scope, obj = obj]() { _executor.select(scope, obj); });
+                            [this, scope = scope, obj = obj]() { _executor->select(scope, obj); });
 }
 
 void ViInputHandler::registerCommand(ModeSelect modes,
@@ -296,7 +296,7 @@ void ViInputHandler::setMode(ViMode theMode)
     _viMode = theMode;
     clearPendingInput();
 
-    _executor.modeChanged(theMode);
+    _executor->modeChanged(theMode);
 }
 
 bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
@@ -351,7 +351,7 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
 void ViInputHandler::startSearchExternally()
 {
     _searchTerm.clear();
-    _executor.searchStart();
+    _executor->searchStart();
 
     if (_viMode != ViMode::Insert)
         _searchEditMode = SearchEditMode::Enabled;
@@ -375,24 +375,24 @@ bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
             if (_searchEditMode == SearchEditMode::ExternallyEnabled)
                 setMode(ViMode::Insert);
             _searchEditMode = SearchEditMode::Disabled;
-            _executor.searchCancel();
+            _executor->searchCancel();
             break;
         case '\x0D'_key:
             if (_searchEditMode == SearchEditMode::ExternallyEnabled)
                 setMode(ViMode::Insert);
             _searchEditMode = SearchEditMode::Disabled;
-            _executor.searchDone();
+            _executor->searchDone();
             break;
         case '\x08'_key:
         case '\x7F'_key:
             if (!_searchTerm.empty())
                 _searchTerm.resize(_searchTerm.size() - 1);
-            _executor.updateSearchTerm(_searchTerm);
+            _executor->updateSearchTerm(_searchTerm);
             break;
         case Modifier::Control | 'L':
         case Modifier::Control | 'U':
             _searchTerm.clear();
-            _executor.updateSearchTerm(_searchTerm);
+            _executor->updateSearchTerm(_searchTerm);
             break;
         case Modifier::Control | 'A': // TODO: move cursor to BOL
         case Modifier::Control | 'E': // TODO: move cursor to EOL
@@ -400,7 +400,7 @@ bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
             if (ch >= 0x20 && modifier.without(Modifier::Shift).none())
             {
                 _searchTerm += ch;
-                _executor.updateSearchTerm(_searchTerm);
+                _executor->updateSearchTerm(_searchTerm);
             }
             else
                 errorLog()("ViInputHandler: Receiving control code {}+0x{:02X} in search mode. Ignoring.",
@@ -455,7 +455,7 @@ bool ViInputHandler::parseCount(char32_t ch, Modifier modifier)
     {
         case '0':
             if (!_count)
-                break;
+                return false;
             [[fallthrough]];
         case '1':
         case '2':
@@ -469,14 +469,16 @@ bool ViInputHandler::parseCount(char32_t ch, Modifier modifier)
             //.
             _count = _count * 10 + (ch - '0');
             return true;
+        default:
+            //.
+            return false;
     }
-    return false;
 }
 
 void ViInputHandler::startSearch()
 {
     _searchEditMode = SearchEditMode::Enabled;
-    _executor.searchStart();
+    _executor->searchStart();
 }
 
 void ViInputHandler::toggleMode(ViMode newMode)
