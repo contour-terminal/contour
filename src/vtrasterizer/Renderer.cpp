@@ -42,10 +42,10 @@ namespace
         auto const m = textShaper.metrics(font);
 
         gm.cellSize.width = vtbackend::Width::cast_from(m.advance);
-        gm.cellSize.height = vtbackend::Height::cast_from(m.line_height);
-        gm.baseline = m.line_height - m.ascender;
-        gm.underline.position = gm.baseline + m.underline_position;
-        gm.underline.thickness = m.underline_thickness;
+        gm.cellSize.height = vtbackend::Height::cast_from(m.lineHeight);
+        gm.baseline = m.lineHeight - m.ascender;
+        gm.underline.position = gm.baseline + m.underlinePosition;
+        gm.underline.thickness = m.underlineThickness;
 
         rendererLog()("Loading grid metrics {}", gm);
     }

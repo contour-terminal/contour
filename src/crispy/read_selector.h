@@ -53,8 +53,8 @@ class posix_read_selector
 
     void wakeup() noexcept
     {
-        if (_break_pipe[1] != -1)
-            write(_break_pipe[1], "x", 1);
+        if (_breakPipe[1] != -1)
+            write(_breakPipe[1], "x", 1);
     }
 
     std::optional<int> wait_one(std::optional<std::chrono::milliseconds> timeout = std::nullopt) noexcept
@@ -77,11 +77,11 @@ class posix_read_selector
         if (result <= 0)
             return std::nullopt;
 
-        if (FD_ISSET(_break_pipe[0], &_reader))
+        if (FD_ISSET(_breakPipe[0], &_reader))
         {
             // Drain the pipe.
             char buf[256];
-            while (read(_break_pipe[0], buf, sizeof(buf)) > 0)
+            while (read(_breakPipe[0], buf, sizeof(buf)) > 0)
                 ;
             return std::nullopt;
         }
@@ -113,7 +113,7 @@ class posix_read_selector
     fd_set _except {};
     std::vector<int> _fds;
     std::deque<int> _pending;
-    int _break_pipe[2] { -1, -1 };
+    int _breakPipe[2] { -1, -1 };
 };
 
 // {{{ epoll_read_selector, implements waiting for a set of file descriptors to become readable.
@@ -136,29 +136,29 @@ class epoll_read_selector
     std::optional<int> try_pop_pending() noexcept;
 
   private:
-    int _epoll_fd = -1;
-    int _event_fd = -1;
+    int _epollFd = -1;
+    int _eventFd = -1;
     std::deque<int> _pending;
 };
 
 inline epoll_read_selector::epoll_read_selector()
 {
-    _epoll_fd = epoll_create1(EPOLL_CLOEXEC);
-    Require(_epoll_fd != -1);
+    _epollFd = epoll_create1(EPOLL_CLOEXEC);
+    Require(_epollFd != -1);
 
-    _event_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    Require(_event_fd != -1);
+    _eventFd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    Require(_eventFd != -1);
 
     auto event = epoll_event {};
     event.events = EPOLLIN;
-    event.data.fd = _event_fd;
-    epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, _event_fd, &event);
+    event.data.fd = _eventFd;
+    epoll_ctl(_epollFd, EPOLL_CTL_ADD, _eventFd, &event);
 }
 
 inline epoll_read_selector::~epoll_read_selector()
 {
-    close(_epoll_fd);
-    close(_event_fd);
+    close(_epollFd);
+    close(_eventFd);
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
@@ -167,7 +167,7 @@ inline void epoll_read_selector::want_read(int fd) noexcept
     auto event = epoll_event {};
     event.events = EPOLLIN;
     event.data.fd = fd;
-    epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd, &event);
+    epoll_ctl(_epollFd, EPOLL_CTL_ADD, fd, &event);
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
@@ -176,13 +176,13 @@ inline void epoll_read_selector::cancel_read(int fd) noexcept
     auto event = epoll_event {};
     event.events = EPOLLIN;
     event.data.fd = fd;
-    epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, fd, &event);
+    epoll_ctl(_epollFd, EPOLL_CTL_DEL, fd, &event);
 }
 
 inline void epoll_read_selector::wakeup() const noexcept
 {
     auto const value = eventfd_t { 1 };
-    write(_event_fd, &value, sizeof(value));
+    write(_eventFd, &value, sizeof(value));
 }
 
 inline std::optional<int> epoll_read_selector::try_pop_pending() noexcept
@@ -204,7 +204,7 @@ inline std::optional<int> epoll_read_selector::wait_one(
     auto events = std::array<epoll_event, 64> { {} };
     for (;;)
     {
-        auto const result = epoll_wait(_epoll_fd,
+        auto const result = epoll_wait(_epollFd,
                                        events.data(),
                                        events.size(),
                                        timeout.has_value() ? static_cast<int>(timeout.value().count()) : -1);
@@ -224,10 +224,10 @@ inline std::optional<int> epoll_read_selector::wait_one(
         bool piped = false;
         for (size_t i = 0; i < static_cast<size_t>(result); ++i)
         {
-            if (events[i].data.fd == _event_fd)
+            if (events[i].data.fd == _eventFd)
             {
                 eventfd_t dummy {};
-                piped = ::read(_event_fd, &dummy, sizeof(dummy)) > 0;
+                piped = ::read(_eventFd, &dummy, sizeof(dummy)) > 0;
             }
             else
                 _pending.push_back(events[i].data.fd);

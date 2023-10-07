@@ -174,7 +174,7 @@ struct font_description
     font_weight weight = font_weight::normal;
     font_slant slant = font_slant::normal;
     font_spacing spacing = font_spacing::proportional;
-    bool strict_spacing = false;
+    bool strictSpacing = false;
 
     std::vector<font_feature> features;
 
@@ -188,7 +188,7 @@ struct font_description
 inline bool operator==(font_description const& a, font_description const& b)
 {
     return a.familyName == b.familyName && a.weight == b.weight && a.slant == b.slant
-           && a.spacing == b.spacing && a.strict_spacing == b.strict_spacing;
+           && a.spacing == b.spacing && a.strictSpacing == b.strictSpacing;
 }
 
 inline bool operator!=(font_description const& a, font_description const& b)
@@ -198,12 +198,12 @@ inline bool operator!=(font_description const& a, font_description const& b)
 
 struct font_metrics
 {
-    int line_height;
+    int lineHeight;
     int advance;
     int ascender;
     int descender;
-    int underline_position;
-    int underline_thickness;
+    int underlinePosition;
+    int underlineThickness;
 };
 
 struct font_size
@@ -320,7 +320,7 @@ struct hash<text::font_description>
         auto fnv = crispy::fnv<char>();
         return size_t(
             fnv(fnv(fnv(fnv(fnv(fd.familyName), char(fd.weight)), char(fd.slant)), char(fd.spacing)),
-                char(fd.strict_spacing)));
+                char(fd.strictSpacing)));
     }
 };
 } // namespace std
@@ -403,7 +403,7 @@ struct fmt::formatter<text::font_description>: fmt::formatter<std::string>
                         desc.weight,
                         desc.slant,
                         desc.spacing,
-                        desc.strict_spacing ? "yes" : "no"),
+                        desc.strictSpacing ? "yes" : "no"),
             ctx);
     }
 };
@@ -414,12 +414,12 @@ struct fmt::formatter<text::font_metrics>: fmt::formatter<std::string>
     auto format(text::font_metrics const& metrics, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("({}, {}, {}, {}, {}, {})",
-                                                          metrics.line_height,
+                                                          metrics.lineHeight,
                                                           metrics.advance,
                                                           metrics.ascender,
                                                           metrics.descender,
-                                                          metrics.underline_position,
-                                                          metrics.underline_thickness),
+                                                          metrics.underlinePosition,
+                                                          metrics.underlineThickness),
                                               ctx);
     }
 };

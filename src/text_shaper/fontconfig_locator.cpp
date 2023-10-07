@@ -234,7 +234,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
 
         int spacing = -1;
         FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
-        if (description.strict_spacing)
+        if (description.strictSpacing)
         {
             // Some fonts don't seem to tell us their spacing attribute. ;-(
             // But instead of ignoring them all together, try to be more friendly.

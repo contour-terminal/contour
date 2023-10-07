@@ -213,24 +213,24 @@ enum class RenderState
 /// either DirtyIdle if no painting is currently in progress, DirtyPainting otherwise.
 struct RenderStateManager
 {
-    std::atomic<RenderState> state_ = RenderState::CleanIdle;
-    bool renderingPressure_ = false;
+    std::atomic<RenderState> state = RenderState::CleanIdle;
+    bool renderingPressure = false;
 
-    RenderState fetchAndClear() { return state_.exchange(RenderState::CleanPainting); }
+    RenderState fetchAndClear() { return state.exchange(RenderState::CleanPainting); }
 
     bool touch()
     {
         for (;;)
         {
-            auto state = state_.load();
-            switch (state)
+            auto stateTmp = state.load();
+            switch (stateTmp)
             {
                 case RenderState::CleanIdle:
-                    if (state_.compare_exchange_strong(state, RenderState::DirtyIdle))
+                    if (state.compare_exchange_strong(stateTmp, RenderState::DirtyIdle))
                         return true;
                     break;
                 case RenderState::CleanPainting:
-                    if (state_.compare_exchange_strong(state, RenderState::DirtyPainting))
+                    if (state.compare_exchange_strong(stateTmp, RenderState::DirtyPainting))
                         return false;
                     break;
                 case RenderState::DirtyIdle:
@@ -245,8 +245,8 @@ struct RenderStateManager
     {
         for (;;)
         {
-            auto state = state_.load();
-            switch (state)
+            auto stateTmp = state.load();
+            switch (stateTmp)
             {
                 case RenderState::DirtyIdle:
                     // assert(!"The impossible happened, painting but painting. Shakesbeer.");
@@ -255,10 +255,10 @@ struct RenderStateManager
                     [[fallthrough]];
                 case RenderState::DirtyPainting: return false;
                 case RenderState::CleanPainting:
-                    if (!state_.compare_exchange_strong(state, RenderState::CleanIdle))
+                    if (!state.compare_exchange_strong(stateTmp, RenderState::CleanIdle))
                         break;
                     [[fallthrough]];
-                case RenderState::CleanIdle: renderingPressure_ = false; return true;
+                case RenderState::CleanIdle: renderingPressure = false; return true;
             }
         }
     }

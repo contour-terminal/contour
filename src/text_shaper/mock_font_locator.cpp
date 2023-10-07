@@ -49,7 +49,7 @@ font_source_list mock_font_locator::locate(font_description const& description)
         if (item.description.weight != description.weight)
             continue;
 
-        if (item.description.spacing != description.spacing && description.strict_spacing)
+        if (item.description.spacing != description.spacing && description.strictSpacing)
             continue;
 
         output.emplace_back(item.source);

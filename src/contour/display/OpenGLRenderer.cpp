@@ -510,7 +510,7 @@ ImageSize OpenGLRenderer::renderBufferSize()
 
 struct ScopedRenderEnvironment
 {
-    QOpenGLExtraFunctions& _gl;
+    QOpenGLExtraFunctions& gl;
 
     bool savedBlend;          // QML seems to explicitly disable that, but we need it.
     GLenum savedDepthFunc {}; // Shuold be GL_LESS, but you never know.
@@ -518,33 +518,33 @@ struct ScopedRenderEnvironment
     GLenum savedBlendSource {};
     GLenum savedBlendDestination {};
 
-    ScopedRenderEnvironment(QOpenGLExtraFunctions& gl):
-        _gl { gl }, // clang-format off
-        savedBlend { _gl.glIsEnabled(GL_BLEND) != GL_FALSE } // clang-format on
+    ScopedRenderEnvironment(QOpenGLExtraFunctions& glIn):
+        gl { glIn }, // clang-format off
+        savedBlend { gl.glIsEnabled(GL_BLEND) != GL_FALSE } // clang-format on
     {
-        _gl.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, (GLint*) &savedVAO);
+        gl.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, (GLint*) &savedVAO);
 
-        _gl.glGetIntegerv(GL_DEPTH_FUNC, (GLint*) &savedDepthFunc);
-        _gl.glDepthFunc(GL_LEQUAL);
-        _gl.glDepthMask(GL_FALSE);
+        gl.glGetIntegerv(GL_DEPTH_FUNC, (GLint*) &savedDepthFunc);
+        gl.glDepthFunc(GL_LEQUAL);
+        gl.glDepthMask(GL_FALSE);
 
         // Enable color blending to allow drawing text/images on top of background.
-        _gl.glGetIntegerv(GL_BLEND_SRC, (GLint*) &savedBlendSource);
-        _gl.glGetIntegerv(GL_BLEND_DST, (GLint*) &savedBlendDestination);
-        _gl.glEnable(GL_BLEND);
+        gl.glGetIntegerv(GL_BLEND_SRC, (GLint*) &savedBlendSource);
+        gl.glGetIntegerv(GL_BLEND_DST, (GLint*) &savedBlendDestination);
+        gl.glEnable(GL_BLEND);
         // _gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE);
-        _gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+        gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
     }
 
     ~ScopedRenderEnvironment()
     {
-        _gl.glBlendFunc(savedBlendSource, savedBlendDestination);
-        _gl.glDepthFunc(savedDepthFunc);
+        gl.glBlendFunc(savedBlendSource, savedBlendDestination);
+        gl.glDepthFunc(savedDepthFunc);
         if (!savedBlend)
-            _gl.glDisable(GL_BLEND);
+            gl.glDisable(GL_BLEND);
 
-        _gl.glBindVertexArray(savedVAO);
-        _gl.glDepthMask(GL_TRUE);
+        gl.glBindVertexArray(savedVAO);
+        gl.glDepthMask(GL_TRUE);
     }
 };
 

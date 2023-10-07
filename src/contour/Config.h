@@ -137,9 +137,9 @@ struct TerminalProfile
     vtpty::Process::ExecInfo shell;
     bool maximized = false;
     bool fullscreen = false;
-    bool show_title_bar = true;
+    bool showTitleBar = true;
     bool sizeIndicatorOnResize = true;
-    bool mouse_hide_while_typing = true;
+    bool mouseHideWhileTyping = true;
     vtbackend::RefreshRate refreshRate = { 0.0 }; // 0=auto
     vtbackend::LineOffset copyLastMarkRangeOffset = vtbackend::LineOffset(0);
 

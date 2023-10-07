@@ -114,6 +114,10 @@ CheckOptions:
     value:           CamelCase
   - key:             readability-identifier-naming.ClassMemberCase
     value:           camelBack
+  - key:             readability-identifier-naming.PublicMemberCase
+    value:           camelBack
+  - key:             readability-identifier-naming.PrivateMemberCase
+    value:           camelBack
   - key:             readability-identifier-naming.PublicMemberPrefix
     value:           ''
   - key:             readability-identifier-naming.PrivateMemberPrefix
