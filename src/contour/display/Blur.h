@@ -61,21 +61,21 @@ class Blur: protected QOpenGLExtraFunctions
     QOpenGLShaderProgram* _shaderKawaseDown = nullptr;
     //.
 
-    QVector<QOpenGLFramebufferObject*> _FBO_vector;
+    QVector<QOpenGLFramebufferObject*> _vectorFBO;
     QOpenGLTexture* _textureToBlur = nullptr;
 
-    QOpenGLVertexArrayObject _VertexArrayObject;
+    QOpenGLVertexArrayObject _vertexArrayObject;
     QOpenGLBuffer _vertexBuffer;
 
     int _iterations = -1;
     QImage _imageToBlur;
 
     // GPU timer
-    GLuint64 _GPUtimerElapsedTime {};
+    GLuint64 _timerGPUElapsedTime {};
 
     // CPU timer
-    QElapsedTimer _CPUTimer;
-    quint64 _CPUTimerElapsedTime {};
+    QElapsedTimer _timerCPU;
+    quint64 _timerCPUElapsedTime {};
 };
 
 } // namespace contour::display

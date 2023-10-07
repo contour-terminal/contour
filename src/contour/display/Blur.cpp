@@ -87,8 +87,8 @@ Blur::Blur():
     _vertexBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
     _vertexBuffer.allocate(sgVertexes, sizeof(sgVertexes));
 
-    _VertexArrayObject.create();
-    _VertexArrayObject.bind();
+    _vertexArrayObject.create();
+    _vertexArrayObject.bind();
 
     _shaderKawaseUp->enableAttributeArray(0);
     _shaderKawaseUp->setAttributeBuffer(
@@ -107,7 +107,7 @@ Blur::~Blur()
     delete _shaderKawaseDown;
     delete _gaussianBlur;
 
-    for (auto& i: _FBO_vector)
+    for (auto& i: _vectorFBO)
         delete i;
 
     delete _textureToBlur;
@@ -137,11 +137,11 @@ QImage Blur::blurGaussian(QImage imageToBlur)
     glGenQueries(1, &gpuTimerQuery);
     glBeginQuery(GL_TIME_ELAPSED, gpuTimerQuery);
 #endif
-    _CPUTimer.start();
+    _timerCPU.start();
 
-    renderToFBO(_FBO_vector[0], _textureToBlur->textureId(), _gaussianBlur);
+    renderToFBO(_vectorFBO[0], _textureToBlur->textureId(), _gaussianBlur);
 
-    _CPUTimerElapsedTime = (quint64) _CPUTimer.nsecsElapsed();
+    _timerCPUElapsedTime = (quint64) _timerCPU.nsecsElapsed();
 
 #if defined(CONTOUR_GPU_TIMERS)
     glEndQuery(GL_TIME_ELAPSED);
@@ -149,11 +149,11 @@ QImage Blur::blurGaussian(QImage imageToBlur)
     while (!GPUTimerAvailable)
         glGetQueryObjectiv(gpuTimerQuery, GL_QUERY_RESULT_AVAILABLE, &_GPUTimerAvailable);
 
-    glGetQueryObjectui64v(gpuTimerQuery, GL_QUERY_RESULT, &_GPUtimerElapsedTime);
+    glGetQueryObjectui64v(gpuTimerQuery, GL_QUERY_RESULT, &_timerGPUElapsedTime);
     glDeleteQueries(1, &gpuTimerQuery);
 #endif
 
-    auto image = _FBO_vector[0]->toImage();
+    auto image = _vectorFBO[0]->toImage();
     _context->doneCurrent();
 
 #if defined(CONTOUR_GPU_TIMERS)
@@ -186,28 +186,28 @@ QImage Blur::blurDualKawase(QImage imageToBlur, int offset, int iterations)
     glBeginQuery(GL_TIME_ELAPSED, gpuTimerQuery);
 #endif
 
-    _CPUTimer.start();
+    _timerCPU.start();
 
     _shaderKawaseDown->setUniformValue("u_offset", QVector2D((float) offset, (float) offset));
     _shaderKawaseUp->setUniformValue("u_offset", QVector2D((float) offset, (float) offset));
 
     // Initial downsample
     // We only need this helper texture because we can't put a QImage into the texture of a
-    // QOpenGLFramebufferObject Otherwise we would skip this and start the downsampling from _FBO_vector[0]
-    // instead of _FBO_vector[1]
-    renderToFBO(_FBO_vector[1], _textureToBlur->textureId(), _shaderKawaseDown);
+    // QOpenGLFramebufferObject Otherwise we would skip this and start the downsampling from _vectorFBO[0]
+    // instead of _vectorFBO[1]
+    renderToFBO(_vectorFBO[1], _textureToBlur->textureId(), _shaderKawaseDown);
 
     // Downsample
     for (int i = 1; i < iterations; i++)
-        renderToFBO(_FBO_vector[i + 1], _FBO_vector[i]->texture(), _shaderKawaseDown);
+        renderToFBO(_vectorFBO[i + 1], _vectorFBO[i]->texture(), _shaderKawaseDown);
 
     // Upsample
     for (int i = iterations; i > 0; i--)
-        renderToFBO(_FBO_vector[i - 1], _FBO_vector[i]->texture(), _shaderKawaseUp);
+        renderToFBO(_vectorFBO[i - 1], _vectorFBO[i]->texture(), _shaderKawaseUp);
     // --------------- blur end ---------------
 
     // Get the CPU timer result
-    _CPUTimerElapsedTime = (quint64) _CPUTimer.nsecsElapsed();
+    _timerCPUElapsedTime = (quint64) _timerCPU.nsecsElapsed();
 
 // Get the GPU timer result
 #if defined(CONTOUR_GPU_TIMERS)
@@ -216,11 +216,11 @@ QImage Blur::blurDualKawase(QImage imageToBlur, int offset, int iterations)
     while (!GPUTimerAvailable)
         glGetQueryObjectiv(gpuTimerQuery, GL_QUERY_RESULT_AVAILABLE, &GPUTimerAvailable);
 
-    glGetQueryObjectui64v(gpuTimerQuery, GL_QUERY_RESULT, &_GPUtimerElapsedTime);
+    glGetQueryObjectui64v(gpuTimerQuery, GL_QUERY_RESULT, &_timerGPUElapsedTime);
     glDeleteQueries(1, &gpuTimerQuery);
 #endif
 
-    auto image = _FBO_vector[0]->toImage();
+    auto image = _vectorFBO[0]->toImage();
     _context->doneCurrent();
     return image;
 }
@@ -246,19 +246,19 @@ void Blur::renderToFBO(QOpenGLFramebufferObject* targetFBO,
 
 void Blur::initFBOTextures()
 {
-    for (auto& i: _FBO_vector)
+    for (auto& i: _vectorFBO)
         delete i;
 
-    _FBO_vector.clear();
-    _FBO_vector.append(new QOpenGLFramebufferObject(
+    _vectorFBO.clear();
+    _vectorFBO.append(new QOpenGLFramebufferObject(
         _imageToBlur.size(), QOpenGLFramebufferObject::CombinedDepthStencil, GL_TEXTURE_2D));
 
     for (int i = 1; i <= _iterations; i++)
     {
-        _FBO_vector.append(new QOpenGLFramebufferObject(
+        _vectorFBO.append(new QOpenGLFramebufferObject(
             _imageToBlur.size() / qPow(2, i), QOpenGLFramebufferObject::CombinedDepthStencil, GL_TEXTURE_2D));
 
-        CHECKED_GL(glBindTexture(GL_TEXTURE_2D, _FBO_vector.last()->texture()));
+        CHECKED_GL(glBindTexture(GL_TEXTURE_2D, _vectorFBO.last()->texture()));
         CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
         CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
     }
@@ -272,13 +272,13 @@ void Blur::initFBOTextures()
 
 float Blur::getGPUTime() const noexcept
 {
-    float const gpuTime = float(_GPUtimerElapsedTime) / 1000000.f;
+    float const gpuTime = float(_timerGPUElapsedTime) / 1000000.f;
     return roundf(gpuTime * 1000) / 1000;
 }
 
 float Blur::getCPUTime() const noexcept
 {
-    float const cpuTime = float(_CPUTimerElapsedTime) / 1000000.f;
+    float const cpuTime = float(_timerCPUElapsedTime) / 1000000.f;
     return roundf(cpuTime * 1000) / 1000;
 }
 

@@ -231,11 +231,11 @@ struct directwrite_shaper::Private
         fontInfo.description.familyName = wStringConverter.to_bytes(resolvedFamilyName);
         fontInfo.description.wFamilyName = resolvedFamilyName;
         fontInfo.size = _size;
-        fontInfo.metrics.line_height = int(ceil(lineHeight * dipScalar));
+        fontInfo.metrics.lineHeight = int(ceil(lineHeight * dipScalar));
         fontInfo.metrics.ascender = int(ceil(dwMetrics.ascent * dipScalar));
         fontInfo.metrics.descender = int(ceil(dwMetrics.descent * dipScalar));
-        fontInfo.metrics.underline_position = int(ceil(dwMetrics.underlinePosition * dipScalar));
-        fontInfo.metrics.underline_thickness = int(ceil(dwMetrics.underlineThickness * dipScalar));
+        fontInfo.metrics.underlinePosition = int(ceil(dwMetrics.underlinePosition * dipScalar));
+        fontInfo.metrics.underlineThickness = int(ceil(dwMetrics.underlineThickness * dipScalar));
         fontInfo.metrics.advance = int(ceil(computeAverageAdvance(fontFace) * dipScalar));
 
         fontFace->QueryInterface(&fontInfo.fontFace);

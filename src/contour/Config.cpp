@@ -1365,7 +1365,7 @@ namespace
                              terminalProfile.copyLastMarkRangeOffset,
                              logger);
         tryLoadChildRelative(
-            usedKeys, profile, basePath, "show_title_bar", terminalProfile.show_title_bar, logger);
+            usedKeys, profile, basePath, "show_title_bar", terminalProfile.showTitleBar, logger);
         tryLoadChildRelative(usedKeys,
                              profile,
                              basePath,
@@ -1683,7 +1683,7 @@ namespace
                              profile,
                              basePath,
                              "mouse.hide_while_typing",
-                             terminalProfile.mouse_hide_while_typing,
+                             terminalProfile.mouseHideWhileTyping,
                              logger);
 
         tryLoadChildRelative(usedKeys,

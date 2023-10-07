@@ -405,7 +405,7 @@ struct open_shaper::Private // {{{
     // (file_path, file_mtime, font_weight, font_slant, pixel_size)
 
     unordered_map<glyph_key, rasterized_glyph> glyphs;
-    hb_buffer_ptr hb_buf;
+    hb_buffer_ptr hbBuf;
     font_key nextFontKey;
 
     font_key create_font_key()
@@ -458,14 +458,14 @@ struct open_shaper::Private // {{{
 
         font_metrics output {};
 
-        output.line_height = scaleVertical(ftFace, ftFace->height);
+        output.lineHeight = scaleVertical(ftFace, ftFace->height);
         output.advance = computeAverageAdvance(ftFace);
         if (!output.advance)
-            output.advance = int(double(output.line_height) * 2.0 / 3.0);
+            output.advance = int(double(output.lineHeight) * 2.0 / 3.0);
         output.ascender = scaleVertical(ftFace, ftFace->ascender);
         output.descender = scaleVertical(ftFace, ftFace->descender);
-        output.underline_position = scaleVertical(ftFace, ftFace->underline_position);
-        output.underline_thickness = scaleVertical(ftFace, ftFace->underline_thickness);
+        output.underlinePosition = scaleVertical(ftFace, ftFace->underline_position);
+        output.underlineThickness = scaleVertical(ftFace, ftFace->underline_thickness);
 
         return output;
     }
@@ -476,7 +476,7 @@ struct open_shaper::Private // {{{
         } },
         locator { &locator },
         dpi { dpi },
-        hb_buf(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
+        hbBuf(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
         nextFontKey {}
     {
         if (auto const ec = FT_Init_FreeType(&ft); ec != FT_Err_Ok)
@@ -510,7 +510,7 @@ struct open_shaper::Private // {{{
                 continue;
 
             // Skip if main font is monospace but fallbacks font is not.
-            if (fontInfo.description.strict_spacing
+            if (fontInfo.description.strictSpacing
                 && fontInfo.description.spacing != font_spacing::proportional)
             {
                 Require(fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
@@ -650,7 +650,7 @@ void open_shaper::shape(font_key font,
     Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
     HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
     hb_font_t* hbFont = fontInfo.hbFont.get();
-    hb_buffer_t* hbBuf = _d->hb_buf.get();
+    hb_buffer_t* hbBuf = _d->hbBuf.get();
 
     if (textShapingLog)
     {

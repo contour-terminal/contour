@@ -632,7 +632,7 @@ void TerminalSession::sendKeyPressEvent(Key key, Modifier modifier, Timestamp no
         return;
     }
 
-    if (_profile.mouse_hide_while_typing)
+    if (_profile.mouseHideWhileTyping)
         _display->setMouseCursorShape(MouseCursorShape::Hidden);
 
     if (auto const* actions =
@@ -655,7 +655,7 @@ void TerminalSession::sendCharPressEvent(char32_t value, Modifier modifier, Time
         return;
     }
 
-    if (_profile.mouse_hide_while_typing)
+    if (_profile.mouseHideWhileTyping)
         _display->setMouseCursorShape(MouseCursorShape::Hidden);
 
     if (auto const* actions =
