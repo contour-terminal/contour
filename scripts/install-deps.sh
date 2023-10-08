@@ -268,6 +268,7 @@ install_deps_ubuntu()
             qml6-module-qtmultimedia
             qml6-module-qtquick-templates
             qml6-module-qtquick-window
+            qml6-module-qt5compat-graphicaleffects
             qt6-base-dev
             qt6-base-dev-tools
             qt6-declarative-dev
@@ -301,10 +302,10 @@ install_deps_ubuntu()
             packages="$packages g++-8"
         fi
         if [ "$RELEASE" = "22.04" ] || [ "$RELEASE" = "22.10"  ]; then
-            packages="$packages qml6-module-qt5compat-graphicaleffects "
+            packages="$packages"
         fi
         if [ "$RELEASE" = "23.04" ]; then
-            packages="$packages qml6-moduile-qtquick3d-spatialaudio qml6-module-qt5compat-graphicaleffects"
+            packages="$packages qml6-moduile-qtquick3d-spatialaudio"
         fi
 
     fi
