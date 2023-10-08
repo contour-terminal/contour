@@ -588,13 +588,13 @@ class Terminal
     void notify(std::string_view title, std::string_view body);
     void reply(std::string_view text);
 
-    template <typename... T>
-    void reply(fmt::format_string<T...> fmt, T&&... args)
+    template <typename... Ts>
+    void reply(fmt::format_string<Ts...> message, Ts&&... args)
     {
-#if defined(__APPLE__)
-        reply(fmt::vformat(fmt, fmt::make_format_args(args...)));
+#if defined(__APPLE__) || defined(_MSC_VER)
+        reply(fmt::vformat(message, fmt::make_format_args(args...)));
 #else
-        reply(fmt::vformat(fmt, fmt::make_format_args(std::forward<T>(args)...)));
+        reply(fmt::vformat(message, fmt::make_format_args(std::forward<Ts>(args)...)));
 #endif
     }
 
