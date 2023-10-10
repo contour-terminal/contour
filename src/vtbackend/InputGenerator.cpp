@@ -302,13 +302,6 @@ void InputGenerator::setApplicationKeypadMode(bool enable)
     inputLog()("set application keypad mode: {} -> {}", enable, _numpadKeysMode);
 }
 
-bool InputGenerator::generate(u32string const& characterEvent, Modifier modifier)
-{
-    for (char32_t const ch: characterEvent)
-        generate(ch, modifier);
-    return true;
-}
-
 bool InputGenerator::generate(char32_t characterEvent, Modifier modifier)
 {
     char const chr = static_cast<char>(characterEvent);

@@ -284,7 +284,6 @@ class InputGenerator
     [[nodiscard]] bool passiveMouseTracking() const noexcept { return _passiveMouseTracking; }
 
     bool generate(char32_t characterEvent, Modifier modifier);
-    bool generate(std::u32string const& characterEvent, Modifier modifier);
     bool generate(Key key, Modifier modifier);
     void generatePaste(std::string_view const& text);
     bool generateMousePress(Modifier modifier,
