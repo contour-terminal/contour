@@ -375,12 +375,10 @@ class Terminal
     [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
     [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
 
-    void setDefaultColorPalette(ColorPalette palette) noexcept
+    void setColorPalette(ColorPalette const& palette) noexcept
     {
-        _state.defaultColorPalette = std::move(palette);
+        _state.colorPalette = palette;
     }
-
-    void setColorPalette(ColorPalette const& palette) noexcept { _state.colorPalette = palette; }
 
     void resetColorPalette() noexcept { setColorPalette(defaultColorPalette()); }
 
