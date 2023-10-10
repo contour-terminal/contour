@@ -17,6 +17,12 @@
 namespace vtbackend
 {
 
+enum class ColorPreference
+{
+    Dark,
+    Light,
+};
+
 struct ImageData
 {
     vtbackend::ImageFormat format;
@@ -140,6 +146,21 @@ RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target
 } // namespace vtbackend
 
 // {{{ fmtlib custom formatter support
+template <>
+struct fmt::formatter<vtbackend::ColorPreference>: fmt::formatter<std::string_view>
+{
+    auto format(vtbackend::ColorPreference value, format_context& ctx) -> format_context::iterator
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::ColorPreference::Dark: name = "Dark"; break;
+            case vtbackend::ColorPreference::Light: name = "Light"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
 template <>
 struct fmt::formatter<vtbackend::ColorMode>: fmt::formatter<std::string_view>
 {

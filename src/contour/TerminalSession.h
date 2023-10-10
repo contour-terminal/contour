@@ -4,6 +4,7 @@
 #include <contour/Actions.h>
 #include <contour/Audio.h>
 #include <contour/Config.h>
+#include <contour/helper.h>
 
 #include <vtbackend/Terminal.h>
 
@@ -18,9 +19,7 @@
 #include <QtQml/QJSValue>
 
 #include <cstdint>
-#include <filesystem>
 #include <thread>
-#include <variant>
 
 #include <qcolor.h>
 
@@ -98,7 +97,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     }
     QString pathToBackground() const
     {
-        if (const auto& p = std::get_if<std::filesystem::path>(&(profile().colors.backgroundImage->location)))
+        if (const auto& p =
+                std::get_if<std::filesystem::path>(&(_terminal.colorPalette().backgroundImage->location)))
         {
             return QString("file:") + QString(p->string().c_str());
         }
@@ -108,19 +108,19 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     QColor getBackgroundColor() const noexcept
     {
         auto color = terminal().isModeEnabled(vtbackend::DECMode::ReverseVideo)
-                         ? _profile.colors.defaultForeground
-                         : _profile.colors.defaultBackground;
+                         ? _terminal.colorPalette().defaultForeground
+                         : _terminal.colorPalette().defaultBackground;
         return QColor(color.red, color.green, color.blue, static_cast<uint8_t>(_profile.backgroundOpacity));
     }
     float getOpacityBackground() const noexcept
     {
-        if (profile().colors.backgroundImage)
-            return profile().colors.backgroundImage->opacity;
+        if (_terminal.colorPalette().backgroundImage)
+            return _terminal.colorPalette().backgroundImage->opacity;
         return 0.0;
     }
     bool getIsImageBackground() const noexcept
     {
-        if (profile().colors.backgroundImage)
+        if (_terminal.colorPalette().backgroundImage)
             return true;
         return false;
     }
@@ -128,7 +128,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool getIsBlurBackground() const noexcept
     {
         if (getIsImageBackground())
-            return profile().colors.backgroundImage->blur;
+            return _terminal.colorPalette().backgroundImage->blur;
         return false;
     }
 
@@ -218,6 +218,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_INVOKABLE void executePendingBufferCapture(bool answer, bool remember);
     Q_INVOKABLE void executeShowHostWritableStatusLine(bool answer, bool remember);
     Q_INVOKABLE void requestWindowResize(QJSValue w, QJSValue h);
+
+    void updateColorPreference(vtbackend::ColorPreference preference);
 
     // vtbackend::Events
     //
@@ -385,6 +387,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     config::TerminalProfile _profile;
     double _contentScale = 1.0;
     ContourGuiApp& _app;
+    vtbackend::ColorPreference _currentColorPreference;
 
     vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;

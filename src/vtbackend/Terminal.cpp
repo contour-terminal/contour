@@ -1704,7 +1704,8 @@ void Terminal::softReset()
     setLeftRightMargin({}, boxed_cast<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1)); // DECRLM
 
     _currentScreen.get().cursor().hyperlink = {};
-    _state.colorPalette = _state.defaultColorPalette;
+
+    resetColorPalette();
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
@@ -1769,7 +1770,7 @@ void Terminal::hardReset()
     _state.imagePool.clear();
     _state.tabs.clear();
 
-    _state.colorPalette = _state.defaultColorPalette;
+    resetColorPalette();
 
     _hostWritableStatusLineScreen.margin() = Margin {
         Margin::Vertical { {}, boxed_cast<LineOffset>(_hostWritableStatusLineScreen.pageSize().lines) - 1 },
@@ -2183,6 +2184,22 @@ void Terminal::setHighlightRange(HighlightRange highlightRange)
 
 constexpr auto MagicStackTopId = size_t { 0 };
 
+void Terminal::setColorPalette(ColorPalette const& palette) noexcept
+{
+    _state.colorPalette = palette;
+}
+
+void Terminal::resetColorPalette(ColorPalette const& colors)
+{
+    _state.colorPalette = colors;
+    _state.defaultColorPalette = colors;
+    _settings.colorPalette = colors;
+    _factorySettings.colorPalette = colors;
+
+    if (isModeEnabled(DECMode::ReportColorPaletteUpdated))
+        _currentScreen.get().reportColorPaletteUpdate();
+}
+
 void Terminal::pushColorPalette(size_t slot)
 {
     if (slot > MaxColorPaletteSaveStackSize)
@@ -2217,7 +2234,7 @@ void Terminal::popColorPalette(size_t slot)
 
     auto const index = slot == MagicStackTopId ? _state.savedColorPalettes.size() - 1 : slot - 1;
 
-    _state.colorPalette = _state.savedColorPalettes[index];
+    setColorPalette(_state.savedColorPalettes[index]);
     if (slot == MagicStackTopId)
         _state.savedColorPalettes.pop_back();
 }

@@ -12,7 +12,12 @@
 #include <crispy/utils.h>
 
 #include <QtCore/QProcess>
+#if !defined(__APPLE__) && !defined(_WIN32)
+    #include <QtDBus/QDBusConnection>
+#endif
+#include <QtDBus/QtDBus>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QStyleHints>
 #include <QtGui/QSurfaceFormat>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
@@ -346,6 +351,25 @@ int ContourGuiApp::terminalGuiAction()
 
     // NB: We use QApplication over QGuiApplication because we want to use SystemTrayIcon.
     QApplication app(qtArgsCount, (char**) qtArgsPtr.data());
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    _colorPreference = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark
+                           ? vtbackend::ColorPreference::Dark
+                           : vtbackend::ColorPreference::Light;
+
+    displayLog()("Color theme mode at startup: {}", _colorPreference);
+
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, [&](Qt::ColorScheme newScheme) {
+        auto const newValue = newScheme == Qt::ColorScheme::Dark ? vtbackend::ColorPreference::Dark
+                                                                 : vtbackend::ColorPreference::Light;
+        if (_colorPreference == newValue)
+            return;
+
+        _colorPreference = newValue;
+        displayLog()("Color preference changed to {} mode\n", _colorPreference);
+        sessionsManager().updateColorPreference(_colorPreference);
+    });
+#endif
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     // Enforce OpenGL over any other. As much as I'd love to provide other backends, too.

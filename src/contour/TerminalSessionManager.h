@@ -1,6 +1,7 @@
 #pragma once
 
 #include <contour/TerminalSession.h>
+#include <contour/helper.h>
 
 #include <QtCore/QAbstractListModel>
 #include <QtQml/QQmlEngine>
@@ -33,6 +34,8 @@ class TerminalSessionManager: public QAbstractListModel
     Q_INVOKABLE [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;
 
     [[nodiscard]] int count() const noexcept { return static_cast<int>(_sessions.size()); }
+
+    void updateColorPreference(vtbackend::ColorPreference const& preference);
 
   private:
     ContourGuiApp& _app;

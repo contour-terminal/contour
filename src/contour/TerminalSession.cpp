@@ -12,6 +12,7 @@
 #include <vtpty/Pty.h>
 
 #include <crispy/StackTrace.h>
+#include <crispy/assert.h>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
@@ -72,6 +73,24 @@ namespace
 #endif
     }
 
+    ColorPalette const* preferredColorPalette(config::ColorConfig const& config,
+                                              vtbackend::ColorPreference preference)
+    {
+        if (auto const* dualColorConfig = std::get_if<config::DualColorConfig>(&config))
+        {
+            switch (preference)
+            {
+                case vtbackend::ColorPreference::Dark: return &dualColorConfig->darkMode;
+                case vtbackend::ColorPreference::Light: return &dualColorConfig->lightMode;
+            }
+        }
+        else if (auto const* simpleColorConfig = std::get_if<config::SimpleColorConfig>(&config))
+            return &simpleColorConfig->colors;
+
+        errorLog()("preferredColorPalette: Unknown color config type.");
+        return nullptr;
+    }
+
     string normalize_crlf(QString&& text)
     {
 #if !defined(_WIN32)
@@ -100,7 +119,8 @@ namespace
     }
 
     vtbackend::Settings createSettingsFromConfig(config::Config const& config,
-                                                 config::TerminalProfile const& profile)
+                                                 config::TerminalProfile const& profile,
+                                                 ColorPreference colorPreference)
     {
         auto settings = vtbackend::Settings {};
 
@@ -118,7 +138,8 @@ namespace
         settings.statusDisplayPosition = profile.statusDisplayPosition;
         settings.syncWindowTitleWithHostWritableStatusDisplay =
             profile.syncWindowTitleWithHostWritableStatusDisplay;
-        settings.colorPalette = profile.colors;
+        if (auto const* p = preferredColorPalette(profile.colors, colorPreference))
+            settings.colorPalette = *p;
         settings.refreshRate = profile.refreshRate;
         settings.primaryScreen.allowReflowOnResize = config.reflowOnResize;
         settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord;
@@ -143,9 +164,11 @@ TerminalSession::TerminalSession(unique_ptr<vtpty::Pty> pty, ContourGuiApp& app)
     _profileName { app.profileName() },
     _profile { *_config.profile(_profileName) },
     _app { app },
-    _terminal {
-        *this, std::move(pty), createSettingsFromConfig(_config, _profile), std::chrono::steady_clock::now()
-    }
+    _currentColorPreference { app.colorPreference() },
+    _terminal { *this,
+                std::move(pty),
+                createSettingsFromConfig(_config, _profile, _currentColorPreference),
+                std::chrono::steady_clock::now() }
 {
     if (app.liveConfig())
     {
@@ -339,6 +362,20 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
             }
             break;
         }
+    }
+}
+
+void TerminalSession::updateColorPreference(vtbackend::ColorPreference preference)
+{
+    if (preference == _currentColorPreference)
+        return;
+
+    _currentColorPreference = preference;
+    if (auto const* colorPalette = preferredColorPalette(_profile.colors, preference))
+    {
+        _terminal.resetColorPalette(*colorPalette);
+
+        emit backgroundColorChanged();
     }
 }
 
@@ -1299,8 +1336,7 @@ void TerminalSession::configureTerminal()
     //     return;
 
     configureCursor(_profile.inputModes.insert.cursor);
-    _terminal.colorPalette() = _profile.colors;
-    _terminal.defaultColorPalette() = _profile.colors;
+    updateColorPreference(_app.colorPreference());
     _terminal.setMaxHistoryLineCount(_profile.maxHistoryLineCount);
     _terminal.setHighlightTimeout(_profile.highlightTimeout);
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff);

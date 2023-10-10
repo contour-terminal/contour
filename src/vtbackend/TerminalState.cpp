@@ -10,6 +10,8 @@ class Terminal;
 TerminalState::TerminalState(Terminal& terminal):
     settings { terminal.settings() },
     cellPixelSize {},
+    defaultColorPalette { settings.colorPalette },
+    colorPalette { settings.colorPalette },
     effectiveImageCanvasSize { settings.maxImageSize },
     imageColorPalette { std::make_shared<SixelColorPalette>(maxImageColorRegisters, maxImageColorRegisters) },
     imagePool { [te = &terminal](Image const* image) {
@@ -79,6 +81,7 @@ std::string to_string(DECMode mode)
         case DECMode::Unicode: return "Unicode";
         case DECMode::TextReflow: return "TextReflow";
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
+        case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
     }
     return fmt::format("({})", static_cast<unsigned>(mode));
 }

@@ -111,7 +111,6 @@ target_compile_definitions(contour PRIVATE
 )
 
 set_target_properties(contour PROPERTIES AUTOMOC ON)
-
 set_target_properties(contour PROPERTIES AUTORCC ON)
 
 # Disable all deprecated Qt functions prior to Qt 6.0

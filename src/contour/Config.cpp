@@ -985,7 +985,6 @@ namespace
     {
         if (!node)
             return;
-        ;
 
         usedKeys.emplace(basePath);
         using vtbackend::RGBColor;
@@ -1159,6 +1158,37 @@ namespace
         return colors;
     }
 
+    vtbackend::ColorPalette loadColorSchemeByName(
+        UsedKeys& usedKeys,
+        string const& path,
+        YAML::Node const& nameNode,
+        unordered_map<string, vtbackend::ColorPalette> const& colorschemes,
+        logstore::message_builder& logger)
+    {
+        auto const name = nameNode.as<string>();
+        if (auto i = colorschemes.find(name); i != colorschemes.end())
+        {
+            usedKeys.emplace(path);
+            return i->second;
+        }
+
+        for (fs::path const& prefix: configHomes("contour"))
+        {
+            auto const filePath = prefix / "colorschemes" / (name + ".yml");
+            auto fileContents = readFile(filePath);
+            if (!fileContents)
+                continue;
+            YAML::Node subDocument = YAML::Load(fileContents.value());
+            UsedKeys usedColorKeys;
+            auto colors = loadColorScheme(usedColorKeys, "", subDocument);
+            // TODO: Check usedColorKeys for validity.
+            configLog()("Loaded colors from {}.", filePath.string());
+            return colors;
+        }
+        logger("Could not open colorscheme file for \"{}\".", name);
+        return vtbackend::ColorPalette {};
+    }
+
     void softLoadFont(UsedKeys& usedKeys,
                       string_view basePath,
                       YAML::Node const& node,
@@ -1301,40 +1331,29 @@ namespace
                                unordered_map<string, vtbackend::ColorPalette> const& colorschemes,
                                logstore::message_builder logger)
     {
-
         if (auto colors = profile["colors"]; colors) // {{{
         {
             usedKeys.emplace(fmt::format("{}.{}.colors", parentPath, profileName));
             auto const path = fmt::format("{}.{}.{}", parentPath, profileName, "colors");
             if (colors.IsMap())
-                terminalProfile.colors = loadColorScheme(usedKeys, path, colors);
-            else if (auto i = colorschemes.find(colors.as<string>()); i != colorschemes.end())
             {
-                usedKeys.emplace(path);
-                terminalProfile.colors = i->second;
+                terminalProfile.colors =
+                    DualColorConfig { .darkMode = loadColorSchemeByName(
+                                          usedKeys, path + ".dark", colors["dark"], colorschemes, logger),
+                                      .lightMode = loadColorSchemeByName(
+                                          usedKeys, path + ".light", colors["light"], colorschemes, logger) };
+#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
+                errorLog()("Dual color scheme is not supported by your local Qt version. "
+                           "Falling back to single color scheme.");
+#endif
             }
             else if (colors.IsScalar())
             {
-                bool found = false;
-                for (fs::path const& prefix: configHomes("contour"))
-                {
-                    auto const filePath = prefix / "colorschemes" / (colors.as<string>() + ".yml");
-                    auto fileContents = readFile(filePath);
-                    if (!fileContents)
-                        continue;
-                    YAML::Node subDocument = YAML::Load(fileContents.value());
-                    UsedKeys usedColorKeys;
-                    terminalProfile.colors = loadColorScheme(usedColorKeys, "", subDocument);
-                    // TODO: Check usedColorKeys for validity.
-                    configLog()("Loaded colors from {}.", filePath.string());
-                    found = true;
-                    break;
-                }
-                if (!found)
-                    logger("Could not open colorscheme file for \"{}\".", colors.as<string>());
+                terminalProfile.colors =
+                    SimpleColorConfig { loadColorSchemeByName(usedKeys, path, colors, colorschemes, logger) };
             }
             else
-                logger("scheme '{}' not found.", colors.as<string>());
+                logger("Invalid colors value.");
         }
         else
             logger("No colors section in profile {} found.", profileName);
@@ -1372,12 +1391,18 @@ namespace
                              "size_indicator_on_resize",
                              terminalProfile.sizeIndicatorOnResize,
                              logger);
-        tryLoadChildRelative(usedKeys,
-                             profile,
-                             basePath,
-                             "draw_bold_text_with_bright_colors",
-                             terminalProfile.colors.useBrightColors,
-                             logger);
+        bool useBrightColors = false;
+        tryLoadChildRelative(
+            usedKeys, profile, basePath, "draw_bold_text_with_bright_colors", useBrightColors, logger);
+
+        if (auto* simple = get_if<SimpleColorConfig>(&terminalProfile.colors))
+            simple->colors.useBrightColors = useBrightColors;
+        else if (auto* dual = get_if<DualColorConfig>(&terminalProfile.colors))
+        {
+            dual->darkMode.useBrightColors = useBrightColors;
+            dual->lightMode.useBrightColors = useBrightColors;
+        }
+
         tryLoadChildRelative(usedKeys, profile, basePath, "wm_class", terminalProfile.wmClass, logger);
 
         if (auto args = profile["arguments"]; args && args.IsSequence())
@@ -2026,19 +2051,11 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     if (auto colorschemes = doc["color_schemes"]; colorschemes)
     {
         usedKeys.emplace("color_schemes");
-        // load default colorschemes
-        const std::string nameDefault = "default";
-        auto const pathDefault = "color_schemes." + nameDefault;
-        config.colorschemes[nameDefault] =
-            loadColorScheme(usedKeys, pathDefault, colorschemes.begin()->second);
 
         for (auto i = colorschemes.begin(); i != colorschemes.end(); ++i)
         {
             auto const name = i->first.as<string>();
-            if (name == nameDefault)
-                continue;
             auto const path = "color_schemes." + name;
-            config.colorschemes[name] = config.colorschemes[nameDefault];
             updateColorScheme(config.colorschemes[name], usedKeys, path, i->second);
         }
     }

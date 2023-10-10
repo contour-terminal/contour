@@ -15,6 +15,7 @@ _deps/**
 out
 out/**
 CMakeSettings.json
+vcpkg_installed/**
 
 # VIM: code completion / IntelliSense
 .clangd

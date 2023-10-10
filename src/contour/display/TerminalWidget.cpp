@@ -37,11 +37,8 @@
 #include <QtQml/QQmlContext>
 #include <QtQuick/QQuickWindow>
 
-#include <algorithm>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -292,7 +289,7 @@ void TerminalWidget::setSession(TerminalSession* newSession)
     _renderer =
         make_unique<vtrasterizer::Renderer>(newSession->profile().terminalSize,
                                             sanitizeFontDescription(profile().fonts, fontDPI()),
-                                            newSession->profile().colors,
+                                            _session->terminal().colorPalette(),
                                             newSession->config().textureAtlasHashtableSlots,
                                             newSession->config().textureAtlasTileCount,
                                             newSession->config().textureAtlasDirectMapping,

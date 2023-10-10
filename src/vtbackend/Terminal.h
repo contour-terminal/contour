@@ -375,6 +375,10 @@ class Terminal
     [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
     [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
 
+    void setColorPalette(ColorPalette const& palette) noexcept;
+    void resetColorPalette() noexcept { setColorPalette(defaultColorPalette()); }
+    void resetColorPalette(ColorPalette const& colors);
+
     void pushColorPalette(size_t slot);
     void popColorPalette(size_t slot);
     void reportColorPaletteStack();
@@ -588,13 +592,13 @@ class Terminal
     void notify(std::string_view title, std::string_view body);
     void reply(std::string_view text);
 
-    template <typename... T>
-    void reply(fmt::format_string<T...> fmt, T&&... args)
+    template <typename... Ts>
+    void reply(fmt::format_string<Ts...> message, Ts&&... args)
     {
-#if defined(__APPLE__)
-        reply(fmt::vformat(fmt, fmt::make_format_args(args...)));
+#if defined(__APPLE__) || defined(_MSC_VER)
+        reply(fmt::vformat(message, fmt::make_format_args(args...)));
 #else
-        reply(fmt::vformat(fmt, fmt::make_format_args(std::forward<T>(args)...)));
+        reply(fmt::vformat(message, fmt::make_format_args(std::forward<Ts>(args)...)));
 #endif
     }
 
@@ -691,6 +695,7 @@ class Terminal
     [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
         CellLocation position) const noexcept;
 
+    Settings& factorySettings() noexcept { return _factorySettings; }
     Settings const& factorySettings() const noexcept { return _factorySettings; }
     Settings const& settings() const noexcept { return _settings; }
     Settings& settings() noexcept { return _settings; }
