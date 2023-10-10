@@ -10,6 +10,8 @@ class Terminal;
 TerminalState::TerminalState(Terminal& terminal):
     settings { terminal.settings() },
     cellPixelSize {},
+    defaultColorPalette { settings.colorPalette },
+    colorPalette { settings.colorPalette },
     effectiveImageCanvasSize { settings.maxImageSize },
     imageColorPalette { std::make_shared<SixelColorPalette>(maxImageColorRegisters, maxImageColorRegisters) },
     imagePool { [te = &terminal](Image const* image) {
