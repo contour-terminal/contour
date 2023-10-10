@@ -57,5 +57,6 @@ the terminal to scroll the view to make that target line visible.
 - `i(`, `a(` - round brackets enclosed string
 - `i'`, `a'` - single quoted string
 - `i\``, `a\`` - backtick enclosed string
-- `i[`, `a[` - square bracket encoded string
-- `iw`, `aw` - (space delimited) word
+- `i[`, `a[` - square bracket enclosed string
+- `iw`, `aw` - regular word
+- `iW`, `aW` - space delimited word
