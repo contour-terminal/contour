@@ -50,6 +50,7 @@ class ScreenBase: public SequenceHandler
     void resetSavedCursorState() { _savedCursor = {}; }
     virtual void saveCursor() = 0;
     virtual void restoreCursor() = 0;
+    virtual void reportColorPaletteUpdate() = 0;
 
     [[nodiscard]] virtual Margin margin() const noexcept = 0;
     [[nodiscard]] virtual Margin& margin() noexcept = 0;
@@ -220,6 +221,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void deviceStatusReport();           // DSR
     void reportCursorPosition();         // CPR
     void reportExtendedCursorPosition(); // DECXCPR
+    void reportColorPaletteUpdate() override;
     void selectConformanceLevel(VTType level);
     void requestDynamicColor(DynamicColorName name);
     void requestCapability(capabilities::Code code);

@@ -129,6 +129,8 @@
           <li>Removes the ability to inline colorschemes within a configuration profile. Colorschemes must now always be referenced by their name.</li>
           <li>Adds the ability to chose a color scheme based on the operating systems's dark/light mode setting. This will change live whenever the OS's dark/light mode setting changes as well (#604).</li>
           <li>Adds VT sequence DECSSCLS (change scroll speed) and properly handle DECSCLM (enable slow scrolling mode) (#1204)</li>
+          <li>Adds VT sequence parameter ?996 to DSR to request a report of current color scheme dark/light mode hint.</li>
+          <li>Adds VT sequence `SM ?2031` and `RM ?2031` to enable/disable unsolicited DSR for color scheme updates by the user or OS.</li>
           <li>Adds percentage value to Indicator Statusline to indicate scroll offset in scrollback buffer.</li>
           <li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
           <li>Adds config option `profile.*.bell` to adjust BEL behavior and fixes (#1162) and (#1163).</li>

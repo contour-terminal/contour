@@ -686,6 +686,10 @@ enum class DECMode
     // intersecting with the main page area.
     ReportGridCellSelection = 2030,
 
+    // If enabled, the terminal will report color palette changes to the application,
+    // if modified by the user or operating system (e.g. dark/light mode adaption).
+    ReportColorPaletteUpdated = 2031,
+
     // If enabled (default, as per spec), then the cursor is left next to the graphic,
     // that is, the text cursor is placed at the position of the sixel cursor.
     // If disabled otherwise, the cursor is placed below the image, as if CR LF was sent,
@@ -791,6 +795,7 @@ constexpr unsigned toDECModeNum(DECMode m)
         case DECMode::MouseAlternateScroll: return 1007;
         case DECMode::MousePassiveTracking: return 2029;
         case DECMode::ReportGridCellSelection: return 2030;
+        case DECMode::ReportColorPaletteUpdated: return 2031;
         case DECMode::BatchedRendering: return 2026;
         case DECMode::Unicode: return 2027;
         case DECMode::TextReflow: return 2028;
@@ -837,6 +842,7 @@ constexpr bool isValidDECMode(unsigned int mode) noexcept
         case DECMode::MouseAlternateScroll:
         case DECMode::MousePassiveTracking:
         case DECMode::ReportGridCellSelection:
+        case DECMode::ReportColorPaletteUpdated:
         case DECMode::BatchedRendering:
         case DECMode::Unicode:
         case DECMode::TextReflow:

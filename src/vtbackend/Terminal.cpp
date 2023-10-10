@@ -2195,6 +2195,9 @@ void Terminal::resetColorPalette(ColorPalette const& colors)
     _state.defaultColorPalette = colors;
     _settings.colorPalette = colors;
     _factorySettings.colorPalette = colors;
+
+    if (isModeEnabled(DECMode::ReportColorPaletteUpdated))
+        _currentScreen.get().reportColorPaletteUpdate();
 }
 
 void Terminal::pushColorPalette(size_t slot)

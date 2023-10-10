@@ -78,6 +78,9 @@ using std::vector;
 namespace vtbackend
 {
 
+auto constexpr inline ColorPaletteUpdateDsrRequestId = 996;
+auto constexpr inline ColorPaletteUpdateDsrReplyId = 997;
+
 auto constexpr inline TabWidth = ColumnCount(8);
 
 auto const inline vtCaptureBufferLog = logstore::category("vt.ext.capturebuffer",
@@ -92,6 +95,11 @@ auto const inline vtCaptureBufferLog = logstore::category("vt.ext.capturebuffer"
 
 namespace // {{{ helper
 {
+    constexpr bool isLightColor(RGBColor color) noexcept
+    {
+        return ((5 * color.green) + (2 * color.red) + color.blue) > 8 * 128;
+    }
+
     template <typename Rep, typename Period>
     inline void sleep_for(std::chrono::duration<Rep, Period> const& rtime)
     {
@@ -875,6 +883,19 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::reportCursorPosition()
 {
     _terminal->reply("\033[{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1);
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void Screen<Cell>::reportColorPaletteUpdate()
+{
+    auto constexpr DarkModeHint = 1;
+    auto constexpr LightModeHint = 2;
+
+    auto const modeHint = isLightColor(_state->colorPalette.defaultForeground) ? DarkModeHint : LightModeHint;
+
+    _terminal->reply("\033[?{};{}n", ColorPaletteUpdateDsrReplyId, modeHint);
+    _terminal->flushInput();
 }
 
 template <typename Cell>
@@ -2800,6 +2821,9 @@ namespace impl
         {
             switch (seq.param(0))
             {
+                case ColorPaletteUpdateDsrRequestId:
+                    screen.reportColorPaletteUpdate();
+                    return ApplyResult::Ok;
                 default: return ApplyResult::Unsupported;
             }
         }

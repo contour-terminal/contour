@@ -107,6 +107,7 @@ nav:
     - vt-extensions/index.md
     - vt-extensions/clickable-links.md
     - vt-extensions/vertical-line-marks.md
+    - vt-extensions/color-palette-update-notifications.md
     - vt-extensions/synchronized-output.md
     - vt-extensions/buffer-capture.md
     - vt-extensions/font-settings.md
