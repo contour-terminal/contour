@@ -494,6 +494,13 @@ void TerminalSession::copyToClipboard(std::string_view data)
     _display->post([this, data = string(data)]() { _display->copyToClipboard(data); });
 }
 
+void TerminalSession::openDocument(std::string_view fileOrUrl)
+{
+    auto stripped = strip_if(string(fileOrUrl), true);
+    fmt::print("TerminalSession.openDocument: {}\n", fileOrUrl);
+    QDesktopServices::openUrl(QUrl(QString::fromStdString(std::string(fileOrUrl))));
+}
+
 void TerminalSession::inspect()
 {
     if (_display)
