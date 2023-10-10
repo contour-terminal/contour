@@ -2184,6 +2184,19 @@ void Terminal::setHighlightRange(HighlightRange highlightRange)
 
 constexpr auto MagicStackTopId = size_t { 0 };
 
+void Terminal::setColorPalette(ColorPalette const& palette) noexcept
+{
+    _state.colorPalette = palette;
+}
+
+void Terminal::resetColorPalette(ColorPalette const& colors)
+{
+    _state.colorPalette = colors;
+    _state.defaultColorPalette = colors;
+    _settings.colorPalette = colors;
+    _factorySettings.colorPalette = colors;
+}
+
 void Terminal::pushColorPalette(size_t slot)
 {
     if (slot > MaxColorPaletteSaveStackSize)

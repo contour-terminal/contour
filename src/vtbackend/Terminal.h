@@ -375,12 +375,9 @@ class Terminal
     [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
     [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
 
-    void setColorPalette(ColorPalette const& palette) noexcept
-    {
-        _state.colorPalette = palette;
-    }
-
+    void setColorPalette(ColorPalette const& palette) noexcept;
     void resetColorPalette() noexcept { setColorPalette(defaultColorPalette()); }
+    void resetColorPalette(ColorPalette const& colors);
 
     void pushColorPalette(size_t slot);
     void popColorPalette(size_t slot);

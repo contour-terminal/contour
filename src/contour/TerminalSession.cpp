@@ -373,10 +373,7 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
     _currentColorPreference = preference;
     if (auto const* colorPalette = preferredColorPalette(_profile.colors, preference))
     {
-        _terminal.settings().colorPalette = *colorPalette;
-        _terminal.factorySettings().colorPalette = *colorPalette;
-        _terminal.colorPalette() = *colorPalette;
-        _terminal.defaultColorPalette() = *colorPalette;
+        _terminal.resetColorPalette(*colorPalette);
 
         emit backgroundColorChanged();
     }
