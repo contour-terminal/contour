@@ -938,6 +938,12 @@ bool TerminalSession::operator()(actions::OpenFileManager)
     return true;
 }
 
+bool TerminalSession::operator()(actions::OpenSelection)
+{
+    QDesktopServices::openUrl(QUrl(QString::fromUtf8(terminal().extractSelectionText().c_str())));
+    return true;
+}
+
 bool TerminalSession::operator()(actions::PasteClipboard paste)
 {
     pasteFromClipboard(1, paste.strip);

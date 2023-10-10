@@ -46,6 +46,7 @@ struct NewTerminal{ std::optional<std::string> profileName; };
 struct NoSearchHighlight{};
 struct OpenConfiguration{};
 struct OpenFileManager{};
+struct OpenSelection{};
 struct PasteClipboard{ bool strip = false; };
 struct PasteSelection{};
 struct Quit{};
@@ -99,6 +100,7 @@ using Action = std::variant<CancelSelection,
                             NoSearchHighlight,
                             OpenConfiguration,
                             OpenFileManager,
+                            OpenSelection,
                             PasteClipboard,
                             PasteSelection,
                             Quit,
@@ -163,6 +165,7 @@ DECLARE_ACTION_FMT(NewTerminal)
 DECLARE_ACTION_FMT(NoSearchHighlight)
 DECLARE_ACTION_FMT(OpenConfiguration)
 DECLARE_ACTION_FMT(OpenFileManager)
+DECLARE_ACTION_FMT(OpenSelection)
 DECLARE_ACTION_FMT(PasteClipboard)
 DECLARE_ACTION_FMT(PasteSelection)
 DECLARE_ACTION_FMT(Quit)
@@ -227,6 +230,7 @@ struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
         HANDLE_ACTION(NoSearchHighlight);
         HANDLE_ACTION(OpenConfiguration);
         HANDLE_ACTION(OpenFileManager);
+        HANDLE_ACTION(OpenSelection);
         HANDLE_ACTION(PasteClipboard);
         HANDLE_ACTION(PasteSelection);
         HANDLE_ACTION(Quit);

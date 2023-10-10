@@ -48,6 +48,7 @@ optional<Action> fromString(string const& name)
         mapAction<actions::NoSearchHighlight>("NoSearchHighlight"),
         mapAction<actions::OpenConfiguration>("OpenConfiguration"),
         mapAction<actions::OpenFileManager>("OpenFileManager"),
+        mapAction<actions::OpenSelection>("OpenSelection"),
         mapAction<actions::PasteClipboard>("PasteClipboard"),
         mapAction<actions::PasteSelection>("PasteSelection"),
         mapAction<actions::Quit>("Quit"),

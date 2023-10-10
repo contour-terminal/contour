@@ -592,7 +592,7 @@ namespace
 
         auto const text = QString::fromUtf8(name.c_str()).toUcs4();
         if (text.size() == 1)
-            return static_cast<char32_t>(toupper(static_cast<int>(text[0])));
+            return static_cast<char32_t>(text[0]);
 
         auto constexpr NamedChars = array { pair { "ENTER"sv, (char) C0::CR },
                                             pair { "BACKSPACE"sv, (char) C0::BS },
