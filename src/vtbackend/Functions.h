@@ -383,7 +383,8 @@ constexpr inline auto CHA         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto CHT         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'I', VTType::VT100, "CHT", "Cursor Horizontal Forward Tabulation");
 constexpr inline auto CNL         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'E', VTType::VT100, "CNL", "Move cursor to next line");
 constexpr inline auto CPL         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'F', VTType::VT100, "CPL", "Move cursor to previous line");
-constexpr inline auto CPR         = detail::CSI(std::nullopt, 1, 1, std::nullopt, 'n', VTType::VT100, "CPR", "Request Cursor position");
+constexpr inline auto ANSIDSR     = detail::CSI(std::nullopt, 1, 1, std::nullopt, 'n', VTType::VT100, "DSR", "Device Status Report (ANSI)");
+constexpr inline auto DSR         = detail::CSI('?', 1, 1, std::nullopt, 'n', VTType::VT100, "DSR", "Device Status Report (DEC)");
 constexpr inline auto CUB         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'D', VTType::VT100, "CUB", "Move cursor backward");
 constexpr inline auto CUD         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'B', VTType::VT100, "CUD", "Move cursor down");
 constexpr inline auto CUF         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'C', VTType::VT100, "CUF", "Move cursor forward");
@@ -538,7 +539,6 @@ constexpr static auto allFunctionsArray() noexcept
         CHT,
         CNL,
         CPL,
-        CPR,
         CUB,
         CUD,
         CUF,
@@ -558,6 +558,8 @@ constexpr static auto allFunctionsArray() noexcept
         DECSED,
         DECSERA,
         DECSEL,
+        ANSIDSR,
+        DSR,
         XTRESTORE,
         XTSAVE,
         DECPS,

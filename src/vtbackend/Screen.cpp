@@ -2785,12 +2785,21 @@ namespace impl
         }
 
         template <typename Cell>
-        ApplyResult CPR(Sequence const& seq, Screen<Cell>& screen)
+        ApplyResult ANSIDSR(Sequence const& seq, Screen<Cell>& screen)
         {
             switch (seq.param(0))
             {
                 case 5: screen.deviceStatusReport(); return ApplyResult::Ok;
                 case 6: screen.reportCursorPosition(); return ApplyResult::Ok;
+                default: return ApplyResult::Unsupported;
+            }
+        }
+
+        template <typename Cell>
+        ApplyResult DSR(Sequence const& seq, Screen<Cell>& screen)
+        {
+            switch (seq.param(0))
+            {
                 default: return ApplyResult::Unsupported;
             }
         }
@@ -3450,7 +3459,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case CPL:
             moveCursorToPrevLine(LineCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
             break;
-        case CPR: return impl::CPR(seq, *this);
+        case ANSIDSR: return impl::ANSIDSR(seq, *this);
+        case DSR: return impl::DSR(seq, *this);
         case CUB: moveCursorBackward(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case CUD: moveCursorDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
         case CUF: moveCursorForward(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
