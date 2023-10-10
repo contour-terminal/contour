@@ -13,7 +13,7 @@ namespace vtbackend
 {
 
 template <typename PtyDevice = vtpty::MockPty>
-class MockTerm: public Terminal::Events
+class MockTerm: public Terminal::NullEvents
 {
   public:
     MockTerm(ColumnCount columns, LineCount lines): MockTerm { PageSize { lines, columns } } {}

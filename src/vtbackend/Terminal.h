@@ -108,6 +108,7 @@ class Terminal
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*fontSpec*/) {}
         virtual void copyToClipboard(std::string_view /*data*/) {}
+        virtual void openDocument(std::string_view /*fileOrUrl*/) = 0;
         virtual void inspect() {}
         virtual void notify(std::string_view /*title*/, std::string_view /*body*/) {}
         virtual void onClosed() {}
@@ -124,6 +125,36 @@ class Terminal
         virtual void playSound(Sequence::Parameters const&) {}
         virtual void cursorPositionChanged() {}
         virtual void onScrollOffsetChanged(ScrollOffset) {}
+    };
+
+    class NullEvents: public Events
+    {
+      public:
+        void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) override {}
+        void bell() override {}
+        void bufferChanged(ScreenType) override {}
+        void renderBufferUpdated() override {}
+        void screenUpdated() override {}
+        FontDef getFontDef() override { return {}; }
+        void setFontDef(FontDef const& /*fontSpec*/) override {}
+        void copyToClipboard(std::string_view /*data*/) override {}
+        void openDocument(std::string_view /*fileOrUrl*/) override {}
+        void inspect() override {}
+        void notify(std::string_view /*title*/, std::string_view /*body*/) override {}
+        void onClosed() override {}
+        void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) override {}
+        void onSelectionCompleted() override {}
+        void requestWindowResize(LineCount, ColumnCount) override {}
+        void requestWindowResize(Width, Height) override {}
+        void requestShowHostWritableStatusLine() override {}
+        void setWindowTitle(std::string_view /*title*/) override {}
+        void setTerminalProfile(std::string const& /*configProfileName*/) override {}
+        void discardImage(Image const&) override {}
+        void inputModeChanged(ViMode /*mode*/) override {}
+        void updateHighlights() override {}
+        void playSound(Sequence::Parameters const&) override {}
+        void cursorPositionChanged() override {}
+        void onScrollOffsetChanged(ScrollOffset) override {}
     };
 
     Terminal(Events& eventListener,
@@ -588,6 +619,7 @@ class Terminal
     [[nodiscard]] FontDef getFontDef();
     void setFontDef(FontDef const& fontDef);
     void copyToClipboard(std::string_view data);
+    void openDocument(std::string_view data);
     void inspect();
     void notify(std::string_view title, std::string_view body);
     void reply(std::string_view text);

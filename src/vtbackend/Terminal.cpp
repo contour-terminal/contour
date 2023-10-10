@@ -1347,6 +1347,11 @@ void Terminal::copyToClipboard(string_view data)
     _eventListener.copyToClipboard(data);
 }
 
+void Terminal::openDocument(string_view data)
+{
+    _eventListener.openDocument(data);
+}
+
 void Terminal::inspect()
 {
     _eventListener.inspect();

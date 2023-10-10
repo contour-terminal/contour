@@ -28,6 +28,9 @@ using vim motion keys and then start selecting.
 - `V` enables/disables visual line mode
 - `i` activates insert mode
 - `Ctrl+v` enables/disables visual block mode
+- Normal: `o {motion}` (opens resource by given `motion`, this can be a URL or local file)
+- Normal: `o {TextObject}` (opens resource by given `textObject`, such as `oiw`, `oaw`, `oiW`, ...)
+- Visual: `o` (open current selection into primary clipboard)
 
 ### Supported motions
 
@@ -60,3 +63,14 @@ the terminal to scroll the view to make that target line visible.
 - `i[`, `a[` - square bracket enclosed string
 - `iw`, `aw` - regular word
 - `iW`, `aW` - space delimited word
+
+### Opening local files and URLs
+
+Contour currently only supports OSC-8 hyperlinks as well as explicitly opening selected text.
+
+In normal mode, you can open links by moving the cursor onto a resource (URL or local file) and
+then press `oiW` (open in (space sperated) word) or use any of the other supported text objects
+to denote what to open.
+
+You may as well type `oo` to open the URL under the current line. This works if no other information
+is on this current line, while spaces are trimmed left and right of the given URL in this line.

@@ -108,6 +108,7 @@ enum class ViOperator
     Paste = 'p',
     PasteStripped = 'P',
     ReverseSearchCurrentWord = '#',
+    Open = 'o',
 };
 
 enum class TextObject
@@ -161,6 +162,7 @@ class ViInputHandler: public InputHandler
         virtual void select(TextObjectScope scope, TextObject textObject) = 0;
         virtual void yank(TextObjectScope scope, TextObject textObject) = 0;
         virtual void yank(ViMotion motion) = 0;
+        virtual void open(TextObjectScope scope, TextObject textObject) = 0;
         virtual void paste(unsigned count, bool stripped) = 0;
 
         virtual void modeChanged(ViMode mode) = 0;
@@ -307,6 +309,7 @@ struct fmt::formatter<vtbackend::ViOperator>: formatter<std::string_view>
         {
             case ViOperator::MoveCursor: name = "MoveCursor"; break;
             case ViOperator::Yank: name = "Yank"; break;
+            case ViOperator::Open: name = "Open"; break;
             case ViOperator::Paste: name = "Paste"; break;
             case ViOperator::PasteStripped: name = "PasteStripped"; break;
             case ViOperator::ReverseSearchCurrentWord: name = "ReverseSearchCurrentWord"; break;

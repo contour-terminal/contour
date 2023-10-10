@@ -171,30 +171,52 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "p", [this]() { _executor->paste(count(), false); });
     registerCommand(ModeSelect::Normal, "P", [this]() { _executor->paste(count(), true); });
 
-    registerCommand(ModeSelect::Normal, "Y", [this]() { _executor->execute(ViOperator::Yank, ViMotion::FullLine, count()); });
-    registerCommand(ModeSelect::Normal, "yy", [this]() { _executor->execute(ViOperator::Yank, ViMotion::FullLine, count()); });
-    registerCommand(ModeSelect::Normal, "yb", [this]() { _executor->execute(ViOperator::Yank, ViMotion::WordBackward, count()); });
-    registerCommand(ModeSelect::Normal, "ye", [this]() { _executor->execute(ViOperator::Yank, ViMotion::WordEndForward, count()); });
-    registerCommand(ModeSelect::Normal, "yw", [this]() { _executor->execute(ViOperator::Yank, ViMotion::WordForward, count()); });
-    registerCommand(ModeSelect::Normal, "yB", [this]() { _executor->execute(ViOperator::Yank, ViMotion::BigWordBackward, count()); });
-    registerCommand(ModeSelect::Normal, "yE", [this]() { _executor->execute(ViOperator::Yank, ViMotion::BigWordEndForward, count()); });
-    registerCommand(ModeSelect::Normal, "yW", [this]() { _executor->execute(ViOperator::Yank, ViMotion::BigWordForward, count()); });
-    registerCommand(ModeSelect::Normal, "yt.", [this]() { _executor->execute(ViOperator::Yank, ViMotion::TillBeforeCharRight, count(), _lastChar); });
-    registerCommand(ModeSelect::Normal, "yT.", [this]() { _executor->execute(ViOperator::Yank, ViMotion::TillAfterCharLeft, count(), _lastChar); });
-    registerCommand(ModeSelect::Normal, "yf.", [this]() { _executor->execute(ViOperator::Yank, ViMotion::ToCharRight, count(), _lastChar); });
-    registerCommand(ModeSelect::Normal, "yF.", [this]() { _executor->execute(ViOperator::Yank, ViMotion::ToCharLeft, count(), _lastChar); });
+    for (auto&& [theKey, viOperator]: { pair { 'y', ViOperator::Yank }, pair { 'o', ViOperator::Open } })
+    {
+        // This is solely a workaround for Apple Clang and FreeBSDs Clang.
+        char const key = theKey;
+        ViOperator const op = viOperator;
+
+        auto const s1 = [](char ch) { return std::string(1, ch); };
+        registerCommand(ModeSelect::Normal, s1(toupper(key)), [this, op]() { _executor->execute(op, ViMotion::FullLine, count()); });
+
+        auto const s2 = [key](char ch) { return fmt::format("{}{}", key, ch); };
+        registerCommand(ModeSelect::Normal, s2(key), [this, op]() { _executor->execute(op, ViMotion::FullLine, count()); });
+        registerCommand(ModeSelect::Normal, s2('b'), [this, op]() { _executor->execute(op, ViMotion::WordBackward, count()); });
+        registerCommand(ModeSelect::Normal, s2('e'), [this, op]() { _executor->execute(op, ViMotion::WordEndForward, count()); });
+        registerCommand(ModeSelect::Normal, s2('w'), [this, op]() { _executor->execute(op, ViMotion::WordForward, count()); });
+        registerCommand(ModeSelect::Normal, s2('B'), [this, op]() { _executor->execute(op, ViMotion::BigWordBackward, count()); });
+        registerCommand(ModeSelect::Normal, s2('E'), [this, op]() { _executor->execute(op, ViMotion::BigWordEndForward, count()); });
+        registerCommand(ModeSelect::Normal, s2('W'), [this, op]() { _executor->execute(op, ViMotion::BigWordForward, count()); });
+
+        auto const s3 = [key](char ch) { return fmt::format("{}{}.", key, ch); };
+        registerCommand(ModeSelect::Normal, s3('t'), [this, op]() { _executor->execute(op, ViMotion::TillBeforeCharRight, count(), _lastChar); });
+        registerCommand(ModeSelect::Normal, s3('T'), [this, op]() { _executor->execute(op, ViMotion::TillAfterCharLeft, count(), _lastChar); });
+        registerCommand(ModeSelect::Normal, s3('f'), [this, op]() { _executor->execute(op, ViMotion::ToCharRight, count(), _lastChar); });
+        registerCommand(ModeSelect::Normal, s3('F'), [this, op]() { _executor->execute(op, ViMotion::ToCharLeft, count(), _lastChar); });
+    }
     // clang-format on
 
     for (auto const& [scopeChar, scope]: ScopeMappings)
+    {
         for (auto const& [objectChar, obj]: TextObjectMappings)
+        {
             registerCommand(ModeSelect::Normal,
                             fmt::format("y{}{}", scopeChar, objectChar),
                             [this, scope = scope, obj = obj]() { _executor->yank(scope, obj); });
+            registerCommand(ModeSelect::Normal,
+                            fmt::format("o{}{}", scopeChar, objectChar),
+                            [this, scope = scope, obj = obj]() { _executor->open(scope, obj); });
+        }
+    }
 
     // visual mode
     registerCommand(ModeSelect::Visual, "/", [this]() { startSearch(); });
     registerCommand(ModeSelect::Visual, "y", [this]() {
         _executor->execute(ViOperator::Yank, ViMotion::Selection, count());
+    });
+    registerCommand(ModeSelect::Visual, "o", [this]() {
+        _executor->execute(ViOperator::Open, ViMotion::Selection, count());
     });
     registerCommand(ModeSelect::Visual, "v", [this]() { toggleMode(ViMode::Normal); });
     registerCommand(ModeSelect::Visual, "V", [this]() { toggleMode(ViMode::VisualLine); });

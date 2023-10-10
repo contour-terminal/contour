@@ -351,7 +351,7 @@ void ViCommands::executeYank(ViMotion motion, unsigned count)
     }
 }
 
-void ViCommands::executeYank(CellLocation from, CellLocation to)
+std::string ViCommands::extractTextAndHighlightRange(CellLocation from, CellLocation to)
 {
     assert(_terminal->inputHandler().mode() == ViMode::Normal);
     assert(!_terminal->selector());
@@ -365,12 +365,50 @@ void ViCommands::executeYank(CellLocation from, CellLocation to)
     _terminal->setSelector(make_unique<LinearSelection>(
         _terminal->selectionHelper(), from, _terminal->selectionUpdatedHelper()));
     (void) _terminal->selector()->extend(to);
-    auto const text = _terminal->extractSelectionText();
-    _terminal->copyToClipboard(text);
+
+    auto text = _terminal->extractSelectionText();
+
     _terminal->clearSelection();
     _terminal->setHighlightRange(LinearHighlight { from, to });
     _terminal->inputHandler().setMode(ViMode::Normal);
     _terminal->screenUpdated();
+    return text;
+}
+
+void ViCommands::executeYank(CellLocation from, CellLocation to)
+{
+    _terminal->copyToClipboard(extractTextAndHighlightRange(from, to));
+}
+
+void ViCommands::executeOpen(CellLocation from, CellLocation to)
+{
+    _terminal->openDocument(extractTextAndHighlightRange(from, to));
+}
+
+void ViCommands::executeOpen(ViMotion motion, unsigned count)
+{
+    switch (motion)
+    {
+        case ViMotion::Selection: {
+            assert(_terminal->selector());
+            if (_lastMode == ViMode::VisualBlock)
+                _terminal->setHighlightRange(
+                    RectangularHighlight { _terminal->selector()->from(), _terminal->selector()->to() });
+            else
+                _terminal->setHighlightRange(
+                    LinearHighlight { _terminal->selector()->from(), _terminal->selector()->to() });
+
+            _terminal->copyToClipboard(_terminal->extractSelectionText());
+
+            _terminal->inputHandler().setMode(ViMode::Normal);
+            break;
+        }
+        default: {
+            auto const [from, to] = translateToCellRange(motion, count);
+            executeOpen(from, to);
+        }
+        break;
+    }
 }
 
 void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count, char32_t lastChar)
@@ -382,8 +420,15 @@ void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count, char32_
             //.
             moveCursor(motion, count);
             break;
+        case ViOperator::Open:
+            if (isValidCharMove(motion))
+            {
+                _lastCharMotion = motion;
+                _lastChar = lastChar;
+            }
+            executeOpen(motion, count);
+            break;
         case ViOperator::Yank:
-            //.
             if (isValidCharMove(motion))
             {
                 _lastCharMotion = motion;
@@ -436,6 +481,15 @@ void ViCommands::yank(ViMotion motion)
     cursorPosition = from;
     inputLog()("{}: Executing: motion-yank {}\n", _terminal->inputHandler().mode(), motion);
     executeYank(from, to);
+    _terminal->screenUpdated();
+}
+
+void ViCommands::open(TextObjectScope scope, TextObject textObject)
+{
+    auto const [from, to] = translateToCellRange(scope, textObject);
+    cursorPosition = from;
+    inputLog()("{}: Executing: open {} {}\n", _terminal->inputHandler().mode(), scope, textObject);
+    executeOpen(from, to);
     _terminal->screenUpdated();
 }
 

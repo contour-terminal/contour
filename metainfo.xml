@@ -140,6 +140,7 @@
           <li>Adds size indicator window on resize (#1203).</li>
           <li>Adds config entry `profile.*.size_indicator_on_resize` to control size indicator on resize and makes resize indicator small.</li>
           <li>Adds OpenSelection action, and honor case in the configuration bindings</li>
+          <li>Adds open resource (URL, local file) feature also to vi mode.</li>
         </ul>
       </description>
     </release>

@@ -36,6 +36,7 @@ class ViCommands: public ViInputHandler::Executor
     void select(TextObjectScope scope, TextObject textObject) override;
     void yank(TextObjectScope scope, TextObject textObject) override;
     void yank(ViMotion motion) override;
+    void open(TextObjectScope scope, TextObject textObject) override;
     void paste(unsigned count, bool stripped) override;
 
     void searchStart() override;
@@ -69,6 +70,10 @@ class ViCommands: public ViInputHandler::Executor
     [[nodiscard]] std::optional<CellLocation> toCharLeft(unsigned count) const noexcept;
     void executeYank(ViMotion motion, unsigned count);
     void executeYank(CellLocation from, CellLocation to);
+    void executeOpen(ViMotion motion, unsigned count);
+    void executeOpen(CellLocation from, CellLocation to);
+
+    std::string extractTextAndHighlightRange(CellLocation from, CellLocation to);
 
     /// Snaps the input location to the correct cell location if the input location is part of a wide char
     /// cell but not precisely the beginning cell location.
