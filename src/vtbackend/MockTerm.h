@@ -75,6 +75,7 @@ class MockTerm: public Terminal::NullEvents
     }
 
     std::string const& replyData() const noexcept { return mockPty().stdinBuffer(); }
+    void resetReplyData() noexcept { mockPty().stdinBuffer().clear(); }
 
     void requestCaptureBuffer(LineCount lines, bool logical) override
     {

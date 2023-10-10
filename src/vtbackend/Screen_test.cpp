@@ -755,6 +755,48 @@ TEST_CASE("Linefeed", "[screen]")
     }
 }
 
+TEST_CASE("DSR.Unsolicited_ColorPaletteUpdated", "[screen]")
+{
+    auto const lightModeColors = ColorPalette {
+        .defaultForeground = RGBColor { 0x00, 0x00, 0x00 },
+        .defaultBackground = RGBColor { 0xff, 0xff, 0xff },
+    };
+
+    auto const darkModeColors = ColorPalette {
+        .defaultForeground = RGBColor { 0xff, 0xff, 0xff },
+        .defaultBackground = RGBColor { 0x00, 0x00, 0x00 },
+    };
+
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+
+    REQUIRE_FALSE(mock.terminal.isModeEnabled(DECMode::ReportColorPaletteUpdated));
+
+    // Set light mode colors
+    mock.terminal.resetColorPalette(lightModeColors);
+
+    // This must not trigger an unsolicited DSR by default.
+    REQUIRE(escape(mock.replyData()) == ""sv);
+
+    // Request unsolicited DSRs for color palette updates.
+    mock.writeToScreen(DECSM(toDECModeNum(DECMode::ReportColorPaletteUpdated)));
+    // mock.terminal.setMode(DECMode::ReportColorPaletteUpdated, true); // FIXME (above)
+    REQUIRE(mock.terminal.isModeEnabled(DECMode::ReportColorPaletteUpdated));
+
+    // Set dark mode colors
+    mock.terminal.resetColorPalette(lightModeColors);
+
+    // This must trigger an unsolicited DSR.
+    REQUIRE(escape(mock.replyData()) == escape("\033[?997;2n"sv));
+    mock.resetReplyData();
+
+    // Set light mode colors
+    mock.terminal.resetColorPalette(darkModeColors);
+
+    // This must trigger an unsolicited DSR.
+    REQUIRE(escape(mock.replyData()) == escape("\033[?997;1n"sv));
+    mock.resetReplyData();
+}
+
 TEST_CASE("ClearToEndOfScreen", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };

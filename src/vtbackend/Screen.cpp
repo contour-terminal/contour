@@ -2529,6 +2529,7 @@ namespace impl
                 case 2028: return DECMode::TextReflow;
                 case 2029: return DECMode::MousePassiveTracking;
                 case 2030: return DECMode::ReportGridCellSelection;
+                case 2031: return DECMode::ReportColorPaletteUpdated;
                 case 8452: return DECMode::SixelCursorNextToGraphic;
                 default: return nullopt;
             }
