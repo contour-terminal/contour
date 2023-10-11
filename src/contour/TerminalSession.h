@@ -254,6 +254,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                       vtbackend::KeyboardEventType eventType,
                       Timestamp now);
     void sendCharEvent(char32_t value,
+                       uint32_t physicalKey,
                        vtbackend::Modifier modifier,
                        vtbackend::KeyboardEventType eventType,
                        Timestamp now);

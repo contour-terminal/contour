@@ -4,6 +4,7 @@
 #include <vtbackend/primitives.h>
 
 #include <crispy/escape.h>
+#include <crispy/flags.h>
 #include <crispy/overloaded.h>
 
 #include <fmt/format.h>
@@ -12,7 +13,6 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include <libunicode/convert.h>
 
@@ -40,6 +40,8 @@ class Modifier
   public:
     enum Key : unsigned
     {
+        // NB: These values MUST match the values of the corresponding
+        // the bit positions in the modifier mask in CSIu keyboard protocol.
         None = 0,
         Shift = 1,
         Alt = 2,
@@ -294,14 +296,20 @@ class KeyboardInputGenerator
   public:
     virtual ~KeyboardInputGenerator() = default;
 
-    virtual bool generateChar(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType) = 0;
+    virtual bool generateChar(char32_t characterEvent,
+                              uint32_t physicalKey,
+                              Modifier modifier,
+                              KeyboardEventType eventType) = 0;
     virtual bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) = 0;
 };
 
 class StandardKeyboardInputGenerator: public KeyboardInputGenerator
 {
   public:
-    bool generateChar(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType) override;
+    bool generateChar(char32_t characterEvent,
+                      uint32_t physicalKey,
+                      Modifier modifier,
+                      KeyboardEventType eventType) override;
     bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) override;
 
     [[nodiscard]] bool normalCursorKeys() const noexcept { return _cursorKeysMode == KeyMode::Normal; }
@@ -357,6 +365,70 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     KeyMode _cursorKeysMode = KeyMode::Normal;
     KeyMode _numpadKeysMode = KeyMode::Normal;
     std::string _pendingSequence {};
+};
+
+enum class KeyboardEventFlag
+{
+    None = 0,
+    DisambiguateEscapeCodes = 1,
+    ReportEventTypes = 2,
+    ReportAlternateKeys = 4,
+    ReportAllKeysAsEscapeCodes = 8,
+    ReportAssociatedText = 16,
+};
+
+using KeyboardEventFlags = crispy::flags<KeyboardEventFlag>;
+
+// Implements extended CSIu keyboard input mode.
+class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerator
+{
+  public:
+    static constexpr inline size_t MaxStackDepth = 32;
+
+    constexpr void enter(KeyboardEventFlags flags) noexcept
+    {
+        if (stackDepth() < MaxStackDepth)
+            _flags.at(++_currentStackTop) = flags;
+    }
+
+    [[nodiscard]] constexpr size_t stackDepth() const noexcept { return 1 + _currentStackTop; }
+
+    [[nodiscard]] constexpr KeyboardEventFlags flags() const noexcept { return _flags.at(_currentStackTop); }
+
+    [[nodiscard]] constexpr KeyboardEventFlags& flags() noexcept { return _flags.at(_currentStackTop); }
+
+    [[nodiscard]] constexpr bool enabled(KeyboardEventFlag flag) const noexcept { return flags() & flag; }
+
+    [[nodiscard]] constexpr bool enabled(KeyboardEventType eventType) const noexcept
+    {
+        // Press-event is always emitted. The other events are only emitted if the corresponding flag is set.
+        return eventType != KeyboardEventType::Release || enabled(KeyboardEventFlag::ReportEventTypes);
+    }
+
+    constexpr void leave(size_t n = 1) noexcept { _currentStackTop -= std::min(n, _currentStackTop); }
+
+    constexpr void reset() noexcept
+    {
+        _currentStackTop = 0;
+        _flags.at(_currentStackTop) = KeyboardEventFlag::None;
+    }
+
+    // {{{ Overrides from StandardKeyboardInputGenerator
+
+    bool generateChar(char32_t characterEvent,
+                      uint32_t physicalKey,
+                      Modifier modifier,
+                      KeyboardEventType eventType) override;
+    bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) override;
+
+    // }}}
+
+  private:
+    [[nodiscard]] std::string encodeCharacter(char32_t ch, uint32_t physicalKey, Modifier modifier) const;
+    [[nodiscard]] std::string encodeModifiers(Modifier modifier, KeyboardEventType eventType) const;
+
+    std::array<KeyboardEventFlags, MaxStackDepth> _flags = { KeyboardEventFlag::None };
+    size_t _currentStackTop = 0;
 };
 
 class InputGenerator
@@ -416,7 +488,16 @@ class InputGenerator
     void setPassiveMouseTracking(bool v) noexcept { _passiveMouseTracking = v; }
     [[nodiscard]] bool passiveMouseTracking() const noexcept { return _passiveMouseTracking; }
 
-    bool generate(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType);
+    bool generate(char32_t characterEvent,
+                  uint32_t physicalKey,
+                  Modifier modifier,
+                  KeyboardEventType eventType);
+    bool generate(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType)
+    {
+        // Simulate physical key here.
+        auto const physicalKey = static_cast<uint32_t>(characterEvent);
+        return generate(characterEvent, physicalKey, modifier, eventType);
+    }
     bool generate(Key key, Modifier modifier, KeyboardEventType eventType);
     void generatePaste(std::string_view const& text);
     bool generateMousePress(Modifier modifier,
@@ -469,6 +550,16 @@ class InputGenerator
     /// Resets the input generator's state, as required by the RIS (hard reset) VT sequence.
     void reset();
 
+    [[nodiscard]] ExtendedKeyboardInputGenerator& keyboardProtocol() noexcept
+    {
+        return _keyboardInputGenerator;
+    }
+
+    [[nodiscard]] ExtendedKeyboardInputGenerator const& keyboardProtocol() const noexcept
+    {
+        return _keyboardInputGenerator;
+    }
+
   private:
     bool generateMouse(MouseEventType eventType,
                        Modifier modifier,
@@ -510,7 +601,7 @@ class InputGenerator
 
     std::set<MouseButton> _currentlyPressedMouseButtons {};
     CellLocation _currentMousePosition {}; // current mouse position
-    StandardKeyboardInputGenerator _keyboardInputGenerator {};
+    ExtendedKeyboardInputGenerator _keyboardInputGenerator {};
 };
 
 inline std::string to_string(InputGenerator::MouseEventType value)
@@ -539,6 +630,27 @@ struct fmt::formatter<vtbackend::KeyboardEventType>: formatter<std::string_view>
             case vtbackend::KeyboardEventType::Press: name = "Press"; break;
             case vtbackend::KeyboardEventType::Repeat: name = "Repeat"; break;
             case vtbackend::KeyboardEventType::Release: name = "Release"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<vtbackend::KeyboardEventFlag>: formatter<std::string_view>
+{
+    auto format(vtbackend::KeyboardEventFlag value, format_context& ctx) -> format_context::iterator
+    {
+        string_view name;
+        switch (value)
+        {
+                // clang-format off
+            case vtbackend::KeyboardEventFlag::None: name = "None"; break;
+            case vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes: name = "DisambiguateEscapeCodes"; break;
+            case vtbackend::KeyboardEventFlag::ReportEventTypes: name = "ReportEventTypes"; break;
+            case vtbackend::KeyboardEventFlag::ReportAlternateKeys: name = "ReportAlternateKeys"; break;
+            case vtbackend::KeyboardEventFlag::ReportAllKeysAsEscapeCodes: name = "ReportAllKeysAsEscapeCodes"; break;
+            case vtbackend::KeyboardEventFlag::ReportAssociatedText: name = "ReportAssociatedText"; break;
+                // clang-format on
         }
         return formatter<string_view>::format(name, ctx);
     }

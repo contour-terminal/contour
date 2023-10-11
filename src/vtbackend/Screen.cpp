@@ -3806,6 +3806,34 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             break;
 
         case DECPS: _terminal->playSound(seq.parameters()); break;
+        case CSIUENTER: {
+            auto const flags = KeyboardEventFlags::from_value(seq.param_or(0, 1));
+            _terminal->keyboardProtocol().enter(flags);
+            return ApplyResult::Ok;
+        }
+        case CSIUQUERY: {
+            _terminal->reply("\033[?{}u", _terminal->keyboardProtocol().flags().value());
+            return ApplyResult::Ok;
+        }
+        case CSIUENHCE: {
+            auto const flags = KeyboardEventFlags::from_value(static_cast<unsigned>(seq.param_or(0, 1)));
+            auto const mode = seq.param_or(1, 1);
+            if (_terminal->keyboardProtocol().stackDepth() <= 1)
+                return ApplyResult::Invalid;
+            switch (mode)
+            {
+                case 1: _terminal->keyboardProtocol().flags() = flags; return ApplyResult::Ok;
+                case 2: _terminal->keyboardProtocol().flags().enable(flags); return ApplyResult::Ok;
+                case 3: _terminal->keyboardProtocol().flags().disable(flags); return ApplyResult::Ok;
+                default: break;
+            }
+            return ApplyResult::Invalid;
+        }
+        case CSIULEAVE: {
+            auto const count = seq.param_or<size_t>(0, 1);
+            _terminal->keyboardProtocol().leave(count);
+            return ApplyResult::Ok;
+        }
         // OSC
         case SETTITLE:
             //(not supported) ChangeIconTitle(seq.intermediateCharacters());

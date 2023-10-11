@@ -694,10 +694,8 @@ void TerminalSession::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType
     terminal().sendKeyEvent(key, modifier, eventType, now);
 }
 
-void TerminalSession::sendCharEvent(char32_t value,
-                                    Modifier modifier,
-                                    KeyboardEventType eventType,
-                                    Timestamp now)
+void TerminalSession::sendCharEvent(
+    char32_t value, uint32_t physicalKey, Modifier modifier, KeyboardEventType eventType, Timestamp now)
 {
     inputLog()("Character {} event received: {} {}",
                eventType,
@@ -724,7 +722,7 @@ void TerminalSession::sendCharEvent(char32_t value,
             return;
         }
     }
-    terminal().sendCharEvent(value, modifier, eventType, now);
+    terminal().sendCharEvent(value, physicalKey, modifier, eventType, now);
 }
 
 void TerminalSession::sendMousePressEvent(Modifier modifier,

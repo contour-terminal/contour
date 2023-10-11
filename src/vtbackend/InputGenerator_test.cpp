@@ -10,9 +10,7 @@
 #include <libunicode/convert.h>
 
 using namespace std;
-using vtbackend::InputGenerator;
-using vtbackend::KeyboardEventType;
-using vtbackend::Modifier;
+using namespace vtbackend;
 using Buffer = vtbackend::InputGenerator::Sequence;
 using crispy::escape;
 
@@ -134,3 +132,43 @@ TEST_CASE("InputGenerator.all(Ctrl + A..Z)", "[terminal,input]")
         REQUIRE(escape(input.peek()) == escape(c0));
     }
 }
+
+// {{{ ExtendedKeyboardInputGenerator
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Ctrl+L", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.generateChar('L', 'L', Modifier::Control, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[108;5u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Escape", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    input.generateKey(Key::Escape, Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[27u"sv));
+
+    input.generateKey(Key::Escape, Modifier::Shift, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[27;2u"sv));
+
+    // repeat is not being encoded here, because we did not request ReportEventTypes.
+    input.generateKey(Key::Escape, Modifier::Shift, KeyboardEventType::Repeat);
+    REQUIRE(escape(input.take()) == escape("\033[27;2u"sv));
+
+    input.generateKey(Key::Escape, Modifier::Shift, KeyboardEventType::Release);
+    REQUIRE(escape(input.take()) == escape(""sv));
+
+    // Now we do request ReportEventTypes, so we should get the repeat and release event.
+    input.flags().enable(KeyboardEventFlag::ReportEventTypes);
+
+    input.generateKey(Key::Escape, Modifier::Shift, KeyboardEventType::Repeat);
+    REQUIRE(escape(input.take()) == escape("\033[27;1:2u"sv));
+
+    input.generateKey(Key::Escape, Modifier::Shift, KeyboardEventType::Release);
+    REQUIRE(escape(input.take()) == escape("\033[27;1:3u"sv));
+}
+
+// }}}
