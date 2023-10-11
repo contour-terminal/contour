@@ -196,6 +196,10 @@ ContourTerminal
         bellSoundEffect.play()
     }
 
+    function doAlert() {
+        Window.window.alert(0);
+    }
+
     function updateFontSize() {
         sizeWidgetText.font.pointSize = vtWidget.session.fontSize
     }
@@ -205,6 +209,9 @@ ContourTerminal
 
         // Connect bell control code with an actual sound effect.
         vt.onBell.connect(playBell);
+
+        // Connect alert control of the window
+        vt.onAlert.connect(doAlert);
 
         // Link showNotification signal.
         vt.onShowNotification.connect(vtWidget.showNotification);

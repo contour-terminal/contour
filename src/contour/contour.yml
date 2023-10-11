@@ -181,11 +181,15 @@ profiles:
         # whether or not to put the window into maximized mode.
         maximized: false
 
-        # There is no sound for BEL character if set to "off".
-        # If set to "default" BEL character sound will be default sound.
-        # If set to path to a file then BEL sound will use that file. Example
-        #   bell: "/home/user/Music/bell.wav"
-        bell: "default"
+        bell:
+            # There is no sound for BEL character if set to "off".
+            # If set to "default" BEL character sound will be default sound.
+            # If set to path to a file then BEL sound will use that file. Example
+            #   sound: "/home/user/Music/bell.wav"
+            sound: "default"
+
+            # If this boolean is true, a window alert will be raised with each bell
+            alert: true
 
         # Defines the class part of the WM_CLASS property of the window.
         wm_class: "contour"

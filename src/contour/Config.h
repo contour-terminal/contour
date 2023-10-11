@@ -208,7 +208,11 @@ struct TerminalProfile
         vtrasterizer::Decorator hover = vtrasterizer::Decorator::Underline;
     } hyperlinkDecoration;
 
-    std::string bell = "default";
+    struct
+    {
+        std::string sound = "default";
+        bool alert = true;
+    } bell;
 
     // Set of DEC modes that are frozen and cannot be changed by the application.
     std::map<vtbackend::DECMode, bool> frozenModes;

@@ -403,7 +403,7 @@ int ContourGuiApp::terminalGuiAction()
     // Spawn initial window.
     newWindow();
 
-    if (auto const& bell = config().profile().bell; bell == "off")
+    if (auto const& bell = config().profile().bell.sound; bell == "off")
     {
         if (auto* bellAudioOutput = _qmlEngine->rootObjects().first()->findChild<QObject*>("BellAudioOutput");
             bellAudioOutput)

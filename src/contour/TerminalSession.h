@@ -350,6 +350,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void isScrollbarVisibleChanged();
     void opacityChanged();
     void onBell();
+    void onAlert();
     void requestPermissionForFontChange();
     void requestPermissionForBufferCapture();
     void requestPermissionForShowHostWritableStatusLine();
