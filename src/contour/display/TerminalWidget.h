@@ -97,6 +97,7 @@ class TerminalWidget: public QQuickItem
 
     // {{{ Input handling
     void keyPressEvent(QKeyEvent* keyEvent) override;
+    void keyReleaseEvent(QKeyEvent* keyEvent) override;
     void wheelEvent(QWheelEvent* wheelEvent) override;
     void mousePressEvent(QMouseEvent* mousePressEvent) override;
     void mouseReleaseEvent(QMouseEvent* mouseReleaseEvent) override;

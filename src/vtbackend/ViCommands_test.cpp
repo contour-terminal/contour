@@ -73,27 +73,27 @@ TEST_CASE("vi.motions: |", "[vi]")
                           vtbackend::PageSize { vtbackend::LineCount(2), vtbackend::ColumnCount(40) });
 
     // middle
-    mock.sendCharPressSequence("15|");
+    mock.sendCharSequence("15|");
     CHECK(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
     CHECK(mock.terminal.state().viCommands.cursorPosition.column.value == 14);
 
     // at right margin
-    mock.sendCharPressSequence("40|");
+    mock.sendCharSequence("40|");
     CHECK(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
     CHECK(mock.terminal.state().viCommands.cursorPosition.column.value == 39);
 
     // at left margin
-    mock.sendCharPressSequence("1|");
+    mock.sendCharSequence("1|");
     CHECK(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
     CHECK(mock.terminal.state().viCommands.cursorPosition.column.value == 0);
 
     // one off right margin
-    mock.sendCharPressSequence("41|");
+    mock.sendCharSequence("41|");
     CHECK(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
     CHECK(mock.terminal.state().viCommands.cursorPosition.column.value == 39);
 
     // without [count] leading to left margin
-    mock.sendCharPressSequence("|");
+    mock.sendCharSequence("|");
     CHECK(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
     CHECK(mock.terminal.state().viCommands.cursorPosition.column.value == 0);
 }
@@ -112,10 +112,10 @@ TEST_CASE("vi.motions: text objects", "[vi]")
 
     SECTION("vi( across multiple lines, nested")
     {
-        mock.sendCharPressSequence("3j31|"); // position cursor onto the * symbol, line 4.
+        mock.sendCharSequence("3j31|"); // position cursor onto the * symbol, line 4.
         REQUIRE(mock.terminal.state().viCommands.cursorPosition == 3_lineOffset + 30_columnOffset);
 
-        mock.sendCharPressSequence("vi("); // cursor is now placed at the end of the selection
+        mock.sendCharSequence("vi("); // cursor is now placed at the end of the selection
         CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 33_columnOffset);
         REQUIRE(mock.terminal.selector() != nullptr);
         vtbackend::Selection const& selection = *mock.terminal.selector();
@@ -125,10 +125,10 @@ TEST_CASE("vi.motions: text objects", "[vi]")
 
     SECTION("vi) across multiple lines, nested")
     {
-        mock.sendCharPressSequence("3j31|"); // position cursor onto the * symbol, line 4.
+        mock.sendCharSequence("3j31|"); // position cursor onto the * symbol, line 4.
         REQUIRE(mock.terminal.state().viCommands.cursorPosition == 3_lineOffset + 30_columnOffset);
 
-        mock.sendCharPressSequence("vi)"); // cursor is now placed at the end of the selection
+        mock.sendCharSequence("vi)"); // cursor is now placed at the end of the selection
         CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 33_columnOffset);
         REQUIRE(mock.terminal.selector() != nullptr);
         vtbackend::Selection const& selection = *mock.terminal.selector();
@@ -143,11 +143,11 @@ TEST_CASE("vi.motions: M", "[vi]")
         "Hello\r\n", vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
 
     // first move cursor by one right, to also ensure that column is preserved
-    mock.sendCharPressSequence("lM");
+    mock.sendCharSequence("lM");
     CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 1_columnOffset);
 
     // running M again won't change anything
-    mock.sendCharPressSequence("M");
+    mock.sendCharSequence("M");
     CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 1_columnOffset);
 }
 
@@ -157,10 +157,10 @@ TEST_CASE("vi.motion: t{char}", "[vi]")
         setupMockTerminal("One.Two..Three and more\r\n"
                           "   On the next line.",
                           vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
-    mock.sendCharPressSequence("te"); // jump to the char before first `e`, which is `n`.
+    mock.sendCharSequence("te"); // jump to the char before first `e`, which is `n`.
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 1_columnOffset);
 
-    mock.sendCharPressSequence("t "); // jump to the char before first space character, which is `e`.
+    mock.sendCharSequence("t "); // jump to the char before first space character, which is `e`.
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 13_columnOffset);
 }
 
@@ -170,27 +170,27 @@ TEST_CASE("vi.motion: b", "[vi]")
         setupMockTerminal("One.Two..Three and more\r\n"
                           "   On the next line.",
                           vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
-    mock.sendCharPressSequence("j$"); // jump to line 2, at the right-most non-space character.
+    mock.sendCharSequence("j$"); // jump to line 2, at the right-most non-space character.
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 1_lineOffset + 19_columnOffset);
 
-    mock.sendCharPressSequence("b"); // l[ine.]
+    mock.sendCharSequence("b"); // l[ine.]
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 1_lineOffset + 15_columnOffset);
-    mock.sendCharPressSequence("2b"); // t[he]
+    mock.sendCharSequence("2b"); // t[he]
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 1_lineOffset + 6_columnOffset);
-    mock.sendCharPressSequence("3b"); // a[nd] -- on line 1
+    mock.sendCharSequence("3b"); // a[nd] -- on line 1
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 15_columnOffset);
-    mock.sendCharPressSequence("b"); // T[hree]
+    mock.sendCharSequence("b"); // T[hree]
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 9_columnOffset);
-    mock.sendCharPressSequence("b"); // .[.]
+    mock.sendCharSequence("b"); // .[.]
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 7_columnOffset);
-    mock.sendCharPressSequence("b"); // T[wo]
+    mock.sendCharSequence("b"); // T[wo]
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 4_columnOffset);
-    mock.sendCharPressSequence("b"); // .
+    mock.sendCharSequence("b"); // .
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 3_columnOffset);
-    mock.sendCharPressSequence("b"); // O[ne]
+    mock.sendCharSequence("b"); // O[ne]
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 0_columnOffset);
 
-    mock.sendCharPressSequence("b");
+    mock.sendCharSequence("b");
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 0_columnOffset);
 }
 

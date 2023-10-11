@@ -627,12 +627,13 @@ void Terminal::updateIndicatorStatusLine()
     }
 }
 
-bool Terminal::sendKeyPressEvent(Key key, Modifier modifier, Timestamp now)
+bool Terminal::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventType, Timestamp now)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
 
-    if (allowInput() && _state.inputHandler.sendKeyPressEvent(key, modifier))
+    if (allowInput() && eventType != KeyboardEventType::Release
+        && _state.inputHandler.sendKeyPressEvent(key, modifier))
         return true;
 
     // Early exit if KAM is enabled.
@@ -640,13 +641,13 @@ bool Terminal::sendKeyPressEvent(Key key, Modifier modifier, Timestamp now)
         return true;
 
     _viewport.scrollToBottom();
-    bool const success = _state.inputGenerator.generate(key, modifier);
+    bool const success = _state.inputGenerator.generate(key, modifier, eventType);
     flushInput();
     _viewport.scrollToBottom();
     return success;
 }
 
-bool Terminal::sendCharPressEvent(char32_t ch, Modifier modifier, Timestamp now)
+bool Terminal::sendCharEvent(char32_t ch, Modifier modifier, KeyboardEventType eventType, Timestamp now)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
@@ -655,10 +656,10 @@ bool Terminal::sendCharPressEvent(char32_t ch, Modifier modifier, Timestamp now)
     if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
-    if (_state.inputHandler.sendCharPressEvent(ch, modifier))
+    if (eventType != KeyboardEventType::Release && _state.inputHandler.sendCharPressEvent(ch, modifier))
         return true;
 
-    auto const success = _state.inputGenerator.generate(ch, modifier);
+    auto const success = _state.inputGenerator.generate(ch, modifier, eventType);
 
     flushInput();
     _viewport.scrollToBottom();

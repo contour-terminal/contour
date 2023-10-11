@@ -279,8 +279,8 @@ class Terminal
 
     // {{{ input proxy
     using Timestamp = std::chrono::steady_clock::time_point;
-    bool sendKeyPressEvent(Key key, Modifier modifier, Timestamp now);
-    bool sendCharPressEvent(char32_t ch, Modifier modifier, Timestamp now);
+    bool sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventType, Timestamp now);
+    bool sendCharEvent(char32_t ch, Modifier modifier, KeyboardEventType eventType, Timestamp now);
     bool sendMousePressEvent(Modifier modifier,
                              MouseButton button,
                              PixelCoordinate pixelPosition,

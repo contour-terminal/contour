@@ -16,143 +16,12 @@
 
 using namespace std;
 
-namespace vtbackend
-{
-
-namespace mappings
-{
-    struct KeyMapping
-    {
-        Key key;
-        std::string_view mapping {};
-    };
-
-    // TODO: implement constexpr-binary-search by:
-    // - adding operator<(KeyMapping a, KeyMapping b) { return a.key < b.key; }
-    // - constexpr-evaluated sort()ed array returned in lambda-expr to be assigned to these globals here.
-    // - make use of this property and let tryMap() do a std::binary_search()
-
 #define ESC "\x1B"
 #define CSI "\x1B["
 #define SS3 "\x1BO"
 
-    // the modifier parameter is going to be replaced via fmt::format()
-    array<KeyMapping, 30> const functionKeysWithModifiers {
-        // clang-format off
-        // Note, that F1..F4 is using CSI too instead of ESC when used with modifier keys.
-        // XXX: Maybe I am blind when reading ctlseqs.txt, but F1..F4 with "1;{}P".. seems not to
-        // match what other terminal emulators send out with modifiers and I don't see how to match
-        // xterm's behaviour along with getting for example vim working to bind to these.
-        KeyMapping { Key::F1, ESC "O{}P" }, // "1;{}P"
-        KeyMapping { Key::F2, ESC "O{}Q" }, // "1;{}Q"
-        KeyMapping { Key::F3, ESC "O{}R" }, // "1;{}R"
-        KeyMapping { Key::F4, ESC "O{}S" }, // "1;{}S"
-        KeyMapping { Key::F5, CSI "15;{}~" },
-        KeyMapping { Key::F6, CSI "17;{}~" },
-        KeyMapping { Key::F7, CSI "18;{}~" },
-        KeyMapping { Key::F8, CSI "19;{}~" },
-        KeyMapping { Key::F9, CSI "20;{}~" },
-        KeyMapping { Key::F10, CSI "21;{}~" },
-        KeyMapping { Key::F11, CSI "23;{}~" },
-        KeyMapping { Key::F12, CSI "24;{}~" },
-        KeyMapping { Key::F13, CSI "25;{}~" },
-        KeyMapping { Key::F14, CSI "26;{}~" },
-        KeyMapping { Key::F15, CSI "28;{}~" },
-        KeyMapping { Key::F16, CSI "29;{}~" },
-        KeyMapping { Key::F17, CSI "31;{}~" },
-        KeyMapping { Key::F18, CSI "32;{}~" },
-        KeyMapping { Key::F19, CSI "33;{}~" },
-        KeyMapping { Key::F20, CSI "34;{}~" },
-
-        // cursor keys
-        KeyMapping { Key::UpArrow, CSI "1;{}A" },
-        KeyMapping { Key::DownArrow, CSI "1;{}B" },
-        KeyMapping { Key::RightArrow, CSI "1;{}C" },
-        KeyMapping { Key::LeftArrow, CSI "1;{}D" },
-
-        // 6-key editing pad
-        KeyMapping { Key::Insert, CSI "2;{}~" },
-        KeyMapping { Key::Delete, CSI "3;{}~" },
-        KeyMapping { Key::Home, CSI "1;{}H" },
-        KeyMapping { Key::End, CSI "1;{}F" },
-        KeyMapping { Key::PageUp, CSI "5;{}~" },
-        KeyMapping { Key::PageDown, CSI "6;{}~" },
-        // clang-format on
-    };
-
-    array<KeyMapping, 22> const standard {
-        // clang-format off
-        // cursor keys
-        KeyMapping { Key::UpArrow, CSI "A" },
-        KeyMapping { Key::DownArrow, CSI "B" },
-        KeyMapping { Key::RightArrow, CSI "C" },
-        KeyMapping { Key::LeftArrow, CSI "D" },
-
-        // 6-key editing pad
-        KeyMapping { Key::Insert, CSI "2~" },
-        KeyMapping { Key::Delete, CSI "3~" },
-        KeyMapping { Key::Home, CSI "H" },
-        KeyMapping { Key::End, CSI "F" },
-        KeyMapping { Key::PageUp, CSI "5~" },
-        KeyMapping { Key::PageDown, CSI "6~" },
-
-        // function keys
-        KeyMapping { Key::F1, ESC "OP" },
-        KeyMapping { Key::F2, ESC "OQ" },
-        KeyMapping { Key::F3, ESC "OR" },
-        KeyMapping { Key::F4, ESC "OS" },
-        KeyMapping { Key::F5, CSI "15~" },
-        KeyMapping { Key::F6, CSI "17~" },
-        KeyMapping { Key::F7, CSI "18~" },
-        KeyMapping { Key::F8, CSI "19~" },
-        KeyMapping { Key::F9, CSI "20~" },
-        KeyMapping { Key::F10, CSI "21~" },
-        KeyMapping { Key::F11, CSI "23~" },
-        KeyMapping { Key::F12, CSI "24~" },
-        // clang-format on
-    };
-
-    /// (DECCKM) Cursor key mode: mappings in when cursor key application mode is set.
-    array<KeyMapping, 6> const applicationCursorKeys {
-        // clang-format off
-        KeyMapping { Key::UpArrow, SS3 "A" },
-        KeyMapping { Key::DownArrow, SS3 "B" },
-        KeyMapping { Key::RightArrow, SS3 "C" },
-        KeyMapping { Key::LeftArrow, SS3 "D" },
-        KeyMapping { Key::Home, SS3 "H" },
-        KeyMapping { Key::End, SS3 "F" },
-        // clang-format on
-    };
-
-    array<KeyMapping, 21> const applicationKeypad {
-        // clang-format off
-        KeyMapping { Key::PageUp, CSI "5~" },
-        KeyMapping { Key::PageDown, CSI "6~" },
-        // KeyMapping{Key::Space,    SS3 " "}, // TODO
-        // KeyMapping{Key::Tab,      SS3 "I"}, // TODO
-        // KeyMapping{Key::Enter,    SS3 "M"}, // TODO
-        // clang-format on
-    };
-
-#undef ESC
-#undef CSI
-#undef SS3
-
-    constexpr bool operator==(KeyMapping const& km, Key key) noexcept
-    {
-        return km.key == key;
-    }
-
-    template <size_t N>
-    optional<string_view> tryMap(array<KeyMapping, N> const& mappings, Key key) noexcept
-    {
-        for (KeyMapping const& km: mappings)
-            if (km.key == key)
-                return { km.mapping };
-
-        return nullopt;
-    }
-} // namespace mappings
+namespace vtbackend
+{
 
 string to_string(Modifier modifier)
 {
@@ -169,10 +38,183 @@ string to_string(MouseButton button)
     return fmt::format("{}", button);
 }
 
+// {{{ StandardKeyboardInputGenerator
+bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
+                                                  Modifier modifier,
+                                                  KeyboardEventType eventType)
+{
+    if (eventType == KeyboardEventType::Release)
+        return false;
+
+    char const chr = static_cast<char>(characterEvent);
+
+    // See section "Alt and Meta Keys" in ctlseqs.txt from xterm.
+    if (modifier == Modifier::Alt)
+        // NB: There are other modes in xterm to send Alt+Key options or even send ESC on Meta key instead.
+        append("\033");
+
+    // Well accepted hack to distinguish between Backspace nad Ctrl+Backspace,
+    // - Backspace is emitting 0x7f,
+    // - Ctrl+Backspace is emitting 0x08
+    if (characterEvent == 0x08)
+    {
+        if (!modifier.control())
+            append("\x7f");
+        else
+            append("\x08");
+        return true;
+    }
+
+    if (modifier == Modifier::Shift && characterEvent == 0x09)
+    {
+        append("\033[Z"); // introduced by linux_console in 1995, adopted by xterm in 2002
+        return true;
+    }
+
+    // raw C0 code
+    if (modifier == Modifier::Control && characterEvent < 32)
+    {
+        append(static_cast<uint8_t>(characterEvent));
+        return true;
+    }
+
+    if (modifier == Modifier::Control && characterEvent == L' ')
+    {
+        append('\x00');
+        return true;
+    }
+
+    if (modifier == Modifier::Control && crispy::ascending('A', chr, 'Z'))
+    {
+        append(static_cast<char>(chr - 'A' + 1));
+        return true;
+    }
+
+    if (modifier == Modifier::Control && characterEvent >= '[' && characterEvent <= '_')
+    {
+        append(static_cast<char>(chr - 'A' + 1)); // remaining C0 characters 0x1B .. 0x1F
+        return true;
+    }
+
+    if (modifier.without(Modifier::Alt).none() || modifier == Modifier::Shift)
+    {
+        append(unicode::convert_to<char>(characterEvent));
+        return true;
+    }
+
+    if (characterEvent < 0x7F)
+        append(static_cast<char>(characterEvent));
+    else
+        append(unicode::convert_to<char>(characterEvent));
+
+    inputLog()("Sending {} \"{}\".", modifier, crispy::escape(unicode::convert_to<char>(characterEvent)));
+    return true;
+}
+
+std::string StandardKeyboardInputGenerator::select(Modifier modifier, FunctionKeyMapping mapping) const
+{
+    if (applicationCursorKeys() && !mapping.appCursor.empty())
+        return std::string(mapping.appCursor);
+
+    if (applicationKeypad() && !mapping.appKeypad.empty())
+        return std::string(mapping.appKeypad);
+
+    if (modifier && !mapping.mods.empty())
+        return crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(modifier));
+
+    return std::string(mapping.std);
+}
+
+bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, KeyboardEventType eventType)
+{
+    if (eventType == KeyboardEventType::Release)
+        return false;
+
+    // clang-format off
+    switch (key)
+    {
+        case Key::F1: append(select(modifier, { .std = ESC "OP", .mods = ESC "O{}P" })); break;
+        case Key::F2: append(select(modifier, { .std = ESC "OQ", .mods = ESC "O{}Q" })); break;
+        case Key::F3: append(select(modifier, { .std = ESC "OR", .mods = ESC "O{}R" })); break;
+        case Key::F4: append(select(modifier, { .std = ESC "OS", .mods = ESC "O{}S" })); break;
+        case Key::F5: append(select(modifier, { .std = CSI "15~", .mods = CSI "15;{}~" })); break;
+        case Key::F6: append(select(modifier, { .std = CSI "17~", .mods = CSI "17;{}~" })); break;
+        case Key::F7: append(select(modifier, { .std = CSI "18~", .mods = CSI "18;{}~" })); break;
+        case Key::F8: append(select(modifier, { .std = CSI "19~", .mods = CSI "19;{}~" })); break;
+        case Key::F9: append(select(modifier, { .std = CSI "20~", .mods = CSI "20;{}~" })); break;
+        case Key::F10: append(select(modifier, { .std = CSI "21~", .mods = CSI "21;{}~" })); break;
+        case Key::F11: append(select(modifier, { .std = CSI "23~", .mods = CSI "23;{}~" })); break;
+        case Key::F12: append(select(modifier, { .std = CSI "24~", .mods = CSI "24;{}~" })); break;
+        case Key::F13: append(select(modifier, { .std = CSI "25~", .mods = CSI "25;{}~" })); break;
+        case Key::F14: append(select(modifier, { .std = CSI "26~", .mods = CSI "26;{}~" })); break;
+        case Key::F15: append(select(modifier, { .std = CSI "28~", .mods = CSI "28;{}~" })); break;
+        case Key::F16: append(select(modifier, { .std = CSI "29~", .mods = CSI "29;{}~" })); break;
+        case Key::F17: append(select(modifier, { .std = CSI "31~", .mods = CSI "31;{}~" })); break;
+        case Key::F18: append(select(modifier, { .std = CSI "32~", .mods = CSI "32;{}~" })); break;
+        case Key::F19: append(select(modifier, { .std = CSI "33~", .mods = CSI "33;{}~" })); break;
+        case Key::F20: append(select(modifier, { .std = CSI "34~", .mods = CSI "34;{}~" })); break;
+        case Key::F21: append(select(modifier, { .std = CSI "35~", .mods = CSI "35;{}~" })); break;
+        case Key::F22: append(select(modifier, { .std = CSI "36~", .mods = CSI "36;{}~" })); break;
+        case Key::F23: append(select(modifier, { .std = CSI "37~", .mods = CSI "37;{}~" })); break;
+        case Key::F24: append(select(modifier, { .std = CSI "38~", .mods = CSI "38;{}~" })); break;
+        case Key::F25: append(select(modifier, { .std = CSI "39~", .mods = CSI "39;{}~" })); break;
+        case Key::F26: append(select(modifier, { .std = CSI "40~", .mods = CSI "40;{}~" })); break;
+        case Key::F27: append(select(modifier, { .std = CSI "41~", .mods = CSI "41;{}~" })); break;
+        case Key::F28: append(select(modifier, { .std = CSI "42~", .mods = CSI "42;{}~" })); break;
+        case Key::F29: append(select(modifier, { .std = CSI "43~", .mods = CSI "43;{}~" })); break;
+        case Key::F30: append(select(modifier, { .std = CSI "44~", .mods = CSI "44;{}~" })); break;
+        case Key::F31: append(select(modifier, { .std = CSI "45~", .mods = CSI "45;{}~" })); break;
+        case Key::F32: append(select(modifier, { .std = CSI "46~", .mods = CSI "46;{}~" })); break;
+        case Key::F33: append(select(modifier, { .std = CSI "47~", .mods = CSI "47;{}~" })); break;
+        case Key::F34: append(select(modifier, { .std = CSI "48~", .mods = CSI "48;{}~" })); break;
+        case Key::F35: append(select(modifier, { .std = CSI "49~", .mods = CSI "49;{}~" })); break;
+        case Key::Escape: append("\033"); break;
+        case Key::Enter: append(select(modifier, { .std = "\r", .appKeypad = SS3 "M" })); break;
+        case Key::Tab: append(select(modifier, { .std = "\t", .appKeypad = SS3 "I" })); break;
+        case Key::Backspace: append(modifier.control() ? "\x7f" : "\x08"); break;
+        case Key::UpArrow: append(select(modifier, { .std = CSI "A", .mods = CSI "1;{}A", .appCursor = SS3 "A" })); break;
+        case Key::DownArrow: append(select(modifier, { .std = CSI "B", .mods = CSI "1;{}B", .appCursor = SS3 "B" })); break;
+        case Key::RightArrow: append(select(modifier, { .std = CSI "C", .mods = CSI "1;{}C", .appCursor = SS3 "C" })); break;
+        case Key::LeftArrow: append(select(modifier, { .std = CSI "D", .mods = CSI "1;{}D", .appCursor = SS3 "D" })); break;
+        case Key::Home: append(select(modifier, { .std = CSI "H", .mods = CSI "1;{}H", .appCursor = SS3 "H" })); break;
+        case Key::End: append(select(modifier, { .std = CSI "F", .mods = CSI "1;{}F", .appCursor = SS3 "F" })); break;
+        case Key::PageUp: append(select(modifier, { .std = CSI "5~", .mods = CSI "5;{}~", .appKeypad = CSI "5~" })); break;
+        case Key::PageDown: append(select(modifier, { .std = CSI "6~", .mods = CSI "6;{}~", .appKeypad = CSI "6~" })); break;
+        case Key::Insert: append(select(modifier, { .std = CSI "2~", .mods = CSI "2;{}~" })); break;
+        case Key::Delete: append(select(modifier, { .std = CSI "3~", .mods = CSI "3;{}~" })); break;
+        case Key::MediaPlay:
+        case Key::MediaStop:
+        case Key::MediaPrevious:
+        case Key::MediaNext:
+        case Key::MediaPause:
+        case Key::MediaTogglePlayPause:
+        case Key::VolumeUp:
+        case Key::VolumeDown:
+        case Key::VolumeMute:
+        case Key::Control:
+        case Key::Alt:
+        case Key::LeftSuper:
+        case Key::RightSuper:
+        case Key::LeftHyper:
+        case Key::RightHyper:
+        case Key::Meta:
+        case Key::CapsLock:
+        case Key::ScrollLock:
+        case Key::NumLock:
+        case Key::PrintScreen:
+        case Key::Pause:
+        case Key::Menu:
+            return false;
+    }
+    // clang-format on
+
+    return true;
+}
+// }}}
+
 void InputGenerator::reset()
 {
-    _cursorKeysMode = KeyMode::Normal;
-    _numpadKeysMode = KeyMode::Normal;
+    _standardKeyboardInputGenerator.reset();
     _bracketedPaste = false;
     _generateFocusEvents = false;
     _mouseProtocol = std::nullopt;
@@ -187,99 +229,39 @@ void InputGenerator::reset()
 void InputGenerator::setCursorKeysMode(KeyMode mode)
 {
     inputLog()("set cursor keys mode: {}", mode);
-    _cursorKeysMode = mode;
+    _standardKeyboardInputGenerator.setCursorKeysMode(mode);
 }
 
 void InputGenerator::setNumpadKeysMode(KeyMode mode)
 {
     inputLog()("set numpad keys mode: {}", mode);
-    _numpadKeysMode = mode;
+    _standardKeyboardInputGenerator.setNumpadKeysMode(mode);
 }
 
 void InputGenerator::setApplicationKeypadMode(bool enable)
 {
-    if (enable)
-        _numpadKeysMode = KeyMode::Application;
-    else
-        _numpadKeysMode = KeyMode::Normal; // aka. Numeric
-
-    inputLog()("set application keypad mode: {} -> {}", enable, _numpadKeysMode);
+    _standardKeyboardInputGenerator.setApplicationKeypadMode(enable);
+    inputLog()("set application keypad mode: {}", enable);
 }
 
-bool InputGenerator::generate(char32_t characterEvent, Modifier modifier)
+bool InputGenerator::generate(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType)
 {
-    char const chr = static_cast<char>(characterEvent);
-
-    // See section "Alt and Meta Keys" in ctlseqs.txt from xterm.
-    if (modifier == Modifier::Alt)
-        // NB: There are other modes in xterm to send Alt+Key options or even send ESC on Meta key instead.
-        append("\033");
-
-    // Well accepted hack to distinguish between Backspace nad Ctrl+Backspace,
-    // - Backspace is emitting 0x7f,
-    // - Ctrl+Backspace is emitting 0x08
-    if (characterEvent == 0x08)
-    {
-        if (!modifier.control())
-            return append("\x7f");
-        else
-            return append("\x08");
-    }
-
-    if (modifier == Modifier::Shift && characterEvent == 0x09)
-        return append("\033[Z"); // introduced by linux_console in 1995, adopted by xterm in 2002
-
-    // raw C0 code
-    if (modifier == Modifier::Control && characterEvent < 32)
-        return append(static_cast<uint8_t>(characterEvent));
-
-    if (modifier == Modifier::Control && characterEvent == L' ')
-        return append('\x00');
-
-    if (modifier == Modifier::Control && crispy::ascending('A', chr, 'Z'))
-        return append(static_cast<char>(chr - 'A' + 1));
-
-    if (modifier == Modifier::Control && characterEvent >= '[' && characterEvent <= '_')
-        return append(static_cast<char>(chr - 'A' + 1)); // remaining C0 characters 0x1B .. 0x1F
-
-    if (modifier.without(Modifier::Alt).none() || modifier == Modifier::Shift)
-        return append(unicode::convert_to<char>(characterEvent));
-
-    if (characterEvent < 0x7F)
-        append(static_cast<char>(characterEvent));
-    else
-        append(unicode::convert_to<char>(characterEvent));
-
-    inputLog()("Sending {} \"{}\".", modifier, crispy::escape(unicode::convert_to<char>(characterEvent)));
-    return true;
+    bool const success =
+        _standardKeyboardInputGenerator.generateChar(characterEvent, modifier, KeyboardEventType::Press);
+    _pendingSequence += _standardKeyboardInputGenerator.take();
+    inputLog()("Sending {} \"{}\" {}.",
+               modifier,
+               crispy::escape(unicode::convert_to<char>(characterEvent)),
+               eventType);
+    return success;
 }
 
-bool InputGenerator::generate(Key key, Modifier modifier)
+bool InputGenerator::generate(Key key, Modifier modifier, KeyboardEventType eventType)
 {
-    auto const logged = [key, modifier](bool success) -> bool {
-        if (success)
-            inputLog()("Sending {} {}.", modifier, key);
-        return success;
-    };
-
-    if (modifier)
-    {
-        if (auto mapping = tryMap(mappings::functionKeysWithModifiers, key); mapping)
-            return logged(append(crispy::replace(*mapping, "{}"sv, makeVirtualTerminalParam(modifier))));
-    }
-
-    if (applicationCursorKeys())
-        if (auto mapping = tryMap(mappings::applicationCursorKeys, key); mapping)
-            return logged(append(*mapping));
-
-    if (applicationKeypad())
-        if (auto mapping = tryMap(mappings::applicationKeypad, key); mapping)
-            return logged(append(*mapping));
-
-    if (auto mapping = tryMap(mappings::standard, key); mapping)
-        return logged(append(*mapping));
-
-    return false;
+    bool const success = _standardKeyboardInputGenerator.generateKey(key, modifier, eventType);
+    _pendingSequence += _standardKeyboardInputGenerator.take();
+    inputLog()("Sending {} \"{}\" {}.", modifier, key, eventType);
+    return success;
 }
 
 void InputGenerator::generatePaste(std::string_view const& text)
