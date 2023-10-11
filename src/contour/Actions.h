@@ -208,10 +208,10 @@ DECLARE_ACTION_FMT(WriteScreen)
 template <>
 struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
 {
-    static auto format(contour::actions::Action const& _action, format_context& ctx)
+    auto format(contour::actions::Action const& _action, format_context& ctx)
         -> format_context::iterator
     {
-        std::string name;
+        std::string name = "Unknown action";
         // {{{ handle
         HANDLE_ACTION(CancelSelection);
         HANDLE_ACTION(ChangeProfile);
@@ -262,7 +262,7 @@ struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
         HANDLE_ACTION(ViNormalMode);
         HANDLE_ACTION(WriteScreen);
         // }}}
-        return fmt::format_to(ctx.out(), "UNKNOWN ACTION");
+        return formatter<string_view>::format(name, ctx);
     }
 };
 

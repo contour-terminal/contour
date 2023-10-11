@@ -527,14 +527,14 @@ void Terminal::updateIndicatorStatusLine()
 
     auto const _ = crispy::finally { [this, savedActiveStatusDisplay = _state.activeStatusDisplay]() {
         // Cleaning up.
-        setActiveStatusDisplay(savedActiveStatusDisplay);
+        // setActiveStatusDisplay(savedActiveStatusDisplay);
         verifyState();
     } };
 
     auto const colors =
         _state.focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
 
-    setActiveStatusDisplay(ActiveStatusDisplay::IndicatorStatusLine);
+    // setActiveStatusDisplay(ActiveStatusDisplay::IndicatorStatusLine);
 
     // Prepare old status line's cursor position and some other flags.
     _indicatorStatusScreen.moveCursorTo({}, {});
@@ -833,8 +833,8 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     }
 
     auto const shouldExtendSelection = shouldExtendSelectionByMouse(newPosition, pixelPosition);
-
     auto relativePos = _viewport.translateScreenToGridCoordinate(newPosition);
+    fmt::print(" shouldExtend {}, relativePos {} \n", shouldExtendSelection, relativePos);
     if (shouldExtendSelection && _leftMouseButtonPressed)
     {
         _state.viCommands.cursorPosition = relativePos;
@@ -854,18 +854,28 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     if (_leftMouseButtonPressed)
     {
         if (!selectionAvailable())
+        {
+            fmt::print("selection not available\n");
             setSelector(
                 std::make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
+        }
         else if (selector()->state() != Selection::State::Complete && shouldExtendSelection)
         {
             if (currentScreen().isCellEmpty(relativePos)
                 && !currentScreen().compareCellTextAt(relativePos, 0x20))
-                relativePos.column = ColumnOffset { 0 } + *(_settings.pageSize.columns - 1);
-            _state.viCommands.cursorPosition = relativePos;
+            {
+                relativePos.column = ColumnOffset { 0 } + unbox(_settings.pageSize.columns - 1);
+                fmt::print("change coloums {} \n", relativePos);
+                _state.viCommands.cursorPosition = relativePos;
+            }
             if (_state.inputHandler.mode() != ViMode::Insert)
+            {
                 _state.inputHandler.setMode(selector()->viMode());
+            }
             if (selector()->extend(relativePos))
+            {
                 breakLoopAndRefreshRenderBuffer();
+            }
         }
     }
 }
