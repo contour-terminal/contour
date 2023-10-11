@@ -22,6 +22,7 @@ set(crispy_SOURCES
     compose.h
     defines.h
     escape.h
+    flags.h
     indexed.h
     logstore.cpp logstore.h
     overloaded.h
