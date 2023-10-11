@@ -267,6 +267,9 @@ void TerminalSession::terminate()
 void TerminalSession::bell()
 {
     emit onBell();
+
+    if (_profile.bell.alert)
+        emit onAlert();
 }
 
 void TerminalSession::bufferChanged(vtbackend::ScreenType type)

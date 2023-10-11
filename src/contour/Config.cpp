@@ -1805,15 +1805,19 @@ namespace
             terminalProfile.syncWindowTitleWithHostWritableStatusDisplay = boolValue;
 
         strValue = "default";
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "bell", strValue, logger))
+        if (tryLoadChildRelative(usedKeys, profile, basePath, "bell.sound", strValue, logger))
         {
             if (!strValue.empty())
             {
                 if (strValue != "off" && strValue != "default")
                     strValue = "file:" + strValue;
-                terminalProfile.bell = strValue;
+                terminalProfile.bell.sound = strValue;
             }
         }
+
+        boolValue = false;
+        if (tryLoadChildRelative(usedKeys, profile, basePath, "bell.alert", boolValue, logger))
+            terminalProfile.bell.alert = boolValue;
 
         if (auto value = profile["slow_scrolling_time"])
         {
