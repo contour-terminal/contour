@@ -261,6 +261,8 @@ string to_string(MouseButton button)
         case MouseButton::Release: return "Release"s;
         case MouseButton::WheelUp: return "WheelUp"s;
         case MouseButton::WheelDown: return "WheelDown"s;
+        case MouseButton::WheelRight: return "WheelRight"s;
+        case MouseButton::WheelLeft: return "WheelLeft"s;
     }
     return ""; // should never be reached
 }
@@ -493,13 +495,16 @@ namespace
             case MouseButton::Release: return 3;
             case MouseButton::WheelUp: return 4;
             case MouseButton::WheelDown: return 5;
+            case MouseButton::WheelRight: return 6;
+            case MouseButton::WheelLeft: return 7;
         }
         return 0; // should never happen
     }
 
     constexpr bool isMouseWheel(MouseButton button) noexcept
     {
-        return button == MouseButton::WheelUp || button == MouseButton::WheelDown;
+        return button == MouseButton::WheelUp || button == MouseButton::WheelDown
+               || button == MouseButton::WheelLeft || button == MouseButton::WheelRight;
     }
 
     constexpr uint8_t buttonX10(MouseButton button) noexcept
