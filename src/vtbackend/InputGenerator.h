@@ -215,6 +215,8 @@ enum class MouseButton
     Release, // Button was released and/or no button is pressed.
     WheelUp,
     WheelDown,
+    WheelLeft,
+    WheelRight,
 };
 
 std::string to_string(MouseButton button);
@@ -487,6 +489,8 @@ struct fmt::formatter<vtbackend::MouseButton>: formatter<std::string_view>
             case vtbackend::MouseButton::Release: name = "Release"; break;
             case vtbackend::MouseButton::WheelUp: name = "WheelUp"; break;
             case vtbackend::MouseButton::WheelDown: name = "WheelDown"; break;
+            case vtbackend::MouseButton::WheelLeft: name = "WheelLeft"; break;
+            case vtbackend::MouseButton::WheelRight: name = "WheelRight"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

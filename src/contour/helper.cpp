@@ -120,13 +120,7 @@ namespace
         if (event->angleDelta().y())
             return event->angleDelta().y();
 
-        if (event->pixelDelta().x())
-            return event->pixelDelta().x();
-        if (event->angleDelta().x())
-            return event->angleDelta().x();
-
         return 0;
-
 #else
         // switch (event->orientation())
         // {
@@ -266,12 +260,24 @@ bool sendKeyEvent(QKeyEvent* event, TerminalSession& session)
 
 void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 {
-    auto const yDelta = mouseWheelDelta(event);
+    using VTMouseButton = vtbackend::MouseButton;
 
+    auto const xDelta = event->angleDelta().x() > 0 ? 1 : event->angleDelta().x() < 0 ? -1 : 0;
+    if (xDelta)
+    {
+        auto const modifier = makeModifier(event->modifiers());
+        auto const button = xDelta > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
+        auto const pixelPosition = makeMousePixelPosition(event, session.contentScale());
+
+        session.sendMousePressEvent(modifier, button, pixelPosition);
+        event->accept();
+    }
+
+    auto const yDelta = mouseWheelDelta(event);
     if (yDelta)
     {
         auto const modifier = makeModifier(event->modifiers());
-        auto const button = yDelta > 0 ? vtbackend::MouseButton::WheelUp : vtbackend::MouseButton::WheelDown;
+        auto const button = yDelta > 0 ? VTMouseButton::WheelUp : VTMouseButton::WheelDown;
         auto const pixelPosition = makeMousePixelPosition(event, session.contentScale());
 
         session.sendMousePressEvent(modifier, button, pixelPosition);
