@@ -141,7 +141,7 @@
           <li>Adds config entry `profile.*.size_indicator_on_resize` to control size indicator on resize and makes resize indicator small.</li>
           <li>Adds OpenSelection action, and honor case in the configuration bindings</li>
           <li>Adds open resource (URL, local file) feature also to vi mode.</li>
-          <li>Adds configurable window alerts on terminal bells; BREAKING CHANGE: "bell" configuration has been moved to "bell.sound"</li>
+          <li>Adds configurable window alerts on terminal bells.</li>
         </ul>
       </description>
     </release>
