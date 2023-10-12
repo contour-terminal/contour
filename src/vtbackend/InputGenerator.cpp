@@ -248,19 +248,29 @@ bool InputGenerator::generate(char32_t characterEvent, Modifier modifier, Keyboa
 {
     bool const success =
         _standardKeyboardInputGenerator.generateChar(characterEvent, modifier, KeyboardEventType::Press);
-    _pendingSequence += _standardKeyboardInputGenerator.take();
-    inputLog()("Sending {} \"{}\" {}.",
-               modifier,
-               crispy::escape(unicode::convert_to<char>(characterEvent)),
-               eventType);
+
+    if (success)
+    {
+        _pendingSequence += _standardKeyboardInputGenerator.take();
+        inputLog()("Sending {} \"{}\" {}.",
+                   modifier,
+                   crispy::escape(unicode::convert_to<char>(characterEvent)),
+                   eventType);
+    }
+
     return success;
 }
 
 bool InputGenerator::generate(Key key, Modifier modifier, KeyboardEventType eventType)
 {
     bool const success = _standardKeyboardInputGenerator.generateKey(key, modifier, eventType);
-    _pendingSequence += _standardKeyboardInputGenerator.take();
-    inputLog()("Sending {} \"{}\" {}.", modifier, key, eventType);
+
+    if (success)
+    {
+        _pendingSequence += _standardKeyboardInputGenerator.take();
+        inputLog()("Sending {} \"{}\" {}.", modifier, key, eventType);
+    }
+
     return success;
 }
 
