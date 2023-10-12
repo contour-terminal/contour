@@ -126,25 +126,6 @@ namespace mappings
 
     array<KeyMapping, 21> const applicationKeypad {
         // clang-format off
-        KeyMapping { Key::Numpad_NumLock, SS3 "P" },
-        KeyMapping { Key::Numpad_Divide, SS3 "Q" },
-        KeyMapping { Key::Numpad_Multiply, SS3 "Q" },
-        KeyMapping { Key::Numpad_Subtract, SS3 "Q" },
-        KeyMapping { Key::Numpad_CapsLock, SS3 "m" },
-        KeyMapping { Key::Numpad_Add, SS3 "l" },
-        KeyMapping { Key::Numpad_Decimal, SS3 "n" },
-        KeyMapping { Key::Numpad_Enter, SS3 "M" },
-        KeyMapping { Key::Numpad_Equal, SS3 "X" },
-        KeyMapping { Key::Numpad_0, SS3 "p" },
-        KeyMapping { Key::Numpad_1, SS3 "q" },
-        KeyMapping { Key::Numpad_2, SS3 "r" },
-        KeyMapping { Key::Numpad_3, SS3 "s" },
-        KeyMapping { Key::Numpad_4, SS3 "t" },
-        KeyMapping { Key::Numpad_5, SS3 "u" },
-        KeyMapping { Key::Numpad_6, SS3 "v" },
-        KeyMapping { Key::Numpad_7, SS3 "w" },
-        KeyMapping { Key::Numpad_8, SS3 "x" },
-        KeyMapping { Key::Numpad_9, SS3 "y" },
         KeyMapping { Key::PageUp, CSI "5~" },
         KeyMapping { Key::PageDown, CSI "6~" },
         // KeyMapping{Key::Space,    SS3 " "}, // TODO
@@ -230,7 +211,7 @@ bool InputGenerator::generate(char32_t characterEvent, Modifier modifier)
     char const chr = static_cast<char>(characterEvent);
 
     // See section "Alt and Meta Keys" in ctlseqs.txt from xterm.
-    if (modifier.alt())
+    if (modifier == Modifier::Alt)
         // NB: There are other modes in xterm to send Alt+Key options or even send ESC on Meta key instead.
         append("\033");
 

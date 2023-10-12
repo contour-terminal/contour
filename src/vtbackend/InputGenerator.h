@@ -41,7 +41,11 @@ class Modifier
         Shift = 1,
         Alt = 2,
         Control = 4,
-        Meta = 8,
+        Super = 8,
+        Hyper = 16,
+        Meta = 32,
+        CapsLock = 32,
+        NumLock = 64,
     };
 
     constexpr Modifier(Key key): _mask { static_cast<unsigned>(key) } {}
@@ -59,7 +63,12 @@ class Modifier
     [[nodiscard]] constexpr bool shift() const noexcept { return value() & Shift; }
     [[nodiscard]] constexpr bool alt() const noexcept { return value() & Alt; }
     [[nodiscard]] constexpr bool control() const noexcept { return value() & Control; }
+    [[nodiscard]] constexpr bool super() const noexcept { return value() & Super; }
+    // hyper is called hyperKey because in MSVC/Win32 there is a `typedef hyper __uint64;` :-(
+    [[nodiscard]] constexpr bool hyperKey() const noexcept { return value() & Hyper; }
     [[nodiscard]] constexpr bool meta() const noexcept { return value() & Meta; }
+    [[nodiscard]] constexpr bool capsLock() const noexcept { return value() & CapsLock; }
+    [[nodiscard]] constexpr bool numLock() const noexcept { return value() & NumLock; }
 
     constexpr operator unsigned() const noexcept { return _mask; }
 
@@ -159,6 +168,26 @@ enum class Key
     F18,
     F19,
     F20,
+    F21,
+    F22,
+    F23,
+    F24,
+    F25,
+    F26,
+    F27,
+    F28,
+    F29,
+    F30,
+    F31,
+    F32,
+    F33,
+    F34,
+    F35,
+
+    Escape,
+    Enter,
+    Tab,
+    Backspace,
 
     // cursor keys
     DownArrow,
@@ -174,28 +203,34 @@ enum class Key
     PageUp,
     PageDown,
 
-    // numpad keys
-    // NOLINTBEGIN(readability-identifier-naming)
-    Numpad_NumLock,
-    Numpad_Divide,
-    Numpad_Multiply,
-    Numpad_Subtract,
-    Numpad_CapsLock,
-    Numpad_Add,
-    Numpad_Decimal,
-    Numpad_Enter,
-    Numpad_Equal,
-    Numpad_0,
-    Numpad_1,
-    Numpad_2,
-    Numpad_3,
-    Numpad_4,
-    Numpad_5,
-    Numpad_6,
-    Numpad_7,
-    Numpad_8,
-    Numpad_9,
-    // NOLINTEND(readability-identifier-naming)
+    // media keys
+    MediaPlay,
+    MediaStop,
+    MediaPrevious,
+    MediaNext,
+    MediaPause,
+    MediaTogglePlayPause,
+
+    VolumeUp,
+    VolumeDown,
+    VolumeMute,
+
+    // modifier keys
+    Control,
+    Alt,
+    LeftSuper,
+    RightSuper,
+    LeftHyper,
+    RightHyper,
+    Meta,
+
+    // other special keys
+    CapsLock,
+    ScrollLock,
+    NumLock,
+    PrintScreen,
+    Pause,
+    Menu,
 };
 
 std::string to_string(Key key);
@@ -542,6 +577,25 @@ struct fmt::formatter<vtbackend::Key>: formatter<std::string_view>
             case vtbackend::Key::F18: name = "F18"; break;
             case vtbackend::Key::F19: name = "F19"; break;
             case vtbackend::Key::F20: name = "F20"; break;
+            case vtbackend::Key::F21: name = "F21"; break;
+            case vtbackend::Key::F22: name = "F22"; break;
+            case vtbackend::Key::F23: name = "F23"; break;
+            case vtbackend::Key::F24: name = "F24"; break;
+            case vtbackend::Key::F25: name = "F25"; break;
+            case vtbackend::Key::F26: name = "F26"; break;
+            case vtbackend::Key::F27: name = "F27"; break;
+            case vtbackend::Key::F28: name = "F28"; break;
+            case vtbackend::Key::F29: name = "F29"; break;
+            case vtbackend::Key::F30: name = "F30"; break;
+            case vtbackend::Key::F31: name = "F31"; break;
+            case vtbackend::Key::F32: name = "F32"; break;
+            case vtbackend::Key::F33: name = "F33"; break;
+            case vtbackend::Key::F34: name = "F34"; break;
+            case vtbackend::Key::F35: name = "F35"; break;
+            case vtbackend::Key::Escape: name = "Escape"; break;
+            case vtbackend::Key::Enter: name = "Enter"; break;
+            case vtbackend::Key::Tab: name = "Tab"; break;
+            case vtbackend::Key::Backspace: name = "Backspace"; break;
             case vtbackend::Key::DownArrow: name = "DownArrow"; break;
             case vtbackend::Key::LeftArrow: name = "LeftArrow"; break;
             case vtbackend::Key::RightArrow: name = "RightArrow"; break;
@@ -552,25 +606,28 @@ struct fmt::formatter<vtbackend::Key>: formatter<std::string_view>
             case vtbackend::Key::End: name = "End"; break;
             case vtbackend::Key::PageUp: name = "PageUp"; break;
             case vtbackend::Key::PageDown: name = "PageDown"; break;
-            case vtbackend::Key::Numpad_NumLock: name = "Numpad_NumLock"; break;
-            case vtbackend::Key::Numpad_Divide: name = "Numpad_Divide"; break;
-            case vtbackend::Key::Numpad_Multiply: name = "Numpad_Multiply"; break;
-            case vtbackend::Key::Numpad_Subtract: name = "Numpad_Subtract"; break;
-            case vtbackend::Key::Numpad_CapsLock: name = "Numpad_CapsLock"; break;
-            case vtbackend::Key::Numpad_Add: name = "Numpad_Add"; break;
-            case vtbackend::Key::Numpad_Decimal: name = "Numpad_Decimal"; break;
-            case vtbackend::Key::Numpad_Enter: name = "Numpad_Enter"; break;
-            case vtbackend::Key::Numpad_Equal: name = "Numpad_Equal"; break;
-            case vtbackend::Key::Numpad_0: name = "Numpad_0"; break;
-            case vtbackend::Key::Numpad_1: name = "Numpad_1"; break;
-            case vtbackend::Key::Numpad_2: name = "Numpad_2"; break;
-            case vtbackend::Key::Numpad_3: name = "Numpad_3"; break;
-            case vtbackend::Key::Numpad_4: name = "Numpad_4"; break;
-            case vtbackend::Key::Numpad_5: name = "Numpad_5"; break;
-            case vtbackend::Key::Numpad_6: name = "Numpad_6"; break;
-            case vtbackend::Key::Numpad_7: name = "Numpad_7"; break;
-            case vtbackend::Key::Numpad_8: name = "Numpad_8"; break;
-            case vtbackend::Key::Numpad_9: name = "Numpad_9"; break;
+            case vtbackend::Key::MediaPlay: name = "MediaPlay"; break;
+            case vtbackend::Key::MediaStop: name = "MediaStop"; break;
+            case vtbackend::Key::MediaPrevious: name = "MediaPrevious"; break;
+            case vtbackend::Key::MediaNext: name = "MediaNext"; break;
+            case vtbackend::Key::MediaPause: name = "MediaPause"; break;
+            case vtbackend::Key::MediaTogglePlayPause: name = "MediaTogglePlayPause"; break;
+            case vtbackend::Key::VolumeDown: name = "VolumeDown"; break;
+            case vtbackend::Key::VolumeUp: name = "VolumeUp"; break;
+            case vtbackend::Key::VolumeMute: name = "VolumeMute"; break;
+            case vtbackend::Key::Control: name = "Control"; break;
+            case vtbackend::Key::Alt: name = "Alt"; break;
+            case vtbackend::Key::LeftSuper: name = "LeftSuper"; break;
+            case vtbackend::Key::RightSuper: name = "RightSuper"; break;
+            case vtbackend::Key::LeftHyper: name = "LeftHyper"; break;
+            case vtbackend::Key::RightHyper: name = "RightHyper"; break;
+            case vtbackend::Key::Meta: name = "Meta"; break;
+            case vtbackend::Key::CapsLock: name = "CapsLock"; break;
+            case vtbackend::Key::ScrollLock: name = "ScrollLock"; break;
+            case vtbackend::Key::NumLock: name = "NumLock"; break;
+            case vtbackend::Key::PrintScreen: name = "PrintScreen"; break;
+            case vtbackend::Key::Pause: name = "Pause"; break;
+            case vtbackend::Key::Menu: name = "Menu"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

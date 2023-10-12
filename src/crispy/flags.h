@@ -23,6 +23,9 @@ template <typename flag_type>
 class flags
 {
   public:
+    flags() noexcept = default;
+    flags(flag_type flag) noexcept { enable(flag); }
+
     constexpr void enable(flag_type flag) noexcept { _value |= static_cast<unsigned>(flag); }
     constexpr void disable(flag_type flag) noexcept { _value &= ~static_cast<unsigned>(flag); }
 
@@ -45,7 +48,30 @@ class flags
         return *this;
     }
 
+    [[nodiscard]] constexpr bool none() const noexcept { return _value == 0; }
+    [[nodiscard]] constexpr bool any() const noexcept { return _value != 0; }
+
     [[nodiscard]] constexpr unsigned value() const noexcept { return _value; }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    [[nodiscard]] static constexpr flags<flag_type> from_value(unsigned value) noexcept
+    {
+        auto result = flags<flag_type> {};
+        result._value = value;
+        return result;
+    }
+
+    [[nodiscard]] constexpr flags<flag_type> with(flag_type flag) const noexcept
+    {
+        return flags<flag_type>::from_value(_value) | flag;
+    }
+
+    [[nodiscard]] constexpr flags<flag_type> without(flag_type flag) const noexcept
+    {
+        auto result = flags<flag_type>::from_value(_value);
+        result &= flag;
+        return result;
+    }
 
   private:
     unsigned _value = 0;
