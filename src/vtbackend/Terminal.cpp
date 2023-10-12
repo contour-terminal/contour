@@ -859,22 +859,16 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
             setSelector(
                 std::make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
         }
-        else if (selector()->state() != Selection::State::Complete && shouldExtendSelection)
+        else if (selector()->state() != Selection::State::Complete)
         {
             if (currentScreen().isCellEmpty(relativePos)
                 && !currentScreen().compareCellTextAt(relativePos, 0x20))
-            {
                 relativePos.column = ColumnOffset { 0 } + unbox(_settings.pageSize.columns - 1);
-                _state.viCommands.cursorPosition = relativePos;
-            }
+            _state.viCommands.cursorPosition = relativePos;
             if (_state.inputHandler.mode() != ViMode::Insert)
-            {
                 _state.inputHandler.setMode(selector()->viMode());
-            }
             if (selector()->extend(relativePos))
-            {
                 breakLoopAndRefreshRenderBuffer();
-            }
         }
     }
 }
@@ -1905,8 +1899,8 @@ void Terminal::markCellDirty(CellLocation position) noexcept
     if (!_selection)
         return;
 
-    if (_selection->contains(position))
-        clearSelection();
+    //if (_selection->contains(position))
+    //    clearSelection();
 }
 
 void Terminal::markRegionDirty(Rect area) noexcept
@@ -1917,8 +1911,8 @@ void Terminal::markRegionDirty(Rect area) noexcept
     if (!_selection)
         return;
 
-    if (_selection->intersects(area))
-        clearSelection();
+    //if (_selection->intersects(area))
+    //    clearSelection();
 }
 
 void Terminal::synchronizedOutput(bool enabled)
