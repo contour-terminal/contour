@@ -699,8 +699,10 @@ void TerminalSession::sendCharEvent(char32_t value,
                                     KeyboardEventType eventType,
                                     Timestamp now)
 {
-    inputLog()(
-        "Character press event received: {} {}", modifier, crispy::escape(unicode::convert_to<char>(value)));
+    inputLog()("Character {} event received: {} {}",
+               eventType,
+               modifier,
+               crispy::escape(unicode::convert_to<char>(value)));
 
     assert(_display != nullptr);
 
