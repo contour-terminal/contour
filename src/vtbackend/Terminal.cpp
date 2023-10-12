@@ -527,14 +527,11 @@ void Terminal::updateIndicatorStatusLine()
 
     auto const _ = crispy::finally { [this, savedActiveStatusDisplay = _state.activeStatusDisplay]() {
         // Cleaning up.
-        // setActiveStatusDisplay(savedActiveStatusDisplay);
         verifyState();
     } };
 
     auto const colors =
         _state.focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
-
-    // setActiveStatusDisplay(ActiveStatusDisplay::IndicatorStatusLine);
 
     // Prepare old status line's cursor position and some other flags.
     _indicatorStatusScreen.moveCursorTo({}, {});
@@ -823,6 +820,11 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     // - grid text selection is extended
     verifyState();
 
+
+    // avoid applying event for sctatus line or inidcator status line
+    if(! (isPrimaryScreen() || isAlternateScreen()))
+        return;
+
     if (newPosition != _currentMousePosition)
     {
         // Speed-clicks are only counted when not moving the mouse in between, so reset on mouse move here.
@@ -834,7 +836,6 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
 
     auto const shouldExtendSelection = shouldExtendSelectionByMouse(newPosition, pixelPosition);
     auto relativePos = _viewport.translateScreenToGridCoordinate(newPosition);
-    fmt::print(" shouldExtend {}, relativePos {} \n", shouldExtendSelection, relativePos);
     if (shouldExtendSelection && _leftMouseButtonPressed)
     {
         _state.viCommands.cursorPosition = relativePos;
@@ -855,7 +856,6 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     {
         if (!selectionAvailable())
         {
-            fmt::print("selection not available\n");
             setSelector(
                 std::make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
         }
@@ -865,7 +865,6 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
                 && !currentScreen().compareCellTextAt(relativePos, 0x20))
             {
                 relativePos.column = ColumnOffset { 0 } + unbox(_settings.pageSize.columns - 1);
-                fmt::print("change coloums {} \n", relativePos);
                 _state.viCommands.cursorPosition = relativePos;
             }
             if (_state.inputHandler.mode() != ViMode::Insert)

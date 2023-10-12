@@ -12,9 +12,9 @@ namespace vtbackend
 
 bool Viewport::scrollUp(LineCount numLines)
 {
+    viewportLog()("scrollUp");
     auto offset =
         std::min(_scrollOffset + numLines.as<ScrollOffset>(), boxed_cast<ScrollOffset>(historyLineCount()));
-    viewportLog()("{} = min({} + {}, {})", offset , _scrollOffset, numLines, historyLineCount());
     return scrollTo(offset);
 }
 
