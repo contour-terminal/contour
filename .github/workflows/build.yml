@@ -908,7 +908,7 @@ jobs:
   # {{{ GUI: test: contour quick shell exit
   test_quick_exit:
     name: "GUI: Quick Shell Exit"
-    needs: [package_for_Ubuntu, build_fontconfig]
+    needs: [package_for_Ubuntu, fedora, build_fontconfig]
     strategy:
       fail-fast: false
       matrix:
