@@ -532,47 +532,69 @@ namespace
     optional<vtbackend::Key> parseKey(string const& name)
     {
         using vtbackend::Key;
-        auto static constexpr Mappings = array { pair { "F1"sv, Key::F1 },
-                                                 pair { "F2"sv, Key::F2 },
-                                                 pair { "F3"sv, Key::F3 },
-                                                 pair { "F4"sv, Key::F4 },
-                                                 pair { "F5"sv, Key::F5 },
-                                                 pair { "F6"sv, Key::F6 },
-                                                 pair { "F7"sv, Key::F7 },
-                                                 pair { "F8"sv, Key::F8 },
-                                                 pair { "F9"sv, Key::F9 },
-                                                 pair { "F10"sv, Key::F10 },
-                                                 pair { "F11"sv, Key::F11 },
-                                                 pair { "F12"sv, Key::F12 },
-                                                 pair { "DownArrow"sv, Key::DownArrow },
-                                                 pair { "LeftArrow"sv, Key::LeftArrow },
-                                                 pair { "RightArrow"sv, Key::RightArrow },
-                                                 pair { "UpArrow"sv, Key::UpArrow },
-                                                 pair { "Insert"sv, Key::Insert },
-                                                 pair { "Delete"sv, Key::Delete },
-                                                 pair { "Home"sv, Key::Home },
-                                                 pair { "End"sv, Key::End },
-                                                 pair { "PageUp"sv, Key::PageUp },
-                                                 pair { "PageDown"sv, Key::PageDown },
-                                                 pair { "Numpad_NumLock"sv, Key::Numpad_NumLock },
-                                                 pair { "Numpad_Divide"sv, Key::Numpad_Divide },
-                                                 pair { "Numpad_Multiply"sv, Key::Numpad_Multiply },
-                                                 pair { "Numpad_Subtract"sv, Key::Numpad_Subtract },
-                                                 pair { "Numpad_CapsLock"sv, Key::Numpad_CapsLock },
-                                                 pair { "Numpad_Add"sv, Key::Numpad_Add },
-                                                 pair { "Numpad_Decimal"sv, Key::Numpad_Decimal },
-                                                 pair { "Numpad_Enter"sv, Key::Numpad_Enter },
-                                                 pair { "Numpad_Equal"sv, Key::Numpad_Equal },
-                                                 pair { "Numpad_0"sv, Key::Numpad_0 },
-                                                 pair { "Numpad_1"sv, Key::Numpad_1 },
-                                                 pair { "Numpad_2"sv, Key::Numpad_2 },
-                                                 pair { "Numpad_3"sv, Key::Numpad_3 },
-                                                 pair { "Numpad_4"sv, Key::Numpad_4 },
-                                                 pair { "Numpad_5"sv, Key::Numpad_5 },
-                                                 pair { "Numpad_6"sv, Key::Numpad_6 },
-                                                 pair { "Numpad_7"sv, Key::Numpad_7 },
-                                                 pair { "Numpad_8"sv, Key::Numpad_8 },
-                                                 pair { "Numpad_9"sv, Key::Numpad_9 } };
+        auto static constexpr Mappings = array {
+            pair { "F1"sv, Key::F1 },
+            pair { "F2"sv, Key::F2 },
+            pair { "F3"sv, Key::F3 },
+            pair { "F4"sv, Key::F4 },
+            pair { "F5"sv, Key::F5 },
+            pair { "F6"sv, Key::F6 },
+            pair { "F7"sv, Key::F7 },
+            pair { "F8"sv, Key::F8 },
+            pair { "F9"sv, Key::F9 },
+            pair { "F10"sv, Key::F10 },
+            pair { "F11"sv, Key::F11 },
+            pair { "F12"sv, Key::F12 },
+            pair { "F13"sv, Key::F13 },
+            pair { "F14"sv, Key::F14 },
+            pair { "F15"sv, Key::F15 },
+            pair { "F16"sv, Key::F16 },
+            pair { "F17"sv, Key::F17 },
+            pair { "F18"sv, Key::F18 },
+            pair { "F19"sv, Key::F19 },
+            pair { "F20"sv, Key::F20 },
+            pair { "F21"sv, Key::F21 },
+            pair { "F22"sv, Key::F22 },
+            pair { "F23"sv, Key::F23 },
+            pair { "F24"sv, Key::F24 },
+            pair { "F25"sv, Key::F25 },
+            pair { "F26"sv, Key::F26 },
+            pair { "F27"sv, Key::F27 },
+            pair { "F28"sv, Key::F28 },
+            pair { "F29"sv, Key::F29 },
+            pair { "F30"sv, Key::F30 },
+            pair { "F31"sv, Key::F31 },
+            pair { "F32"sv, Key::F32 },
+            pair { "F33"sv, Key::F33 },
+            pair { "F34"sv, Key::F34 },
+            pair { "F35"sv, Key::F35 },
+            pair { "Escape"sv, Key::Escape },
+            pair { "Enter"sv, Key::Enter },
+            pair { "Tab"sv, Key::Tab },
+            pair { "Backspace"sv, Key::Backspace },
+            pair { "DownArrow"sv, Key::DownArrow },
+            pair { "LeftArrow"sv, Key::LeftArrow },
+            pair { "RightArrow"sv, Key::RightArrow },
+            pair { "UpArrow"sv, Key::UpArrow },
+            pair { "Insert"sv, Key::Insert },
+            pair { "Delete"sv, Key::Delete },
+            pair { "Home"sv, Key::Home },
+            pair { "End"sv, Key::End },
+            pair { "PageUp"sv, Key::PageUp },
+            pair { "PageDown"sv, Key::PageDown },
+            pair { "MediaPlay"sv, Key::MediaPlay },
+            pair { "MediaStop"sv, Key::MediaStop },
+            pair { "MediaPrevious"sv, Key::MediaPrevious },
+            pair { "MediaNext"sv, Key::MediaNext },
+            pair { "MediaPause"sv, Key::MediaPause },
+            pair { "MediaTogglePlayPause"sv, Key::MediaTogglePlayPause },
+            pair { "VolumeUp"sv, Key::VolumeUp },
+            pair { "VolumeDown"sv, Key::VolumeDown },
+            pair { "VolumeMute"sv, Key::VolumeMute },
+            pair { "PrintScreen"sv, Key::PrintScreen },
+            pair { "Pause"sv, Key::Pause },
+            pair { "Menu"sv, Key::Menu },
+        };
 
         auto const lowerName = toLower(name);
 
@@ -594,31 +616,15 @@ namespace
         if (text.size() == 1)
             return static_cast<char32_t>(text[0]);
 
-        auto constexpr NamedChars = array { pair { "ENTER"sv, (char) C0::CR },
-                                            pair { "BACKSPACE"sv, (char) C0::BS },
-                                            pair { "TAB"sv, (char) C0::HT },
-                                            pair { "ESCAPE"sv, (char) C0::ESC },
-
-                                            pair { "LESS"sv, '<' },
-                                            pair { "GREATER"sv, '>' },
-                                            pair { "PLUS"sv, '+' },
-
-                                            pair { "APOSTROPHE"sv, '\'' },
-                                            pair { "ADD"sv, '+' },
-                                            pair { "BACKSLASH"sv, 'x' },
-                                            pair { "COMMA"sv, ',' },
-                                            pair { "DECIMAL"sv, '.' },
-                                            pair { "DIVIDE"sv, '/' },
-                                            pair { "EQUAL"sv, '=' },
-                                            pair { "LEFT_BRACKET"sv, '[' },
-                                            pair { "MINUS"sv, '-' },
-                                            pair { "MULTIPLY"sv, '*' },
-                                            pair { "PERIOD"sv, '.' },
-                                            pair { "RIGHT_BRACKET"sv, ']' },
-                                            pair { "SEMICOLON"sv, ';' },
-                                            pair { "SLASH"sv, '/' },
-                                            pair { "SUBTRACT"sv, '-' },
-                                            pair { "SPACE"sv, ' ' } };
+        auto constexpr NamedChars = array {
+            pair { "LESS"sv, '<' },        pair { "GREATER"sv, '>' },      pair { "PLUS"sv, '+' },
+            pair { "APOSTROPHE"sv, '\'' }, pair { "ADD"sv, '+' },          pair { "BACKSLASH"sv, 'x' },
+            pair { "COMMA"sv, ',' },       pair { "DECIMAL"sv, '.' },      pair { "DIVIDE"sv, '/' },
+            pair { "EQUAL"sv, '=' },       pair { "LEFT_BRACKET"sv, '[' }, pair { "MINUS"sv, '-' },
+            pair { "MULTIPLY"sv, '*' },    pair { "PERIOD"sv, '.' },       pair { "RIGHT_BRACKET"sv, ']' },
+            pair { "SEMICOLON"sv, ';' },   pair { "SLASH"sv, '/' },        pair { "SUBTRACT"sv, '-' },
+            pair { "SPACE"sv, ' ' }
+        };
 
         auto const lowerName = toUpper(name);
         for (auto const& mapping: NamedChars)
@@ -661,8 +667,14 @@ namespace
             return Modifier::Key::Control;
         if (upperKey == "SHIFT")
             return Modifier::Key::Shift;
+        if (upperKey == "SUPER")
+            return Modifier::Key::Super;
         if (upperKey == "META")
-            return Modifier::Key::Meta;
+            // TODO: This is technically not correct, but we used the term Meta up until now,
+            // to refer to the Windows/Cmd key. But Qt also exposes another modifier called
+            // Meta, which rarely exists on modern keyboards (?), but it we need to support it
+            // as well, especially since extended CSIu protocol exposes it as well.
+            return Modifier::Key::Super; // Return Modifier::Key::Meta in the future.
         return nullopt;
     }
 

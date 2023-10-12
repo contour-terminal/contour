@@ -23,7 +23,7 @@ TEST_CASE("InputGenerator.Modifier.encodings")
     auto constexpr Alt = Modifier(Modifier::Alt);
     auto constexpr Shift = Modifier(Modifier::Shift);
     auto constexpr Control = Modifier(Modifier::Control);
-    auto constexpr Meta = Modifier(Modifier::Meta);
+    auto constexpr Super = Modifier(Modifier::Super);
 
     CHECK((1 + Shift.value()) == 2);
     CHECK((1 + Alt.value()) == 3);
@@ -32,14 +32,14 @@ TEST_CASE("InputGenerator.Modifier.encodings")
     CHECK((1 + (Shift | Control).value()) == 6);
     CHECK((1 + (Alt | Control).value()) == 7);
     CHECK((1 + (Shift | Alt | Control).value()) == 8);
-    CHECK((1 + Meta.value()) == 9);
-    CHECK((1 + (Meta | Shift).value()) == 10);
-    CHECK((1 + (Meta | Alt).value()) == 11);
-    CHECK((1 + (Meta | Alt | Shift).value()) == 12);
-    CHECK((1 + (Meta | Control).value()) == 13);
-    CHECK((1 + (Meta | Control | Shift).value()) == 14);
-    CHECK((1 + (Meta | Control | Alt).value()) == 15);
-    CHECK((1 + (Meta | Control | Alt | Shift).value()) == 16);
+    CHECK((1 + Super.value()) == 9);
+    CHECK((1 + (Super | Shift).value()) == 10);
+    CHECK((1 + (Super | Alt).value()) == 11);
+    CHECK((1 + (Super | Alt | Shift).value()) == 12);
+    CHECK((1 + (Super | Control).value()) == 13);
+    CHECK((1 + (Super | Control | Shift).value()) == 14);
+    CHECK((1 + (Super | Control | Alt).value()) == 15);
+    CHECK((1 + (Super | Control | Alt | Shift).value()) == 16);
 }
 
 TEST_CASE("InputGenerator.consume")

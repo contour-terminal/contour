@@ -176,6 +176,35 @@ bool sendKeyEvent(QKeyEvent* event, TerminalSession& session)
         pair { Qt::Key_F18, Key::F18 },
         pair { Qt::Key_F19, Key::F19 },
         pair { Qt::Key_F20, Key::F20 },
+
+        pair { Qt::Key_MediaPlay, Key::MediaPlay },
+        pair { Qt::Key_MediaStop, Key::MediaStop },
+        pair { Qt::Key_MediaPrevious, Key::MediaPrevious },
+        pair { Qt::Key_MediaNext, Key::MediaNext },
+        pair { Qt::Key_MediaPause, Key::MediaPause },
+        pair { Qt::Key_MediaTogglePlayPause, Key::MediaTogglePlayPause },
+
+        pair { Qt::Key_VolumeUp, Key::VolumeUp },
+        pair { Qt::Key_VolumeDown, Key::VolumeDown },
+        pair { Qt::Key_VolumeMute, Key::VolumeMute },
+
+        pair { Qt::Key_Control, Key::Control },
+        pair { Qt::Key_Alt, Key::Alt },
+        pair { Qt::Key_Super_L, Key::LeftSuper },
+        pair { Qt::Key_Super_R, Key::RightSuper },
+        pair { Qt::Key_Hyper_L, Key::LeftHyper },
+        pair { Qt::Key_Hyper_R, Key::RightHyper },
+        pair { Qt::Key_Meta, Key::Meta },
+
+        pair { Qt::Key_CapsLock, Key::CapsLock },
+        pair { Qt::Key_ScrollLock, Key::ScrollLock },
+        pair { Qt::Key_NumLock, Key::NumLock },
+        pair { Qt::Key_Print, Key::PrintScreen },
+        pair { Qt::Key_Pause, Key::Pause },
+        pair { Qt::Key_Menu, Key::Menu },
+
+        // pair { Qt::Key_Num
+
     }; // }}}
 
     static auto constexpr CharMappings = array {
