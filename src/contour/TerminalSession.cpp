@@ -669,7 +669,7 @@ void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
 
 // }}}
 // {{{ Input Events
-void TerminalSession::sendKeyPressEvent(Key key, Modifier modifier, Timestamp now)
+void TerminalSession::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventType, Timestamp now)
 {
     inputLog()("Key press event received: {} {}", modifier, key);
 
@@ -682,14 +682,22 @@ void TerminalSession::sendKeyPressEvent(Key key, Modifier modifier, Timestamp no
     if (_profile.mouseHideWhileTyping)
         _display->setMouseCursorShape(MouseCursorShape::Hidden);
 
-    if (auto const* actions =
-            config::apply(_config.inputMappings.keyMappings, key, modifier, matchModeFlags()))
-        executeAllActions(*actions);
-    else
-        terminal().sendKeyPressEvent(key, modifier, now);
+    if (eventType != KeyboardEventType::Release)
+    {
+        if (auto const* actions =
+                config::apply(_config.inputMappings.keyMappings, key, modifier, matchModeFlags()))
+        {
+            executeAllActions(*actions);
+            return;
+        }
+    }
+    terminal().sendKeyEvent(key, modifier, eventType, now);
 }
 
-void TerminalSession::sendCharPressEvent(char32_t value, Modifier modifier, Timestamp now)
+void TerminalSession::sendCharEvent(char32_t value,
+                                    Modifier modifier,
+                                    KeyboardEventType eventType,
+                                    Timestamp now)
 {
     inputLog()(
         "Character press event received: {} {}", modifier, crispy::escape(unicode::convert_to<char>(value)));
@@ -705,11 +713,16 @@ void TerminalSession::sendCharPressEvent(char32_t value, Modifier modifier, Time
     if (_profile.mouseHideWhileTyping)
         _display->setMouseCursorShape(MouseCursorShape::Hidden);
 
-    if (auto const* actions =
-            config::apply(_config.inputMappings.charMappings, value, modifier, matchModeFlags()))
-        executeAllActions(*actions);
-    else
-        terminal().sendCharPressEvent(value, modifier, now); // TODO: get rid of Event{} struct here, too!
+    if (eventType != KeyboardEventType::Release)
+    {
+        if (auto const* actions =
+                config::apply(_config.inputMappings.charMappings, value, modifier, matchModeFlags()))
+        {
+            executeAllActions(*actions);
+            return;
+        }
+    }
+    terminal().sendCharEvent(value, modifier, eventType, now);
 }
 
 void TerminalSession::sendMousePressEvent(Modifier modifier,

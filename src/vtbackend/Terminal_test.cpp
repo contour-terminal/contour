@@ -76,7 +76,7 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 
         // type something into the terminal
         auto const clockAtInputEvent = clockBase + BlinkInterval + chrono::milliseconds(10);
-        terminal.sendCharPressEvent('x', vtbackend::Modifier {}, clockAtInputEvent);
+        mc.sendCharEvent('x', vtbackend::Modifier {}, clockAtInputEvent);
 
         // now the cursor is visible before the interval has passed
         terminal.tick(clockBeforeTurn);

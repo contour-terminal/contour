@@ -6,6 +6,8 @@
 #include <crispy/escape.h>
 #include <crispy/overloaded.h>
 
+#include <fmt/format.h>
+
 #include <optional>
 #include <set>
 #include <string>
@@ -32,6 +34,7 @@ enum class MouseProtocol
     AnyEventTracking = 1003,
 };
 
+// {{{ Modifier
 class Modifier
 {
   public:
@@ -272,10 +275,87 @@ enum class MouseTransport
 };
 // }}}
 
+enum class KeyboardEventType
+{
+    Press,
+    Repeat,
+    Release,
+};
+
+class KeyboardInputGenerator
+{
+  public:
+    virtual ~KeyboardInputGenerator() = default;
+
+    virtual bool generateChar(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType) = 0;
+    virtual bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) = 0;
+};
+
+class StandardKeyboardInputGenerator: public KeyboardInputGenerator
+{
+  public:
+    bool generateChar(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType) override;
+    bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) override;
+
+    [[nodiscard]] bool normalCursorKeys() const noexcept { return _cursorKeysMode == KeyMode::Normal; }
+    [[nodiscard]] bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
+
+    [[nodiscard]] bool numericKeypad() const noexcept { return _numpadKeysMode == KeyMode::Normal; }
+    [[nodiscard]] bool applicationKeypad() const noexcept { return !numericKeypad(); }
+    void setCursorKeysMode(KeyMode mode) { _cursorKeysMode = mode; }
+    void setNumpadKeysMode(KeyMode mode) { _numpadKeysMode = mode; }
+    void setApplicationKeypadMode(bool enable)
+    {
+        _numpadKeysMode = enable ? KeyMode::Application : KeyMode::Normal;
+    }
+
+    [[nodiscard]] std::string_view peek() const noexcept { return std::string_view(_pendingSequence); }
+
+    [[nodiscard]] std::string take() noexcept
+    {
+        auto result = std::move(_pendingSequence);
+        _pendingSequence.clear();
+        return result;
+    }
+
+    void reset()
+    {
+        _cursorKeysMode = KeyMode::Normal;
+        _numpadKeysMode = KeyMode::Normal;
+    }
+
+  protected:
+    struct FunctionKeyMapping
+    {
+        std::string_view std {};
+        std::string_view mods {};
+        std::string_view appCursor {};
+        std::string_view appKeypad {};
+    };
+
+    [[nodiscard]] std::string select(Modifier modifier, FunctionKeyMapping mapping) const;
+    void append(char ch) { _pendingSequence += ch; }
+    void append(std::string_view sequence) { _pendingSequence += sequence; }
+
+    template <typename... Args>
+    void append(fmt::format_string<Args...> const& text, Args&&... args)
+    {
+#if defined(__APPLE__) || defined(_MSC_VER)
+        append(fmt::vformat(text, fmt::make_format_args(args...)));
+#else
+        append(fmt::format(text, std::forward<Args>(args)...));
+#endif
+    }
+
+    KeyMode _cursorKeysMode = KeyMode::Normal;
+    KeyMode _numpadKeysMode = KeyMode::Normal;
+    std::string _pendingSequence {};
+};
+
 class InputGenerator
 {
   public:
-    using Sequence = std::vector<char>;
+    using Sequence = std::string;
 
     /// Changes the input mode for cursor keys.
     void setCursorKeysMode(KeyMode mode);
@@ -285,11 +365,23 @@ class InputGenerator
 
     void setApplicationKeypadMode(bool enable);
 
-    [[nodiscard]] bool normalCursorKeys() const noexcept { return _cursorKeysMode == KeyMode::Normal; }
-    [[nodiscard]] bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
+    [[nodiscard]] bool normalCursorKeys() const noexcept
+    {
+        return _standardKeyboardInputGenerator.normalCursorKeys();
+    }
+    [[nodiscard]] bool applicationCursorKeys() const noexcept
+    {
+        return _standardKeyboardInputGenerator.applicationCursorKeys();
+    }
 
-    [[nodiscard]] bool numericKeypad() const noexcept { return _numpadKeysMode == KeyMode::Normal; }
-    [[nodiscard]] bool applicationKeypad() const noexcept { return !numericKeypad(); }
+    [[nodiscard]] bool numericKeypad() const noexcept
+    {
+        return _standardKeyboardInputGenerator.numericKeypad();
+    }
+    [[nodiscard]] bool applicationKeypad() const noexcept
+    {
+        return _standardKeyboardInputGenerator.applicationKeypad();
+    }
 
     [[nodiscard]] bool bracketedPaste() const noexcept { return _bracketedPaste; }
     void setBracketedPaste(bool enable) { _bracketedPaste = enable; }
@@ -320,8 +412,8 @@ class InputGenerator
     void setPassiveMouseTracking(bool v) noexcept { _passiveMouseTracking = v; }
     [[nodiscard]] bool passiveMouseTracking() const noexcept { return _passiveMouseTracking; }
 
-    bool generate(char32_t characterEvent, Modifier modifier);
-    bool generate(Key key, Modifier modifier);
+    bool generate(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType);
+    bool generate(Key key, Modifier modifier, KeyboardEventType eventType);
     void generatePaste(std::string_view const& text);
     bool generateMousePress(Modifier modifier,
                             MouseButton button,
@@ -403,8 +495,6 @@ class InputGenerator
 
     // private fields
     //
-    KeyMode _cursorKeysMode = KeyMode::Normal;
-    KeyMode _numpadKeysMode = KeyMode::Normal;
     bool _bracketedPaste = false;
     bool _generateFocusEvents = false;
     std::optional<MouseProtocol> _mouseProtocol = std::nullopt;
@@ -416,6 +506,7 @@ class InputGenerator
 
     std::set<MouseButton> _currentlyPressedMouseButtons {};
     CellLocation _currentMousePosition {}; // current mouse position
+    StandardKeyboardInputGenerator _standardKeyboardInputGenerator {};
 };
 
 inline std::string to_string(InputGenerator::MouseEventType value)
@@ -432,6 +523,22 @@ inline std::string to_string(InputGenerator::MouseEventType value)
 } // namespace vtbackend
 
 // {{{ fmtlib custom formatter support
+
+template <>
+struct fmt::formatter<vtbackend::KeyboardEventType>: formatter<std::string_view>
+{
+    auto format(vtbackend::KeyboardEventType value, format_context& ctx) -> format_context::iterator
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::KeyboardEventType::Press: name = "Press"; break;
+            case vtbackend::KeyboardEventType::Repeat: name = "Repeat"; break;
+            case vtbackend::KeyboardEventType::Release: name = "Release"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
 
 template <>
 struct fmt::formatter<vtbackend::MouseProtocol>: formatter<std::string_view>

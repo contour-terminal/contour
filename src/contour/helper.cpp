@@ -137,7 +137,7 @@ namespace
 
 } // namespace
 
-bool sendKeyEvent(QKeyEvent* event, TerminalSession& session)
+bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, TerminalSession& session)
 {
     using vtbackend::Key;
     using vtbackend::Modifier;
@@ -225,7 +225,7 @@ bool sendKeyEvent(QKeyEvent* event, TerminalSession& session)
             begin(KeyMappings), end(KeyMappings), [event](auto const& x) { return x.first == event->key(); });
         i != end(KeyMappings))
     {
-        session.sendKeyPressEvent(i->second, modifiers, now);
+        session.sendKeyEvent(i->second, modifiers, eventType, now);
         return true;
     }
 
@@ -235,13 +235,13 @@ bool sendKeyEvent(QKeyEvent* event, TerminalSession& session)
                                [event](auto const& x) { return x.first == event->key(); });
         i != end(CharMappings))
     {
-        session.sendCharPressEvent(static_cast<char32_t>(i->second), modifiers, now);
+        session.sendCharEvent(static_cast<char32_t>(i->second), modifiers, eventType, now);
         return true;
     }
 
     if (key == Qt::Key_Backtab)
     {
-        session.sendCharPressEvent(U'\t', modifiers.with(Modifier::Shift), now);
+        session.sendCharEvent(U'\t', modifiers.with(Modifier::Shift), eventType, now);
         return true;
     }
 
@@ -249,35 +249,37 @@ bool sendKeyEvent(QKeyEvent* event, TerminalSession& session)
     if (0x20 <= key && key < 0x80 && (modifiers.alt() && session.profile().optionKeyAsAlt))
     {
         auto const ch = static_cast<char32_t>(modifiers.shift() ? std::toupper(key) : std::tolower(key));
-        session.sendCharPressEvent(ch, modifiers, now);
+        session.sendCharEvent(ch, modifiers, eventType, now);
         return true;
     }
 #endif
 
     if (0x20 <= key && key < 0x80 && (modifiers.control()))
     {
-        session.sendCharPressEvent(static_cast<char32_t>(key), modifiers, now);
+        session.sendCharEvent(static_cast<char32_t>(key), modifiers, eventType, now);
         return true;
     }
 
     switch (key)
     {
-        case Qt::Key_BraceLeft: session.sendCharPressEvent(L'[', modifiers, now); return true;
-        case Qt::Key_Equal: session.sendCharPressEvent(L'=', modifiers, now); return true;
-        case Qt::Key_BraceRight: session.sendCharPressEvent(L']', modifiers, now); return true;
-        case Qt::Key_Backspace: session.sendCharPressEvent(0x08, modifiers, now); return true;
+        case Qt::Key_BraceLeft: session.sendCharEvent(L'[', modifiers, eventType, now); return true;
+        case Qt::Key_Equal: session.sendCharEvent(L'=', modifiers, eventType, now); return true;
+        case Qt::Key_BraceRight: session.sendCharEvent(L']', modifiers, eventType, now); return true;
+        case Qt::Key_Backspace: session.sendCharEvent(0x08, modifiers, eventType, now); return true;
     }
 
     if (!event->text().isEmpty())
     {
+        auto const codepoints = event->text().toUcs4();
+        assert(codepoints.size() == 1);
 #if defined(__APPLE__)
         // On OS/X the Alt-modifier does not seem to be passed to the terminal apps
         // but rather remapped to whatever OS/X is mapping them to.
-        for (char32_t const ch: event->text().toUcs4())
-            session.sendCharPressEvent(ch, modifiers.without(Modifier::Alt), now);
+        for (char32_t const ch: codepoints)
+            session.sendCharEvent(ch, modifiers.without(Modifier::Alt), eventType, now);
 #else
-        for (char32_t const ch: event->text().toUcs4())
-            session.sendCharPressEvent(ch, modifiers, now);
+        for (char32_t const ch: codepoints)
+            session.sendCharEvent(ch, modifiers, eventType, now);
 #endif
 
         return true;

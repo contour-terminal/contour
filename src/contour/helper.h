@@ -138,7 +138,7 @@ constexpr inline vtbackend::MouseButton makeMouseButton(Qt::MouseButton button)
 }
 
 class TerminalSession;
-bool sendKeyEvent(QKeyEvent* keyEvent, TerminalSession& session);
+bool sendKeyEvent(QKeyEvent* keyEvent, vtbackend::KeyboardEventType eventType, TerminalSession& session);
 void sendWheelEvent(QWheelEvent* event, TerminalSession& session);
 void sendMousePressEvent(QMouseEvent* event, TerminalSession& session);
 void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session);

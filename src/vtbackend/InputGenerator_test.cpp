@@ -11,6 +11,7 @@
 
 using namespace std;
 using vtbackend::InputGenerator;
+using vtbackend::KeyboardEventType;
 using vtbackend::Modifier;
 using Buffer = vtbackend::InputGenerator::Sequence;
 using crispy::escape;
@@ -62,14 +63,14 @@ TEST_CASE("InputGenerator.consume")
 TEST_CASE("InputGenerator.Ctrl+Space", "[terminal,input]")
 {
     auto input = InputGenerator {};
-    input.generate(L' ', Modifier::Control);
+    input.generate(L' ', Modifier::Control, KeyboardEventType::Press);
     CHECK(escape(input.peek()) == "\\x00");
 }
 
 TEST_CASE("InputGenerator.Ctrl+A", "[terminal,input]")
 {
     auto input = InputGenerator {};
-    input.generate('A', Modifier::Control);
+    input.generate('A', Modifier::Control, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x01));
     REQUIRE(escape(input.peek()) == escape(c0));
 }
@@ -77,7 +78,7 @@ TEST_CASE("InputGenerator.Ctrl+A", "[terminal,input]")
 TEST_CASE("InputGenerator.Ctrl+D", "[terminal,input]")
 {
     auto input = InputGenerator {};
-    input.generate('D', Modifier::Control);
+    input.generate('D', Modifier::Control, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x04));
     REQUIRE(escape(input.peek()) == escape(c0));
 }
@@ -85,7 +86,7 @@ TEST_CASE("InputGenerator.Ctrl+D", "[terminal,input]")
 TEST_CASE("InputGenerator.Ctrl+[", "[terminal,input]")
 {
     auto input = InputGenerator {};
-    input.generate('[', Modifier::Control);
+    input.generate('[', Modifier::Control, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x1b)); // 27
     REQUIRE(escape(input.peek()) == escape(c0));
 }
@@ -93,7 +94,7 @@ TEST_CASE("InputGenerator.Ctrl+[", "[terminal,input]")
 TEST_CASE("InputGenerator.Ctrl+\\", "[terminal,input]")
 {
     auto input = InputGenerator {};
-    input.generate('\\', Modifier::Control);
+    input.generate('\\', Modifier::Control, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x1c)); // 28
     REQUIRE(escape(input.peek()) == escape(c0));
 }
@@ -101,7 +102,7 @@ TEST_CASE("InputGenerator.Ctrl+\\", "[terminal,input]")
 TEST_CASE("InputGenerator.Ctrl+]", "[terminal,input]")
 {
     auto input = InputGenerator {};
-    input.generate(']', Modifier::Control);
+    input.generate(']', Modifier::Control, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x1d)); // 29
     REQUIRE(escape(input.peek()) == escape(c0));
 }
@@ -109,7 +110,7 @@ TEST_CASE("InputGenerator.Ctrl+]", "[terminal,input]")
 TEST_CASE("InputGenerator.Ctrl+^", "[terminal,input]")
 {
     auto input = InputGenerator {};
-    input.generate('^', Modifier::Control);
+    input.generate('^', Modifier::Control, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x1e)); // 30
     REQUIRE(escape(input.peek()) == escape(c0));
 }
@@ -117,7 +118,7 @@ TEST_CASE("InputGenerator.Ctrl+^", "[terminal,input]")
 TEST_CASE("InputGenerator.Ctrl+_", "[terminal,input]")
 {
     auto input = InputGenerator {};
-    input.generate('_', Modifier::Control);
+    input.generate('_', Modifier::Control, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x1f)); // 31
     REQUIRE(escape(input.peek()) == escape(c0));
 }
@@ -128,7 +129,7 @@ TEST_CASE("InputGenerator.all(Ctrl + A..Z)", "[terminal,input]")
     {
         INFO(fmt::format("Testing Ctrl+{}", ch));
         auto input = InputGenerator {};
-        input.generate(static_cast<char32_t>(ch), Modifier::Control);
+        input.generate(static_cast<char32_t>(ch), Modifier::Control, KeyboardEventType::Press);
         auto const c0 = string(1, static_cast<char>(ch - 'A' + 1));
         REQUIRE(escape(input.peek()) == escape(c0));
     }

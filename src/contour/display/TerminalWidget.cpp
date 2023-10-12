@@ -738,7 +738,15 @@ void TerminalWidget::onAfterRendering()
 // {{{ Qt Widget Input Event handling & forwarding
 void TerminalWidget::keyPressEvent(QKeyEvent* keyEvent)
 {
-    sendKeyEvent(keyEvent, *_session);
+    sendKeyEvent(keyEvent,
+                 keyEvent->isAutoRepeat() ? vtbackend::KeyboardEventType::Repeat
+                                          : vtbackend::KeyboardEventType::Press,
+                 *_session);
+}
+
+void TerminalWidget::keyReleaseEvent(QKeyEvent* keyEvent)
+{
+    sendKeyEvent(keyEvent, vtbackend::KeyboardEventType::Release, *_session);
 }
 
 void TerminalWidget::wheelEvent(QWheelEvent* event)
