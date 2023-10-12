@@ -247,7 +247,7 @@ void InputGenerator::setApplicationKeypadMode(bool enable)
 bool InputGenerator::generate(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType)
 {
     bool const success =
-        _standardKeyboardInputGenerator.generateChar(characterEvent, modifier, KeyboardEventType::Press);
+        _standardKeyboardInputGenerator.generateChar(characterEvent, modifier, eventType);
 
     if (success)
     {
