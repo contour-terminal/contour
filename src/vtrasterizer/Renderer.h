@@ -18,6 +18,8 @@
 
 #include <fmt/format.h>
 
+#include <gsl/pointers>
+
 #include <memory>
 #include <vector>
 
@@ -110,17 +112,17 @@ class Renderer
 
     void inspect(std::ostream& textOutput) const;
 
-    std::array<std::reference_wrapper<Renderable>, 5> renderables()
+    std::array<gsl::not_null<Renderable*>, 5> renderables()
     {
-        return std::array<std::reference_wrapper<Renderable>, 5> {
-            _backgroundRenderer, _cursorRenderer, _decorationRenderer, _imageRenderer, _textRenderer
+        return std::array<gsl::not_null<Renderable*>, 5> {
+            &_backgroundRenderer, &_cursorRenderer, &_decorationRenderer, &_imageRenderer, &_textRenderer
         };
     }
 
-    [[nodiscard]] std::array<std::reference_wrapper<Renderable const>, 5> renderables() const
+    [[nodiscard]] std::array<gsl::not_null<Renderable const*>, 5> renderables() const
     {
-        return std::array<std::reference_wrapper<Renderable const>, 5> {
-            _backgroundRenderer, _cursorRenderer, _decorationRenderer, _imageRenderer, _textRenderer
+        return std::array<gsl::not_null<Renderable const*>, 5> {
+            &_backgroundRenderer, &_cursorRenderer, &_decorationRenderer, &_imageRenderer, &_textRenderer
         };
     }
 

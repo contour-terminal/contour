@@ -13,7 +13,6 @@
 #endif
 
 #include <array>
-#include <functional>
 #include <memory>
 
 using std::array;
@@ -24,7 +23,6 @@ using std::make_unique;
 using std::move;
 using std::nullopt;
 using std::optional;
-using std::reference_wrapper;
 using std::scoped_lock;
 using std::tuple;
 using std::unique_ptr;
@@ -192,8 +190,8 @@ void Renderer::configureTextureAtlas()
     rendererLog()("- Atlas direct mapping : {} (for text rendering)", _atlasDirectMapping ? "enabled" : "disabled");
     // clang-format on
 
-    for (reference_wrapper<Renderable>& renderable: renderables())
-        renderable.get().setTextureAtlas(*_textureAtlas);
+    for (gsl::not_null<Renderable*>& renderable: renderables())
+        renderable->setTextureAtlas(*_textureAtlas);
 }
 
 void Renderer::discardImage(vtbackend::Image const& image)
@@ -224,7 +222,7 @@ void Renderer::clearCache()
     // TODO(?): below functions are actually doing the same again and again and again. delete them (and their
     // functions for that) either that, or only the render target is allowed to clear the actual atlas caches.
     for (auto& renderable: renderables())
-        renderable.get().clearCache();
+        renderable->clearCache();
 }
 
 void Renderer::setFonts(FontDescriptions fontDescriptions)
@@ -348,7 +346,7 @@ void Renderer::inspect(std::ostream& textOutput) const
 {
     _textureAtlas->inspect(textOutput);
     for (auto const& renderable: renderables())
-        renderable.get().inspect(textOutput);
+        renderable->inspect(textOutput);
 }
 
 } // namespace vtrasterizer
