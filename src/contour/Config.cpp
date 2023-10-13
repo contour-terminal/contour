@@ -344,7 +344,7 @@ namespace
                       vector<string_view> const& keys,
                       size_t offset,
                       T& store,
-                      logstore::message_builder logger)
+                      logstore::category logger)
     {
         string parentKey;
         for (size_t i = 0; i < offset; ++i)
@@ -371,7 +371,7 @@ namespace
                 parentKey += '.';
                 parentKey += keys[i];
             }
-            logger(
+            logger()(
                 "Missing key {}. Using default: {}.", parentKey, !defaultStr.empty() ? defaultStr : R"("")");
             return false;
         }
@@ -387,7 +387,7 @@ namespace
                       vector<string_view> const& keys,
                       size_t offset,
                       boxed::boxed<T, U>& store,
-                      logstore::message_builder const& logger)
+                      logstore::category const& logger)
     {
         return tryLoadValue(usedKeys, root, keys, offset, store.value, logger);
     }
@@ -397,7 +397,7 @@ namespace
                       YAML::Node const& root,
                       string const& path,
                       T& store,
-                      logstore::message_builder& logger)
+                      logstore::category const& logger)
     {
         auto const keys = crispy::split(path, '.');
         usedKeys.emplace(path);
@@ -409,7 +409,7 @@ namespace
                       YAML::Node const& root,
                       string const& path,
                       boxed::boxed<T, U>& store,
-                      logstore::message_builder const& logger)
+                      logstore::category const& logger)
     {
         return tryLoadValue(usedKeys, root, path, store.value, logger);
     }
@@ -420,7 +420,7 @@ namespace
                       string const& parentPath,
                       string const& key,
                       T& store,
-                      logstore::message_builder const& logger)
+                      logstore::category const& logger)
     {
         auto const path = fmt::format("{}.{}", parentPath, key);
         return tryLoadValue(usedKeys, doc, path, store, logger);
@@ -432,7 +432,7 @@ namespace
                               string const& parentPath,
                               string const& childKeyPath,
                               T& store,
-                              logstore::message_builder const& logger)
+                              logstore::category const& logger)
     {
         // return tryLoadValue(usedKeys, node, childKeyPath, store); // XXX parentPath
         auto const keys = crispy::split(childKeyPath, '.');
@@ -451,7 +451,7 @@ namespace
                       string const& parentPath,
                       string const& key,
                       boxed::boxed<T, U>& store,
-                      logstore::message_builder const& logger)
+                      logstore::category const& logger)
     {
         return tryLoadChild(usedKeys, doc, parentPath, key, store.value, logger);
     }
@@ -470,7 +470,7 @@ namespace
                     continue;
                 if (crispy::startsWith(string_view(prefix), "x-"sv))
                     continue;
-                errorLog()("Superfluous config key found: {}", escape(prefix));
+                configLog()("Superfluous config key found: {}", escape(prefix));
             }
         }
         else if (root.IsSequence())
@@ -643,17 +643,17 @@ namespace
             return;
 
         std::string strValue;
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue, errorLog());
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue, configLog);
         if (!strValue.empty())
             cursorConfig.cursorShape = vtbackend::makeCursorShape(strValue);
 
         bool boolValue = cursorConfig.cursorDisplay == vtbackend::CursorDisplay::Blink;
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue, errorLog());
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue, configLog);
         cursorConfig.cursorDisplay =
             boolValue ? vtbackend::CursorDisplay::Blink : vtbackend::CursorDisplay::Steady;
 
         auto uintValue = cursorConfig.cursorBlinkInterval.count();
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue, errorLog());
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue, configLog);
         cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
     }
 
@@ -1150,13 +1150,13 @@ namespace
         // TODO: color palette from 16..255
 
         float opacityValue = 1.0;
-        tryLoadChildRelative(usedKeys, node, basePath, "background_image.opacity", opacityValue, errorLog());
+        tryLoadChildRelative(usedKeys, node, basePath, "background_image.opacity", opacityValue, configLog);
 
         bool imageBlur = false;
-        tryLoadChildRelative(usedKeys, node, basePath, "background_image.blur", imageBlur, errorLog());
+        tryLoadChildRelative(usedKeys, node, basePath, "background_image.blur", imageBlur, configLog);
 
         string fileName;
-        if (tryLoadChildRelative(usedKeys, node, basePath, "background_image.path", fileName, errorLog()))
+        if (tryLoadChildRelative(usedKeys, node, basePath, "background_image.path", fileName, configLog))
             colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
     }
 
@@ -1175,7 +1175,7 @@ namespace
         string const& path,
         YAML::Node const& nameNode,
         unordered_map<string, vtbackend::ColorPalette> const& colorschemes,
-        logstore::message_builder& logger)
+        logstore::category& logger)
     {
         auto const name = nameNode.as<string>();
         if (auto i = colorschemes.find(name); i != colorschemes.end())
@@ -1194,10 +1194,10 @@ namespace
             UsedKeys usedColorKeys;
             auto colors = loadColorScheme(usedColorKeys, "", subDocument);
             // TODO: Check usedColorKeys for validity.
-            configLog()("Loaded colors from {}.", filePath.string());
+            logger()("Loaded colors from {}.", filePath.string());
             return colors;
         }
-        logger("Could not open colorscheme file for \"{}\".", name);
+        logger()("Could not open colorscheme file for \"{}\".", name);
         return vtbackend::ColorPalette {};
     }
 
@@ -1341,7 +1341,7 @@ namespace
                                std::string const& parentPath,
                                std::string const& profileName,
                                unordered_map<string, vtbackend::ColorPalette> const& colorschemes,
-                               logstore::message_builder logger)
+                               logstore::category logger)
     {
         if (auto colors = profile["colors"]; colors) // {{{
         {
@@ -1365,10 +1365,10 @@ namespace
                     SimpleColorConfig { loadColorSchemeByName(usedKeys, path, colors, colorschemes, logger) };
             }
             else
-                logger("Invalid colors value.");
+                logger()("Invalid colors value.");
         }
         else
-            logger("No colors section in profile {} found.", profileName);
+            logger()("No colors section in profile {} found.", profileName);
         // }}}
 
         string const basePath = fmt::format("{}.{}", parentPath, profileName);
@@ -1378,7 +1378,7 @@ namespace
         if (terminalProfile.shell.program.empty())
         {
             if (!terminalProfile.shell.arguments.empty())
-                logger("No shell defined but arguments. Ignoring arguments.");
+                logger()("No shell defined but arguments. Ignoring arguments.");
 
             auto loginShell = Process::loginShell(terminalProfile.shell.escapeSandbox);
             terminalProfile.shell.program = loginShell.front();
@@ -1471,7 +1471,7 @@ namespace
         if (terminalProfile.shell.env.find("TERM") == terminalProfile.shell.env.end())
         {
             terminalProfile.shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
-            configLog()("Defaulting TERM to {}.", terminalProfile.shell.env["TERM"]);
+            logger()("Defaulting TERM to {}.", terminalProfile.shell.env["TERM"]);
         }
 
         if (terminalProfile.shell.env.find("COLORTERM") == terminalProfile.shell.env.end())
@@ -1482,7 +1482,7 @@ namespace
         if (auto const idOpt = stringToVTType(strValue))
             terminalProfile.terminalId = idOpt.value();
         else
-            logger("Invalid Terminal ID \"{}\", specified", strValue);
+            logger()("Invalid Terminal ID \"{}\", specified", strValue);
 
         tryLoadChildRelative(usedKeys,
                              profile,
@@ -1499,18 +1499,18 @@ namespace
             if (!sanitizeRange(ref(terminalProfile.terminalSize.columns.value),
                                *MinimalTerminalSize.columns,
                                *MaximumTerminalSize.columns))
-                logger("Terminal width {} out of bounds. Should be between {} and {}.",
-                       terminalProfile.terminalSize.columns,
-                       MinimalTerminalSize.columns,
-                       MaximumTerminalSize.columns);
+                logger()("Terminal width {} out of bounds. Should be between {} and {}.",
+                         terminalProfile.terminalSize.columns,
+                         MinimalTerminalSize.columns,
+                         MaximumTerminalSize.columns);
 
             if (!sanitizeRange(ref(terminalProfile.terminalSize.lines),
                                MinimalTerminalSize.lines,
                                MaximumTerminalSize.lines))
-                logger("Terminal height {} out of bounds. Should be between {} and {}.",
-                       terminalProfile.terminalSize.lines,
-                       MinimalTerminalSize.lines,
-                       MaximumTerminalSize.lines);
+                logger()("Terminal height {} out of bounds. Should be between {} and {}.",
+                         terminalProfile.terminalSize.lines,
+                         MinimalTerminalSize.lines,
+                         MaximumTerminalSize.lines);
         }
 
         strValue = "ask";
@@ -1544,9 +1544,9 @@ namespace
         {
             if (terminalProfile.fonts.size < MinimumFontSize)
             {
-                logger("Invalid font size {} set in config file. Minimum value is {}.",
-                       terminalProfile.fonts.size,
-                       MinimumFontSize);
+                logger()("Invalid font size {} set in config file. Minimum value is {}.",
+                         terminalProfile.fonts.size,
+                         MinimumFontSize);
                 terminalProfile.fonts.size = MinimumFontSize;
             }
         }
@@ -1589,9 +1589,9 @@ namespace
             else if (lwrValue == "native")
                 terminalProfile.fonts.textShapingEngine = NativeTextShapingEngine;
             else
-                configLog()("Invalid value for configuration key {}.font.text_shaping.engine: {}",
-                            basePath,
-                            strValue);
+                logger()("Invalid value for configuration key {}.font.text_shaping.engine: {}",
+                         basePath,
+                         strValue);
         }
 
         terminalProfile.fonts.fontLocator = NativeFontLocator;
@@ -1610,7 +1610,7 @@ namespace
             else if (lwrValue == "mock")
                 terminalProfile.fonts.fontLocator = vtrasterizer::FontLocatorEngine::Mock;
             else
-                configLog()("Invalid value for configuration key {}.font.locator: {}", basePath, strValue);
+                logger()("Invalid value for configuration key {}.font.locator: {}", basePath, strValue);
         }
 
         bool strictSpacing = false;
@@ -1681,7 +1681,7 @@ namespace
             i != renderModeMap.end())
             terminalProfile.fonts.renderMode = i->second;
         else
-            logger("Invalid render_mode \"{}\" in configuration.", strValue);
+            logger()("Invalid render_mode \"{}\" in configuration.", strValue);
 
         auto intValue = LineCount();
         tryLoadChildRelative(usedKeys, profile, basePath, "history.limit", intValue, logger);
@@ -1707,7 +1707,7 @@ namespace
             else if (literal == "hidden")
                 terminalProfile.scrollbarPosition = ScrollBarPosition::Hidden;
             else
-                logger("Invalid value for config entry {}: {}", "scrollbar.position", strValue);
+                logger()("Invalid value for config entry {}: {}", "scrollbar.position", strValue);
         }
         tryLoadChildRelative(usedKeys,
                              profile,
@@ -1798,7 +1798,7 @@ namespace
         else if (strValue == "none")
             terminalProfile.initialStatusDisplayType = vtbackend::StatusDisplayType::None;
         else
-            logger("Invalid value for config entry {}: {}", "status_line.display", strValue);
+            logger()("Invalid value for config entry {}: {}", "status_line.display", strValue);
 
         if (tryLoadChildRelative(usedKeys, profile, basePath, "status_line.position", strValue, logger))
         {
@@ -1808,7 +1808,7 @@ namespace
             else if (literal == "top")
                 terminalProfile.statusDisplayPosition = vtbackend::StatusDisplayPosition::Top;
             else
-                logger("Invalid value for config entry {}: {}", "status_line.position", strValue);
+                logger()("Invalid value for config entry {}: {}", "status_line.position", strValue);
         }
 
         bool boolValue = false;
@@ -1839,13 +1839,14 @@ namespace
                 auto time = value.as<unsigned>();
                 if (time < 10 || time > 2000)
                 {
-                    logger("slow_scrolling_time must be between 10 and 2000 milliseconds. Defaulting to 100");
+                    logger()(
+                        "slow_scrolling_time must be between 10 and 2000 milliseconds. Defaulting to 100");
                     time = 100;
                 }
                 terminalProfile.smoothLineScrolling = chrono::milliseconds(time);
             }
             else
-                logger("Invalid value for config entry {}", "slow_scrolling_time");
+                logger()("Invalid value for config entry {}", "slow_scrolling_time");
         }
 
         if (auto frozenDecModes = profile["frozen_dec_modes"]; frozenDecModes)
@@ -1880,7 +1881,7 @@ namespace
     {
         auto terminalProfile = TerminalProfile {}; // default profile
         updateTerminalProfile(
-            terminalProfile, usedKeys, profile, parentPath, profileName, colorschemes, errorLog());
+            terminalProfile, usedKeys, profile, parentPath, profileName, colorschemes, configLog);
         return terminalProfile;
     }
 
@@ -1959,8 +1960,8 @@ Config loadConfigFromFile(fs::path const& fileName)
  */
 void loadConfigFromFile(Config& config, fs::path const& fileName)
 {
-    auto logger = errorLog();
-    configLog()("Loading configuration from file: {}", fileName.string());
+    auto logger = configLog;
+    logger()("Loading configuration from file: {} ", fileName.string());
     config.backingFilePath = fileName;
     createFileIfNotExists(config.backingFilePath);
     auto usedKeys = UsedKeys {};
@@ -2118,15 +2119,15 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     if ((config.ptyReadBufferSize % 16) != 0)
     {
         // For improved performance ...
-        configLog()("read_buffer_size must be a multiple of 16.");
+        logger()("read_buffer_size must be a multiple of 16.");
     }
 
     tryLoadValue(usedKeys, doc, "pty_buffer_size", config.ptyBufferObjectSize, logger);
     if (config.ptyBufferObjectSize < 1024 * 256)
     {
         // For improved performance ...
-        configLog()("pty_buffer_size too small. This cann severily degrade performance. Forcing 256 KB as "
-                    "minimum acceptable setting.");
+        logger()("pty_buffer_size too small. This cann severily degrade performance. Forcing 256 KB as "
+                 "minimum acceptable setting.");
         config.ptyBufferObjectSize = 1024 * 256;
     }
 
@@ -2143,9 +2144,9 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
         auto const& defaultProfileNode = profiles[config.defaultProfileName];
         if (!defaultProfileNode)
         {
-            errorLog()("default_profile \"{}\" not found in profiles list."
-                       " Using the first available profile",
-                       escape(config.defaultProfileName));
+            logger()("default_profile \"{}\" not found in profiles list."
+                     " Using the first available profile",
+                     escape(config.defaultProfileName));
 
             if (profiles.begin() != profiles.end())
                 config.defaultProfileName = profiles.begin()->first.as<std::string>();
@@ -2174,7 +2175,7 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
             usedKeys.emplace(fmt::format("{}.{}", parentPath, name));
             config.profiles[name] = config.profiles[config.defaultProfileName];
             updateTerminalProfile(
-                config.profiles[name], usedKeys, profile, parentPath, name, config.colorschemes, dummy());
+                config.profiles[name], usedKeys, profile, parentPath, name, config.colorschemes, configLog);
         }
     }
 
