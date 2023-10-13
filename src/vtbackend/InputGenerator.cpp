@@ -221,7 +221,7 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
 
 void InputGenerator::reset()
 {
-    _standardKeyboardInputGenerator.reset();
+    _keyboardInputGenerator.reset();
     _bracketedPaste = false;
     _generateFocusEvents = false;
     _mouseProtocol = std::nullopt;
@@ -236,28 +236,28 @@ void InputGenerator::reset()
 void InputGenerator::setCursorKeysMode(KeyMode mode)
 {
     inputLog()("set cursor keys mode: {}", mode);
-    _standardKeyboardInputGenerator.setCursorKeysMode(mode);
+    _keyboardInputGenerator.setCursorKeysMode(mode);
 }
 
 void InputGenerator::setNumpadKeysMode(KeyMode mode)
 {
     inputLog()("set numpad keys mode: {}", mode);
-    _standardKeyboardInputGenerator.setNumpadKeysMode(mode);
+    _keyboardInputGenerator.setNumpadKeysMode(mode);
 }
 
 void InputGenerator::setApplicationKeypadMode(bool enable)
 {
-    _standardKeyboardInputGenerator.setApplicationKeypadMode(enable);
+    _keyboardInputGenerator.setApplicationKeypadMode(enable);
     inputLog()("set application keypad mode: {}", enable);
 }
 
 bool InputGenerator::generate(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType)
 {
-    bool const success = _standardKeyboardInputGenerator.generateChar(characterEvent, modifier, eventType);
+    bool const success = _keyboardInputGenerator.generateChar(characterEvent, modifier, eventType);
 
     if (success)
     {
-        _pendingSequence += _standardKeyboardInputGenerator.take();
+        _pendingSequence += _keyboardInputGenerator.take();
         inputLog()("Sending {} \"{}\" {}.",
                    modifier,
                    crispy::escape(unicode::convert_to<char>(characterEvent)),
@@ -269,11 +269,11 @@ bool InputGenerator::generate(char32_t characterEvent, Modifier modifier, Keyboa
 
 bool InputGenerator::generate(Key key, Modifier modifier, KeyboardEventType eventType)
 {
-    bool const success = _standardKeyboardInputGenerator.generateKey(key, modifier, eventType);
+    bool const success = _keyboardInputGenerator.generateKey(key, modifier, eventType);
 
     if (success)
     {
-        _pendingSequence += _standardKeyboardInputGenerator.take();
+        _pendingSequence += _keyboardInputGenerator.take();
         inputLog()("Sending {} \"{}\" {}.", modifier, key, eventType);
     }
 

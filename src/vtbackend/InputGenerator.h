@@ -374,20 +374,17 @@ class InputGenerator
 
     [[nodiscard]] bool normalCursorKeys() const noexcept
     {
-        return _standardKeyboardInputGenerator.normalCursorKeys();
+        return _keyboardInputGenerator.normalCursorKeys();
     }
     [[nodiscard]] bool applicationCursorKeys() const noexcept
     {
-        return _standardKeyboardInputGenerator.applicationCursorKeys();
+        return _keyboardInputGenerator.applicationCursorKeys();
     }
 
-    [[nodiscard]] bool numericKeypad() const noexcept
-    {
-        return _standardKeyboardInputGenerator.numericKeypad();
-    }
+    [[nodiscard]] bool numericKeypad() const noexcept { return _keyboardInputGenerator.numericKeypad(); }
     [[nodiscard]] bool applicationKeypad() const noexcept
     {
-        return _standardKeyboardInputGenerator.applicationKeypad();
+        return _keyboardInputGenerator.applicationKeypad();
     }
 
     [[nodiscard]] bool bracketedPaste() const noexcept { return _bracketedPaste; }
@@ -513,7 +510,7 @@ class InputGenerator
 
     std::set<MouseButton> _currentlyPressedMouseButtons {};
     CellLocation _currentMousePosition {}; // current mouse position
-    StandardKeyboardInputGenerator _standardKeyboardInputGenerator {};
+    StandardKeyboardInputGenerator _keyboardInputGenerator {};
 };
 
 inline std::string to_string(InputGenerator::MouseEventType value)
