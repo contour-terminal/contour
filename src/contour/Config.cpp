@@ -1500,17 +1500,17 @@ namespace
                                *MinimalTerminalSize.columns,
                                *MaximumTerminalSize.columns))
                 logger()("Terminal width {} out of bounds. Should be between {} and {}.",
-                       terminalProfile.terminalSize.columns,
-                       MinimalTerminalSize.columns,
-                       MaximumTerminalSize.columns);
+                         terminalProfile.terminalSize.columns,
+                         MinimalTerminalSize.columns,
+                         MaximumTerminalSize.columns);
 
             if (!sanitizeRange(ref(terminalProfile.terminalSize.lines),
                                MinimalTerminalSize.lines,
                                MaximumTerminalSize.lines))
                 logger()("Terminal height {} out of bounds. Should be between {} and {}.",
-                       terminalProfile.terminalSize.lines,
-                       MinimalTerminalSize.lines,
-                       MaximumTerminalSize.lines);
+                         terminalProfile.terminalSize.lines,
+                         MinimalTerminalSize.lines,
+                         MaximumTerminalSize.lines);
         }
 
         strValue = "ask";
@@ -1545,8 +1545,8 @@ namespace
             if (terminalProfile.fonts.size < MinimumFontSize)
             {
                 logger()("Invalid font size {} set in config file. Minimum value is {}.",
-                       terminalProfile.fonts.size,
-                       MinimumFontSize);
+                         terminalProfile.fonts.size,
+                         MinimumFontSize);
                 terminalProfile.fonts.size = MinimumFontSize;
             }
         }
@@ -1590,8 +1590,8 @@ namespace
                 terminalProfile.fonts.textShapingEngine = NativeTextShapingEngine;
             else
                 logger()("Invalid value for configuration key {}.font.text_shaping.engine: {}",
-                       basePath,
-                       strValue);
+                         basePath,
+                         strValue);
         }
 
         terminalProfile.fonts.fontLocator = NativeFontLocator;
@@ -1839,7 +1839,8 @@ namespace
                 auto time = value.as<unsigned>();
                 if (time < 10 || time > 2000)
                 {
-                    logger()("slow_scrolling_time must be between 10 and 2000 milliseconds. Defaulting to 100");
+                    logger()(
+                        "slow_scrolling_time must be between 10 and 2000 milliseconds. Defaulting to 100");
                     time = 100;
                 }
                 terminalProfile.smoothLineScrolling = chrono::milliseconds(time);
