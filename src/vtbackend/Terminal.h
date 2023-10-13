@@ -414,14 +414,14 @@ class Terminal
     void popColorPalette(size_t slot);
     void reportColorPaletteStack();
 
-    [[nodiscard]] ScreenBase& currentScreen() noexcept { return _currentScreen.get(); }
-    [[nodiscard]] ScreenBase const& currentScreen() const noexcept { return _currentScreen.get(); }
+    [[nodiscard]] ScreenBase& currentScreen() noexcept { return *_currentScreen; }
+    [[nodiscard]] ScreenBase const& currentScreen() const noexcept { return *_currentScreen; }
 
     [[nodiscard]] ScreenBase& activeDisplay() noexcept
     {
         switch (_state.activeStatusDisplay)
         {
-            case ActiveStatusDisplay::Main: return _currentScreen.get();
+            case ActiveStatusDisplay::Main: return *_currentScreen;
             case ActiveStatusDisplay::StatusLine: return _hostWritableStatusLineScreen;
             case ActiveStatusDisplay::IndicatorStatusLine: return _indicatorStatusScreen;
         }
@@ -479,7 +479,7 @@ class Terminal
 
     [[nodiscard]] std::optional<CellLocation> currentMouseGridPosition() const noexcept
     {
-        if (_currentScreen.get().contains(_currentMousePosition))
+        if (_currentScreen->contains(_currentMousePosition))
             return _viewport.translateScreenToGridCoordinate(_currentMousePosition);
         return std::nullopt;
     }
@@ -594,7 +594,7 @@ class Terminal
     [[nodiscard]] std::shared_ptr<HyperlinkInfo const> tryGetHoveringHyperlink() const noexcept
     {
         if (auto const gridPosition = currentMouseGridPosition())
-            return _currentScreen.get().hyperlinkAt(*gridPosition);
+            return _currentScreen->hyperlinkAt(*gridPosition);
         return {};
     }
 
@@ -842,7 +842,7 @@ class Terminal
     Screen<AlternateScreenCell> _alternateScreen;
     Screen<StatusDisplayCell> _hostWritableStatusLineScreen;
     Screen<StatusDisplayCell> _indicatorStatusScreen;
-    std::reference_wrapper<ScreenBase> _currentScreen;
+    gsl::not_null<ScreenBase*> _currentScreen;
     Viewport _viewport;
     TraceHandler _traceHandler;
     // clang-format on
