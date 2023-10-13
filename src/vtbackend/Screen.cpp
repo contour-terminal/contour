@@ -3394,9 +3394,14 @@ void Screen<Cell>::processSequence(Sequence const& seq)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (vtTraceSequenceLog)
-        vtTraceSequenceLog()("Processing {:<14} {}",
-                             seq.functionDefinition(_terminal->activeSequences())->mnemonic,
-                             seq.text());
+    {
+        if (auto const* fd = seq.functionDefinition(_terminal->activeSequences()))
+        {
+            vtTraceSequenceLog()("Processing {:<14} {}", fd->mnemonic, seq.text());
+        }
+        else
+            vtTraceSequenceLog()("Processing unknown sequence: {}", seq.text());
+    }
 #endif
 
     // std::cerr << fmt::format("\t{} \t; {}\n", seq,
