@@ -47,8 +47,8 @@ class Modifier
         Super = 8,
         Hyper = 16,
         Meta = 32,
-        CapsLock = 32,
-        NumLock = 64,
+        CapsLock = 64,
+        NumLock = 128,
     };
 
     constexpr Modifier(Key key): _mask { static_cast<unsigned>(key) } {}
@@ -219,13 +219,20 @@ enum class Key
     VolumeMute,
 
     // modifier keys
-    Control,
-    Alt,
+    LeftShift,
+    RightShift,
+    LeftControl,
+    RightControl,
+    LeftAlt,
+    RightAlt,
     LeftSuper,
     RightSuper,
     LeftHyper,
     RightHyper,
-    Meta,
+    LeftMeta,
+    RightMeta,
+    IsoLevel3Shift,
+    IsoLevel5Shift,
 
     // other special keys
     CapsLock,
@@ -277,9 +284,9 @@ enum class MouseTransport
 
 enum class KeyboardEventType
 {
-    Press,
-    Repeat,
-    Release,
+    Press = 1,
+    Repeat = 2,
+    Release = 3,
 };
 
 class KeyboardInputGenerator
@@ -722,13 +729,20 @@ struct fmt::formatter<vtbackend::Key>: formatter<std::string_view>
             case vtbackend::Key::VolumeDown: name = "VolumeDown"; break;
             case vtbackend::Key::VolumeUp: name = "VolumeUp"; break;
             case vtbackend::Key::VolumeMute: name = "VolumeMute"; break;
-            case vtbackend::Key::Control: name = "Control"; break;
-            case vtbackend::Key::Alt: name = "Alt"; break;
+            case vtbackend::Key::LeftShift: name = "LeftShift"; break;
+            case vtbackend::Key::RightShift: name = "RightShift"; break;
+            case vtbackend::Key::LeftControl: name = "LeftControl"; break;
+            case vtbackend::Key::RightControl: name = "RightControl"; break;
+            case vtbackend::Key::LeftAlt: name = "LeftAlt"; break;
+            case vtbackend::Key::RightAlt: name = "RightAlt"; break;
             case vtbackend::Key::LeftSuper: name = "LeftSuper"; break;
             case vtbackend::Key::RightSuper: name = "RightSuper"; break;
             case vtbackend::Key::LeftHyper: name = "LeftHyper"; break;
             case vtbackend::Key::RightHyper: name = "RightHyper"; break;
-            case vtbackend::Key::Meta: name = "Meta"; break;
+            case vtbackend::Key::LeftMeta: name = "LeftMeta"; break;
+            case vtbackend::Key::RightMeta: name = "RightMeta"; break;
+            case vtbackend::Key::IsoLevel3Shift: name = "IsoLevel3Shift"; break;
+            case vtbackend::Key::IsoLevel5Shift: name = "IsoLevel5Shift"; break;
             case vtbackend::Key::CapsLock: name = "CapsLock"; break;
             case vtbackend::Key::ScrollLock: name = "ScrollLock"; break;
             case vtbackend::Key::NumLock: name = "NumLock"; break;

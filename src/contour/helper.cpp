@@ -146,6 +146,12 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
     static auto constexpr KeyMappings = array {
         // {{{
+        pair { Qt::Key_Escape, Key::Escape },
+        pair { Qt::Key_Enter, Key::Enter },
+        pair { Qt::Key_Return, Key::Enter },
+        pair { Qt::Key_Tab, Key::Tab },
+        pair { Qt::Key_Backspace, Key::Backspace },
+
         pair { Qt::Key_Insert, Key::Insert },
         pair { Qt::Key_Delete, Key::Delete },
         pair { Qt::Key_Right, Key::RightArrow },
@@ -176,6 +182,21 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         pair { Qt::Key_F18, Key::F18 },
         pair { Qt::Key_F19, Key::F19 },
         pair { Qt::Key_F20, Key::F20 },
+        pair { Qt::Key_F21, Key::F21 },
+        pair { Qt::Key_F22, Key::F22 },
+        pair { Qt::Key_F23, Key::F23 },
+        pair { Qt::Key_F24, Key::F24 },
+        pair { Qt::Key_F25, Key::F25 },
+        pair { Qt::Key_F26, Key::F26 },
+        pair { Qt::Key_F27, Key::F27 },
+        pair { Qt::Key_F28, Key::F28 },
+        pair { Qt::Key_F29, Key::F29 },
+        pair { Qt::Key_F30, Key::F30 },
+        pair { Qt::Key_F31, Key::F31 },
+        pair { Qt::Key_F32, Key::F32 },
+        pair { Qt::Key_F33, Key::F33 },
+        pair { Qt::Key_F34, Key::F34 },
+        pair { Qt::Key_F35, Key::F35 },
 
         pair { Qt::Key_MediaPlay, Key::MediaPlay },
         pair { Qt::Key_MediaStop, Key::MediaStop },
@@ -188,13 +209,13 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         pair { Qt::Key_VolumeDown, Key::VolumeDown },
         pair { Qt::Key_VolumeMute, Key::VolumeMute },
 
-        pair { Qt::Key_Control, Key::Control },
-        pair { Qt::Key_Alt, Key::Alt },
+        pair { Qt::Key_Control, Key::LeftControl }, // NB: Qt cannot distinguish between left and right
+        pair { Qt::Key_Alt, Key::LeftAlt },         // NB: Qt cannot distinguish between left and right
+        pair { Qt::Key_Meta, Key::LeftMeta },       // NB: Qt cannot distinguish between left and right
         pair { Qt::Key_Super_L, Key::LeftSuper },
         pair { Qt::Key_Super_R, Key::RightSuper },
         pair { Qt::Key_Hyper_L, Key::LeftHyper },
         pair { Qt::Key_Hyper_R, Key::RightHyper },
-        pair { Qt::Key_Meta, Key::Meta },
 
         pair { Qt::Key_CapsLock, Key::CapsLock },
         pair { Qt::Key_ScrollLock, Key::ScrollLock },
@@ -202,19 +223,16 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         pair { Qt::Key_Print, Key::PrintScreen },
         pair { Qt::Key_Pause, Key::Pause },
         pair { Qt::Key_Menu, Key::Menu },
-
-        // pair { Qt::Key_Num
-
     }; // }}}
 
     static auto constexpr CharMappings = array {
         // {{{
-        pair { Qt::Key_Return, '\r' },      pair { Qt::Key_AsciiCircum, '^' },
-        pair { Qt::Key_AsciiTilde, '~' },   pair { Qt::Key_Backslash, '\\' },
-        pair { Qt::Key_Bar, '|' },          pair { Qt::Key_BraceLeft, '{' },
-        pair { Qt::Key_BraceRight, '}' },   pair { Qt::Key_BracketLeft, '[' },
-        pair { Qt::Key_BracketRight, ']' }, pair { Qt::Key_QuoteLeft, '`' },
-        pair { Qt::Key_Underscore, '_' },
+        // pair { Qt::Key_Return, '\r' },
+        pair { Qt::Key_AsciiCircum, '^' }, pair { Qt::Key_AsciiTilde, '~' },
+        pair { Qt::Key_Backslash, '\\' },  pair { Qt::Key_Bar, '|' },
+        pair { Qt::Key_BraceLeft, '{' },   pair { Qt::Key_BraceRight, '}' },
+        pair { Qt::Key_BracketLeft, '[' }, pair { Qt::Key_BracketRight, ']' },
+        pair { Qt::Key_QuoteLeft, '`' },   pair { Qt::Key_Underscore, '_' },
     }; // }}}
 
     auto const modifiers = makeModifier(event->modifiers());

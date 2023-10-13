@@ -118,6 +118,8 @@ constexpr inline vtbackend::Modifier makeModifier(Qt::KeyboardModifiers qtModifi
 #else
     if (qtModifiers & Qt::ControlModifier)
         modifiers |= Modifier::Control;
+    if (qtModifiers & Qt::KeypadModifier)
+        modifiers |= Modifier::NumLock;
     if (qtModifiers & Qt::MetaModifier)
         modifiers |= Modifier::Meta;
 #endif

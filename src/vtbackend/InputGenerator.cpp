@@ -191,13 +191,20 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
         case Key::VolumeUp:
         case Key::VolumeDown:
         case Key::VolumeMute:
-        case Key::Control:
-        case Key::Alt:
+        case Key::LeftShift:
+        case Key::RightShift:
+        case Key::LeftControl:
+        case Key::RightControl:
+        case Key::LeftAlt:
+        case Key::RightAlt:
         case Key::LeftSuper:
         case Key::RightSuper:
         case Key::LeftHyper:
         case Key::RightHyper:
-        case Key::Meta:
+        case Key::LeftMeta:
+        case Key::RightMeta:
+        case Key::IsoLevel3Shift:
+        case Key::IsoLevel5Shift:
         case Key::CapsLock:
         case Key::ScrollLock:
         case Key::NumLock:
