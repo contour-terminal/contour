@@ -119,7 +119,7 @@ It will neither build nor run on any prior Windows OS, due to libterminal making
 
 ```
 cd C:\
-git clone git clone https://github.com/Microsoft/vcpkg.git
+git clone https://github.com/Microsoft/vcpkg.git
 .\vcpkg\bootstrap-vcpkg.bat
 ```
 
