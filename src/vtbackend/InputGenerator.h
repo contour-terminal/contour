@@ -563,25 +563,34 @@ struct fmt::formatter<vtbackend::MouseProtocol>: formatter<std::string_view>
 };
 
 template <>
+struct fmt::formatter<vtbackend::Modifier::Key>: formatter<std::string_view>
+{
+    auto format(vtbackend::Modifier::Key value, format_context& ctx) -> format_context::iterator
+    {
+        std::string_view name;
+        switch (value)
+        {
+            case vtbackend::Modifier::Key::None: name = "None"; break;
+            case vtbackend::Modifier::Key::Shift: name = "Shift"; break;
+            case vtbackend::Modifier::Key::Alt: name = "Alt"; break;
+            case vtbackend::Modifier::Key::Control: name = "Control"; break;
+            case vtbackend::Modifier::Key::Super: name = "Super"; break;
+            case vtbackend::Modifier::Key::Hyper: name = "Hyper"; break;
+            case vtbackend::Modifier::Key::Meta: name = "Meta"; break;
+            case vtbackend::Modifier::Key::CapsLock: name = "CapsLock"; break;
+            case vtbackend::Modifier::Key::NumLock: name = "NumLock"; break;
+        }
+        return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
 struct fmt::formatter<vtbackend::Modifier>: formatter<std::string>
 {
     auto format(vtbackend::Modifier modifier, format_context& ctx) -> format_context::iterator
     {
-        std::string s;
-        auto const advance = [&](bool cond, std::string_view text) {
-            if (!cond)
-                return;
-            if (!s.empty())
-                s += ',';
-            s += text;
-        };
-        advance(modifier.alt(), "Alt");
-        advance(modifier.shift(), "Shift");
-        advance(modifier.control(), "Control");
-        advance(modifier.meta(), "Meta");
-        if (s.empty())
-            s = "None";
-        return formatter<std::string>::format(s, ctx);
+        auto mk = crispy::flags<vtbackend::Modifier::Key>::from_value(modifier.value());
+        return formatter<std::string>::format(fmt::format("{}", mk), ctx);
     }
 };
 
