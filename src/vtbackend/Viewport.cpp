@@ -12,22 +12,28 @@ namespace vtbackend
 
 bool Viewport::scrollUp(LineCount numLines)
 {
-    return scrollTo(
-        std::min(_scrollOffset + numLines.as<ScrollOffset>(), boxed_cast<ScrollOffset>(historyLineCount())));
+    viewportLog()("scrollUp");
+    auto offset =
+        std::min(_scrollOffset + numLines.as<ScrollOffset>(), boxed_cast<ScrollOffset>(historyLineCount()));
+    return scrollTo(offset);
 }
 
 bool Viewport::scrollDown(LineCount numLines)
 {
+
+    viewportLog()("scrollDown");
     return scrollTo(std::max(_scrollOffset - numLines.as<ScrollOffset>(), ScrollOffset(0)));
 }
 
 bool Viewport::scrollToTop()
 {
+    viewportLog()("scrollToTop");
     return scrollTo(boxed_cast<ScrollOffset>(historyLineCount()));
 }
 
 bool Viewport::scrollToBottom()
 {
+    viewportLog()("scrollToBottom");
     if (scrollingDisabled())
         return false;
 
@@ -36,11 +42,13 @@ bool Viewport::scrollToBottom()
 
 bool Viewport::forceScrollToBottom()
 {
+    viewportLog()("force ScrollToBottom");
     return scrollTo(ScrollOffset(0));
 }
 
 bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset)
 {
+    viewportLog()("makeVisibleWithinSafeArea");
     return makeVisibleWithinSafeArea(lineOffset, _scrollOff);
 }
 
@@ -50,6 +58,7 @@ bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset, LineCount paddin
     auto const viewportBottom = boxed_cast<LineOffset>(screenLineCount() - 1) - _scrollOffset.as<int>()
                                 - boxed_cast<LineOffset>(paddingLines);
 
+    viewportLog()("viewportTop {} viewportBottom {} lineOffset {}", viewportTop, viewportBottom, lineOffset);
     // Is the line above the viewport?
     if (!(viewportTop < lineOffset))
         return scrollUp(LineCount::cast_from(viewportTop - lineOffset));
@@ -63,11 +72,13 @@ bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset, LineCount paddin
 
 bool Viewport::makeVisible(LineOffset lineOffset)
 {
+    viewportLog()("makeVisible {}", unbox(lineOffset));
     return makeVisibleWithinSafeArea(lineOffset, LineCount(0));
 }
 
 bool Viewport::scrollTo(ScrollOffset offset)
 {
+    viewportLog()("scroll to {}", offset);
     if (scrollingDisabled() && offset != ScrollOffset(0))
         return false;
 
@@ -76,22 +87,19 @@ bool Viewport::scrollTo(ScrollOffset offset)
 
     if (0 <= *offset && offset <= boxed_cast<ScrollOffset>(historyLineCount()))
     {
-#if defined(CONTOUR_LOG_VIEWPORT)
-        ViewportLog()("Scroll to offset {}", offset);
-#endif
+        viewportLog()("Scroll to offset {}", offset);
         _scrollOffset = offset;
         _modified();
         return true;
     }
 
-#if defined(CONTOUR_LOG_VIEWPORT)
-    ViewportLog()("Scroll to offset {} ignored. Out of bounds.", offset);
-#endif
+    viewportLog()("Scroll to offset {} ignored. Out of bounds.", offset);
     return false;
 }
 
 bool Viewport::scrollMarkUp()
 {
+    viewportLog()("Scroll to Mark Down");
     if (scrollingDisabled())
         return false;
 
@@ -105,6 +113,7 @@ bool Viewport::scrollMarkUp()
 
 bool Viewport::scrollMarkDown()
 {
+    viewportLog()("Scroll to Mark Down");
     if (scrollingDisabled())
         return false;
 

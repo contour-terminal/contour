@@ -525,16 +525,13 @@ void Terminal::updateIndicatorStatusLine()
 {
     Require(_state.activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
 
-    auto const _ = crispy::finally { [this, savedActiveStatusDisplay = _state.activeStatusDisplay]() {
+    auto const _ = crispy::finally { [this]() {
         // Cleaning up.
-        setActiveStatusDisplay(savedActiveStatusDisplay);
         verifyState();
     } };
 
     auto const colors =
         _state.focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
-
-    setActiveStatusDisplay(ActiveStatusDisplay::IndicatorStatusLine);
 
     // Prepare old status line's cursor position and some other flags.
     _indicatorStatusScreen.moveCursorTo({}, {});
@@ -640,10 +637,12 @@ bool Terminal::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventT
     if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
-    _viewport.scrollToBottom();
     bool const success = _state.inputGenerator.generate(key, modifier, eventType);
-    flushInput();
-    _viewport.scrollToBottom();
+    if (success)
+    {
+        flushInput();
+        _viewport.scrollToBottom();
+    }
     return success;
 }
 
@@ -661,9 +660,11 @@ bool Terminal::sendCharEvent(
         return true;
 
     auto const success = _state.inputGenerator.generate(ch, physicalKey, modifier, eventType);
-
-    flushInput();
-    _viewport.scrollToBottom();
+    if (success)
+    {
+        flushInput();
+        _viewport.scrollToBottom();
+    }
     return success;
 }
 
@@ -823,6 +824,10 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     // - grid text selection is extended
     verifyState();
 
+    // avoid applying event for sctatus line or inidcator status line
+    if (!(isPrimaryScreen() || isAlternateScreen()))
+        return;
+
     if (newPosition != _currentMousePosition)
     {
         // Speed-clicks are only counted when not moving the mouse in between, so reset on mouse move here.
@@ -833,7 +838,6 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     }
 
     auto const shouldExtendSelection = shouldExtendSelectionByMouse(newPosition, pixelPosition);
-
     auto relativePos = _viewport.translateScreenToGridCoordinate(newPosition);
     if (shouldExtendSelection && _leftMouseButtonPressed)
     {
@@ -854,13 +858,15 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     if (_leftMouseButtonPressed)
     {
         if (!selectionAvailable())
+        {
             setSelector(
                 std::make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
-        else if (selector()->state() != Selection::State::Complete && shouldExtendSelection)
+        }
+        else if (selector()->state() != Selection::State::Complete)
         {
             if (currentScreen().isCellEmpty(relativePos)
                 && !currentScreen().compareCellTextAt(relativePos, 0x20))
-                relativePos.column = ColumnOffset { 0 } + *(_settings.pageSize.columns - 1);
+                relativePos.column = ColumnOffset { 0 } + unbox(_settings.pageSize.columns - 1);
             _state.viCommands.cursorPosition = relativePos;
             if (_state.inputHandler.mode() != ViMode::Insert)
                 _state.inputHandler.setMode(selector()->viMode());
@@ -1896,8 +1902,9 @@ void Terminal::markCellDirty(CellLocation position) noexcept
     if (!_selection)
         return;
 
-    if (_selection->contains(position))
-        clearSelection();
+    crispy::ignore_unused(position);
+    // if (_selection->contains(position))
+    //     clearSelection();
 }
 
 void Terminal::markRegionDirty(Rect area) noexcept
@@ -1908,8 +1915,9 @@ void Terminal::markRegionDirty(Rect area) noexcept
     if (!_selection)
         return;
 
-    if (_selection->intersects(area))
-        clearSelection();
+    crispy::ignore_unused(area);
+    // if (_selection->intersects(area))
+    //     clearSelection();
 }
 
 void Terminal::synchronizedOutput(bool enabled)
