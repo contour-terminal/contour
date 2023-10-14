@@ -113,7 +113,7 @@ bool Viewport::scrollMarkUp()
 
 bool Viewport::scrollMarkDown()
 {
-    viewportLog()("Scroll to Mark Down ");
+    viewportLog()("Scroll to Mark Down");
     if (scrollingDisabled())
         return false;
 
