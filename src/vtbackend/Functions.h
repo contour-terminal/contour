@@ -452,6 +452,12 @@ constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VT
 constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, "DECSASD", "Select Active Status Display");
 constexpr inline auto DECPS       = detail::CSI(std::nullopt, 3, 18, ',', '~', VTType::VT520, "DECPS", "Controls the sound frequency or notes");
 
+// CSI u functions
+constexpr inline auto CSIUENTER = detail::CSI('>', 0, 1, std::nullopt, 'u', VTExtension::Unknown, "CSIUENTER", "Enter Extended keyboard mode");
+constexpr inline auto CSIUQUERY = detail::CSI('?', 0, 0, std::nullopt, 'u', VTExtension::Unknown, "CSIUQUERY", "Report Extended keyboard mode");
+constexpr inline auto CSIUENHCE = detail::CSI('=', 1, 2, std::nullopt, 'u', VTExtension::Unknown, "CSIUENHCE", "Request enhancement to extended keyboard mode");
+constexpr inline auto CSIULEAVE = detail::CSI('<', 0, 1, std::nullopt, 'u', VTExtension::Unknown, "CSIULEAVE", "Leave Extended keyboard mode");
+
 // DCS functions
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTExtension::Contour, "XTSETPROFILE", "Set Terminal Profile");
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, "DECRQSS", "Request Status String");
@@ -563,6 +569,10 @@ constexpr static auto allFunctionsArray() noexcept
         XTRESTORE,
         XTSAVE,
         DECPS,
+        CSIUENTER,
+        CSIUQUERY,
+        CSIUENHCE,
+        CSIULEAVE,
         DECRM,
         DECRQM,
         DECRQM_ANSI,

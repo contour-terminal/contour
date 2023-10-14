@@ -40,9 +40,12 @@ string to_string(MouseButton button)
 
 // {{{ StandardKeyboardInputGenerator
 bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
+                                                  uint32_t physicalKey,
                                                   Modifier modifier,
                                                   KeyboardEventType eventType)
 {
+    crispy::ignore_unused(physicalKey);
+
     if (eventType == KeyboardEventType::Release)
         return false;
 
@@ -191,13 +194,20 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
         case Key::VolumeUp:
         case Key::VolumeDown:
         case Key::VolumeMute:
-        case Key::Control:
-        case Key::Alt:
+        case Key::LeftShift:
+        case Key::RightShift:
+        case Key::LeftControl:
+        case Key::RightControl:
+        case Key::LeftAlt:
+        case Key::RightAlt:
         case Key::LeftSuper:
         case Key::RightSuper:
         case Key::LeftHyper:
         case Key::RightHyper:
-        case Key::Meta:
+        case Key::LeftMeta:
+        case Key::RightMeta:
+        case Key::IsoLevel3Shift:
+        case Key::IsoLevel5Shift:
         case Key::CapsLock:
         case Key::ScrollLock:
         case Key::NumLock:
@@ -212,9 +222,193 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
 }
 // }}}
 
+// {{{ ExtendedKeyboardInputGenerator
+bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
+                                                  uint32_t physicalKey,
+                                                  Modifier modifier,
+                                                  KeyboardEventType eventType)
+{
+    if (enabled(eventType))
+    {
+        if (enabled(KeyboardEventFlag::DisambiguateEscapeCodes)
+            && (modifier.any() || enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes)))
+        {
+            append("\033[{};{}u",
+                   encodeCharacter(characterEvent, physicalKey, modifier),
+                   encodeModifiers(modifier, eventType));
+            return true;
+        }
+    }
+
+    return StandardKeyboardInputGenerator::generateChar(characterEvent, physicalKey, modifier, eventType);
+}
+
+constexpr unsigned encodeEventType(KeyboardEventType eventType) noexcept
+{
+    return static_cast<unsigned>(eventType);
+}
+
+std::string ExtendedKeyboardInputGenerator::encodeModifiers(Modifier modifier,
+                                                            KeyboardEventType eventType) const
+{
+    if (enabled(KeyboardEventFlag::ReportEventTypes))
+        return fmt::format("{}:{}", modifier.value(), encodeEventType(eventType));
+
+    if (modifier.value() != 0)
+        return std::to_string(1 + modifier.value());
+
+    return "";
+}
+
+std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
+                                                            uint32_t physicalKey,
+                                                            Modifier modifier) const
+{
+    // The codepoint is always the lower-case form
+    // TODO: use libunicode for down-shifting
+    auto unshiftedKey = ch < 0x80 ? fmt::format("{}", std::tolower(static_cast<char>(ch))) : ""s;
+
+    auto result = std::move(unshiftedKey);
+
+    if (enabled(KeyboardEventFlag::ReportAlternateKeys))
+    {
+        // The shifted key is simply the upper-case version of unicode-codepoint
+        auto const shiftedKey = static_cast<uint32_t>(
+            (modifier.shift() && (0x20 <= ch && ch < 0x80)) ? std::toupper(static_cast<char>(ch)) : 0);
+        // TODO: use libunicode for up-shifting
+
+        bool const showPhysicalKey = physicalKey && physicalKey != ch && physicalKey != shiftedKey;
+        if (shiftedKey || showPhysicalKey)
+            result += ':';
+        if (shiftedKey)
+            result += std::to_string(shiftedKey);
+
+        // The base layout key is the key corresponding to the physical key in the standard PC-101 key layout
+        if (showPhysicalKey)
+        {
+            result += ':';
+            result += std::to_string(physicalKey);
+        }
+    }
+
+    return result;
+}
+
+struct ExtendedKeyMapping
+{
+    Key key;
+    Modifier modifier;
+    std::string_view code;
+};
+
+constexpr pair<unsigned, char> mapKey(Key key) noexcept
+{
+    switch (key)
+    {
+        case Key::Escape: return { 27, 'u' };
+        case Key::Enter: return { 13, 'u' };
+        case Key::Tab: return { 9, 'u' };
+        case Key::Backspace: return { 127, 'u' };
+        case Key::Insert: return { 2, '~' };
+        case Key::Delete: return { 3, '~' };
+        case Key::LeftArrow: return { 1, 'D' };
+        case Key::RightArrow: return { 1, 'C' };
+        case Key::UpArrow: return { 1, 'A' };
+        case Key::DownArrow: return { 1, 'B' };
+        case Key::PageUp: return { 5, '~' };
+        case Key::PageDown: return { 6, '~' };
+        case Key::Home: return { 7, '~' }; // or 1 H
+        case Key::End: return { 8, '~' };  // or 1 F
+        case Key::CapsLock: return { 57358, 'u' };
+        case Key::ScrollLock: return { 57359, 'u' };
+        case Key::NumLock: return { 57360, 'u' };
+        case Key::PrintScreen: return { 57361, 'u' };
+        case Key::Pause: return { 57362, 'u' };
+        case Key::Menu: return { 57363, 'u' };
+        case Key::F1: return { 11, '~' }; // or 1 P
+        case Key::F2: return { 12, '~' }; // or 1 Q
+        case Key::F3: return { 13, '~' }; // or 1 R (not anymore)
+        case Key::F4: return { 14, '~' }; // or 1 S
+        case Key::F5: return { 15, '~' };
+        case Key::F6: return { 17, '~' };
+        case Key::F7: return { 18, '~' };
+        case Key::F8: return { 19, '~' };
+        case Key::F9: return { 20, '~' };
+        case Key::F10: return { 21, '~' };
+        case Key::F11: return { 23, '~' };
+        case Key::F12: return { 24, '~' };
+        case Key::F13: return { 57376, 'u' };
+        case Key::F14: return { 57377, 'u' };
+        case Key::F15: return { 57378, 'u' };
+        case Key::F16: return { 57379, 'u' };
+        case Key::F17: return { 57380, 'u' };
+        case Key::F18: return { 57381, 'u' };
+        case Key::F19: return { 57382, 'u' };
+        case Key::F20: return { 57383, 'u' };
+        case Key::F21: return { 57384, 'u' };
+        case Key::F22: return { 57385, 'u' };
+        case Key::F23: return { 57386, 'u' };
+        case Key::F24: return { 57387, 'u' };
+        case Key::F25: return { 57388, 'u' };
+        case Key::F26: return { 57389, 'u' };
+        case Key::F27: return { 57390, 'u' };
+        case Key::F28: return { 57391, 'u' };
+        case Key::F29: return { 57392, 'u' };
+        case Key::F30: return { 57393, 'u' };
+        case Key::F31: return { 57394, 'u' };
+        case Key::F32: return { 57395, 'u' };
+        case Key::F33: return { 57396, 'u' };
+        case Key::F34: return { 57397, 'u' };
+        case Key::F35: return { 57398, 'u' };
+        case Key::MediaPlay: return { 57428, 'u' };
+        case Key::MediaPause: return { 57429, 'u' };
+        case Key::MediaTogglePlayPause: return { 57430, 'u' };
+        case Key::MediaStop: return { 57432, 'u' };
+        case Key::MediaNext: return { 57435, 'u' };
+        case Key::MediaPrevious: return { 57436, 'u' };
+        case Key::VolumeDown: return { 57438, 'u' };
+        case Key::VolumeUp: return { 57439, 'u' };
+        case Key::VolumeMute: return { 57440, 'u' };
+        case Key::LeftShift: return { 57441, 'u' };
+        case Key::LeftControl: return { 57442, 'u' };
+        case Key::LeftAlt: return { 57443, 'u' };
+        case Key::LeftSuper: return { 57444, 'u' };
+        case Key::LeftHyper: return { 57445, 'u' };
+        case Key::LeftMeta: return { 57446, 'u' };
+        case Key::RightShift: return { 57447, 'u' };
+        case Key::RightControl: return { 57448, 'u' };
+        case Key::RightAlt: return { 57449, 'u' };
+        case Key::RightSuper: return { 57450, 'u' };
+        case Key::RightHyper: return { 57451, 'u' };
+        case Key::RightMeta: return { 57452, 'u' };
+        case Key::IsoLevel3Shift: return { 57453, 'u' };
+        case Key::IsoLevel5Shift: return { 57454, 'u' };
+    }
+}
+
+bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifier modifier, KeyboardEventType eventType)
+{
+    if (!enabled(eventType))
+        return false;
+
+    if (!enabled(KeyboardEventFlag::DisambiguateEscapeCodes))
+        return StandardKeyboardInputGenerator::generateKey(key, modifier, eventType);
+
+    auto const [code, function] = mapKey(key);
+    auto const encodedModifiers = encodeModifiers(modifier, eventType);
+    auto controlSequence = fmt::format("\033[{}", code);
+    if (!encodedModifiers.empty())
+        controlSequence += fmt::format(";{}", encodedModifiers);
+    controlSequence += function;
+    append(controlSequence);
+
+    return true;
+}
+// }}}
+
 void InputGenerator::reset()
 {
-    _standardKeyboardInputGenerator.reset();
+    _keyboardInputGenerator.reset();
     _bracketedPaste = false;
     _generateFocusEvents = false;
     _mouseProtocol = std::nullopt;
@@ -229,28 +423,32 @@ void InputGenerator::reset()
 void InputGenerator::setCursorKeysMode(KeyMode mode)
 {
     inputLog()("set cursor keys mode: {}", mode);
-    _standardKeyboardInputGenerator.setCursorKeysMode(mode);
+    _keyboardInputGenerator.setCursorKeysMode(mode);
 }
 
 void InputGenerator::setNumpadKeysMode(KeyMode mode)
 {
     inputLog()("set numpad keys mode: {}", mode);
-    _standardKeyboardInputGenerator.setNumpadKeysMode(mode);
+    _keyboardInputGenerator.setNumpadKeysMode(mode);
 }
 
 void InputGenerator::setApplicationKeypadMode(bool enable)
 {
-    _standardKeyboardInputGenerator.setApplicationKeypadMode(enable);
+    _keyboardInputGenerator.setApplicationKeypadMode(enable);
     inputLog()("set application keypad mode: {}", enable);
 }
 
-bool InputGenerator::generate(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType)
+bool InputGenerator::generate(char32_t characterEvent,
+                              uint32_t physicalKey,
+                              Modifier modifier,
+                              KeyboardEventType eventType)
 {
-    bool const success = _standardKeyboardInputGenerator.generateChar(characterEvent, modifier, eventType);
+    bool const success =
+        _keyboardInputGenerator.generateChar(characterEvent, physicalKey, modifier, eventType);
 
     if (success)
     {
-        _pendingSequence += _standardKeyboardInputGenerator.take();
+        _pendingSequence += _keyboardInputGenerator.take();
         inputLog()("Sending {} \"{}\" {}.",
                    modifier,
                    crispy::escape(unicode::convert_to<char>(characterEvent)),
@@ -262,11 +460,11 @@ bool InputGenerator::generate(char32_t characterEvent, Modifier modifier, Keyboa
 
 bool InputGenerator::generate(Key key, Modifier modifier, KeyboardEventType eventType)
 {
-    bool const success = _standardKeyboardInputGenerator.generateKey(key, modifier, eventType);
+    bool const success = _keyboardInputGenerator.generateKey(key, modifier, eventType);
 
     if (success)
     {
-        _pendingSequence += _standardKeyboardInputGenerator.take();
+        _pendingSequence += _keyboardInputGenerator.take();
         inputLog()("Sending {} \"{}\" {}.", modifier, key, eventType);
     }
 

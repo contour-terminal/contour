@@ -146,6 +146,12 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
     static auto constexpr KeyMappings = array {
         // {{{
+        pair { Qt::Key_Escape, Key::Escape },
+        pair { Qt::Key_Enter, Key::Enter },
+        pair { Qt::Key_Return, Key::Enter },
+        pair { Qt::Key_Tab, Key::Tab },
+        pair { Qt::Key_Backspace, Key::Backspace },
+
         pair { Qt::Key_Insert, Key::Insert },
         pair { Qt::Key_Delete, Key::Delete },
         pair { Qt::Key_Right, Key::RightArrow },
@@ -176,6 +182,21 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         pair { Qt::Key_F18, Key::F18 },
         pair { Qt::Key_F19, Key::F19 },
         pair { Qt::Key_F20, Key::F20 },
+        pair { Qt::Key_F21, Key::F21 },
+        pair { Qt::Key_F22, Key::F22 },
+        pair { Qt::Key_F23, Key::F23 },
+        pair { Qt::Key_F24, Key::F24 },
+        pair { Qt::Key_F25, Key::F25 },
+        pair { Qt::Key_F26, Key::F26 },
+        pair { Qt::Key_F27, Key::F27 },
+        pair { Qt::Key_F28, Key::F28 },
+        pair { Qt::Key_F29, Key::F29 },
+        pair { Qt::Key_F30, Key::F30 },
+        pair { Qt::Key_F31, Key::F31 },
+        pair { Qt::Key_F32, Key::F32 },
+        pair { Qt::Key_F33, Key::F33 },
+        pair { Qt::Key_F34, Key::F34 },
+        pair { Qt::Key_F35, Key::F35 },
 
         pair { Qt::Key_MediaPlay, Key::MediaPlay },
         pair { Qt::Key_MediaStop, Key::MediaStop },
@@ -188,13 +209,13 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         pair { Qt::Key_VolumeDown, Key::VolumeDown },
         pair { Qt::Key_VolumeMute, Key::VolumeMute },
 
-        pair { Qt::Key_Control, Key::Control },
-        pair { Qt::Key_Alt, Key::Alt },
+        pair { Qt::Key_Control, Key::LeftControl }, // NB: Qt cannot distinguish between left and right
+        pair { Qt::Key_Alt, Key::LeftAlt },         // NB: Qt cannot distinguish between left and right
+        pair { Qt::Key_Meta, Key::LeftMeta },       // NB: Qt cannot distinguish between left and right
         pair { Qt::Key_Super_L, Key::LeftSuper },
         pair { Qt::Key_Super_R, Key::RightSuper },
         pair { Qt::Key_Hyper_L, Key::LeftHyper },
         pair { Qt::Key_Hyper_R, Key::RightHyper },
-        pair { Qt::Key_Meta, Key::Meta },
 
         pair { Qt::Key_CapsLock, Key::CapsLock },
         pair { Qt::Key_ScrollLock, Key::ScrollLock },
@@ -202,19 +223,16 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         pair { Qt::Key_Print, Key::PrintScreen },
         pair { Qt::Key_Pause, Key::Pause },
         pair { Qt::Key_Menu, Key::Menu },
-
-        // pair { Qt::Key_Num
-
     }; // }}}
 
     static auto constexpr CharMappings = array {
         // {{{
-        pair { Qt::Key_Return, '\r' },      pair { Qt::Key_AsciiCircum, '^' },
-        pair { Qt::Key_AsciiTilde, '~' },   pair { Qt::Key_Backslash, '\\' },
-        pair { Qt::Key_Bar, '|' },          pair { Qt::Key_BraceLeft, '{' },
-        pair { Qt::Key_BraceRight, '}' },   pair { Qt::Key_BracketLeft, '[' },
-        pair { Qt::Key_BracketRight, ']' }, pair { Qt::Key_QuoteLeft, '`' },
-        pair { Qt::Key_Underscore, '_' },
+        // pair { Qt::Key_Return, '\r' },
+        pair { Qt::Key_AsciiCircum, '^' }, pair { Qt::Key_AsciiTilde, '~' },
+        pair { Qt::Key_Backslash, '\\' },  pair { Qt::Key_Bar, '|' },
+        pair { Qt::Key_BraceLeft, '{' },   pair { Qt::Key_BraceRight, '}' },
+        pair { Qt::Key_BracketLeft, '[' }, pair { Qt::Key_BracketRight, ']' },
+        pair { Qt::Key_QuoteLeft, '`' },   pair { Qt::Key_Underscore, '_' },
     }; // }}}
 
     auto const modifiers = makeModifier(event->modifiers());
@@ -229,19 +247,20 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         return true;
     }
 
+    auto const physicalKey = event->nativeVirtualKey();
     // NOLINTNEXTLINE(readability-qualified-auto)
     if (auto const i = find_if(begin(CharMappings),
                                end(CharMappings),
                                [event](auto const& x) { return x.first == event->key(); });
         i != end(CharMappings))
     {
-        session.sendCharEvent(static_cast<char32_t>(i->second), modifiers, eventType, now);
+        session.sendCharEvent(static_cast<char32_t>(i->second), physicalKey, modifiers, eventType, now);
         return true;
     }
 
     if (key == Qt::Key_Backtab)
     {
-        session.sendCharEvent(U'\t', modifiers.with(Modifier::Shift), eventType, now);
+        session.sendCharEvent(U'\t', physicalKey, modifiers.with(Modifier::Shift), eventType, now);
         return true;
     }
 
@@ -249,23 +268,26 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     if (0x20 <= key && key < 0x80 && (modifiers.alt() && session.profile().optionKeyAsAlt))
     {
         auto const ch = static_cast<char32_t>(modifiers.shift() ? std::toupper(key) : std::tolower(key));
-        session.sendCharEvent(ch, modifiers, eventType, now);
+        session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
         return true;
     }
 #endif
 
     if (0x20 <= key && key < 0x80 && (modifiers.control()))
     {
-        session.sendCharEvent(static_cast<char32_t>(key), modifiers, eventType, now);
+        session.sendCharEvent(static_cast<char32_t>(key), physicalKey, modifiers, eventType, now);
         return true;
     }
 
     switch (key)
     {
-        case Qt::Key_BraceLeft: session.sendCharEvent(L'[', modifiers, eventType, now); return true;
-        case Qt::Key_Equal: session.sendCharEvent(L'=', modifiers, eventType, now); return true;
-        case Qt::Key_BraceRight: session.sendCharEvent(L']', modifiers, eventType, now); return true;
-        case Qt::Key_Backspace: session.sendCharEvent(0x08, modifiers, eventType, now); return true;
+            // clang-format off
+        case Qt::Key_BraceLeft: session.sendCharEvent(L'[', physicalKey, modifiers, eventType, now); return true;
+        case Qt::Key_Equal: session.sendCharEvent(L'=', physicalKey, modifiers, eventType, now); return true;
+        case Qt::Key_BraceRight: session.sendCharEvent(L']', physicalKey, modifiers, eventType, now); return true;
+        case Qt::Key_Backspace: session.sendCharEvent(0x08, physicalKey, modifiers, eventType, now); return true;
+        default: break;
+            // clang-format on
     }
 
     if (!event->text().isEmpty())
@@ -276,10 +298,10 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         // On OS/X the Alt-modifier does not seem to be passed to the terminal apps
         // but rather remapped to whatever OS/X is mapping them to.
         for (char32_t const ch: codepoints)
-            session.sendCharEvent(ch, modifiers.without(Modifier::Alt), eventType, now);
+            session.sendCharEvent(ch, physicalKey, modifiers.without(Modifier::Alt), eventType, now);
 #else
         for (char32_t const ch: codepoints)
-            session.sendCharEvent(ch, modifiers, eventType, now);
+            session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
 #endif
 
         return true;

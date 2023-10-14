@@ -4,6 +4,7 @@
 #include <vtbackend/primitives.h>
 
 #include <crispy/escape.h>
+#include <crispy/flags.h>
 #include <crispy/overloaded.h>
 
 #include <fmt/format.h>
@@ -12,7 +13,6 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include <libunicode/convert.h>
 
@@ -40,6 +40,8 @@ class Modifier
   public:
     enum Key : unsigned
     {
+        // NB: These values MUST match the values of the corresponding
+        // the bit positions in the modifier mask in CSIu keyboard protocol.
         None = 0,
         Shift = 1,
         Alt = 2,
@@ -47,8 +49,8 @@ class Modifier
         Super = 8,
         Hyper = 16,
         Meta = 32,
-        CapsLock = 32,
-        NumLock = 64,
+        CapsLock = 64,
+        NumLock = 128,
     };
 
     constexpr Modifier(Key key): _mask { static_cast<unsigned>(key) } {}
@@ -219,13 +221,20 @@ enum class Key
     VolumeMute,
 
     // modifier keys
-    Control,
-    Alt,
+    LeftShift,
+    RightShift,
+    LeftControl,
+    RightControl,
+    LeftAlt,
+    RightAlt,
     LeftSuper,
     RightSuper,
     LeftHyper,
     RightHyper,
-    Meta,
+    LeftMeta,
+    RightMeta,
+    IsoLevel3Shift,
+    IsoLevel5Shift,
 
     // other special keys
     CapsLock,
@@ -277,9 +286,9 @@ enum class MouseTransport
 
 enum class KeyboardEventType
 {
-    Press,
-    Repeat,
-    Release,
+    Press = 1,
+    Repeat = 2,
+    Release = 3,
 };
 
 class KeyboardInputGenerator
@@ -287,14 +296,20 @@ class KeyboardInputGenerator
   public:
     virtual ~KeyboardInputGenerator() = default;
 
-    virtual bool generateChar(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType) = 0;
+    virtual bool generateChar(char32_t characterEvent,
+                              uint32_t physicalKey,
+                              Modifier modifier,
+                              KeyboardEventType eventType) = 0;
     virtual bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) = 0;
 };
 
 class StandardKeyboardInputGenerator: public KeyboardInputGenerator
 {
   public:
-    bool generateChar(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType) override;
+    bool generateChar(char32_t characterEvent,
+                      uint32_t physicalKey,
+                      Modifier modifier,
+                      KeyboardEventType eventType) override;
     bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) override;
 
     [[nodiscard]] bool normalCursorKeys() const noexcept { return _cursorKeysMode == KeyMode::Normal; }
@@ -352,6 +367,70 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     std::string _pendingSequence {};
 };
 
+enum class KeyboardEventFlag
+{
+    None = 0,
+    DisambiguateEscapeCodes = 1,
+    ReportEventTypes = 2,
+    ReportAlternateKeys = 4,
+    ReportAllKeysAsEscapeCodes = 8,
+    ReportAssociatedText = 16,
+};
+
+using KeyboardEventFlags = crispy::flags<KeyboardEventFlag>;
+
+// Implements extended CSIu keyboard input mode.
+class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerator
+{
+  public:
+    static constexpr inline size_t MaxStackDepth = 32;
+
+    constexpr void enter(KeyboardEventFlags flags) noexcept
+    {
+        if (stackDepth() < MaxStackDepth)
+            _flags.at(++_currentStackTop) = flags;
+    }
+
+    [[nodiscard]] constexpr size_t stackDepth() const noexcept { return 1 + _currentStackTop; }
+
+    [[nodiscard]] constexpr KeyboardEventFlags flags() const noexcept { return _flags.at(_currentStackTop); }
+
+    [[nodiscard]] constexpr KeyboardEventFlags& flags() noexcept { return _flags.at(_currentStackTop); }
+
+    [[nodiscard]] constexpr bool enabled(KeyboardEventFlag flag) const noexcept { return flags() & flag; }
+
+    [[nodiscard]] constexpr bool enabled(KeyboardEventType eventType) const noexcept
+    {
+        // Press-event is always emitted. The other events are only emitted if the corresponding flag is set.
+        return eventType != KeyboardEventType::Release || enabled(KeyboardEventFlag::ReportEventTypes);
+    }
+
+    constexpr void leave(size_t n = 1) noexcept { _currentStackTop -= std::min(n, _currentStackTop); }
+
+    constexpr void reset() noexcept
+    {
+        _currentStackTop = 0;
+        _flags.at(_currentStackTop) = KeyboardEventFlag::None;
+    }
+
+    // {{{ Overrides from StandardKeyboardInputGenerator
+
+    bool generateChar(char32_t characterEvent,
+                      uint32_t physicalKey,
+                      Modifier modifier,
+                      KeyboardEventType eventType) override;
+    bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) override;
+
+    // }}}
+
+  private:
+    [[nodiscard]] std::string encodeCharacter(char32_t ch, uint32_t physicalKey, Modifier modifier) const;
+    [[nodiscard]] std::string encodeModifiers(Modifier modifier, KeyboardEventType eventType) const;
+
+    std::array<KeyboardEventFlags, MaxStackDepth> _flags = { KeyboardEventFlag::None };
+    size_t _currentStackTop = 0;
+};
+
 class InputGenerator
 {
   public:
@@ -367,20 +446,17 @@ class InputGenerator
 
     [[nodiscard]] bool normalCursorKeys() const noexcept
     {
-        return _standardKeyboardInputGenerator.normalCursorKeys();
+        return _keyboardInputGenerator.normalCursorKeys();
     }
     [[nodiscard]] bool applicationCursorKeys() const noexcept
     {
-        return _standardKeyboardInputGenerator.applicationCursorKeys();
+        return _keyboardInputGenerator.applicationCursorKeys();
     }
 
-    [[nodiscard]] bool numericKeypad() const noexcept
-    {
-        return _standardKeyboardInputGenerator.numericKeypad();
-    }
+    [[nodiscard]] bool numericKeypad() const noexcept { return _keyboardInputGenerator.numericKeypad(); }
     [[nodiscard]] bool applicationKeypad() const noexcept
     {
-        return _standardKeyboardInputGenerator.applicationKeypad();
+        return _keyboardInputGenerator.applicationKeypad();
     }
 
     [[nodiscard]] bool bracketedPaste() const noexcept { return _bracketedPaste; }
@@ -412,7 +488,16 @@ class InputGenerator
     void setPassiveMouseTracking(bool v) noexcept { _passiveMouseTracking = v; }
     [[nodiscard]] bool passiveMouseTracking() const noexcept { return _passiveMouseTracking; }
 
-    bool generate(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType);
+    bool generate(char32_t characterEvent,
+                  uint32_t physicalKey,
+                  Modifier modifier,
+                  KeyboardEventType eventType);
+    bool generate(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType)
+    {
+        // Simulate physical key here.
+        auto const physicalKey = static_cast<uint32_t>(characterEvent);
+        return generate(characterEvent, physicalKey, modifier, eventType);
+    }
     bool generate(Key key, Modifier modifier, KeyboardEventType eventType);
     void generatePaste(std::string_view const& text);
     bool generateMousePress(Modifier modifier,
@@ -465,6 +550,16 @@ class InputGenerator
     /// Resets the input generator's state, as required by the RIS (hard reset) VT sequence.
     void reset();
 
+    [[nodiscard]] ExtendedKeyboardInputGenerator& keyboardProtocol() noexcept
+    {
+        return _keyboardInputGenerator;
+    }
+
+    [[nodiscard]] ExtendedKeyboardInputGenerator const& keyboardProtocol() const noexcept
+    {
+        return _keyboardInputGenerator;
+    }
+
   private:
     bool generateMouse(MouseEventType eventType,
                        Modifier modifier,
@@ -506,7 +601,7 @@ class InputGenerator
 
     std::set<MouseButton> _currentlyPressedMouseButtons {};
     CellLocation _currentMousePosition {}; // current mouse position
-    StandardKeyboardInputGenerator _standardKeyboardInputGenerator {};
+    ExtendedKeyboardInputGenerator _keyboardInputGenerator {};
 };
 
 inline std::string to_string(InputGenerator::MouseEventType value)
@@ -541,6 +636,27 @@ struct fmt::formatter<vtbackend::KeyboardEventType>: formatter<std::string_view>
 };
 
 template <>
+struct fmt::formatter<vtbackend::KeyboardEventFlag>: formatter<std::string_view>
+{
+    auto format(vtbackend::KeyboardEventFlag value, format_context& ctx) -> format_context::iterator
+    {
+        string_view name;
+        switch (value)
+        {
+                // clang-format off
+            case vtbackend::KeyboardEventFlag::None: name = "None"; break;
+            case vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes: name = "DisambiguateEscapeCodes"; break;
+            case vtbackend::KeyboardEventFlag::ReportEventTypes: name = "ReportEventTypes"; break;
+            case vtbackend::KeyboardEventFlag::ReportAlternateKeys: name = "ReportAlternateKeys"; break;
+            case vtbackend::KeyboardEventFlag::ReportAllKeysAsEscapeCodes: name = "ReportAllKeysAsEscapeCodes"; break;
+            case vtbackend::KeyboardEventFlag::ReportAssociatedText: name = "ReportAssociatedText"; break;
+                // clang-format on
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
 struct fmt::formatter<vtbackend::MouseProtocol>: formatter<std::string_view>
 {
     auto format(vtbackend::MouseProtocol value, format_context& ctx) -> format_context::iterator
@@ -559,25 +675,34 @@ struct fmt::formatter<vtbackend::MouseProtocol>: formatter<std::string_view>
 };
 
 template <>
+struct fmt::formatter<vtbackend::Modifier::Key>: formatter<std::string_view>
+{
+    auto format(vtbackend::Modifier::Key value, format_context& ctx) -> format_context::iterator
+    {
+        std::string_view name;
+        switch (value)
+        {
+            case vtbackend::Modifier::Key::None: name = "None"; break;
+            case vtbackend::Modifier::Key::Shift: name = "Shift"; break;
+            case vtbackend::Modifier::Key::Alt: name = "Alt"; break;
+            case vtbackend::Modifier::Key::Control: name = "Control"; break;
+            case vtbackend::Modifier::Key::Super: name = "Super"; break;
+            case vtbackend::Modifier::Key::Hyper: name = "Hyper"; break;
+            case vtbackend::Modifier::Key::Meta: name = "Meta"; break;
+            case vtbackend::Modifier::Key::CapsLock: name = "CapsLock"; break;
+            case vtbackend::Modifier::Key::NumLock: name = "NumLock"; break;
+        }
+        return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
 struct fmt::formatter<vtbackend::Modifier>: formatter<std::string>
 {
     auto format(vtbackend::Modifier modifier, format_context& ctx) -> format_context::iterator
     {
-        std::string s;
-        auto const advance = [&](bool cond, std::string_view text) {
-            if (!cond)
-                return;
-            if (!s.empty())
-                s += ',';
-            s += text;
-        };
-        advance(modifier.alt(), "Alt");
-        advance(modifier.shift(), "Shift");
-        advance(modifier.control(), "Control");
-        advance(modifier.meta(), "Meta");
-        if (s.empty())
-            s = "None";
-        return formatter<std::string>::format(s, ctx);
+        auto mk = crispy::flags<vtbackend::Modifier::Key>::from_value(modifier.value());
+        return formatter<std::string>::format(fmt::format("{}", mk), ctx);
     }
 };
 
@@ -722,13 +847,20 @@ struct fmt::formatter<vtbackend::Key>: formatter<std::string_view>
             case vtbackend::Key::VolumeDown: name = "VolumeDown"; break;
             case vtbackend::Key::VolumeUp: name = "VolumeUp"; break;
             case vtbackend::Key::VolumeMute: name = "VolumeMute"; break;
-            case vtbackend::Key::Control: name = "Control"; break;
-            case vtbackend::Key::Alt: name = "Alt"; break;
+            case vtbackend::Key::LeftShift: name = "LeftShift"; break;
+            case vtbackend::Key::RightShift: name = "RightShift"; break;
+            case vtbackend::Key::LeftControl: name = "LeftControl"; break;
+            case vtbackend::Key::RightControl: name = "RightControl"; break;
+            case vtbackend::Key::LeftAlt: name = "LeftAlt"; break;
+            case vtbackend::Key::RightAlt: name = "RightAlt"; break;
             case vtbackend::Key::LeftSuper: name = "LeftSuper"; break;
             case vtbackend::Key::RightSuper: name = "RightSuper"; break;
             case vtbackend::Key::LeftHyper: name = "LeftHyper"; break;
             case vtbackend::Key::RightHyper: name = "RightHyper"; break;
-            case vtbackend::Key::Meta: name = "Meta"; break;
+            case vtbackend::Key::LeftMeta: name = "LeftMeta"; break;
+            case vtbackend::Key::RightMeta: name = "RightMeta"; break;
+            case vtbackend::Key::IsoLevel3Shift: name = "IsoLevel3Shift"; break;
+            case vtbackend::Key::IsoLevel5Shift: name = "IsoLevel5Shift"; break;
             case vtbackend::Key::CapsLock: name = "CapsLock"; break;
             case vtbackend::Key::ScrollLock: name = "ScrollLock"; break;
             case vtbackend::Key::NumLock: name = "NumLock"; break;

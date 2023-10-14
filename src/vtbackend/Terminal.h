@@ -280,7 +280,8 @@ class Terminal
     // {{{ input proxy
     using Timestamp = std::chrono::steady_clock::time_point;
     bool sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventType, Timestamp now);
-    bool sendCharEvent(char32_t ch, Modifier modifier, KeyboardEventType eventType, Timestamp now);
+    bool sendCharEvent(
+        char32_t ch, uint32_t physicalKey, Modifier modifier, KeyboardEventType eventType, Timestamp now);
     bool sendMousePressEvent(Modifier modifier,
                              MouseButton button,
                              PixelCoordinate pixelPosition,
@@ -693,6 +694,12 @@ class Terminal
 
     [[nodiscard]] ViInputHandler& inputHandler() noexcept { return _state.inputHandler; }
     [[nodiscard]] ViInputHandler const& inputHandler() const noexcept { return _state.inputHandler; }
+
+    [[nodiscard]] ExtendedKeyboardInputGenerator& keyboardProtocol() noexcept
+    {
+        return _state.inputGenerator.keyboardProtocol();
+    }
+
     void resetHighlight();
 
     StatusDisplayType statusDisplayType() const noexcept { return _state.statusDisplayType; }

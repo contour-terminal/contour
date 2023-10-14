@@ -647,7 +647,8 @@ bool Terminal::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventT
     return success;
 }
 
-bool Terminal::sendCharEvent(char32_t ch, Modifier modifier, KeyboardEventType eventType, Timestamp now)
+bool Terminal::sendCharEvent(
+    char32_t ch, uint32_t physicalKey, Modifier modifier, KeyboardEventType eventType, Timestamp now)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
@@ -659,7 +660,7 @@ bool Terminal::sendCharEvent(char32_t ch, Modifier modifier, KeyboardEventType e
     if (eventType != KeyboardEventType::Release && _state.inputHandler.sendCharPressEvent(ch, modifier))
         return true;
 
-    auto const success = _state.inputGenerator.generate(ch, modifier, eventType);
+    auto const success = _state.inputGenerator.generate(ch, physicalKey, modifier, eventType);
 
     flushInput();
     _viewport.scrollToBottom();

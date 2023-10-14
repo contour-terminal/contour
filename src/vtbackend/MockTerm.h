@@ -39,9 +39,12 @@ class MockTerm: public Terminal::NullEvents
 
     bool sendCharEvent(char32_t ch, Modifier modifier, Terminal::Timestamp now)
     {
-        if (!terminal.sendCharEvent(ch, modifier, KeyboardEventType::Press, now))
+        // Simulate physical key here, as we don't have a real keyboard.
+        auto const physicalKey = static_cast<uint32_t>(ch);
+
+        if (!terminal.sendCharEvent(ch, physicalKey, modifier, KeyboardEventType::Press, now))
             return false;
-        terminal.sendCharEvent(ch, modifier, KeyboardEventType::Release, now);
+        terminal.sendCharEvent(ch, physicalKey, modifier, KeyboardEventType::Release, now);
         return true;
     }
 
