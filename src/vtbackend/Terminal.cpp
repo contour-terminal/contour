@@ -637,10 +637,12 @@ bool Terminal::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventT
     if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
-    _viewport.scrollToBottom();
     bool const success = _state.inputGenerator.generate(key, modifier, eventType);
-    flushInput();
-    _viewport.scrollToBottom();
+    if (success)
+    {
+        flushInput();
+        _viewport.scrollToBottom();
+    }
     return success;
 }
 
@@ -658,9 +660,11 @@ bool Terminal::sendCharEvent(
         return true;
 
     auto const success = _state.inputGenerator.generate(ch, physicalKey, modifier, eventType);
-
-    flushInput();
-    _viewport.scrollToBottom();
+    if (success)
+    {
+        flushInput();
+        _viewport.scrollToBottom();
+    }
     return success;
 }
 
