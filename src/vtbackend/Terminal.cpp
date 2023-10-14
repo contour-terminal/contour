@@ -525,7 +525,7 @@ void Terminal::updateIndicatorStatusLine()
 {
     Require(_state.activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
 
-    auto const _ = crispy::finally { [this, savedActiveStatusDisplay = _state.activeStatusDisplay]() {
+    auto const _ = crispy::finally { [this]() {
         // Cleaning up.
         verifyState();
     } };
@@ -820,9 +820,8 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     // - grid text selection is extended
     verifyState();
 
-
     // avoid applying event for sctatus line or inidcator status line
-    if(! (isPrimaryScreen() || isAlternateScreen()))
+    if (!(isPrimaryScreen() || isAlternateScreen()))
         return;
 
     if (newPosition != _currentMousePosition)
@@ -1899,8 +1898,9 @@ void Terminal::markCellDirty(CellLocation position) noexcept
     if (!_selection)
         return;
 
-    //if (_selection->contains(position))
-    //    clearSelection();
+    crispy::ignore_unused(position);
+    // if (_selection->contains(position))
+    //     clearSelection();
 }
 
 void Terminal::markRegionDirty(Rect area) noexcept
@@ -1911,8 +1911,9 @@ void Terminal::markRegionDirty(Rect area) noexcept
     if (!_selection)
         return;
 
-    //if (_selection->intersects(area))
-    //    clearSelection();
+    crispy::ignore_unused(area);
+    // if (_selection->intersects(area))
+    //     clearSelection();
 }
 
 void Terminal::synchronizedOutput(bool enabled)

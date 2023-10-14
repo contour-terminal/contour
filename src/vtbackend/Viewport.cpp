@@ -58,7 +58,7 @@ bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset, LineCount paddin
     auto const viewportBottom = boxed_cast<LineOffset>(screenLineCount() - 1) - _scrollOffset.as<int>()
                                 - boxed_cast<LineOffset>(paddingLines);
 
-    viewportLog()("viewportTop {} viewportBottom {}   lineOffset   {}", viewportTop, viewportBottom, lineOffset);
+    viewportLog()("viewportTop {} viewportBottom {} lineOffset {}", viewportTop, viewportBottom, lineOffset);
     // Is the line above the viewport?
     if (!(viewportTop < lineOffset))
         return scrollUp(LineCount::cast_from(viewportTop - lineOffset));

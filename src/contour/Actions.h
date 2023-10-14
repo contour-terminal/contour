@@ -208,8 +208,7 @@ DECLARE_ACTION_FMT(WriteScreen)
 template <>
 struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
 {
-    auto format(contour::actions::Action const& _action, format_context& ctx)
-        -> format_context::iterator
+    auto format(contour::actions::Action const& _action, format_context& ctx) -> format_context::iterator
     {
         std::string name = "Unknown action";
         // {{{ handle
