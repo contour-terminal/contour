@@ -263,7 +263,8 @@ void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command,
 
 void ViInputHandler::appendModifierToPendingInput(Modifier modifier)
 {
-    if (modifier.meta())
+    if (modifier.super())
+        // Super key is usually also named as Meta, conflicting with the actual Meta key.
         _pendingInput += "M-";
     if (modifier.alt())
         _pendingInput += "A-";
