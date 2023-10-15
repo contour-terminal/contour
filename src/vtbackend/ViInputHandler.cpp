@@ -275,7 +275,8 @@ void ViInputHandler::appendModifierToPendingInput(Modifier modifier)
 
 bool ViInputHandler::handlePendingInput()
 {
-    Require(!_pendingInput.empty());
+    if (_pendingInput.empty())
+        return false;
 
     auto constexpr TrieMapAllowWildcardDot = true;
 
@@ -372,6 +373,12 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
             break;
         }
 
+    if (_pendingInput.empty())
+    {
+        errorLog()("ViInputHandler: Unhandled key: {} ({})", key, modifier);
+        return false;
+    }
+
     return handlePendingInput();
 }
 
@@ -466,6 +473,12 @@ bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
         _pendingInput += "<NL>";
     else
         _pendingInput += unicode::convert_to<char>(ch);
+
+    if (_pendingInput.empty())
+    {
+        errorLog()("ViInputHandler: Unhandled char: {} ({})", static_cast<uint32_t>(ch), modifier);
+        return false;
+    }
 
     if (handlePendingInput())
         return true;
