@@ -419,6 +419,20 @@ bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
     if (!enabled(KeyboardEventFlag::DisambiguateEscapeCodes))
         return StandardKeyboardInputGenerator::generateKey(key, modifier, eventType);
 
+    if (modifier.none() && !enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes))
+    {
+        // "The only exceptions are the Enter, Tab and Backspace keys which still generate the same bytes as
+        // in legacy mode this is to allow the user to type and execute commands in the shell such as reset
+        // after a program that sets this mode crashes without clearing it."
+        switch (key)
+        {
+            case Key::Enter:
+            case Key::Tab:
+            case Key::Backspace: return StandardKeyboardInputGenerator::generateKey(key, modifier, eventType);
+            default: break;
+        }
+    }
+
     if (isModifierKey(key) && !enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes))
         return false;
 
