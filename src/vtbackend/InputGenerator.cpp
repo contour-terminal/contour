@@ -300,13 +300,6 @@ std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
     return result;
 }
 
-struct ExtendedKeyMapping
-{
-    Key key;
-    Modifier modifier;
-    std::string_view code;
-};
-
 constexpr pair<unsigned, char> mapKey(Key key) noexcept
 {
     switch (key)
