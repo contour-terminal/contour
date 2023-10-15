@@ -65,6 +65,8 @@ class Viewport
     bool makeVisibleWithinSafeArea(LineOffset line);
     bool makeVisibleWithinSafeArea(LineOffset line, LineCount paddingLines);
 
+    CellLocation clampCellLocation(CellLocation const& location) const noexcept;
+
     /// Translates a screen coordinate to a Grid-coordinate by applying
     /// the scroll-offset to it.
     constexpr CellLocation translateScreenToGridCoordinate(CellLocation p) const noexcept

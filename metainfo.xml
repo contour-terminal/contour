@@ -128,6 +128,7 @@
           <li>Clear search term when switch to insert vi mode (#1135)</li>
           <li>Delete dpi_scale entry in configuration (#1137)</li>
           <li>Removes the ability to inline colorschemes within a configuration profile. Colorschemes must now always be referenced by their name.</li>
+          <li>Moves the vi-like cursor with the viewport when scrolling up/down.</li>
           <li>Adds the ability to chose a color scheme based on the operating systems's dark/light mode setting. This will change live whenever the OS's dark/light mode setting changes as well (#604).</li>
           <li>Adds VT sequence DECSSCLS (change scroll speed) and properly handle DECSCLM (enable slow scrolling mode) (#1204)</li>
           <li>Adds VT sequence parameter ?996 to DSR to request a report of current color scheme dark/light mode hint.</li>

@@ -145,11 +145,7 @@ Terminal::Terminal(Events& eventListener,
         *this, PageSize { LineCount(1), _settings.pageSize.columns }, false, LineCount(0)
     },
     _currentScreen { &_primaryScreen },
-    _viewport { *this,
-                [this]() {
-                    _eventListener.onScrollOffsetChanged(_viewport.scrollOffset());
-                    breakLoopAndRefreshRenderBuffer();
-                } },
+    _viewport { *this, std::bind(&Terminal::onViewportChanged, this) },
     _traceHandler { *this },
     _selectionHelper { this },
     _refreshInterval { _settings.refreshRate }
@@ -166,6 +162,15 @@ Terminal::Terminal(Events& eventListener,
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
+}
+
+void Terminal::onViewportChanged()
+{
+    if (_state.inputHandler.mode() != ViMode::Insert)
+        _state.viCommands.cursorPosition = _viewport.clampCellLocation(_state.viCommands.cursorPosition);
+
+    _eventListener.onScrollOffsetChanged(_viewport.scrollOffset());
+    breakLoopAndRefreshRenderBuffer();
 }
 
 void Terminal::setRefreshRate(RefreshRate refreshRate)
