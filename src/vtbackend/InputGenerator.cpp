@@ -404,6 +404,8 @@ constexpr bool isModifierKey(Key key) noexcept
         case Key::RightMeta:
         case Key::IsoLevel3Shift:
         case Key::IsoLevel5Shift:
+        case Key::CapsLock:
+        case Key::NumLock:
             return true;
         default:
             return false;
