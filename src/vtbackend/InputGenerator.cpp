@@ -116,16 +116,18 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
 
 std::string StandardKeyboardInputGenerator::select(Modifier modifier, FunctionKeyMapping mapping) const
 {
+    auto const prefix = modifier.alt() ? "\033" : ""s;
+
     if (applicationCursorKeys() && !mapping.appCursor.empty())
-        return std::string(mapping.appCursor);
+        return prefix + std::string(mapping.appCursor);
 
     if (applicationKeypad() && !mapping.appKeypad.empty())
-        return std::string(mapping.appKeypad);
+        return prefix + std::string(mapping.appKeypad);
 
     if (modifier && !mapping.mods.empty())
-        return crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(modifier));
+        return prefix + crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(modifier));
 
-    return std::string(mapping.std);
+    return prefix + std::string(mapping.std);
 }
 
 bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, KeyboardEventType eventType)
@@ -174,7 +176,7 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
         case Key::Escape: append("\033"); break;
         case Key::Enter: append(select(modifier, { .std = "\r", .appKeypad = SS3 "M" })); break;
         case Key::Tab: append(select(modifier, { .std = "\t", .appKeypad = SS3 "I" })); break;
-        case Key::Backspace: append(modifier.control() ? "\x7f" : "\x08"); break;
+        case Key::Backspace: append(select(modifier, { .std = modifier.control() ? "\x7f" : "\x08" })); break;
         case Key::UpArrow: append(select(modifier, { .std = CSI "A", .mods = CSI "1;{}A", .appCursor = SS3 "A" })); break;
         case Key::DownArrow: append(select(modifier, { .std = CSI "B", .mods = CSI "1;{}B", .appCursor = SS3 "B" })); break;
         case Key::RightArrow: append(select(modifier, { .std = CSI "C", .mods = CSI "1;{}C", .appCursor = SS3 "C" })); break;
