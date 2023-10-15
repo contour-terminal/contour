@@ -570,7 +570,7 @@ TEST_CASE("AppendChar.emoji_zwj_1", "[screen]")
     auto const s8 = screen.grid().lineText(LineOffset(0));
     auto const s32 = unicode::from_utf8(s8);
     CHECK(U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F" == c0.codepoints());
-    CHECK(U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F    " == s32);
+    CHECK(U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F   " == s32);
 }
 
 TEST_CASE("AppendChar.emoji_1", "[screen]")
@@ -607,6 +607,18 @@ TEST_CASE("AppendChar_WideChar", "[screen]")
     mock.terminal.setMode(DECMode::AutoWrap, true);
     mock.writeToScreen(U"\U0001F600");
     CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
+}
+
+TEST_CASE("AppendChar_Into_WideChar_Right_Half", "[screen]")
+{
+    auto const pageSize = PageSize { LineCount(2), ColumnCount(4) };
+    auto mock = MockTerm { pageSize, LineCount(5) };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen(U"\U0001F600B"); // "😀B"
+    REQUIRE(screen.grid().lineText(LineOffset(0)) == unicode::convert_to<char>(U"\U0001F600B "sv));
+    mock.writeToScreen(CHA(2));
+    mock.writeToScreen("X");
+    REQUIRE(screen.grid().lineText(LineOffset(0)) == " XB ");
 }
 
 TEST_CASE("AppendChar_AutoWrap", "[screen]")
