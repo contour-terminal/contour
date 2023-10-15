@@ -667,6 +667,10 @@ void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
     }
 }
 
+void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
+{
+    emit scrollOffsetChanged(unbox(value));
+}
 // }}}
 // {{{ Input Events
 void TerminalSession::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventType, Timestamp now)

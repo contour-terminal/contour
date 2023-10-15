@@ -660,6 +660,8 @@ class Terminal
     void synchronizedOutput(bool enabled);
     void onBufferScrolled(LineCount n) noexcept;
 
+    void onViewportChanged();
+
     void setMaxImageColorRegisters(unsigned value) noexcept { _state.maxImageColorRegisters = value; }
 
     /// @returns either an empty string or a file:// URL of the last set working directory.

@@ -52,6 +52,19 @@ bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset)
     return makeVisibleWithinSafeArea(lineOffset, _scrollOff);
 }
 
+CellLocation Viewport::clampCellLocation(CellLocation const& location) const noexcept
+{
+    auto const viewportTop = -_scrollOffset.as<LineOffset>() + boxed_cast<LineOffset>(_scrollOff);
+    auto const viewportBottom = boxed_cast<LineOffset>(screenLineCount() - 1) - _scrollOffset.as<int>()
+                                - boxed_cast<LineOffset>(_scrollOff);
+
+    auto const line = std::clamp(location.line, viewportTop, viewportBottom);
+    auto const column = std::clamp(
+        location.column, ColumnOffset(0), boxed_cast<ColumnOffset>(_terminal->pageSize().columns - 1));
+
+    return CellLocation { line, column };
+}
+
 bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset, LineCount paddingLines)
 {
     auto const viewportTop = -_scrollOffset.as<LineOffset>() + boxed_cast<LineOffset>(paddingLines);

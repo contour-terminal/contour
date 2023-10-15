@@ -165,10 +165,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         terminal().viewport().scrollTo(vtbackend::ScrollOffset::cast_from(value));
     }
 
-    void onScrollOffsetChanged(vtbackend::ScrollOffset value) override
-    {
-        emit scrollOffsetChanged(unbox(value));
-    }
+    void onScrollOffsetChanged(vtbackend::ScrollOffset value) override;
     // }}}
 
     // {{{ QAbstractItemModel overrides
