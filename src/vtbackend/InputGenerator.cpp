@@ -116,16 +116,18 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
 
 std::string StandardKeyboardInputGenerator::select(Modifier modifier, FunctionKeyMapping mapping) const
 {
+    auto const prefix = modifier.alt() ? "\033" : ""s;
+
     if (applicationCursorKeys() && !mapping.appCursor.empty())
-        return std::string(mapping.appCursor);
+        return prefix + std::string(mapping.appCursor);
 
     if (applicationKeypad() && !mapping.appKeypad.empty())
-        return std::string(mapping.appKeypad);
+        return prefix + std::string(mapping.appKeypad);
 
     if (modifier && !mapping.mods.empty())
-        return crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(modifier));
+        return prefix + crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(modifier));
 
-    return std::string(mapping.std);
+    return prefix + std::string(mapping.std);
 }
 
 bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, KeyboardEventType eventType)
@@ -174,7 +176,7 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
         case Key::Escape: append("\033"); break;
         case Key::Enter: append(select(modifier, { .std = "\r", .appKeypad = SS3 "M" })); break;
         case Key::Tab: append(select(modifier, { .std = "\t", .appKeypad = SS3 "I" })); break;
-        case Key::Backspace: append(modifier.control() ? "\x7f" : "\x08"); break;
+        case Key::Backspace: append(select(modifier, { .std = modifier.control() ? "\x7f" : "\x08" })); break;
         case Key::UpArrow: append(select(modifier, { .std = CSI "A", .mods = CSI "1;{}A", .appCursor = SS3 "A" })); break;
         case Key::DownArrow: append(select(modifier, { .std = CSI "B", .mods = CSI "1;{}B", .appCursor = SS3 "B" })); break;
         case Key::RightArrow: append(select(modifier, { .std = CSI "C", .mods = CSI "1;{}C", .appCursor = SS3 "C" })); break;
@@ -386,6 +388,32 @@ constexpr pair<unsigned, char> mapKey(Key key) noexcept
     }
 }
 
+constexpr bool isModifierKey(Key key) noexcept
+{
+    // clang-format off
+    switch (key)
+    {
+        case Key::LeftShift:
+        case Key::LeftControl:
+        case Key::LeftAlt:
+        case Key::LeftSuper:
+        case Key::LeftHyper:
+        case Key::LeftMeta:
+        case Key::RightShift:
+        case Key::RightControl:
+        case Key::RightAlt:
+        case Key::RightSuper:
+        case Key::RightHyper:
+        case Key::RightMeta:
+        case Key::IsoLevel3Shift:
+        case Key::IsoLevel5Shift:
+            return true;
+        default:
+            return false;
+    }
+    // clang-format on
+}
+
 bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifier modifier, KeyboardEventType eventType)
 {
     if (!enabled(eventType))
@@ -393,6 +421,9 @@ bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
 
     if (!enabled(KeyboardEventFlag::DisambiguateEscapeCodes))
         return StandardKeyboardInputGenerator::generateKey(key, modifier, eventType);
+
+    if (isModifierKey(key) && !enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes))
+        return false;
 
     auto const [code, function] = mapKey(key);
     auto const encodedModifiers = encodeModifiers(modifier, eventType);

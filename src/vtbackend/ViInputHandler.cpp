@@ -263,7 +263,8 @@ void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command,
 
 void ViInputHandler::appendModifierToPendingInput(Modifier modifier)
 {
-    if (modifier.meta())
+    if (modifier.super())
+        // Super key is usually also named as Meta, conflicting with the actual Meta key.
         _pendingInput += "M-";
     if (modifier.alt())
         _pendingInput += "A-";
@@ -275,7 +276,8 @@ void ViInputHandler::appendModifierToPendingInput(Modifier modifier)
 
 bool ViInputHandler::handlePendingInput()
 {
-    Require(!_pendingInput.empty());
+    if (_pendingInput.empty())
+        return false;
 
     auto constexpr TrieMapAllowWildcardDot = true;
 
@@ -325,9 +327,14 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
 {
     if (_searchEditMode != SearchEditMode::Disabled)
     {
-        // Do we want to do anything in here?
         // TODO: support cursor movements.
-        errorLog()("ViInputHandler: Ignoring key input {}+{}.", modifier, key);
+        switch (key)
+        {
+            case Key::Backspace: return handleSearchEditor('\x08', modifier);
+            case Key::Enter: return handleSearchEditor('\x0D', modifier);
+            case Key::Escape: return handleSearchEditor('\x1B', modifier);
+            default: break;
+        }
         return true;
     }
 
@@ -337,9 +344,16 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
         case ViMode::Insert:
             return false;
         case ViMode::Normal:
+            break;
         case ViMode::Visual:
         case ViMode::VisualLine:
         case ViMode::VisualBlock:
+            if (key == Key::Escape && modifier.none())
+            {
+                clearPendingInput();
+                setMode(ViMode::Normal);
+                return true;
+            }
             break;
     }
     // clang-format on
@@ -366,6 +380,12 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
             _pendingInput += mappedText;
             break;
         }
+
+    if (_pendingInput.empty())
+    {
+        errorLog()("ViInputHandler: Unhandled key: {} ({})", key, modifier);
+        return false;
+    }
 
     return handlePendingInput();
 }
@@ -461,6 +481,12 @@ bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
         _pendingInput += "<NL>";
     else
         _pendingInput += unicode::convert_to<char>(ch);
+
+    if (_pendingInput.empty())
+    {
+        errorLog()("ViInputHandler: Unhandled char: {} ({})", static_cast<uint32_t>(ch), modifier);
+        return false;
+    }
 
     if (handlePendingInput())
         return true;
