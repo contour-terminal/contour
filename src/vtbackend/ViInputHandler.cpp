@@ -344,9 +344,16 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
         case ViMode::Insert:
             return false;
         case ViMode::Normal:
+            break;
         case ViMode::Visual:
         case ViMode::VisualLine:
         case ViMode::VisualBlock:
+            if (key == Key::Escape && modifier.none())
+            {
+                clearPendingInput();
+                setMode(ViMode::Normal);
+                return true;
+            }
             break;
     }
     // clang-format on
