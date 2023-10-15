@@ -176,7 +176,11 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
         case Key::Escape: append("\033"); break;
         case Key::Enter: append(select(modifier, { .std = "\r", .appKeypad = SS3 "M" })); break;
         case Key::Tab: append(select(modifier, { .std = "\t", .appKeypad = SS3 "I" })); break;
-        case Key::Backspace: append(select(modifier, { .std = modifier.control() ? "\x7f" : "\x08" })); break;
+        case Key::Backspace:
+            // Well accepted hack to distinguish between Backspace nad Ctrl+Backspace,
+            // - Backspace is emitting 0x7f,
+            // - Ctrl+Backspace is emitting 0x08
+            append(select(modifier, { .std = !modifier.control() ? "\x7f" : "\x08" })); break;
         case Key::UpArrow: append(select(modifier, { .std = CSI "A", .mods = CSI "1;{}A", .appCursor = SS3 "A" })); break;
         case Key::DownArrow: append(select(modifier, { .std = CSI "B", .mods = CSI "1;{}B", .appCursor = SS3 "B" })); break;
         case Key::RightArrow: append(select(modifier, { .std = CSI "C", .mods = CSI "1;{}C", .appCursor = SS3 "C" })); break;
