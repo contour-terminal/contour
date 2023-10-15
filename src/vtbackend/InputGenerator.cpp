@@ -386,6 +386,32 @@ constexpr pair<unsigned, char> mapKey(Key key) noexcept
     }
 }
 
+constexpr bool isModifierKey(Key key) noexcept
+{
+    // clang-format off
+    switch (key)
+    {
+        case Key::LeftShift:
+        case Key::LeftControl:
+        case Key::LeftAlt:
+        case Key::LeftSuper:
+        case Key::LeftHyper:
+        case Key::LeftMeta:
+        case Key::RightShift:
+        case Key::RightControl:
+        case Key::RightAlt:
+        case Key::RightSuper:
+        case Key::RightHyper:
+        case Key::RightMeta:
+        case Key::IsoLevel3Shift:
+        case Key::IsoLevel5Shift:
+            return true;
+        default:
+            return false;
+    }
+    // clang-format on
+}
+
 bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifier modifier, KeyboardEventType eventType)
 {
     if (!enabled(eventType))
@@ -393,6 +419,9 @@ bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
 
     if (!enabled(KeyboardEventFlag::DisambiguateEscapeCodes))
         return StandardKeyboardInputGenerator::generateKey(key, modifier, eventType);
+
+    if (isModifierKey(key) && !enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes))
+        return false;
 
     auto const [code, function] = mapKey(key);
     auto const encodedModifiers = encodeModifiers(modifier, eventType);
