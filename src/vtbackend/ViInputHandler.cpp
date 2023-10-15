@@ -325,9 +325,14 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
 {
     if (_searchEditMode != SearchEditMode::Disabled)
     {
-        // Do we want to do anything in here?
         // TODO: support cursor movements.
-        errorLog()("ViInputHandler: Ignoring key input {}+{}.", modifier, key);
+        switch (key)
+        {
+            case Key::Backspace: return handleSearchEditor('\x08', modifier);
+            case Key::Enter: return handleSearchEditor('\x0D', modifier);
+            case Key::Escape: return handleSearchEditor('\x1B', modifier);
+            default: break;
+        }
         return true;
     }
 
