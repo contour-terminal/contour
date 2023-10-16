@@ -34,6 +34,7 @@ env:
 
 jobs:
 
+  # {{{ ArchLinux
   archlinux:
     strategy:
       matrix:
@@ -82,16 +83,17 @@ jobs:
       - name: "Uploading Archlinux .pkg.tar.zst package"
         uses: actions/upload-artifact@v3
         with:
-          name: "dist-packages"
+          name: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
           path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
           if-no-files-found: error
           retention-days: 7
-
+  # }}}
+  # {{{ Fedora
   fedora:
     strategy:
       fail-fast: false
       matrix:
-        os_version: [36, 37, 38, 39]
+        os_version: [38, 39]
         arch:
           [
             "linux/amd64 x86_64"
@@ -169,25 +171,15 @@ jobs:
       - name: "Uploading Fedora RPM package"
         uses: actions/upload-artifact@v3
         with:
-          name: "dist-packages"
-          path: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
+          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
+          path: |
+            contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm
+            contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm
+            contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm
           if-no-files-found: error
           retention-days: 7
-      - name: "Uploading Fedora RPM package (debuginfo)"
-        uses: actions/upload-artifact@v3
-        with:
-          name: "dist-packages"
-          path: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
-          if-no-files-found: error
-          retention-days: 7
-      - name: "Uploading Fedora RPM package (debugsource)"
-        uses: actions/upload-artifact@v3
-        with:
-          name: "dist-packages"
-          path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
-          if-no-files-found: error
-          retention-days: 7
-
+  # }}}
+  # {{{ FreeBSD
   freebsd:
     runs-on: macos-12
     name: FreeBSD 13
@@ -219,7 +211,8 @@ jobs:
             ./build/src/vtparser/vtparser_test
             ./build/src/vtbackend/vtbackend_test
             rm -rf _deps build
-
+  # }}}
+  # {{{ OS/X
   osx:
     name: "OS/X"
     runs-on: macos-11
@@ -266,25 +259,21 @@ jobs:
         run: |
           set -ex
           cmake --build build --target package
-          ls -hl build/
-          ls -hlR build/src/contour/contour.app
+          # ls -hl build/
+          # find build/src/contour/contour.app -print
           BASENAME="contour-${{ steps.set_vars.outputs.version }}-osx"
           mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
           mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "${BASENAME}.zip"
-          unzip -l "${BASENAME}.zip"
+      - name: "Show ZIP-package contents"
+        run: "unzip -l contour-${{ steps.set_vars.outputs.version }}-osx.zip"
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v2
         with:
-          name: "dist-packages"
+          name: "contour-${{ steps.set_vars.outputs.version }}-osx.dmg"
           path: "contour-${{ steps.set_vars.outputs.version }}-osx.dmg"
           retention-days: 7
-      - name: upload to artifact store (ZIP)
-        uses: actions/upload-artifact@v2
-        with:
-          name: "dist-packages"
-          path: "contour-${{ steps.set_vars.outputs.version }}-osx.zip"
-          retention-days: 1
-
+  # }}}
+  # {{{ Windows
   windows:
     name: "Windows"
     runs-on: windows-latest
@@ -313,7 +302,6 @@ jobs:
         with:
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
           vcpkgGitCommitId: 3e93bb69a1cadeb36fe9eca3b6f3912d84f618d5
-          vcpkgTriplet: x64-windows
       - name: "create build directory"
         shell: powershell
         run: |
@@ -339,7 +327,7 @@ jobs:
           type "_CPack_Packages/win64/WIX/wix.log"
       - name: inspect
         run: Get-ChildItem -Recurse
-      - name: "Rename packages"
+      - name: "Rename package(s)"
         run: |
           mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
@@ -348,19 +336,19 @@ jobs:
       - name: "Uploading MSI to artifact store"
         uses: actions/upload-artifact@v3
         with:
-          name: "dist-packages"
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           path: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading ZIP to artifact store"
         uses: actions/upload-artifact@v3
         with:
-          name: "dist-packages"
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
           path: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
           if-no-files-found: error
-          retention-days: 1
-
-  # {{{ Ubuntu
+          retention-days: 7
+  # }}}
+  # {{{ Ubuntu CC matrix
   ubuntu_2204_cc_matrix:
     strategy:
       fail-fast: false
@@ -467,8 +455,8 @@ jobs:
             build/src/vtbackend/bench-headless
             test/images
           retention-days: 1
-
-  # Create AppImage (Using Ubuntu 20.04 as base).
+  # }}}
+  # {{{ Linux AppImage (Using Ubuntu 20.04 as base).
   # package_for_AppImage:
   #   name: "Packaging for AppImage"
   #   runs-on: ubuntu-20.04
@@ -534,11 +522,12 @@ jobs:
   #     - name: "Uploading AppImage"
   #       uses: actions/upload-artifact@v3
   #       with:
-  #         name: "dist-packages"
+  #         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
   #         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
   #         if-no-files-found: error
   #         retention-days: 7
-
+  # }}}
+  # {{{ Ubuntu 18.04
   ubuntu18:
     strategy:
       matrix:
@@ -590,18 +579,14 @@ jobs:
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v3
         with:
-          name: "dist-packages"
-          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.deb"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.deb"
+          path: |
+            contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.deb
+            contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.ddeb
           if-no-files-found: error
           retention-days: 7
-      - name: "Uploading artifact .ddeb package (debugging symbols)"
-        uses: actions/upload-artifact@v3
-        with:
-          name: "dist-packages"
-          path: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.ddeb"
-          if-no-files-found: error
-          retention-days: 7
-
+  # }}}
+  # {{{ Ubuntu 20.04 / 22.04
   package_for_Ubuntu:
     name: "Packaging for Ubuntu ${{ matrix.os_version }}"
     strategy:
@@ -683,22 +668,18 @@ jobs:
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v3
         with:
-          name: "dist-packages"
-          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-          if-no-files-found: error
-          retention-days: 7
-      - name: "Uploading artifact .ddeb package (debugging symbols)"
-        uses: actions/upload-artifact@v3
-        with:
-          name: "dist-packages"
-          path: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+          path: |
+            contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
+            contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb
           if-no-files-found: error
           retention-days: 7
       - name: "Attempt installing the created .deb"
         run: |
           sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
           sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
-
+  # }}}
+  # {{{ Ubuntu 22.04: test via valgrind
   test_ubuntu2204_valgrind:
     name: "Run tests via valgrind"
     runs-on: ubuntu-22.04
@@ -733,7 +714,8 @@ jobs:
         run: valgrind --error-exitcode=64 ./build/src/vtparser/vtparser_test
       - name: "test: vtbackend (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/vtbackend/vtbackend_test
-
+  # }}}
+  # {{{ Ubuntu 22.04: Test bench-headless
   test_ubuntu2204_bench_headless:
     strategy:
       matrix:
@@ -771,7 +753,8 @@ jobs:
                           valgrind
       - name: "bench-headless: ${{ matrix.test_case }}"
         run: valgrind --error-exitcode=64 ./build/src/vtbackend/bench-headless ${{ matrix.test_case }} size 1
-
+  # }}}
+  # {{{ Ubuntu check matrix
   check_ubuntu2204_matrix_test_matrix:
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -796,7 +779,6 @@ jobs:
         uses: geekyeggo/delete-artifact@v2
         with:
           name: contour-ubuntu2204-tests
-
   # }}}
   # {{{ Build fontconfig
   build_fontconfig:
@@ -935,8 +917,7 @@ jobs:
         REPOSITORY: ${{ github.event.repository.name }}
     - uses: actions/download-artifact@v3
       with:
-        # name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
-        name: "dist-packages"
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
     - uses: actions/download-artifact@v3
       with:
         name: "patched-fontconfig-${{ matrix.os_version }}"
@@ -1059,7 +1040,7 @@ jobs:
         REPOSITORY: ${{ github.event.repository.name }}
     - uses: actions/download-artifact@v3
       with:
-        name: "dist-packages"
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
     - uses: actions/download-artifact@v3
       with:
         name: "notcurses-install-22.04"
@@ -1134,7 +1115,7 @@ jobs:
         REPOSITORY: ${{ github.event.repository.name }}
     - uses: actions/download-artifact@v3
       with:
-        name: "dist-packages"
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
     - name: "Check install package"
       run: |
         sudo apt install "./contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version}}-amd64.deb"
@@ -1180,10 +1161,41 @@ jobs:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: run release checks
         run: ./scripts/check-release.sh
-      - name: fetch release artifacts
+
+      # {{{ fetch release artifacts
+      - name: "fetch artifact: Ubuntu 18.04"
         uses: actions/download-artifact@v3
         with:
-          name: dist-packages
+          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.deb
+      - name: "fetch artifact: Ubuntu 20.04"
+        uses: actions/download-artifact@v3
+        with:
+          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu20.04-amd64.deb
+      - name: "fetch artifact: Ubuntu 22.04"
+        uses: actions/download-artifact@v3
+        with:
+          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb
+      - name: "fetch artifact: Fedora 38"
+        uses: actions/download-artifact@v3
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc38.x86_64.rpm"
+      - name: "fetch artifact: Fedora 39"
+        uses: actions/download-artifact@v3
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc39.x86_64.rpm"
+      - name: "fetch artifact: ArchLinux"
+        uses: actions/download-artifact@v3
+        with:
+          name: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
+      - name: "fetch artifact: MacOS"
+        uses: actions/download-artifact@v3
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-osx.dmg"
+      - name: "fetch artifact: Windows"
+        uses: actions/download-artifact@v3
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
+      # }}}
 
       - name: "inspect"
         run: ls -lisahF
