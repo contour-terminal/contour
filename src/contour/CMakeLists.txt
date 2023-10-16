@@ -9,8 +9,6 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 endif()
 
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
-option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
-option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
 
 # Widgets is rquired for SystemTrayIcon's fallback implementation
 set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets)
@@ -120,16 +118,8 @@ if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour PRIVATE CONTOUR_PERF_STATS)
 endif()
 
-if(CONTOUR_VT_METRICS)
-    target_compile_definitions(contour PRIVATE CONTOUR_VT_METRICS)
-endif()
-
 if(CONTOUR_FRONTEND_GUI)
     target_compile_definitions(contour PRIVATE CONTOUR_FRONTEND_GUI)
-endif()
-
-if(CONTOUR_SCROLLBAR)
-    target_compile_definitions(contour PRIVATE CONTOUR_SCROLLBAR)
 endif()
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
@@ -196,7 +186,7 @@ if(CONTOUR_FRONTEND_GUI)
             crispy::core 
             vtrasterizer 
         )
-        if(NOT(WIN32) AND NOT(APPLE) AND NOT(CONTOUR_QT_VERSION EQUAL "6"))
+        if(NOT(WIN32) AND NOT(APPLE))
             target_link_libraries(contour Qt5::X11Extras xcb)
         endif()
     endif()
