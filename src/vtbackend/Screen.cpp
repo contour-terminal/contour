@@ -16,6 +16,11 @@
 #include <crispy/times.h>
 #include <crispy/utils.h>
 
+#include <libunicode/convert.h>
+#include <libunicode/emoji_segmenter.h>
+#include <libunicode/grapheme_segmenter.h>
+#include <libunicode/word_segmenter.h>
+
 #include <range/v3/view/iota.hpp>
 
 #include <algorithm>
@@ -27,11 +32,6 @@
 #include <tuple>
 #include <type_traits>
 #include <variant>
-
-#include <libunicode/convert.h>
-#include <libunicode/emoji_segmenter.h>
-#include <libunicode/grapheme_segmenter.h>
-#include <libunicode/word_segmenter.h>
 
 #if defined(_WIN32)
     #include <Windows.h>

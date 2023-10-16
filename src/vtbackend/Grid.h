@@ -11,6 +11,8 @@
 #include <crispy/defines.h>
 #include <crispy/ring.h>
 
+#include <libunicode/convert.h>
+
 #include <range/v3/algorithm/copy.hpp>
 #include <range/v3/iterator/insert_iterators.hpp>
 #include <range/v3/view/iota.hpp>
@@ -21,8 +23,6 @@
 #include <algorithm>
 #include <string>
 #include <string_view>
-
-#include <libunicode/convert.h>
 
 namespace vtbackend
 {

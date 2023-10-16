@@ -7,14 +7,14 @@
 #include <crispy/flags.h>
 #include <crispy/overloaded.h>
 
+#include <libunicode/convert.h>
+
 #include <fmt/format.h>
 
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
-
-#include <libunicode/convert.h>
 
 namespace vtbackend
 {

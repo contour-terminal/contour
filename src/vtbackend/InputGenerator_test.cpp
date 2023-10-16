@@ -3,11 +3,11 @@
 
 #include <crispy/escape.h>
 
+#include <libunicode/convert.h>
+
 #include <catch2/catch.hpp>
 
 #include <string>
-
-#include <libunicode/convert.h>
 
 using namespace std;
 using namespace vtbackend;

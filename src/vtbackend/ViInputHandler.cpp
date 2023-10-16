@@ -2,13 +2,13 @@
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/logging.h>
 
+#include <crispy/TrieMap.h>
 #include <crispy/assert.h>
 #include <crispy/utils.h>
 
-#include <variant>
-
-#include "crispy/TrieMap.h"
 #include <libunicode/convert.h>
+
+#include <variant>
 
 using std::nullopt;
 using std::optional;

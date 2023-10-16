@@ -3,7 +3,10 @@
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/logging.h>
 
+#include <crispy/assert.h>
 #include <crispy/utils.h>
+
+#include <libunicode/convert.h>
 
 #include <fmt/format.h>
 
@@ -11,8 +14,6 @@
 #include <iterator>
 #include <string_view>
 #include <unordered_map>
-
-#include <libunicode/convert.h>
 
 using namespace std;
 
@@ -383,6 +384,7 @@ constexpr pair<unsigned, char> mapKey(Key key) noexcept
         case Key::IsoLevel3Shift: return { 57453, 'u' };
         case Key::IsoLevel5Shift: return { 57454, 'u' };
     }
+    crispy::unreachable();
 }
 
 constexpr bool isModifierKey(Key key) noexcept

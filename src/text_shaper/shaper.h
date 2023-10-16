@@ -9,6 +9,9 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 
+#include <libunicode/emoji_segmenter.h>
+#include <libunicode/ucd.h>
+
 #include <fmt/format.h>
 
 #include <gsl/span>
@@ -22,9 +25,6 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-
-#include <libunicode/emoji_segmenter.h>
-#include <libunicode/ucd.h>
 
 namespace text
 {

@@ -13,12 +13,12 @@
 #include <crispy/defines.h>
 #include <crispy/times.h>
 
-#include <memory>
-#include <string>
-
 #include <libunicode/capi.h>
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
+
+#include <memory>
+#include <string>
 
 namespace vtbackend
 {

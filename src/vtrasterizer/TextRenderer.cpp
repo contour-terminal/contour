@@ -139,15 +139,15 @@ Making use of reserved glyph slots
 #include <crispy/indexed.h>
 #include <crispy/range.h>
 
+#include <libunicode/convert.h>
+#include <libunicode/utf8_grapheme_segmenter.h>
+
 #include <fmt/core.h>
 #include <fmt/ostream.h>
 
 #include <range/v3/algorithm/copy.hpp>
 
 #include <algorithm>
-
-#include <libunicode/convert.h>
-#include <libunicode/utf8_grapheme_segmenter.h>
 
 using crispy::point;
 using crispy::strong_hash;

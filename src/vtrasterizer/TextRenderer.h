@@ -14,18 +14,18 @@
 #include <text_shaper/shaper.h>
 
 #include <crispy/FNV.h>
+#include <crispy/StrongHash.h>
+#include <crispy/StrongLRUHashtable.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
+
+#include <libunicode/convert.h>
+#include <libunicode/run_segmenter.h>
 
 #include <gsl/span>
 #include <gsl/span_ext>
 
 #include <vector>
-
-#include "crispy/StrongHash.h"
-#include "crispy/StrongLRUHashtable.h"
-#include <libunicode/convert.h>
-#include <libunicode/run_segmenter.h>
 
 namespace vtrasterizer
 {

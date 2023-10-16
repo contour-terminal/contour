@@ -5,14 +5,14 @@
 #include <vtbackend/Line.h>
 #include <vtbackend/primitives.h>
 
+#include <libunicode/convert.h>
+
 #include <fmt/format.h>
 
 #include <functional>
 #include <ostream>
 #include <sstream>
 #include <vector>
-
-#include <libunicode/convert.h>
 
 namespace vtbackend
 {

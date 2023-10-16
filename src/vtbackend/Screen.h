@@ -20,6 +20,9 @@
 #include <crispy/size.h>
 #include <crispy/utils.h>
 
+#include <libunicode/grapheme_segmenter.h>
+#include <libunicode/width.h>
+
 #include <fmt/format.h>
 
 #include <gsl/pointers>
@@ -31,9 +34,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <libunicode/grapheme_segmenter.h>
-#include <libunicode/width.h>
 
 namespace vtbackend
 {

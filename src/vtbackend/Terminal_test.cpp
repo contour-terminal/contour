@@ -9,12 +9,12 @@
 #include <crispy/App.h>
 #include <crispy/times.h>
 
+#include <libunicode/convert.h>
+
 #include <catch2/catch.hpp>
 
 #include <string>
 #include <vector>
-
-#include <libunicode/convert.h>
 
 using namespace std;
 using namespace std::chrono_literals;

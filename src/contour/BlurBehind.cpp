@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "BlurBehind.h"
+#include <contour/BlurBehind.h>
+#include <contour/ContourGuiApp.h>
 
 #include <crispy/utils.h>
 
 #include <QtCore/QDebug>
 #include <QtGui/QWindow>
-
-#include "ContourGuiApp.h"
 
 #if defined(_WIN32)
     #include <Windows.h>

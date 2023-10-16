@@ -15,6 +15,8 @@
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
+#include <libunicode/convert.h>
+
 #include <fmt/chrono.h>
 
 #include <gsl/pointers>
@@ -25,8 +27,6 @@
 #include <cstdlib>
 #include <utility>
 #include <variant>
-
-#include <libunicode/convert.h>
 
 using crispy::size;
 using std::nullopt;

@@ -1,21 +1,13 @@
 #include <crispy/StackTrace.h>
 #include <crispy/utils.h>
-// #include <xzero/Tokenizer.h>
-// #include <xzero/Buffer.h>
-// #include <xzero/sysconfig.h>
 
 #include <fmt/format.h>
 
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
-#include <memory>
 #include <optional>
 #include <regex>
-#include <typeinfo>
-
-#include "StackTrace.h"
 
 #if !defined(_WIN32)
     #include <sys/types.h>
