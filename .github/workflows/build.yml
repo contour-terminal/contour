@@ -258,20 +258,20 @@ jobs:
   # {{{ OS/X
   osx:
     name: "OS/X"
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v3
       - name: set variables
         id: set_vars
         run: |
           ./scripts/ci-set-vars.sh
-          echo QTVER=5 >> "$GITHUB_OUTPUT"
+          echo QTVER=6 >> "$GITHUB_OUTPUT"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ccache-osx_qt${{ steps.set_vars.outputs.QTVER }}
+          key: ccache-osx_qt${{ steps.set_vars.outputs.QTVER }}-r1
           max-size: 256M
       - name: "Install dependencies"
         # Sometimes, brew thinks it needs to install from source rather than binary.
@@ -310,9 +310,6 @@ jobs:
           # find build/src/contour/contour.app -print
           BASENAME="contour-${{ steps.set_vars.outputs.version }}-osx"
           mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
-          mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "${BASENAME}.zip"
-      - name: "Show ZIP-package contents"
-        run: "unzip -l contour-${{ steps.set_vars.outputs.version }}-osx.zip"
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v2
         with:

@@ -10,7 +10,9 @@ endif()
 
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 
-# Widgets is rquired for SystemTrayIcon's fallback implementation
+# {{{ Setup QT_COMPONENTS
+# QT_COMPONENTS is the list of Qt libraries Contour requires for building.
+# NB: Widgets is rquired for SystemTrayIcon's fallback implementation
 set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets)
 if(CONTOUR_QT_VERSION EQUAL 6)
     list(APPEND QT_COMPONENTS OpenGL OpenGLWidgets Core5Compat)
@@ -18,12 +20,22 @@ endif()
 if(NOT(WIN32) AND NOT(APPLE) AND (CONTOUR_QT_VERSION EQUAL 5))
     list(APPEND QT_COMPONENTS X11Extras)
 endif()
+# }}}
 
-message(STATUS "Build contour using Qt ${CONTOUR_QT_VERSION}")
 message(STATUS "Qt components: ${QT_COMPONENTS}")
+
 find_package(Qt${CONTOUR_QT_VERSION} COMPONENTS ${QT_COMPONENTS} REQUIRED)
 
 add_subdirectory(display)
+
+if(APPLE)
+    #set(CMAKE_INSTALL_RPATH "@executable_path")
+    set(CMAKE_INSTALL_RPATH "@executable_path/../Frameworks")
+    set(CMAKE_BUILD_RPATH "${CMAKE_INSTALL_RPATH}")
+    set(CMAKE_MACOSX_RPATH ON)
+    #set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+    find_package(Qt6 COMPONENTS Core Quick REQUIRED)
+endif()
 
 set(contour_SRCS
     CaptureScreen.cpp CaptureScreen.h
@@ -46,6 +58,13 @@ endif()
 
 if(WIN32)
     list(APPEND contour_SRCS contour.rc)
+endif()
+
+set(QT_RESOURCES resources.qrc)
+if(CONTOUR_QT_VERSION EQUAL "5")
+    qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
+else()
+    qt_add_resources(QT_RESOURCES ${QT_RESOURCES})
 endif()
 
 # {{{ configure QML files and their imports
@@ -80,22 +99,19 @@ DeclareQmlImport(qml_import_QtGraphicalEffects "QtGraphicalEffects" "1.12" "Qt5C
 DeclareQML(qml_audio "Audio" "AudioOutput")
 DeclareQML(qml_media_player "" "audioOutput: bellAudioOutput")
 
-
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/RequestPermission.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/RequestPermission.qml)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/Terminal.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/Terminal.qml)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/main.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/main.qml)
 # }}}
 
-set(QT_RESOURCES resources.qrc)
-if(CONTOUR_QT_VERSION EQUAL "5")
-    qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
-else()
-    qt_add_resources(QT_RESOURCES ${QT_RESOURCES})
-endif()
-
 add_executable(contour ${contour_SRCS} ${QT_RESOURCES})
 
+set_target_properties(contour PROPERTIES AUTOMOC ON)
+set_target_properties(contour PROPERTIES AUTORCC ON)
+
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
+# {{{ declare compiler definitions
 # target_compile_definitions(contour PRIVATE $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:QT_QML_DEBUG>)
 target_compile_definitions(contour PRIVATE $<$<CONFIG:Debug>:QT_QML_DEBUG>)
 target_compile_definitions(contour PRIVATE $<$<CONFIG:Debug>:QMLJSDEBUGGER>)
@@ -107,9 +123,6 @@ target_compile_definitions(contour PRIVATE
     CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
     CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
 )
-
-set_target_properties(contour PROPERTIES AUTOMOC ON)
-set_target_properties(contour PROPERTIES AUTORCC ON)
 
 # Disable all deprecated Qt functions prior to Qt 6.0
 target_compile_definitions(contour PRIVATE QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
@@ -125,7 +138,9 @@ endif()
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     target_compile_definitions(contour PRIVATE CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
+# }}}
 
+# {{{ platform specific target set_target_properties
 if(WIN32)
     if (NOT ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug"))
         set_target_properties(contour PROPERTIES
@@ -140,6 +155,7 @@ elseif(APPLE)
     set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/Modules" ${CMAKE_MODULE_PATH})
     set_target_properties(contour PROPERTIES
         OUTPUT_NAME "contour"
+        MACOSX_RPATH ON
         MACOSX_BUNDLE ON
         MACOSX_BUNDLE_BUNDLE_NAME "Contour"
         MACOSX_BUNDLE_INFO_STRING "Contour Terminal Emulator"
@@ -152,50 +168,58 @@ elseif(APPLE)
         # TODO: RESOURCE "images/icon.icns"
     )
 endif()
+# }}}
 
-target_link_libraries(contour vtbackend yaml-cpp)
 if(FREEBSD)
     # FreeBSD does not find yaml-cpp in /usr/local but weirdly everything else.
     target_link_directories(contour PUBLIC "/usr/local/lib")
 endif()
 
+if(APPLE)
+    set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
+else()
+    set(YAML_CPP_LIBRARIES yaml-cpp)
+endif()
+
+target_link_libraries(contour
+    ContourTerminalDisplay
+    crispy::core
+    vtbackend
+    vtrasterizer
+    ${YAML_CPP_LIBRARIES}
+)
+
+# {{{ GUI: Declare Qt build dependencies
 if(CONTOUR_FRONTEND_GUI)
     if(CONTOUR_QT_VERSION EQUAL "6")
-        target_link_libraries(contour 
-            ContourTerminalDisplay 
-            Qt6::Core 
+        target_link_libraries(contour
+            Qt6::Core
             Qt6::Core5Compat
-            Qt6::Multimedia 
-            Qt6::Network 
-            Qt6::OpenGL 
-            Qt6::Qml 
+            Qt6::Multimedia
+            Qt6::Network
+            Qt6::OpenGL
+            Qt6::Qml
             Qt6::Widgets
-            vtrasterizer 
         )
         if(NOT(WIN32) AND NOT(APPLE))
             target_link_libraries(contour xcb)
         endif()
     else()
-        target_link_libraries(contour 
-            ContourTerminalDisplay 
-            Qt5::Core 
-            Qt5::Gui 
+        target_link_libraries(contour
+            Qt5::Core
+            Qt5::Gui
             Qt5::Multimedia
-            Qt5::Network 
+            Qt5::Network
             Qt5::Widgets
-            crispy::core 
-            vtrasterizer 
         )
         if(NOT(WIN32) AND NOT(APPLE))
             target_link_libraries(contour Qt5::X11Extras xcb)
         endif()
     endif()
 endif()
+# }}}
 
-if(CONTOUR_BUILD_WITH_MIMALLOC)
-    target_link_libraries(contour mimalloc)
-endif()
-
+# {{{ Build terminfo file
 if(NOT(WIN32))
     set(terminfo_file "contour.terminfo")
     set(terminfo_basedir "${CMAKE_CURRENT_BINARY_DIR}/terminfo")
@@ -216,38 +240,49 @@ if(NOT(WIN32))
         VERBATIM
     )
 endif()
+# }}}
 
 # ====================================================================================
 # INSTALLER
 # ====================================================================================
 
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "contour")
+
+# {{{ CPACK variable definitions
 if(NOT(CPACK_GENERATOR))
     if(APPLE)
-        set(CPACK_GENERATOR DragNDrop ZIP)
+        set(CPACK_GENERATOR DragNDrop)
     elseif(WIN32)
         set(CPACK_GENERATOR WIX ZIP)
     endif()
 endif()
 
-set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "contour")
-
 set(CPACK_PACKAGE_NAME "Contour")
 set(CPACK_PACKAGE_VENDOR "https://github.com/contour-terminal/contour/")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "`contour` is a modern terminal emulator, for everyday use.")
 set(CPACK_PACKAGE_CONTACT "Christian Parpart <christian@parpart.family>")
-set(CPACK_PACKAGE_VERSION "${CONTOUR_VERSION_STRING}")
+if(WIN32)
+    # XXX: WIX does only allow x.x.x.x patterns.
+    set(CPACK_PACKAGE_VERSION "${CONTOUR_VERSION}")
+else()
+    set(CPACK_PACKAGE_VERSION "${CONTOUR_VERSION_STRING}")
+endif()
+set(CPACK_PACKAGE_EXECUTABLES contour "Contour Terminal Emulator")
+set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
 #TODO: set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_SOURCE_DIR}/README.md")
-set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
-
 #TODO? set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
 #TODO: set(CPACK_WIX_UI_DIALOG "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-256.png")
 #TODO: set(CPACK_WIX_UI_BANNER "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-256.png")
-
-set(CPACK_PACKAGE_EXECUTABLES contour "Contour Terminal Emulator")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
 set(CPACK_CREATE_DESKTOP_LINKS contour)
+set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6DC2432A")
+if(APPLE)
+    set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
+endif()
+# }}}
 
-# {{{  Qt bundle installation helpers
+# {{{ Qt bundle installation helpers
 set(INSTALLED_QT_VERSION ${CONTOUR_QT_VERSION})
 
 function(_qt_get_plugin_name_with_version target out_var)
@@ -261,14 +296,14 @@ endfunction()
 
 # if(APPLE)
 #    # Required when packaging, and set CMAKE_INSTALL_PREFIX to "/"
-#    set(CPACK_SET_DESTDIR TRUE) 
+#    set(CPACK_SET_DESTDIR TRUE)
 #    set(CMAKE_BUNDLE_NAME "contour")
 #    set(CMAKE_BUNDLE_LOCATION "/")
 #    # make sure CMAKE_INSTALL_PREFIX ends in /
 #    set(CMAKE_INSTALL_PREFIX "/${CMAKE_BUNDLE_NAME}.app/Contents")
 # endif(APPLE)
 
-macro(install_qt_plugin _qt_plugin_name _qt_plugins_var)
+macro(bundle_install_qt_plugin _qt_plugin_name _qt_plugins_var)
     set(_install_prefix "contour.app/Contents/")
     if(TARGET "${_qt_plugin_name}")
         get_target_property(_qt_plugin_path "${_qt_plugin_name}" LOCATION)
@@ -282,19 +317,23 @@ macro(install_qt_plugin _qt_plugin_name _qt_plugins_var)
         get_filename_component(_qt_plugin_file "${_qt_plugin_path}" NAME)
         get_filename_component(_qt_plugin_type "${_qt_plugin_path}" PATH)
         get_filename_component(_qt_plugin_type "${_qt_plugin_type}" NAME)
-        if(APPLE)
+        get_filename_component(_qt_plugin_ext "${_qt_plugin_path}" EXT)
+        if("${_qt_plugin_ext}" STREQUAL ".dylib")
             set(_qt_plugin_dir "PlugIns")
-        elseif(WIN32)
-            set(_qt_plugin_dir "plugins")
+            set(_qt_plugin_dest "${_install_prefix}${_qt_plugin_dir}/${_qt_plugin_type}")
+            message(STATUS "Install Qt plugin: ${_qt_plugin_path} ~> ${_qt_plugin_dest}")
+            install(FILES "${_qt_plugin_path}" DESTINATION "${_qt_plugin_dest}")
+            set(${_qt_plugins_var} "${${_qt_plugins_var}};\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_qt_plugin_dest}/${_qt_plugin_file}")
+        else()
+            message(STATUS "bundle_install_qt_plugin: Ignoring '${_qt_plugin_path}'")
         endif()
-        set(_qt_plugin_dest "${_install_prefix}${_qt_plugin_dir}/${_qt_plugin_type}")
-        install(FILES "${_qt_plugin_path}" DESTINATION "${_qt_plugin_dest}" ${COMPONENT})
-        set(${_qt_plugins_var} "${${_qt_plugins_var}};\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_qt_plugin_dest}/${_qt_plugin_file}")
     endif()
 endmacro()
 
-macro(install_qt_plugins _comps _plugins_var)
-    foreach(_qt_comp IN LISTS ${_comps})
+# _qtComponents  - in-variable name, list of Qt components (like Gui, Qml, Widgets) to install
+# _plugins_var   - out-variable name, list variable that will contain all the libraries to maybe carry over
+macro(bundle_install_all_qt_plugins _qtComponents _plugins_var)
+    foreach(_qt_comp IN LISTS ${_qtComponents})
         if(INSTALLED_QT_VERSION VERSION_LESS 6)
             set(_qt_module_plugins ${Qt${INSTALLED_QT_VERSION}${_qt_comp}_PLUGINS})
         else()
@@ -305,7 +344,7 @@ macro(install_qt_plugins _comps _plugins_var)
                 # Qt6 provides the plugins as individual packages that need to be found.
                 find_package(Qt${INSTALLED_QT_VERSION}${_qt_plugin} QUIET PATHS ${Qt${INSTALLED_QT_VERSION}${_qt_comp}_DIR})
             endif()
-            install_qt_plugin("${_qt_plugin}" "${_plugins_var}")
+            bundle_install_qt_plugin("${_qt_plugin}" "${_plugins_var}")
         endforeach()
     endforeach()
 endmacro()
@@ -318,10 +357,6 @@ endif()
 # }}}
 
 if(WIN32)
-    set(CPACK_PACKAGE_VERSION "${CONTOUR_VERSION}") # XXX: WIX does only allow x.x.x.x patterns.
-    set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
-    set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6DC2432A")
-
     include(DeployQt)
     windeployqt(contour)
     install(TARGETS contour DESTINATION bin)
@@ -339,7 +374,7 @@ elseif(APPLE)
     # {{{ NB: This would run macdeployqt after creating contour executable during build stage.
     # This is currently disabled, because it seems like packaging would not work then,
     # but instead, we invoke macdeployqt during cpack stage.
-    # 
+    #
     # include(DeployQt)
     # add_custom_command(
     #     TARGET contour POST_BUILD
@@ -350,9 +385,6 @@ elseif(APPLE)
     # )
     # }}}
 
-    include(GNUInstallDirs)
-    set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
-
     include(InstallRequiredSystemLibraries)
 
     # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
@@ -361,17 +393,9 @@ elseif(APPLE)
     set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
     set(INSTALL_CMAKE_DIR "${App_Contents}/Resources")
 
-    # based on code from CMake's QtDialog/CMakeLists.txt
-
-    if(INSTALLED_QT_VERSION VERSION_EQUAL 5)
-        install_qt_plugin("Qt5::QCocoaIntegrationPlugin" QT_PLUGINS)
-        if(TARGET Qt5::QMacStylePlugin)
-            install_qt_plugin("Qt5::QMacStylePlugin" QT_PLUGINS)
-        endif()
-    else()
-        # FIXME: Minimize plugins for Qt6.
-        install_qt_plugins(QT_COMPONENTS QT_PLUGINS)
-    endif()
+    # NB: This is mostly based on code from CMake's QtDialog/CMakeLists.txt
+    # TODO: Minimize the number of plugins installed to the required ones.
+    bundle_install_all_qt_plugins(QT_COMPONENTS QT_PLUGINS)
 
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
@@ -387,40 +411,103 @@ elseif(APPLE)
         RUNTIME DESTINATION "${INSTALL_RUNTIME_DIR}" COMPONENT Runtime
     )
 
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" "[Paths]\nPlugins = PlugIns\n")
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" DESTINATION "${INSTALL_CMAKE_DIR}")
+    # file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" "[Paths]\nPlugins = PlugIns\n")
+    # install(FILES "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" DESTINATION "${INSTALL_CMAKE_DIR}")
 
     # {{{ create vars for fixup_bundle call
     set(BUNDLE_APP "\${CMAKE_INSTALL_PREFIX}/${APP_NAME}.app")        # Note Mac specific extension .app
-    set(DIRS "/usr/local/lib" "/opt/homebrew/lib" "/lib" "/usr/lib" ${CMAKE_BINARY_DIR})  # Directories to look for dependencies
-    list(APPEND DIRS ${Qt_BIN_DIR} ${QT_LIBRARY_DIR} ${QT_BINARY_DIR})
+
+    # LIBS_SEARCH_DIRS will contain a list of directories to look for dependencies to include into the bundle.
+    set(LIBS_SEARCH_DIRS
+        "/opt/homebrew/lib"
+        "/usr/local/lib"
+        "/usr/lib"
+        "/lib"
+    )
 
     # Path used for searching by FIND_XXX(), with appropriate suffixes added
     if(CMAKE_PREFIX_PATH)
         foreach(dir ${CMAKE_PREFIX_PATH})
-            list(APPEND DIRS "${dir}/bin" "${dir}/lib")
+            if (IS_DIRECTORY "${dir}/bin")
+                list(APPEND LIBS_SEARCH_DIRS "${dir}/bin")
+            endif()
+            if (IS_DIRECTORY "${dir}/lib")
+                list(APPEND LIBS_SEARCH_DIRS "${dir}/lib")
+            endif()
         endforeach()
     endif()
-    message(STATUS "BUNDLE_APP : ${BUNDLE_APP}")
-    message(STATUS "QT_PLUGINS : ${QT_PLUGINS}")
-    message(STATUS "DIRS       : ${DIRS}")
+
+    # some debug printing
+    foreach(_plugin ${QT_PLUGINS})
+        message(STATUS "Qt Plugin: ${_plugin}")
+    endforeach()
+    foreach(_dir ${LIBS_SEARCH_DIRS})
+        message(STATUS "Library Search Dir: ${_dir}")
+    endforeach()
     # }}}
 
     set(CODE_SIGN_CERTIFICATE_ID "-" CACHE STRING "Mac OS/X Code signature ID") # TODO: Use proper ID on CI
     include(DeployQt)  # Just to get access to ${MACDEPLOYQT_EXECUTABLE}
+    get_filename_component(_macdeployqt_path "${MACDEPLOYQT_EXECUTABLE}" PATH)
+    message(STATUS "macdeployqt path: ${_macdeployqt_path}")
     message(STATUS "macdeployqt location : ${MACDEPLOYQT_EXECUTABLE}")
+
+    set(QT_PLUGINS_DIR "${Qt6Widgets_DIR}/../../../plugins")
+    set(QT_QML_PLUGINS_DIR "${Qt6Widgets_DIR}/../../../qml")
+
+    set(qtconf_dest_dir "${BUNDLE_APP}/Contents/Resources")
+    set(plugin_dest_dir "${BUNDLE_APP}/Contents/PlugIns")
+    set(qml_dest_dir "${BUNDLE_APP}/Contents/Resources/qml")
+
+    # If we are in a dynamic build of qt
+    if(EXISTS "${QT_PLUGINS_DIR}/platforms/libqcocoa.dylib")
+        install(FILES "${QT_PLUGINS_DIR}/platforms/libqcocoa.dylib" DESTINATION "${plugin_dest_dir}/platforms")
+        install(FILES "${QT_PLUGINS_DIR}/imageformats/libqsvg.dylib" DESTINATION "${plugin_dest_dir}/imageformats")
+        install(FILES "${QT_PLUGINS_DIR}/iconengines/libqsvgicon.dylib" DESTINATION "${plugin_dest_dir}/iconengines")
+    endif()
+
     install(CODE "
         execute_process(
-            WORKING_DIRECTORY \"${CMAKE_CURRENT_BINARY_DIR}\"
-            COMMAND ${MACDEPLOYQT_EXECUTABLE} contour.app
+            WORKING_DIRECTORY \"${_macdeployqt_path}/..\" # is this specific working dir really required? (others believe so)
+            COMMAND ${MACDEPLOYQT_EXECUTABLE} \"${CMAKE_CURRENT_BINARY_DIR}/contour.app\"
                     -always-overwrite
                     -verbose=1
-                    -qmlimport=${CMAKE_CURRENT_SOURCE_DIR}/ui
+                    -no-strip
                     -qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui
         )
+
+        # Recursively iterate through all plugins and populate PLUGIN_PATHS to be passed to fixup_bundle.
+
+        message(STATUS \"Globbing into RELATIVE \${CMAKE_CURRENT_BINARY_DIR} for \${CMAKE_SHARED_LIBRARY_SUFFIX} files (\${CMAKE_INSTALL_PREFIX})\")
+        file(GLOB_RECURSE PLUGIN_PATHS
+            \"\${CMAKE_INSTALL_PREFIX}/contour.app/Contents/PlugIns/*${CMAKE_SHARED_LIBRARY_SUFFIX}\"
+        )
+        foreach(_plugin \${PLUGIN_PATHS})
+            message(STATUS \"CPack Qt Plugin: \${_plugin}\")
+        endforeach()
+
         include(BundleUtilities)
-        fixup_bundle(\"${BUNDLE_APP}\" \"${QT_PLUGINS}\" \"${DIRS}\")
+        fixup_bundle(
+            \"${BUNDLE_APP}\"
+            \"\${PLUGIN_PATHS}\"
+            \"${LIBS_SEARCH_DIRS}\"
+        )
+
+        # Post-fix libqcocoa.dylib platform plugin's rpath,
+        # The already provided rpath (@loader_path/../../../../lib) does not work
+        # in a bundled app.
+        # execute_process(
+        #     COMMAND install_name_tool
+        #         -add_rpath @loader_path/../../Frameworks
+        #         \"${BUNDLE_APP}/Contents/PlugIns/platforms/libqcocoa.dylib\"
+        # )
+        # ^^^
+        # Should not be needed, because of fixup_bundle to PLUGIN_PATHS...
+        # But for some reason, I cannot get it to work.
+
+        # Ensure code signature
         execute_process(
+            WORKING_DIRECTORY \"${CMAKE_CURRENT_BINARY_DIR}\"
             COMMAND codesign --force --deep --sign \"${CODE_SIGN_CERTIFICATE_ID}\" \"${BUNDLE_APP}\"
         )
     ")
