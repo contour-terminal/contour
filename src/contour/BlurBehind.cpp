@@ -90,6 +90,8 @@ namespace
                                 &value);
             xcb_flush(infoOpt.value().connection);
         }
+        else
+            errorLog()(R"(Could not set X11 property info for "{}" to {}.)", name, value);
     }
 
     void setPropertyX11(QWindow* window, string const& name, string const& value)
@@ -107,6 +109,8 @@ namespace
 
             xcb_flush(infoOpt.value().connection);
         }
+        else
+            errorLog()(R"(Could not set X11 property info for "{}" to "{}".)", name, value);
     }
 
     void unsetPropertyX11(QWindow* window, string const& name)
