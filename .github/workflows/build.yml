@@ -34,6 +34,7 @@ env:
 
 jobs:
 
+  # {{{ ArchLinux
   archlinux:
     strategy:
       matrix:
@@ -86,7 +87,8 @@ jobs:
           path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
           if-no-files-found: error
           retention-days: 7
-
+  # }}}
+  # {{{ Fedora
   fedora:
     strategy:
       fail-fast: false
@@ -187,7 +189,8 @@ jobs:
           path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
           if-no-files-found: error
           retention-days: 7
-
+  # }}}
+  # {{{ FreeBSD
   freebsd:
     runs-on: macos-12
     name: FreeBSD 13
@@ -219,7 +222,8 @@ jobs:
             ./build/src/vtparser/vtparser_test
             ./build/src/vtbackend/vtbackend_test
             rm -rf _deps build
-
+  # }}}
+  # {{{ OS/X
   osx:
     name: "OS/X"
     runs-on: macos-11
@@ -284,7 +288,8 @@ jobs:
           name: "dist-packages"
           path: "contour-${{ steps.set_vars.outputs.version }}-osx.zip"
           retention-days: 1
-
+  # }}}
+  # {{{ Windows
   windows:
     name: "Windows"
     runs-on: windows-latest
@@ -359,7 +364,7 @@ jobs:
           path: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
           if-no-files-found: error
           retention-days: 1
-
+  # }}}
   # {{{ Ubuntu
   ubuntu_2204_cc_matrix:
     strategy:
