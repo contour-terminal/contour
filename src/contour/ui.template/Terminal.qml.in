@@ -18,16 +18,50 @@ ContourTerminal
 
     session: terminalSessions.createSession()
 
+
     Rectangle {
         id : backgroundColor
         anchors.centerIn: parent
         width:  vtWidget.width
         height:  vtWidget.height
+        opacity : session.isImageBackground
+            ? session.isBlurBackground ? 1.0 - session.opacityBackground : 1.0
+            : 1.0
         color: session.backgroundColor
         visible : true
         focus : false
     }
 
+    Image {
+        id: backgroundImage
+        width:  vtWidget.width
+        height:  vtWidget.height
+        opacity : session.opacityBackground
+        focus: false
+        visible : session.isImageBackground
+        source :  session.pathToBackground
+    }
+
+
+    FastBlur {
+        visible: session.isBlurBackground
+        anchors.fill: backgroundImage
+        source: backgroundImage
+        radius: 32
+    }
+
+
+    Rectangle {
+        anchors.centerIn: parent
+        width:  vtWidget.width
+        height:  vtWidget.height
+        color: session.backgroundColor
+        opacity : session.isImageBackground
+                ? session.isBlurBackground ? 1.0 - session.opacityBackground : 0.0
+                : 0.0
+        visible : true
+        focus : false
+    }
 
 
     Rectangle {
@@ -51,24 +85,6 @@ ContourTerminal
             font.pointSize: vtWidget.fontSize
             text :  "Size: " + session.pageColumnsCount.toString() + " x " + session.pageLineCount.toString()
         }
-    }
-
-
-    Image {
-        id: backgroundImage
-        width:  vtWidget.width
-        height:  vtWidget.height
-        opacity : session.opacityBackground
-        focus: false
-        visible : session.isImageBackground
-        source :  session.pathToBackground
-    }
-
-    FastBlur {
-        visible: session.isBlurBackground
-        anchors.fill: backgroundImage
-        source: backgroundImage
-        radius: 32
     }
 
 
