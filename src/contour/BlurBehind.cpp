@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "BlurBehind.h"
+#include <contour/BlurBehind.h>
+#include <contour/ContourGuiApp.h>
 
 #include <crispy/utils.h>
 
 #include <QtCore/QDebug>
 #include <QtGui/QWindow>
-
-#include "ContourGuiApp.h"
 
 #if defined(_WIN32)
     #include <Windows.h>
@@ -90,6 +89,8 @@ namespace
                                 &value);
             xcb_flush(infoOpt.value().connection);
         }
+        else
+            errorLog()(R"(Could not set X11 property info for "{}" to {}.)", name, value);
     }
 
     void setPropertyX11(QWindow* window, string const& name, string const& value)
@@ -107,6 +108,8 @@ namespace
 
             xcb_flush(infoOpt.value().connection);
         }
+        else
+            errorLog()(R"(Could not set X11 property info for "{}" to "{}".)", name, value);
     }
 
     void unsetPropertyX11(QWindow* window, string const& name)

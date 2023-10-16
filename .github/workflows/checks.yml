@@ -44,6 +44,8 @@ jobs:
         clang-format-version: '15'
         check-path: 'src'
         #exclude-regex: 'sse2neon.h'
+    - name: "Check includes"
+      run: ./scripts/check-includes.sh
 
   editorconfig:
     name: "Check editorconfig"

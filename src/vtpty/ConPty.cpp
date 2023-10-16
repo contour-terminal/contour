@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ConPty.h>
 
+#include <crispy/BufferObject.h>
+
 #include <utility>
 
 #include <Windows.h>
-
-#include "crispy/BufferObject.h"
 
 using namespace std;
 

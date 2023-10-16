@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "BufferObject.h"
-
 #include <crispy/BufferObject.h>
 
 namespace crispy

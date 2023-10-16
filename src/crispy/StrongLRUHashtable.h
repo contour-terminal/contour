@@ -10,8 +10,6 @@
 #include <stdexcept>
 #include <vector>
 
-#include "StrongHash.h"
-
 #define DEBUG_STRONG_LRU_HASHTABLE 1
 
 #if defined(NDEBUG) && defined(DEBUG_STRONG_LRU_HASHTABLE)

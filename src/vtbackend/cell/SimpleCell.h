@@ -9,11 +9,11 @@
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
 
-#include <string>
-#include <utility>
-
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
+
+#include <string>
+#include <utility>
 
 namespace vtbackend
 {

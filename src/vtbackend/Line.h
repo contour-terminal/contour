@@ -10,14 +10,14 @@
 #include <crispy/Comparison.h>
 #include <crispy/assert.h>
 
+#include <libunicode/convert.h>
+
 #include <gsl/span>
 #include <gsl/span_ext>
 
 #include <string>
 #include <variant>
 #include <vector>
-
-#include <libunicode/convert.h>
 
 namespace vtbackend
 {

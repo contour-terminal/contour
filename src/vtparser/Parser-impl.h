@@ -7,11 +7,11 @@
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
+#include <libunicode/utf8.h>
+
 #include <array>
 #include <string_view>
 #include <tuple>
-
-#include <libunicode/utf8.h>
 
 namespace vtparser
 {

@@ -14,6 +14,7 @@
 #include <vtrasterizer/RenderTarget.h>
 #include <vtrasterizer/TextRenderer.h>
 
+#include <crispy/StrongLRUHashtable.h>
 #include <crispy/size.h>
 
 #include <fmt/format.h>
@@ -22,8 +23,6 @@
 
 #include <memory>
 #include <vector>
-
-#include "crispy/StrongLRUHashtable.h"
 
 namespace vtrasterizer
 {

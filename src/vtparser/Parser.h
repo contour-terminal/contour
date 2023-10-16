@@ -3,6 +3,9 @@
 
 #include <crispy/overloaded.h>
 
+#include <libunicode/convert.h>
+#include <libunicode/scan.h>
+
 #include <fmt/core.h>
 
 #include <gsl/span>
@@ -14,9 +17,6 @@
 #include <limits>
 #include <string>
 #include <string_view>
-
-#include <libunicode/convert.h>
-#include <libunicode/scan.h>
 
 namespace vtparser
 {
