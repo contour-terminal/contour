@@ -917,7 +917,7 @@ jobs:
         REPOSITORY: ${{ github.event.repository.name }}
     - uses: actions/download-artifact@v3
       with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
     - uses: actions/download-artifact@v3
       with:
         name: "patched-fontconfig-${{ matrix.os_version }}"
