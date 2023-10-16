@@ -586,6 +586,13 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
         cell.reset();
 #endif
 
+    if (cell.isFlagEnabled(CellFlags::WideCharContinuation) && _cursor.position.column > ColumnOffset(0))
+    {
+        // Erase the left half of the wide char.
+        Cell& prevCell = line.useCellAt(_cursor.position.column - 1);
+        prevCell.reset();
+    }
+
     cell.write(_cursor.graphicsRendition,
                codepoint,
                static_cast<uint8_t>(unicode::width(codepoint)),
@@ -622,7 +629,8 @@ void Screen<Cell>::clearAndAdvance(int offset) noexcept
         auto& line = currentLine();
         for (int i = 1; i < n; ++i) // XXX It's not even clear if other TEs are doing that, too.
         {
-            line.useCellAt(_cursor.position.column).reset(_cursor.graphicsRendition, _cursor.hyperlink);
+            line.useCellAt(_cursor.position.column)
+                .reset(_cursor.graphicsRendition.with(CellFlags::WideCharContinuation), _cursor.hyperlink);
             _cursor.position.column++;
         }
     }

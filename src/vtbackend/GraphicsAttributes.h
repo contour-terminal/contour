@@ -17,6 +17,13 @@ struct GraphicsAttributes
     Color backgroundColor { DefaultColor() };
     Color underlineColor { DefaultColor() };
     CellFlags flags {};
+
+    [[nodiscard]] constexpr GraphicsAttributes with(CellFlags f) const noexcept
+    {
+        auto copy = *this;
+        copy.flags |= f;
+        return copy;
+    }
 };
 
 static_assert(std::is_trivially_copy_assignable_v<GraphicsAttributes>);

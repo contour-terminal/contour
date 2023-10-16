@@ -76,7 +76,6 @@ class SimpleCell
   private:
     std::u32string _codepoints {};
     GraphicsAttributes _graphicsAttributes {};
-    CellFlags _flags {};
     uint8_t _width = 1;
     HyperlinkId _hyperlink {};
     std::shared_ptr<ImageFragment> _imageFragment {};
@@ -193,17 +192,17 @@ inline void SimpleCell::setWidth(uint8_t newWidth) noexcept
 
 inline CellFlags SimpleCell::flags() const noexcept
 {
-    return _flags;
+    return _graphicsAttributes.flags;
 }
 
 inline bool SimpleCell::isFlagEnabled(CellFlags testFlags) const noexcept
 {
-    return _flags & testFlags;
+    return _graphicsAttributes.flags & testFlags;
 }
 
 inline void SimpleCell::resetFlags(CellFlags flags) noexcept
 {
-    _flags = flags;
+    _graphicsAttributes.flags = flags;
 }
 
 inline void SimpleCell::setGraphicsRendition(GraphicsRendition sgr) noexcept

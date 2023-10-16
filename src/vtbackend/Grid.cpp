@@ -276,11 +276,20 @@ std::string Grid<Cell>::lineText(LineOffset lineOffset) const
     std::string line;
     line.reserve(unbox<size_t>(_pageSize.columns));
 
+    int skipCount = 0;
     for (Cell const& cell: lineBuffer(lineOffset))
+    {
+        if (skipCount > 0)
+        {
+            skipCount--;
+            continue;
+        }
         if (cell.codepointCount())
             line += cell.toUtf8();
         else
             line += ' '; // fill character
+        skipCount = cell.width() - 1;
+    }
 
     return line;
 }
@@ -300,12 +309,19 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 std::string Grid<Cell>::lineText(Line<Cell> const& line) const
 {
     std::stringstream sstr;
+    int skipCount = 0;
     for (Cell const& cell: line.inflatedBuffer())
     {
+        if (skipCount > 0)
+        {
+            skipCount--;
+            continue;
+        }
         if (cell.codepointCount() == 0)
             sstr << ' ';
         else
             sstr << cell.toUtf8();
+        skipCount = cell.width() - 1;
     }
     return sstr.str();
 }

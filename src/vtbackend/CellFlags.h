@@ -31,7 +31,8 @@ enum class CellFlags : uint32_t
     Encircled = (1 << 13),
     Overline = (1 << 14),
     RapidBlinking = (1 << 15),
-    CharacterProtected = (1 << 16), // Character is protected by selective erase operations.
+    CharacterProtected = (1 << 16),   // Character is protected by selective erase operations.
+    WideCharContinuation = (1 << 17), // Cell is a continuation of a wide char.
 };
 
 constexpr CellFlags& operator|=(CellFlags& a, CellFlags b) noexcept
@@ -83,7 +84,7 @@ struct fmt::formatter<vtbackend::CellFlags>: fmt::formatter<std::string>
 {
     auto format(const vtbackend::CellFlags flags, format_context& ctx) -> format_context::iterator
     {
-        static const std::array<std::pair<vtbackend::CellFlags, std::string_view>, 17> nameMap = {
+        static const std::array<std::pair<vtbackend::CellFlags, std::string_view>, 18> nameMap = {
             std::pair { vtbackend::CellFlags::Bold, std::string_view("Bold") },
             std::pair { vtbackend::CellFlags::Faint, std::string_view("Faint") },
             std::pair { vtbackend::CellFlags::Italic, std::string_view("Italic") },
@@ -101,6 +102,8 @@ struct fmt::formatter<vtbackend::CellFlags>: fmt::formatter<std::string>
             std::pair { vtbackend::CellFlags::Encircled, std::string_view("Encircled") },
             std::pair { vtbackend::CellFlags::Overline, std::string_view("Overline") },
             std::pair { vtbackend::CellFlags::CharacterProtected, std::string_view("CharacterProtected") },
+            std::pair { vtbackend::CellFlags::WideCharContinuation,
+                        std::string_view("WideCharContinuation") },
         };
         std::string s;
         for (auto const& mapping: nameMap)
