@@ -345,7 +345,9 @@ vector<string> Process::loginShell(bool escapeSandbox)
 
 fs::path Process::homeDirectory()
 {
-    if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
+    if (auto const* home = getenv("HOME"); home != nullptr)
+        return fs::path(home);
+    else if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
         return fs::path(pw->pw_dir);
     else
         return fs::path("/");

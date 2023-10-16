@@ -230,7 +230,7 @@ namespace
         if (appTerminfoDir.has_value())
             locations.emplace_back(appTerminfoDir.value().string());
 
-        locations.emplace_back(getenv("HOME") + "/.terminfo"s);
+        locations.emplace_back(Process::homeDirectory() / ".terminfo");
 
         if (auto const* value = getenv("TERMINFO_DIRS"); value && *value)
             for (auto const dir: crispy::split(string_view(value), ':'))
@@ -1893,8 +1893,8 @@ fs::path configHome(string const& programName)
 #if defined(__unix__) || defined(__APPLE__)
     if (auto const* value = getenv("XDG_CONFIG_HOME"); value && *value)
         return fs::path { value } / programName;
-    else if (auto const* value = getenv("HOME"); value && *value)
-        return fs::path { value } / ".config" / programName;
+    else
+        return Process::homeDirectory() / ".config" / programName;
 #endif
 
 #if defined(_WIN32)
@@ -1906,9 +1906,8 @@ fs::path configHome(string const& programName)
         GetEnvironmentVariableA("LOCALAPPDATA", &buf[0], size);
         return fs::path { &buf[0] } / programName;
     }
-#endif
-
     throw runtime_error { "Could not find config home folder." };
+#endif
 }
 
 fs::path configHome()
