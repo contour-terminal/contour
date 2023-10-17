@@ -54,7 +54,11 @@ class posix_read_selector
     void wakeup() noexcept
     {
         if (_breakPipe[1] != -1)
-            write(_breakPipe[1], "x", 1);
+        {
+            auto written = write(_breakPipe[1], "x", 1);
+            if (written == -1)
+                errorLog()("Writing to break-pipe failed. {}", strerror(errno));
+        }
     }
 
     std::optional<int> wait_one(std::optional<std::chrono::milliseconds> timeout = std::nullopt) noexcept
@@ -182,7 +186,9 @@ inline void epoll_read_selector::cancel_read(int fd) noexcept
 inline void epoll_read_selector::wakeup() const noexcept
 {
     auto const value = eventfd_t { 1 };
-    write(_eventFd, &value, sizeof(value));
+    auto written = write(_eventFd, &value, sizeof(value));
+    if (written == -1)
+        errorLog()("Writing to eventFd failed. {}", strerror(errno));
 }
 
 inline std::optional<int> epoll_read_selector::try_pop_pending() noexcept

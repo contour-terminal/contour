@@ -147,9 +147,9 @@ fetch_and_unpack_yaml_cpp()
 fetch_and_unpack_range()
 {
     fetch_and_unpack \
-        range-v3-0.11.0 \
-        range-v3-0.11.0.tar.gz \
-        https://github.com/ericniebler/range-v3/archive/refs/tags/0.11.0.tar.gz
+        range-v3-0.12.0 \
+        range-v3-0.12.0.tar.gz \
+        https://github.com/ericniebler/range-v3/archive/refs/tags/0.12.0.tar.gz
 }
 
 fetch_and_unpack_libutempter()
