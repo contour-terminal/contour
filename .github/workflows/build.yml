@@ -36,6 +36,7 @@ jobs:
 
   # {{{ ArchLinux
   archlinux:
+    if: github.ref == 'refs/heads/master'
     strategy:
       matrix:
         arch:
@@ -93,7 +94,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: [38, 39]
+        os_version: [39]
         arch:
           [
             "linux/amd64 x86_64"
@@ -181,6 +182,7 @@ jobs:
   # }}}
   # {{{ FreeBSD
   freebsd:
+    if: github.ref == 'refs/heads/master'
     runs-on: macos-12
     name: FreeBSD 13
     # env:
@@ -190,7 +192,7 @@ jobs:
       - uses: actions/checkout@v3
       - name: Test in FreeBSD
         id: test
-        uses: vmactions/freebsd-vm@v0.3.0
+        uses: vmactions/freebsd-vm@v0
         with:
           envs: 'MYTOKEN MYTOKEN2'
           usesh: true
@@ -358,11 +360,9 @@ jobs:
         compiler:
           [
             "GCC 10",
-            "GCC 11",
-            "Clang 12",
-            "Clang 14",
+            "Clang 15",
           ]
-        qt_version: [5, 6]
+        qt_version: [6]
     name: "Ubuntu Linux 22.04 (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
     runs-on: ubuntu-22.04
     outputs:
@@ -444,7 +444,7 @@ jobs:
       - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
       - name: "Upload unit tests"
-        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' && matrix.qt_version == '5' }}
+        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' && matrix.qt_version == '6' }}
         uses: actions/upload-artifact@v3
         with:
           name: contour-ubuntu2204-tests
@@ -890,7 +890,7 @@ jobs:
   # {{{ GUI: test: contour quick shell exit
   test_quick_exit:
     name: "GUI: Quick Shell Exit"
-    needs: [package_for_Ubuntu, fedora, build_fontconfig]
+    needs: [package_for_Ubuntu, build_fontconfig]
     strategy:
       fail-fast: false
       matrix:
@@ -1175,10 +1175,6 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb
-      - name: "fetch artifact: Fedora 38"
-        uses: actions/download-artifact@v3
-        with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc38.x86_64.rpm"
       - name: "fetch artifact: Fedora 39"
         uses: actions/download-artifact@v3
         with:
