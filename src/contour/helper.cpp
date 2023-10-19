@@ -276,6 +276,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         i != end(KeyMappings))
     {
         session.sendKeyEvent(i->second, modifiers, eventType, now);
+        event->accept();
         return true;
     }
 
@@ -287,12 +288,14 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         i != end(CharMappings))
     {
         session.sendCharEvent(static_cast<char32_t>(i->second), physicalKey, modifiers, eventType, now);
+        event->accept();
         return true;
     }
 
     if (key == Qt::Key_Backtab)
     {
         session.sendCharEvent(U'\t', physicalKey, modifiers.with(Modifier::Shift), eventType, now);
+        event->accept();
         return true;
     }
 
@@ -301,6 +304,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     {
         auto const ch = static_cast<char32_t>(modifiers.shift() ? std::toupper(key) : std::tolower(key));
         session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
+        event->accept();
         return true;
     }
 #endif
@@ -308,6 +312,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     if (0x20 <= key && key < 0x80 && (modifiers & Modifier::Control))
     {
         session.sendCharEvent(static_cast<char32_t>(key), physicalKey, modifiers, eventType, now);
+        event->accept();
         return true;
     }
 
@@ -335,7 +340,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         for (char32_t const ch: codepoints)
             session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
 #endif
-
+        event->accept();
         return true;
     }
 
