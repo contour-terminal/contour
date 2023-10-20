@@ -12,6 +12,8 @@
 #include <vector>
 
 #if !defined(_WIN32)
+    #include <crispy/file_descriptor.h>
+
     #include <sys/select.h>
 
     #include <unistd.h>
@@ -34,23 +36,18 @@ class posix_read_selector
   public:
     posix_read_selector()
     {
-        int const rv = pipe(_breakPipe.data());
+        int pfd[2];
+        int const rv = pipe(pfd);
         Require(rv == 0);
-        assert(_breakPipe[0] != -1);
-        assert(_breakPipe[1] != -1);
+        _breakPipeReader = file_descriptor::from_native(pfd[0]);
+        _breakPipeWriter = file_descriptor::from_native(pfd[1]);
 
         int currentFlags = 0;
-        for (int const fd: _breakPipe)
+        for (int const fd: pfd)
         {
             fcntl(fd, F_GETFL, &currentFlags);
             fcntl(fd, F_SETFL, currentFlags | O_NONBLOCK);
         }
-    }
-
-    ~posix_read_selector()
-    {
-        ::close(_breakPipe[0]);
-        ::close(_breakPipe[1]);
     }
 
     static posix_read_selector create(std::initializer_list<int> fds)
@@ -79,9 +76,9 @@ class posix_read_selector
 
     void wakeup() noexcept
     {
-        if (_breakPipe[1] != -1)
+        if (_breakPipeWriter.is_open())
         {
-            auto written = write(_breakPipe[1], "x", 1);
+            auto written = write(_breakPipeWriter, "x", 1);
             if (written == -1)
                 errorLog()("Writing to break-pipe failed. {}", strerror(errno));
         }
@@ -98,12 +95,10 @@ class posix_read_selector
         FD_ZERO(&_writer);
         FD_ZERO(&_except);
 
-        int maxfd = _breakPipe[0];
-        FD_SET(_breakPipe[0], &_reader);
-        fmt::print("add interest (pipe): {}\n", _breakPipe[0]);
+        int maxfd = _breakPipeReader.get();
+        FD_SET(_breakPipeReader.get(), &_reader);
         for (auto const fd: _fds)
         {
-            fmt::print("add interest: {}\n", fd);
             FD_SET(fd, &_reader);
             if (fd > maxfd)
                 maxfd = fd;
@@ -122,11 +117,11 @@ class posix_read_selector
         if (result <= 0)
             return std::nullopt;
 
-        if (FD_ISSET(_breakPipe[0], &_reader))
+        if (FD_ISSET(_breakPipeReader, &_reader))
         {
             // Drain the pipe.
             char buf[256];
-            while (read(_breakPipe[0], buf, sizeof(buf)) > 0)
+            while (read(_breakPipeReader, buf, sizeof(buf)) > 0)
                 ;
         }
 
@@ -157,7 +152,8 @@ class posix_read_selector
     fd_set _except {};
     std::vector<int> _fds;
     std::deque<int> _pending;
-    std::array<int, 2> _breakPipe { { -1, -1 } };
+    file_descriptor _breakPipeReader;
+    file_descriptor _breakPipeWriter;
 };
 
 // {{{ epoll_read_selector, implements waiting for a set of file descriptors to become readable.
@@ -169,7 +165,7 @@ class epoll_read_selector
 {
   public:
     epoll_read_selector();
-    ~epoll_read_selector();
+    ~epoll_read_selector() = default;
 
     void want_read(int fd) noexcept;
     void cancel_read(int fd) noexcept;
@@ -182,30 +178,21 @@ class epoll_read_selector
     std::optional<int> try_pop_pending() noexcept;
 
   private:
-    int _epollFd = -1;
-    int _eventFd = -1;
+    file_descriptor _epollFd;
+    file_descriptor _eventFd;
     size_t _size = 0;
     std::deque<int> _pending;
 };
 
 inline epoll_read_selector::epoll_read_selector()
 {
-    _epollFd = epoll_create1(EPOLL_CLOEXEC);
-    Require(_epollFd != -1);
-
-    _eventFd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    Require(_eventFd != -1);
+    _epollFd = file_descriptor::from_native(epoll_create1(EPOLL_CLOEXEC));
+    _eventFd = file_descriptor::from_native(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
 
     auto event = epoll_event {};
     event.events = EPOLLIN;
     event.data.fd = _eventFd;
     epoll_ctl(_epollFd, EPOLL_CTL_ADD, _eventFd, &event);
-}
-
-inline epoll_read_selector::~epoll_read_selector()
-{
-    close(_epollFd);
-    close(_eventFd);
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
