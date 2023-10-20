@@ -36,7 +36,7 @@ jobs:
 
   # {{{ ArchLinux
   archlinux:
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
         arch:
