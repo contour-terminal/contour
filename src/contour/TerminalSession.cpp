@@ -676,7 +676,7 @@ void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 // {{{ Input Events
 void TerminalSession::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventType, Timestamp now)
 {
-    inputLog()("Key press event received: {} {}", modifier, key);
+    inputLog()("Key {} event received: {} {}", eventType, modifier, key);
 
     if (_terminatedAndWaitingForKeyPress)
     {
