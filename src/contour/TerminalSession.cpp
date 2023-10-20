@@ -678,7 +678,7 @@ void TerminalSession::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType
 {
     inputLog()("Key {} event received: {} {}", eventType, modifier, key);
 
-    if (_terminatedAndWaitingForKeyPress)
+    if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
     {
         _display->closeDisplay();
         return;
@@ -709,7 +709,7 @@ void TerminalSession::sendCharEvent(
 
     assert(_display != nullptr);
 
-    if (_terminatedAndWaitingForKeyPress)
+    if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
     {
         _display->closeDisplay();
         return;
