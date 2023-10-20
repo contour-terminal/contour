@@ -279,7 +279,7 @@ void SixelParser::leaveState()
                 auto const pad = _params[1];
 
                 auto const imageSize =
-                    _params.size() > 2
+                    _params.size() > 3
                         ? optional<ImageSize> { ImageSize { Width(_params[2]), Height(_params[3]) } }
                         : std::nullopt;
 
