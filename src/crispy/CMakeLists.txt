@@ -22,6 +22,7 @@ set(crispy_SOURCES
     compose.h
     defines.h
     escape.h
+    file_descriptor.h
     flags.h
     indexed.h
     logstore.cpp logstore.h
