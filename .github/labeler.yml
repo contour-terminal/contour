@@ -23,7 +23,6 @@ fonts:
     - src/text_shaper/*.cpp
     - src/text_shaper/*.h
 frontend:
-    - src/contour/*.cpp
-    - src/contour/*.h
+    - src/contour/**
 test:
     - src/**/*_test.cpp
