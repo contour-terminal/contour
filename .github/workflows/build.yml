@@ -34,6 +34,45 @@ env:
 
 jobs:
 
+  # {{{ Common checks
+  check_common:
+    name: "Check CI scripts"
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: "Checking for common errors in build, deployment, and CI."
+      run: ./scripts/check-common.sh
+
+  check_PR_TODOs:
+    name: "Check PR-TODOs"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: "Checking for open PR-related TODO items"
+      run: ./scripts/check-pr-todos.sh
+
+  check_clang_format:
+    name: "Check C++ style"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: Run clang-format style check for C/C++/Protobuf programs.
+      uses: jidicula/clang-format-action@v4.11.0
+      with:
+        clang-format-version: '15'
+        check-path: 'src'
+        #exclude-regex: 'sse2neon.h'
+    - name: "Check includes"
+      run: ./scripts/check-includes.sh
+
+  editorconfig:
+    name: "Check editorconfig"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: editorconfig-checker/action-editorconfig-checker@main
+      - run: editorconfig-checker
+  # }}}
   # {{{ ArchLinux
   archlinux:
     if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
@@ -1094,6 +1133,16 @@ jobs:
     - name: "Check result success"
       run: |
         exit ${{ steps.Xvfb-contour-notcurses.outputs.exitCode }}
+
+  check_notcurses_test_matrix:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: tests matrix
+    needs: test_notcurses
+    steps:
+    - name: Check build matrix status
+      if: ${{ needs.test_notcurses.result != 'success' }}
+      run: exit 1
   # }}}
   # {{{ Check Ubuntu package
   check_package_ubuntu:
@@ -1119,18 +1168,6 @@ jobs:
     - name: "Check install package"
       run: |
         sudo apt install "./contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version}}-amd64.deb"
-  # }}}
-  # {{{ check_notcurses_test_matrix
-  check_notcurses_test_matrix:
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    name: tests matrix
-    needs: test_notcurses
-    steps:
-    - name: Check build matrix status
-      if: ${{ needs.test_notcurses.result != 'success' }}
-      run: exit 1
-
   # }}}
   # {{{ Release
   check_release:
