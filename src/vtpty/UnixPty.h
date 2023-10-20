@@ -5,12 +5,11 @@
 #include <vtpty/UnixUtils.h>
 
 #include <crispy/BufferObject.h>
+#include <crispy/file_descriptor.h>
 #include <crispy/read_selector.h>
 
-#include <array>
 #include <memory>
 #include <optional>
-#include <vector>
 
 #if defined(__APPLE__)
     #include <util.h>
@@ -21,15 +20,17 @@
 namespace vtpty
 {
 
+using crispy::file_descriptor;
+
 class UnixPty final: public Pty
 {
   private:
     class Slave final: public PtySlave
     {
-        int _slaveFd;
+        file_descriptor _slaveFd;
 
       public:
-        explicit Slave(PtySlaveHandle fd): _slaveFd { unbox<int>(fd) } {}
+        explicit Slave(PtySlaveHandle fd): _slaveFd { file_descriptor::from_native(unbox<int>(fd)) } {}
         ~Slave() override;
         [[nodiscard]] PtySlaveHandle handle() const noexcept;
         void close() override;
@@ -70,7 +71,7 @@ class UnixPty final: public Pty
 
     [[nodiscard]] bool started() const noexcept { return _masterFd != -1; }
 
-    int _masterFd = -1;
+    file_descriptor _masterFd;
     UnixPipe _stdoutFastPipe;
     crispy::read_selector _readSelector;
     PageSize _pageSize;

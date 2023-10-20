@@ -11,7 +11,6 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -106,12 +105,12 @@ UnixPty::Slave::~Slave()
 
 PtySlaveHandle UnixPty::Slave::handle() const noexcept
 {
-    return PtySlaveHandle::cast_from(_slaveFd);
+    return PtySlaveHandle::cast_from(_slaveFd.get());
 }
 
 void UnixPty::Slave::close()
 {
-    util::saveClose(&_slaveFd);
+    _slaveFd.close();
 }
 
 bool UnixPty::Slave::isClosed() const noexcept
@@ -154,7 +153,7 @@ bool UnixPty::Slave::login()
     }
 
     if (_slaveFd > 2)
-        util::saveClose(&_slaveFd);
+        _slaveFd.close();
 
     return true;
 }
@@ -179,7 +178,7 @@ UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels): _pageSize { pag
 void UnixPty::start()
 {
     auto const handles = createUnixPty(_pageSize, _pixels);
-    _masterFd = unbox<int>(handles.master);
+    _masterFd = crispy::file_descriptor::from_native(unbox<int>(handles.master));
     _slave = make_unique<Slave>(handles.slave);
 
     if (!util::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
@@ -199,7 +198,6 @@ void UnixPty::start()
 UnixPty::~UnixPty()
 {
     ptyLog()("PTY destroying master (file descriptor {}).", _masterFd);
-    util::saveClose(&_masterFd);
 }
 
 PtySlave& UnixPty::slave() noexcept
@@ -210,7 +208,7 @@ PtySlave& UnixPty::slave() noexcept
 
 PtyMasterHandle UnixPty::handle() const noexcept
 {
-    return PtyMasterHandle::cast_from(_masterFd);
+    return PtyMasterHandle::cast_from(_masterFd.get());
 }
 
 void UnixPty::close()
@@ -218,7 +216,7 @@ void UnixPty::close()
     ptyLog()("PTY closing master (file descriptor {}).", _masterFd);
     assert(_masterFd != -1);
     _readSelector.cancel_read(_masterFd);
-    util::saveClose(&_masterFd);
+    _masterFd.close();
     wakeupReader();
 }
 
