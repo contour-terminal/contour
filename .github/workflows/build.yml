@@ -1133,11 +1133,28 @@ jobs:
 
   # }}}
   # {{{ Release
+  check_release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    name: Check Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Installing xmllint for ci-set-vars.sh and check-release.sh
+        run: sudo apt -qy install libxml2-utils
+      - name: set variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: run release checks
+        run: ./scripts/check-release.sh
+
   do_release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     name: Create Github release
     runs-on: ubuntu-latest
     needs:
+      - check_release
       - archlinux
       - check_notcurses_test_matrix
       - fedora
@@ -1159,8 +1176,6 @@ jobs:
         run: ./scripts/ci-set-vars.sh
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-      - name: run release checks
-        run: ./scripts/check-release.sh
 
       # {{{ fetch release artifacts
       - name: "fetch artifact: Ubuntu 18.04"
