@@ -527,7 +527,8 @@ void TerminalSession::onClosed()
 
     if (auto* localProcess = dynamic_cast<vtpty::Process*>(&_terminal.device()))
     {
-        localProcess->close();
+        if (!localProcess->isClosed())
+            localProcess->close();
         auto const exitStatus = localProcess->checkStatus();
         if (exitStatus)
             sessionLog()(

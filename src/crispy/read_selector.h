@@ -20,6 +20,8 @@
 #if defined(__linux__)
     #include <sys/epoll.h>
     #include <sys/eventfd.h>
+#else
+    #include <fcntl.h>
 #endif
 
 namespace crispy
@@ -30,6 +32,27 @@ namespace crispy
 class posix_read_selector
 {
   public:
+    posix_read_selector()
+    {
+        int const rv = pipe(_breakPipe.data());
+        Require(rv == 0);
+        assert(_breakPipe[0] != -1);
+        assert(_breakPipe[1] != -1);
+
+        int currentFlags = 0;
+        for (int const fd: _breakPipe)
+        {
+            fcntl(fd, F_GETFL, &currentFlags);
+            fcntl(fd, F_SETFL, currentFlags | O_NONBLOCK);
+        }
+    }
+
+    ~posix_read_selector()
+    {
+        ::close(_breakPipe[0]);
+        ::close(_breakPipe[1]);
+    }
+
     static posix_read_selector create(std::initializer_list<int> fds)
     {
         auto selector = posix_read_selector {};
@@ -40,14 +63,17 @@ class posix_read_selector
 
     void want_read(int fd) noexcept
     {
-        FD_SET(fd, &_reader);
+        assert(fd >= 0);
+        assert(std::count(_fds.begin(), _fds.end(), fd) == 0);
         _fds.push_back(fd);
         std::sort(_fds.begin(), _fds.end());
     }
 
+    [[nodiscard]] size_t size() const noexcept { return _fds.size(); }
+
     void cancel_read(int fd) noexcept
     {
-        FD_CLR(fd, &_reader);
+        assert(std::count(_fds.begin(), _fds.end(), fd) == 1);
         _fds.erase(std::remove(_fds.begin(), _fds.end(), fd), _fds.end());
     }
 
@@ -68,6 +94,21 @@ class posix_read_selector
         if (auto const fd = try_pop_pending(); fd.has_value())
             return fd;
 
+        FD_ZERO(&_reader);
+        FD_ZERO(&_writer);
+        FD_ZERO(&_except);
+
+        int maxfd = _breakPipe[0];
+        FD_SET(_breakPipe[0], &_reader);
+        fmt::print("add interest (pipe): {}\n", _breakPipe[0]);
+        for (auto const fd: _fds)
+        {
+            fmt::print("add interest: {}\n", fd);
+            FD_SET(fd, &_reader);
+            if (fd > maxfd)
+                maxfd = fd;
+        }
+
         auto tv = std::unique_ptr<timeval>();
         if (timeout.has_value())
         {
@@ -76,7 +117,7 @@ class posix_read_selector
                           .tv_usec = static_cast<int>((timeout->count() % 1000) * 1000) });
         }
 
-        auto const result = ::select(_fds.back() + 1, &_reader, &_writer, &_except, tv.get());
+        auto const result = ::select(maxfd + 1, &_reader, &_writer, &_except, tv.get());
 
         if (result <= 0)
             return std::nullopt;
@@ -87,7 +128,6 @@ class posix_read_selector
             char buf[256];
             while (read(_breakPipe[0], buf, sizeof(buf)) > 0)
                 ;
-            return std::nullopt;
         }
 
         for (int fd: _fds)
@@ -117,7 +157,7 @@ class posix_read_selector
     fd_set _except {};
     std::vector<int> _fds;
     std::deque<int> _pending;
-    int _breakPipe[2] { -1, -1 };
+    std::array<int, 2> _breakPipe { { -1, -1 } };
 };
 
 // {{{ epoll_read_selector, implements waiting for a set of file descriptors to become readable.
@@ -133,6 +173,8 @@ class epoll_read_selector
 
     void want_read(int fd) noexcept;
     void cancel_read(int fd) noexcept;
+    [[nodiscard]] size_t size() const noexcept;
+
     void wakeup() const noexcept;
     std::optional<int> wait_one(std::optional<std::chrono::milliseconds> timeout = std::nullopt) noexcept;
 
@@ -142,6 +184,7 @@ class epoll_read_selector
   private:
     int _epollFd = -1;
     int _eventFd = -1;
+    size_t _size = 0;
     std::deque<int> _pending;
 };
 
@@ -172,6 +215,7 @@ inline void epoll_read_selector::want_read(int fd) noexcept
     event.events = EPOLLIN;
     event.data.fd = fd;
     epoll_ctl(_epollFd, EPOLL_CTL_ADD, fd, &event);
+    _size++;
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
@@ -181,6 +225,12 @@ inline void epoll_read_selector::cancel_read(int fd) noexcept
     event.events = EPOLLIN;
     event.data.fd = fd;
     epoll_ctl(_epollFd, EPOLL_CTL_DEL, fd, &event);
+    _size--;
+}
+
+inline size_t epoll_read_selector::size() const noexcept
+{
+    return _size;
 }
 
 inline void epoll_read_selector::wakeup() const noexcept

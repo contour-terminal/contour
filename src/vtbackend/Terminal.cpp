@@ -268,7 +268,7 @@ bool Terminal::processInputOnce()
     {
         terminalLog()("PTY read returned with zero bytes. Closing PTY.");
         _pty->close();
-        return true;
+        return false;
     }
 
     {

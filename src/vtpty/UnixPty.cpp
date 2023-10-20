@@ -216,6 +216,8 @@ PtyMasterHandle UnixPty::handle() const noexcept
 void UnixPty::close()
 {
     ptyLog()("PTY closing master (file descriptor {}).", _masterFd);
+    assert(_masterFd != -1);
+    _readSelector.cancel_read(_masterFd);
     util::saveClose(&_masterFd);
     wakeupReader();
 }
@@ -248,6 +250,7 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     if (rv == 0 && fd == _stdoutFastPipe.reader())
     {
         ptyInLog()("Closing stdout-fastpipe.");
+        _readSelector.cancel_read(fd);
         _stdoutFastPipe.closeReader();
         errno = EAGAIN;
         return nullopt;
@@ -260,6 +263,8 @@ Pty::ReadResult UnixPty::read(crispy::buffer_object<char>& storage,
                               std::optional<std::chrono::milliseconds> timeout,
                               size_t size)
 {
+    assert(_readSelector.size() > 0);
+
     if (auto const fd = _readSelector.wait_one(timeout); fd.has_value())
     {
         auto const l = scoped_lock { storage };
