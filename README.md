@@ -55,7 +55,7 @@ sudo dnf install contour-terminal
 
 #### Install from Flathub
 
-Click the following button install Contour from the Flathub store.
+Click the following button to install Contour from the Flathub store.
 
 [![Get it on Flathub](https://raw.githubusercontent.com/flatpak-design-team/flathub-mockups/master/assets/download-button/download.svg?sanitize=true)](https://flathub.org/apps/details/org.contourterminal.Contour)
 
@@ -76,7 +76,7 @@ Click the following button install Contour from the Flathub store.
 
 ## Configuration
 
-In order to set up Contour, it is necessary to modify the configuration file
+In order to configure Contour, it is necessary to modify the configuration file
 `contour.yml`, which is initially generated in the `$HOME/.config/contour`
 directory. Some features also require shell integration. These can be generated
 via the CLI (see below), these currently exist for zsh, fish and tcsh.
@@ -84,8 +84,10 @@ via the CLI (see below), these currently exist for zsh, fish and tcsh.
 ## Installing from source
 
 Contour is best installed from supported package managers, but you can build
-from source by following the instruction below. You can Qt 5 or Qt 6,
-by default contour will be compiler with Qt 6, to change Qt version use `QTVER=5 ./scripts/install-deps.sh` to fetch dependencies and cmake flag `-D CONTOUR_QT_VERSION=5`.
+from source by following the instructions below. You can use Qt 5 or Qt 6,
+by default contour will be compiled with Qt 6, to change Qt version use
+`QTVER=5 ./scripts/install-deps.sh` to fetch dependencies and cmake flag
+`-D CONTOUR_QT_VERSION=5`.
 
 ### UNIX-like systems (Linux, FreeBSD, OS/X)
 
