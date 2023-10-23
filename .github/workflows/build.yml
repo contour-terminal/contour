@@ -657,10 +657,8 @@ jobs:
             echo "QTVER=5" >> "$GITHUB_OUTPUT"
           fi
       - name: "Install gcc-10 on 20.04"
-        run: |
-          if [[ ${{ matrix.os_version }} = "20.04" ]]; then
-            sudo apt -y install gcc-10
-          fi
+        if: matrix.os_version == '20.04'
+        run: sudo apt -y install gcc-10
       - name: "install dependencies"
         run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
