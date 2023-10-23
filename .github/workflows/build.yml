@@ -656,6 +656,11 @@ jobs:
           if [[ ${{ matrix.os_version }} = "20.04" ]]; then
             echo "QTVER=5" >> "$GITHUB_OUTPUT"
           fi
+      - name: "Install gcc-10 on 20.04"
+        run: |
+          if [[ ${{ matrix.os_version }} = "20.04" ]]; then
+            sudo apt -y install gcc-10
+          fi
       - name: "install dependencies"
         run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
@@ -669,7 +674,7 @@ jobs:
           # TODO: turn on -Werror again, that requires some code changes.
           CMAKE_CXX_STANDARD=20
           if [[ "${{ matrix.os_version }}" = "20.04" ]]; then
-            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=5"
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=5 -DCMAKE_CXX_COMPILER=g++-10"
           else
           # use Qt6 for 22.04
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=6"
