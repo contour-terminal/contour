@@ -3,7 +3,7 @@
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/utils.h>
 
-#include <catch2/catch.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 #include <iostream>
 #include <string_view>
@@ -406,7 +406,7 @@ TEST_CASE("strong_lru_hashtable.peek", "")
 
     for (int i = 1; i <= 4; ++i)
     {
-        INFO(fmt::format("i: {}", i))
+        INFO(fmt::format("i: {}", i));
         REQUIRE(cache.peek(h(1)) == 2);
         REQUIRE(joinHumanReadable(cache.hashes()) == sh(4, 3, 2, 1));
     }

@@ -2,7 +2,7 @@
 #include <crispy/StrongLRUCache.h>
 #include <crispy/utils.h>
 
-#include <catch2/catch.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 #include <iostream>
 #include <string_view>

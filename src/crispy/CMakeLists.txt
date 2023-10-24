@@ -127,10 +127,9 @@ if(CRISPY_TESTING)
         utils_test.cpp
         ring_test.cpp
         sort_test.cpp
-        test_main.cpp
         times_test.cpp
     )
-    target_link_libraries(crispy_test fmt::fmt-header-only range-v3::range-v3 Catch2::Catch2 crispy::core)
+target_link_libraries(crispy_test fmt::fmt-header-only range-v3::range-v3 Catch2::Catch2WithMain crispy::core)
     add_test(crispy_test ./crispy_test)
 endif()
 message(STATUS "[crispy] Compile unit tests: ${CRISPY_TESTING}")

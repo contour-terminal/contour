@@ -3,7 +3,7 @@
 #include <vtbackend/Screen.h>
 #include <vtbackend/Selector.h>
 
-#include <catch2/catch.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 using crispy::size;
 using namespace std;
