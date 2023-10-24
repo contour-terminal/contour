@@ -45,11 +45,13 @@ endmacro()
 # Now, conditionally find all dependencies that were not included above
 # via find_package, usually system installed packages.
 
-if (TARGET Catch2::Catch2WithMain)
-    set(THIRDPARTY_BUILTIN_Catch2 "embedded")
-else()
-    find_package(Catch2 REQUIRED)
-    set(THIRDPARTY_BUILTIN_Catch2 "system package")
+if(CONTOUR_TESTING)
+    if(TARGET Catch2::Catch2WithMain)
+        set(THIRDPARTY_BUILTIN_Catch2 "embedded")
+    else()
+        find_package(Catch2 REQUIRED)
+        set(THIRDPARTY_BUILTIN_Catch2 "system package")
+    endif()
 endif()
 
 if(TARGET fmt)
