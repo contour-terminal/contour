@@ -76,9 +76,9 @@ fetch_and_unpack()
 fetch_and_unpack_Catch2()
 {
     fetch_and_unpack \
-        Catch2-2.13.10 \
-        Catch2-2.13.10.tar.gz \
-        https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.10.tar.gz
+        Catch2-3.4.0 \
+        Catch2-3.4.0.tar.gz \
+        https://github.com/catchorg/Catch2/archive/refs/tags/v3.4.0.tar.gz
 }
 
 fetch_and_unpack_fmtlib()
@@ -121,7 +121,7 @@ fetch_and_unpack_boxed()
 fetch_and_unpack_libunicode()
 {
     if test x$LIBUNICODE_SRC_DIR = x; then
-        local libunicode_git_sha="b1b017c466038655872e1968acfc6a9880cf5d9f"
+        local libunicode_git_sha="c1474ddc3a90366629d61863628b8d41cd764fa8"
         fetch_and_unpack \
             libunicode-$libunicode_git_sha \
             libunicode-$libunicode_git_sha.tar.gz \

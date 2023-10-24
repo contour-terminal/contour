@@ -100,7 +100,7 @@ target_link_libraries(vtbackend PUBLIC
     crispy::core 
     fmt::fmt-header-only
     range-v3::range-v3 
-    ${LIBUNICODE_LIBS}  
+    unicode::unicode
     vtparser 
     vtpty 
 )
@@ -123,7 +123,6 @@ endif()
 if(LIBTERMINAL_TESTING)
     enable_testing()
     add_executable(vtbackend_test
-        test_main.cpp
         Capabilities_test.cpp
         Color_test.cpp
         InputGenerator_test.cpp
@@ -137,7 +136,7 @@ if(LIBTERMINAL_TESTING)
         SixelParser_test.cpp
         ViCommands_test.cpp
     )
-    target_link_libraries(vtbackend_test fmt::fmt-header-only Catch2::Catch2 vtbackend)
+    target_link_libraries(vtbackend_test fmt::fmt-header-only Catch2::Catch2WithMain vtbackend)
     add_test(vtbackend_test ./vtbackend_test)
 
     if (LIBTERMINAL_BUILD_BENCH_HEADLESS)

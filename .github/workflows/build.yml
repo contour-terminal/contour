@@ -285,6 +285,7 @@ jobs:
           QTVER=${{ steps.set_vars.outputs.QTVER }}
           cmake . \
                 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                -DCONTOUR_TESTING=ON \
                 -DQt${QTVER}_DIR="$(brew --prefix qt@${QTVER})/lib/cmake/Qt${QTVER}" \
                 -DCONTOUR_QT_VERSION=${QTVER} \
                 -B build/
@@ -351,7 +352,7 @@ jobs:
                 New-Item -ItemType Directory -Force -Path build
           }
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_QT_VERSION=6 -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_TESTING=ON -DCONTOUR_QT_VERSION=6 -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
       - name: "Build"
         run: cmake --build build/ --config Release
       - name: "test: crispy"

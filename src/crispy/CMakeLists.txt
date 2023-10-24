@@ -45,7 +45,7 @@ if(MSVC)
     target_compile_definitions(crispy-core PUBLIC NOMINMAX)
 endif()
 
-set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
+set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode::unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
 
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL AMD64)
     target_compile_options(crispy-core PUBLIC -maes)
@@ -127,10 +127,9 @@ if(CRISPY_TESTING)
         utils_test.cpp
         ring_test.cpp
         sort_test.cpp
-        test_main.cpp
         times_test.cpp
     )
-    target_link_libraries(crispy_test fmt::fmt-header-only range-v3::range-v3 Catch2::Catch2 crispy::core)
+target_link_libraries(crispy_test fmt::fmt-header-only range-v3::range-v3 Catch2::Catch2WithMain crispy::core)
     add_test(crispy_test ./crispy_test)
 endif()
 message(STATUS "[crispy] Compile unit tests: ${CRISPY_TESTING}")

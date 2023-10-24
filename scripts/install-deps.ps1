@@ -20,15 +20,15 @@ $ThirdParties =
         Macro   = ""
     };
     [ThirdParty]@{
-        Folder  = "Catch2-2.13.10";
-        Archive = "Catch2-2.13.10.zip";
-        URI     = "https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.10.zip";
+        Folder  = "Catch2-3.4.0";
+        Archive = "Catch2-3.4.0.zip";
+        URI     = "https://github.com/catchorg/Catch2/archive/refs/tags/v3.4.0.zip";
         Macro   = ""
     };
     [ThirdParty]@{
-        Folder  = "libunicode-b1b017c466038655872e1968acfc6a9880cf5d9f";
-        Archive = "libunicode-b1b017c466038655872e1968acfc6a9880cf5d9f.zip";
-        URI     = "https://github.com/contour-terminal/libunicode/archive/b1b017c466038655872e1968acfc6a9880cf5d9f.zip";
+        Folder  = "libunicode-c1474ddc3a90366629d61863628b8d41cd764fa8";
+        Archive = "libunicode-c1474ddc3a90366629d61863628b8d41cd764fa8.zip";
+        URI     = "https://github.com/contour-terminal/libunicode/archive/c1474ddc3a90366629d61863628b8d41cd764fa8.zip";
         Macro   = "libunicode"
     };
     [ThirdParty]@{

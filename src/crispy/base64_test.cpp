@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/base64.h>
 
-#include <catch2/catch.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 using namespace crispy;
 

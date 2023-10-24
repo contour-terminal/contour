@@ -380,10 +380,11 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     if (!maxCharCount)
         return { ProcessKind::FallbackToFSM, 0 };
 
+    _scanState.next = nullptr;
     auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
-    auto const [cellCount, next, subStart, subEnd] = unicode::scan_text(_scanState, chunk, maxCharCount);
+    auto const [cellCount, subStart, subEnd] = unicode::scan_text(_scanState, chunk, maxCharCount);
 
-    if (next == input)
+    if (_scanState.next == input)
         return { ProcessKind::FallbackToFSM, 0 };
 
     // We do not test on cellCount>0 because the scan could contain only a ZWJ (zero width
@@ -396,7 +397,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
 
     assert(cellCount <= maxCharCount);
     assert(subEnd <= chunk.data() + chunk.size());
-    assert(next <= chunk.data() + chunk.size());
+    assert(_scanState.next <= chunk.data() + chunk.size());
 
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (vtTraceParserLog)
@@ -425,7 +426,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
             _eventListener.execute(*input++);
     }
 
-    auto const count = static_cast<size_t>(std::distance(input, next));
+    auto const count = static_cast<size_t>(std::distance(input, _scanState.next));
     return { ProcessKind::ContinueBulk, count };
 }
 

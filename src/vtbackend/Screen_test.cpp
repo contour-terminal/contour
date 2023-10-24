@@ -13,7 +13,7 @@
 
 #include <range/v3/view/iota.hpp>
 
-#include <catch2/catch.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 #include <string_view>
 
@@ -3589,9 +3589,9 @@ TEST_CASE("Sixel.simple", "[screen]")
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
                 if ((column.value + line.value) % 2)
-                    REQUIRE_THAT(white10x10, Catch::Matchers::Equals(fragment->data()));
+                    REQUIRE(fragment->data() == white10x10);
                 else
-                    REQUIRE_THAT(black10x10, Catch::Matchers::Equals(fragment->data()));
+                    REQUIRE(fragment->data() == black10x10);
 
                 CHECK(fragment->offset().line == line);
                 CHECK(fragment->offset().column == column);
@@ -3630,9 +3630,9 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
                 if ((column.value + line.value) % 2)
-                    REQUIRE_THAT(black10x10, Catch::Matchers::Equals(fragment->data()));
+                    REQUIRE(fragment->data() == black10x10);
                 else
-                    REQUIRE_THAT(white10x10, Catch::Matchers::Equals(fragment->data()));
+                    REQUIRE(fragment->data() == white10x10);
                 CHECK(fragment->offset().line == line + 1);
                 CHECK(fragment->offset().column == column);
                 CHECK(!fragment->data().empty());
@@ -3669,9 +3669,9 @@ TEST_CASE("Sixel.status_line", "[screen]")
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
                 if ((column.value + line.value) % 2)
-                    REQUIRE_THAT(white10x10, Catch::Matchers::Equals(fragment->data()));
+                    REQUIRE(fragment->data() == white10x10);
                 else
-                    REQUIRE_THAT(black10x10, Catch::Matchers::Equals(fragment->data()));
+                    REQUIRE(fragment->data() == black10x10);
 
                 CHECK(fragment->offset().line == line + 6);
                 CHECK(fragment->offset().column == column);

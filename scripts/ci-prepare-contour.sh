@@ -9,6 +9,7 @@ prepare_build_ubuntu()
 {
    cmake \
       -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
+      -DCONTOUR_TESTING=ON \
       -S . -B ${BUILD_DIR} \
       ${EXTRA_CMAKE_FLAGS}
 }
