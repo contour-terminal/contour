@@ -45,7 +45,7 @@ if(MSVC)
     target_compile_definitions(crispy-core PUBLIC NOMINMAX)
 endif()
 
-set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
+set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode::unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
 
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL AMD64)
     target_compile_options(crispy-core PUBLIC -maes)

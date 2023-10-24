@@ -26,9 +26,9 @@ $ThirdParties =
         Macro   = ""
     };
     [ThirdParty]@{
-        Folder  = "libunicode-204a3ae7d3725e6e9061e988df39befae62ab10f";
-        Archive = "libunicode-204a3ae7d3725e6e9061e988df39befae62ab10f.zip";
-        URI     = "https://github.com/contour-terminal/libunicode/archive/204a3ae7d3725e6e9061e988df39befae62ab10f.zip";
+        Folder  = "libunicode-c1474ddc3a90366629d61863628b8d41cd764fa8";
+        Archive = "libunicode-c1474ddc3a90366629d61863628b8d41cd764fa8.zip";
+        URI     = "https://github.com/contour-terminal/libunicode/archive/c1474ddc3a90366629d61863628b8d41cd764fa8.zip";
         Macro   = "libunicode"
     };
     [ThirdParty]@{

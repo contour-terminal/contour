@@ -100,7 +100,7 @@ target_link_libraries(vtbackend PUBLIC
     crispy::core 
     fmt::fmt-header-only
     range-v3::range-v3 
-    ${LIBUNICODE_LIBS}  
+    unicode::unicode
     vtparser 
     vtpty 
 )
