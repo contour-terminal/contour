@@ -53,6 +53,7 @@ cmake . \
     -DCONTOUR_QT_VERSION=6 \
     -DPEDANTIC_COMPILER=ON \
     -DPEDANTIC_COMPILER_WERROR=ON \
+    -DCONTOUR_TESTING=ON \
     -B build \
     -GNinja
 cd build

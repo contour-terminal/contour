@@ -39,6 +39,7 @@ RUN g++-10 --version
 RUN cmake -S . -B build -G Ninja \
     -D CMAKE_CXX_STANDARD=20 \
     -D CONTOUR_QT_VERSION=5 \
+    -D CONTOUR_TESTING=ON \
     -D CMAKE_CXX_COMPILER=g++-10
 
 RUN cmake --build build -- -j3
