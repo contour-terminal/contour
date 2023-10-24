@@ -110,7 +110,7 @@ fetch_and_unpack_termbenchpro()
 
 fetch_and_unpack_boxed()
 {
-    local boxed_cpp_git_sha="daa702e22e71f3da3eef838e4946b6c3df1f16b1"
+    local boxed_cpp_git_sha="783cb74e95cbe06a52b468a73c14467e8f082cd1"
     fetch_and_unpack \
         boxed-cpp-$boxed_cpp_git_sha \
         boxed-cpp-$boxed_cpp_git_sha.tar.gz \

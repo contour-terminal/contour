@@ -38,9 +38,9 @@ $ThirdParties =
         Macro   = "termbench_pro"
     }
     [ThirdParty]@{
-        Folder  = "boxed-cpp-daa702e22e71f3da3eef838e4946b6c3df1f16b1";
-        Archive = "boxed-cpp-daa702e22e71f3da3eef838e4946b6c3df1f16b1.zip";
-        URI     = "https://github.com/contour-terminal/boxed-cpp/archive/daa702e22e71f3da3eef838e4946b6c3df1f16b1.zip";
+        Folder  = "boxed-cpp-783cb74e95cbe06a52b468a73c14467e8f082cd1";
+        Archive = "boxed-cpp-783cb74e95cbe06a52b468a73c14467e8f082cd1.zip";
+        URI     = "https://github.com/contour-terminal/boxed-cpp/archive/783cb74e95cbe06a52b468a73c14467e8f082cd1.zip";
         Macro   = "boxed_cpp"
     }
 )
