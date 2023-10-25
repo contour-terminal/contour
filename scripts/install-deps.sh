@@ -439,6 +439,7 @@ install_deps_fedora()
     local os_version=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
 
     local packages="
+        catch-devel
         cmake
         extra-cmake-modules
         fontconfig-devel
@@ -460,13 +461,6 @@ install_deps_fedora()
         packages="$packages fmt"
     else
         fetch_and_unpack_fmtlib
-    fi
-
-    # catch-devel on Fedora 38 is too new, so we need to use the one we downloaded.
-    if test "$os_version" -lt 38; then
-        packages="$packages catch-devel"
-    else
-        fetch_and_unpack_Catch2
     fi
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
