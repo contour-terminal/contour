@@ -217,7 +217,8 @@ class TerminalWidget: public QQuickItem
         return pageSizeForPixels(pixelSize(), _renderer->gridMetrics().cellSize);
     }
 
-    void updateSizeProperties();
+    void updateMinimumSize();
+    void updateImplicitSize();
 
     void statsSummary();
     void doResize(crispy::size size);

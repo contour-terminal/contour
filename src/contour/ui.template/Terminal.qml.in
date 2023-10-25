@@ -249,6 +249,10 @@ ContourTerminal
         vt.fontSizeChanged.connect(updateFontSize);
         updateFontSize();
 
+        // Show cell-dimensions popup in case of page size changes
+        vt.lineCountChanged.connect(updateSizeWidget);
+        vt.columnsCountChanged.connect(updateSizeWidget);
+
         // Permission-wall related hooks.
         vt.requestPermissionForFontChange.connect(requestFontChangeDialog.open);
         vt.requestPermissionForBufferCapture.connect(requestBufferCaptureDialog.open);
