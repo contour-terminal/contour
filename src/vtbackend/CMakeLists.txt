@@ -148,7 +148,12 @@ if(LIBTERMINAL_TESTING)
             CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
             CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         )
-        target_link_libraries(bench-headless fmt::fmt-header-only vtbackend termbench)
+
+        target_link_libraries(bench-headless
+            fmt::fmt-header-only
+            termbench::termbench
+            vtbackend
+        )
 
         if(CONTOUR_INSTALL_TOOLS)
             if(WIN32)

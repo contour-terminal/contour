@@ -100,7 +100,7 @@ fetch_and_unpack_gsl()
 
 fetch_and_unpack_termbenchpro()
 {
-    local termbench_pro_git_sha="a4feadd3a698e4fe2d9dd5b03d5f941534a25a91"
+    local termbench_pro_git_sha="7f86c882b2dab88a0cceeffd7e3848f55fa5f6f2"
     fetch_and_unpack \
         termbench-pro-$termbench_pro_git_sha \
         termbench-pro-$termbench_pro_git_sha.tar.gz \
