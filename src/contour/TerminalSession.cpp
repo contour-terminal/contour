@@ -500,7 +500,7 @@ void TerminalSession::copyToClipboard(std::string_view data)
 void TerminalSession::openDocument(std::string_view fileOrUrl)
 {
     auto stripped = strip_if(string(fileOrUrl), true);
-    fmt::print("TerminalSession.openDocument: {}\n", fileOrUrl);
+    sessionLog()("openDocument: {}\n", fileOrUrl);
     QDesktopServices::openUrl(QUrl(QString::fromStdString(std::string(fileOrUrl))));
 }
 
