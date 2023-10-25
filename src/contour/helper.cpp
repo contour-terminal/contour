@@ -487,6 +487,7 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     if (*newPixelSize.width == 0 || *newPixelSize.height == 0)
         return;
 
+    auto const oldPageSize = session.terminal().pageSize();
     auto const newPageSize = pageSizeForPixels(newPixelSize, renderer.gridMetrics().cellSize);
     vtbackend::Terminal& terminal = session.terminal();
     vtbackend::ImageSize cellSize = renderer.gridMetrics().cellSize;
@@ -495,6 +496,12 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     renderer.renderTarget().setRenderSize(newPixelSize);
     renderer.setPageSize(newPageSize);
     renderer.setMargin(computeMargin(renderer.gridMetrics().cellSize, newPageSize, newPixelSize));
+
+    if (oldPageSize.lines != newPageSize.lines)
+        emit session.lineCountChanged(newPageSize.lines.as<int>());
+
+    if (oldPageSize.columns != newPageSize.columns)
+        emit session.columnsCountChanged(newPageSize.columns.as<int>());
 
     auto const viewSize = cellSize * newPageSize;
     displayLog()("Applying resize: {} (new pixel size) {} (view size)", newPixelSize, viewSize);

@@ -299,7 +299,8 @@ void TerminalWidget::setSession(TerminalSession* newSession)
         );
 
     applyFontDPI();
-    updateSizeProperties();
+    updateImplicitSize();
+    updateMinimumSize();
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
 
@@ -917,16 +918,23 @@ double TerminalWidget::contentScale() const
     return window()->devicePixelRatio();
 }
 
-void TerminalWidget::updateSizeProperties()
+void TerminalWidget::updateImplicitSize()
 {
-    Require(_renderer);
+    assert(_renderer);
     assert(_session);
+    assert(window());
 
     // implicit width/height
     auto const dpr = contentScale();
     auto const implicitViewSize = _renderer->cellSize() * _session->terminal().totalPageSize() * (1.0 / dpr);
     setImplicitWidth(unbox<qreal>(implicitViewSize.width));
     setImplicitHeight(unbox<qreal>(implicitViewSize.height));
+}
+
+void TerminalWidget::updateMinimumSize()
+{
+    Require(_renderer);
+    assert(_session);
 
     Require(window());
 
@@ -935,7 +943,7 @@ void TerminalWidget::updateSizeProperties()
     auto const minSize =
         ImageSize { Width::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.columns),
                     Height::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.lines) };
-    auto const scaledMinSize = minSize / dpr;
+    auto const scaledMinSize = minSize / contentScale();
 
     window()->setMinimumSize(QSize(scaledMinSize.width.as<int>(), scaledMinSize.height.as<int>()));
 }
@@ -1193,7 +1201,7 @@ bool TerminalWidget::setFontSize(text::font_size newFontSize)
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
     auto const actualWidgetSize = qtBaseWidgetSize * contentScale();
     applyResize(actualWidgetSize, *_session, *_renderer);
-    updateSizeProperties();
+    updateMinimumSize();
     // logDisplayInfo();
     return true;
 }
@@ -1231,7 +1239,7 @@ void TerminalWidget::setWindowMaximized()
 
 void TerminalWidget::setWindowNormal()
 {
-    updateSizeProperties();
+    updateMinimumSize();
     window()->showNormal();
     _maximizedState = false;
 }
