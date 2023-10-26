@@ -1,0 +1,17 @@
+name: Check Changelog
+
+on:
+  pull_request:
+    types: [assigned, opened, synchronize, reopened, labeled, unlabeled]
+    branches:
+      - master
+
+jobs:
+  Check-Changelog:
+    name: Check Changelog Action
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: tarides/changelog-check-action@v2
+        name: Check changelog
+        with:
+          changelog: metainfo.md
