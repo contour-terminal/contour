@@ -3,7 +3,7 @@
 #include <contour/BlurBehind.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/display/OpenGLRenderer.h>
-#include <contour/display/TerminalWidget.h>
+#include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
 
 #include <vtbackend/Color.h>
@@ -222,8 +222,8 @@ namespace
 } // namespace
 // }}}
 
-// {{{ Widget creation and QQuickItem overides
-TerminalWidget::TerminalWidget(QQuickItem* parent):
+// {{{ Display creation and QQuickItem overides
+TerminalDisplay::TerminalDisplay(QQuickItem* parent):
     QQuickItem(parent),
     _startTime { steady_clock::time_point::min() },
     _lastFontDPI { fontDPI() },
@@ -245,7 +245,7 @@ TerminalWidget::TerminalWidget(QQuickItem* parent):
     updateInputMethod(Qt::ImQueryAll);
 #endif
 
-    connect(this, &QQuickItem::windowChanged, this, &TerminalWidget::handleWindowChanged);
+    connect(this, &QQuickItem::windowChanged, this, &TerminalDisplay::handleWindowChanged);
 
     // setMouseTracking(true);
     // setFormat(createSurfaceFormat());
@@ -253,17 +253,17 @@ TerminalWidget::TerminalWidget(QQuickItem* parent):
     // TODO: setAttribute(Qt::WA_InputMethodEnabled, true);
 
     _updateTimer.setSingleShot(true);
-    connect(&_updateTimer, &QTimer::timeout, this, &TerminalWidget::scheduleRedraw, Qt::QueuedConnection);
+    connect(&_updateTimer, &QTimer::timeout, this, &TerminalDisplay::scheduleRedraw, Qt::QueuedConnection);
 }
 
-TerminalWidget::~TerminalWidget()
+TerminalDisplay::~TerminalDisplay()
 {
     displayLog()("Destroying terminal widget.");
     if (_session)
         _session->detachDisplay(*this);
 }
 
-void TerminalWidget::setSession(TerminalSession* newSession)
+void TerminalDisplay::setSession(TerminalSession* newSession)
 {
     if (_session)
         return;
@@ -280,7 +280,7 @@ void TerminalWidget::setSession(TerminalSession* newSession)
 
     _session = newSession;
 
-    QObject::connect(newSession, &TerminalSession::titleChanged, this, &TerminalWidget::titleChanged);
+    QObject::connect(newSession, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
 
     _session->start();
 
@@ -307,7 +307,7 @@ void TerminalWidget::setSession(TerminalSession* newSession)
     emit sessionChanged(newSession);
 }
 
-vtbackend::PageSize TerminalWidget::windowSize() const noexcept
+vtbackend::PageSize TerminalDisplay::windowSize() const noexcept
 {
     if (!_session)
         return vtbackend::PageSize { LineCount(25), ColumnCount(80) };
@@ -315,7 +315,7 @@ vtbackend::PageSize TerminalWidget::windowSize() const noexcept
     return profile().terminalSize;
 }
 
-void TerminalWidget::sizeChanged()
+void TerminalDisplay::sizeChanged()
 {
     if (!_session || !_renderTarget)
         return;
@@ -323,14 +323,14 @@ void TerminalWidget::sizeChanged()
     displayLog()(
         "size changed to: {}x{} (session {})", width(), height(), _session ? "available" : "not attached");
 
-    auto const qtBaseWidgetSize =
+    auto const qtBaseDisplaySize =
         vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
-    auto const newPixelSize = qtBaseWidgetSize * contentScale();
+    auto const newPixelSize = qtBaseDisplaySize * contentScale();
     displayLog()("Resizing view to {}x{} virtual ({} actual).", width(), height(), newPixelSize);
     applyResize(newPixelSize, *_session, *_renderer);
 }
 
-void TerminalWidget::handleWindowChanged(QQuickWindow* newWindow)
+void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
 {
     if (newWindow)
     {
@@ -338,23 +338,23 @@ void TerminalWidget::handleWindowChanged(QQuickWindow* newWindow)
         connect(newWindow,
                 &QQuickWindow::sceneGraphInitialized,
                 this,
-                &TerminalWidget::onSceneGrapheInitialized,
+                &TerminalDisplay::onSceneGrapheInitialized,
                 Qt::DirectConnection);
 
         connect(newWindow,
                 &QQuickWindow::beforeSynchronizing,
                 this,
-                &TerminalWidget::onBeforeSynchronize,
+                &TerminalDisplay::onBeforeSynchronize,
                 Qt::DirectConnection);
 
         connect(newWindow,
                 &QQuickWindow::sceneGraphInvalidated,
                 this,
-                &TerminalWidget::cleanup,
+                &TerminalDisplay::cleanup,
                 Qt::DirectConnection);
 
-        connect(this, &QQuickItem::widthChanged, this, &TerminalWidget::sizeChanged, Qt::DirectConnection);
-        connect(this, &QQuickItem::heightChanged, this, &TerminalWidget::sizeChanged, Qt::DirectConnection);
+        connect(this, &QQuickItem::widthChanged, this, &TerminalDisplay::sizeChanged, Qt::DirectConnection);
+        connect(this, &QQuickItem::heightChanged, this, &TerminalDisplay::sizeChanged, Qt::DirectConnection);
     }
     else
         displayLog()("Detaching widget {} from window.", (void*) this);
@@ -375,28 +375,28 @@ class CleanupJob: public QRunnable
     OpenGLRenderer* _renderer;
 };
 
-void TerminalWidget::releaseResources()
+void TerminalDisplay::releaseResources()
 {
     displayLog()("Releasing resources.");
     window()->scheduleRenderJob(new CleanupJob(_renderTarget), QQuickWindow::BeforeSynchronizingStage);
     _renderTarget = nullptr;
 }
 
-void TerminalWidget::cleanup()
+void TerminalDisplay::cleanup()
 {
     displayLog()("Cleaning up.");
     delete _renderTarget;
     _renderTarget = nullptr;
 }
 
-void TerminalWidget::onRefreshRateChanged()
+void TerminalDisplay::onRefreshRateChanged()
 {
     auto const rate = refreshRate();
     displayLog()("Refresh rate changed to {}.", rate.value);
     _session->terminal().setRefreshRate(rate);
 }
 
-void TerminalWidget::configureScreenHooks()
+void TerminalDisplay::configureScreenHooks()
 {
     Require(window());
 
@@ -408,13 +408,13 @@ void TerminalWidget::configureScreenHooks()
     // connect(screen, SIGNAL(physicalDotsPerInchChanged(qreal)), this, SLOT(applyFontDPI()));
 }
 
-void TerminalWidget::onScreenChanged()
+void TerminalDisplay::onScreenChanged()
 {
     displayLog()("Screen changed.");
     applyFontDPI();
 }
 
-void TerminalWidget::applyFontDPI()
+void TerminalDisplay::applyFontDPI()
 {
     auto const newFontDPI = fontDPI();
     if (newFontDPI == _lastFontDPI)
@@ -445,7 +445,7 @@ void TerminalWidget::applyFontDPI()
     applyResize(newPixelSize, *_session, *_renderer);
 }
 
-void TerminalWidget::logDisplayInfo()
+void TerminalDisplay::logDisplayInfo()
 {
     if (!_session)
         return;
@@ -481,7 +481,7 @@ void TerminalWidget::logDisplayInfo()
     // clang-format on
 }
 
-void TerminalWidget::watchKdeDpiSetting()
+void TerminalDisplay::watchKdeDpiSetting()
 {
 #if defined(__unix__)
     auto const kcmFontsFile = kcmFontsFilePath();
@@ -493,13 +493,13 @@ void TerminalWidget::watchKdeDpiSetting()
 #endif
 }
 
-void TerminalWidget::onDpiConfigChanged()
+void TerminalDisplay::onDpiConfigChanged()
 {
     applyFontDPI();
     watchKdeDpiSetting(); // re-watch file
 }
 
-void TerminalWidget::onSceneGrapheInitialized()
+void TerminalDisplay::onSceneGrapheInitialized()
 {
     // displayLog()("onSceneGrapheInitialized");
 
@@ -509,7 +509,7 @@ void TerminalWidget::onSceneGrapheInitialized()
 #endif
 }
 
-void TerminalWidget::onBeforeSynchronize()
+void TerminalDisplay::onBeforeSynchronize()
 {
     if (!_session)
         return;
@@ -538,7 +538,7 @@ void TerminalWidget::onBeforeSynchronize()
     _renderTarget->setViewSize(viewSize);
 }
 
-void TerminalWidget::createRenderer()
+void TerminalDisplay::createRenderer()
 {
     Require(!_renderTarget);
     Require(_session);
@@ -586,19 +586,19 @@ void TerminalWidget::createRenderer()
     connect(window(),
             &QQuickWindow::beforeRendering,
             this,
-            &TerminalWidget::onBeforeRendering,
+            &TerminalDisplay::onBeforeRendering,
             Qt::ConnectionType::DirectConnection);
 
     // connect(window(),
     //         &QQuickWindow::beforeRenderPassRecording,
     //         this,
-    //         &TerminalWidget::paint,
+    //         &TerminalDisplay::paint,
     //         Qt::DirectConnection);
 
     connect(window(),
             &QQuickWindow::afterRendering,
             this,
-            &TerminalWidget::onAfterRendering,
+            &TerminalDisplay::onAfterRendering,
             Qt::DirectConnection);
 
     configureScreenHooks();
@@ -608,24 +608,24 @@ void TerminalWidget::createRenderer()
 
     // {{{ Apply proper grid/pixel sizes to terminal
     {
-        auto const qtBaseWidgetSize =
+        auto const qtBaseDisplaySize =
             ImageSize { vtbackend::Width::cast_from(width()), vtbackend::Height::cast_from(height()) };
-        _renderer->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseWidgetSize));
+        _renderer->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseDisplaySize));
         // resize widget (same pixels, but adjusted terminal rows/columns and margin)
-        auto const actualWidgetSize = qtBaseWidgetSize * contentScale();
-        applyResize(actualWidgetSize, *_session, *_renderer);
+        auto const actualDisplaySize = qtBaseDisplaySize * contentScale();
+        applyResize(actualDisplaySize, *_session, *_renderer);
     }
     // }}}
 
     displayLog()("Implicit size: {}x{}", implicitWidth(), implicitHeight());
 }
 
-QMatrix4x4 TerminalWidget::createModelMatrix() const
+QMatrix4x4 TerminalDisplay::createModelMatrix() const
 {
     QMatrix4x4 result;
 
     // Compose model matrix from our transform properties in the QML
-    QQmlListProperty<QQuickTransform> transformations = const_cast<TerminalWidget*>(this)->transform();
+    QQmlListProperty<QQuickTransform> transformations = const_cast<TerminalDisplay*>(this)->transform();
     auto const count = transformations.count(&transformations);
     for (int i = 0; i < count; i++)
     {
@@ -636,7 +636,7 @@ QMatrix4x4 TerminalWidget::createModelMatrix() const
     return result;
 }
 
-void TerminalWidget::onBeforeRendering()
+void TerminalDisplay::onBeforeRendering()
 {
     if (_renderTarget->initialized())
         return;
@@ -645,7 +645,7 @@ void TerminalWidget::onBeforeRendering()
     _renderTarget->initialize();
 }
 
-void TerminalWidget::paint()
+void TerminalDisplay::paint()
 {
     // We consider *this* the true initial start-time.
     // That shouldn't be significantly different from the object construction
@@ -694,7 +694,7 @@ void TerminalWidget::paint()
     }
 }
 
-float TerminalWidget::uptime() const noexcept
+float TerminalDisplay::uptime() const noexcept
 {
     using namespace std::chrono;
     auto const now = steady_clock::now();
@@ -703,7 +703,7 @@ float TerminalWidget::uptime() const noexcept
     return uptimeSecs;
 }
 
-void TerminalWidget::onAfterRendering()
+void TerminalDisplay::onAfterRendering()
 {
     // This method is called after the QML scene has been rendered.
     // We use this to schedule the next rendering frame, if needed.
@@ -736,8 +736,8 @@ void TerminalWidget::onAfterRendering()
 }
 // }}}
 
-// {{{ Qt Widget Input Event handling & forwarding
-void TerminalWidget::keyPressEvent(QKeyEvent* keyEvent)
+// {{{ Qt Display Input Event handling & forwarding
+void TerminalDisplay::keyPressEvent(QKeyEvent* keyEvent)
 {
     sendKeyEvent(keyEvent,
                  keyEvent->isAutoRepeat() ? vtbackend::KeyboardEventType::Repeat
@@ -745,45 +745,45 @@ void TerminalWidget::keyPressEvent(QKeyEvent* keyEvent)
                  *_session);
 }
 
-void TerminalWidget::keyReleaseEvent(QKeyEvent* keyEvent)
+void TerminalDisplay::keyReleaseEvent(QKeyEvent* keyEvent)
 {
     sendKeyEvent(keyEvent, vtbackend::KeyboardEventType::Release, *_session);
 }
 
-void TerminalWidget::wheelEvent(QWheelEvent* event)
+void TerminalDisplay::wheelEvent(QWheelEvent* event)
 {
     sendWheelEvent(event, *_session);
 }
 
-void TerminalWidget::mousePressEvent(QMouseEvent* event)
+void TerminalDisplay::mousePressEvent(QMouseEvent* event)
 {
     sendMousePressEvent(event, *_session);
 }
 
-void TerminalWidget::mouseMoveEvent(QMouseEvent* event)
+void TerminalDisplay::mouseMoveEvent(QMouseEvent* event)
 {
     sendMouseMoveEvent(event, *_session);
 }
 
-void TerminalWidget::hoverMoveEvent(QHoverEvent* event)
+void TerminalDisplay::hoverMoveEvent(QHoverEvent* event)
 {
     QQuickItem::hoverMoveEvent(event);
     sendMouseMoveEvent(event, *_session);
 }
 
-void TerminalWidget::mouseReleaseEvent(QMouseEvent* event)
+void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
 {
     sendMouseReleaseEvent(event, *_session);
 }
 
-void TerminalWidget::focusInEvent(QFocusEvent* event)
+void TerminalDisplay::focusInEvent(QFocusEvent* event)
 {
     QQuickItem::focusInEvent(event);
     if (_session)
         _session->sendFocusInEvent(); // TODO: paint with "normal" colors
 }
 
-void TerminalWidget::focusOutEvent(QFocusEvent* event)
+void TerminalDisplay::focusOutEvent(QFocusEvent* event)
 {
     QQuickItem::focusOutEvent(event);
     if (_session)
@@ -791,7 +791,7 @@ void TerminalWidget::focusOutEvent(QFocusEvent* event)
 }
 
 #if QT_CONFIG(im)
-void TerminalWidget::inputMethodEvent(QInputMethodEvent* event)
+void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
 {
     terminal().updateInputMethodPreeditString(event->preeditString().toStdString());
 
@@ -806,7 +806,7 @@ void TerminalWidget::inputMethodEvent(QInputMethodEvent* event)
 }
 #endif
 
-QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery query) const
+QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
 {
     QPoint cursorPos = QPoint();
     auto const dpr = contentScale();
@@ -836,7 +836,7 @@ QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery query) const
         }
         // TODO?: case Qt::ImCursorRectangle:
         // case Qt::ImMicroFocus:
-        //     return imageToWidget(QRect(cursorPos.x(), cursorPos.y(), 1, 1));
+        //     return imageToDisplay(QRect(cursorPos.x(), cursorPos.y(), 1, 1));
         // case Qt::ImFont:
         //     return QFont("monospace", 10);
         case Qt::ImCursorPosition:
@@ -859,7 +859,7 @@ QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery query) const
     return QQuickItem::inputMethodQuery(query);
 }
 
-bool TerminalWidget::event(QEvent* event)
+bool TerminalDisplay::event(QEvent* event)
 {
     try
     {
@@ -884,13 +884,13 @@ bool TerminalWidget::event(QEvent* event)
 // }}}
 
 // {{{ helpers
-void TerminalWidget::onScrollBarValueChanged(int value)
+void TerminalDisplay::onScrollBarValueChanged(int value)
 {
     terminal().viewport().scrollTo(vtbackend::ScrollOffset::cast_from(value));
     scheduleRedraw();
 }
 
-double TerminalWidget::contentScale() const
+double TerminalDisplay::contentScale() const
 {
 #if !defined(__APPLE__) && !defined(_WIN32)
     if (auto const kcmFontsFile = kcmFontsFilePath())
@@ -912,13 +912,13 @@ double TerminalWidget::contentScale() const
     }
 #endif
     if (!window())
-        // This can only happen during TerminalWidget instanciation
+        // This can only happen during TerminalDisplay instanciation
         return 1.0;
 
     return window()->devicePixelRatio();
 }
 
-void TerminalWidget::updateImplicitSize()
+void TerminalDisplay::updateImplicitSize()
 {
     assert(_renderer);
     assert(_session);
@@ -931,7 +931,7 @@ void TerminalWidget::updateImplicitSize()
     setImplicitHeight(unbox<qreal>(implicitViewSize.height));
 }
 
-void TerminalWidget::updateMinimumSize()
+void TerminalDisplay::updateMinimumSize()
 {
     Require(_renderer);
     assert(_session);
@@ -950,7 +950,7 @@ void TerminalWidget::updateMinimumSize()
 // }}}
 
 // {{{ TerminalDisplay: attributes
-vtbackend::RefreshRate TerminalWidget::refreshRate() const
+vtbackend::RefreshRate TerminalDisplay::refreshRate() const
 {
     auto* const screen = window()->screen();
     if (!screen)
@@ -964,60 +964,60 @@ vtbackend::RefreshRate TerminalWidget::refreshRate() const
         return systemRefreshRate;
 }
 
-DPI TerminalWidget::fontDPI() const noexcept
+DPI TerminalDisplay::fontDPI() const noexcept
 {
     return DPI { 96, 96 } * contentScale();
 }
 
-bool TerminalWidget::isFullScreen() const
+bool TerminalDisplay::isFullScreen() const
 {
     return window()->visibility() == QQuickWindow::Visibility::FullScreen;
 }
 
-vtbackend::ImageSize TerminalWidget::pixelSize() const
+vtbackend::ImageSize TerminalDisplay::pixelSize() const
 {
     assert(_session);
     return gridMetrics().cellSize * _session->terminal().pageSize();
 }
 
-vtbackend::ImageSize TerminalWidget::cellSize() const
+vtbackend::ImageSize TerminalDisplay::cellSize() const
 {
     return gridMetrics().cellSize;
 }
 // }}}
 
 // {{{ TerminalDisplay: (user requested) actions
-void TerminalWidget::post(std::function<void()> fn)
+void TerminalDisplay::post(std::function<void()> fn)
 {
     postToObject(this, std::move(fn));
 }
 
-vtbackend::FontDef TerminalWidget::getFontDef()
+vtbackend::FontDef TerminalDisplay::getFontDef()
 {
     Require(_renderer);
     return getFontDefinition(*_renderer);
 }
 
-void TerminalWidget::copyToClipboard(std::string_view data)
+void TerminalDisplay::copyToClipboard(std::string_view data)
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
         clipboard->setText(QString::fromUtf8(data.data(), static_cast<int>(data.size())));
 }
 
-void TerminalWidget::inspect()
+void TerminalDisplay::inspect()
 {
 // Ensure we're invoked on GUI thread when calling doDumpState().
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-    QMetaObject::invokeMethod(this, &TerminalWidget::doDumpState, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(this, &TerminalDisplay::doDumpState, Qt::QueuedConnection);
 #endif
 }
 
-void TerminalWidget::doDumpState()
+void TerminalDisplay::doDumpState()
 {
     _doDumpState = true;
 }
 
-void TerminalWidget::doDumpStateInternal()
+void TerminalDisplay::doDumpStateInternal()
 {
 
     auto finally = crispy::finally { [this] {
@@ -1109,12 +1109,12 @@ void TerminalWidget::doDumpStateInternal()
         .save(QString::fromStdString(screenshotFilePath.string()));
 }
 
-void TerminalWidget::notify(std::string_view /*_title*/, std::string_view /*_body*/)
+void TerminalDisplay::notify(std::string_view /*_title*/, std::string_view /*_body*/)
 {
     // TODO: showNotification callback to Controller?
 }
 
-void TerminalWidget::resizeWindow(vtbackend::Width newWidth, vtbackend::Height newHeight)
+void TerminalDisplay::resizeWindow(vtbackend::Width newWidth, vtbackend::Height newHeight)
 {
     Require(_session != nullptr);
 
@@ -1145,7 +1145,7 @@ void TerminalWidget::resizeWindow(vtbackend::Width newWidth, vtbackend::Height n
     terminal().resizeScreen(requestedPageSize, pixels);
 }
 
-void TerminalWidget::resizeWindow(vtbackend::LineCount newLineCount, vtbackend::ColumnCount newColumnCount)
+void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend::ColumnCount newColumnCount)
 {
     if (isFullScreen())
     {
@@ -1167,7 +1167,7 @@ void TerminalWidget::resizeWindow(vtbackend::LineCount newLineCount, vtbackend::
     window()->resize(QSize(pixels.width.as<int>(), pixels.height.as<int>()));
 }
 
-void TerminalWidget::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
+void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
 {
     Require(_session != nullptr);
     Require(_renderTarget != nullptr);
@@ -1185,7 +1185,7 @@ void TerminalWidget::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
     }
 }
 
-bool TerminalWidget::setFontSize(text::font_size newFontSize)
+bool TerminalDisplay::setFontSize(text::font_size newFontSize)
 {
     Require(_session != nullptr);
     Require(_renderTarget != nullptr);
@@ -1195,18 +1195,18 @@ bool TerminalWidget::setFontSize(text::font_size newFontSize)
     if (!_renderer->setFontSize(newFontSize))
         return false;
 
-    auto const qtBaseWidgetSize =
+    auto const qtBaseDisplaySize =
         ImageSize { vtbackend::Width::cast_from(width()), vtbackend::Height::cast_from(height()) };
-    _renderer->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseWidgetSize));
+    _renderer->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseDisplaySize));
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
-    auto const actualWidgetSize = qtBaseWidgetSize * contentScale();
-    applyResize(actualWidgetSize, *_session, *_renderer);
+    auto const actualDisplaySize = qtBaseDisplaySize * contentScale();
+    applyResize(actualDisplaySize, *_session, *_renderer);
     updateMinimumSize();
     // logDisplayInfo();
     return true;
 }
 
-bool TerminalWidget::setPageSize(PageSize newPageSize)
+bool TerminalDisplay::setPageSize(PageSize newPageSize)
 {
     if (newPageSize == terminal().pageSize())
         return false;
@@ -1220,36 +1220,36 @@ bool TerminalWidget::setPageSize(PageSize newPageSize)
     return true;
 }
 
-void TerminalWidget::setMouseCursorShape(MouseCursorShape newCursorShape)
+void TerminalDisplay::setMouseCursorShape(MouseCursorShape newCursorShape)
 {
     if (auto const qtShape = toQtMouseShape(newCursorShape); qtShape != cursor().shape())
         setCursor(qtShape);
 }
 
-void TerminalWidget::setWindowFullScreen()
+void TerminalDisplay::setWindowFullScreen()
 {
     window()->showFullScreen();
 }
 
-void TerminalWidget::setWindowMaximized()
+void TerminalDisplay::setWindowMaximized()
 {
     window()->showMaximized();
     _maximizedState = true;
 }
 
-void TerminalWidget::setWindowNormal()
+void TerminalDisplay::setWindowNormal()
 {
     updateMinimumSize();
     window()->showNormal();
     _maximizedState = false;
 }
 
-void TerminalWidget::setBlurBehind(bool enable)
+void TerminalDisplay::setBlurBehind(bool enable)
 {
     BlurBehind::setEnabled(window(), enable);
 }
 
-void TerminalWidget::toggleFullScreen()
+void TerminalDisplay::toggleFullScreen()
 {
     if (!isFullScreen())
     {
@@ -1262,7 +1262,7 @@ void TerminalWidget::toggleFullScreen()
         window()->showNormal();
 }
 
-void TerminalWidget::toggleTitleBar()
+void TerminalDisplay::toggleTitleBar()
 {
     auto const currentlyFrameless = (window()->flags() & Qt::FramelessWindowHint) != 0;
     _maximizedState = window()->visibility() == QQuickWindow::Visibility::Maximized;
@@ -1270,14 +1270,14 @@ void TerminalWidget::toggleTitleBar()
     window()->setFlag(Qt::FramelessWindowHint, !currentlyFrameless);
 }
 
-void TerminalWidget::setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover)
+void TerminalDisplay::setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover)
 {
     _renderer->setHyperlinkDecoration(normal, hover);
 }
 // }}}
 
 // {{{ TerminalDisplay: terminal events
-void TerminalWidget::scheduleRedraw()
+void TerminalDisplay::scheduleRedraw()
 {
     auto const currentHistoryLineCount = terminal().currentScreen().historyLineCount();
     if (currentHistoryLineCount != _lastHistoryLineCount)
@@ -1291,18 +1291,18 @@ void TerminalWidget::scheduleRedraw()
         post([this]() { window()->update(); });
 }
 
-void TerminalWidget::renderBufferUpdated()
+void TerminalDisplay::renderBufferUpdated()
 {
     scheduleRedraw();
 }
 
-void TerminalWidget::closeDisplay()
+void TerminalDisplay::closeDisplay()
 {
     displayLog()("closeDisplay");
     emit terminated();
 }
 
-void TerminalWidget::onSelectionCompleted()
+void TerminalDisplay::onSelectionCompleted()
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
@@ -1312,7 +1312,7 @@ void TerminalWidget::onSelectionCompleted()
     }
 }
 
-void TerminalWidget::bufferChanged(vtbackend::ScreenType type)
+void TerminalDisplay::bufferChanged(vtbackend::ScreenType type)
 {
     using Type = vtbackend::ScreenType;
     switch (type)
@@ -1324,7 +1324,7 @@ void TerminalWidget::bufferChanged(vtbackend::ScreenType type)
     // scheduleRedraw();
 }
 
-void TerminalWidget::discardImage(vtbackend::Image const& image)
+void TerminalDisplay::discardImage(vtbackend::Image const& image)
 {
     _renderer->discardImage(image);
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalSession.h>
-#include <contour/display/TerminalWidget.h>
+#include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
 
 #include <vtbackend/MatchModes.h>
@@ -195,14 +195,14 @@ TerminalSession::~TerminalSession()
         _screenUpdateThread->join();
 }
 
-void TerminalSession::detachDisplay(display::TerminalWidget& display)
+void TerminalSession::detachDisplay(display::TerminalDisplay& display)
 {
     sessionLog()("Detaching display from session.");
     Require(_display == &display);
     _display = nullptr;
 }
 
-void TerminalSession::attachDisplay(display::TerminalWidget& newDisplay)
+void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 {
     sessionLog()("Attaching display.");
     // newDisplay.setSession(*this); // NB: we're being called by newDisplay!
