@@ -38,7 +38,7 @@ class OpenGLRenderer;
 
 // It currently just handles one terminal inside, but ideally later it can handle
 // multiple terminals in tabbed views as well tiled.
-class TerminalWidget: public QQuickItem
+class TerminalDisplay: public QQuickItem
 {
     Q_OBJECT
     Q_PROPERTY(TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
@@ -51,8 +51,8 @@ class TerminalWidget: public QQuickItem
     TerminalSession* getSessionHelper() { return _session; }
 
   public:
-    explicit TerminalWidget(QQuickItem* parent = nullptr);
-    ~TerminalWidget() override;
+    explicit TerminalDisplay(QQuickItem* parent = nullptr);
+    ~TerminalDisplay() override;
 
     // {{{ QML property helper
     [[nodiscard]] QString title() const

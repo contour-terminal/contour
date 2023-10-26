@@ -13,7 +13,7 @@ add_library(ContourTerminalDisplay STATIC
     Blur.cpp Blur.h
     OpenGLRenderer.cpp OpenGLRenderer.h
     ShaderConfig.cpp ShaderConfig.h
-    TerminalWidget.cpp TerminalWidget.h
+    TerminalDisplay.cpp TerminalDisplay.h
     ${QT_RESOURCES}
 )
 set_target_properties(ContourTerminalDisplay PROPERTIES AUTOMOC ON)

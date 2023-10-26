@@ -28,7 +28,7 @@ namespace contour
 
 namespace display
 {
-    class TerminalWidget;
+    class TerminalDisplay;
 }
 
 class ContourGuiApp;
@@ -205,11 +205,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     vtbackend::Terminal const& terminal() const noexcept { return _terminal; }
     vtbackend::ScreenType currentScreenType() const noexcept { return _currentScreenType; }
 
-    display::TerminalWidget* display() noexcept { return _display; }
-    display::TerminalWidget const* display() const noexcept { return _display; }
+    display::TerminalDisplay* display() noexcept { return _display; }
+    display::TerminalDisplay const* display() const noexcept { return _display; }
 
-    void attachDisplay(display::TerminalWidget& display);
-    void detachDisplay(display::TerminalWidget& display);
+    void attachDisplay(display::TerminalDisplay& display);
+    void detachDisplay(display::TerminalDisplay& display);
 
     Q_INVOKABLE void applyPendingFontChange(bool answer, bool remember);
     Q_INVOKABLE void executePendingBufferCapture(bool answer, bool remember);
@@ -397,7 +397,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;
-    display::TerminalWidget* _display = nullptr;
+    display::TerminalDisplay* _display = nullptr;
 
     std::unique_ptr<QFileSystemWatcher> _configFileChangeWatcher;
 
