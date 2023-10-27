@@ -16,6 +16,7 @@
 
 #include <QtCore/QAbstractItemModel>
 #include <QtCore/QFileSystemWatcher>
+#include <QtCore/QThread>
 #include <QtQml/QJSValue>
 
 #include <cstdint>
@@ -423,6 +424,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::optional<CaptureBufferRequest> _pendingBufferCapture;
     std::optional<vtbackend::FontDef> _pendingFontChange;
     PermissionCache _rememberedPermissions;
+    std::unique_ptr<QThread> _exitWatcherThread;
 };
 
 } // namespace contour

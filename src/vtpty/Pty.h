@@ -66,6 +66,9 @@ class Pty
     /// This is automatically invoked when the destructor is called.
     virtual void close() = 0;
 
+    /// Blocks until the underlying PTY is closed.
+    virtual void waitForClosed() = 0;
+
     /// Returns true if the underlying PTY is closed, otherwise false.
     [[nodiscard]] virtual bool isClosed() const noexcept = 0;
 

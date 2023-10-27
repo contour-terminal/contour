@@ -107,6 +107,12 @@ void ConPty::start()
         throw runtime_error { GetLastErrorAsString() };
 }
 
+void ConPty::waitForClosed()
+{
+    while (!isClosed())
+        Sleep(1000);
+}
+
 void ConPty::close()
 {
     ptyLog()("ConPty.close()");

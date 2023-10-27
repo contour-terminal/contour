@@ -28,6 +28,7 @@ class MockViewPty: public Pty
 
     void start() override;
     void close() override;
+    void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override;
 
     [[nodiscard]] std::string& stdinBuffer() noexcept { return _inputBuffer; }
