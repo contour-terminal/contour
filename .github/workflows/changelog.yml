@@ -14,4 +14,4 @@ jobs:
       - uses: tarides/changelog-check-action@v2
         name: Check changelog
         with:
-          changelog: metainfo.md
+          changelog: metainfo.xml

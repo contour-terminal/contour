@@ -19,12 +19,6 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #include <QtOpenGL/QOpenGLPixelTransferOptions>
-#else
-    #include <QtGui/QOpenGLPixelTransferOptions>
-#endif
-
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -326,6 +320,9 @@ void OpenGLRenderer::initialize()
     CHECKED_GL(_rectTimeLocation = _rectShader->uniformLocation("u_time")); // NOLINT(cppcoreguidelines-prefer-member-initializer)
     // clang-format on
 
+    // Image row alignment is 1 byte (OpenGL defaults to 4).
+    _transferOptions.setAlignment(1);
+
     setRenderSize(_renderTargetSize);
 
     assert(_textProjectionLocation != -1);
@@ -593,10 +590,10 @@ void OpenGLRenderer::execute(std::chrono::steady_clock::time_point now)
     //
     if (!_scheduledExecutions.uploadTiles.empty())
     {
-        glBindTexture(GL_TEXTURE_2D, _textureAtlas.textureId);
+        _textureAtlas.gpuTexture.bind();
         for (auto const& params: _scheduledExecutions.uploadTiles)
             executeUploadTile(params);
-        glBindTexture(GL_TEXTURE_2D, 0);
+        _textureAtlas.gpuTexture.release();
     }
 
     // render textures
@@ -622,9 +619,7 @@ void OpenGLRenderer::executeRenderTextures()
     RenderBatch& batch = _scheduledExecutions.renderBatch;
     if (!batch.renderTiles.empty())
     {
-        //_textureAtlas.gpuTexture.bind(batch.userdata /* unit */);
-        glBindTexture(GL_TEXTURE_2D, _textureAtlas.textureId);
-
+        _textureAtlas.gpuTexture.bind();
         glBindVertexArray(_textVAO);
 
         // upload buffer
@@ -636,8 +631,7 @@ void OpenGLRenderer::executeRenderTextures()
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(batch.renderTiles.size() * 6));
 
         glBindVertexArray(0);
-        //_textureAtlas.gpuTexture.release(batch.userdata /* unit */);
-        glBindTexture(GL_TEXTURE_2D, 0);
+        _textureAtlas.gpuTexture.release();
     }
 
     _scheduledExecutions.clear();
@@ -653,7 +647,6 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     // _textureAtlas.textureSize = param.size;
     // _textureAtlas.properties = param.properties;
 
-#if 0
     if (_textureAtlas.gpuTexture.isCreated())
         _textureAtlas.gpuTexture.destroy();
 
@@ -671,62 +664,6 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
                     QImage::Format::Format_RGBA8888);
     stubData.fill(qRgba(0x00, 0xA0, 0x00, 0xC0));
     _textureAtlas.gpuTexture.setData(stubData);
-#else
-    if (_textureAtlas.textureId)
-        glDeleteTextures(1, &_textureAtlas.textureId);
-    glGenTextures(1, &_textureAtlas.textureId);
-    glBindTexture(GL_TEXTURE_2D, _textureAtlas.textureId);
-    glTexParameteri(GL_TEXTURE_2D,
-                    GL_TEXTURE_MAG_FILTER,
-                    GL_NEAREST); // NEAREST, because LINEAR yields borders at the edges
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    constexpr auto const Target = GL_TEXTURE_2D;
-    constexpr auto const LevelOfDetail = 0;
-    constexpr auto const Type = GL_UNSIGNED_BYTE;
-    std::vector<uint8_t> stub;
-    // {{{ fill stub
-    stub.resize(param.size.area() * element_count(param.properties.format));
-    auto t = stub.begin();
-    switch (param.properties.format)
-    {
-        case atlas::Format::Red:
-            for (auto i = 0u; i < param.size.area(); ++i)
-                *t++ = 0x40;
-            break;
-        case atlas::Format::RGB:
-            for (auto i = 0u; i < param.size.area(); ++i)
-            {
-                *t++ = 0x00;
-                *t++ = 0x00;
-                *t++ = 0x80;
-            }
-            break;
-        case atlas::Format::RGBA:
-            for (auto i = 0u; i < param.size.area(); ++i)
-            {
-                *t++ = 0x00;
-                *t++ = 0xA0;
-                *t++ = 0x00;
-                *t++ = 0xC0;
-            }
-            break;
-    }
-    // }}}
-    GLenum const glFmt = GL_RGBA;
-    GLint constexpr UnusedParam = 0;
-    CHECKED_GL(glTexImage2D(Target,
-                            LevelOfDetail,
-                            (int) glFmt,
-                            unbox<int>(param.size.width),
-                            unbox<int>(param.size.height),
-                            UnusedParam,
-                            glFmt,
-                            Type,
-                            stub.data()));
-#endif
 
     displayLog()(
         "GL configure atlas: {} {} GL texture Id {}", param.size, param.properties.format, textureAtlasId());
@@ -776,16 +713,13 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
             }
             break;
         }
-        case atlas::Format::RGBA: break;
+        case atlas::Format::RGBA:
+            // Already in expected format
+            break;
     }
-    // }}}
+        // }}}
 
-    // Image row alignment is 1 byte (OpenGL defaults to 4).
-    CHECKED_GL(glPixelStorei(GL_UNPACK_ALIGNMENT, param.rowAlignment));
-    // QOpenGLPixelTransferOptions transferOptions;
-    // transferOptions.setAlignment(1);
-
-#if 0
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
     _textureAtlas.gpuTexture.setData(param.location.x.value,
                                      param.location.y.value,
                                      0, // z
@@ -794,19 +728,17 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
                                      0, // depth
                                      QOpenGLTexture::PixelFormat::RGBA,
                                      QOpenGLTexture::PixelType::UInt8,
-                                     bitmapData /*, &transferOptions*/);
+                                     bitmapData,
+                                     &_transferOptions);
 #else
-    auto constexpr LevelOfDetail = 0;
-    auto constexpr BitmapType = GL_UNSIGNED_BYTE;
-    auto constexpr BitmapFormat = GL_RGBA;
     glTexSubImage2D(GL_TEXTURE_2D,
-                    LevelOfDetail,
+                    0, // level of detail
                     param.location.x.value,
                     param.location.y.value,
                     unbox<GLsizei>(param.bitmapSize.width),
                     unbox<GLsizei>(param.bitmapSize.height),
-                    BitmapFormat,
-                    BitmapType,
+                    GL_RGBA,          // source format
+                    GL_UNSIGNED_BYTE, // source type
                     bitmapData);
 #endif
 }

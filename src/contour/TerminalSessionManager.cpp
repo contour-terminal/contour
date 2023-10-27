@@ -3,6 +3,8 @@
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
 
+#include <QtQml/QQmlEngine>
+
 using std::make_unique;
 using std::nullopt;
 
@@ -26,6 +28,12 @@ TerminalSession* TerminalSessionManager::createSession()
     _sessions.push_back(session);
 
     connect(session, &TerminalSession::sessionClosed, [this, session]() { removeSession(*session); });
+
+    // Claim ownership of this object, so that it will be deleted automatically by the QML's GC.
+    //
+    // QQmlEngine falsely assumed that the object would not be needed anymore at random times in active
+    // sessions. This will work around it, by explicitly claiming ownership of the object.
+    QQmlEngine::setObjectOwnership(session, QQmlEngine::CppOwnership);
 
     return session;
 }
