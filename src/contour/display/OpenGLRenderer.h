@@ -15,9 +15,11 @@
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    #include <QtOpenGL/QOpenGLPixelTransferOptions>
     #include <QtOpenGL/QOpenGLShaderProgram>
     #include <QtOpenGL/QOpenGLTexture>
 #else
+    #include <QtGui/QOpenGLPixelTransferOptions>
     #include <QtGui/QOpenGLShaderProgram>
     #include <QtGui/QOpenGLTexture>
 #endif
@@ -171,6 +173,7 @@ class OpenGLRenderer final:
     QMatrix4x4 _projectionMatrix;
     QMatrix4x4 _viewMatrix;
     QMatrix4x4 _modelMatrix;
+    QOpenGLPixelTransferOptions _transferOptions;
 
     vtrasterizer::PageMargin _margin {};
 
@@ -188,8 +191,7 @@ class OpenGLRenderer final:
     // index equals AtlasID
     struct AtlasAttributes
     {
-        // QOpenGLTexture gpuTexture { QOpenGLTexture::Target::Target2D };
-        GLuint textureId {};
+        QOpenGLTexture gpuTexture { QOpenGLTexture::Target::Target2D };
         ImageSize textureSize {};
         vtrasterizer::atlas::AtlasProperties properties {};
     };
@@ -197,9 +199,8 @@ class OpenGLRenderer final:
 
     [[nodiscard]] GLuint textureAtlasId() const noexcept
     {
-        assert(_textureAtlas.textureId != 0);
-        return _textureAtlas.textureId;
-        // return _textureAtlas.gpuTexture.textureId();
+        assert(_textureAtlas.gpuTexture.textureId() != 0);
+        return _textureAtlas.gpuTexture.textureId();
     }
 
     // private data members for rendering filled rectangles

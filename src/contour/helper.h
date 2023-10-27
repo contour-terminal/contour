@@ -266,22 +266,26 @@ struct RenderStateManager
     }
 };
 
-#define CONSUME_GL_ERRORS()                         \
-    do                                              \
-    {                                               \
-        GLenum err {};                              \
-        while ((err = glGetError()) != GL_NO_ERROR) \
-            ;                                       \
+#define CONSUME_GL_ERRORS()                                                       \
+    do                                                                            \
+    {                                                                             \
+        GLenum err {};                                                            \
+        while ((err = glGetError()) != GL_NO_ERROR)                               \
+            errorLog()("Ignoring GL error {} in {}:{}", err, __FILE__, __LINE__); \
     } while (0)
 
 #define CHECKED_GL(code)                                            \
-    do                                                              \
-    {                                                               \
+    [&]() -> bool {                                                 \
         (code);                                                     \
         GLenum err {};                                              \
+        int fails = 0;                                              \
         while ((err = glGetError()) != GL_NO_ERROR)                 \
+        {                                                           \
             errorLog()("OpenGL error {} for call: {}", err, #code); \
-    } while (0)
+            fails++;                                                \
+        }                                                           \
+        return fails == 0;                                          \
+    }()
 
 } // namespace contour
 
