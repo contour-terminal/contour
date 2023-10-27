@@ -864,7 +864,6 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
     sessionLog()("Clearing history and perform terminal hard reset");
 
     _terminal.hardReset();
-    _terminal.forceRedraw([]() { this_thread::yield(); });
     return true;
 }
 
