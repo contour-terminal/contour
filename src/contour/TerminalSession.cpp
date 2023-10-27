@@ -260,6 +260,7 @@ void TerminalSession::terminate()
     if (!_display)
         return;
 
+    sessionLog()("Terminated. Closing display.");
     _display->closeDisplay();
 }
 
@@ -511,7 +512,10 @@ void TerminalSession::inspect()
 
     // Deferred termination? Then close display now.
     if (_terminal.device().isClosed() && !_app.dumpStateAtExit().has_value())
+    {
+        sessionLog()("Terminal device is closed. Closing display.");
         _display->closeDisplay();
+    }
 }
 
 void TerminalSession::notify(string_view title, string_view content)
@@ -558,7 +562,10 @@ void TerminalSession::onClosed()
     if (_app.dumpStateAtExit().has_value())
         inspect();
     else if (_display)
+    {
+        sessionLog()("Terminal device is closed. Closing display.");
         _display->closeDisplay();
+    }
 }
 
 void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
@@ -680,6 +687,7 @@ void TerminalSession::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType
 
     if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
     {
+        sessionLog()("Terminated and waiting for key press. Closing display.");
         _display->closeDisplay();
         return;
     }
@@ -711,6 +719,7 @@ void TerminalSession::sendCharEvent(
 
     if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
     {
+        sessionLog()("Terminated and waiting for key press. Closing display.");
         _display->closeDisplay();
         return;
     }
