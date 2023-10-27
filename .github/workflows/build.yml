@@ -445,7 +445,7 @@ jobs:
         run: sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: Install Clang
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
-        run: sudo apt install -y clang-${{ steps.extract_matrix.outputs.CC_VERSION }}
+        run: sudo apt install -y clang-${{ steps.extract_matrix.outputs.CC_VERSION }} #libc++-dev libc++abi-dev
       - name: Install Clang-Tidy
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
         run: sudo apt install -y clang-tidy-${{ steps.extract_matrix.outputs.CC_VERSION }}
@@ -458,23 +458,30 @@ jobs:
         run: |
           CC_NAME=$(echo "${{ matrix.compiler }}" | awk '{ print tolower($1); }')
           CC_VER=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
-          test "${CC_NAME}" = "clang" && CC_EXE="clang++"
-          test "${CC_NAME}" = "gcc"   && CC_EXE="g++"
           test "${{ matrix.compiler }}" = "GCC 8"  && EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
-          test "${{ startsWith(matrix.compiler, 'Clang') }}" = "true" && EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DENABLE_TIDY=ON"
-          BUILD_DIR="build" \
-            CMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
-            CXX="${CC_EXE}-${CC_VER}" \
-            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
-                               -DCMAKE_CXX_STANDARD=${{ matrix.cxx }} \
-                               -DCMAKE_INSTALL_PREFIX="/usr" \
-                               -DCONTOUR_INSTALL_TOOLS=ON \
-                               -DCONTOUR_QT_VERSION=${{ matrix.qt_version }} \
-                               -DPEDANTIC_COMPILER=ON \
-                               -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
-                               -DLIBUNICODE_UCD_BASE_DIR=$(pwd)/_ucd \
-                               " \
-            ./scripts/ci-prepare-contour.sh
+          test "${CC_NAME}" = "gcc" && CC_EXE="g++"
+          if [[ "${CC_NAME}" = "clang" ]]; then
+              CC_EXE="clang++"
+              # CMAKE_CXX_FLAGS="-stdlib=libc++"
+              # CMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -lc++abi"
+              # EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DENABLE_TIDY=ON"
+              # EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=OFF"
+          fi
+          cmake \
+              $EXTRA_CMAKE_FLAGS \
+              -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
+              -DCMAKE_CXX_STANDARD=${{ matrix.cxx }} \
+              -DCMAKE_CXX_COMPILER="${CC_EXE}-${CC_VER}" \
+              -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}" \
+              -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS}" \
+              -DCONTOUR_TESTING=ON \
+              -DCMAKE_INSTALL_PREFIX="/usr" \
+              -DCONTOUR_INSTALL_TOOLS=ON \
+              -DCONTOUR_QT_VERSION=${{ matrix.qt_version }} \
+              -DPEDANTIC_COMPILER=ON \
+              -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
+              -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
+              -S . -B build
       - name: "build"
         run: cmake --build build/ -- -j3
       - name: "test: crispy"
