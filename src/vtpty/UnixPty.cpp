@@ -14,6 +14,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #if defined(__APPLE__)
     #include <util.h>
@@ -111,6 +112,20 @@ PtySlaveHandle UnixPty::Slave::handle() const noexcept
 void UnixPty::Slave::close()
 {
     _slaveFd.close();
+}
+
+void UnixPty::waitForClosed()
+{
+    crispy::read_selector selector;
+    selector.want_read(_masterFd);
+    while (true)
+    {
+        selector.wait_one();
+        if (isClosed())
+            break;
+
+        std::this_thread::yield();
+    }
 }
 
 bool UnixPty::Slave::isClosed() const noexcept

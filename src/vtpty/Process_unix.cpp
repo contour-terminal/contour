@@ -252,6 +252,11 @@ Pty const& Process::pty() const noexcept
     return *_d->pty;
 }
 
+void Process::waitForClosed()
+{
+    (void) wait();
+}
+
 optional<Process::ExitStatus> Process::checkStatus() const
 {
     return _d->checkStatus(false);

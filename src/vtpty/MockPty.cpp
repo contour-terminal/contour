@@ -65,6 +65,11 @@ void MockPty::close()
     _closed = true;
 }
 
+void MockPty::waitForClosed()
+{
+    // No-op. as we're a mock-pty.
+}
+
 bool MockPty::isClosed() const noexcept
 {
     return _closed;

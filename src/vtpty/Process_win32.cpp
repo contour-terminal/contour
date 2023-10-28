@@ -250,6 +250,14 @@ void Process::start()
     });
 }
 
+void Process::waitForClosed()
+{
+    Require(static_cast<ConPty const*>(_d->pty.get()));
+
+    // TODO: Should probably wait for process exit instead here
+    _d->pty->waitForClosed();
+}
+
 Pty& Process::pty() noexcept
 {
     return *_d->pty;

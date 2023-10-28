@@ -126,6 +126,7 @@
           <li>Fixes vi mode `f` action freeze on last line</li>
           <li>Fixes AltGr handling on Windows (#150)</li>
           <li>Fixes rarely happening bad access to GPU texture atlas (#1309)</li>
+          <li>Fixes terminal session not being terminated when the process terminated, but the PTY handle was still open (e.g. by other processes).</li>
           <li>Do not clear search term when entering search editor again.</li>
           <li>Clear search term when switch to insert vi mode (#1135)</li>
           <li>Delete dpi_scale entry in configuration (#1137)</li>

@@ -55,6 +55,7 @@ class UnixPty final: public Pty
     [[nodiscard]] PtyMasterHandle handle() const noexcept;
     void start() override;
     void close() override;
+    void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
     [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage,

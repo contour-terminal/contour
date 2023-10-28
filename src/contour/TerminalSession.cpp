@@ -155,6 +155,23 @@ namespace
         return nextSessionId++;
     }
 
+    class ExitWatcherThread: public QThread
+    {
+      public:
+        ExitWatcherThread(TerminalSession& session): _session { session } {}
+
+        void run() override
+        {
+            sessionLog()("ExitWatcherThread: Started.");
+            _session.terminal().device().waitForClosed();
+            sessionLog()("ExitWatcherThread: Terminal device closed.");
+            _session.onClosed();
+        }
+
+      private:
+        TerminalSession& _session;
+    };
+
 } // namespace
 
 TerminalSession::TerminalSession(unique_ptr<vtpty::Pty> pty, ContourGuiApp& app):
@@ -168,7 +185,8 @@ TerminalSession::TerminalSession(unique_ptr<vtpty::Pty> pty, ContourGuiApp& app)
     _terminal { *this,
                 std::move(pty),
                 createSettingsFromConfig(_config, _profile, _currentColorPreference),
-                std::chrono::steady_clock::now() }
+                std::chrono::steady_clock::now() },
+    _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) }
 {
     if (app.liveConfig())
     {
@@ -191,6 +209,8 @@ TerminalSession::~TerminalSession()
     sessionLog()("Destroying terminal session.");
     _terminating = true;
     _terminal.device().wakeupReader();
+    if (_exitWatcherThread->isRunning())
+        _exitWatcherThread->terminate();
     if (_screenUpdateThread)
         _screenUpdateThread->join();
 }
@@ -231,6 +251,7 @@ void TerminalSession::start()
 {
     _terminal.device().start();
     _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
+    _exitWatcherThread->start(QThread::LowPriority);
 }
 
 void TerminalSession::mainLoop()
