@@ -150,6 +150,9 @@ Pty::ReadResult ConPty::read(crispy::buffer_object<char>& buffer,
     if (!ReadFile(_input, buffer.hotEnd(), n, &nread, nullptr))
         return nullopt;
 
+    if (ptyInLog)
+        ptyInLog()("{} received: \"{}\"", "master", crispy::escape(buffer.hotEnd(), buffer.hotEnd() + nread));
+
     return { tuple { string_view { buffer.hotEnd(), nread }, false } };
 }
 
@@ -166,9 +169,15 @@ int ConPty::write(std::string_view data)
 
     DWORD nwritten {};
     if (WriteFile(_output, buf, static_cast<DWORD>(size), &nwritten, nullptr))
+    {
+        ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(data.data(), data.data() + nwritten));
         return static_cast<int>(nwritten);
+    }
     else
+    {
+        ptyOutLog()("PTY write of {} bytes failed.\n", size);
         return -1;
+    }
 }
 
 PageSize ConPty::pageSize() const noexcept
