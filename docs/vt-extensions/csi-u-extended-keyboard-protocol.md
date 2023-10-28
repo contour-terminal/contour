@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-The main problem with the classic way of processing keyboard input is, that it is highly ambiuous
+The main problem with the classic way of processing keyboard input is, that it is highly ambiguous
 when modifiers need to be used.
 
 CSIu aims to solve this by enabling disambiguation of keyboard events that would be ambiguous otherwise.
