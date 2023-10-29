@@ -4,7 +4,7 @@
 
 ## Windows 10 or newer
 
-Please download Contour for Windows (the `.msi` file) from our release page, and double click on it to install.
+Please download Contour for Windows (the `.msi` file) from our [release page](https://github.com/contour-terminal/contour/releases/latest/), and double click on it to install.
 
 ## Mac OS/X
 
