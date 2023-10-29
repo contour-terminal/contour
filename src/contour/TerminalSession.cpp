@@ -165,7 +165,7 @@ namespace
             sessionLog()("ExitWatcherThread: Started.");
             _session.terminal().device().waitForClosed();
             sessionLog()("ExitWatcherThread: Terminal device closed.");
-            _session.onClosed();
+            postToObject(&_session, [&]() { _session.onClosed(); });
         }
 
       private:
@@ -547,6 +547,10 @@ void TerminalSession::notify(string_view title, string_view content)
 
 void TerminalSession::onClosed()
 {
+    if (_onClosedHandled)
+        return;
+
+    _onClosedHandled = true;
     auto const now = steady_clock::now();
     auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
 
