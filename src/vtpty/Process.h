@@ -45,6 +45,7 @@ class [[nodiscard]] Process: public Pty
     //! Returns login shell of current user.
     static std::vector<std::string> loginShell(bool escapeSandbox);
 
+    static std::string userName();
     static std::filesystem::path homeDirectory();
 
     Process(ExecInfo const& exe, std::unique_ptr<Pty> pty):
@@ -123,9 +124,9 @@ struct fmt::formatter<vtpty::Process::ExitStatus>: fmt::formatter<std::string>
                                         strerror_s(buf, sizeof(buf), errno);
                                         return fmt::format("{} (signal number {})", buf, exit.signum);
 #else
-                                         return fmt::format("{} (signal number {})",
-                                                            strerror_r(errno, buf, sizeof(buf)),
-                                                            exit.signum);
+                                        return fmt::format("{} (signal number {})",
+                                                           strerror_r(errno, buf, sizeof(buf)),
+                                                           exit.signum);
 #endif
                                     } },
                        status);

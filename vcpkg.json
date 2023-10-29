@@ -6,6 +6,7 @@
         "fontconfig",
         "freetype",
         "harfbuzz",
+        "libssh2",
         "range-v3",
         "yaml-cpp"
     ]

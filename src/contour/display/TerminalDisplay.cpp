@@ -273,7 +273,12 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
                  "contentScale={}",
                  (void const*) this,
                  (void const*) newSession,
-                 newSession->profile().shell.program,
+                 newSession->profile().ssh.hostname.empty()
+                     ? fmt::format("program={}", newSession->profile().shell.program)
+                     : fmt::format("{}@{}:{}",
+                                   newSession->profile().ssh.username,
+                                   newSession->profile().ssh.hostname,
+                                   newSession->profile().ssh.port),
                  newSession->profile().terminalSize,
                  newSession->profile().fonts.size,
                  contentScale());

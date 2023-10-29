@@ -205,6 +205,7 @@ install_deps_popos()
         libqt5gui5
         libqt5opengl5-dev
         libqt5x11extras5-dev
+        libssh2-1-dev
         libutempter-dev
         libx11-xcb-dev
         libyaml-cpp-dev
@@ -246,6 +247,7 @@ install_deps_ubuntu()
         libfontconfig1-dev
         libfreetype6-dev
         libharfbuzz-dev
+        libssh2-1-dev
         libutempter-dev
         libx11-xcb-dev
         libyaml-cpp-dev
@@ -343,6 +345,7 @@ install_deps_FreeBSD()
         fontconfig \
         freetype2 \
         harfbuzz \
+        libssh2 \
         microsoft-gsl \
         ncurses \
         ninja \
@@ -371,6 +374,7 @@ install_deps_arch()
         fontconfig \
         git \
         harfbuzz \
+        libssh2 \
         libxcb \
         microsoft-gsl \
         ninja \
@@ -424,6 +428,7 @@ install_deps_suse()
         libqt5-qtx11extras-devel
         libutempter-devel
         libxcb-devel
+        libssh2-devel
         ncurses-devel
         ninja
         pkgconf
@@ -446,6 +451,7 @@ install_deps_fedora()
         freetype-devel
         gcc-c++
         harfbuzz-devel
+        libssh2-devel
         libxcb-devel
         ninja-build
         pkgconf
@@ -511,6 +517,7 @@ install_deps_darwin()
         harfbuzz \
         pkg-config \
         qt$QTVER \
+        libssh2 \
         range-v3
 }
 

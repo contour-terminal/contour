@@ -38,6 +38,7 @@ using std::string_view;
 using std::vector;
 
 using vtpty::Process;
+using vtpty::SshSession;
 
 using namespace std::string_literals;
 
@@ -175,11 +176,10 @@ std::optional<fs::path> ContourGuiApp::dumpStateAtExit() const
 
 void ContourGuiApp::onExit(TerminalSession& session)
 {
-    auto const* localProcess = dynamic_cast<vtpty::Process const*>(&session.terminal().device());
-    if (!localProcess)
-        return;
-
-    _exitStatus = localProcess->checkStatus();
+    if (auto const* localProcess = dynamic_cast<vtpty::Process const*>(&session.terminal().device()))
+        _exitStatus = localProcess->checkStatus();
+    else if (auto const* sshSession = dynamic_cast<vtpty::SshSession const*>(&session.terminal().device()))
+        _exitStatus = sshSession->exitStatus();
 }
 
 QUrl ContourGuiApp::resolveResource(std::string_view path)
@@ -420,10 +420,22 @@ int ContourGuiApp::terminalGuiAction()
 
     if (_exitStatus.has_value())
     {
-        if (holds_alternative<Process::NormalExit>(*_exitStatus))
-            rv = get<Process::NormalExit>(*_exitStatus).exitCode;
-        else if (holds_alternative<Process::SignalExit>(*_exitStatus))
-            rv = EXIT_FAILURE;
+        if (holds_alternative<SshSession::ExitStatus>(*_exitStatus))
+        {
+            auto const sshExitStatus = get<SshSession::ExitStatus>(*_exitStatus);
+            if (holds_alternative<SshSession::NormalExit>(sshExitStatus))
+                rv = get<SshSession::NormalExit>(sshExitStatus).exitCode;
+            else if (holds_alternative<SshSession::SignalExit>(sshExitStatus))
+                rv = EXIT_FAILURE;
+        }
+        else if (holds_alternative<Process::ExitStatus>(*_exitStatus))
+        {
+            auto const processExitStatus = get<Process::ExitStatus>(*_exitStatus);
+            if (holds_alternative<Process::NormalExit>(processExitStatus))
+                rv = get<Process::NormalExit>(processExitStatus).exitCode;
+            else if (holds_alternative<Process::SignalExit>(processExitStatus))
+                rv = EXIT_FAILURE;
+        }
     }
 
     // Explicitly destroy QML engine here to ensure it's being destructed before QGuiApplication.

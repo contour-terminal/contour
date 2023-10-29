@@ -22,6 +22,7 @@ BuildRequires:  fontconfig-devel
 BuildRequires:  freetype-devel
 BuildRequires:  gcc-c++
 BuildRequires:  harfbuzz-devel
+BuildRequires:  libssh2-devel
 BuildRequires:  ninja-build
 BuildRequires:  pkgconf
 BuildRequires:  qt6-qtbase-devel
@@ -31,6 +32,7 @@ BuildRequires:  qt6-qtmultimedia-devel
 
 Requires:       fontconfig
 Requires:       freetype
+Requires:       libssh2
 Requires:       harfbuzz
 Requires:       qt6-qtbase
 Requires:       qt6-qtbase-gui

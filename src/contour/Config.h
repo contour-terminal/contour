@@ -11,6 +11,7 @@
 #include <vtbackend/primitives.h> // CursorDisplay
 
 #include <vtpty/Process.h>
+#include <vtpty/SshSession.h>
 
 #include <vtrasterizer/Decorator.h>
 #include <vtrasterizer/FontDescriptions.h>
@@ -148,6 +149,8 @@ using ColorConfig = std::variant<SimpleColorConfig, DualColorConfig>;
 struct TerminalProfile
 {
     vtpty::Process::ExecInfo shell;
+    vtpty::SshHostConfig ssh;
+
     bool maximized = false;
     bool fullscreen = false;
     bool showTitleBar = true;

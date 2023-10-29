@@ -38,6 +38,8 @@ class TerminalSessionManager: public QAbstractListModel
     void updateColorPreference(vtbackend::ColorPreference const& preference);
 
   private:
+    std::unique_ptr<vtpty::Pty> createPty();
+
     ContourGuiApp& _app;
     std::chrono::seconds _earlyExitThreshold;
 
