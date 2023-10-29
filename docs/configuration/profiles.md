@@ -1,6 +1,6 @@
 
 All profiles inside configuration files share parent node `profiles`. To create profile you need to specify child node
-```
+```yaml
 profiles:
     main:
     #default configuration

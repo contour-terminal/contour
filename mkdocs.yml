@@ -96,7 +96,7 @@ nav:
     #- Rendered (Advanced) : configuration/advanced/rendered.md
   - Features:
     - List of features: features.md
-    - Font liagatures: demo/font-ligatures.md
+    - Font ligatures: demo/font-ligatures.md
     - Images: demo/images.md
     - Input method editor (IME): demo/ime.md
     - Line marks: demo/line-marks.md
