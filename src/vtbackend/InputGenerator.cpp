@@ -192,6 +192,24 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
         case Key::PageDown: append(select(modifier, { .std = CSI "6~", .mods = CSI "6;{}~", .appKeypad = CSI "6~" })); break;
         case Key::Insert: append(select(modifier, { .std = CSI "2~", .mods = CSI "2;{}~" })); break;
         case Key::Delete: append(select(modifier, { .std = CSI "3~", .mods = CSI "3;{}~" })); break;
+        case Key::Numpad_Enter:    append(select(modifier, { .std = "\r", .appKeypad = SS3 "M" })); break;
+        case Key::Numpad_Multiply: append(select(modifier, { .std = "*",  .appKeypad = SS3 "j" })); break;
+        case Key::Numpad_Add:      append(select(modifier, { .std = "+",  .appKeypad = SS3 "k" })); break;
+        case Key::Numpad_Subtract: append(select(modifier, { .std = "-",  .appKeypad = SS3 "m" })); break;
+        case Key::Numpad_Decimal:  append(select(modifier, { .std = ".",  .appKeypad = CSI "3~" })); break;
+        case Key::Numpad_Divide:   append(select(modifier, { .std = "/",  .appKeypad = SS3 "o" })); break;
+        case Key::Numpad_0:        append(select(modifier, { .std = "0",  .appKeypad = CSI "2~" })); break;
+        case Key::Numpad_1:        append(select(modifier, { .std = "1",  .appKeypad = SS3 "F" })); break;
+        case Key::Numpad_2:        append(select(modifier, { .std = "2",  .appKeypad = CSI "B" })); break;
+        case Key::Numpad_3:        append(select(modifier, { .std = "3",  .appKeypad = CSI "6~" })); break;
+        case Key::Numpad_4:        append(select(modifier, { .std = "4",  .appKeypad = CSI "D" })); break;
+        case Key::Numpad_5:        append(select(modifier, { .std = "5",  .appKeypad = CSI "E" })); break;
+        case Key::Numpad_6:        append(select(modifier, { .std = "6",  .appKeypad = CSI "C" })); break;
+        case Key::Numpad_7:        append(select(modifier, { .std = "7",  .appKeypad = SS3 "H" })); break;
+        case Key::Numpad_8:        append(select(modifier, { .std = "8",  .appKeypad = CSI "A" })); break;
+        case Key::Numpad_9:        append(select(modifier, { .std = "9",  .appKeypad = CSI "5~" })); break;
+        case Key::Numpad_Equal:    append(select(modifier, { .std = "=",  .appKeypad = SS3 "X" })); break;
+        // {{{ unsupported keys in legacy input protocol
         case Key::MediaPlay:
         case Key::MediaStop:
         case Key::MediaPrevious:
@@ -222,6 +240,7 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
         case Key::Pause:
         case Key::Menu:
             return false;
+        // }}}
     }
     // clang-format on
 
@@ -383,7 +402,39 @@ constexpr pair<unsigned, char> mapKey(Key key) noexcept
         case Key::RightMeta: return { 57452, 'u' };
         case Key::IsoLevel3Shift: return { 57453, 'u' };
         case Key::IsoLevel5Shift: return { 57454, 'u' };
+        case Key::Numpad_0: return { 57399, 'u' };
+        case Key::Numpad_1: return { 57400, 'u' };
+        case Key::Numpad_2: return { 57401, 'u' };
+        case Key::Numpad_3: return { 57402, 'u' };
+        case Key::Numpad_4: return { 57403, 'u' };
+        case Key::Numpad_5: return { 57404, 'u' };
+        case Key::Numpad_6: return { 57405, 'u' };
+        case Key::Numpad_7: return { 57406, 'u' };
+        case Key::Numpad_8: return { 57407, 'u' };
+        case Key::Numpad_9: return { 57408, 'u' };
+        case Key::Numpad_Decimal: return { 57409, 'u' };
+        case Key::Numpad_Divide: return { 57410, 'u' };
+        case Key::Numpad_Multiply: return { 57411, 'u' };
+        case Key::Numpad_Subtract: return { 57412, 'u' };
+        case Key::Numpad_Add: return { 57413, 'u' };
+        case Key::Numpad_Enter: return { 57414, 'u' };
+        case Key::Numpad_Equal: return { 57415, 'u' };
     }
+
+    // TODO: implement me
+    // case Key::Numpad_Separator: return { 57416, 'u' };
+    // case Key::Numpad_Left: return { 57417, 'u' };
+    // case Key::Numpad_Right: return { 57418, 'u' };
+    // case Key::Numpad_Up: return { 57419, 'u' };
+    // case Key::Numpad_Down: return { 57420, 'u' };
+    // case Key::Numpad_PageUp: return { 57421, 'u' };
+    // case Key::Numpad_PageDown: return { 57422, 'u' };
+    // case Key::Numpad_Home: return { 57423, 'u' };
+    // case Key::Numpad_End: return { 57424, 'u' };
+    // case Key::Numpad_Insert: return { 57425, 'u' };
+    // case Key::Numpad_Delete: return { 57426, 'u' };
+    // case Key::Numpad_Begin: return { 57427, 'u' };
+
     crispy::unreachable();
 }
 

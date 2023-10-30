@@ -243,6 +243,27 @@ enum class Key
     PrintScreen,
     Pause,
     Menu,
+
+    // numpad keys
+    // NOLINTBEGIN(readability-identifier-naming)
+    Numpad_Divide,
+    Numpad_Multiply,
+    Numpad_Subtract,
+    Numpad_Add,
+    Numpad_Decimal,
+    Numpad_Enter,
+    Numpad_Equal,
+    Numpad_0,
+    Numpad_1,
+    Numpad_2,
+    Numpad_3,
+    Numpad_4,
+    Numpad_5,
+    Numpad_6,
+    Numpad_7,
+    Numpad_8,
+    Numpad_9,
+    // NOLINTEND(readability-identifier-naming)
 };
 
 std::string to_string(Key key);
@@ -867,6 +888,23 @@ struct fmt::formatter<vtbackend::Key>: formatter<std::string_view>
             case vtbackend::Key::PrintScreen: name = "PrintScreen"; break;
             case vtbackend::Key::Pause: name = "Pause"; break;
             case vtbackend::Key::Menu: name = "Menu"; break;
+            case vtbackend::Key::Numpad_Divide: name = "Numpad_Divide"; break;
+            case vtbackend::Key::Numpad_Multiply: name = "Numpad_Multiply"; break;
+            case vtbackend::Key::Numpad_Subtract: name = "Numpad_Subtract"; break;
+            case vtbackend::Key::Numpad_Add: name = "Numpad_Add"; break;
+            case vtbackend::Key::Numpad_Decimal: name = "Numpad_Decimal"; break;
+            case vtbackend::Key::Numpad_Enter: name = "Numpad_Enter"; break;
+            case vtbackend::Key::Numpad_Equal: name = "Numpad_Equal"; break;
+            case vtbackend::Key::Numpad_0: name = "Numpad_0"; break;
+            case vtbackend::Key::Numpad_1: name = "Numpad_1"; break;
+            case vtbackend::Key::Numpad_2: name = "Numpad_2"; break;
+            case vtbackend::Key::Numpad_3: name = "Numpad_3"; break;
+            case vtbackend::Key::Numpad_4: name = "Numpad_4"; break;
+            case vtbackend::Key::Numpad_5: name = "Numpad_5"; break;
+            case vtbackend::Key::Numpad_6: name = "Numpad_6"; break;
+            case vtbackend::Key::Numpad_7: name = "Numpad_7"; break;
+            case vtbackend::Key::Numpad_8: name = "Numpad_8"; break;
+            case vtbackend::Key::Numpad_9: name = "Numpad_9"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
