@@ -109,28 +109,26 @@ class [[nodiscard]] Process: public Pty
 } // namespace vtpty
 
 template <>
-struct fmt::formatter<vtpty::Process::ExitStatus>
+struct fmt::formatter<vtpty::Process::ExitStatus>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(vtpty::Process::ExitStatus const& status, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtpty::Process::ExitStatus const& status, format_context& ctx) -> format_context::iterator
     {
-        return std::visit(overloaded { [&](vtpty::Process::NormalExit exit) {
-                                          return fmt::format_to(ctx.out(), "{} (normal exit)", exit.exitCode);
-                                      },
-                                       [&](vtpty::Process::SignalExit exit) {
-                                           char buf[256];
+        auto const text =
+            std::visit(overloaded { [&](vtpty::Process::NormalExit exit) {
+                                       return fmt::format("{} (normal exit)", exit.exitCode);
+                                   },
+                                    [&](vtpty::Process::SignalExit exit) {
+                                        char buf[256];
 #if defined(_WIN32)
-                                           strerror_s(buf, sizeof(buf), errno);
-                                           return fmt::format_to(
-                                               ctx.out(), "{} (signal number {})", buf, exit.signum);
+                                        strerror_s(buf, sizeof(buf), errno);
+                                        return fmt::format("{} (signal number {})", buf, exit.signum);
 #else
-                                           return fmt::format_to(ctx.out(),
-                                                                 "{} (signal number {})",
-                                                                 strerror_r(errno, buf, sizeof(buf)),
-                                                                 exit.signum);
+                                         return fmt::format("{} (signal number {})",
+                                                            strerror_r(errno, buf, sizeof(buf)),
+                                                            exit.signum);
 #endif
-                                       } },
-                          status);
+                                    } },
+                       status);
+        return fmt::formatter<std::string>::format(text, ctx);
     }
 };
