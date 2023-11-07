@@ -238,6 +238,36 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     auto const modifiers = makeModifier(event->modifiers());
     auto const key = event->key();
 
+    if (event->modifiers().testFlag(Qt::KeypadModifier))
+    {
+        std::optional<Key> mappedKey = nullopt;
+        switch (key)
+        {
+            case Qt::Key_0: mappedKey = Key::Numpad_0; break;
+            case Qt::Key_1: mappedKey = Key::Numpad_1; break;
+            case Qt::Key_2: mappedKey = Key::Numpad_2; break;
+            case Qt::Key_3: mappedKey = Key::Numpad_3; break;
+            case Qt::Key_4: mappedKey = Key::Numpad_4; break;
+            case Qt::Key_5: mappedKey = Key::Numpad_5; break;
+            case Qt::Key_6: mappedKey = Key::Numpad_6; break;
+            case Qt::Key_7: mappedKey = Key::Numpad_7; break;
+            case Qt::Key_8: mappedKey = Key::Numpad_8; break;
+            case Qt::Key_9: mappedKey = Key::Numpad_9; break;
+            case Qt::Key_Asterisk: mappedKey = Key::Numpad_Multiply; break;
+            case Qt::Key_Plus: mappedKey = Key::Numpad_Add; break;
+            case Qt::Key_Minus: mappedKey = Key::Numpad_Subtract; break;
+            case Qt::Key_Period: mappedKey = Key::Numpad_Decimal; break;
+            case Qt::Key_Slash: mappedKey = Key::Numpad_Divide; break;
+            case Qt::Key_Enter: mappedKey = Key::Numpad_Enter; break;
+            default: break;
+        }
+        if (mappedKey)
+        {
+            session.sendKeyEvent(*mappedKey, modifiers, eventType, now);
+            return true;
+        }
+    }
+
     // NOLINTNEXTLINE(readability-qualified-auto)
     if (auto const i = find_if(
             begin(KeyMappings), end(KeyMappings), [event](auto const& x) { return x.first == event->key(); });
