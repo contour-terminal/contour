@@ -358,6 +358,23 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
     }
     // clang-format on
 
+    auto const charMappings = std::array<std::pair<Key, char32_t>, 10> { {
+        { Key::Numpad_0, '0' },
+        { Key::Numpad_1, '1' },
+        { Key::Numpad_2, '2' },
+        { Key::Numpad_3, '3' },
+        { Key::Numpad_4, '4' },
+        { Key::Numpad_5, '5' },
+        { Key::Numpad_6, '6' },
+        { Key::Numpad_7, '7' },
+        { Key::Numpad_8, '8' },
+        { Key::Numpad_9, '9' },
+    } };
+
+    for (auto const& [mappedKey, mappedText]: charMappings)
+        if (key == mappedKey)
+            return sendCharPressEvent(mappedText, modifier);
+
     if (modifier.any())
         return true;
 

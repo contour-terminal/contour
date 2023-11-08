@@ -594,6 +594,23 @@ namespace
             pair { "PrintScreen"sv, Key::PrintScreen },
             pair { "Pause"sv, Key::Pause },
             pair { "Menu"sv, Key::Menu },
+            pair { "Numpad_0"sv, Key::Numpad_0 },
+            pair { "Numpad_1"sv, Key::Numpad_1 },
+            pair { "Numpad_2"sv, Key::Numpad_2 },
+            pair { "Numpad_3"sv, Key::Numpad_3 },
+            pair { "Numpad_4"sv, Key::Numpad_4 },
+            pair { "Numpad_5"sv, Key::Numpad_5 },
+            pair { "Numpad_6"sv, Key::Numpad_6 },
+            pair { "Numpad_7"sv, Key::Numpad_7 },
+            pair { "Numpad_8"sv, Key::Numpad_8 },
+            pair { "Numpad_9"sv, Key::Numpad_9 },
+            pair { "Numpad_Decimal"sv, Key::Numpad_Decimal },
+            pair { "Numpad_Divide"sv, Key::Numpad_Divide },
+            pair { "Numpad_Multiply"sv, Key::Numpad_Multiply },
+            pair { "Numpad_Subtract"sv, Key::Numpad_Subtract },
+            pair { "Numpad_Add"sv, Key::Numpad_Add },
+            pair { "Numpad_Enter"sv, Key::Numpad_Enter },
+            pair { "Numpad_Equal"sv, Key::Numpad_Equal },
         };
 
         auto const lowerName = toLower(name);
@@ -623,7 +640,7 @@ namespace
             pair { "EQUAL"sv, '=' },       pair { "LEFT_BRACKET"sv, '[' }, pair { "MINUS"sv, '-' },
             pair { "MULTIPLY"sv, '*' },    pair { "PERIOD"sv, '.' },       pair { "RIGHT_BRACKET"sv, ']' },
             pair { "SEMICOLON"sv, ';' },   pair { "SLASH"sv, '/' },        pair { "SUBTRACT"sv, '-' },
-            pair { "SPACE"sv, ' ' }
+            pair { "SPACE"sv, ' ' },
         };
 
         auto const lowerName = toUpper(name);

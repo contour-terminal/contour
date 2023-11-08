@@ -121,8 +121,9 @@ constexpr inline vtbackend::Modifier makeModifier(Qt::KeyboardModifiers qtModifi
     if (qtModifiers & Qt::MetaModifier)
         modifiers |= Modifier::Meta;
 #endif
-    if (qtModifiers & Qt::KeypadModifier)
-        modifiers |= Modifier::NumLock;
+    // TODO: Get the actual numlock state. Problem is, Qt does not provide this info back to us.
+    // if (...)
+    //     modifiers |= Modifier::NumLock;
 
     return modifiers;
 }
