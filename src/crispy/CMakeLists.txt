@@ -30,6 +30,7 @@ set(crispy_SOURCES
     reference.h
     ring.h
     times.h
+    utils.cpp utils.h
 )
 
 add_library(crispy-core STATIC ${crispy_SOURCES})

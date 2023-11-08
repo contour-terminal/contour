@@ -536,4 +536,6 @@ inline bool beginsWith(std::basic_string_view<T> text, std::basic_string_view<T>
     return true;
 }
 
+std::string threadName();
+
 } // namespace crispy

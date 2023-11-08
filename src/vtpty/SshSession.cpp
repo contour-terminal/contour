@@ -20,6 +20,7 @@
 #include <vtpty/SshSession.h>
 
 #include <crispy/escape.h>
+#include <crispy/utils.h>
 
 #include <fstream>
 
@@ -80,29 +81,6 @@ auto inline sshLog = logstore::category("ssh", "SSH I/O logger", logstore::categ
 namespace
 {
     constexpr auto MaxPasswordTries = 3;
-
-    std::string threadName()
-    {
-#if defined(_WIN32)
-        auto const ThreadHandle = GetCurrentThread();
-        PWSTR pwsz = nullptr;
-        HRESULT hr = GetThreadDescription(ThreadHandle, &pwsz);
-        if (SUCCEEDED(hr))
-        {
-            int const len = WideCharToMultiByte(CP_UTF8, 0, pwsz, -1, nullptr, 0, nullptr, nullptr);
-            std::string utf8Str(len, '\0');
-            WideCharToMultiByte(CP_UTF8, 0, pwsz, -1, utf8Str.data(), len, nullptr, nullptr);
-            utf8Str.resize(len - 1);
-            LocalFree(pwsz);
-            return utf8Str;
-        }
-        return ""s;
-#else
-        char text[32] = {};
-        pthread_getname_np(pthread_self(), text, sizeof(text));
-        return text;
-#endif
-    }
 
     template <typename T>
     std::string_view libssl2ErrorString(T rc)
@@ -394,7 +372,7 @@ void SshSession::setState(State nextState)
     if (_state == nextState)
         return;
 
-    sshLog()("({}) State transition from {} to {}.\n", threadName(), _state, nextState);
+    sshLog()("({}) State transition from {} to {}.\n", crispy::threadName(), _state, nextState);
 
     _state = nextState;
 
@@ -773,7 +751,7 @@ void SshSession::wakeupReader()
 
 void SshSession::handlePreAuthenticationPasswordInput(std::string_view buf, State next)
 {
-    sshLog()("({}) Handling pre-authentication input: \"{}\"", threadName(), crispy::escape(buf));
+    sshLog()("({}) Handling pre-authentication input: \"{}\"", crispy::threadName(), crispy::escape(buf));
     if (buf.empty())
         return;
 
@@ -861,7 +839,7 @@ void SshSession::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
     _pageSize = cells;
     _pixels = pixels;
 
-    sshLog()("({}) Resizing PTY to {}x{}.", threadName(), cells.columns, cells.lines);
+    sshLog()("({}) Resizing PTY to {}x{}.", crispy::threadName(), cells.columns, cells.lines);
 
     if (isOperational())
     {
@@ -1150,18 +1128,18 @@ int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
     if (dir & LIBSSH2_SESSION_BLOCK_INBOUND)
     {
         readfd = &fd;
-        fmt::print("({}) SshSession: waiting for socket to become readable\n", threadName());
+        fmt::print("({}) SshSession: waiting for socket to become readable\n", crispy::threadName());
     }
 
     if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND)
     {
         writefd = &fd;
-        fmt::print("({}) SshSession: waiting for socket to become readable\n", threadName());
+        fmt::print("({}) SshSession: waiting for socket to become readable\n", crispy::threadName());
     }
 
     auto const rc = ::select((int) (_p->sshSocket + 1), readfd, writefd, nullptr, timeout ? &tv : nullptr);
     fmt::print("({}) SshSession: select() returned {}{}{}\n",
-               threadName(),
+               crispy::threadName(),
                rc,
                readfd && FD_ISSET(_p->sshSocket, readfd) ? " [readable]" : "",
                writefd && FD_ISSET(_p->sshSocket, writefd) ? " [writable]" : "");
