@@ -7,6 +7,7 @@
 #include <contour/helper.h>
 
 #include <vtpty/Process.h>
+#include <vtpty/SshSession.h>
 
 #include <QtDBus/QDBusVariant>
 #include <QtQml/QQmlApplicationEngine>
@@ -43,7 +44,9 @@ class ContourGuiApp: public QObject, public ContourApp
 
     std::string profileName() const;
 
-    std::optional<vtpty::Process::ExitStatus> exitStatus() const noexcept { return _exitStatus; }
+    using ExitStatus = std::optional<std::variant<vtpty::Process::ExitStatus, vtpty::SshSession::ExitStatus>>;
+
+    ExitStatus exitStatus() const noexcept { return _exitStatus; }
 
     std::optional<std::filesystem::path> dumpStateAtExit() const;
 
@@ -82,7 +85,7 @@ class ContourGuiApp: public QObject, public ContourApp
 
     int _argc = 0;
     char const** _argv = nullptr;
-    std::optional<vtpty::Process::ExitStatus> _exitStatus;
+    ExitStatus _exitStatus;
 
     vtbackend::ColorPreference _colorPreference = vtbackend::ColorPreference::Dark;
 

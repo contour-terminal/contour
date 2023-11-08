@@ -245,6 +245,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void playSound(vtbackend::Sequence::Parameters const& params) override;
     void cursorPositionChanged() override;
 
+    bool isClosed() const noexcept { return _onClosedHandled; }
+
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
     void sendKeyEvent(vtbackend::Key key,

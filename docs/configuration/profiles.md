@@ -31,6 +31,39 @@ profiles:
     escape_sandbox: true
 ```
 
+### `ssh`
+
+With this key, you can bypass local PTY and process execution and directly connect via TCP/IP to a remote SSH server.
+
+```yaml
+profiles:
+  profile_name:
+    ssh:
+      host: remote-server.example.com
+      port: 22
+      user: "CustomUserName"
+      private_key: "path/to/key"
+      public_key: "path/to/key.pub"
+      known_hosts: "~/.ssh/known_hosts"
+      forward_agent: false
+```
+
+Note, only `host` option is required. Everything else is defaulted.
+Keep in mind, that the user's `~/.ssh/config` will be parsed with respect to the supported options above.
+These values can be overridden in the local Contour configuration as follows:
+
+:octicons-horizontal-rule-16: ==ssh.host== SSH server to establish the connection to.
+:octicons-horizontal-rule-16: ==ssh.port== SSH port (defaults to `22`). Only specify this value if it is deviating from the default value `22`.
+:octicons-horizontal-rule-16: ==ssh.private_key== Path to private key to use for key based authentication.
+:octicons-horizontal-rule-16: ==ssh.public_key== Path to public key that belongs to the private key. When using key based authentication, it depends on the underlying backend, if the public key is also required. OpenSSL for example does not require it.
+:octicons-horizontal-rule-16: ==ssh.known_hosts== Path to `known_hosts` file. This defaults to and usually is located in `~/.ssh/known_hosts`.
+:octicons-horizontal-rule-16: ==ssh.forward_agent== Boolean, indicating wether or not the local SSH auth agent should be requested to be forwarded. Note: this is currently not working due to an issue related to the underlying library being used, but is hopefully resolved soon.
+
+Note, custom environment variables may be passed as well, when connecting to an SSH server using this builtin-feature. Mind,
+that the SSH server is not required to accept all environment variables.
+
+If an OpenSSH server is used, have a look at the `AcceptEnv` configuration setting in the `sshd_config`
+configuration file on the remote SSH server, to configure what environment variables are permitted to be sent.
 
 ### `copy_last_mark_range_offset`
 configuration option is an advanced setting that is useful when using the CopyPreviousMarkRange feature with multiline prompts. It allows you to specify an offset value that is added to the current cursor's line number minus 1 (i.e., the line above the current cursor).

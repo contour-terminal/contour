@@ -348,6 +348,17 @@ vector<string> Process::loginShell(bool escapeSandbox)
         return { "/bin/sh"s };
 }
 
+std::string Process::userName()
+{
+    if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
+        return pw->pw_name;
+
+    if (char const* user = getenv("USER"); user != nullptr)
+        return user;
+
+    return "unknown";
+}
+
 fs::path Process::homeDirectory()
 {
     if (auto const* home = getenv("HOME"); home != nullptr)

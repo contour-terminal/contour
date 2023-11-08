@@ -326,6 +326,14 @@ vector<string> Process::loginShell(bool escapeSandbox)
     return { "powershell.exe"s }; // TODO: Find out what the user's default shell is.
 }
 
+std::string Process::userName()
+{
+    if (char const* p = getenv("USERNAME"); p && *p)
+        return p;
+
+    return "unknown"s;
+}
+
 fs::path Process::homeDirectory()
 {
     if (char const* p = getenv("USERPROFILE"); p && *p)

@@ -274,10 +274,9 @@ jobs:
       - name: "Install dependencies"
         run: |
           set -ex
-          #brew update
+          brew update
           QTVER=${{ steps.set_vars.outputs.QTVER }}
           QTVER=${QTVER} ./scripts/install-deps.sh
-          brew install qt@${QTVER} openssl
       - name: "Create build directory"
         run: mkdir build
       - name: "Generate build files"
@@ -343,7 +342,7 @@ jobs:
         id: runvcpkg
         with:
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-          vcpkgGitCommitId: 3e93bb69a1cadeb36fe9eca3b6f3912d84f618d5
+          vcpkgGitCommitId: 3715d743ac08146d9b7714085c1babdba9f262d5
       - name: "create build directory"
         shell: powershell
         run: |

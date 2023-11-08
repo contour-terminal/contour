@@ -6,6 +6,8 @@
 #include <system_error>
 
 #if defined(_WIN32)
+    #include <string>
+
     #include <Windows.h>
 #else
     #include <unistd.h>
@@ -14,28 +16,55 @@
 namespace crispy
 {
 
-class file_descriptor
+template <typename T>
+struct close_native_handle
 {
-  public:
+};
+
 #if defined(_WIN32)
-    using native_handle_type = HANDLE;
-    static inline constexpr native_handle_type invalid_native_handle = INVALID_HANDLE_VALUE; // NOLINT
+template <>
+struct close_native_handle<HANDLE>
+{
+    void operator()(HANDLE value) { CloseHandle(value); }
+};
 #else
-    using native_handle_type = int;
-    static inline constexpr native_handle_type invalid_native_handle = -1; // NOLINT
+template <>
+struct close_native_handle<int>
+{
+    void operator()(int fd)
+    {
+        for (;;)
+        {
+            int rv = ::close(fd);
+            switch (rv)
+            {
+                case 0: return;
+                case EINTR: break;
+                default: throw std::system_error(errno, std::system_category(), "close() failed");
+            }
+        }
+    }
+};
 #endif
 
+template <typename T, const T InvalidHandleValue>
+class native_handle
+{
+  public:
+    using native_handle_type = T;
+    static inline constexpr native_handle_type invalid_native_handle = InvalidHandleValue; // NOLINT
+
   private:
-    file_descriptor(native_handle_type fd) noexcept: _fd { fd } {}
+    native_handle(native_handle_type fd) noexcept: _fd { fd } {}
 
   public:
-    file_descriptor() noexcept = default;
+    native_handle() noexcept = default;
 
-    file_descriptor(file_descriptor const&) = delete;
-    file_descriptor& operator=(file_descriptor const&) = delete;
+    native_handle(native_handle const&) = delete;
+    native_handle& operator=(native_handle const&) = delete;
 
-    file_descriptor(file_descriptor&& fd) noexcept: _fd(fd.release()) {}
-    file_descriptor& operator=(file_descriptor&& fd) noexcept
+    native_handle(native_handle&& fd) noexcept: _fd(fd.release()) {}
+    native_handle& operator=(native_handle&& fd) noexcept
     {
         if (this != &fd)
         {
@@ -45,13 +74,13 @@ class file_descriptor
         return *this;
     }
 
-    ~file_descriptor() { close(); }
+    ~native_handle() { close(); }
 
-    static file_descriptor from_native(native_handle_type fd) // NOLINT
+    static native_handle from_native(native_handle_type fd) // NOLINT
     {
         if (fd == invalid_native_handle)
-            throw std::system_error(errno, std::system_category(), "file_descriptor() failed");
-        return file_descriptor { fd };
+            throw std::system_error(errno, std::system_category(), "native_handle() failed");
+        return native_handle { fd };
     }
 
     [[nodiscard]] native_handle_type get() const noexcept { return _fd; }
@@ -72,40 +101,39 @@ class file_descriptor
         if (_fd == invalid_native_handle)
             return;
 
-#if defined(_WIN32)
-        CloseHandle(_fd);
+        crispy::close_native_handle<native_handle_type> {}(_fd);
         _fd = invalid_native_handle;
-#else
-        for (;;)
-        {
-            // clang-format off
-            int rv = ::close(_fd);
-            switch (rv)
-            {
-                case 0:
-                    _fd = invalid_native_handle;
-                    return;
-                case EINTR:
-                    break;
-                default:
-                    throw std::system_error(errno, std::system_category(), "close() failed");
-            }
-            // clang-format on
-        }
-#endif
     }
 
   private:
     native_handle_type _fd = invalid_native_handle;
 };
 
+#if defined(_WIN32)
+using file_descriptor = native_handle<HANDLE, INVALID_HANDLE_VALUE>;
+#else
+using file_descriptor = native_handle<int, -1>;
+#endif
+
 } // end namespace crispy
+
+#if defined(_WIN32)
+template <>
+struct fmt::formatter<HANDLE>: fmt::formatter<std::string>
+{
+    auto format(HANDLE value, format_context& ctx) -> format_context::iterator
+    {
+        auto str = fmt::format("0x{:X}", (unsigned long long) (value));
+        return fmt::formatter<std::string>::format(str, ctx);
+    }
+};
+#endif
 
 template <>
 struct fmt::formatter<crispy::file_descriptor>: fmt::formatter<crispy::file_descriptor::native_handle_type>
 {
     auto format(crispy::file_descriptor const& fd, format_context& ctx) -> format_context::iterator
     {
-        return fmt::formatter<int>::format(fd.get(), ctx);
+        return fmt::formatter<crispy::file_descriptor::native_handle_type>::format(fd.get(), ctx);
     }
 };

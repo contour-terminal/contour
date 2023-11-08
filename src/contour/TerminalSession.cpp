@@ -10,6 +10,7 @@
 
 #include <vtpty/Process.h>
 #include <vtpty/Pty.h>
+#include <vtpty/SshSession.h>
 
 #include <crispy/StackTrace.h>
 #include <crispy/assert.h>
@@ -238,6 +239,9 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
     auto const l = scoped_lock { _terminal };
     _terminal.resizeScreen(_terminal.pageSize(), pixels);
     _terminal.setRefreshRate(_display->refreshRate());
+
+    if (_onClosedHandled)
+        _display->closeDisplay();
 }
 
 void TerminalSession::scheduleRedraw()
@@ -249,6 +253,7 @@ void TerminalSession::scheduleRedraw()
 
 void TerminalSession::start()
 {
+    sessionLog()("Starting terminal session.");
     _terminal.device().start();
     _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
     _exitWatcherThread->start(QThread::LowPriority);
@@ -559,6 +564,17 @@ void TerminalSession::onClosed()
         if (!localProcess->isClosed())
             localProcess->close();
         auto const exitStatus = localProcess->checkStatus();
+        if (exitStatus)
+            sessionLog()(
+                "Process terminated after {} seconds with exit status {}.", diff.count(), *exitStatus);
+        else
+            sessionLog()("Process terminated after {} seconds.", diff.count());
+    }
+    else if (auto* sshSession = dynamic_cast<vtpty::SshSession*>(&_terminal.device()))
+    {
+        if (!sshSession->isClosed())
+            sshSession->close();
+        auto const exitStatus = sshSession->exitStatus();
         if (exitStatus)
             sessionLog()(
                 "Process terminated after {} seconds with exit status {}.", diff.count(), *exitStatus);

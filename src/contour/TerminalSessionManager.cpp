@@ -3,7 +3,14 @@
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
 
+#include <vtpty/Process.h>
+#include <vtpty/SshSession.h>
+
 #include <QtQml/QQmlEngine>
+
+#include <string>
+
+using namespace std::string_literals;
 
 using std::make_unique;
 using std::nullopt;
@@ -15,15 +22,21 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app): _app { app }
 {
 }
 
+std::unique_ptr<vtpty::Pty> TerminalSessionManager::createPty()
+{
+    auto const& profile = _app.config().profile(_app.profileName());
+
+    if (!profile->ssh.hostname.empty())
+        return make_unique<vtpty::SshSession>(profile->ssh);
+
+    return make_unique<vtpty::Process>(profile->shell, vtpty::createPty(profile->terminalSize, nullopt));
+}
+
 TerminalSession* TerminalSessionManager::createSession()
 {
-    auto pty = make_unique<vtpty::Process>(
-        _app.config().profile(_app.profileName())->shell,
-        vtpty::createPty(_app.config().profile(_app.profileName())->terminalSize, nullopt));
-
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessable from within QML.
-    auto session = new TerminalSession(std::move(pty), _app);
+    auto* session = new TerminalSession(createPty(), _app);
 
     _sessions.push_back(session);
 

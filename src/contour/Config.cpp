@@ -1402,6 +1402,46 @@ namespace
             loginShell.erase(loginShell.begin());
             terminalProfile.shell.arguments = loginShell;
         }
+        if (auto const sshNode = profile["ssh"]; sshNode && sshNode.IsMap())
+        {
+            usedKeys.emplace(fmt::format("{}.{}.ssh", parentPath, profileName));
+            auto& ssh = terminalProfile.ssh;
+            std::string strValue;
+            tryLoadChildRelative(usedKeys, profile, basePath, "ssh.host", ssh.hostname, logger);
+
+            // Get SSH config from ~/.ssh/config
+            if (!ssh.hostname.empty())
+            {
+                if (auto const sshConfigResult = vtpty::loadSshConfig(); sshConfigResult)
+                {
+                    // NB: We don't care if we could not load the ~/.ssh/config, we then simply don't use it
+                    auto const& sshConfig = sshConfigResult.value();
+                    if (auto const i = sshConfig.find(ssh.hostname); i != sshConfig.end())
+                    {
+                        configLog()("Using SSH config for host \"{}\" as base. {}",
+                                    ssh.hostname,
+                                    i->second.toString());
+                        ssh = i->second;
+                    }
+                }
+            }
+
+            // Override with values from profile
+            tryLoadChildRelative(usedKeys, profile, basePath, "ssh.port", ssh.port, logger);
+            tryLoadChildRelative(usedKeys, profile, basePath, "ssh.forward_agent", ssh.forwardAgent, logger);
+            if (!tryLoadChildRelative(usedKeys, profile, basePath, "ssh.user", ssh.username, logger)
+                && ssh.username.empty())
+                ssh.username = vtpty::Process::userName();
+            if (tryLoadChildRelative(usedKeys, profile, basePath, "ssh.private_key", strValue, logger))
+                ssh.privateKeyFile = homeResolvedPath(strValue, Process::homeDirectory());
+            if (tryLoadChildRelative(usedKeys, profile, basePath, "ssh.public_key", strValue, logger))
+                ssh.publicKeyFile = homeResolvedPath(strValue, Process::homeDirectory());
+            if (tryLoadChildRelative(usedKeys, profile, basePath, "ssh.known_hosts", strValue, logger))
+                ssh.knownHostsFile = homeResolvedPath(strValue, Process::homeDirectory());
+            else if (auto const p = Process::homeDirectory() / ".ssh" / "known_hosts"; fs::exists(p))
+                ssh.knownHostsFile = p;
+        }
+
         tryLoadChildRelative(usedKeys, profile, basePath, "maximized", terminalProfile.maximized, logger);
         tryLoadChildRelative(usedKeys, profile, basePath, "fullscreen", terminalProfile.fullscreen, logger);
         tryLoadChildRelative(
@@ -1454,6 +1494,7 @@ namespace
             fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
         terminalProfile.shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
 
+        // {{{ Populate environment variables
         std::optional<fs::path> appTerminfoDir;
 #if defined(__APPLE__)
         {
@@ -1493,6 +1534,10 @@ namespace
 
         if (terminalProfile.shell.env.find("COLORTERM") == terminalProfile.shell.env.end())
             terminalProfile.shell.env["COLORTERM"] = "truecolor";
+
+        // This is currently duplicated. Environment vars belong to each parent struct, not just shell.
+        terminalProfile.ssh.env = terminalProfile.shell.env;
+        // }}}
 
         strValue = fmt::format("{}", terminalProfile.terminalId);
         tryLoadChildRelative(usedKeys, profile, basePath, "terminal_id", strValue, logger);

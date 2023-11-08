@@ -51,8 +51,10 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd
     target_compile_options(crispy-core PUBLIC -maes)
 elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL aarch64) # ARM64
     target_compile_options(crispy-core PUBLIC -march=armv8-a+fp+simd+crypto+crc)
+elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL ARM64)
+    message(STATUS "Target architecture: ${CMAKE_SYSTEM_PROCESSOR}")
 else()
-    message(WARNING "Target architecture not detected.")
+    message(WARNING "Target architecture not detected: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 target_compile_features(crispy-core PUBLIC cxx_std_17)
 target_link_libraries(crispy-core PUBLIC ${CRISPY_CORE_LIBS})
