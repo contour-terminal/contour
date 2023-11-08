@@ -231,17 +231,22 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 
     setContentScale(newDisplay.contentScale());
 
-    // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
-    auto const pixels = _display->cellSize() * _terminal.pageSize();
-    // auto const pixels =
-    //     ImageSize { _display->cellSize().width * boxed_cast<Width>(_terminal.pageSize().columns),
-    //                 _display->cellSize().height * boxed_cast<Height>(_terminal.pageSize().lines) };
-    auto const l = scoped_lock { _terminal };
-    _terminal.resizeScreen(_terminal.pageSize(), pixels);
-    _terminal.setRefreshRate(_display->refreshRate());
+    {
+        // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
+        auto const pixels = _display->cellSize() * _terminal.pageSize();
+        // auto const pixels =
+        //     ImageSize { _display->cellSize().width * boxed_cast<Width>(_terminal.pageSize().columns),
+        //                 _display->cellSize().height * boxed_cast<Height>(_terminal.pageSize().lines) };
+        auto const l = scoped_lock { _terminal };
+        _terminal.resizeScreen(_terminal.pageSize(), pixels);
+        _terminal.setRefreshRate(_display->refreshRate());
+    }
 
-    if (_onClosedHandled)
-        _display->closeDisplay();
+    {
+        auto const _ = std::scoped_lock { _onClosedMutex };
+        if (_onClosedHandled)
+            _display->closeDisplay();
+    }
 }
 
 void TerminalSession::scheduleRedraw()
@@ -552,17 +557,26 @@ void TerminalSession::notify(string_view title, string_view content)
 
 void TerminalSession::onClosed()
 {
-    if (_onClosedHandled)
+    auto const _ = std::scoped_lock { _onClosedMutex };
+    auto isClosedAlready = _onClosedHandled.load();
+    if (isClosedAlready || !_onClosedHandled.compare_exchange_weak(isClosedAlready, true))
+    {
+        sessionLog()("onClosed called: thread {}, display {}", crispy::threadName(), _display ? "yes" : "no");
+        if (_display)
+            _display->closeDisplay();
         return;
+    }
 
-    _onClosedHandled = true;
+    sessionLog()("Terminal device closed (thread {})", crispy::threadName());
+
+    if (!_terminal.device().isClosed())
+        _terminal.device().close();
+
     auto const now = steady_clock::now();
     auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
 
     if (auto* localProcess = dynamic_cast<vtpty::Process*>(&_terminal.device()))
     {
-        if (!localProcess->isClosed())
-            localProcess->close();
         auto const exitStatus = localProcess->checkStatus();
         if (exitStatus)
             sessionLog()(
@@ -572,8 +586,6 @@ void TerminalSession::onClosed()
     }
     else if (auto* sshSession = dynamic_cast<vtpty::SshSession*>(&_terminal.device()))
     {
-        if (!sshSession->isClosed())
-            sshSession->close();
         auto const exitStatus = sshSession->exitStatus();
         if (exitStatus)
             sessionLog()(
@@ -607,6 +619,8 @@ void TerminalSession::onClosed()
         sessionLog()("Terminal device is closed. Closing display.");
         _display->closeDisplay();
     }
+    else
+        sessionLog()("Terminal device is closed. But no display available (yet).");
 }
 
 void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
