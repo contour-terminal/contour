@@ -9,6 +9,7 @@
 #include <crispy/read_selector.h>
 
 #include <memory>
+#include <mutex>
 #include <optional>
 
 #if defined(__APPLE__)
@@ -78,6 +79,7 @@ class UnixPty final: public Pty
     PageSize _pageSize;
     std::optional<ImageSize> _pixels;
     std::unique_ptr<Slave> _slave;
+    std::mutex _mutex;
 };
 
 } // namespace vtpty

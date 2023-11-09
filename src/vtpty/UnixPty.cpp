@@ -228,8 +228,14 @@ PtyMasterHandle UnixPty::handle() const noexcept
 
 void UnixPty::close()
 {
-    ptyLog()("PTY closing master (file descriptor {}).", _masterFd);
-    assert(_masterFd != -1);
+    auto const _ = std::scoped_lock { _mutex };
+    if (_masterFd.is_closed())
+    {
+        ptyLog()("PTY closing master from thread {} (already closed).", crispy::threadName());
+        return;
+    }
+
+    ptyLog()("PTY closing master from thread {} (file descriptor {}).", crispy::threadName(), _masterFd);
     _readSelector.cancel_read(_masterFd);
     _masterFd.close();
     wakeupReader();

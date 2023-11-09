@@ -427,7 +427,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::optional<vtbackend::FontDef> _pendingFontChange;
     PermissionCache _rememberedPermissions;
     std::unique_ptr<QThread> _exitWatcherThread;
-    bool _onClosedHandled = false;
+
+    std::atomic<bool> _onClosedHandled = false;
+    std::mutex _onClosedMutex;
 };
 
 } // namespace contour
