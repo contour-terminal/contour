@@ -126,7 +126,7 @@ jobs:
           name: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
           path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
   # }}}
   # {{{ Fedora
   fedora:
@@ -874,7 +874,7 @@ jobs:
         name: "patched-fontconfig-${{ matrix.os_version }}"
         path: "/home/runner/opt/fontconfig"
         if-no-files-found: error
-        retention-days: 3
+        retention-days: 1
   # }}}
   # {{{ Build notcurses
   build_notcurses:
@@ -1002,7 +1002,7 @@ jobs:
         name: quick-exit-contour-dump
         path: quick-exit-dumps
         if-no-files-found: ignore
-        retention-days: 3
+        retention-days: 1
     - name: "Check result success"
       run: |
         exit ${{ steps.Xvfb-contour.outputs.exitCode }}
@@ -1139,7 +1139,7 @@ jobs:
         name: notcurses-contour-dump
         path: notcurses-demo-dumps
         if-no-files-found: ignore
-        retention-days: 3
+        retention-days: 1
     - name: "Check result success"
       run: |
         exit ${{ steps.Xvfb-contour-notcurses.outputs.exitCode }}
