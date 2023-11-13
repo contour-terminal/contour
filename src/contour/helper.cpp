@@ -139,6 +139,8 @@ namespace
 
 bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, TerminalSession& session)
 {
+    qDebug() << "sendKeyEvent: " << event->key() << " " << event->text() << " " << event->modifiers();
+
     using vtbackend::Key;
     using vtbackend::Modifier;
 
