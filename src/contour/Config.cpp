@@ -2102,6 +2102,22 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
 
     tryLoadValue(usedKeys, doc, "live_config", config.live, logger);
 
+    if (auto const loggingNode = doc["logging"]; loggingNode.IsMap())
+    {
+        usedKeys.emplace("logging");
+
+        if (auto const tagsNode = loggingNode["tags"]; tagsNode.IsSequence())
+        {
+            usedKeys.emplace("logging.tags");
+            for (auto const& tagNode: tagsNode)
+            {
+                auto const tag = tagNode.as<string>();
+                usedKeys.emplace("logging.tags." + tag);
+                logstore::enable(tag);
+            }
+        }
+    }
+
     auto logEnabled = false;
     tryLoadValue(usedKeys, doc, "logging.enabled", logEnabled, logger);
 
