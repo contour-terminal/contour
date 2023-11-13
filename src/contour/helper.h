@@ -104,6 +104,10 @@ constexpr inline vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModi
 
     Modifiers modifiers {};
 
+    // TODO: Can we safely enable this? Especially with respect to CSIu?
+    // if (qtModifiers & Qt::KeypadModifier)
+    //     modifiers |= Modifier::NumLock;
+
     if (qtModifiers & Qt::AltModifier)
         modifiers |= Modifier::Alt;
     if (qtModifiers & Qt::ShiftModifier)
@@ -122,9 +126,6 @@ constexpr inline vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModi
     if (qtModifiers & Qt::MetaModifier)
         modifiers |= Modifier::Meta;
 #endif
-    // TODO: Get the actual numlock state. Problem is, Qt does not provide this info back to us.
-    // if (...)
-    //     modifiers |= Modifier::NumLock;
 
     return modifiers;
 }
