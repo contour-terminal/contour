@@ -127,6 +127,16 @@ constexpr inline vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModi
         modifiers |= Modifier::Meta;
 #endif
 
+#if defined(_WIN32)
+    // Deal with AltGr on Windows, which is seen by the app as Ctrl+Alt, because
+    // the user may alternatively press Ctrl+Alt to emulate AltGr on keyboard
+    // that are missing the AltGr key.
+    // Microsoft does not recommend using Ctrl+Alt modifier for shortcuts.
+    auto constexpr AltGrEquivalent = Modifiers { Modifier::Alt, Modifier::Control };
+    if (modifiers.contains(AltGrEquivalent))
+        modifiers = modifiers.without(AltGrEquivalent);
+#endif
+
     return modifiers;
 }
 
