@@ -97,11 +97,16 @@ constexpr inline char32_t makeChar(Qt::Key key, Qt::KeyboardModifiers mods)
     return 0;
 }
 
-constexpr inline vtbackend::Modifier makeModifier(Qt::KeyboardModifiers qtModifiers)
+constexpr inline vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers)
 {
     using vtbackend::Modifier;
+    using vtbackend::Modifiers;
 
-    Modifier modifiers {};
+    Modifiers modifiers {};
+
+    // TODO: Can we safely enable this? Especially with respect to CSIu?
+    // if (qtModifiers & Qt::KeypadModifier)
+    //     modifiers |= Modifier::NumLock;
 
     if (qtModifiers & Qt::AltModifier)
         modifiers |= Modifier::Alt;
@@ -121,9 +126,16 @@ constexpr inline vtbackend::Modifier makeModifier(Qt::KeyboardModifiers qtModifi
     if (qtModifiers & Qt::MetaModifier)
         modifiers |= Modifier::Meta;
 #endif
-    // TODO: Get the actual numlock state. Problem is, Qt does not provide this info back to us.
-    // if (...)
-    //     modifiers |= Modifier::NumLock;
+
+#if defined(_WIN32)
+    // Deal with AltGr on Windows, which is seen by the app as Ctrl+Alt, because
+    // the user may alternatively press Ctrl+Alt to emulate AltGr on keyboard
+    // that are missing the AltGr key.
+    // Microsoft does not recommend using Ctrl+Alt modifier for shortcuts.
+    auto constexpr AltGrEquivalent = Modifiers { Modifier::Alt, Modifier::Control };
+    if (modifiers.contains(AltGrEquivalent))
+        modifiers = modifiers.without(AltGrEquivalent);
+#endif
 
     return modifiers;
 }

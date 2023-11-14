@@ -24,9 +24,9 @@ using namespace std;
 namespace vtbackend
 {
 
-string to_string(Modifier modifier)
+string to_string(Modifiers modifiers)
 {
-    return fmt::format("{}", modifier);
+    return fmt::format("{}", modifiers);
 }
 
 string to_string(Key key)
@@ -42,7 +42,7 @@ string to_string(MouseButton button)
 // {{{ StandardKeyboardInputGenerator
 bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
                                                   uint32_t physicalKey,
-                                                  Modifier modifier,
+                                                  Modifiers modifiers,
                                                   KeyboardEventType eventType)
 {
     crispy::ignore_unused(physicalKey);
@@ -53,7 +53,7 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     char const chr = static_cast<char>(characterEvent);
 
     // See section "Alt and Meta Keys" in ctlseqs.txt from xterm.
-    if (modifier == Modifier::Alt)
+    if (modifiers == Modifier::Alt)
         // NB: There are other modes in xterm to send Alt+Key options or even send ESC on Meta key instead.
         append("\033");
 
@@ -62,45 +62,45 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     // - Ctrl+Backspace is emitting 0x08
     if (characterEvent == 0x08)
     {
-        if (!modifier.control())
+        if (!modifiers.contains(Modifier::Control))
             append("\x7f");
         else
             append("\x08");
         return true;
     }
 
-    if (modifier == Modifier::Shift && characterEvent == 0x09)
+    if (modifiers == Modifier::Shift && characterEvent == 0x09)
     {
         append("\033[Z"); // introduced by linux_console in 1995, adopted by xterm in 2002
         return true;
     }
 
     // raw C0 code
-    if (modifier == Modifier::Control && characterEvent < 32)
+    if (modifiers == Modifier::Control && characterEvent < 32)
     {
         append(static_cast<uint8_t>(characterEvent));
         return true;
     }
 
-    if (modifier == Modifier::Control && characterEvent == L' ')
+    if (modifiers == Modifier::Control && characterEvent == L' ')
     {
         append('\x00');
         return true;
     }
 
-    if (modifier == Modifier::Control && crispy::ascending('A', chr, 'Z'))
+    if (modifiers == Modifier::Control && crispy::ascending('A', chr, 'Z'))
     {
         append(static_cast<char>(chr - 'A' + 1));
         return true;
     }
 
-    if (modifier == Modifier::Control && characterEvent >= '[' && characterEvent <= '_')
+    if (modifiers == Modifier::Control && characterEvent >= '[' && characterEvent <= '_')
     {
         append(static_cast<char>(chr - 'A' + 1)); // remaining C0 characters 0x1B .. 0x1F
         return true;
     }
 
-    if (modifier.without(Modifier::Alt).none() || modifier == Modifier::Shift)
+    if (modifiers.without(Modifier::Alt).none() || modifiers == Modifier::Shift)
     {
         append(unicode::convert_to<char>(characterEvent));
         return true;
@@ -111,13 +111,13 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     else
         append(unicode::convert_to<char>(characterEvent));
 
-    inputLog()("Sending {} \"{}\".", modifier, crispy::escape(unicode::convert_to<char>(characterEvent)));
+    inputLog()("Sending {} \"{}\".", modifiers, crispy::escape(unicode::convert_to<char>(characterEvent)));
     return true;
 }
 
-std::string StandardKeyboardInputGenerator::select(Modifier modifier, FunctionKeyMapping mapping) const
+std::string StandardKeyboardInputGenerator::select(Modifiers modifiers, FunctionKeyMapping mapping) const
 {
-    auto const prefix = modifier.alt() ? "\033" : ""s;
+    auto const prefix = modifiers.contains(Modifier::Alt) ? "\033" : ""s;
 
     if (applicationCursorKeys() && !mapping.appCursor.empty())
         return prefix + std::string(mapping.appCursor);
@@ -125,13 +125,13 @@ std::string StandardKeyboardInputGenerator::select(Modifier modifier, FunctionKe
     if (applicationKeypad() && !mapping.appKeypad.empty())
         return prefix + std::string(mapping.appKeypad);
 
-    if (modifier && !mapping.mods.empty())
-        return prefix + crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(modifier));
+    if (modifiers && !mapping.mods.empty())
+        return prefix + crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(modifiers));
 
     return prefix + std::string(mapping.std);
 }
 
-bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, KeyboardEventType eventType)
+bool StandardKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
     if (eventType == KeyboardEventType::Release)
         return false;
@@ -139,76 +139,76 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
     // clang-format off
     switch (key)
     {
-        case Key::F1: append(select(modifier, { .std = ESC "OP", .mods = ESC "O{}P" })); break;
-        case Key::F2: append(select(modifier, { .std = ESC "OQ", .mods = ESC "O{}Q" })); break;
-        case Key::F3: append(select(modifier, { .std = ESC "OR", .mods = ESC "O{}R" })); break;
-        case Key::F4: append(select(modifier, { .std = ESC "OS", .mods = ESC "O{}S" })); break;
-        case Key::F5: append(select(modifier, { .std = CSI "15~", .mods = CSI "15;{}~" })); break;
-        case Key::F6: append(select(modifier, { .std = CSI "17~", .mods = CSI "17;{}~" })); break;
-        case Key::F7: append(select(modifier, { .std = CSI "18~", .mods = CSI "18;{}~" })); break;
-        case Key::F8: append(select(modifier, { .std = CSI "19~", .mods = CSI "19;{}~" })); break;
-        case Key::F9: append(select(modifier, { .std = CSI "20~", .mods = CSI "20;{}~" })); break;
-        case Key::F10: append(select(modifier, { .std = CSI "21~", .mods = CSI "21;{}~" })); break;
-        case Key::F11: append(select(modifier, { .std = CSI "23~", .mods = CSI "23;{}~" })); break;
-        case Key::F12: append(select(modifier, { .std = CSI "24~", .mods = CSI "24;{}~" })); break;
-        case Key::F13: append(select(modifier, { .std = CSI "25~", .mods = CSI "25;{}~" })); break;
-        case Key::F14: append(select(modifier, { .std = CSI "26~", .mods = CSI "26;{}~" })); break;
-        case Key::F15: append(select(modifier, { .std = CSI "28~", .mods = CSI "28;{}~" })); break;
-        case Key::F16: append(select(modifier, { .std = CSI "29~", .mods = CSI "29;{}~" })); break;
-        case Key::F17: append(select(modifier, { .std = CSI "31~", .mods = CSI "31;{}~" })); break;
-        case Key::F18: append(select(modifier, { .std = CSI "32~", .mods = CSI "32;{}~" })); break;
-        case Key::F19: append(select(modifier, { .std = CSI "33~", .mods = CSI "33;{}~" })); break;
-        case Key::F20: append(select(modifier, { .std = CSI "34~", .mods = CSI "34;{}~" })); break;
-        case Key::F21: append(select(modifier, { .std = CSI "35~", .mods = CSI "35;{}~" })); break;
-        case Key::F22: append(select(modifier, { .std = CSI "36~", .mods = CSI "36;{}~" })); break;
-        case Key::F23: append(select(modifier, { .std = CSI "37~", .mods = CSI "37;{}~" })); break;
-        case Key::F24: append(select(modifier, { .std = CSI "38~", .mods = CSI "38;{}~" })); break;
-        case Key::F25: append(select(modifier, { .std = CSI "39~", .mods = CSI "39;{}~" })); break;
-        case Key::F26: append(select(modifier, { .std = CSI "40~", .mods = CSI "40;{}~" })); break;
-        case Key::F27: append(select(modifier, { .std = CSI "41~", .mods = CSI "41;{}~" })); break;
-        case Key::F28: append(select(modifier, { .std = CSI "42~", .mods = CSI "42;{}~" })); break;
-        case Key::F29: append(select(modifier, { .std = CSI "43~", .mods = CSI "43;{}~" })); break;
-        case Key::F30: append(select(modifier, { .std = CSI "44~", .mods = CSI "44;{}~" })); break;
-        case Key::F31: append(select(modifier, { .std = CSI "45~", .mods = CSI "45;{}~" })); break;
-        case Key::F32: append(select(modifier, { .std = CSI "46~", .mods = CSI "46;{}~" })); break;
-        case Key::F33: append(select(modifier, { .std = CSI "47~", .mods = CSI "47;{}~" })); break;
-        case Key::F34: append(select(modifier, { .std = CSI "48~", .mods = CSI "48;{}~" })); break;
-        case Key::F35: append(select(modifier, { .std = CSI "49~", .mods = CSI "49;{}~" })); break;
+        case Key::F1: append(select(modifiers, { .std = ESC "OP", .mods = ESC "O{}P" })); break;
+        case Key::F2: append(select(modifiers, { .std = ESC "OQ", .mods = ESC "O{}Q" })); break;
+        case Key::F3: append(select(modifiers, { .std = ESC "OR", .mods = ESC "O{}R" })); break;
+        case Key::F4: append(select(modifiers, { .std = ESC "OS", .mods = ESC "O{}S" })); break;
+        case Key::F5: append(select(modifiers, { .std = CSI "15~", .mods = CSI "15;{}~" })); break;
+        case Key::F6: append(select(modifiers, { .std = CSI "17~", .mods = CSI "17;{}~" })); break;
+        case Key::F7: append(select(modifiers, { .std = CSI "18~", .mods = CSI "18;{}~" })); break;
+        case Key::F8: append(select(modifiers, { .std = CSI "19~", .mods = CSI "19;{}~" })); break;
+        case Key::F9: append(select(modifiers, { .std = CSI "20~", .mods = CSI "20;{}~" })); break;
+        case Key::F10: append(select(modifiers, { .std = CSI "21~", .mods = CSI "21;{}~" })); break;
+        case Key::F11: append(select(modifiers, { .std = CSI "23~", .mods = CSI "23;{}~" })); break;
+        case Key::F12: append(select(modifiers, { .std = CSI "24~", .mods = CSI "24;{}~" })); break;
+        case Key::F13: append(select(modifiers, { .std = CSI "25~", .mods = CSI "25;{}~" })); break;
+        case Key::F14: append(select(modifiers, { .std = CSI "26~", .mods = CSI "26;{}~" })); break;
+        case Key::F15: append(select(modifiers, { .std = CSI "28~", .mods = CSI "28;{}~" })); break;
+        case Key::F16: append(select(modifiers, { .std = CSI "29~", .mods = CSI "29;{}~" })); break;
+        case Key::F17: append(select(modifiers, { .std = CSI "31~", .mods = CSI "31;{}~" })); break;
+        case Key::F18: append(select(modifiers, { .std = CSI "32~", .mods = CSI "32;{}~" })); break;
+        case Key::F19: append(select(modifiers, { .std = CSI "33~", .mods = CSI "33;{}~" })); break;
+        case Key::F20: append(select(modifiers, { .std = CSI "34~", .mods = CSI "34;{}~" })); break;
+        case Key::F21: append(select(modifiers, { .std = CSI "35~", .mods = CSI "35;{}~" })); break;
+        case Key::F22: append(select(modifiers, { .std = CSI "36~", .mods = CSI "36;{}~" })); break;
+        case Key::F23: append(select(modifiers, { .std = CSI "37~", .mods = CSI "37;{}~" })); break;
+        case Key::F24: append(select(modifiers, { .std = CSI "38~", .mods = CSI "38;{}~" })); break;
+        case Key::F25: append(select(modifiers, { .std = CSI "39~", .mods = CSI "39;{}~" })); break;
+        case Key::F26: append(select(modifiers, { .std = CSI "40~", .mods = CSI "40;{}~" })); break;
+        case Key::F27: append(select(modifiers, { .std = CSI "41~", .mods = CSI "41;{}~" })); break;
+        case Key::F28: append(select(modifiers, { .std = CSI "42~", .mods = CSI "42;{}~" })); break;
+        case Key::F29: append(select(modifiers, { .std = CSI "43~", .mods = CSI "43;{}~" })); break;
+        case Key::F30: append(select(modifiers, { .std = CSI "44~", .mods = CSI "44;{}~" })); break;
+        case Key::F31: append(select(modifiers, { .std = CSI "45~", .mods = CSI "45;{}~" })); break;
+        case Key::F32: append(select(modifiers, { .std = CSI "46~", .mods = CSI "46;{}~" })); break;
+        case Key::F33: append(select(modifiers, { .std = CSI "47~", .mods = CSI "47;{}~" })); break;
+        case Key::F34: append(select(modifiers, { .std = CSI "48~", .mods = CSI "48;{}~" })); break;
+        case Key::F35: append(select(modifiers, { .std = CSI "49~", .mods = CSI "49;{}~" })); break;
         case Key::Escape: append("\033"); break;
-        case Key::Enter: append(select(modifier, { .std = "\r" })); break;
-        case Key::Tab: append(select(modifier, { .std = "\t" })); break;
+        case Key::Enter: append(select(modifiers, { .std = "\r" })); break;
+        case Key::Tab: append(select(modifiers, { .std = "\t" })); break;
         case Key::Backspace:
             // Well accepted hack to distinguish between Backspace nad Ctrl+Backspace,
             // - Backspace is emitting 0x7f,
             // - Ctrl+Backspace is emitting 0x08
-            append(select(modifier, { .std = !modifier.control() ? "\x7f" : "\x08" })); break;
-        case Key::UpArrow: append(select(modifier, { .std = CSI "A", .mods = CSI "1;{}A", .appCursor = SS3 "A" })); break;
-        case Key::DownArrow: append(select(modifier, { .std = CSI "B", .mods = CSI "1;{}B", .appCursor = SS3 "B" })); break;
-        case Key::RightArrow: append(select(modifier, { .std = CSI "C", .mods = CSI "1;{}C", .appCursor = SS3 "C" })); break;
-        case Key::LeftArrow: append(select(modifier, { .std = CSI "D", .mods = CSI "1;{}D", .appCursor = SS3 "D" })); break;
-        case Key::Home: append(select(modifier, { .std = CSI "H", .mods = CSI "1;{}H", .appCursor = SS3 "H" })); break;
-        case Key::End: append(select(modifier, { .std = CSI "F", .mods = CSI "1;{}F", .appCursor = SS3 "F" })); break;
-        case Key::PageUp: append(select(modifier, { .std = CSI "5~", .mods = CSI "5;{}~", .appKeypad = CSI "5~" })); break;
-        case Key::PageDown: append(select(modifier, { .std = CSI "6~", .mods = CSI "6;{}~", .appKeypad = CSI "6~" })); break;
-        case Key::Insert: append(select(modifier, { .std = CSI "2~", .mods = CSI "2;{}~" })); break;
-        case Key::Delete: append(select(modifier, { .std = CSI "3~", .mods = CSI "3;{}~" })); break;
-        case Key::Numpad_Enter:    append(select(modifier, { .std = "\r", .appKeypad = SS3 "M" })); break;
-        case Key::Numpad_Multiply: append(select(modifier, { .std = "*",  .appKeypad = SS3 "j" })); break;
-        case Key::Numpad_Add:      append(select(modifier, { .std = "+",  .appKeypad = SS3 "k" })); break;
-        case Key::Numpad_Subtract: append(select(modifier, { .std = "-",  .appKeypad = SS3 "m" })); break;
-        case Key::Numpad_Decimal:  append(select(modifier, { .std = ".",  .appKeypad = CSI "3~" })); break;
-        case Key::Numpad_Divide:   append(select(modifier, { .std = "/",  .appKeypad = SS3 "o" })); break;
-        case Key::Numpad_0:        append(select(modifier, { .std = "0",  .appKeypad = CSI "2~" })); break;
-        case Key::Numpad_1:        append(select(modifier, { .std = "1",  .appKeypad = SS3 "F" })); break;
-        case Key::Numpad_2:        append(select(modifier, { .std = "2",  .appKeypad = CSI "B" })); break;
-        case Key::Numpad_3:        append(select(modifier, { .std = "3",  .appKeypad = CSI "6~" })); break;
-        case Key::Numpad_4:        append(select(modifier, { .std = "4",  .appKeypad = CSI "D" })); break;
-        case Key::Numpad_5:        append(select(modifier, { .std = "5",  .appKeypad = CSI "E" })); break;
-        case Key::Numpad_6:        append(select(modifier, { .std = "6",  .appKeypad = CSI "C" })); break;
-        case Key::Numpad_7:        append(select(modifier, { .std = "7",  .appKeypad = SS3 "H" })); break;
-        case Key::Numpad_8:        append(select(modifier, { .std = "8",  .appKeypad = CSI "A" })); break;
-        case Key::Numpad_9:        append(select(modifier, { .std = "9",  .appKeypad = CSI "5~" })); break;
-        case Key::Numpad_Equal:    append(select(modifier, { .std = "=",  .appKeypad = SS3 "X" })); break;
+            append(select(modifiers, { .std = modifiers & Modifier::Control ? "\x08" : "\x7F" })); break;
+        case Key::UpArrow: append(select(modifiers, { .std = CSI "A", .mods = CSI "1;{}A", .appCursor = SS3 "A" })); break;
+        case Key::DownArrow: append(select(modifiers, { .std = CSI "B", .mods = CSI "1;{}B", .appCursor = SS3 "B" })); break;
+        case Key::RightArrow: append(select(modifiers, { .std = CSI "C", .mods = CSI "1;{}C", .appCursor = SS3 "C" })); break;
+        case Key::LeftArrow: append(select(modifiers, { .std = CSI "D", .mods = CSI "1;{}D", .appCursor = SS3 "D" })); break;
+        case Key::Home: append(select(modifiers, { .std = CSI "H", .mods = CSI "1;{}H", .appCursor = SS3 "H" })); break;
+        case Key::End: append(select(modifiers, { .std = CSI "F", .mods = CSI "1;{}F", .appCursor = SS3 "F" })); break;
+        case Key::PageUp: append(select(modifiers, { .std = CSI "5~", .mods = CSI "5;{}~", .appKeypad = CSI "5~" })); break;
+        case Key::PageDown: append(select(modifiers, { .std = CSI "6~", .mods = CSI "6;{}~", .appKeypad = CSI "6~" })); break;
+        case Key::Insert: append(select(modifiers, { .std = CSI "2~", .mods = CSI "2;{}~" })); break;
+        case Key::Delete: append(select(modifiers, { .std = CSI "3~", .mods = CSI "3;{}~" })); break;
+        case Key::Numpad_Enter:    append(select(modifiers, { .std = "\r", .appKeypad = SS3 "M" })); break;
+        case Key::Numpad_Multiply: append(select(modifiers, { .std = "*",  .appKeypad = SS3 "j" })); break;
+        case Key::Numpad_Add:      append(select(modifiers, { .std = "+",  .appKeypad = SS3 "k" })); break;
+        case Key::Numpad_Subtract: append(select(modifiers, { .std = "-",  .appKeypad = SS3 "m" })); break;
+        case Key::Numpad_Decimal:  append(select(modifiers, { .std = ".",  .appKeypad = CSI "3~" })); break;
+        case Key::Numpad_Divide:   append(select(modifiers, { .std = "/",  .appKeypad = SS3 "o" })); break;
+        case Key::Numpad_0:        append(select(modifiers, { .std = "0",  .appKeypad = CSI "2~" })); break;
+        case Key::Numpad_1:        append(select(modifiers, { .std = "1",  .appKeypad = SS3 "F" })); break;
+        case Key::Numpad_2:        append(select(modifiers, { .std = "2",  .appKeypad = CSI "B" })); break;
+        case Key::Numpad_3:        append(select(modifiers, { .std = "3",  .appKeypad = CSI "6~" })); break;
+        case Key::Numpad_4:        append(select(modifiers, { .std = "4",  .appKeypad = CSI "D" })); break;
+        case Key::Numpad_5:        append(select(modifiers, { .std = "5",  .appKeypad = CSI "E" })); break;
+        case Key::Numpad_6:        append(select(modifiers, { .std = "6",  .appKeypad = CSI "C" })); break;
+        case Key::Numpad_7:        append(select(modifiers, { .std = "7",  .appKeypad = SS3 "H" })); break;
+        case Key::Numpad_8:        append(select(modifiers, { .std = "8",  .appKeypad = CSI "A" })); break;
+        case Key::Numpad_9:        append(select(modifiers, { .std = "9",  .appKeypad = CSI "5~" })); break;
+        case Key::Numpad_Equal:    append(select(modifiers, { .std = "=",  .appKeypad = SS3 "X" })); break;
         // {{{ unsupported keys in legacy input protocol
         case Key::MediaPlay:
         case Key::MediaStop:
@@ -251,22 +251,22 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
 // {{{ ExtendedKeyboardInputGenerator
 bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
                                                   uint32_t physicalKey,
-                                                  Modifier modifier,
+                                                  Modifiers modifiers,
                                                   KeyboardEventType eventType)
 {
     if (enabled(eventType))
     {
         if (enabled(KeyboardEventFlag::DisambiguateEscapeCodes)
-            && (modifier.any() || enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes)))
+            && (modifiers.any() || enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes)))
         {
             append("\033[{};{}u",
-                   encodeCharacter(characterEvent, physicalKey, modifier),
-                   encodeModifiers(modifier, eventType));
+                   encodeCharacter(characterEvent, physicalKey, modifiers),
+                   encodeModifiers(modifiers, eventType));
             return true;
         }
     }
 
-    return StandardKeyboardInputGenerator::generateChar(characterEvent, physicalKey, modifier, eventType);
+    return StandardKeyboardInputGenerator::generateChar(characterEvent, physicalKey, modifiers, eventType);
 }
 
 constexpr unsigned encodeEventType(KeyboardEventType eventType) noexcept
@@ -274,21 +274,21 @@ constexpr unsigned encodeEventType(KeyboardEventType eventType) noexcept
     return static_cast<unsigned>(eventType);
 }
 
-std::string ExtendedKeyboardInputGenerator::encodeModifiers(Modifier modifier,
+std::string ExtendedKeyboardInputGenerator::encodeModifiers(Modifiers modifiers,
                                                             KeyboardEventType eventType) const
 {
     if (enabled(KeyboardEventFlag::ReportEventTypes))
-        return fmt::format("{}:{}", modifier.value(), encodeEventType(eventType));
+        return fmt::format("{}:{}", modifiers.value(), encodeEventType(eventType));
 
-    if (modifier.value() != 0)
-        return std::to_string(1 + modifier.value());
+    if (modifiers.value() != 0)
+        return std::to_string(1 + modifiers.value());
 
     return "";
 }
 
 std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
                                                             uint32_t physicalKey,
-                                                            Modifier modifier) const
+                                                            Modifiers modifiers) const
 {
     // The codepoint is always the lower-case form
     // TODO: use libunicode for down-shifting
@@ -300,7 +300,8 @@ std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
     {
         // The shifted key is simply the upper-case version of unicode-codepoint
         auto const shiftedKey = static_cast<uint32_t>(
-            (modifier.shift() && (0x20 <= ch && ch < 0x80)) ? std::toupper(static_cast<char>(ch)) : 0);
+            (modifiers & Modifier::Shift && (0x20 <= ch && ch < 0x80)) ? std::toupper(static_cast<char>(ch))
+                                                                       : 0);
         // TODO: use libunicode for up-shifting
 
         bool const showPhysicalKey = physicalKey && physicalKey != ch && physicalKey != shiftedKey;
@@ -466,15 +467,15 @@ constexpr bool isModifierKey(Key key) noexcept
     // clang-format on
 }
 
-bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifier modifier, KeyboardEventType eventType)
+bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
     if (!enabled(eventType))
         return false;
 
     if (!enabled(KeyboardEventFlag::DisambiguateEscapeCodes))
-        return StandardKeyboardInputGenerator::generateKey(key, modifier, eventType);
+        return StandardKeyboardInputGenerator::generateKey(key, modifiers, eventType);
 
-    if (modifier.none() && !enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes))
+    if (modifiers.none() && !enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes))
     {
         // "The only exceptions are the Enter, Tab and Backspace keys which still generate the same bytes as
         // in legacy mode this is to allow the user to type and execute commands in the shell such as reset
@@ -483,7 +484,8 @@ bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
         {
             case Key::Enter:
             case Key::Tab:
-            case Key::Backspace: return StandardKeyboardInputGenerator::generateKey(key, modifier, eventType);
+            case Key::Backspace:
+                return StandardKeyboardInputGenerator::generateKey(key, modifiers, eventType);
             default: break;
         }
     }
@@ -492,7 +494,7 @@ bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifier modifier, Key
         return false;
 
     auto const [code, function] = mapKey(key);
-    auto const encodedModifiers = encodeModifiers(modifier, eventType);
+    auto const encodedModifiers = encodeModifiers(modifiers, eventType);
     auto controlSequence = fmt::format("\033[{}", code);
     if (!encodedModifiers.empty())
         controlSequence += fmt::format(";{}", encodedModifiers);
@@ -537,17 +539,17 @@ void InputGenerator::setApplicationKeypadMode(bool enable)
 
 bool InputGenerator::generate(char32_t characterEvent,
                               uint32_t physicalKey,
-                              Modifier modifier,
+                              Modifiers modifiers,
                               KeyboardEventType eventType)
 {
     bool const success =
-        _keyboardInputGenerator.generateChar(characterEvent, physicalKey, modifier, eventType);
+        _keyboardInputGenerator.generateChar(characterEvent, physicalKey, modifiers, eventType);
 
     if (success)
     {
         _pendingSequence += _keyboardInputGenerator.take();
         inputLog()("Sending {} \"{}\" {}.",
-                   modifier,
+                   modifiers,
                    crispy::escape(unicode::convert_to<char>(characterEvent)),
                    eventType);
     }
@@ -555,14 +557,14 @@ bool InputGenerator::generate(char32_t characterEvent,
     return success;
 }
 
-bool InputGenerator::generate(Key key, Modifier modifier, KeyboardEventType eventType)
+bool InputGenerator::generate(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
-    bool const success = _keyboardInputGenerator.generateKey(key, modifier, eventType);
+    bool const success = _keyboardInputGenerator.generateKey(key, modifiers, eventType);
 
     if (success)
     {
         _pendingSequence += _keyboardInputGenerator.take();
-        inputLog()("Sending {} \"{}\" {}.", modifier, key, eventType);
+        inputLog()("Sending {} \"{}\" {}.", modifiers, key, eventType);
     }
 
     return success;
@@ -661,14 +663,14 @@ void InputGenerator::setMouseWheelMode(MouseWheelMode mode) noexcept
 
 namespace
 {
-    constexpr uint8_t modifierBits(Modifier modifier) noexcept
+    constexpr uint8_t modifierBits(Modifiers modifiers) noexcept
     {
         uint8_t mods = 0;
-        if (modifier.shift())
+        if (modifiers.contains(Modifier::Shift))
             mods |= 4;
-        if (modifier.meta())
+        if (modifiers.contains(Modifier::Meta))
             mods |= 8;
-        if (modifier.control())
+        if (modifiers.contains(Modifier::Control))
             mods |= 16;
         return mods;
     }
@@ -707,7 +709,7 @@ namespace
 } // namespace
 
 bool InputGenerator::generateMouse(MouseEventType eventType,
-                                   Modifier modifier,
+                                   Modifiers modifiers,
                                    MouseButton button,
                                    CellLocation pos,
                                    PixelCoordinate pixelPosition,
@@ -725,7 +727,7 @@ bool InputGenerator::generateMouse(MouseEventType eventType,
         case MouseProtocol::X10: // Old X10 mouse protocol
             if (eventType == MouseEventType::Press)
                 mouseTransport(
-                    eventType, buttonX10(button), modifierBits(modifier), pos, pixelPosition, uiHandled);
+                    eventType, buttonX10(button), modifierBits(modifiers), pos, pixelPosition, uiHandled);
             return true;
         case MouseProtocol::NormalTracking: // Normal tracking mode, that's X10 with mouse release events and
                                             // modifiers
@@ -734,7 +736,8 @@ bool InputGenerator::generateMouse(MouseEventType eventType,
                 auto const buttonValue = _mouseTransport != MouseTransport::SGR
                                              ? buttonNormal(button, eventType)
                                              : buttonX10(button);
-                mouseTransport(eventType, buttonValue, modifierBits(modifier), pos, pixelPosition, uiHandled);
+                mouseTransport(
+                    eventType, buttonValue, modifierBits(modifiers), pos, pixelPosition, uiHandled);
             }
             return true;
         case MouseProtocol::ButtonTracking: // Button-event tracking protocol.
@@ -750,7 +753,7 @@ bool InputGenerator::generateMouse(MouseEventType eventType,
                     eventType == MouseEventType::Drag ? uint8_t(buttonValue + 0x20) : buttonValue;
 
                 mouseTransport(
-                    eventType, draggableButton, modifierBits(modifier), pos, pixelPosition, uiHandled);
+                    eventType, draggableButton, modifierBits(modifiers), pos, pixelPosition, uiHandled);
                 return true;
             }
             return false;
@@ -765,7 +768,7 @@ bool InputGenerator::generateMouse(MouseEventType eventType,
                     eventType == MouseEventType::Drag ? uint8_t(buttonValue + 0x20) : buttonValue;
 
                 mouseTransport(
-                    eventType, draggableButton, modifierBits(modifier), pos, pixelPosition, uiHandled);
+                    eventType, draggableButton, modifierBits(modifiers), pos, pixelPosition, uiHandled);
             }
             return true;
         case MouseProtocol::HighlightTracking: // Highlight mouse tracking
@@ -887,11 +890,11 @@ bool InputGenerator::mouseTransportURXVT(MouseEventType eventType,
 }
 
 bool InputGenerator::generateMousePress(
-    Modifier modifier, MouseButton button, CellLocation pos, PixelCoordinate pixelPosition, bool uiHandled)
+    Modifiers modifiers, MouseButton button, CellLocation pos, PixelCoordinate pixelPosition, bool uiHandled)
 {
     auto const logged = [=](bool success) -> bool {
         if (success)
-            inputLog()("Sending mouse press {} {} at {}.", button, modifier, pos);
+            inputLog()("Sending mouse press {} {} at {}.", button, modifiers, pos);
         return success;
     };
 
@@ -930,15 +933,15 @@ bool InputGenerator::generateMousePress(
             _currentlyPressedMouseButtons.insert(button);
 
     return logged(generateMouse(
-        MouseEventType::Press, modifier, button, _currentMousePosition, pixelPosition, uiHandled));
+        MouseEventType::Press, modifiers, button, _currentMousePosition, pixelPosition, uiHandled));
 }
 
 bool InputGenerator::generateMouseRelease(
-    Modifier modifier, MouseButton button, CellLocation pos, PixelCoordinate pixelPosition, bool uiHandled)
+    Modifiers modifiers, MouseButton button, CellLocation pos, PixelCoordinate pixelPosition, bool uiHandled)
 {
     auto const logged = [=](bool success) -> bool {
         if (success)
-            inputLog()("Sending mouse release {} {} at {}.", button, modifier, pos);
+            inputLog()("Sending mouse release {} {} at {}.", button, modifiers, pos);
         return success;
     };
 
@@ -948,10 +951,10 @@ bool InputGenerator::generateMouseRelease(
         _currentlyPressedMouseButtons.erase(i);
 
     return logged(generateMouse(
-        MouseEventType::Release, modifier, button, _currentMousePosition, pixelPosition, uiHandled));
+        MouseEventType::Release, modifiers, button, _currentMousePosition, pixelPosition, uiHandled));
 }
 
-bool InputGenerator::generateMouseMove(Modifier modifier,
+bool InputGenerator::generateMouseMove(Modifiers modifiers,
                                        CellLocation pos,
                                        PixelCoordinate pixelPosition,
                                        bool uiHandled)
@@ -986,7 +989,7 @@ bool InputGenerator::generateMouseMove(Modifier modifier,
     if (report)
         return logged(generateMouse(
             MouseEventType::Drag,
-            modifier,
+            modifiers,
             buttonsPressed ? *_currentlyPressedMouseButtons.begin() // what if multiple are pressed?
                            : MouseButton::Release,
             pos,

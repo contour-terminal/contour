@@ -132,7 +132,7 @@ namespace
         settings.cursorBlinkInterval = profile.inputModes.insert.cursor.cursorBlinkInterval;
         settings.smoothLineScrolling = profile.smoothLineScrolling;
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters);
-        settings.mouseProtocolBypassModifier = config.bypassMouseProtocolModifier;
+        settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers;
         settings.maxImageSize = config.maxImageSize;
         settings.maxImageRegisterCount = config.maxImageColorRegisters;
         settings.statusDisplayType = profile.initialStatusDisplayType;
@@ -736,9 +736,9 @@ void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 }
 // }}}
 // {{{ Input Events
-void TerminalSession::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventType, Timestamp now)
+void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
 {
-    inputLog()("Key {} event received: {} {}", eventType, modifier, key);
+    inputLog()("Key {} event received: {} {}", eventType, modifiers, key);
 
     if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
     {
@@ -753,21 +753,21 @@ void TerminalSession::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType
     if (eventType != KeyboardEventType::Release)
     {
         if (auto const* actions =
-                config::apply(_config.inputMappings.keyMappings, key, modifier, matchModeFlags()))
+                config::apply(_config.inputMappings.keyMappings, key, modifiers, matchModeFlags()))
         {
             executeAllActions(*actions);
             return;
         }
     }
-    terminal().sendKeyEvent(key, modifier, eventType, now);
+    terminal().sendKeyEvent(key, modifiers, eventType, now);
 }
 
 void TerminalSession::sendCharEvent(
-    char32_t value, uint32_t physicalKey, Modifier modifier, KeyboardEventType eventType, Timestamp now)
+    char32_t value, uint32_t physicalKey, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
 {
     inputLog()("Character {} event received: {} {}",
                eventType,
-               modifier,
+               modifiers,
                crispy::escape(unicode::convert_to<char>(value)));
 
     assert(_display != nullptr);
@@ -785,37 +785,37 @@ void TerminalSession::sendCharEvent(
     if (eventType != KeyboardEventType::Release)
     {
         if (auto const* actions =
-                config::apply(_config.inputMappings.charMappings, value, modifier, matchModeFlags()))
+                config::apply(_config.inputMappings.charMappings, value, modifiers, matchModeFlags()))
         {
             executeAllActions(*actions);
             return;
         }
     }
-    terminal().sendCharEvent(value, physicalKey, modifier, eventType, now);
+    terminal().sendCharEvent(value, physicalKey, modifiers, eventType, now);
 }
 
-void TerminalSession::sendMousePressEvent(Modifier modifier,
+void TerminalSession::sendMousePressEvent(Modifiers modifiers,
                                           MouseButton button,
                                           PixelCoordinate pixelPosition)
 {
     auto const uiHandledHint = false;
-    inputLog()("Mouse press received: {} {}\n", modifier, button);
+    inputLog()("Mouse press received: {} {}\n", modifiers, button);
 
     terminal().tick(steady_clock::now());
 
-    if (terminal().sendMousePressEvent(modifier, button, pixelPosition, uiHandledHint))
+    if (terminal().sendMousePressEvent(modifiers, button, pixelPosition, uiHandledHint))
         return;
 
-    auto const sanitizedModifier = modifier.contains(_config.bypassMouseProtocolModifier)
-                                       ? modifier.without(_config.bypassMouseProtocolModifier)
-                                       : modifier;
+    auto const sanitizedModifier = modifiers.contains(_config.bypassMouseProtocolModifiers)
+                                       ? modifiers.without(_config.bypassMouseProtocolModifiers)
+                                       : modifiers;
 
     if (auto const* actions =
             config::apply(_config.inputMappings.mouseMappings, button, sanitizedModifier, matchModeFlags()))
         executeAllActions(*actions);
 }
 
-void TerminalSession::sendMouseMoveEvent(vtbackend::Modifier modifier,
+void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
                                          vtbackend::CellLocation pos,
                                          vtbackend::PixelCoordinate pixelPosition)
 {
@@ -828,7 +828,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifier modifier,
     terminal().tick(steady_clock::now());
 
     auto constexpr UiHandledHint = false;
-    terminal().sendMouseMoveEvent(modifier, pos, pixelPosition, UiHandledHint);
+    terminal().sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
 
     if (pos != _currentMousePosition)
     {
@@ -841,14 +841,14 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifier modifier,
     }
 }
 
-void TerminalSession::sendMouseReleaseEvent(Modifier modifier,
+void TerminalSession::sendMouseReleaseEvent(Modifiers modifiers,
                                             MouseButton button,
                                             PixelCoordinate pixelPosition)
 {
     terminal().tick(steady_clock::now());
 
     auto const uiHandledHint = false;
-    terminal().sendMouseReleaseEvent(modifier, button, pixelPosition, uiHandledHint);
+    terminal().sendMouseReleaseEvent(modifiers, button, pixelPosition, uiHandledHint);
     scheduleRedraw();
 }
 
@@ -1202,7 +1202,7 @@ bool TerminalSession::operator()(actions::SendChars const& event)
 {
     // auto const now = steady_clock::now();
     // for (auto const ch: event.chars)
-    //     terminal().sendCharPressEvent(static_cast<char32_t>(ch), vtbackend::Modifier::None, now);
+    //     terminal().sendCharPressEvent(static_cast<char32_t>(ch), vtbackend::Modifiers::None, now);
     terminal().sendRawInput(event.chars);
     return true;
 }
@@ -1410,8 +1410,8 @@ void TerminalSession::configureTerminal()
     sessionLog()("Configuring terminal.");
 
     _terminal.setWordDelimiters(_config.wordDelimiters);
-    _terminal.setMouseProtocolBypassModifier(_config.bypassMouseProtocolModifier);
-    _terminal.setMouseBlockSelectionModifier(_config.mouseBlockSelectionModifier);
+    _terminal.setMouseProtocolBypassModifiers(_config.bypassMouseProtocolModifiers);
+    _terminal.setMouseBlockSelectionModifiers(_config.mouseBlockSelectionModifiers);
     _terminal.setLastMarkRangeOffset(_profile.copyLastMarkRangeOffset);
 
     sessionLog()("Setting terminal ID to {}.", _profile.terminalId);

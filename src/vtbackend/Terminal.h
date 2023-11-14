@@ -274,23 +274,23 @@ class Terminal
 
     void clearScreen();
 
-    void setMouseProtocolBypassModifier(Modifier value) { _settings.mouseProtocolBypassModifier = value; }
-    void setMouseBlockSelectionModifier(Modifier value) { _settings.mouseBlockSelectionModifier = value; }
+    void setMouseProtocolBypassModifiers(Modifiers value) { _settings.mouseProtocolBypassModifiers = value; }
+    void setMouseBlockSelectionModifiers(Modifiers value) { _settings.mouseBlockSelectionModifiers = value; }
 
     // {{{ input proxy
     using Timestamp = std::chrono::steady_clock::time_point;
-    bool sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventType, Timestamp now);
+    bool sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType eventType, Timestamp now);
     bool sendCharEvent(
-        char32_t ch, uint32_t physicalKey, Modifier modifier, KeyboardEventType eventType, Timestamp now);
-    bool sendMousePressEvent(Modifier modifier,
+        char32_t ch, uint32_t physicalKey, Modifiers modifiers, KeyboardEventType eventType, Timestamp now);
+    bool sendMousePressEvent(Modifiers modifiers,
                              MouseButton button,
                              PixelCoordinate pixelPosition,
                              bool uiHandledHint);
-    void sendMouseMoveEvent(Modifier modifier,
+    void sendMouseMoveEvent(Modifiers modifiers,
                             CellLocation newPosition,
                             PixelCoordinate pixelPosition,
                             bool uiHandledHint);
-    bool sendMouseReleaseEvent(Modifier modifier,
+    bool sendMouseReleaseEvent(Modifiers modifiers,
                                MouseButton button,
                                PixelCoordinate pixelPosition,
                                bool uiHandledHint);
@@ -759,7 +759,7 @@ class Terminal
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
     void updateHoveringHyperlinkState();
-    bool handleMouseSelection(Modifier modifier);
+    bool handleMouseSelection(Modifiers modifiers);
 
     /// Tests if the text selection should be extended by the given mouse position or not.
     ///
@@ -770,13 +770,13 @@ class Terminal
 
     // Tests if the App mouse protocol is explicitly being bypassed by the user,
     // by pressing a special bypass modifier (usualy Shift).
-    bool allowBypassAppMouseGrabViaModifier(Modifier modifier) const noexcept
+    bool allowBypassAppMouseGrabViaModifier(Modifiers modifiers) const noexcept
     {
-        return _settings.mouseProtocolBypassModifier != Modifier::None
-               && modifier.contains(_settings.mouseProtocolBypassModifier);
+        return _settings.mouseProtocolBypassModifiers != Modifier::None
+               && modifiers.contains(_settings.mouseProtocolBypassModifiers);
     }
 
-    bool allowPassMouseEventToApp(Modifier currentlyPressedModifier) const noexcept
+    bool allowPassMouseEventToApp(Modifiers currentlyPressedModifier) const noexcept
     {
         return _state.inputGenerator.mouseProtocol().has_value() && allowInput()
                && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier);

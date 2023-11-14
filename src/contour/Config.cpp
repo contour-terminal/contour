@@ -674,24 +674,24 @@ namespace
         cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
     }
 
-    optional<vtbackend::Modifier::Key> parseModifierKey(string const& key)
+    optional<vtbackend::Modifier> parseModifierKey(string const& key)
     {
         using vtbackend::Modifier;
         auto const upperKey = toUpper(key);
         if (upperKey == "ALT")
-            return Modifier::Key::Alt;
+            return Modifier::Alt;
         if (upperKey == "CONTROL")
-            return Modifier::Key::Control;
+            return Modifier::Control;
         if (upperKey == "SHIFT")
-            return Modifier::Key::Shift;
+            return Modifier::Shift;
         if (upperKey == "SUPER")
-            return Modifier::Key::Super;
+            return Modifier::Super;
         if (upperKey == "META")
             // TODO: This is technically not correct, but we used the term Meta up until now,
             // to refer to the Windows/Cmd key. But Qt also exposes another modifier called
             // Meta, which rarely exists on modern keyboards (?), but it we need to support it
             // as well, especially since extended CSIu protocol exposes it as well.
-            return Modifier::Key::Super; // Return Modifier::Key::Meta in the future.
+            return Modifier::Super; // Return Modifier::Meta in the future.
         return nullopt;
     }
 
@@ -752,11 +752,12 @@ namespace
         return matchModes;
     }
 
-    optional<vtbackend::Modifier> parseModifier(UsedKeys& usedKeys,
-                                                string const& prefix,
-                                                YAML::Node const& node)
+    optional<vtbackend::Modifiers> parseModifiers(UsedKeys& usedKeys,
+                                                  string const& prefix,
+                                                  YAML::Node const& node)
     {
         using vtbackend::Modifier;
+        using vtbackend::Modifiers;
         if (!node)
             return nullopt;
         usedKeys.emplace(prefix);
@@ -765,7 +766,7 @@ namespace
         if (!node.IsSequence())
             return nullopt;
 
-        vtbackend::Modifier mods;
+        vtbackend::Modifiers mods;
         for (const auto& i: node)
         {
             if (!i.IsScalar())
@@ -783,13 +784,13 @@ namespace
     template <typename Input>
     void appendOrCreateBinding(vector<vtbackend::InputBinding<Input, ActionList>>& bindings,
                                vtbackend::MatchModes modes,
-                               vtbackend::Modifier modifier,
+                               vtbackend::Modifiers modifiers,
                                Input input,
                                Action action)
     {
         for (auto& binding: bindings)
         {
-            if (match(binding, modes, modifier, input))
+            if (match(binding, modes, modifiers, input))
             {
                 binding.binding.emplace_back(std::move(action));
                 return;
@@ -797,12 +798,12 @@ namespace
         }
 
         bindings.emplace_back(vtbackend::InputBinding<Input, ActionList> {
-            modes, modifier, input, ActionList { std::move(action) } });
+            modes, modifiers, input, ActionList { std::move(action) } });
     }
 
     bool tryAddKey(InputMappings& inputMappings,
                    vtbackend::MatchModes modes,
-                   vtbackend::Modifier modifier,
+                   vtbackend::Modifiers modifiers,
                    YAML::Node const& node,
                    Action action)
     {
@@ -819,12 +820,12 @@ namespace
         if (holds_alternative<vtbackend::Key>(*input))
         {
             appendOrCreateBinding(
-                inputMappings.keyMappings, modes, modifier, get<vtbackend::Key>(*input), std::move(action));
+                inputMappings.keyMappings, modes, modifiers, get<vtbackend::Key>(*input), std::move(action));
         }
         else if (holds_alternative<char32_t>(*input))
         {
             appendOrCreateBinding(
-                inputMappings.charMappings, modes, modifier, get<char32_t>(*input), std::move(action));
+                inputMappings.charMappings, modes, modifiers, get<char32_t>(*input), std::move(action));
         }
         else
             assert(false && "The impossible happened.");
@@ -856,7 +857,7 @@ namespace
 
     bool tryAddMouse(vector<MouseInputMapping>& bindings,
                      vtbackend::MatchModes modes,
-                     vtbackend::Modifier modifier,
+                     vtbackend::Modifiers modifiers,
                      YAML::Node const& node,
                      Action action)
     {
@@ -864,7 +865,7 @@ namespace
         if (!mouseButton)
             return false;
 
-        appendOrCreateBinding(bindings, modes, modifier, *mouseButton, std::move(action));
+        appendOrCreateBinding(bindings, modes, modifiers, *mouseButton, std::move(action));
         return true;
     }
 
@@ -986,7 +987,7 @@ namespace
         using namespace vtbackend;
 
         auto const action = parseAction(usedKeys, prefix, mapping);
-        auto const mods = parseModifier(usedKeys, prefix + ".mods", mapping["mods"]);
+        auto const mods = parseModifiers(usedKeys, prefix + ".mods", mapping["mods"]);
         auto const mode = parseMatchModes(usedKeys, prefix + ".mode", mapping["mode"]);
         if (action && mods && mode)
         {
@@ -2042,14 +2043,14 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     tryLoadValue(usedKeys, doc, "word_delimiters", config.wordDelimiters, logger);
 
     if (auto opt =
-            parseModifier(usedKeys, "bypass_mouse_protocol_modifier", doc["bypass_mouse_protocol_modifier"]);
+            parseModifiers(usedKeys, "bypass_mouse_protocol_modifier", doc["bypass_mouse_protocol_modifier"]);
         opt.has_value())
-        config.bypassMouseProtocolModifier = opt.value();
+        config.bypassMouseProtocolModifiers = opt.value();
 
     if (auto opt =
-            parseModifier(usedKeys, "mouse_block_selection_modifier", doc["mouse_block_selection_modifier"]);
+            parseModifiers(usedKeys, "mouse_block_selection_modifier", doc["mouse_block_selection_modifier"]);
         opt.has_value())
-        config.mouseBlockSelectionModifier = opt.value();
+        config.mouseBlockSelectionModifiers = opt.value();
 
     if (doc["on_mouse_select"].IsDefined())
     {
@@ -2101,6 +2102,22 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     tryLoadValue(usedKeys, doc, "spawn_new_process", config.spawnNewProcess, logger);
 
     tryLoadValue(usedKeys, doc, "live_config", config.live, logger);
+
+    if (auto const loggingNode = doc["logging"]; loggingNode.IsMap())
+    {
+        usedKeys.emplace("logging");
+
+        if (auto const tagsNode = loggingNode["tags"]; tagsNode.IsSequence())
+        {
+            usedKeys.emplace("logging.tags");
+            for (auto const& tagNode: tagsNode)
+            {
+                auto const tag = tagNode.as<string>();
+                usedKeys.emplace("logging.tags." + tag);
+                logstore::enable(tag);
+            }
+        }
+    }
 
     auto logEnabled = false;
     tryLoadValue(usedKeys, doc, "logging.enabled", logEnabled, logger);

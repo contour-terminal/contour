@@ -107,12 +107,12 @@ template <typename Input>
 std::vector<actions::Action> const* apply(
     std::vector<vtbackend::InputBinding<Input, ActionList>> const& mappings,
     Input input,
-    vtbackend::Modifier modifier,
+    vtbackend::Modifiers modifiers,
     uint8_t actualModeFlags)
 {
     for (vtbackend::InputBinding<Input, ActionList> const& mapping: mappings)
     {
-        if (mapping.modifier == modifier && mapping.input == input
+        if (mapping.modifiers == modifiers && mapping.input == input
             && helper::testMatchMode(actualModeFlags, mapping.modes))
         {
             return &mapping.binding;
@@ -308,9 +308,9 @@ struct Config
 
     // selection
     std::string wordDelimiters;
-    vtbackend::Modifier bypassMouseProtocolModifier = vtbackend::Modifier::Shift;
+    vtbackend::Modifiers bypassMouseProtocolModifiers = vtbackend::Modifier::Shift;
     SelectionAction onMouseSelection = SelectionAction::CopyToSelectionClipboard;
-    vtbackend::Modifier mouseBlockSelectionModifier = vtbackend::Modifier::Control;
+    vtbackend::Modifiers mouseBlockSelectionModifiers = vtbackend::Modifier::Control;
 
     // input mapping
     InputMappings inputMappings;

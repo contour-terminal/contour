@@ -139,6 +139,8 @@ namespace
 
 bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, TerminalSession& session)
 {
+    qDebug() << "sendKeyEvent: " << event->key() << " " << event->text() << " " << event->modifiers();
+
     using vtbackend::Key;
     using vtbackend::Modifier;
 
@@ -235,7 +237,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         pair { Qt::Key_QuoteLeft, '`' },   pair { Qt::Key_Underscore, '_' },
     }; // }}}
 
-    auto const modifiers = makeModifier(event->modifiers());
+    auto const modifiers = makeModifiers(event->modifiers());
     auto const key = event->key();
 
     if (event->modifiers().testFlag(Qt::KeypadModifier))
@@ -303,7 +305,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     }
 #endif
 
-    if (0x20 <= key && key < 0x80 && (modifiers.control()))
+    if (0x20 <= key && key < 0x80 && (modifiers & Modifier::Control))
     {
         session.sendCharEvent(static_cast<char32_t>(key), physicalKey, modifiers, eventType, now);
         return true;
@@ -348,7 +350,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     auto const xDelta = event->angleDelta().x() > 0 ? 1 : event->angleDelta().x() < 0 ? -1 : 0;
     if (xDelta)
     {
-        auto const modifier = makeModifier(event->modifiers());
+        auto const modifier = makeModifiers(event->modifiers());
         auto const button = xDelta > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
         auto const pixelPosition = makeMousePixelPosition(event, session.contentScale());
 
@@ -359,7 +361,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     auto const yDelta = mouseWheelDelta(event);
     if (yDelta)
     {
-        auto const modifier = makeModifier(event->modifiers());
+        auto const modifier = makeModifiers(event->modifiers());
         auto const button = yDelta > 0 ? VTMouseButton::WheelUp : VTMouseButton::WheelDown;
         auto const pixelPosition = makeMousePixelPosition(event, session.contentScale());
 
@@ -370,7 +372,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 
 void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
 {
-    session.sendMousePressEvent(makeModifier(event->modifiers()),
+    session.sendMousePressEvent(makeModifiers(event->modifiers()),
                                 makeMouseButton(event->button()),
                                 makeMousePixelPosition(event, session.contentScale()));
     event->accept();
@@ -378,7 +380,7 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
 
 void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
 {
-    session.sendMouseReleaseEvent(makeModifier(event->modifiers()),
+    session.sendMouseReleaseEvent(makeModifiers(event->modifiers()),
                                   makeMouseButton(event->button()),
                                   makeMousePixelPosition(event, session.contentScale()));
     event->accept();
@@ -386,7 +388,7 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
 
 void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
 {
-    session.sendMouseMoveEvent(makeModifier(event->modifiers()),
+    session.sendMouseMoveEvent(makeModifiers(event->modifiers()),
                                makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
                                makeMousePixelPosition(event, session.contentScale()));
     event->accept();
@@ -399,7 +401,7 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
 #else
     auto const position = event->pos();
 #endif
-    session.sendMouseMoveEvent(makeModifier(event->modifiers()),
+    session.sendMouseMoveEvent(makeModifiers(event->modifiers()),
                                makeMouseCellLocation(position.x(), position.y(), session),
                                makeMousePixelPosition(event, session.contentScale()));
     event->accept();
