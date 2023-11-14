@@ -128,6 +128,7 @@ if(CRISPY_TESTING)
         indexed_test.cpp
         compose_test.cpp
         utils_test.cpp
+        result_test.cpp
         ring_test.cpp
         sort_test.cpp
         times_test.cpp
