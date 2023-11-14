@@ -25,7 +25,12 @@ template <typename flag_type>
 class flags
 {
   public:
-    constexpr flags(flag_type flag) noexcept { enable(flag); }
+    constexpr flags(flag_type flag) noexcept: _value(static_cast<unsigned>(flag)) {}
+    constexpr flags(std::initializer_list<flag_type> bits) noexcept
+    {
+        for (auto const bit: bits)
+            enable(bit);
+    }
     constexpr flags() noexcept = default;
     constexpr flags(flags&&) noexcept = default;
     constexpr flags(flags const&) noexcept = default;
@@ -42,12 +47,13 @@ class flags
         _value &= ~static_cast<unsigned>(flags._value);
     }
 
-    [[nodiscard]] constexpr bool test(flag_type flag) const noexcept
+    [[nodiscard]] constexpr bool contains(flags<flag_type> flags) const noexcept
     {
-        return _value & static_cast<unsigned>(flag);
+        return _value & flags.value();
     }
 
-    [[nodiscard]] constexpr bool operator&(flag_type flag) const noexcept { return test(flag); }
+    [[nodiscard]] constexpr bool test(flag_type flag) const noexcept { return contains(flag); }
+    [[nodiscard]] constexpr bool operator&(flag_type flag) const noexcept { return contains(flag); }
 
     constexpr flags& operator|=(flags<flag_type> flags) noexcept
     {
@@ -55,13 +61,13 @@ class flags
         return *this;
     }
 
-    [[nodiscard]] constexpr flags& operator|=(flag_type flag) noexcept
+    constexpr flags& operator|=(flag_type flag) noexcept
     {
         enable(flag);
         return *this;
     }
 
-    [[nodiscard]] constexpr flags& operator&=(flag_type flag) noexcept
+    constexpr flags& operator&=(flag_type flag) noexcept
     {
         disable(flag);
         return *this;
@@ -69,6 +75,7 @@ class flags
 
     [[nodiscard]] constexpr bool none() const noexcept { return _value == 0; }
     [[nodiscard]] constexpr bool any() const noexcept { return _value != 0; }
+    [[nodiscard]] constexpr explicit operator bool() const noexcept { return _value != 0; }
 
     [[nodiscard]] constexpr unsigned value() const noexcept { return _value; }
 
@@ -80,21 +87,27 @@ class flags
         return result;
     }
 
-    [[nodiscard]] constexpr flags<flag_type> with(flag_type flag) const noexcept
+    [[nodiscard]] constexpr flags<flag_type> with(flag_type other) const noexcept
     {
-        return flags<flag_type>::from_value(_value) | flag;
+        return flags<flag_type>::from_value(_value | static_cast<unsigned>(other));
     }
 
-    [[nodiscard]] constexpr flags<flag_type> without(flag_type flag) const noexcept
+    constexpr flags<flag_type> without(flags<flag_type> other) const noexcept
     {
-        auto result = flags<flag_type>::from_value(_value);
-        result &= flag;
-        return result;
+        return flags<flag_type>::from_value(_value & ~other.value());
     }
+
+    constexpr auto operator<=>(flags<flag_type> const& other) const noexcept = default;
 
   private:
     unsigned _value = 0;
 };
+
+template <typename flag_type>
+constexpr flags<flag_type> operator|(flags<flag_type> lhs, flags<flag_type> rhs) noexcept
+{
+    return flags<flag_type>::from_value(lhs.value() | rhs.value());
+}
 
 } // namespace crispy
 
