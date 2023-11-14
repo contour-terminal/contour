@@ -35,118 +35,30 @@ enum class MouseProtocol
 };
 
 // {{{ Modifier
-class Modifier
+enum Modifier : unsigned
 {
-  public:
-    enum Key : unsigned
-    {
-        // NB: These values MUST match the values of the corresponding
-        // the bit positions in the modifier mask in CSIu keyboard protocol.
-        None = 0,
-        Shift = 1,
-        Alt = 2,
-        Control = 4,
-        Super = 8,
-        Hyper = 16,
-        Meta = 32,
-        CapsLock = 64,
-        NumLock = 128,
-    };
-
-    constexpr Modifier(Key key): _mask { static_cast<unsigned>(key) } {}
-
-    constexpr Modifier() = default;
-    constexpr Modifier(Modifier&&) = default;
-    constexpr Modifier(Modifier const&) = default;
-    constexpr Modifier& operator=(Modifier&&) = default;
-    constexpr Modifier& operator=(Modifier const&) = default;
-
-    [[nodiscard]] constexpr unsigned value() const noexcept { return _mask; }
-
-    [[nodiscard]] constexpr bool none() const noexcept { return value() == 0; }
-    [[nodiscard]] constexpr bool some() const noexcept { return value() != 0; }
-    [[nodiscard]] constexpr bool shift() const noexcept { return value() & Shift; }
-    [[nodiscard]] constexpr bool alt() const noexcept { return value() & Alt; }
-    [[nodiscard]] constexpr bool control() const noexcept { return value() & Control; }
-    [[nodiscard]] constexpr bool super() const noexcept { return value() & Super; }
-    // hyper is called hyperKey because in MSVC/Win32 there is a `typedef hyper __uint64;` :-(
-    [[nodiscard]] constexpr bool hyperKey() const noexcept { return value() & Hyper; }
-    [[nodiscard]] constexpr bool meta() const noexcept { return value() & Meta; }
-    [[nodiscard]] constexpr bool capsLock() const noexcept { return value() & CapsLock; }
-    [[nodiscard]] constexpr bool numLock() const noexcept { return value() & NumLock; }
-
-    constexpr operator unsigned() const noexcept { return _mask; }
-
-    [[nodiscard]] constexpr bool any() const noexcept { return _mask != 0; }
-
-    constexpr Modifier& operator|=(Modifier const& other) noexcept
-    {
-        _mask |= other._mask;
-        return *this;
-    }
-
-    [[nodiscard]] constexpr Modifier with(Modifier const& other) const noexcept
-    {
-        return Modifier(static_cast<Key>(_mask | other._mask));
-    }
-
-    [[nodiscard]] constexpr Modifier without(Modifier const& other) const noexcept
-    {
-        return Modifier(static_cast<Key>(_mask & ~other._mask));
-    }
-
-    [[nodiscard]] bool contains(Modifier const& other) const noexcept
-    {
-        return (_mask & other._mask) == other._mask;
-    }
-
-    constexpr void enable(Key key) noexcept { _mask |= key; }
-
-    constexpr void disable(Key key) noexcept { _mask &= ~static_cast<unsigned>(key); }
-
-  private:
-    unsigned _mask = 0;
+    // NB: These values MUST match the values of the corresponding
+    // the bit positions in the modifier mask in CSIu keyboard protocol.
+    None = 0,
+    Shift = 1,
+    Alt = 2,
+    Control = 4,
+    Super = 8,
+    Hyper = 16,
+    Meta = 32,
+    CapsLock = 64,
+    NumLock = 128,
 };
 
-constexpr Modifier operator|(Modifier a, Modifier b) noexcept
-{
-    return Modifier(static_cast<Modifier::Key>(a.value() | b.value()));
-}
-
-constexpr bool operator<(Modifier lhs, Modifier rhs) noexcept
-{
-    return lhs.value() < rhs.value();
-}
-
-constexpr bool operator==(Modifier lhs, Modifier rhs) noexcept
-{
-    return lhs.value() == rhs.value();
-}
-
-std::optional<Modifier::Key> parseModifierKey(std::string const& key);
-
-constexpr bool operator!(Modifier modifier) noexcept
-{
-    return modifier.none();
-}
-
-constexpr bool operator==(Modifier lhs, Modifier::Key rhs) noexcept
-{
-    return static_cast<Modifier::Key>(lhs.value()) == rhs;
-}
-
-constexpr Modifier operator+(Modifier::Key lhs, Modifier::Key rhs) noexcept
-{
-    return Modifier(static_cast<Modifier::Key>(static_cast<unsigned>(lhs) | static_cast<unsigned>(rhs)));
-}
+using Modifiers = crispy::flags<Modifier>;
 
 /// @returns CSI parameter for given function key modifier
-constexpr size_t makeVirtualTerminalParam(Modifier modifier) noexcept
+constexpr size_t makeVirtualTerminalParam(Modifiers modifier) noexcept
 {
     return 1 + modifier.value();
 }
 
-std::string to_string(Modifier modifier);
+std::string to_string(Modifiers modifier);
 
 // }}}
 // {{{ KeyInputEvent, Key
@@ -319,9 +231,9 @@ class KeyboardInputGenerator
 
     virtual bool generateChar(char32_t characterEvent,
                               uint32_t physicalKey,
-                              Modifier modifier,
+                              Modifiers modifier,
                               KeyboardEventType eventType) = 0;
-    virtual bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) = 0;
+    virtual bool generateKey(Key key, Modifiers modifier, KeyboardEventType eventType) = 0;
 };
 
 class StandardKeyboardInputGenerator: public KeyboardInputGenerator
@@ -329,9 +241,9 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
   public:
     bool generateChar(char32_t characterEvent,
                       uint32_t physicalKey,
-                      Modifier modifier,
+                      Modifiers modifier,
                       KeyboardEventType eventType) override;
-    bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) override;
+    bool generateKey(Key key, Modifiers modifier, KeyboardEventType eventType) override;
 
     [[nodiscard]] bool normalCursorKeys() const noexcept { return _cursorKeysMode == KeyMode::Normal; }
     [[nodiscard]] bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
@@ -369,7 +281,7 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
         std::string_view appKeypad {};
     };
 
-    [[nodiscard]] std::string select(Modifier modifier, FunctionKeyMapping mapping) const;
+    [[nodiscard]] std::string select(Modifiers modifier, FunctionKeyMapping mapping) const;
     void append(char ch) { _pendingSequence += ch; }
     void append(std::string_view sequence) { _pendingSequence += sequence; }
 
@@ -438,15 +350,15 @@ class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerato
 
     bool generateChar(char32_t characterEvent,
                       uint32_t physicalKey,
-                      Modifier modifier,
+                      Modifiers modifier,
                       KeyboardEventType eventType) override;
-    bool generateKey(Key key, Modifier modifier, KeyboardEventType eventType) override;
+    bool generateKey(Key key, Modifiers modifier, KeyboardEventType eventType) override;
 
     // }}}
 
   private:
-    [[nodiscard]] std::string encodeCharacter(char32_t ch, uint32_t physicalKey, Modifier modifier) const;
-    [[nodiscard]] std::string encodeModifiers(Modifier modifier, KeyboardEventType eventType) const;
+    [[nodiscard]] std::string encodeCharacter(char32_t ch, uint32_t physicalKey, Modifiers modifier) const;
+    [[nodiscard]] std::string encodeModifiers(Modifiers modifier, KeyboardEventType eventType) const;
 
     std::array<KeyboardEventFlags, MaxStackDepth> _flags = { KeyboardEventFlag::None };
     size_t _currentStackTop = 0;
@@ -511,26 +423,26 @@ class InputGenerator
 
     bool generate(char32_t characterEvent,
                   uint32_t physicalKey,
-                  Modifier modifier,
+                  Modifiers modifier,
                   KeyboardEventType eventType);
-    bool generate(char32_t characterEvent, Modifier modifier, KeyboardEventType eventType)
+    bool generate(char32_t characterEvent, Modifiers modifier, KeyboardEventType eventType)
     {
         // Simulate physical key here.
         auto const physicalKey = static_cast<uint32_t>(characterEvent);
         return generate(characterEvent, physicalKey, modifier, eventType);
     }
-    bool generate(Key key, Modifier modifier, KeyboardEventType eventType);
+    bool generate(Key key, Modifiers modifier, KeyboardEventType eventType);
     void generatePaste(std::string_view const& text);
-    bool generateMousePress(Modifier modifier,
+    bool generateMousePress(Modifiers modifier,
                             MouseButton button,
                             CellLocation pos,
                             PixelCoordinate pixelPosition,
                             bool uiHandled);
-    bool generateMouseMove(Modifier modifier,
+    bool generateMouseMove(Modifiers modifier,
                            CellLocation pos,
                            PixelCoordinate pixelPosition,
                            bool uiHandled);
-    bool generateMouseRelease(Modifier modifier,
+    bool generateMouseRelease(Modifiers modifier,
                               MouseButton button,
                               CellLocation pos,
                               PixelCoordinate pixelPosition,
@@ -583,7 +495,7 @@ class InputGenerator
 
   private:
     bool generateMouse(MouseEventType eventType,
-                       Modifier modifier,
+                       Modifiers modifier,
                        MouseButton button,
                        CellLocation pos,
                        PixelCoordinate pixelPosition,
@@ -696,34 +608,24 @@ struct fmt::formatter<vtbackend::MouseProtocol>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::Modifier::Key>: formatter<std::string_view>
+struct fmt::formatter<vtbackend::Modifier>: formatter<std::string_view>
 {
-    auto format(vtbackend::Modifier::Key value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::Modifier value, format_context& ctx) -> format_context::iterator
     {
         std::string_view name;
         switch (value)
         {
-            case vtbackend::Modifier::Key::None: name = "None"; break;
-            case vtbackend::Modifier::Key::Shift: name = "Shift"; break;
-            case vtbackend::Modifier::Key::Alt: name = "Alt"; break;
-            case vtbackend::Modifier::Key::Control: name = "Control"; break;
-            case vtbackend::Modifier::Key::Super: name = "Super"; break;
-            case vtbackend::Modifier::Key::Hyper: name = "Hyper"; break;
-            case vtbackend::Modifier::Key::Meta: name = "Meta"; break;
-            case vtbackend::Modifier::Key::CapsLock: name = "CapsLock"; break;
-            case vtbackend::Modifier::Key::NumLock: name = "NumLock"; break;
+            case vtbackend::Modifier::None: name = "None"; break;
+            case vtbackend::Modifier::Shift: name = "Shift"; break;
+            case vtbackend::Modifier::Alt: name = "Alt"; break;
+            case vtbackend::Modifier::Control: name = "Control"; break;
+            case vtbackend::Modifier::Super: name = "Super"; break;
+            case vtbackend::Modifier::Hyper: name = "Hyper"; break;
+            case vtbackend::Modifier::Meta: name = "Meta"; break;
+            case vtbackend::Modifier::CapsLock: name = "CapsLock"; break;
+            case vtbackend::Modifier::NumLock: name = "NumLock"; break;
         }
         return formatter<std::string_view>::format(name, ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<vtbackend::Modifier>: formatter<std::string>
-{
-    auto format(vtbackend::Modifier modifier, format_context& ctx) -> format_context::iterator
-    {
-        auto mk = crispy::flags<vtbackend::Modifier::Key>::from_value(modifier.value());
-        return formatter<std::string>::format(fmt::format("{}", mk), ctx);
     }
 };
 

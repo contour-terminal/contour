@@ -19,10 +19,10 @@ TEST_CASE("InputGenerator.Modifier.encodings")
     // Ensures we can construct the correct values that are needed
     // as parameters for input events in the VT protocol.
 
-    auto constexpr Alt = Modifier(Modifier::Alt);
-    auto constexpr Shift = Modifier(Modifier::Shift);
-    auto constexpr Control = Modifier(Modifier::Control);
-    auto constexpr Super = Modifier(Modifier::Super);
+    auto constexpr Alt = Modifiers { Modifier::Alt };
+    auto constexpr Shift = Modifiers { Modifier::Shift };
+    auto constexpr Control = Modifiers { Modifier::Control };
+    auto constexpr Super = Modifiers { Modifier::Super };
 
     CHECK((1 + Shift.value()) == 2);
     CHECK((1 + Alt.value()) == 3);

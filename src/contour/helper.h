@@ -97,11 +97,12 @@ constexpr inline char32_t makeChar(Qt::Key key, Qt::KeyboardModifiers mods)
     return 0;
 }
 
-constexpr inline vtbackend::Modifier makeModifier(Qt::KeyboardModifiers qtModifiers)
+constexpr inline vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers)
 {
     using vtbackend::Modifier;
+    using vtbackend::Modifiers;
 
-    Modifier modifiers {};
+    Modifiers modifiers {};
 
     if (qtModifiers & Qt::AltModifier)
         modifiers |= Modifier::Alt;

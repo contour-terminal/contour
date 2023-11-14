@@ -629,20 +629,20 @@ void Terminal::updateIndicatorStatusLine()
     }
 }
 
-bool Terminal::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventType, Timestamp now)
+bool Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
 
     if (allowInput() && eventType != KeyboardEventType::Release
-        && _state.inputHandler.sendKeyPressEvent(key, modifier))
+        && _state.inputHandler.sendKeyPressEvent(key, modifiers))
         return true;
 
     // Early exit if KAM is enabled.
     if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
-    bool const success = _state.inputGenerator.generate(key, modifier, eventType);
+    bool const success = _state.inputGenerator.generate(key, modifiers, eventType);
     if (success)
     {
         flushInput();
@@ -652,7 +652,7 @@ bool Terminal::sendKeyEvent(Key key, Modifier modifier, KeyboardEventType eventT
 }
 
 bool Terminal::sendCharEvent(
-    char32_t ch, uint32_t physicalKey, Modifier modifier, KeyboardEventType eventType, Timestamp now)
+    char32_t ch, uint32_t physicalKey, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
@@ -661,10 +661,10 @@ bool Terminal::sendCharEvent(
     if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
-    if (eventType != KeyboardEventType::Release && _state.inputHandler.sendCharPressEvent(ch, modifier))
+    if (eventType != KeyboardEventType::Release && _state.inputHandler.sendCharPressEvent(ch, modifiers))
         return true;
 
-    auto const success = _state.inputGenerator.generate(ch, physicalKey, modifier, eventType);
+    auto const success = _state.inputGenerator.generate(ch, physicalKey, modifiers, eventType);
     if (success)
     {
         flushInput();
@@ -673,7 +673,7 @@ bool Terminal::sendCharEvent(
     return success;
 }
 
-bool Terminal::sendMousePressEvent(Modifier modifier,
+bool Terminal::sendMousePressEvent(Modifiers modifiers,
                                    MouseButton button,
                                    PixelCoordinate pixelPosition,
                                    bool uiHandledHint)
@@ -682,15 +682,16 @@ bool Terminal::sendMousePressEvent(Modifier modifier,
     {
         _leftMouseButtonPressed = true;
         _lastMousePixelPositionOnLeftClick = pixelPosition;
-        if (!allowPassMouseEventToApp(modifier))
-            uiHandledHint = handleMouseSelection(modifier) || uiHandledHint;
+        if (!allowPassMouseEventToApp(modifiers))
+            uiHandledHint = handleMouseSelection(modifiers) || uiHandledHint;
     }
 
     verifyState();
 
-    auto const eventHandledByApp = allowPassMouseEventToApp(modifier)
-                                   && _state.inputGenerator.generateMousePress(
-                                       modifier, button, _currentMousePosition, pixelPosition, uiHandledHint);
+    auto const eventHandledByApp =
+        allowPassMouseEventToApp(modifiers)
+        && _state.inputGenerator.generateMousePress(
+            modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
 
     // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
     // under the current position
@@ -698,7 +699,7 @@ bool Terminal::sendMousePressEvent(Modifier modifier,
     return eventHandledByApp && !isModeEnabled(DECMode::MousePassiveTracking);
 }
 
-bool Terminal::handleMouseSelection(Modifier modifier)
+bool Terminal::handleMouseSelection(Modifiers modifiers)
 {
     verifyState();
 
@@ -720,7 +721,7 @@ bool Terminal::handleMouseSelection(Modifier modifier)
             if (_state.searchMode.initiatedByDoubleClick)
                 clearSearch();
             clearSelection();
-            if (modifier == _settings.mouseBlockSelectionModifier)
+            if (modifiers == _settings.mouseBlockSelectionModifiers)
             {
                 setSelector(std::make_unique<RectangularSelection>(
                     _selectionHelper, startPos, selectionUpdatedHelper()));
@@ -817,7 +818,7 @@ bool Terminal::shouldExtendSelectionByMouse(CellLocation newPosition,
     return true;
 }
 
-void Terminal::sendMouseMoveEvent(Modifier modifier,
+void Terminal::sendMouseMoveEvent(Modifiers modifiers,
                                   CellLocation newPosition,
                                   PixelCoordinate pixelPosition,
                                   bool uiHandledHint)
@@ -851,10 +852,10 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     }
 
     // Do not handle mouse-move events in sub-cell dimensions.
-    if (allowPassMouseEventToApp(modifier))
+    if (allowPassMouseEventToApp(modifiers))
     {
         if (_state.inputGenerator.generateMouseMove(
-                modifier, relativePos, pixelPosition, uiHandledHint || !selectionAvailable()))
+                modifiers, relativePos, pixelPosition, uiHandledHint || !selectionAvailable()))
             flushInput();
         if (!isModeEnabled(DECMode::MousePassiveTracking))
             return;
@@ -881,7 +882,7 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     }
 }
 
-bool Terminal::sendMouseReleaseEvent(Modifier modifier,
+bool Terminal::sendMouseReleaseEvent(Modifiers modifiers,
                                      MouseButton button,
                                      PixelCoordinate pixelPosition,
                                      bool uiHandledHint)
@@ -906,9 +907,9 @@ bool Terminal::sendMouseReleaseEvent(Modifier modifier,
         }
     }
 
-    if (allowPassMouseEventToApp(modifier)
+    if (allowPassMouseEventToApp(modifiers)
         && _state.inputGenerator.generateMouseRelease(
-            modifier, button, _currentMousePosition, pixelPosition, uiHandledHint))
+            modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint))
     {
         flushInput();
 

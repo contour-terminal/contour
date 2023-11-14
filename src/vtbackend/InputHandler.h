@@ -16,8 +16,8 @@ class InputHandler
 {
   public:
     virtual ~InputHandler() = default;
-    virtual bool sendKeyPressEvent(Key key, Modifier modifier) = 0;
-    virtual bool sendCharPressEvent(char32_t codepoint, Modifier modifier) = 0;
+    virtual bool sendKeyPressEvent(Key key, Modifiers modifiers) = 0;
+    virtual bool sendCharPressEvent(char32_t codepoint, Modifiers modifiers) = 0;
 };
 
 } // namespace vtbackend

@@ -65,8 +65,8 @@ struct Settings
     // This value must be integer-devisable by 16.
     size_t ptyReadBufferSize = 4096;
     std::u32string wordDelimiters;
-    Modifier mouseProtocolBypassModifier = Modifier::Shift;
-    Modifier mouseBlockSelectionModifier = Modifier::Control;
+    Modifiers mouseProtocolBypassModifiers = Modifier::Shift;
+    Modifiers mouseBlockSelectionModifiers = Modifier::Control;
     LineOffset copyLastMarkRangeOffset = LineOffset(0);
     bool visualizeSelectedWord = true;
     std::chrono::milliseconds highlightTimeout = std::chrono::milliseconds { 150 };
