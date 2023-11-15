@@ -41,7 +41,7 @@ TEST_CASE("Line.resize", "[Line]")
     auto const trivial =
         TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
-    auto lineTrivial = Line<Cell>(LineFlags::None, trivial);
+    auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
     CHECK(lineTrivial.isTrivialBuffer());
 
     lineTrivial.resize(ColumnCount(10));
@@ -68,7 +68,7 @@ TEST_CASE("Line.reflow", "[Line]")
     auto const trivial =
         TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
-    auto lineTrivial = Line<Cell>(LineFlags::None, trivial);
+    auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
     CHECK(lineTrivial.isTrivialBuffer());
 
     (void) lineTrivial.reflow(ColumnCount(5));

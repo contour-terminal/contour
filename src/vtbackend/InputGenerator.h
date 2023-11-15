@@ -330,7 +330,10 @@ class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerato
 
     [[nodiscard]] constexpr KeyboardEventFlags& flags() noexcept { return _flags.at(_currentStackTop); }
 
-    [[nodiscard]] constexpr bool enabled(KeyboardEventFlag flag) const noexcept { return flags() & flag; }
+    [[nodiscard]] constexpr bool enabled(KeyboardEventFlag flag) const noexcept
+    {
+        return flags().contains(flag);
+    }
 
     [[nodiscard]] constexpr bool enabled(KeyboardEventType eventType) const noexcept
     {

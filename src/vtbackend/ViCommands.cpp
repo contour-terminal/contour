@@ -315,7 +315,7 @@ void ViCommands::toggleLineMark()
 {
     auto const currentLineFlags = _terminal->currentScreen().lineFlagsAt(cursorPosition.line);
     _terminal->currentScreen().enableLineFlags(
-        cursorPosition.line, LineFlags::Marked, !unsigned(currentLineFlags & LineFlags::Marked));
+        cursorPosition.line, LineFlag::Marked, !(currentLineFlags & LineFlag::Marked));
 }
 
 void ViCommands::searchCurrentWord()
@@ -641,16 +641,14 @@ CellLocationRange ViCommands::translateToCellRange(TextObjectScope scope,
         case TextObject::DoubleQuotes: return expandMatchingPair(scope, '"', '"');
         case TextObject::LineMark:
             // Walk the line upwards until we find a marked line.
-            while (
-                a.line > gridTop
-                && !(unsigned(_terminal->currentScreen().lineFlagsAt(a.line)) & unsigned(LineFlags::Marked)))
+            while (a.line > gridTop
+                   && !(_terminal->currentScreen().lineFlagsAt(a.line).contains(LineFlag::Marked)))
                 --a.line;
             if (scope == TextObjectScope::Inner && a != cursorPosition)
                 ++a.line;
             // Walk the line downwards until we find a marked line.
-            while (
-                b.line < gridBottom
-                && !(unsigned(_terminal->currentScreen().lineFlagsAt(b.line)) & unsigned(LineFlags::Marked)))
+            while (b.line < gridBottom
+                   && !(_terminal->currentScreen().lineFlagsAt(b.line).contains(LineFlag::Marked)))
                 ++b.line;
             if (scope == TextObjectScope::Inner && b != cursorPosition)
                 --b.line;
@@ -905,10 +903,10 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             while (count > 0)
             {
                 if (result.line > gridTop
-                    && _terminal->currentScreen().isLineFlagEnabledAt(result.line, LineFlags::Marked))
+                    && _terminal->currentScreen().isLineFlagEnabledAt(result.line, LineFlag::Marked))
                     --result.line;
                 while (result.line > gridTop
-                       && !_terminal->currentScreen().isLineFlagEnabledAt(result.line, LineFlags::Marked))
+                       && !_terminal->currentScreen().isLineFlagEnabledAt(result.line, LineFlag::Marked))
                     --result.line;
                 --count;
             }
@@ -924,8 +922,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                     ++result.line;
                 while (result.line < pageBottom)
                 {
-                    if (unsigned(_terminal->currentScreen().lineFlagsAt(result.line))
-                        & unsigned(LineFlags::Marked))
+                    if (_terminal->currentScreen().lineFlagsAt(result.line).contains(LineFlag::Marked))
                         break;
                     ++result.line;
                 }

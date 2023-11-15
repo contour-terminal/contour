@@ -533,7 +533,7 @@ void Screen<Cell>::crlfIfWrapPending()
         bool const lineWrappable = currentLine().wrappable();
         crlf();
         if (lineWrappable)
-            currentLine().setFlag(LineFlags::Wrappable | LineFlags::Wrapped, true);
+            currentLine().setFlag(LineFlags { LineFlag::Wrappable, LineFlag::Wrapped }, true);
     }
 }
 

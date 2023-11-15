@@ -35,7 +35,7 @@ void logGridText(Grid<Cell> const& grid, string const& headline = "")
             fmt::format("{:>2}: \"{}\" {}\n",
                         line,
                         grid.lineText(LineOffset::cast_from(line - grid.historyLineCount().as<int>())),
-                        (unsigned) grid.lineAt(LineOffset::cast_from(line)).flags()));
+                        grid.lineAt(LineOffset::cast_from(line)).flags()));
     }
 }
 
@@ -459,13 +459,13 @@ TEST_CASE("resize_shrink_columns_with_reflow_and_unwrappable", "[grid]")
     CHECK(grid.lineText(LineOffset(0)) == "JK");
     CHECK(grid.lineText(LineOffset(1)) == "L ");
 
-    CHECK(grid.lineAt(LineOffset(-5)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(-4)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(LineOffset(-3)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(-2)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(LineOffset(-1)).flags() == LineFlags::None);
-    CHECK(grid.lineAt(LineOffset(0)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(1)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
+    CHECK(grid.lineAt(LineOffset(-5)).flags() == LineFlag::Wrappable);
+    CHECK(grid.lineAt(LineOffset(-4)).flags() == LineFlags({ LineFlag::Wrappable, LineFlag::Wrapped }));
+    CHECK(grid.lineAt(LineOffset(-3)).flags() == LineFlag::Wrappable);
+    CHECK(grid.lineAt(LineOffset(-2)).flags() == LineFlags({ LineFlag::Wrappable, LineFlag::Wrapped }));
+    CHECK(grid.lineAt(LineOffset(-1)).flags() == LineFlag::None);
+    CHECK(grid.lineAt(LineOffset(0)).flags() == LineFlag::Wrappable);
+    CHECK(grid.lineAt(LineOffset(1)).flags() == LineFlags({ LineFlag::Wrappable, LineFlag::Wrapped }));
 }
 
 TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid]")
@@ -498,13 +498,13 @@ TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid
     CHECK(grid.lineText(LineOffset(2)) == "JK");
     CHECK(grid.lineText(LineOffset(3)) == "L ");
 
-    CHECK(grid.lineAt(LineOffset(-3)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(-2)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(LineOffset(-1)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(0)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(LineOffset(1)).flags() == LineFlags::None);
-    CHECK(grid.lineAt(LineOffset(2)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(3)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
+    CHECK(grid.lineAt(LineOffset(-3)).flags() == LineFlag::Wrappable);
+    CHECK(grid.lineAt(LineOffset(-2)).flags() == LineFlags({ LineFlag::Wrappable, LineFlag::Wrapped }));
+    CHECK(grid.lineAt(LineOffset(-1)).flags() == LineFlag::Wrappable);
+    CHECK(grid.lineAt(LineOffset(0)).flags() == LineFlags({ LineFlag::Wrappable, LineFlag::Wrapped }));
+    CHECK(grid.lineAt(LineOffset(1)).flags() == LineFlag::None);
+    CHECK(grid.lineAt(LineOffset(2)).flags() == LineFlag::Wrappable);
+    CHECK(grid.lineAt(LineOffset(3)).flags() == LineFlags({ LineFlag::Wrappable, LineFlag::Wrapped }));
 }
 // }}}
 
@@ -886,7 +886,7 @@ TEST_CASE("Grid resize", "[grid]")
     auto const bufferFragment = bufferObject->ref(0, 4);
     auto const sgr = GraphicsAttributes {};
     auto const trivial = TrivialLineBuffer { width, sgr, sgr, HyperlinkId {}, width, bufferFragment };
-    auto lineTrivial = Line<Cell>(LineFlags::None, trivial);
+    auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
     grid.lineAt(LineOffset(0)) = lineTrivial;
     REQUIRE(grid.lineAt(LineOffset(0)).isTrivialBuffer());
     REQUIRE(grid.lineAt(LineOffset(1)).isTrivialBuffer());

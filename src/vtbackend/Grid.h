@@ -842,7 +842,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 constexpr LineFlags Grid<Cell>::defaultLineFlags() const noexcept
 {
-    return _reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
+    return _reflowOnResize ? LineFlag::Wrappable : LineFlag::None;
 }
 
 template <typename Cell>
