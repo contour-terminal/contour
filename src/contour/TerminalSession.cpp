@@ -125,6 +125,7 @@ namespace
     {
         auto settings = vtbackend::Settings {};
 
+        settings.pageSize = profile.terminalSize;
         settings.ptyBufferObjectSize = config.ptyBufferObjectSize;
         settings.ptyReadBufferSize = config.ptyReadBufferSize;
         settings.maxHistoryLineCount = profile.maxHistoryLineCount;
