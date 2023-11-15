@@ -248,7 +248,7 @@ crispy::result<SshHostConfigMap> loadSshConfig(std::filesystem::path const& conf
     std::string currentHost;
 
     if (!file)
-        return crispy::failure(std::make_error_code(std::errc::no_such_file_or_directory));
+        return crispy::failure { std::make_error_code(std::errc::no_such_file_or_directory) };
 
     while (std::getline(file, line))
     {

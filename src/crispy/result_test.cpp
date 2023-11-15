@@ -23,8 +23,8 @@ TEST_CASE("result.transform_error")
 {
     using result = crispy::result<int, int>;
 
-    auto const b = result { crispy::failure(10) }
-                       .transform_error([](int x) { return x * 10; })
+    auto const some = result { crispy::failure { 10 } };
+    auto const b = some.transform_error([](int x) { return x * 10; })
                        .transform_error([](int x) { return x + 1; })
                        .transform_error([](int x) { return std::to_string(x); })
                        .error();
