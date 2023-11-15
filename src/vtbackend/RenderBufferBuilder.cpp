@@ -227,8 +227,8 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& colorPa
         // TODO(decoration): Move property into Terminal.
         auto const decoration =
             href->state == HyperlinkState::Hover
-                ? CellFlags::Underline             // TODO: decorationRenderer_.hyperlinkHover()
-                : CellFlags::DottedUnderline;      // TODO: decorationRenderer_.hyperlinkNormal();
+                ? CellFlag::Underline              // TODO: decorationRenderer_.hyperlinkHover()
+                : CellFlag::DottedUnderline;       // TODO: decorationRenderer_.hyperlinkNormal();
         renderCell.attributes.flags |= decoration; // toCellStyle(decoration);
         renderCell.attributes.decorationColor = color;
     }
@@ -577,7 +577,7 @@ bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(CellLocation screenPo
         auto textAttributes = GraphicsAttributes {};
         textAttributes.foregroundColor = inputMethodEditorStyles.foreground;
         textAttributes.backgroundColor = inputMethodEditorStyles.background;
-        textAttributes.flags |= CellFlags::Bold | CellFlags::Underline;
+        textAttributes.flags.enable({ CellFlag::Bold, CellFlag::Underline });
 
         if (!_output->cells.empty())
             _output->cells.back().groupEnd = true;

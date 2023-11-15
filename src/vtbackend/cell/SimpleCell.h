@@ -55,7 +55,7 @@ class SimpleCell
 
     [[nodiscard]] CellFlags flags() const noexcept;
     [[nodiscard]] bool isFlagEnabled(CellFlags flags) const noexcept;
-    void resetFlags(CellFlags flags = CellFlags::None) noexcept;
+    void resetFlags(CellFlags flags = CellFlag::None) noexcept;
 
     void setGraphicsRendition(GraphicsRendition sgr) noexcept;
     void setForegroundColor(Color color) noexcept;
@@ -197,7 +197,7 @@ inline CellFlags SimpleCell::flags() const noexcept
 
 inline bool SimpleCell::isFlagEnabled(CellFlags testFlags) const noexcept
 {
-    return _graphicsAttributes.flags & testFlags;
+    return _graphicsAttributes.flags.contains(testFlags);
 }
 
 inline void SimpleCell::resetFlags(CellFlags flags) noexcept

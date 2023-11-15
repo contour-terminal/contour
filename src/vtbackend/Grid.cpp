@@ -39,7 +39,7 @@ namespace detail
                             bool reflowOnResize,
                             GraphicsAttributes initialSGR)
     {
-        auto const defaultLineFlags = reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
+        auto const defaultLineFlags = reflowOnResize ? LineFlag::Wrappable : LineFlag::None;
         auto const totalLineCount = unbox<size_t>(pageSize.lines + maxHistoryLineCount);
 
         Lines<Cell> lines;
@@ -80,7 +80,7 @@ namespace detail
         {
             auto from = logicalLineBuffer.begin();
             auto to = from + newColumnCount.as<std::ptrdiff_t>();
-            auto const wrappedFlag = i == 0 && initialNoWrap ? LineFlags::None : LineFlags::Wrapped;
+            auto const wrappedFlag = i == 0 && initialNoWrap ? LineFlag::None : LineFlag::Wrapped;
             targetLines.emplace_back(baseFlags | wrappedFlag, LineBuffer(from, to));
             logicalLineBuffer.erase(from, to);
             ++i;
@@ -88,7 +88,7 @@ namespace detail
 
         if (logicalLineBuffer.size() > 0)
         {
-            auto const wrappedFlag = i == 0 && initialNoWrap ? LineFlags::None : LineFlags::Wrapped;
+            auto const wrappedFlag = i == 0 && initialNoWrap ? LineFlag::None : LineFlag::Wrapped;
             ++i;
             logicalLineBuffer.resize(unbox<size_t>(newColumnCount));
             targetLines.emplace_back(baseFlags | wrappedFlag, std::move(logicalLineBuffer));
@@ -755,7 +755,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
             Lines<Cell> grownLines;
             LineBuffer
                 logicalLineBuffer; // Temporary state, representing wrapped columns from the line "below".
-            LineFlags logicalLineFlags = LineFlags::None;
+            LineFlags logicalLineFlags = LineFlag::None;
 
             auto const appendToLogicalLine = [&logicalLineBuffer](gsl::span<Cell const> cells) {
                 for (auto const& cell: cells)
@@ -804,7 +804,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
                     {
                         // logLogicalLine(line.flags(), " - start new logical line");
                         appendToLogicalLine(line.cells());
-                        logicalLineFlags = line.flags() & ~LineFlags::Wrapped;
+                        logicalLineFlags = line.flags().without(LineFlag::Wrapped);
                     }
                 }
             }
@@ -936,7 +936,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
 
             while (shrinkedLines.size() < totalLineCount)
                 shrinkedLines.emplace_back(
-                    LineFlags::None,
+                    LineFlag::None,
                     TrivialLineBuffer { newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
 
             shrinkedLines.rotate_left(
@@ -1041,7 +1041,7 @@ std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid)
         os << fmt::format("[{:>2}] \"{}\" | {}\n",
                           lineOffset,
                           grid.lineText(LineOffset::cast_from(lineOffset)),
-                          (unsigned) lineAttribs.flags());
+                          lineAttribs.flags());
     }
 
     return os;

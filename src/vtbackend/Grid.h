@@ -842,7 +842,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 constexpr LineFlags Grid<Cell>::defaultLineFlags() const noexcept
 {
-    return _reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
+    return _reflowOnResize ? LineFlag::Wrappable : LineFlag::None;
 }
 
 template <typename Cell>
@@ -882,8 +882,8 @@ template <typename RendererT>
         if (line.isTrivialBuffer() && highlightSearchMatches == HighlightSearchMatches::No)
         {
             auto const cellFlags = line.trivialBuffer().textAttributes.flags;
-            hints.containsBlinkingCells = hints.containsBlinkingCells || (CellFlags::Blinking & cellFlags)
-                                          || (CellFlags::RapidBlinking & cellFlags);
+            hints.containsBlinkingCells = hints.containsBlinkingCells || (cellFlags & CellFlag::Blinking)
+                                          || (cellFlags & CellFlag::RapidBlinking);
             render.renderTrivialLine(line.trivialBuffer(), y);
         }
         else
@@ -892,8 +892,8 @@ template <typename RendererT>
             for (Cell const& cell: line.cells())
             {
                 hints.containsBlinkingCells = hints.containsBlinkingCells
-                                              || (CellFlags::Blinking & cell.flags())
-                                              || (CellFlags::RapidBlinking & cell.flags());
+                                              || (cell.flags() & CellFlag::Blinking)
+                                              || (cell.flags() & CellFlag::RapidBlinking);
                 render.renderCell(cell, y, x++);
             }
             render.endLine();

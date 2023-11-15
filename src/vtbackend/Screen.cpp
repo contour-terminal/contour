@@ -210,22 +210,22 @@ namespace // {{{ helper
 
         // TODO: sgr.styles;
         auto constexpr Masks = array {
-            pair { CellFlags::Bold, "1"sv },
-            pair { CellFlags::Faint, "2"sv },
-            pair { CellFlags::Italic, "3"sv },
-            pair { CellFlags::Underline, "4"sv },
-            pair { CellFlags::Blinking, "5"sv },
-            pair { CellFlags::RapidBlinking, "6"sv },
-            pair { CellFlags::Inverse, "7"sv },
-            pair { CellFlags::Hidden, "8"sv },
-            pair { CellFlags::CrossedOut, "9"sv },
-            pair { CellFlags::DoublyUnderlined, "4:2"sv },
-            pair { CellFlags::CurlyUnderlined, "4:3"sv },
-            pair { CellFlags::DottedUnderline, "4:4"sv },
-            pair { CellFlags::DashedUnderline, "4:5"sv },
-            pair { CellFlags::Framed, "51"sv },
-            // TODO(impl or completely remove): pair{CellFlags::Encircled, ""sv},
-            pair { CellFlags::Overline, "53"sv },
+            pair { CellFlag::Bold, "1"sv },
+            pair { CellFlag::Faint, "2"sv },
+            pair { CellFlag::Italic, "3"sv },
+            pair { CellFlag::Underline, "4"sv },
+            pair { CellFlag::Blinking, "5"sv },
+            pair { CellFlag::RapidBlinking, "6"sv },
+            pair { CellFlag::Inverse, "7"sv },
+            pair { CellFlag::Hidden, "8"sv },
+            pair { CellFlag::CrossedOut, "9"sv },
+            pair { CellFlag::DoublyUnderlined, "4:2"sv },
+            pair { CellFlag::CurlyUnderlined, "4:3"sv },
+            pair { CellFlag::DottedUnderline, "4:4"sv },
+            pair { CellFlag::DashedUnderline, "4:5"sv },
+            pair { CellFlag::Framed, "51"sv },
+            // TODO(impl or completely remove): pair{CellFlag::Encircled, ""sv},
+            pair { CellFlag::Overline, "53"sv },
         };
 
         for (auto const& mask: Masks)
@@ -533,7 +533,7 @@ void Screen<Cell>::crlfIfWrapPending()
         bool const lineWrappable = currentLine().wrappable();
         crlf();
         if (lineWrappable)
-            currentLine().setFlag(LineFlags::Wrappable | LineFlags::Wrapped, true);
+            currentLine().setFlag(LineFlags { LineFlag::Wrappable, LineFlag::Wrapped }, true);
     }
 }
 
@@ -586,7 +586,7 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
         cell.reset();
 #endif
 
-    if (cell.isFlagEnabled(CellFlags::WideCharContinuation) && _cursor.position.column > ColumnOffset(0))
+    if (cell.isFlagEnabled(CellFlag::WideCharContinuation) && _cursor.position.column > ColumnOffset(0))
     {
         // Erase the left half of the wide char.
         Cell& prevCell = line.useCellAt(_cursor.position.column - 1);
@@ -630,7 +630,7 @@ void Screen<Cell>::clearAndAdvance(int offset) noexcept
         for (int i = 1; i < n; ++i) // XXX It's not even clear if other TEs are doing that, too.
         {
             line.useCellAt(_cursor.position.column)
-                .reset(_cursor.graphicsRendition.with(CellFlags::WideCharContinuation), _cursor.hyperlink);
+                .reset(_cursor.graphicsRendition.with(CellFlag::WideCharContinuation), _cursor.hyperlink);
             _cursor.position.column++;
         }
     }
@@ -1085,7 +1085,7 @@ void Screen<Cell>::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOff
     Cell const* e = i + unbox<uintptr_t>(end - begin);
     while (i != e)
     {
-        if (i->isFlagEnabled(CellFlags::CharacterProtected))
+        if (i->isFlagEnabled(CellFlag::CharacterProtected))
         {
             ++i;
             continue;
@@ -1108,7 +1108,7 @@ bool Screen<Cell>::containsProtectedCharacters(LineOffset line, ColumnOffset beg
     Cell const* e = i + unbox<uintptr_t>(end - begin);
     while (i != e)
     {
-        if (i->isFlagEnabled(CellFlags::CharacterProtected))
+        if (i->isFlagEnabled(CellFlag::CharacterProtected))
             return true;
         ++i;
     }
@@ -1166,7 +1166,7 @@ void Screen<Cell>::selectiveEraseArea(Rect area)
                              .useRange(ColumnOffset::cast_from(left),
                                        ColumnCount::cast_from(right.value - left.value + 1)))
         {
-            if (!cell.isFlagEnabled(CellFlags::CharacterProtected))
+            if (!cell.isFlagEnabled(CellFlag::CharacterProtected))
             {
                 cell.writeTextOnly(L' ', 1);
                 cell.setHyperlink(HyperlinkId(0));
@@ -2152,7 +2152,7 @@ void Screen<Cell>::requestStatusString(RequestStatusString value)
             case RequestStatusString::SGR:
                 return fmt::format("0;{}m", vtSequenceParameterString(_cursor.graphicsRendition));
             case RequestStatusString::DECSCA: {
-                auto const isProtected = _cursor.graphicsRendition.flags & CellFlags::CharacterProtected;
+                auto const isProtected = _cursor.graphicsRendition.flags & CellFlag::CharacterProtected;
                 return fmt::format("{}\"q", isProtected ? 1 : 2);
             }
             case RequestStatusString::DECSASD:
@@ -3587,11 +3587,11 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             switch (pc)
             {
                 case 1:
-                    _cursor.graphicsRendition.flags |= CellFlags::CharacterProtected;
+                    _cursor.graphicsRendition.flags.enable(CellFlag::CharacterProtected);
                     return ApplyResult::Ok;
                 case 0:
                 case 2:
-                    _cursor.graphicsRendition.flags &= ~CellFlags::CharacterProtected;
+                    _cursor.graphicsRendition.flags.disable(CellFlag::CharacterProtected);
                     return ApplyResult::Ok;
                 default: return ApplyResult::Invalid;
             }

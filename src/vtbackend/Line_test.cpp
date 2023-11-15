@@ -41,7 +41,7 @@ TEST_CASE("Line.resize", "[Line]")
     auto const trivial =
         TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
-    auto lineTrivial = Line<Cell>(LineFlags::None, trivial);
+    auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
     CHECK(lineTrivial.isTrivialBuffer());
 
     lineTrivial.resize(ColumnCount(10));
@@ -68,7 +68,7 @@ TEST_CASE("Line.reflow", "[Line]")
     auto const trivial =
         TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
-    auto lineTrivial = Line<Cell>(LineFlags::None, trivial);
+    auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
     CHECK(lineTrivial.isTrivialBuffer());
 
     (void) lineTrivial.reflow(ColumnCount(5));
@@ -90,7 +90,7 @@ TEST_CASE("Line.inflate", "[Line]")
     sgr.foregroundColor = RGBColor(0x123456);
     sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);
     sgr.underlineColor = Color::Indexed(IndexedColor::Red);
-    sgr.flags |= CellFlags::CurlyUnderlined;
+    sgr.flags |= CellFlag::CurlyUnderlined;
     auto const trivial =
         TrivialLineBuffer { ColumnCount(10), sgr, sgr, HyperlinkId {}, ColumnCount(10), bufferFragment };
 
@@ -126,7 +126,7 @@ TEST_CASE("Line.inflate.Unicode", "[Line]")
     sgr.foregroundColor = RGBColor(0x123456);
     sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);
     sgr.underlineColor = Color::Indexed(IndexedColor::Red);
-    sgr.flags |= CellFlags::CurlyUnderlined;
+    sgr.flags |= CellFlag::CurlyUnderlined;
     auto const trivial =
         TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
 
@@ -176,13 +176,13 @@ TEST_CASE("Line.inflate.Unicode.FamilyEmoji", "[Line]")
     sgr.foregroundColor = RGBColor(0x123456);
     sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);
     sgr.underlineColor = Color::Indexed(IndexedColor::Red);
-    sgr.flags |= CellFlags::CurlyUnderlined;
+    sgr.flags |= CellFlag::CurlyUnderlined;
 
     auto fillSGR = GraphicsAttributes {};
     fillSGR.foregroundColor = RGBColor(0x123456);
     fillSGR.backgroundColor = Color::Indexed(IndexedColor::Yellow);
     fillSGR.underlineColor = Color::Indexed(IndexedColor::Red);
-    fillSGR.flags |= CellFlags::CurlyUnderlined;
+    fillSGR.flags |= CellFlag::CurlyUnderlined;
 
     auto const trivial =
         TrivialLineBuffer { DisplayWidth, sgr, fillSGR, HyperlinkId {}, UsedColumnCount, bufferFragment };

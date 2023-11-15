@@ -19,9 +19,9 @@ namespace vtbackend::CellUtil
                                              bool blinkingState,
                                              bool rapidBlinkState) noexcept
 {
-    auto const fgMode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
-                        : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                          : ColorMode::Normal;
+    auto const fgMode = (cellFlags & CellFlag::Faint)                                    ? ColorMode::Dimmed
+                        : ((cellFlags & CellFlag::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
+                                                                                         : ColorMode::Normal;
 
     auto constexpr BgMode = ColorMode::Normal;
 
@@ -32,15 +32,15 @@ namespace vtbackend::CellUtil
     auto rgbColors = RGBColorPair { apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
                                     apply(colorPalette, backgroundColor, bgColorTarget, BgMode) };
 
-    if (cellFlags & CellFlags::Inverse)
+    if (cellFlags & CellFlag::Inverse)
         rgbColors = rgbColors.swapped();
 
-    if (cellFlags & CellFlags::Hidden)
+    if (cellFlags & CellFlag::Hidden)
         rgbColors = rgbColors.allBackground();
 
-    if ((cellFlags & CellFlags::Blinking) && !blinkingState)
+    if ((cellFlags & CellFlag::Blinking) && !blinkingState)
         return rgbColors.allBackground();
-    if ((cellFlags & CellFlags::RapidBlinking) && !rapidBlinkState)
+    if ((cellFlags & CellFlag::RapidBlinking) && !rapidBlinkState)
         return rgbColors.allBackground();
 
     return rgbColors;
@@ -54,9 +54,9 @@ namespace vtbackend::CellUtil
     if (isDefaultColor(underlineColor))
         return defaultColor;
 
-    auto const mode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
-                      : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                        : ColorMode::Normal;
+    auto const mode = (cellFlags & CellFlag::Faint)                                    ? ColorMode::Dimmed
+                      : ((cellFlags & CellFlag::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
+                                                                                       : ColorMode::Normal;
 
     return apply(colorPalette, underlineColor, ColorTarget::Foreground, mode);
 }
@@ -130,40 +130,45 @@ CRISPY_REQUIRES(CellConcept<Cell>)
     CellFlags flags = base;
     switch (rendition)
     {
-        case GraphicsRendition::Reset: flags = CellFlags::None; break;
-        case GraphicsRendition::Bold: flags |= CellFlags::Bold; break;
-        case GraphicsRendition::Faint: flags |= CellFlags::Faint; break;
-        case GraphicsRendition::Italic: flags |= CellFlags::Italic; break;
-        case GraphicsRendition::Underline: flags |= CellFlags::Underline; break;
+        case GraphicsRendition::Reset: flags = CellFlag::None; break;
+        case GraphicsRendition::Bold: flags |= CellFlag::Bold; break;
+        case GraphicsRendition::Faint: flags |= CellFlag::Faint; break;
+        case GraphicsRendition::Italic: flags |= CellFlag::Italic; break;
+        case GraphicsRendition::Underline: flags |= CellFlag::Underline; break;
         case GraphicsRendition::Blinking:
-            flags &= ~CellFlags::RapidBlinking;
-            flags |= CellFlags::Blinking;
+            flags.disable(CellFlag::RapidBlinking);
+            flags.enable(CellFlag::Blinking);
             break;
         case GraphicsRendition::RapidBlinking:
-            flags &= ~CellFlags::Blinking;
-            flags |= CellFlags::RapidBlinking;
+            flags.disable(CellFlag::Blinking);
+            flags.enable(CellFlag::RapidBlinking);
             break;
-        case GraphicsRendition::Inverse: flags |= CellFlags::Inverse; break;
-        case GraphicsRendition::Hidden: flags |= CellFlags::Hidden; break;
-        case GraphicsRendition::CrossedOut: flags |= CellFlags::CrossedOut; break;
-        case GraphicsRendition::DoublyUnderlined: flags |= CellFlags::DoublyUnderlined; break;
-        case GraphicsRendition::CurlyUnderlined: flags |= CellFlags::CurlyUnderlined; break;
-        case GraphicsRendition::DottedUnderline: flags |= CellFlags::DottedUnderline; break;
-        case GraphicsRendition::DashedUnderline: flags |= CellFlags::DashedUnderline; break;
-        case GraphicsRendition::Framed: flags |= CellFlags::Framed; break;
-        case GraphicsRendition::Overline: flags |= CellFlags::Overline; break;
-        case GraphicsRendition::Normal: flags &= ~(CellFlags::Bold | CellFlags::Faint); break;
-        case GraphicsRendition::NoItalic: flags &= ~CellFlags::Italic; break;
+        case GraphicsRendition::Inverse: flags |= CellFlag::Inverse; break;
+        case GraphicsRendition::Hidden: flags |= CellFlag::Hidden; break;
+        case GraphicsRendition::CrossedOut: flags |= CellFlag::CrossedOut; break;
+        case GraphicsRendition::DoublyUnderlined: flags |= CellFlag::DoublyUnderlined; break;
+        case GraphicsRendition::CurlyUnderlined: flags |= CellFlag::CurlyUnderlined; break;
+        case GraphicsRendition::DottedUnderline: flags |= CellFlag::DottedUnderline; break;
+        case GraphicsRendition::DashedUnderline: flags |= CellFlag::DashedUnderline; break;
+        case GraphicsRendition::Framed: flags |= CellFlag::Framed; break;
+        case GraphicsRendition::Overline: flags |= CellFlag::Overline; break;
+        case GraphicsRendition::Normal: flags = flags.without({ CellFlag::Bold, CellFlag::Faint }); break;
+        case GraphicsRendition::NoItalic: flags.disable(CellFlag::Italic); break;
         case GraphicsRendition::NoUnderline:
-            flags &= ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
-                       | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
+            flags = flags.without({ CellFlag::Underline,
+                                    CellFlag::DoublyUnderlined,
+                                    CellFlag::CurlyUnderlined,
+                                    CellFlag::DottedUnderline,
+                                    CellFlag::DashedUnderline });
             break;
-        case GraphicsRendition::NoBlinking: flags &= ~(CellFlags::Blinking | CellFlags::RapidBlinking); break;
-        case GraphicsRendition::NoInverse: flags &= ~CellFlags::Inverse; break;
-        case GraphicsRendition::NoHidden: flags &= ~CellFlags::Hidden; break;
-        case GraphicsRendition::NoCrossedOut: flags &= ~CellFlags::CrossedOut; break;
-        case GraphicsRendition::NoFramed: flags &= ~CellFlags::Framed; break;
-        case GraphicsRendition::NoOverline: flags &= ~CellFlags::Overline; break;
+        case GraphicsRendition::NoBlinking:
+            flags = flags.without({ CellFlag::Blinking, CellFlag::RapidBlinking });
+            break;
+        case GraphicsRendition::NoInverse: flags.disable(CellFlag::Inverse); break;
+        case GraphicsRendition::NoHidden: flags.disable(CellFlag::Hidden); break;
+        case GraphicsRendition::NoCrossedOut: flags.disable(CellFlag::CrossedOut); break;
+        case GraphicsRendition::NoFramed: flags.disable(CellFlag::Framed); break;
+        case GraphicsRendition::NoOverline: flags.disable(CellFlag::Overline); break;
     }
     return flags;
 }

@@ -35,15 +35,15 @@ namespace vtrasterizer
 namespace
 {
     auto constexpr CellFlagDecorationMappings = array {
-        pair { vtbackend::CellFlags::Underline, Decorator::Underline },
-        pair { vtbackend::CellFlags::DoublyUnderlined, Decorator::DoubleUnderline },
-        pair { vtbackend::CellFlags::CurlyUnderlined, Decorator::CurlyUnderline },
-        pair { vtbackend::CellFlags::DottedUnderline, Decorator::DottedUnderline },
-        pair { vtbackend::CellFlags::DashedUnderline, Decorator::DashedUnderline },
-        pair { vtbackend::CellFlags::Overline, Decorator::Overline },
-        pair { vtbackend::CellFlags::CrossedOut, Decorator::CrossedOut },
-        pair { vtbackend::CellFlags::Framed, Decorator::Framed },
-        pair { vtbackend::CellFlags::Encircled, Decorator::Encircle },
+        pair { vtbackend::CellFlag::Underline, Decorator::Underline },
+        pair { vtbackend::CellFlag::DoublyUnderlined, Decorator::DoubleUnderline },
+        pair { vtbackend::CellFlag::CurlyUnderlined, Decorator::CurlyUnderline },
+        pair { vtbackend::CellFlag::DottedUnderline, Decorator::DottedUnderline },
+        pair { vtbackend::CellFlag::DashedUnderline, Decorator::DashedUnderline },
+        pair { vtbackend::CellFlag::Overline, Decorator::Overline },
+        pair { vtbackend::CellFlag::CrossedOut, Decorator::CrossedOut },
+        pair { vtbackend::CellFlag::Framed, Decorator::Framed },
+        pair { vtbackend::CellFlag::Encircled, Decorator::Encircle },
     };
 }
 

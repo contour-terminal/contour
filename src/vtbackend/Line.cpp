@@ -181,7 +181,7 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
         {
             while (gapPending > 0)
             {
-                columns.emplace_back(input.textAttributes.with(CellFlags::WideCharContinuation),
+                columns.emplace_back(input.textAttributes.with(CellFlag::WideCharContinuation),
                                      input.hyperlink);
                 --gapPending;
             }

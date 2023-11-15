@@ -9,6 +9,7 @@
 #include <crispy/BufferObject.h>
 #include <crispy/Comparison.h>
 #include <crispy/assert.h>
+#include <crispy/flags.h>
 
 #include <libunicode/convert.h>
 
@@ -22,7 +23,7 @@
 namespace vtbackend
 {
 
-enum class LineFlags : uint8_t
+enum class LineFlag : uint8_t
 {
     None = 0x0000,
     Wrappable = 0x0001,
@@ -31,6 +32,8 @@ enum class LineFlags : uint8_t
     // TODO: DoubleWidth  = 0x0010,
     // TODO: DoubleHeight = 0x0020,
 };
+
+using LineFlags = crispy::flags<LineFlag>;
 
 // clang-format off
 template <typename, bool> struct OptionalProperty;
@@ -95,19 +98,13 @@ class Line
     using reverse_iterator = typename InflatedBuffer::reverse_iterator;
     using const_iterator = typename InflatedBuffer::const_iterator;
 
-    Line(LineFlags flags, TrivialBuffer buffer):
-        _storage { std::move(buffer) }, _flags { static_cast<unsigned>(flags) }
-    {
-    }
+    Line(LineFlags flags, TrivialBuffer buffer): _storage { std::move(buffer) }, _flags { flags } {}
 
-    Line(LineFlags flags, InflatedBuffer buffer):
-        _storage { std::move(buffer) }, _flags { static_cast<unsigned>(flags) }
-    {
-    }
+    Line(LineFlags flags, InflatedBuffer buffer): _storage { std::move(buffer) }, _flags { flags } {}
 
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
     {
-        _flags = static_cast<unsigned>(flags);
+        _flags = flags;
         if (isTrivialBuffer())
             trivialBuffer().reset(attributes);
         else
@@ -116,7 +113,7 @@ class Line
 
     void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
     {
-        _flags = static_cast<unsigned>(flags);
+        _flags = flags;
         setBuffer(TrivialBuffer { count, attributes });
     }
 
@@ -129,7 +126,7 @@ class Line
             reset(flags, attributes);
         else
         {
-            _flags = static_cast<unsigned>(flags);
+            _flags = flags;
             for (Cell& cell: inflatedBuffer())
             {
                 cell.reset();
@@ -235,46 +232,43 @@ class Line
 
     [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(_flags); }
 
-    [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlags::Marked); }
-    void setMarked(bool enable) { setFlag(LineFlags::Marked, enable); }
+    [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlag::Marked); }
+    void setMarked(bool enable) { setFlag(LineFlag::Marked, enable); }
 
-    [[nodiscard]] bool wrapped() const noexcept { return isFlagEnabled(LineFlags::Wrapped); }
-    void setWrapped(bool enable) { setFlag(LineFlags::Wrapped, enable); }
+    [[nodiscard]] bool wrapped() const noexcept { return isFlagEnabled(LineFlag::Wrapped); }
+    void setWrapped(bool enable) { setFlag(LineFlag::Wrapped, enable); }
 
-    [[nodiscard]] bool wrappable() const noexcept { return isFlagEnabled(LineFlags::Wrappable); }
-    void setWrappable(bool enable) { setFlag(LineFlags::Wrappable, enable); }
+    [[nodiscard]] bool wrappable() const noexcept { return isFlagEnabled(LineFlag::Wrappable); }
+    void setWrappable(bool enable) { setFlag(LineFlag::Wrappable, enable); }
 
     [[nodiscard]] LineFlags wrappableFlag() const noexcept
     {
-        return wrappable() ? LineFlags::Wrappable : LineFlags::None;
+        return wrappable() ? LineFlag::Wrappable : LineFlag::None;
     }
     [[nodiscard]] LineFlags wrappedFlag() const noexcept
     {
-        return marked() ? LineFlags::Wrapped : LineFlags::None;
+        return marked() ? LineFlag::Wrapped : LineFlag::None;
     }
     [[nodiscard]] LineFlags markedFlag() const noexcept
     {
-        return marked() ? LineFlags::Marked : LineFlags::None;
+        return marked() ? LineFlag::Marked : LineFlag::None;
     }
 
     [[nodiscard]] LineFlags inheritableFlags() const noexcept
     {
-        auto constexpr Inheritables = unsigned(LineFlags::Wrappable) | unsigned(LineFlags::Marked);
-        return static_cast<LineFlags>(_flags & Inheritables);
+        auto constexpr Inheritables = LineFlags({ LineFlag::Wrappable, LineFlag::Marked });
+        return _flags & Inheritables;
     }
 
-    void setFlag(LineFlags flag, bool enable) noexcept
+    void setFlag(LineFlags flags, bool enable) noexcept
     {
         if (enable)
-            _flags |= static_cast<unsigned>(flag);
+            _flags.enable(flags);
         else
-            _flags &= ~static_cast<unsigned>(flag);
+            _flags.disable(flags);
     }
 
-    [[nodiscard]] bool isFlagEnabled(LineFlags flag) const noexcept
-    {
-        return (_flags & static_cast<unsigned>(flag)) != 0;
-    }
+    [[nodiscard]] bool isFlagEnabled(LineFlags flags) const noexcept { return (_flags & flags).any(); }
 
     [[nodiscard]] InflatedBuffer reflow(ColumnCount newColumnCount);
     [[nodiscard]] std::string toUtf8() const;
@@ -431,23 +425,8 @@ class Line
 
   private:
     Storage _storage;
-    unsigned _flags = 0;
+    LineFlags _flags;
 };
-
-constexpr LineFlags operator|(LineFlags a, LineFlags b) noexcept
-{
-    return LineFlags(unsigned(a) | unsigned(b));
-}
-
-constexpr LineFlags operator~(LineFlags a) noexcept
-{
-    return LineFlags(~unsigned(a));
-}
-
-constexpr LineFlags operator&(LineFlags a, LineFlags b) noexcept
-{
-    return LineFlags(unsigned(a) & unsigned(b));
-}
 
 template <typename Cell>
 inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
@@ -471,14 +450,14 @@ struct fmt::formatter<vtbackend::LineFlags>: formatter<std::string>
     auto format(const vtbackend::LineFlags flags, format_context& ctx) -> format_context::iterator
     {
         static const std::array<std::pair<vtbackend::LineFlags, std::string_view>, 3> nameMap = {
-            std::pair { vtbackend::LineFlags::Wrappable, std::string_view("Wrappable") },
-            std::pair { vtbackend::LineFlags::Wrapped, std::string_view("Wrapped") },
-            std::pair { vtbackend::LineFlags::Marked, std::string_view("Marked") },
+            std::pair { vtbackend::LineFlag::Wrappable, std::string_view("Wrappable") },
+            std::pair { vtbackend::LineFlag::Wrapped, std::string_view("Wrapped") },
+            std::pair { vtbackend::LineFlag::Marked, std::string_view("Marked") },
         };
         std::string s;
         for (auto const& mapping: nameMap)
         {
-            if ((mapping.first & flags) != vtbackend::LineFlags::None)
+            if ((mapping.first & flags) != vtbackend::LineFlag::None)
             {
                 if (!s.empty())
                     s += ",";
