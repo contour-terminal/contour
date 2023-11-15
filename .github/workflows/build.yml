@@ -232,6 +232,7 @@ jobs:
       - name: Test in FreeBSD
         id: test
         uses: vmactions/freebsd-vm@v0
+        timeout-minutes: 60
         with:
           envs: 'MYTOKEN MYTOKEN2'
           usesh: true
@@ -272,6 +273,10 @@ jobs:
           key: ccache-osx_qt${{ steps.set_vars.outputs.QTVER }}
           max-size: 256M
       - name: "Install dependencies"
+        # Sometimes, brew thinks it needs to install from source rather than binary.
+        # For Qt this may take ages (many many hours). Let's not waste our CPU credits here,
+        # and limit the run time.
+        timeout-minutes: 15
         run: |
           set -ex
           brew update
