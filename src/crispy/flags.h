@@ -25,7 +25,9 @@ template <typename flag_type>
 class flags
 {
   public:
-    constexpr flags(flag_type flag) noexcept: _value(static_cast<unsigned>(flag)) {}
+    using value_type = std::underlying_type_t<flag_type>;
+
+    constexpr flags(flag_type flag) noexcept: _value(static_cast<value_type>(flag)) {}
     constexpr flags(std::initializer_list<flag_type> bits) noexcept
     {
         for (auto const bit: bits)
@@ -37,14 +39,17 @@ class flags
     constexpr flags& operator=(flags&&) noexcept = default;
     constexpr flags& operator=(flags const&) noexcept = default;
 
-    constexpr void enable(flag_type flag) noexcept { _value |= static_cast<unsigned>(flag); }
-    constexpr void disable(flag_type flag) noexcept { _value &= ~static_cast<unsigned>(flag); }
+    constexpr void enable(flag_type flag) noexcept { _value |= static_cast<value_type>(flag); }
+    constexpr void disable(flag_type flag) noexcept { _value &= ~static_cast<value_type>(flag); }
 
-    constexpr void enable(flags<flag_type> flags) noexcept { _value |= static_cast<unsigned>(flags._value); }
+    constexpr void enable(flags<flag_type> flags) noexcept
+    {
+        _value |= static_cast<value_type>(flags._value);
+    }
 
     constexpr void disable(flags<flag_type> flags) noexcept
     {
-        _value &= ~static_cast<unsigned>(flags._value);
+        _value &= ~static_cast<value_type>(flags._value);
     }
 
     [[nodiscard]] constexpr bool contains(flags<flag_type> flags) const noexcept
@@ -53,7 +58,11 @@ class flags
     }
 
     [[nodiscard]] constexpr bool test(flag_type flag) const noexcept { return contains(flag); }
-    [[nodiscard]] constexpr bool operator&(flag_type flag) const noexcept { return contains(flag); }
+
+    [[nodiscard]] constexpr flags<flag_type> operator&(flags<flag_type> other) const noexcept
+    {
+        return flags<flag_type>::from_value(_value & other.value());
+    }
 
     constexpr flags& operator|=(flags<flag_type> flags) noexcept
     {
@@ -75,12 +84,13 @@ class flags
 
     [[nodiscard]] constexpr bool none() const noexcept { return _value == 0; }
     [[nodiscard]] constexpr bool any() const noexcept { return _value != 0; }
+    [[nodiscard]] constexpr bool operator!() const noexcept { return _value == 0; }
     [[nodiscard]] constexpr explicit operator bool() const noexcept { return _value != 0; }
 
-    [[nodiscard]] constexpr unsigned value() const noexcept { return _value; }
+    [[nodiscard]] constexpr value_type value() const noexcept { return _value; }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    [[nodiscard]] static constexpr flags<flag_type> from_value(unsigned value) noexcept
+    [[nodiscard]] static constexpr flags<flag_type> from_value(value_type value) noexcept
     {
         auto result = flags<flag_type> {};
         result._value = value;
@@ -89,7 +99,7 @@ class flags
 
     [[nodiscard]] constexpr flags<flag_type> with(flag_type other) const noexcept
     {
-        return flags<flag_type>::from_value(_value | static_cast<unsigned>(other));
+        return flags<flag_type>::from_value(_value | static_cast<value_type>(other));
     }
 
     constexpr flags<flag_type> without(flags<flag_type> other) const noexcept
@@ -99,15 +109,19 @@ class flags
 
     constexpr auto operator<=>(flags<flag_type> const& other) const noexcept = default;
 
-  private:
-    unsigned _value = 0;
-};
+    constexpr flags<flag_type> operator|(flags<flag_type> other) const noexcept
+    {
+        return flags<flag_type>::from_value(_value | other.value());
+    }
 
-template <typename flag_type>
-constexpr flags<flag_type> operator|(flags<flag_type> lhs, flags<flag_type> rhs) noexcept
-{
-    return flags<flag_type>::from_value(lhs.value() | rhs.value());
-}
+    constexpr flags<flag_type> operator|(flag_type other) const noexcept
+    {
+        return flags<flag_type>::from_value(_value | static_cast<value_type>(other));
+    }
+
+  private:
+    value_type _value = 0;
+};
 
 } // namespace crispy
 
