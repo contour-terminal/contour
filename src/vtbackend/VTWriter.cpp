@@ -203,7 +203,7 @@ void VTWriter::write(Line<Cell> const& line)
     {
         for (Cell const& cell: line.inflatedBuffer())
         {
-            if (cell.flags() & CellFlags::Bold)
+            if (cell.flags() & CellFlag::Bold)
                 sgrAdd(GraphicsRendition::Bold);
             else
                 sgrAdd(GraphicsRendition::Normal);

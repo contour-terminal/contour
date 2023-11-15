@@ -18,7 +18,7 @@
 
 using namespace std;
 using namespace std::chrono_literals;
-using vtbackend::CellFlags;
+using vtbackend::CellFlag;
 using vtbackend::ColumnCount;
 using vtbackend::ColumnOffset;
 using vtbackend::LineCount;
@@ -130,8 +130,8 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
             auto const colorDec = fmt::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
             INFO(fmt::format("at line {} column {}, flags {}", line, column, someCell.flags()));
             CHECK(colorDec == "171/178/191");
-            CHECK(someCell.isFlagEnabled(vtbackend::CellFlags::Bold));
-            CHECK(someCell.isFlagEnabled(vtbackend::CellFlags::Underline));
+            CHECK(someCell.isFlagEnabled(vtbackend::CellFlag::Bold));
+            CHECK(someCell.isFlagEnabled(vtbackend::CellFlag::Underline));
             // clang-format on
         }
 }
@@ -353,15 +353,15 @@ TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
 
     auto& screen = mc.terminal.primaryScreen();
 
-    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlags::CurlyUnderlined));
-    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::CurlyUnderlined));
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlags::CurlyUnderlined));
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlags::CurlyUnderlined));
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlag::CurlyUnderlined));
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::CurlyUnderlined));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlag::CurlyUnderlined));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlag::CurlyUnderlined));
 
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlags::Italic));
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::Italic));
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlags::Italic));
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlags::Italic));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlag::Italic));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::Italic));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlag::Italic));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlag::Italic));
 }
 
 TEST_CASE("Terminal.TextSelection", "[terminal]")

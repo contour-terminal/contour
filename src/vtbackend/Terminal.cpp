@@ -557,17 +557,17 @@ void Terminal::updateIndicatorStatusLine()
     if (!allowInput())
     {
         _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = BrightColor::Red;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags |= CellFlags::Bold;
+        _indicatorStatusScreen.cursor().graphicsRendition.flags.enable(CellFlag::Bold);
         _indicatorStatusScreen.writeTextFromExternal(" (PROTECTED)");
         _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = colors.foreground;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags &= ~CellFlags::Bold;
+        _indicatorStatusScreen.cursor().graphicsRendition.flags.disable(CellFlag::Bold);
     }
 
     if (_state.executionMode != ExecutionMode::Normal)
     {
         _indicatorStatusScreen.writeTextFromExternal(" | ");
         _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = BrightColor::Yellow;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags |= CellFlags::Bold;
+        _indicatorStatusScreen.cursor().graphicsRendition.flags |= CellFlag::Bold;
         _indicatorStatusScreen.writeTextFromExternal("TRACING");
         if (!_traceHandler.pendingSequences().empty())
             _indicatorStatusScreen.writeTextFromExternal(
@@ -576,7 +576,7 @@ void Terminal::updateIndicatorStatusLine()
                             _traceHandler.pendingSequences().front()));
 
         _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = colors.foreground;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags &= ~CellFlags::Bold;
+        _indicatorStatusScreen.cursor().graphicsRendition.flags.disable(CellFlag::Bold);
     }
 
     // TODO: Disabled for now, but generally I want that functionality, but configurable somehow.

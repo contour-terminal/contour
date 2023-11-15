@@ -9,6 +9,7 @@
 #include <crispy/BufferObject.h>
 #include <crispy/Comparison.h>
 #include <crispy/assert.h>
+#include <crispy/flags.h>
 
 #include <libunicode/convert.h>
 
@@ -22,7 +23,7 @@
 namespace vtbackend
 {
 
-enum class LineFlags : uint8_t
+enum class LineFlag : uint8_t
 {
     None = 0x0000,
     Wrappable = 0x0001,
@@ -31,6 +32,8 @@ enum class LineFlags : uint8_t
     // TODO: DoubleWidth  = 0x0010,
     // TODO: DoubleHeight = 0x0020,
 };
+
+using LineFlags = crispy::flags<LineFlag>;
 
 // clang-format off
 template <typename, bool> struct OptionalProperty;

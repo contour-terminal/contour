@@ -243,11 +243,11 @@ namespace
 
     constexpr TextStyle makeTextStyle(vtbackend::CellFlags mask)
     {
-        if (contains_all(mask, vtbackend::CellFlags::Bold | vtbackend::CellFlags::Italic))
+        if (mask == vtbackend::CellFlags { vtbackend::CellFlag::Bold, vtbackend::CellFlag::Italic })
             return TextStyle::BoldItalic;
-        if (mask & vtbackend::CellFlags::Bold)
+        if (mask & vtbackend::CellFlag::Bold)
             return TextStyle::Bold;
-        if (mask & vtbackend::CellFlags::Italic)
+        if (mask & vtbackend::CellFlag::Italic)
             return TextStyle::Italic;
         return TextStyle::Regular;
     }
