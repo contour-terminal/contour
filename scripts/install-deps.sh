@@ -497,10 +497,6 @@ install_deps_fedora()
 
 install_deps_darwin()
 {
-    # NB: catch2 is available on brew but version 3, and we are still using version 2
-    # due to all the other supported platforms.
-    fetch_and_unpack_Catch2
-
     # NB: yaml-cpp is available on brew, but gives linker error on Github CI.
     fetch_and_unpack_yaml_cpp
 
@@ -510,6 +506,7 @@ install_deps_darwin()
 
     # NB: Also available in brew: mimalloc
     brew install $SYSDEP_ASSUME_YES \
+        catch2 \
         cpp-gsl \
         fmt \
         fontconfig \
