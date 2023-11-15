@@ -257,7 +257,7 @@ jobs:
   # {{{ OS/X
   osx:
     name: "OS/X"
-    runs-on: macos-11
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
       - name: set variables
