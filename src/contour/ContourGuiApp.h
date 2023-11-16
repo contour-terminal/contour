@@ -76,6 +76,7 @@ class ContourGuiApp: public QObject, public ContourApp
 
   private:
     static void ensureTermInfoFile();
+    void setupQCoreApplication();
     bool loadConfig(std::string const& target);
     int terminalGuiAction();
     int fontConfigAction();
