@@ -312,10 +312,6 @@ int ContourGuiApp::terminalGuiAction()
         errorLog()("Could not access configuration profile.");
         return EXIT_FAILURE;
     }
-    auto appName = QString::fromStdString(profile->wmClass);
-    QCoreApplication::setApplicationName(appName);
-    QCoreApplication::setOrganizationName("contour");
-    QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
 
     vector<string> qtArgsStore;
     vector<char const*> qtArgsPtr;
@@ -351,6 +347,8 @@ int ContourGuiApp::terminalGuiAction()
 
     // NB: We use QApplication over QGuiApplication because we want to use SystemTrayIcon.
     QApplication app(qtArgsCount, (char**) qtArgsPtr.data());
+
+    setupQCoreApplication();
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     _colorPreference = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark
@@ -443,6 +441,42 @@ int ContourGuiApp::terminalGuiAction()
 
     // printf("\r%s", TBC);
     return rv;
+}
+
+void ContourGuiApp::setupQCoreApplication()
+{
+    auto const* profile = _config.profile(profileName());
+    Require(profile);
+
+    auto const defaultAppName = QStringLiteral("contour");
+    auto const defaultOrgDomain = QStringLiteral("contour-terminal.org");
+    auto const defaultOrgName = QStringLiteral("contour");
+
+    auto const platformName = QGuiApplication::platformName();
+    auto const wmClass = QString::fromStdString(profile->wmClass);
+
+    auto const effectiveAppName = [&]() -> QString const& {
+        // On X11, we want to set the WM_CLASS property to the configured value.
+        if (platformName == "xcb" && !wmClass.isEmpty())
+            return wmClass;
+        return defaultAppName;
+    }();
+
+    auto const effectiveOrgDomain = [&]() -> QString const& {
+        // On Wayland, we want to set the Applicion Id to the configured value via the desktop file name.
+        // We use the desktop file name as the application id, because that's what Qt uses to set the
+        // app id on Wayland.
+        // I know this sounds weird. This is because it is weird. But it's the only way to set the
+        // application id on Wayland when using Qt.
+        if (platformName == "wayland" && !wmClass.isEmpty())
+            return wmClass;
+        return defaultOrgDomain;
+    }();
+
+    QCoreApplication::setOrganizationDomain(effectiveOrgDomain);
+    QCoreApplication::setOrganizationName(defaultOrgName);
+    QCoreApplication::setApplicationName(effectiveAppName);
+    QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
 }
 
 void ContourGuiApp::ensureTermInfoFile()
