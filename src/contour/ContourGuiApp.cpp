@@ -462,18 +462,15 @@ void ContourGuiApp::setupQCoreApplication()
         return defaultAppName;
     }();
 
-    auto const effectiveOrgDomain = [&]() -> QString const& {
-        // On Wayland, we want to set the Applicion Id to the configured value via the desktop file name.
-        // We use the desktop file name as the application id, because that's what Qt uses to set the
-        // app id on Wayland.
-        // I know this sounds weird. This is because it is weird. But it's the only way to set the
-        // application id on Wayland when using Qt.
-        if (platformName == "wayland" && !wmClass.isEmpty())
-            return wmClass;
-        return defaultOrgDomain;
-    }();
+    // On Wayland, we want to set the Applicion Id to the configured value via the desktop file name.
+    // We use the desktop file name as the application id, because that's what Qt uses to set the
+    // app id on Wayland.
+    // I know this sounds weird. This is because it is weird. But it's the only way to set the
+    // application id on Wayland when using Qt.
+    if (platformName == "wayland" && !wmClass.isEmpty())
+        QGuiApplication::setDesktopFileName(wmClass);
 
-    QCoreApplication::setOrganizationDomain(effectiveOrgDomain);
+    QCoreApplication::setOrganizationDomain(defaultOrgDomain);
     QCoreApplication::setOrganizationName(defaultOrgName);
     QCoreApplication::setApplicationName(effectiveAppName);
     QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
