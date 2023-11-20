@@ -55,3 +55,19 @@ insert_final_newline = true
 end_of_line = lf
 charset = utf-8
 trim_trailing_whitespace = true
+
+[CMakeLists.txt]
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+
+[*.cmake]
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true

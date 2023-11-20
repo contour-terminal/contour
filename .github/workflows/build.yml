@@ -31,6 +31,7 @@ concurrency:
 
 env:
   CTEST_OUTPUT_ON_FAILURE: 1
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
 
@@ -257,20 +258,20 @@ jobs:
   # {{{ OS/X
   osx:
     name: "OS/X"
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v3
       - name: set variables
         id: set_vars
         run: |
           ./scripts/ci-set-vars.sh
-          echo QTVER=5 >> "$GITHUB_OUTPUT"
+          echo QTVER=6 >> "$GITHUB_OUTPUT"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ccache-osx_qt${{ steps.set_vars.outputs.QTVER }}
+          key: ccache-osx_qt${{ steps.set_vars.outputs.QTVER }}-r1
           max-size: 256M
       - name: "Install dependencies"
         # Sometimes, brew thinks it needs to install from source rather than binary.
@@ -309,9 +310,6 @@ jobs:
           # find build/src/contour/contour.app -print
           BASENAME="contour-${{ steps.set_vars.outputs.version }}-osx"
           mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
-          mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "${BASENAME}.zip"
-      - name: "Show ZIP-package contents"
-        run: "unzip -l contour-${{ steps.set_vars.outputs.version }}-osx.zip"
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v2
         with:
@@ -325,6 +323,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.3
       - name: setup environment
         shell: powershell
         id: set_vars
@@ -356,7 +356,7 @@ jobs:
                 New-Item -ItemType Directory -Force -Path build
           }
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_TESTING=ON -DCONTOUR_QT_VERSION=6 -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_TESTING=ON -DCONTOUR_QT_VERSION=6 -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
       - name: "Build"
         run: cmake --build build/ --config Release
       - name: "test: crispy"

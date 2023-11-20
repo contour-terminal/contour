@@ -35,13 +35,10 @@ namespace contour::display
 {
 
 class OpenGLRenderer final:
-    public QObject,
     public vtrasterizer::RenderTarget,
     public vtrasterizer::atlas::AtlasBackend,
     public QOpenGLExtraFunctions
 {
-    Q_OBJECT
-
     using ImageSize = vtbackend::ImageSize;
 
     using AtlasTextureScreenshot = vtrasterizer::AtlasTextureScreenshot;

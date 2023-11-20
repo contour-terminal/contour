@@ -497,9 +497,6 @@ install_deps_fedora()
 
 install_deps_darwin()
 {
-    # NB: yaml-cpp is available on brew, but gives linker error on Github CI.
-    fetch_and_unpack_yaml_cpp
-
     fetch_and_unpack_libunicode
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
@@ -515,7 +512,8 @@ install_deps_darwin()
         pkg-config \
         qt$QTVER \
         libssh2 \
-        range-v3
+        range-v3 \
+        yaml-cpp
 }
 
 main()
