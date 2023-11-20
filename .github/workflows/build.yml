@@ -291,8 +291,10 @@ jobs:
           cmake . \
                 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
                 -DCONTOUR_TESTING=ON \
-                -DQt${QTVER}_DIR="$(brew --prefix qt@${QTVER})/lib/cmake/Qt${QTVER}" \
                 -DCONTOUR_QT_VERSION=${QTVER} \
+                -DCMAKE_PREFIX_PATH$="$(brew --prefix qt@${QTVER})" \
+                -DMACDEPLOYQT_EXECUTABLE="$(brew --prefix qt${QTVER})/bin/macdeployqt" \
+                -DMACDEPLOYQT_QML_WORKAROUND=ON \
                 -B build/
       - name: "Build"
         run: cmake --build build/
@@ -305,7 +307,8 @@ jobs:
       - name: "Create Package(s)"
         run: |
           set -ex
-          cmake --build build --target package
+          cd build; cpack -G DragNDrop --verbose; cd -
+          # cmake --build build --target package-verbose
           # ls -hl build/
           # find build/src/contour/contour.app -print
           BASENAME="contour-${{ steps.set_vars.outputs.version }}-osx"

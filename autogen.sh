@@ -39,7 +39,8 @@ fi
 case "$OSTYPE" in
     darwin*)
         if test v$QTVER = v6; then
-            EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DQt6_DIR=$(brew --prefix qt6)/lib/cmake/Qt6"
+            EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCMAKE_PREFIX_PATH=$(brew --prefix qt@6)"
+            #EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DQt6_DIR=$(brew --prefix qt6)/lib/cmake/Qt6"
             #EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DQt6_DIR=$HOME/Qt/6.5.3/macos/lib/cmake/Qt6"
         else
             EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DQt5_DIR=$(brew --prefix qt5)/lib/cmake/Qt5"
