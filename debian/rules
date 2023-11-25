@@ -7,66 +7,66 @@ BUILDDIR = release
 
 configure: configure-stamp
 configure-stamp:
-	mkdir -p ${BUILDDIR}
-	cd "${BUILDDIR}" && \
-	CPM_SOURCE_CACHE="$(shell pwd)/_3rdparty" cmake .. \
-		-DCMAKE_BUILD_TYPE="RelWithDebInfo" \
-		-DCMAKE_INSTALL_PREFIX="/usr" \
-		-DCMAKE_CXX_FLAGS="-DNDEBUG=1" \
-		\
-		-DCONTOUR_EXAMPLES=OFF \
-		\
-		-DCRISPY_TESTING=ON \
-		-DLIBTERMINAL_TESTING=ON \
-		-DLIBUNICODE_TESTING=ON
-	touch $@
+    mkdir -p ${BUILDDIR}
+    cd "${BUILDDIR}" && \
+    CPM_SOURCE_CACHE="$(shell pwd)/_3rdparty" cmake .. \
+        -DCMAKE_BUILD_TYPE="RelWithDebInfo" \
+        -DCMAKE_INSTALL_PREFIX="/usr" \
+        -DCMAKE_CXX_FLAGS="-DNDEBUG=1" \
+        \
+        -DCONTOUR_EXAMPLES=OFF \
+        \
+        -DCRISPY_TESTING=ON \
+        -DLIBTERMINAL_TESTING=ON \
+        -DLIBUNICODE_TESTING=ON
+    touch $@
 
 build: build-stamp
 build-stamp: configure-stamp
-	dh_testdir
-	$(MAKE) -C ${BUILDDIR} -j3
-	${BUILDDIR}/src/crispy/crispy_test
-	${BUILDDIR}/src/vtbackend/vtbackend_test
-	touch $@
+    dh_testdir
+    $(MAKE) -C ${BUILDDIR} -j3
+    ${BUILDDIR}/src/crispy/crispy_test
+    ${BUILDDIR}/src/vtbackend/vtbackend_test
+    touch $@
 
 install: install-stamp
 install-stamp:
-	dh_testdir
-	dh_testroot
-	dh_prep
-	dh_installdirs
-	$(MAKE) -C ${BUILDDIR} install DESTDIR=$(CURDIR)/debian/tmp
-	touch $@
+    dh_testdir
+    dh_testroot
+    dh_prep
+    dh_installdirs
+    $(MAKE) -C ${BUILDDIR} install DESTDIR=$(CURDIR)/debian/tmp
+    touch $@
 
 binary-indep: build install
 binary-arch: build install
-	dh_testdir
-	dh_testroot
-	dh_installchangelogs
-	dh_install
-	dh_installman
-	dh_link
-	dh_strip
-	dh_compress
-	dh_fixperms
-	dh_installdeb
-	dh_makeshlibs
-	dh_shlibdeps
-	dh_installdeb
-	dh_gencontrol
-	dh_md5sums
-	dh_builddeb
+    dh_testdir
+    dh_testroot
+    dh_installchangelogs
+    dh_install
+    dh_installman
+    dh_link
+    dh_strip
+    dh_compress
+    dh_fixperms
+    dh_installdeb
+    dh_makeshlibs
+    dh_shlibdeps
+    dh_installdeb
+    dh_gencontrol
+    dh_md5sums
+    dh_builddeb
 
 binary: binary-arch binary-indep
 
 clean:
-	rm -rf ${BUILDDIR}
-	dh_testdir
-	dh_testroot
-	dh_clean
-	#dh_auto_clean
+    rm -rf ${BUILDDIR}
+    dh_testdir
+    dh_testroot
+    dh_clean
+    #dh_auto_clean
 
 %:
-	dh $@
+    dh $@
 
 .PHONY: configure build binary-indep binary-arch binary install clean

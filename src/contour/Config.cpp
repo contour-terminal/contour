@@ -1403,6 +1403,7 @@ namespace
             loginShell.erase(loginShell.begin());
             terminalProfile.shell.arguments = loginShell;
         }
+#if defined(VTPTY_LIBSSH2)
         if (auto const sshNode = profile["ssh"]; sshNode && sshNode.IsMap())
         {
             usedKeys.emplace(fmt::format("{}.{}.ssh", parentPath, profileName));
@@ -1442,6 +1443,7 @@ namespace
             else if (auto const p = Process::homeDirectory() / ".ssh" / "known_hosts"; fs::exists(p))
                 ssh.knownHostsFile = p;
         }
+#endif
 
         tryLoadChildRelative(usedKeys, profile, basePath, "maximized", terminalProfile.maximized, logger);
         tryLoadChildRelative(usedKeys, profile, basePath, "fullscreen", terminalProfile.fullscreen, logger);
@@ -1536,8 +1538,10 @@ namespace
         if (terminalProfile.shell.env.find("COLORTERM") == terminalProfile.shell.env.end())
             terminalProfile.shell.env["COLORTERM"] = "truecolor";
 
-        // This is currently duplicated. Environment vars belong to each parent struct, not just shell.
+            // This is currently duplicated. Environment vars belong to each parent struct, not just shell.
+#if defined(VTPTY_LIBSSH2)
         terminalProfile.ssh.env = terminalProfile.shell.env;
+#endif
         // }}}
 
         strValue = fmt::format("{}", terminalProfile.terminalId);

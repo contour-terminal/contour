@@ -585,6 +585,7 @@ void TerminalSession::onClosed()
         else
             sessionLog()("Process terminated after {} seconds.", diff.count());
     }
+#if defined(VTPTY_LIBSSH2)
     else if (auto* sshSession = dynamic_cast<vtpty::SshSession*>(&_terminal.device()))
     {
         auto const exitStatus = sshSession->exitStatus();
@@ -594,6 +595,7 @@ void TerminalSession::onClosed()
         else
             sessionLog()("Process terminated after {} seconds.", diff.count());
     }
+#endif
     else
         sessionLog()("Process terminated after {} seconds.", diff.count());
 

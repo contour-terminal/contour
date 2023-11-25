@@ -4,7 +4,9 @@
 #include <contour/TerminalSessionManager.h>
 
 #include <vtpty/Process.h>
-#include <vtpty/SshSession.h>
+#if defined(VTPTY_LIBSSH2)
+    #include <vtpty/SshSession.h>
+#endif
 
 #include <QtQml/QQmlEngine>
 
@@ -26,9 +28,10 @@ std::unique_ptr<vtpty::Pty> TerminalSessionManager::createPty()
 {
     auto const& profile = _app.config().profile(_app.profileName());
 
+#if defined(VTPTY_LIBSSH2)
     if (!profile->ssh.hostname.empty())
         return make_unique<vtpty::SshSession>(profile->ssh);
-
+#endif
     return make_unique<vtpty::Process>(profile->shell, vtpty::createPty(profile->terminalSize, nullopt));
 }
 
