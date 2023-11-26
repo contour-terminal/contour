@@ -128,6 +128,13 @@ if(CONTOUR_FRONTEND_GUI)
     endif()
 endif()
 
+add_custom_target(package-verbose
+    COMMAND ${CMAKE_CPACK_COMMAND} --config CPackConfig.cmake --verbose
+    COMMENT "Build package with verbose output"
+    VERBATIM
+    USES_TERMINAL
+)
+
 macro(ContourConfigurationSummary)
     message(STATUS "==============================================================================")
     message(STATUS "    Contour (${CONTOUR_VERSION_STRING})")

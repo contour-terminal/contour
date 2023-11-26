@@ -199,6 +199,7 @@ if(CONTOUR_FRONTEND_GUI)
             Qt6::Network
             Qt6::OpenGL
             Qt6::Qml
+            Qt6::QuickControls2
             Qt6::Widgets
         )
         if(NOT(WIN32) AND NOT(APPLE))
@@ -304,13 +305,18 @@ endfunction()
 # endif(APPLE)
 
 macro(bundle_install_qt_plugin _qt_plugin_name _qt_plugins_var)
+    # Qt6 provides the plugins as individual packages that need to be found.
     set(_install_prefix "contour.app/Contents/")
+    find_package(Qt${INSTALLED_QT_VERSION}${_qt_plugin} QUIET PATHS ${Qt${INSTALLED_QT_VERSION}${_qtComponent}_DIR})
     if(TARGET "${_qt_plugin_name}")
         get_target_property(_qt_plugin_path "${_qt_plugin_name}" LOCATION)
     else()
         _qt_get_plugin_name_with_version("Qt::${_qt_plugin_name}" _qt_plugin_with_version_name)
         if(TARGET "${_qt_plugin_with_version_name}")
             get_target_property(_qt_plugin_path "${_qt_plugin_with_version_name}" LOCATION)
+        else()
+            message(STATUS "Qt ${_qt_plugin_name}: Ignoring")
+            return()
         endif()
     endif()
     if(EXISTS "${_qt_plugin_path}")
@@ -321,39 +327,34 @@ macro(bundle_install_qt_plugin _qt_plugin_name _qt_plugins_var)
         if("${_qt_plugin_ext}" STREQUAL ".dylib")
             set(_qt_plugin_dir "PlugIns")
             set(_qt_plugin_dest "${_install_prefix}${_qt_plugin_dir}/${_qt_plugin_type}")
-            message(STATUS "Install Qt plugin: ${_qt_plugin_path} ~> ${_qt_plugin_dest}")
+            message(STATUS "Qt ${_qt_plugin_name}: Installing from ${_qt_plugin_path}")
             install(FILES "${_qt_plugin_path}" DESTINATION "${_qt_plugin_dest}")
             set(${_qt_plugins_var} "${${_qt_plugins_var}};\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_qt_plugin_dest}/${_qt_plugin_file}")
         else()
-            message(STATUS "bundle_install_qt_plugin: Ignoring '${_qt_plugin_path}'")
+            message(STATUS "Qt ${_qt_plugin_name}: Ignoring '${_qt_plugin_path}'")
         endif()
     endif()
 endmacro()
 
 # _qtComponents  - in-variable name, list of Qt components (like Gui, Qml, Widgets) to install
 # _plugins_var   - out-variable name, list variable that will contain all the libraries to maybe carry over
-macro(bundle_install_all_qt_plugins _qtComponents _plugins_var)
-    foreach(_qt_comp IN LISTS ${_qtComponents})
-        if(INSTALLED_QT_VERSION VERSION_LESS 6)
-            set(_qt_module_plugins ${Qt${INSTALLED_QT_VERSION}${_qt_comp}_PLUGINS})
-        else()
-            get_target_property(_qt_module_plugins Qt${INSTALLED_QT_VERSION}::${_qt_comp} QT_PLUGINS)
-        endif()
+macro(bundle_install_qt_plugins_for_component _qtComponent _plugins_var)
+    get_target_property(_qt_module_plugins Qt${INSTALLED_QT_VERSION}::${_qtComponent} ${_plugins_var})
+    if(NOT _qt_module_plugins)
+        message(STATUS "Qt ${_qtComponent}: no plugins to install")
+    else()
+        message(STATUS "Qt ${_qtComponent}: collecting ...")
         foreach(_qt_plugin IN LISTS _qt_module_plugins)
-            if(INSTALLED_QT_VERSION VERSION_GREATER_EQUAL 6)
-                # Qt6 provides the plugins as individual packages that need to be found.
-                find_package(Qt${INSTALLED_QT_VERSION}${_qt_plugin} QUIET PATHS ${Qt${INSTALLED_QT_VERSION}${_qt_comp}_DIR})
-            endif()
             bundle_install_qt_plugin("${_qt_plugin}" "${_plugins_var}")
         endforeach()
-    endforeach()
+    endif()
 endmacro()
 
-get_property(_Qt_Core_LOCATION TARGET Qt${INSTALLED_QT_VERSION}::Core PROPERTY LOCATION)
-get_filename_component(Qt_BIN_DIR "${_Qt_Core_LOCATION}" PATH)
-if(APPLE)
-  get_filename_component(Qt_BIN_DIR "${Qt_BIN_DIR}" PATH)
-endif()
+# get_property(_Qt_Core_LOCATION TARGET Qt${INSTALLED_QT_VERSION}::Core PROPERTY LOCATION)
+# get_filename_component(Qt_BIN_DIR "${_Qt_Core_LOCATION}" PATH)
+# if(APPLE)
+#   get_filename_component(Qt_BIN_DIR "${Qt_BIN_DIR}" PATH)
+# endif()
 # }}}
 
 if(WIN32)
@@ -385,6 +386,8 @@ elseif(APPLE)
     # )
     # }}}
 
+    qt_import_qml_plugins(contour)
+
     include(InstallRequiredSystemLibraries)
 
     # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
@@ -395,7 +398,9 @@ elseif(APPLE)
 
     # NB: This is mostly based on code from CMake's QtDialog/CMakeLists.txt
     # TODO: Minimize the number of plugins installed to the required ones.
-    bundle_install_all_qt_plugins(QT_COMPONENTS QT_PLUGINS)
+    foreach(_qt_comp IN LISTS QT_COMPONENTS)
+        bundle_install_qt_plugins_for_component("${_qt_comp}" QT_PLUGINS)
+    endforeach()
 
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
@@ -438,6 +443,8 @@ elseif(APPLE)
     endif()
 
     # some debug printing
+    list(SORT QT_PLUGINS)
+    list(REMOVE_DUPLICATES QT_PLUGINS)
     foreach(_plugin ${QT_PLUGINS})
         message(STATUS "Qt Plugin: ${_plugin}")
     endforeach()
@@ -450,20 +457,21 @@ elseif(APPLE)
     include(DeployQt)  # Just to get access to ${MACDEPLOYQT_EXECUTABLE}
     get_filename_component(_macdeployqt_path "${MACDEPLOYQT_EXECUTABLE}" PATH)
     message(STATUS "macdeployqt path: ${_macdeployqt_path}")
-    message(STATUS "macdeployqt location : ${MACDEPLOYQT_EXECUTABLE}")
+    message(STATUS "macdeployqt location: ${MACDEPLOYQT_EXECUTABLE}")
 
-    set(QT_PLUGINS_DIR "${Qt6Widgets_DIR}/../../../plugins")
-    set(QT_QML_PLUGINS_DIR "${Qt6Widgets_DIR}/../../../qml")
-
-    set(qtconf_dest_dir "${BUNDLE_APP}/Contents/Resources")
-    set(plugin_dest_dir "${BUNDLE_APP}/Contents/PlugIns")
-    set(qml_dest_dir "${BUNDLE_APP}/Contents/Resources/qml")
-
-    # If we are in a dynamic build of qt
-    if(EXISTS "${QT_PLUGINS_DIR}/platforms/libqcocoa.dylib")
-        install(FILES "${QT_PLUGINS_DIR}/platforms/libqcocoa.dylib" DESTINATION "${plugin_dest_dir}/platforms")
-        install(FILES "${QT_PLUGINS_DIR}/imageformats/libqsvg.dylib" DESTINATION "${plugin_dest_dir}/imageformats")
-        install(FILES "${QT_PLUGINS_DIR}/iconengines/libqsvgicon.dylib" DESTINATION "${plugin_dest_dir}/iconengines")
+    set(MACDEPLOYQT_QML_WORKAROUND OFF CACHE BOOL "Workaround for macdeployqt not installing Qt QML files.")
+    if(MACDEPLOYQT_QML_WORKAROUND)
+        # Install Qt QML files
+        # This problem is specific to macdeployqt on Github CI, which does not seem to install
+        # the Qt QML files, so we do it manually here.
+        get_filename_component(Qt6_ROOT_DIR "${Qt6_DIR}/../../.." REALPATH)
+        message(STATUS "Using Qt6_ROOT_DIR: ${Qt6_ROOT_DIR}")
+        # Qt Qt5Compat QtMultimedia QtQml QtQuick
+        foreach(_name IN ITEMS Qt Qt5Compat QtMultimedia QtQml QtQuick)
+            get_filename_component(_dir "${Qt6_ROOT_DIR}/share/qt/qml/${_name}" REALPATH)
+            message(STATUS "Using _dir: ${_dir}")
+            install(DIRECTORY "${_dir}" DESTINATION ${App_Contents}/Resources/qml FILES_MATCHING PATTERN "*")
+        endforeach()
     endif()
 
     install(CODE "
@@ -481,6 +489,7 @@ elseif(APPLE)
         message(STATUS \"Globbing into RELATIVE \${CMAKE_CURRENT_BINARY_DIR} for \${CMAKE_SHARED_LIBRARY_SUFFIX} files (\${CMAKE_INSTALL_PREFIX})\")
         file(GLOB_RECURSE PLUGIN_PATHS
             \"\${CMAKE_INSTALL_PREFIX}/contour.app/Contents/PlugIns/*${CMAKE_SHARED_LIBRARY_SUFFIX}\"
+            \"\${CMAKE_INSTALL_PREFIX}/contour.app/Contents/Resources/*${CMAKE_SHARED_LIBRARY_SUFFIX}\"
         )
         foreach(_plugin \${PLUGIN_PATHS})
             message(STATUS \"CPack Qt Plugin: \${_plugin}\")
