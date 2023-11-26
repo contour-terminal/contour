@@ -7,15 +7,15 @@
 #    switch "$PWD"
 #        case "$HOME/work"*
 #            contour set profile to work
-#        case "$HOME/projects"* 
+#        case "$HOME/projects"*
 #            contour set profile to main
-#        case '*' 
+#        case '*'
 #            contour set profile to mobile
 #    end
 # end
 
 
-function precmd_hook_contour -d "Shell Integration hook to be invoked before each prompt" -e fish_prompt 
+function precmd_hook_contour -d "Shell Integration hook to be invoked before each prompt" -e fish_prompt
     # Disable text reflow for the command prompt (and below).
     printf '\e[?2028l'
 

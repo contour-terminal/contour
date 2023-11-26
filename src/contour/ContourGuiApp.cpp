@@ -178,8 +178,10 @@ void ContourGuiApp::onExit(TerminalSession& session)
 {
     if (auto const* localProcess = dynamic_cast<vtpty::Process const*>(&session.terminal().device()))
         _exitStatus = localProcess->checkStatus();
+#if defined(VTPTY_LIBSSH2)
     else if (auto const* sshSession = dynamic_cast<vtpty::SshSession const*>(&session.terminal().device()))
         _exitStatus = sshSession->exitStatus();
+#endif
 }
 
 QUrl ContourGuiApp::resolveResource(std::string_view path)
@@ -418,6 +420,7 @@ int ContourGuiApp::terminalGuiAction()
 
     if (_exitStatus.has_value())
     {
+#if defined(VTPTY_LIBSSH2)
         if (holds_alternative<SshSession::ExitStatus>(*_exitStatus))
         {
             auto const sshExitStatus = get<SshSession::ExitStatus>(*_exitStatus);
@@ -426,7 +429,9 @@ int ContourGuiApp::terminalGuiAction()
             else if (holds_alternative<SshSession::SignalExit>(sshExitStatus))
                 rv = EXIT_FAILURE;
         }
-        else if (holds_alternative<Process::ExitStatus>(*_exitStatus))
+        else
+#endif
+            if (holds_alternative<Process::ExitStatus>(*_exitStatus))
         {
             auto const processExitStatus = get<Process::ExitStatus>(*_exitStatus);
             if (holds_alternative<Process::NormalExit>(processExitStatus))
