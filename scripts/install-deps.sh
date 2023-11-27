@@ -335,12 +335,13 @@ install_deps_FreeBSD()
 {
     fetch_and_unpack_fmtlib
     fetch_and_unpack_libunicode
+    fetch_and_unpack_Catch2
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     # NB: libfmt is available in pkg, but it's not version >= 9.0.0 (as of 2022-09-03).
+    # NB: catch2 (as name "catch") is available in pkg, but it's not version >= 3.0.0.
     su root -c "pkg install $SYSDEP_ASSUME_YES \
-        catch \
         cmake \
         fontconfig \
         freetype2 \
