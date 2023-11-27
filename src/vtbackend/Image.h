@@ -235,14 +235,6 @@ class ImagePool
     /// Creates an RGBA image of given size in pixels.
     std::shared_ptr<Image const> create(ImageFormat format, ImageSize pixelSize, Image::Data&& data);
 
-    /// Rasterizes an Image.
-    std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,
-                                               ImageAlignment alignmentPolicy,
-                                               ImageResize resizePolicy,
-                                               RGBAColor defaultColor,
-                                               GridSize cellSpan,
-                                               ImageSize cellSize);
-
     // named image access
     //
     void link(std::string const& name, std::shared_ptr<Image const> imageRef);
