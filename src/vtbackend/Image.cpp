@@ -124,14 +124,12 @@ shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Im
     return make_shared<Image>(id, format, std::move(data), size, _onImageRemove);
 }
 
-// TODO: Why on earth does this function exist if it's not relevant to ImagePool? Fix this mess.
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-shared_ptr<RasterizedImage> ImagePool::rasterize(shared_ptr<Image const> image,
-                                                 ImageAlignment alignmentPolicy,
-                                                 ImageResize resizePolicy,
-                                                 RGBAColor defaultColor,
-                                                 GridSize cellSpan,
-                                                 ImageSize cellSize)
+shared_ptr<RasterizedImage> rasterize(shared_ptr<Image const> image,
+                                      ImageAlignment alignmentPolicy,
+                                      ImageResize resizePolicy,
+                                      RGBAColor defaultColor,
+                                      GridSize cellSpan,
+                                      ImageSize cellSize)
 {
     return make_shared<RasterizedImage>(
         std::move(image), alignmentPolicy, resizePolicy, defaultColor, cellSpan, cellSize);

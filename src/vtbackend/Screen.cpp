@@ -1960,7 +1960,7 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
     auto const gapColor = RGBAColor {}; // TODO: _cursor.graphicsRendition.backgroundColor;
 
     // TODO: make use of imageOffset and imageSize
-    auto const rasterizedImage = _state->imagePool.rasterize(
+    auto const rasterizedImage = make_shared<RasterizedImage>(
         std::move(image), alignmentPolicy, resizePolicy, gapColor, gridSize, _state->cellPixelSize);
     const auto lastSixelBand = imageSize.height.value % 6;
     const LineOffset offset = [&]() {
