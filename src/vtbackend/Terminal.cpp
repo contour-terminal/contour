@@ -1174,6 +1174,9 @@ void Terminal::verifyState()
     Require(_state.tabs.empty() || _state.tabs.back() < unbox<ColumnOffset>(_settings.pageSize.columns));
 
     _currentScreen->verifyState();
+
+    Require(0 <= *_state.margin.horizontal.from && *_state.margin.horizontal.to < *pageSize().columns);
+    Require(0 <= *_state.margin.vertical.from && *_state.margin.vertical.to < *pageSize().lines);
 #endif
 }
 
@@ -1520,7 +1523,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!enable)
             {
-                currentScreen().margin().horizontal =
+                _state.margin.horizontal =
                     Margin::Horizontal { ColumnOffset(0),
                                          boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1) };
                 _supportedVTSequences.enableSequence(SCOSC);
@@ -1675,24 +1678,21 @@ void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset>
 
     if (sanitizedTop < sanitizedBottom)
     {
-        currentScreen().margin().vertical.from = sanitizedTop;
-        currentScreen().margin().vertical.to = sanitizedBottom;
+        _state.margin.vertical.from = sanitizedTop;
+        _state.margin.vertical.to = sanitizedBottom;
     }
 }
 
 void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOffset> right)
 {
-    if (isModeEnabled(DECMode::LeftRightMargin))
+    auto const defaultLeft = ColumnOffset(0);
+    auto const defaultRight = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+    auto const sanitizedRight = std::min(right.value_or(defaultRight), defaultRight);
+    auto const sanitizedLeft = std::max(left.value_or(defaultLeft), defaultLeft);
+    if (sanitizedLeft < sanitizedRight)
     {
-        auto const defaultLeft = ColumnOffset(0);
-        auto const defaultRight = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
-        auto const sanitizedRight = std::min(right.value_or(defaultRight), defaultRight);
-        auto const sanitizedLeft = std::max(left.value_or(defaultLeft), defaultLeft);
-        if (sanitizedLeft < sanitizedRight)
-        {
-            currentScreen().margin().horizontal.from = sanitizedLeft;
-            currentScreen().margin().horizontal.to = sanitizedRight;
-        }
+        _state.margin.horizontal.from = sanitizedLeft;
+        _state.margin.horizontal.to = sanitizedRight;
     }
 }
 

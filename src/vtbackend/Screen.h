@@ -52,8 +52,6 @@ class ScreenBase: public SequenceHandler
     virtual void restoreCursor() = 0;
     virtual void reportColorPaletteUpdate() = 0;
 
-    [[nodiscard]] virtual Margin margin() const noexcept = 0;
-    [[nodiscard]] virtual Margin& margin() noexcept = 0;
     [[nodiscard]] virtual bool contains(CellLocation coord) const noexcept = 0;
     [[nodiscard]] virtual bool isCellEmpty(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual bool compareCellTextAt(CellLocation position, char codepoint) const noexcept = 0;
@@ -292,8 +290,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] PageSize pageSize() const noexcept { return _grid.pageSize(); }
     [[nodiscard]] ImageSize pixelSize() const noexcept { return _state->cellPixelSize * _settings->pageSize; }
 
-    [[nodiscard]] Margin margin() const noexcept override { return _grid.margin(); }
-    [[nodiscard]] Margin& margin() noexcept override { return _grid.margin(); }
+    [[nodiscard]] constexpr Margin margin() const noexcept { return _state->margin; }
+    [[nodiscard]] constexpr Margin& margin() noexcept { return _state->margin; }
 
     [[nodiscard]] bool isFullHorizontalMargins() const noexcept
     {

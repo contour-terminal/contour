@@ -615,8 +615,6 @@ class Grid
     void setReflowOnResize(bool enabled) { _reflowOnResize = enabled; }
 
     [[nodiscard]] PageSize pageSize() const noexcept { return _pageSize; }
-    [[nodiscard]] Margin margin() const noexcept { return _margin; }
-    [[nodiscard]] Margin& margin() noexcept { return _margin; }
 
     /// Resizes the main page area of the grid and adapts the scrollback area's width accordingly.
     ///
@@ -818,7 +816,6 @@ class Grid
     // private fields
     //
     PageSize _pageSize;
-    Margin _margin;
     bool _reflowOnResize = false;
     MaxHistoryLineCount _historyLimit;
 

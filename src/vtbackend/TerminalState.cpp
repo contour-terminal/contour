@@ -12,6 +12,8 @@ TerminalState::TerminalState(Terminal& terminal):
     cellPixelSize {},
     defaultColorPalette { settings.colorPalette },
     colorPalette { settings.colorPalette },
+    margin { Margin::Vertical { {}, settings.pageSize.lines.as<LineOffset>() - LineOffset(1) },
+             Margin::Horizontal { {}, settings.pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) } },
     effectiveImageCanvasSize { settings.maxImageSize },
     imageColorPalette { std::make_shared<SixelColorPalette>(maxImageColorRegisters, maxImageColorRegisters) },
     imagePool { [te = &terminal](Image const* image) {

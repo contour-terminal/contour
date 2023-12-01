@@ -302,9 +302,6 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::verifyState() const
 {
-    Margin& m = const_cast<Screen*>(this)->margin();
-    Require(0 <= *m.horizontal.from && *m.horizontal.to < *pageSize().columns);
-    Require(0 <= *m.vertical.from && *m.vertical.to < *pageSize().lines);
     Require(*_cursor.position.column < *pageSize().columns);
     Require(*_cursor.position.line < *pageSize().lines);
 
@@ -351,7 +348,7 @@ void Screen<Cell>::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
         Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
                  Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
 
-    _grid.margin() = margin;
+    _terminal->state().margin = margin;
 
     if (_cursor.position.column < boxed_cast<ColumnOffset>(mainDisplayPageSize.columns))
         _cursor.wrapPending = false;
@@ -3664,6 +3661,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             _terminal->resizeScreen(PageSize { pageSize().lines, seq.param<ColumnCount>(0) });
             return ApplyResult::Ok;
         case DECSLRM: {
+            if (!_terminal->isModeEnabled(DECMode::LeftRightMargin))
+                return ApplyResult::Invalid;
             auto l = decr(seq.param_opt<ColumnOffset>(0));
             auto r = decr(seq.param_opt<ColumnOffset>(1));
             _terminal->setLeftRightMargin(l, r);
