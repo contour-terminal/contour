@@ -631,7 +631,7 @@ class Terminal
 #if defined(__APPLE__) || defined(_MSC_VER)
         reply(fmt::vformat(message, fmt::make_format_args(args...)));
 #else
-        reply(fmt::vformat(message, fmt::make_format_args(std::forward<Ts>(args)...)));
+        reply(fmt::vformat(message, fmt::make_format_args(args...)));
 #endif
     }
 
