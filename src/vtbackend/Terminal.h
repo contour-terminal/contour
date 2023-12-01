@@ -207,8 +207,8 @@ class Terminal
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
     [[nodiscard]] CellLocation clampToOrigin(CellLocation coord) const noexcept
     {
-        return { std::clamp(coord.line, LineOffset { 0 }, currentScreen().margin().vertical.to),
-                 std::clamp(coord.column, ColumnOffset { 0 }, currentScreen().margin().horizontal.to) };
+        return { std::clamp(coord.line, LineOffset { 0 }, _state.margin.vertical.to),
+                 std::clamp(coord.column, ColumnOffset { 0 }, _state.margin.horizontal.to) };
     }
 
     [[nodiscard]] LineOffset clampedLine(LineOffset line) const noexcept

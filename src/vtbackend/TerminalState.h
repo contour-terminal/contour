@@ -199,6 +199,11 @@ struct TerminalState
     Modes modes;
     std::map<DECMode, std::vector<bool>> savedModes; //!< saved DEC modes
 
+    // Screen margin - shared across all screens that are covering the main area,
+    // i.e. the primary screen and alternate screen.
+    // This excludes all status lines, title lines, etc.
+    Margin margin;
+
     unsigned maxImageColorRegisters = 256;
     ImageSize effectiveImageCanvasSize;
     std::shared_ptr<SixelColorPalette> imageColorPalette;

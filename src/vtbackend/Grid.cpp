@@ -102,8 +102,6 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 Grid<Cell>::Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistoryLineCount):
     _pageSize { pageSize },
-    _margin { Margin::Vertical { {}, _pageSize.lines.as<LineOffset>() - LineOffset(1) },
-              Margin::Horizontal { {}, _pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) } },
     _reflowOnResize { reflowOnResize },
     _historyLimit { maxHistoryLineCount },
     _lines { detail::createLines<Cell>(
