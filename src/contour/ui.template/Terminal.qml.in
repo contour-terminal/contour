@@ -117,16 +117,10 @@ ContourTerminal
     RequestPermission {
         id: requestFontChangeDialog
         text: "The host application is requesting to change the display font."
-        onYesClicked: {
-            const rememberChoice = requestFontChangeDialog.clickedRememberChoice();
-            console.log("[Terminal] Allowing font change request.", rememberChoice ? "to all" : "single", vtWidget.session)
-            vtWidget.session.applyPendingFontChange(true, rememberChoice);
-        }
-        onNoClicked: {
-            const rememberChoice = requestFontChangeDialog.clickedRememberChoice();
-            console.log("[Terminal] Denying font change request.", rememberChoice ? "to all" : "single", vtWidget.session)
-            vtWidget.session.applyPendingFontChange(false, rememberChoice);
-        }
+        onYesToAllClicked: vtWidget.session.applyPendingFontChange(true, true);
+        onYesClicked: vtWidget.session.applyPendingFontChange(true, false);
+        onNoToAllClicked: vtWidget.session.applyPendingFontChange(false, true);
+        onNoClicked: vtWidget.session.applyPendingFontChange(false, false);
         onRejected: {
             console.log("[Terminal] font change request rejected.", vtWidget.session)
             if (vtWidget.session !== null)
@@ -137,16 +131,10 @@ ContourTerminal
     RequestPermission {
         id: requestBufferCaptureDialog
         text: "The host application is requesting to capture the terminal buffer."
-        onYesClicked: {
-            const rememberChoice = requestBufferCaptureDialog.clickedRememberChoice();
-            console.log("[Terminal] Allowing font change request.", rememberChoice ? "to all" : "single")
-            vtWidget.session.executePendingBufferCapture(true, rememberChoice);
-        }
-        onNoClicked: {
-            const rememberChoice = requestBufferCaptureDialog.clickedRememberChoice();
-            console.log("[Terminal] Denying font change request.", rememberChoice ? "to all" : "single")
-            vtWidget.session.executePendingBufferCapture(false, rememberChoice);
-        }
+        onYesToAllClicked: vtWidget.session.executePendingBufferCapture(true, true);
+        onYesClicked: vtWidget.session.executePendingBufferCapture(true, false);
+        onNoToAllClicked: vtWidget.session.executePendingBufferCapture(false, true);
+        onNoClicked: vtWidget.session.executePendingBufferCapture(false, false);
         onRejected: {
             console.log("[Terminal] Buffer capture request rejected.")
             vtWidget.session.executePendingBufferCapture(false, false);
@@ -156,20 +144,11 @@ ContourTerminal
     RequestPermission {
         id: requestShowHostWritableStatusLine
         text: "The host application is requesting to show the host-writable statusline."
-        onYesClicked: {
-            const rememberChoice = requestShowHostWritableStatusLine.clickedRememberChoice();
-            console.log("[Terminal] Allowing font change request.", rememberChoice ? "to all" : "single")
-            vtWidget.session.executeShowHostWritableStatusLine(true, rememberChoice);
-        }
-        onNoClicked: {
-            const rememberChoice = requestShowHostWritableStatusLine.clickedRememberChoice();
-            console.log("[Terminal] Denying font change request.", rememberChoice ? "to all" : "single")
-            vtWidget.session.executeShowHostWritableStatusLine(false, rememberChoice);
-        }
-        onRejected: {
-            console.log("[Terminal] Buffer capture request rejected.")
-            vtWidget.session.executeShowHostWritableStatusLine(false, false);
-        }
+        onYesToAllClicked: vtWidget.session.executeShowHostWritableStatusLine(true, true);
+        onYesClicked: vtWidget.session.executeShowHostWritableStatusLine(true, false);
+        onNoToAllClicked: vtWidget.session.executeShowHostWritableStatusLine(false, true);
+        onNoClicked: vtWidget.session.executeShowHostWritableStatusLine(false, false);
+        onRejected: vtWidget.session.executeShowHostWritableStatusLine(false, false);
     }
 
     // Callback, to be invoked whenever the GUI scrollbar has been changed.

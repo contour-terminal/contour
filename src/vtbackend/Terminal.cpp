@@ -134,16 +134,22 @@ Terminal::Terminal(Events& eventListener,
     _ptyReadBufferSize { crispy::nextPowerOfTwo(_settings.ptyReadBufferSize) },
     _pty { std::move(pty) },
     _lastCursorBlink { now },
-    _primaryScreen {
-        *this, _settings.pageSize, _settings.primaryScreen.allowReflowOnResize, _settings.maxHistoryLineCount
-    },
-    _alternateScreen { *this, _settings.pageSize, false, LineCount(0) },
-    _hostWritableStatusLineScreen {
-        *this, PageSize { LineCount(1), _settings.pageSize.columns }, false, LineCount(0)
-    },
-    _indicatorStatusScreen {
-        *this, PageSize { LineCount(1), _settings.pageSize.columns }, false, LineCount(0)
-    },
+    _primaryScreen { *this,
+                     _settings.pageSize,
+                     _settings.primaryScreen.allowReflowOnResize,
+                     _settings.maxHistoryLineCount,
+                     "primary" },
+    _alternateScreen { *this, _settings.pageSize, false, LineCount(0), "alternate" },
+    _hostWritableStatusLineScreen { *this,
+                                    PageSize { LineCount(1), _settings.pageSize.columns },
+                                    false,
+                                    LineCount(0),
+                                    "host-writable-status-line" },
+    _indicatorStatusScreen { *this,
+                             PageSize { LineCount(1), _settings.pageSize.columns },
+                             false,
+                             LineCount(0),
+                             "indicator-status-line" },
     _currentScreen { &_primaryScreen },
     _viewport { *this, std::bind(&Terminal::onViewportChanged, this) },
     _traceHandler { *this },

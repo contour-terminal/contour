@@ -274,11 +274,13 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 Screen<Cell>::Screen(Terminal& terminal,
                      PageSize pageSize,
                      bool reflowOnResize,
-                     MaxHistoryLineCount maxHistoryLineCount):
+                     MaxHistoryLineCount maxHistoryLineCount,
+                     std::string_view name):
     _terminal { &terminal },
     _settings { &terminal.settings() },
     _state { &terminal.state() },
-    _grid { pageSize, reflowOnResize, maxHistoryLineCount }
+    _grid { pageSize, reflowOnResize, maxHistoryLineCount },
+    _name { name }
 {
     updateCursorIterator();
 }
@@ -469,7 +471,8 @@ void Screen<Cell>::writeText(string_view text, size_t cellCount)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (vtTraceSequenceLog)
-        vtTraceSequenceLog()("text: ({} bytes, {} cells): \"{}\"", text.size(), cellCount, escape(text));
+        vtTraceSequenceLog()(
+            "[{}] text: ({} bytes, {} cells): \"{}\"", _name, text.size(), cellCount, escape(text));
 
     // Do not log individual characters, as we already logged the whole string above
     _logCharTrace = false;

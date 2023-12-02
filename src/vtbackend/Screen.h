@@ -100,10 +100,12 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     ///                            need to match the terminal's main display page size.
     /// @param reflowOnResize      whether or not to perform virtual line text reflow on resuze.
     /// @param maxHistoryLineCount maximum number of lines that are can be scrolled back to via Viewport.
+    /// @param name                name of this screen, used for logging purposes.
     Screen(Terminal& terminal,
            PageSize pageSize,
            bool reflowOnResize,
-           MaxHistoryLineCount maxHistoryLineCount);
+           MaxHistoryLineCount maxHistoryLineCount,
+           std::string_view name);
 
     Screen(Screen const&) = delete;
     Screen& operator=(Screen const&) = delete;
@@ -645,6 +647,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     std::atomic<bool> _logCharTrace = true;
     std::string _pendingCharTraceLog;
 #endif
+
+    std::string_view _name;
 };
 
 template <typename Cell>

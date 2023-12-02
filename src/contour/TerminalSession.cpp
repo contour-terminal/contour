@@ -447,6 +447,15 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
     flushInput();
 }
 
+void TerminalSession::requestShowHostWritableStatusLine()
+{
+    if (_display)
+        _display->post([this]() {
+            requestPermission(_profile.permissions.displayHostWritableStatusLine,
+                              GuardedRole::ShowHostWritableStatusLine);
+        });
+}
+
 void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remember)
 {
     if (remember)
