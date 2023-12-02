@@ -299,7 +299,7 @@ void TerminalSession::terminate()
 // {{{ Events implementations
 void TerminalSession::bell()
 {
-    emit onBell();
+    emit onBell(_profile.bell.volume);
 
     if (_profile.bell.alert)
         emit onAlert();

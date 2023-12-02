@@ -185,9 +185,17 @@ ContourTerminal
         Window.window.close(); // https://stackoverflow.com/a/53829662/386670
     }
 
-    function playBell() {
-        if(bellSoundEffect.playbackState === MediaPlayer.PlayingState)
-            bellSoundEffect.stop()
+    function playBell(volume) {
+        if (bellSoundEffect.playbackState === MediaPlayer.PlayingState)
+            bellSoundEffect.stop();
+
+        if (bellSoundEffect.audioOutput)
+            // Qt 6 solution to set the volume
+            bellSoundEffect.audioOutput.volume = volume;
+        else
+            // Qt 5 fallback
+            bellSoundEffect.volume = volume;
+
         bellSoundEffect.play()
     }
 

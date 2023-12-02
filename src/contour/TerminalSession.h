@@ -357,7 +357,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void isScrollbarRightChanged();
     void isScrollbarVisibleChanged();
     void opacityChanged();
-    void onBell();
+    void onBell(float volume);
     void onAlert();
     void requestPermissionForFontChange();
     void requestPermissionForBufferCapture();
