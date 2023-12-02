@@ -224,6 +224,10 @@ profiles:
             #   sound: "/home/user/Music/bell.wav"
             sound: "default"
 
+            # Bell volume, a normalized value between 0.0 (silent) and 1.0 (loudest).
+            # Default: 1.0
+            volume: 1.0
+
             # If this boolean is true, a window alert will be raised with each bell
             alert: true
 

@@ -143,7 +143,7 @@
           <li>Adds support vor horizontal mouse scrolling event reporting sequences.</li>
           <li>Adds percentage value to Indicator Statusline to indicate scroll offset in scrollback buffer.</li>
           <li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
-          <li>Adds config option `profiles.*.bell` to adjust BEL behavior and fixes (#1162) and (#1163).</li>
+          <li>Adds config option `profiles.*.bell` to adjust BEL behavior (#1348) and fixes (#1162) and (#1163).</li>
           <li>Adds config option `profiles.*.frozen_dec_modes` to permanently enable/disable certain DEC modes.</li>
           <li>Adds config option `profiles.*.option_as_meta` to allow remapping Option key to Alt on MacOS.</li>
           <li>Adds config option `profiles.*.ssh` to allow connecting to an SSH server directly from Contour.</li>

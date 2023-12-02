@@ -215,6 +215,7 @@ struct TerminalProfile
     {
         std::string sound = "default";
         bool alert = true;
+        float volume = 1.0f;
     } bell;
 
     // Set of DEC modes that are frozen and cannot be changed by the application.

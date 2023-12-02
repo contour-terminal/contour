@@ -1898,6 +1898,10 @@ namespace
         if (tryLoadChildRelative(usedKeys, profile, basePath, "bell.alert", boolValue, logger))
             terminalProfile.bell.alert = boolValue;
 
+        floatValue = 0.0;
+        if (tryLoadChildRelative(usedKeys, profile, basePath, "bell.volume", floatValue, logger))
+            terminalProfile.bell.volume = std::clamp(floatValue, 0.0f, 1.0f);
+
         if (auto value = profile["slow_scrolling_time"])
         {
             usedKeys.emplace(basePath + ".slow_scrolling_time");
