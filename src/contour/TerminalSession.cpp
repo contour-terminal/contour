@@ -708,6 +708,15 @@ void TerminalSession::requestWindowResize(Width width, Height height)
     _display->post([this, width, height]() { _display->resizeWindow(width, height); });
 }
 
+QString TerminalSession::title() const
+{
+#if !defined(NDEBUG)
+    return QString::fromStdString(terminal().windowTitle() + " - Contour (DEBUG)");
+#else
+    return QString::fromStdString(terminal().windowTitle() + " - Contour");
+#endif
+}
+
 void TerminalSession::setWindowTitle(string_view title)
 {
     emit titleChanged(QString::fromUtf8(title.data(), static_cast<int>(title.size())));

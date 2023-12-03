@@ -149,7 +149,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return true;
     }
 
-    QString title() const { return QString::fromStdString(terminal().windowTitle()); }
+    QString title() const;
     void setTitle(QString const& value) { terminal().setWindowTitle(value.toStdString()); }
 
     int pageLineCount() const noexcept { return unbox(_terminal.pageSize().lines); }
