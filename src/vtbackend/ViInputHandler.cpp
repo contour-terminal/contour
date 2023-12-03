@@ -147,6 +147,8 @@ void ViInputHandler::registerAllCommands()
 
         registerCommand(modeSelect, "J", [this]() { _executor->scrollViewport(ScrollOffset(-1)); _executor->moveCursor(ViMotion::LineDown, 1);});
         registerCommand(modeSelect, "K", [this]() { _executor->scrollViewport(ScrollOffset(+1)); _executor->moveCursor(ViMotion::LineUp, 1);});
+        registerCommand(modeSelect, "C-E", [this]() { _executor->scrollViewport(ScrollOffset(-1)); _executor->moveCursor(ViMotion::LineDown, 1);});
+        registerCommand(modeSelect, "C-Y", [this]() { _executor->scrollViewport(ScrollOffset(+1)); _executor->moveCursor(ViMotion::LineUp, 1);});
 
         registerCommand(modeSelect, "t.", [this]() { _executor->moveCursor(ViMotion::TillBeforeCharRight, count(), _lastChar); });
         registerCommand(modeSelect, "T.", [this]() { _executor->moveCursor(ViMotion::TillAfterCharLeft, count(), _lastChar); });
