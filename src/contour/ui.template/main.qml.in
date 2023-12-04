@@ -22,7 +22,7 @@ ApplicationWindow
     // That is why the Component.onCompleted workaround is used until we require Qt6. Sad.
     //
     // title: "%1 - Contour".arg(vtui.session.title)
-    title: "%1 - Contour".arg(vtui.title)
+    title: vtui.title
 
     width: vtui.implicitWidth
     height: vtui.implicitHeight
