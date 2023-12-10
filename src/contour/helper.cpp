@@ -541,12 +541,19 @@ void applyResize(vtbackend::ImageSize newPixelSize,
         emit session.columnsCountChanged(newPageSize.columns.as<int>());
 
     auto const viewSize = cellSize * newPageSize;
-    displayLog()("Applying resize: {} (new pixel size) {} (view size)", newPixelSize, viewSize);
+    displayLog()("Applying resize {}/{} pixels and {} -> {} cells.",
+                 viewSize,
+                 newPixelSize,
+                 terminal.pageSize(),
+                 newPageSize);
 
     auto const l = scoped_lock { terminal };
 
     if (newPageSize == terminal.pageSize())
+    {
+        displayLog()("No resize necessary. New size is same as old size of {}.", newPageSize);
         return;
+    }
 
     terminal.resizeScreen(newPageSize, viewSize);
     terminal.clearSelection();

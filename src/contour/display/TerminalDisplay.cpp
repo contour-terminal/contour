@@ -910,6 +910,10 @@ double TerminalDisplay::contentScale() const
                 if (forcedDPI >= 96.0)
                 {
                     auto const dpr = forcedDPI / 96.0;
+                    displayLog()("Forcing DPI to {} (DPR {}) as read from config file {}.",
+                                 forcedDPI,
+                                 dpr,
+                                 kcmFontsFile.value().string());
                     return dpr;
                 }
             }
