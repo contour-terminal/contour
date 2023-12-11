@@ -96,12 +96,14 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 {
   public:
     /// @param terminal            reference to the terminal this display belongs to.
+    /// @param margin              margin of this display.
     /// @param pageSize            page size of this display. This is passed because it does not necessarily
     ///                            need to match the terminal's main display page size.
     /// @param reflowOnResize      whether or not to perform virtual line text reflow on resuze.
     /// @param maxHistoryLineCount maximum number of lines that are can be scrolled back to via Viewport.
     /// @param name                name of this screen, used for logging purposes.
     Screen(Terminal& terminal,
+           gsl::not_null<Margin*> margin,
            PageSize pageSize,
            bool reflowOnResize,
            MaxHistoryLineCount maxHistoryLineCount,
@@ -292,8 +294,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] PageSize pageSize() const noexcept { return _grid.pageSize(); }
     [[nodiscard]] ImageSize pixelSize() const noexcept { return _state->cellPixelSize * _settings->pageSize; }
 
-    [[nodiscard]] constexpr Margin margin() const noexcept { return _state->margin; }
-    [[nodiscard]] constexpr Margin& margin() noexcept { return _state->margin; }
+    [[nodiscard]] constexpr Margin margin() const noexcept { return *_margin; }
+    [[nodiscard]] constexpr Margin& margin() noexcept { return *_margin; }
 
     [[nodiscard]] bool isFullHorizontalMargins() const noexcept
     {
@@ -634,6 +636,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     gsl::not_null<Terminal*> _terminal;
     gsl::not_null<Settings*> _settings;
     gsl::not_null<TerminalState*> _state;
+    gsl::not_null<Margin*> _margin;
     Grid<Cell> _grid;
 
     CellLocation _lastCursorPosition {};

@@ -135,17 +135,22 @@ Terminal::Terminal(Events& eventListener,
     _pty { std::move(pty) },
     _lastCursorBlink { now },
     _primaryScreen { *this,
+                     &_state.mainScreenMargin,
                      _settings.pageSize,
                      _settings.primaryScreen.allowReflowOnResize,
                      _settings.maxHistoryLineCount,
                      "primary" },
-    _alternateScreen { *this, _settings.pageSize, false, LineCount(0), "alternate" },
+    _alternateScreen {
+        *this, &_state.mainScreenMargin, _settings.pageSize, false, LineCount(0), "alternate"
+    },
     _hostWritableStatusLineScreen { *this,
+                                    &_state.hostWritableScreenMargin,
                                     PageSize { LineCount(1), _settings.pageSize.columns },
                                     false,
                                     LineCount(0),
                                     "host-writable-status-line" },
     _indicatorStatusScreen { *this,
+                             &_state.indicatorScreenMargin,
                              PageSize { LineCount(1), _settings.pageSize.columns },
                              false,
                              LineCount(0),
@@ -1181,8 +1186,10 @@ void Terminal::verifyState()
 
     _currentScreen->verifyState();
 
-    Require(0 <= *_state.margin.horizontal.from && *_state.margin.horizontal.to < *pageSize().columns);
-    Require(0 <= *_state.margin.vertical.from && *_state.margin.vertical.to < *pageSize().lines);
+    Require(0 <= *_state.mainScreenMargin.horizontal.from
+            && *_state.mainScreenMargin.horizontal.to < *pageSize().columns);
+    Require(0 <= *_state.mainScreenMargin.vertical.from
+            && *_state.mainScreenMargin.vertical.to < *pageSize().lines);
 #endif
 }
 
@@ -1529,7 +1536,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!enable)
             {
-                _state.margin.horizontal =
+                _state.mainScreenMargin.horizontal =
                     Margin::Horizontal { ColumnOffset(0),
                                          boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1) };
                 _supportedVTSequences.enableSequence(SCOSC);
@@ -1684,8 +1691,8 @@ void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset>
 
     if (sanitizedTop < sanitizedBottom)
     {
-        _state.margin.vertical.from = sanitizedTop;
-        _state.margin.vertical.to = sanitizedBottom;
+        _state.mainScreenMargin.vertical.from = sanitizedTop;
+        _state.mainScreenMargin.vertical.to = sanitizedBottom;
     }
 }
 
@@ -1697,8 +1704,8 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOf
     auto const sanitizedLeft = std::max(left.value_or(defaultLeft), defaultLeft);
     if (sanitizedLeft < sanitizedRight)
     {
-        _state.margin.horizontal.from = sanitizedLeft;
-        _state.margin.horizontal.to = sanitizedRight;
+        _state.mainScreenMargin.horizontal.from = sanitizedLeft;
+        _state.mainScreenMargin.horizontal.to = sanitizedRight;
     }
 }
 
@@ -1893,6 +1900,13 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     (void) _hostWritableStatusLineScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, CellLocation {}, false);
     (void) _indicatorStatusScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, CellLocation {}, false);
     // clang-format on
+
+    // adjust margins for statuslines as well
+    auto const statuslineMargin =
+        Margin { Margin::Vertical { {}, statusLineHeight().as<LineOffset>() - 1 },
+                 Margin::Horizontal { {}, _settings.pageSize.columns.as<ColumnOffset>() - 1 } };
+    _state.indicatorScreenMargin = statuslineMargin;
+    _state.hostWritableScreenMargin = statuslineMargin;
 
     // truncating tabs
     while (!_state.tabs.empty() && _state.tabs.back() >= unbox<ColumnOffset>(_settings.pageSize.columns))

@@ -202,7 +202,9 @@ struct TerminalState
     // Screen margin - shared across all screens that are covering the main area,
     // i.e. the primary screen and alternate screen.
     // This excludes all status lines, title lines, etc.
-    Margin margin;
+    Margin mainScreenMargin;
+    Margin hostWritableScreenMargin;
+    Margin indicatorScreenMargin;
 
     unsigned maxImageColorRegisters = 256;
     ImageSize effectiveImageCanvasSize;
