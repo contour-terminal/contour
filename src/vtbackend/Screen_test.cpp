@@ -911,12 +911,13 @@ TEST_CASE("DECFI", "[screen]")
     REQUIRE(mock.terminal.isModeEnabled(DECMode::LeftRightMargin));
 
     mock.writeToScreen(DECSLRM(2, 4)); // Set left/right margin
-    REQUIRE(mock.terminal.state().margin.horizontal
+    REQUIRE(mock.terminal.state().mainScreenMargin.horizontal
             == Margin::Horizontal { ColumnOffset(1), ColumnOffset(3) });
     REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     mock.writeToScreen(DECSTBM(2, 4)); // Set top/bottom margin
-    REQUIRE(mock.terminal.state().margin.vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+    REQUIRE(mock.terminal.state().mainScreenMargin.vertical
+            == Margin::Vertical { LineOffset(1), LineOffset(3) });
     REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // from 0,0 to 0,1 (from outside margin to left border)

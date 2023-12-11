@@ -7,7 +7,6 @@
 #include <vtbackend/primitives.h>
 
 #include <string_view>
-#include <utility>
 
 using std::get;
 using std::holds_alternative;
@@ -151,8 +150,10 @@ size_t Sequencer::maxBulkTextSequenceWidth() const noexcept
     if (!_terminal.primaryScreen().currentLine().isTrivialBuffer())
         return 0;
 
-    assert(_terminal.state().margin.horizontal.to >= _terminal.currentScreen().cursor().position.column);
-    return unbox<size_t>(_terminal.state().margin.horizontal.to
+    assert(_terminal.state().mainScreenMargin.horizontal.to
+           >= _terminal.currentScreen().cursor().position.column);
+
+    return unbox<size_t>(_terminal.state().mainScreenMargin.horizontal.to
                          - _terminal.currentScreen().cursor().position.column);
 }
 

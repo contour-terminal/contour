@@ -272,6 +272,7 @@ namespace // {{{ helper
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 Screen<Cell>::Screen(Terminal& terminal,
+                     gsl::not_null<Margin*> margin,
                      PageSize pageSize,
                      bool reflowOnResize,
                      MaxHistoryLineCount maxHistoryLineCount,
@@ -279,6 +280,7 @@ Screen<Cell>::Screen(Terminal& terminal,
     _terminal { &terminal },
     _settings { &terminal.settings() },
     _state { &terminal.state() },
+    _margin { margin },
     _grid { pageSize, reflowOnResize, maxHistoryLineCount },
     _name { name }
 {
@@ -350,7 +352,7 @@ void Screen<Cell>::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
         Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
                  Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
 
-    _terminal->state().margin = margin;
+    *_margin = margin;
 
     if (_cursor.position.column < boxed_cast<ColumnOffset>(mainDisplayPageSize.columns))
         _cursor.wrapPending = false;
