@@ -110,11 +110,11 @@ fetch_and_unpack_termbenchpro()
 
 fetch_and_unpack_boxed()
 {
-    local boxed_cpp_git_sha="783cb74e95cbe06a52b468a73c14467e8f082cd1"
+    local boxed_cpp_version="1.1.0"
     fetch_and_unpack \
-        boxed-cpp-$boxed_cpp_git_sha \
-        boxed-cpp-$boxed_cpp_git_sha.tar.gz \
-        https://github.com/contour-terminal/boxed-cpp/archive/$boxed_cpp_git_sha.tar.gz \
+        boxed-cpp-$boxed_cpp_version \
+        boxed-cpp-$boxed_cpp_version.tar.gz \
+        https://github.com/contour-terminal/boxed-cpp/archive/refs/tags/v${boxed_cpp_version}.tar.gz \
         boxed_cpp
 }
 
