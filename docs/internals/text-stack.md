@@ -206,7 +206,7 @@ What would we be without dreams. ;-)
 References
 ----------
 
-- [Blink's text stack](https://chromium.googlesource.com/chromium/src/+/master/third\_party/blink/renderer/platform/fonts/README.md)
+- [Blink's text stack](https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/renderer/platform/fonts/README.md)
 - [UTS 11](https://unicode.org/reports/tr11/) - character width
 - [UTS 24](https://unicode.org/reports/tr24/) - script property
 - [UTS 29](https://unicode.org/reports/tr29/) - text segmentation (grapheme cluster, word boundary)

@@ -175,11 +175,11 @@ cmake --build build/ --target install
 # References
 
 * [VT510](https://vt100.net/docs/vt510-rm/): VT510 Manual, see Chapter 5.
-* [ECMA-35](http://www.ecma-international.org/publications/standards/Ecma-035.htm):
+* [ECMA-35](http://www.ecma-international.org/publications-and-standards/standards/ecma-35):
     Character Code Structure and Extension Techniques
-* [ECMA-43](http://www.ecma-international.org/publications/standards/Ecma-043.htm):
+* [ECMA-43](http://www.ecma-international.org/publications-and-standards/standards/ecma-43):
     8-bit Coded Character Set Structure and Rules
-* [ECMA-48](http://www.ecma-international.org/publications/standards/Ecma-048.htm):
+* [ECMA-48](http://www.ecma-international.org/publications-and-standards/standards/ecma-48):
     Control Functions for Coded Character Sets
 * [ISO/IEC 8613-6](https://www.iso.org/standard/22943.html):
     Character content architectures
