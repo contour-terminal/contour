@@ -291,7 +291,11 @@ jobs:
         timeout-minutes: 15
         run: |
           set -ex
-          brew update
+          #brew update
+
+          # Trying to work around some Github CI issues causing `brew install` to fail
+          brew uninstall aws-sam-cli azure-cli
+
           QTVER=${{ steps.set_vars.outputs.QTVER }}
           QTVER=${QTVER} ./scripts/install-deps.sh
       - name: "Create build directory"
