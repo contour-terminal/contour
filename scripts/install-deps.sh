@@ -465,7 +465,7 @@ install_deps_fedora()
     fetch_and_unpack_gsl
 
     if test "$os_version" -ge 39; then
-        packages="$packages fmt"
+        packages="$packages fmt-devel"
     else
         fetch_and_unpack_fmtlib
     fi
