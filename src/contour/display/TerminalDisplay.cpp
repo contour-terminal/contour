@@ -895,31 +895,44 @@ void TerminalDisplay::onScrollBarValueChanged(int value)
     scheduleRedraw();
 }
 
-double TerminalDisplay::contentScale() const
+std::optional<double> TerminalDisplay::queryContentScaleOverride() const
 {
 #if !defined(__APPLE__) && !defined(_WIN32)
-    if (auto const kcmFontsFile = kcmFontsFilePath())
+    auto const kcmFontsFile = kcmFontsFilePath();
+    if (!kcmFontsFile)
+        return std::nullopt;
+
+    auto const contents = crispy::readFileAsString(*kcmFontsFile);
+    for (auto const line: crispy::split(contents, '\n'))
     {
-        auto const contents = crispy::readFileAsString(kcmFontsFile.value());
-        for (auto const line: crispy::split(contents, '\n'))
+        auto const fields = crispy::split(line, '=');
+        if (fields.size() == 2 && fields[0] == "forceFontDPI"sv)
         {
-            auto const fields = crispy::split(line, '=');
-            if (fields.size() == 2 && fields[0] == "forceFontDPI"sv)
+            auto const forcedDPI = static_cast<double>(crispy::to_integer(fields[1]).value_or(0.0));
+            if (forcedDPI >= 96.0)
             {
-                auto const forcedDPI = static_cast<double>(crispy::to_integer(fields[1]).value_or(0.0));
-                if (forcedDPI >= 96.0)
+                auto const dpr = forcedDPI / 96.0;
+                if (_lastReportedContentScale.value_or(0.0) != dpr)
                 {
-                    auto const dpr = forcedDPI / 96.0;
+                    _lastReportedContentScale = dpr;
                     displayLog()("Forcing DPI to {} (DPR {}) as read from config file {}.",
                                  forcedDPI,
                                  dpr,
                                  kcmFontsFile.value().string());
-                    return dpr;
                 }
+                return dpr;
             }
         }
     }
 #endif
+    return std::nullopt;
+}
+
+double TerminalDisplay::contentScale() const
+{
+    if (auto const contentScaleOverride = queryContentScaleOverride())
+        return *contentScaleOverride;
+
     if (!window())
         // This can only happen during TerminalDisplay instanciation
         return 1.0;
