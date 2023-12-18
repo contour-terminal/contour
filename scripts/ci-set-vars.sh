@@ -23,18 +23,15 @@ if [[ -z "${GITHUB_OUTPUT}" ]]; then
     GITHUB_OUTPUT="/dev/stdout"
 fi
 
-case "${GITHUB_REF}" in
-    refs/heads/master|refs/heads/release)
-        IS_PRE='false';
-        SUFFIX="";
-        VERSION_STRING="${VERSION}"
-        ;;
-    *)
-        IS_PRE='true';
-        SUFFIX="prerelease";
-        VERSION_STRING="${VERSION}-${SUFFIX}"
-        ;;
-esac
+if [[ "${GITHUB_HEAD_REF}" == "release" ]]; then
+    IS_PRE='false';
+    SUFFIX="";
+    VERSION_STRING="${VERSION}"
+else
+    IS_PRE='true';
+    SUFFIX="prerelease";
+    VERSION_STRING="${VERSION}-${SUFFIX}"
+fi
 
 # TODO: pass "/path/to/version.txt" target filename via CLI param "${1}", and only write that if given.
 echo "${VERSION_STRING}" >version.txt
