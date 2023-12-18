@@ -151,6 +151,7 @@ class TerminalDisplay: public QQuickItem
     void discardImage(vtbackend::Image const&);
     // }}}
 
+    [[nodiscard]] std::optional<double> queryContentScaleOverride() const;
     [[nodiscard]] double contentScale() const;
 
     Q_INVOKABLE void logDisplayInfo();
@@ -247,6 +248,9 @@ class TerminalDisplay: public QQuickItem
     TerminalSession* _session = nullptr;
     std::chrono::steady_clock::time_point _startTime;
     text::DPI _lastFontDPI;
+#if !defined(__APPLE__) && !defined(_WIN32)
+    mutable std::optional<double> _lastReportedContentScale;
+#endif
     std::unique_ptr<vtrasterizer::Renderer> _renderer;
     bool _renderingPressure = false;
     display::OpenGLRenderer* _renderTarget = nullptr;

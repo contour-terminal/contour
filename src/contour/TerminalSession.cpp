@@ -690,13 +690,14 @@ void TerminalSession::requestWindowResize(LineCount lines, ColumnCount columns)
     if (!_display)
         return;
 
-    sessionLog()("Application request to resize window: {}x{}", columns, lines);
+    sessionLog()("Application request to resize window: {}x{} cells", columns, lines);
     _display->post([this, lines, columns]() { _display->resizeWindow(lines, columns); });
 }
 
 void TerminalSession::requestWindowResize(QJSValue w, QJSValue h)
 {
-    requestWindowResize(Width(w.toInt()), Height(h.toInt()));
+    requestWindowResize(Width::cast_from(w.toNumber() * contentScale()),
+                        Height::cast_from(h.toNumber() * contentScale()));
 }
 
 void TerminalSession::requestWindowResize(Width width, Height height)
@@ -704,7 +705,7 @@ void TerminalSession::requestWindowResize(Width width, Height height)
     if (!_display)
         return;
 
-    sessionLog()("Application request to resize window: {}x{} px", width, height);
+    sessionLog()("Application request to resize window: {}x{} pixels", width, height);
     _display->post([this, width, height]() { _display->resizeWindow(width, height); });
 }
 

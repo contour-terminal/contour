@@ -343,6 +343,8 @@ void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
     if (_masterFd < 0)
         return;
 
+    ptyLog()("Sending terminal size: {}x{} / {}", cells.columns, cells.lines, pixels.value_or(ImageSize {}));
+
     auto w = winsize {};
     w.ws_col = unbox<unsigned short>(cells.columns);
     w.ws_row = unbox<unsigned short>(cells.lines);
