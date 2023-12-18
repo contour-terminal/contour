@@ -696,7 +696,8 @@ void TerminalSession::requestWindowResize(LineCount lines, ColumnCount columns)
 
 void TerminalSession::requestWindowResize(QJSValue w, QJSValue h)
 {
-    requestWindowResize(Width(w.toInt()), Height(h.toInt()));
+    requestWindowResize(Width::cast_from(w.toNumber() * contentScale()),
+                        Height::cast_from(h.toNumber() * contentScale()));
 }
 
 void TerminalSession::requestWindowResize(Width width, Height height)
