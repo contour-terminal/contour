@@ -1133,25 +1133,26 @@ void TerminalDisplay::resizeWindow(vtbackend::Width newWidth, vtbackend::Height 
         return;
     }
 
-    auto requestedPageSize = terminal().pageSize();
-    auto const pixelSize =
-        vtbackend::ImageSize { vtbackend::Width(*newWidth ? *newWidth : (unsigned) width()),
-                               vtbackend::Height(*newHeight ? *newHeight : (unsigned) height()) };
-    requestedPageSize.columns =
-        vtbackend::ColumnCount(unbox<int>(pixelSize.width) / unbox<int>(gridMetrics().cellSize.width));
-    requestedPageSize.lines =
-        vtbackend::LineCount(unbox<int>(pixelSize.height) / unbox<int>(gridMetrics().cellSize.height));
+    auto const pixelsAvailable =
+        vtbackend::ImageSize { vtbackend::Width::cast_from(*newWidth ? *newWidth : (unsigned) width()),
+                               vtbackend::Height::cast_from(*newHeight ? *newHeight : (unsigned) height()) };
+
+    auto const newPageSize =
+        PageSize { .lines = vtbackend::LineCount(unbox<int>(pixelsAvailable.height)
+                                                 / unbox<int>(gridMetrics().cellSize.height)),
+                   .columns = vtbackend::ColumnCount(unbox<int>(pixelsAvailable.width)
+                                                     / unbox<int>(gridMetrics().cellSize.width)) };
+
+    auto const newPixelsUsed = vtbackend::ImageSize {
+        vtbackend::Width::cast_from(unbox(newPageSize.columns) * unbox<int>(gridMetrics().cellSize.width)),
+        vtbackend::Height::cast_from(unbox(newPageSize.lines) * unbox<int>(gridMetrics().cellSize.height))
+    };
 
     // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
-    const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
-    _renderer->setPageSize(requestedPageSize);
-    auto const pixels =
-        vtbackend::ImageSize { vtbackend::Width::cast_from(unbox(requestedPageSize.columns)
-                                                           * unbox<int>(gridMetrics().cellSize.width)),
-                               vtbackend::Height::cast_from(unbox(requestedPageSize.lines)
-                                                            * unbox<int>(gridMetrics().cellSize.height)) };
+    const_cast<config::TerminalProfile&>(profile()).terminalSize = newPageSize;
+    _renderer->setPageSize(newPageSize);
     auto const l = scoped_lock { terminal() };
-    terminal().resizeScreen(requestedPageSize, pixels);
+    terminal().resizeScreen(newPageSize, newPixelsUsed);
 }
 
 void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend::ColumnCount newColumnCount)
