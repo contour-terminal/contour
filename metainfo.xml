@@ -108,6 +108,7 @@
       <description>
         <ul>
           <li>Changes VT sequence `DECSCUSR` (`CSI ? 0 SP q` and `CSI ? SP q`) to reset to user-configured cursor style (#1377).</li>
+          <li>Remove `contour-latest` terminfo file. Please use `contour` terminfo instead.</li>
         </ul>
       </description>
     </release>
