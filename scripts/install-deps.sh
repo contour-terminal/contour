@@ -503,7 +503,7 @@ install_deps_darwin()
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     # NB: Also available in brew: mimalloc
-    brew install $SYSDEP_ASSUME_YES \
+    HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install $SYSDEP_ASSUME_YES \
         catch2 \
         cpp-gsl \
         fmt \
