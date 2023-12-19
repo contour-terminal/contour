@@ -7,8 +7,8 @@ if ("${Env:GITHUB_RUN_NUMBER}" -ne "") {
     $VERSION = "${VERSION}.${Env:GITHUB_RUN_NUMBER}"
 }
 
-switch -Regex ($Env:GITHUB_REF) {
-    "^refs/heads/(master|release)$" {
+switch -Regex ($Env:GITHUB_HEAD_REF) {
+    "^release$" {
         $IS_PRE = 'false';
         $SUFFIX = '';
         $DELIM = '';
