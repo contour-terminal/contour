@@ -276,10 +276,12 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) co
 
     if (rv < 0)
     {
+        auto const waitPidErrorCode = errno;
         auto const _ = lock_guard { exitStatusMutex };
         if (exitStatus.has_value())
             return exitStatus;
-        throw runtime_error { "waitpid: "s + getLastErrorAsString() };
+        errorLog()("waitpid() failed: {}", strerror(waitPidErrorCode));
+        return std::nullopt;
     }
     else if (rv == 0 && !waitForExit)
         return nullopt;
