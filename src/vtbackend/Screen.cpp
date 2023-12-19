@@ -3231,7 +3231,7 @@ namespace impl
                         terminal.primaryScreen().requestCharacterSize(RequestPixelSize::WindowArea);
                         return ApplyResult::Ok;
                     case 22: {
-                        switch (seq.param(1))
+                        switch (seq.param_or(1, 0))
                         {
                             case 0:
                                 // CSI 22 ; 0 t | save icon & window title
@@ -3248,7 +3248,7 @@ namespace impl
                         }
                     }
                     case 23: {
-                        switch (seq.param(1))
+                        switch (seq.param_or(1, 0))
                         {
                             case 0:
                                 terminal.restoreWindowTitle();
