@@ -862,53 +862,6 @@ jobs:
         with:
           name: contour-ubuntu2204-tests
   # }}}
-  # {{{ Build fontconfig
-  build_fontconfig:
-    name: "Build patched fontconfig"
-    strategy:
-      fail-fast: false
-      matrix:
-        os_version: ['20.04', '22.04']
-    runs-on: ubuntu-${{ matrix.os_version }}
-    steps:
-    - uses: actions/checkout@v3
-    - name: "get source"
-      run: |
-        set -ex
-        wget https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.13.1.tar.gz
-        tar xzpf fontconfig-2.13.1.tar.gz
-        # sudo tee -a /etc/apt/sources.list < <(echo "deb-src http://azure.archive.ubuntu.com/ubuntu/ focal main restricted")
-        # sudo apt update
-        # apt source libfontconfig1
-        sudo apt install -y gperf
-        ls -hl
-    - name: "patch it"
-      run: |
-        set -ex
-        cd fontconfig-2.13.1
-        patch --verbose -p1 < ../.github/fontconfig-memleak-fix.patch
-    - name: "configure"
-      run: |
-        set -ex
-        export CFLAGS="-O0 -ggdb3"
-        cd fontconfig-2.13.1
-        mkdir build
-        cd build
-        ../configure --prefix="/home/runner/opt/fontconfig"
-    - name: "build & install"
-      run: |
-        set -ex
-        cd fontconfig-2.13.1/build
-        make -j3
-        make install
-    - name: "Uploading artifact"
-      uses: actions/upload-artifact@v3
-      with:
-        name: "patched-fontconfig-${{ matrix.os_version }}"
-        path: "/home/runner/opt/fontconfig"
-        if-no-files-found: error
-        retention-days: 1
-  # }}}
   # {{{ Build notcurses
   build_notcurses:
     name: "Build notcurses"
@@ -972,14 +925,13 @@ jobs:
   # {{{ GUI: test: contour quick shell exit
   test_quick_exit:
     name: "GUI: Quick Shell Exit"
-    needs: [package_for_Ubuntu, build_fontconfig]
+    needs: [package_for_Ubuntu]
     strategy:
       fail-fast: false
       matrix:
         os_version: ['20.04', '22.04']
     runs-on: ubuntu-${{ matrix.os_version }}
     env:
-      LD_LIBRARY_PATH: /home/runner/opt/fontconfig/lib
       # I'm giving up on eliminating all leaks for now.
       # There are still some deep inside Qt I can't explain myself if it's because of me.
       ASAN_OPTIONS: detect_leaks=0
@@ -1000,10 +952,6 @@ jobs:
     - uses: actions/download-artifact@v3
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-    - uses: actions/download-artifact@v3
-      with:
-        name: "patched-fontconfig-${{ matrix.os_version }}"
-        path: "/home/runner/opt/fontconfig"
     - name: "install dependencies"
       run: ./scripts/ci/notcurses-install-deps.sh
     - name: "install contour"
@@ -1025,7 +973,6 @@ jobs:
       timeout-minutes: 5
       id: Xvfb-contour
       run: |
-        # export LD_LIBRARY_PATH="/home/runner/opt/fontconfig/lib"
         ./scripts/ci/Xvfb-contour-run.sh \
               "quick-exit-dumps/${{ matrix.name }}" \
               true
@@ -1044,7 +991,7 @@ jobs:
   test_notcurses:
     name: "GUI: notcurses-demo ${{ matrix.name }}"
     runs-on: ubuntu-22.04
-    needs: [package_for_Ubuntu, build_notcurses, build_fontconfig]
+    needs: [package_for_Ubuntu, build_notcurses]
     strategy:
       fail-fast: false
       matrix:
@@ -1102,7 +1049,7 @@ jobs:
             id: 'z'
           # }}}
     env:
-      LD_LIBRARY_PATH: /home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib
+      LD_LIBRARY_PATH: /home/runner/opt/notcurses/lib
       # I'm giving up on eliminating all leaks for now.
       # There are still some deep inside Qt I can't explain myself if it's because of me.
       ASAN_OPTIONS: detect_leaks=0
@@ -1127,10 +1074,6 @@ jobs:
       with:
         name: "notcurses-install-22.04"
         path: ~/opt/notcurses
-    - uses: actions/download-artifact@v3
-      with:
-        name: "patched-fontconfig-22.04"
-        path: "/home/runner/opt/fontconfig"
     - name: "fix executable bits"
       run: |
         chmod 0755 ~/opt/notcurses/bin/*
@@ -1161,7 +1104,7 @@ jobs:
       timeout-minutes: 5
       id: Xvfb-contour-notcurses
       run: |
-        # export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib"
+        # export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib"
         ./scripts/ci/Xvfb-contour-run.sh \
               "notcurses-demo-dumps/${{ matrix.name }}" \
               ~/opt/notcurses/bin/notcurses-demo \
