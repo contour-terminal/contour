@@ -76,6 +76,16 @@ jobs:
         with: # comma seperated lists
           # use relative paths, if no dirs specified root dir is scanned
           ignored_dirs: "_deps"
+          ignored_files: "./scripts/install-deps.sh,
+                          ./scripts/install-deps.ps1"
+          ignored_links: "https://www.contributor-covenant.org/faq,
+                          https://www.contributor-covenant.org,
+                          https://flatpak.org/getting.html,
+                          https://codeberg.org/dnkl/foot,
+                          https://codecov.io/gh/contour-terminal/contour,
+                          https://msdn.microsoft.com/zh-cn/library/f4k12ae8,
+                          https://msdn.microsoft.com/en-us/library/fzt08www,
+                          "
 
   editorconfig:
     name: "Check editorconfig"

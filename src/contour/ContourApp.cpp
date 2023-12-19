@@ -124,7 +124,7 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
 #endif
         Project { "Qt", "GPL", "https://www.qt.io/" },
         Project { "FreeType", "GPL, FreeType License", "https://freetype.org/" },
-        Project { "HarfBuzz", "Old MIT", "https://harfbuzz.org/" },
+        Project { "HarfBuzz", "Old MIT", "https://harfbuzz.github.io/" },
         // Project{"Catch2", "BSL-1.0", "https://github.com/catchorg/Catch2"},
         Project { "libunicode", "Apache-2.0", "https://github.com/contour-terminal/libunicode" },
         Project { "range-v3", "Boost Software License 1.0", "https://github.com/ericniebler/range-v3" },
