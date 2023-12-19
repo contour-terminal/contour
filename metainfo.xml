@@ -104,6 +104,14 @@
 
     -->
 
+    <release version="0.4.1" urgency="medium" type="development">
+      <description>
+        <ul>
+          <li> ... </li>
+        </ul>
+      </description>
+    </release>
+
     <release version="0.4.0" urgency="medium" date="2023-12-19">
       <description>
         <ul>
