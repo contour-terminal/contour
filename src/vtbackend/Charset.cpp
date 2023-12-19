@@ -16,7 +16,7 @@ constexpr CharsetMap usasciiCharset() noexcept
 
 /// British:
 ///     ESC (A
-///     Reference: http://vt100.net/docs/vt220-rm/table2-5.html
+///     Reference: https://vt100.net/docs/vt220-rm/chapter2.html#T2-5
 constexpr CharsetMap createBritishCharset() noexcept
 {
     auto result = usasciiCharset();
@@ -44,7 +44,7 @@ constexpr CharsetMap createGermanCharset() noexcept
 
 /// DEC Special Character and Line Drawing Set.
 ///
-/// Reference: http://vt100.net/docs/vt102-ug/table5-13.html
+/// Reference: https://vt100.net/docs/vt102-ug/chapter5.html#T5-13
 constexpr CharsetMap createSpecialCharset() noexcept
 {
     auto result = usasciiCharset();

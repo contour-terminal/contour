@@ -70,9 +70,6 @@ using Intrinsics = PlatformIntrinsics<__m128i>;
 template <>
 struct PlatformIntrinsics<int64x2_t>
 {
-    // The following inline functions (in its initial version) were borrowed from:
-    // https://github.com/f1ed/emp/blob/master/emp-tool/utils/block.h
-
     using m128i = int64x2_t;
 
     static inline m128i setzero() noexcept { return vreinterpretq_s64_s32(vdupq_n_s32(0)); }

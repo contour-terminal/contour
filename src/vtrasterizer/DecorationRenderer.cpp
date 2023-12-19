@@ -185,7 +185,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 for (int x = 0; x < unbox<int>(width); ++x)
                 {
                     // Using Wu's antialiasing algorithm to paint the curved line.
-                    // See: https://www-users.mat.umk.pl//~gruby/teaching/lgim/1_wu.pdf
+                    // See: https://dl.acm.org/doi/pdf/10.1145/127719.122734
                     auto const y = yScalar * cos(xScalar * x);
                     auto const y1 = static_cast<int>(floor(y));
                     auto const y2 = static_cast<int>(ceil(y));
