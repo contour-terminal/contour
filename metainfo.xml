@@ -118,6 +118,7 @@
           <li>Fixes VT sequence DECALN to properly reset margins when statusline is shown</li>
           <li>Fixes VT sequence ED (CSI J) when statusline is shown.</li>
           <li>Fixes VT sequence SM ?1003 (Any Event mouse tracking) not reporting mouse move events.</li>
+          <li>Fixes VT sequence XTWINOPS (`CSI 22 t` and `CSI 23 t`) to not assert and terminate the terminal but default to missing paramter `0` instead (#1369).</li>
           <li>Fixes VT sequences CUU/CUD/CUF/CUB to better respect margins (#1201)</li>
           <li>Fixes printing over 2nd cell of a wide character should delete wide character (#1268)</li>
           <li>Fixes URI re-encoding of local files in `OSC 8` (#1199)</li>
