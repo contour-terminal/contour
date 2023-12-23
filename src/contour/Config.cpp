@@ -252,7 +252,7 @@ namespace
 
         auto locations = getTermInfoDirs(appTerminfoDir);
         auto const terms = vector<string> {
-            "contour", "contour-latest", "xterm-256color", "xterm", "vt340", "vt220",
+            "contour", "xterm-256color", "xterm", "vt340", "vt220",
         };
 
         for (auto const& prefix: locations)
