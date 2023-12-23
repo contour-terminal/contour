@@ -1430,6 +1430,9 @@ void Terminal::setCursorStyle(CursorDisplay display, CursorShape shape)
 {
     _settings.cursorDisplay = display;
     _settings.cursorShape = shape;
+
+    _state.cursorDisplay = display;
+    _state.cursorShape = shape;
 }
 
 void Terminal::setCursorVisibility(bool /*visible*/)

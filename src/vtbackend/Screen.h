@@ -242,7 +242,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void setForegroundColor(Color color);
     void setBackgroundColor(Color color);
     void setUnderlineColor(Color color);
-    void setCursorStyle(CursorDisplay display, CursorShape shape);
     void setGraphicsRendition(GraphicsRendition rendition);
     void screenAlignmentPattern();
     void applicationKeypadMode(bool enable);
