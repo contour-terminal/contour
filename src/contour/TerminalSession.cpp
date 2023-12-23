@@ -131,6 +131,8 @@ namespace
         settings.maxHistoryLineCount = profile.maxHistoryLineCount;
         settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset;
         settings.cursorBlinkInterval = profile.inputModes.insert.cursor.cursorBlinkInterval;
+        settings.cursorShape = profile.inputModes.insert.cursor.cursorShape;
+        settings.cursorDisplay = profile.inputModes.insert.cursor.cursorDisplay;
         settings.smoothLineScrolling = profile.smoothLineScrolling;
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters);
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers;

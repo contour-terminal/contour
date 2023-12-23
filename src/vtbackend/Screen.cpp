@@ -1783,16 +1783,6 @@ void Screen<Cell>::setUnderlineColor(Color color)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::setCursorStyle(CursorDisplay display, CursorShape shape)
-{
-    _state->cursorDisplay = display;
-    _state->cursorShape = shape;
-
-    _terminal->setCursorStyle(display, shape);
-}
-
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setGraphicsRendition(GraphicsRendition rendition)
 {
     _terminal->setGraphicsRendition(rendition);
@@ -2857,20 +2847,23 @@ namespace impl
                 return ApplyResult::Invalid;
         }
 
-        template <typename Cell>
-        ApplyResult DECSCUSR(Sequence const& seq, Screen<Cell>& screen)
+        ApplyResult DECSCUSR(Sequence const& seq, Terminal& terminal)
         {
             if (seq.parameterCount() <= 1)
             {
-                switch (seq.param_or(0, Sequence::Parameter { 1 }))
+                switch (seq.param_or(0, Sequence::Parameter { 0 }))
                 {
                     case 0:
-                    case 1: screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Block); break;
-                    case 2: screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Block); break;
-                    case 3: screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Underscore); break;
-                    case 4: screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Underscore); break;
-                    case 5: screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Bar); break;
-                    case 6: screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Bar); break;
+                        // NB: This deviates from DECSCUSR, which is documented to reset to blinking block.
+                        terminal.setCursorStyle(terminal.factorySettings().cursorDisplay,
+                                                terminal.factorySettings().cursorShape);
+                        break;
+                    case 1: terminal.setCursorStyle(CursorDisplay::Blink, CursorShape::Block); break;
+                    case 2: terminal.setCursorStyle(CursorDisplay::Steady, CursorShape::Block); break;
+                    case 3: terminal.setCursorStyle(CursorDisplay::Blink, CursorShape::Underscore); break;
+                    case 4: terminal.setCursorStyle(CursorDisplay::Steady, CursorShape::Underscore); break;
+                    case 5: terminal.setCursorStyle(CursorDisplay::Blink, CursorShape::Bar); break;
+                    case 6: terminal.setCursorStyle(CursorDisplay::Steady, CursorShape::Bar); break;
                     default: return ApplyResult::Invalid;
                 }
                 return ApplyResult::Ok;
@@ -3646,7 +3639,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             requestAnsiMode(seq.param(0));
             return ApplyResult::Ok;
         case DECRQPSR: return impl::DECRQPSR(seq, *this);
-        case DECSCUSR: return impl::DECSCUSR(seq, *this);
+        case DECSCUSR: return impl::DECSCUSR(seq, *_terminal);
         case DECSCPP:
             if (auto const columnCount = seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
             {
