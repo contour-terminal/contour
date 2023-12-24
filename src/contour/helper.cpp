@@ -344,15 +344,18 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     }
 
     auto const physicalKey = event->nativeVirtualKey();
-    // NOLINTNEXTLINE(readability-qualified-auto)
-    if (auto const i = find_if(begin(CharMappings),
-                               end(CharMappings),
-                               [event](auto const& x) { return x.first == event->key(); });
-        i != end(CharMappings))
+    if (event->text().isEmpty())
     {
-        session.sendCharEvent(static_cast<char32_t>(i->second), physicalKey, modifiers, eventType, now);
-        event->accept();
-        return true;
+        // NOLINTNEXTLINE(readability-qualified-auto)
+        if (auto const i = find_if(begin(CharMappings),
+                                   end(CharMappings),
+                                   [event](auto const& x) { return x.first == event->key(); });
+            i != end(CharMappings))
+        {
+            session.sendCharEvent(static_cast<char32_t>(i->second), physicalKey, modifiers, eventType, now);
+            event->accept();
+            return true;
+        }
     }
 
     if (key == Qt::Key_Backtab)
