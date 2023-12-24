@@ -119,12 +119,12 @@ constexpr inline vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModi
     if (qtModifiers & Qt::MetaModifier)
         modifiers |= Modifier::Control;
     if (qtModifiers & Qt::ControlModifier)
-        modifiers |= Modifier::Meta;
+        modifiers |= Modifier::Super;
 #else
     if (qtModifiers & Qt::ControlModifier)
         modifiers |= Modifier::Control;
     if (qtModifiers & Qt::MetaModifier)
-        modifiers |= Modifier::Meta;
+        modifiers |= Modifier::Super;
 #endif
 
 #if defined(_WIN32)

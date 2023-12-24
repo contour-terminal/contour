@@ -668,7 +668,7 @@ namespace
         uint8_t mods = 0;
         if (modifiers.contains(Modifier::Shift))
             mods |= 4;
-        if (modifiers.contains(Modifier::Meta))
+        if (modifiers.contains(Modifier::Super))
             mods |= 8;
         if (modifiers.contains(Modifier::Control))
             mods |= 16;
