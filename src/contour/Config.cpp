@@ -686,6 +686,10 @@ namespace
             return Modifier::Shift;
         if (upperKey == "SUPER")
             return Modifier::Super;
+        if (upperKey == "COMMAND")
+            // This represents the Command key on macOS, which is equivalent to the Windows key on Windows,
+            // and the Super key on Linux.
+            return Modifier::Super;
         if (upperKey == "META")
             // TODO: This is technically not correct, but we used the term Meta up until now,
             // to refer to the Windows/Cmd key. But Qt also exposes another modifier called
