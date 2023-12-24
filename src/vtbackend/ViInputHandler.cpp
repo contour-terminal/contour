@@ -248,13 +248,11 @@ void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command,
     switch (modes)
     {
         case ModeSelect::Normal: {
-            inputLog()("Registering normal mode command: {}", command);
             Require(!_normalMode.contains(commandStr));
             _normalMode.insert(commandStr, std::move(handler));
             break;
         }
         case ModeSelect::Visual: {
-            inputLog()("Registering visual mode command: {}", command);
             Require(!_visualMode.contains(commandStr));
             _visualMode.insert(commandStr, std::move(handler));
             break;
