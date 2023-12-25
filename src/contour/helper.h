@@ -167,28 +167,43 @@ void spawnNewTerminal(std::string const& programPath,
 
 vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer);
 
+constexpr config::TerminalProfile::WindowMargins applyContentScale(
+    config::TerminalProfile::WindowMargins margins, double contentScale) noexcept
+{
+    return { .horizontal = static_cast<unsigned>(margins.horizontal * contentScale),
+             .vertical = static_cast<unsigned>(margins.vertical * contentScale) };
+}
+
 vtrasterizer::PageMargin computeMargin(vtbackend::ImageSize cellSize,
                                        vtbackend::PageSize charCells,
-                                       vtbackend::ImageSize pixels) noexcept;
+                                       vtbackend::ImageSize displaySize,
+                                       config::TerminalProfile::WindowMargins minimumMargins) noexcept;
 
 vtrasterizer::FontDescriptions sanitizeFontDescription(vtrasterizer::FontDescriptions fonts,
                                                        text::DPI screenDPI);
 
-constexpr vtbackend::PageSize pageSizeForPixels(vtbackend::ImageSize viewSize,
-                                                vtbackend::ImageSize cellSize) noexcept
+constexpr vtbackend::PageSize pageSizeForPixels(vtbackend::ImageSize totalViewSize,
+                                                vtbackend::ImageSize cellSize,
+                                                config::TerminalProfile::WindowMargins margins)
 {
-    return vtbackend::PageSize { boxed_cast<vtbackend::LineCount>((viewSize / cellSize).height),
-                                 boxed_cast<vtbackend::ColumnCount>((viewSize / cellSize).width) };
+    // NB: Multiplied by 2, because margins are applied on both sides of the terminal.
+    auto const marginSize = vtbackend::ImageSize { vtbackend::Width::cast_from(2 * margins.horizontal),
+                                                   vtbackend::Height::cast_from(2 * margins.vertical) };
+
+    auto const usableViewSize = totalViewSize - marginSize;
+
+    auto const result =
+        vtbackend::PageSize { boxed_cast<vtbackend::LineCount>((usableViewSize / cellSize).height),
+                              boxed_cast<vtbackend::ColumnCount>((usableViewSize / cellSize).width) };
+
+    return result;
 }
 
 void applyResize(vtbackend::ImageSize newPixelSize,
                  TerminalSession& session,
                  vtrasterizer::Renderer& renderer);
 
-bool applyFontDescription(vtbackend::ImageSize cellSize,
-                          vtbackend::PageSize pageSize,
-                          vtbackend::ImageSize pixelSize,
-                          text::DPI dpi,
+bool applyFontDescription(text::DPI dpi,
                           vtrasterizer::Renderer& renderer,
                           vtrasterizer::FontDescriptions fontDescriptions);
 

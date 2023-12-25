@@ -119,6 +119,19 @@ profiles:
     maximized: false
 ```
 
+### `margins`
+
+Enforces a horizontal and vertical margin to respect on both sides of the terminal.
+This is particularily useful on operating systems (like MacOS) that draw the border frame into the main widgets space,
+or simply to create some artificial space to improve the user's focus.
+
+```yaml
+profiles:
+  profile_name:
+    margins:
+      horizontal: 5
+      vertical: 0
+```
 
 
 ### `bell`

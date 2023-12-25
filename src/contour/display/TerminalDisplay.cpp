@@ -330,9 +330,9 @@ void TerminalDisplay::sizeChanged()
 
     auto const qtBaseDisplaySize =
         vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
-    auto const newPixelSize = qtBaseDisplaySize * contentScale();
-    displayLog()("Resizing view to {}x{} virtual ({} actual).", width(), height(), newPixelSize);
-    applyResize(newPixelSize, *_session, *_renderer);
+    auto const actualPixelSize = qtBaseDisplaySize * contentScale();
+    displayLog()("Resizing view to {}x{} virtual ({} actual).", width(), height(), actualPixelSize);
+    applyResize(actualPixelSize, *_session, *_renderer);
 }
 
 void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
@@ -444,7 +444,8 @@ void TerminalDisplay::applyFontDPI()
     if (!_renderTarget)
         return;
 
-    auto const newPixelSize = vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
+    auto const newPixelSize =
+        vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) } * contentScale();
 
     // Apply resize on same window metrics propagates proper recalculations and repaint.
     applyResize(newPixelSize, *_session, *_renderer);
@@ -615,9 +616,9 @@ void TerminalDisplay::createRenderer()
     {
         auto const qtBaseDisplaySize =
             ImageSize { vtbackend::Width::cast_from(width()), vtbackend::Height::cast_from(height()) };
-        _renderer->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseDisplaySize));
-        // resize widget (same pixels, but adjusted terminal rows/columns and margin)
+
         auto const actualDisplaySize = qtBaseDisplaySize * contentScale();
+
         applyResize(actualDisplaySize, *_session, *_renderer);
     }
     // }}}
@@ -940,34 +941,46 @@ double TerminalDisplay::contentScale() const
     return window()->devicePixelRatio();
 }
 
+/// Computes the required size of the widget to fit the given terminal size.
+///
+/// @param terminalSize the terminal size in rows and columns
+/// @param cellSize     the size of a single cell in pixels (with content scale already applied)
+constexpr ImageSize computeRequiredSize(config::TerminalProfile::WindowMargins margins,
+                                        ImageSize cellSize,
+                                        PageSize totalPageSize) noexcept
+{
+    // We multiply by 2 because the margins are applied to both sides of the terminal.
+    auto const marginSize = ImageSize { vtbackend::Width::cast_from(margins.horizontal * 2),
+                                        vtbackend::Height::cast_from(margins.vertical * 2) };
+
+    return (cellSize * totalPageSize + marginSize);
+}
+
 void TerminalDisplay::updateImplicitSize()
 {
     assert(_renderer);
     assert(_session);
     assert(window());
 
-    // implicit width/height
-    auto const dpr = contentScale();
-    auto const implicitViewSize = _renderer->cellSize() * _session->terminal().totalPageSize() * (1.0 / dpr);
-    setImplicitWidth(unbox<qreal>(implicitViewSize.width));
-    setImplicitHeight(unbox<qreal>(implicitViewSize.height));
+    auto const requiredSize = computeRequiredSize(_session->profile().margins,
+                                                  _renderer->cellSize() * (1.0 / contentScale()),
+                                                  _session->terminal().totalPageSize());
+
+    setImplicitWidth(unbox<qreal>(requiredSize.width));
+    setImplicitHeight(unbox<qreal>(requiredSize.height));
 }
 
 void TerminalDisplay::updateMinimumSize()
 {
+    Require(window());
     Require(_renderer);
     assert(_session);
 
-    Require(window());
+    auto constexpr MinimumTotalPageSize = PageSize { LineCount(5), ColumnCount(10) };
+    auto const minimumSize = computeRequiredSize(
+        _session->profile().margins, _renderer->cellSize() * (1.0 / contentScale()), MinimumTotalPageSize);
 
-    // minimum size
-    auto constexpr MinimumGridSize = PageSize { LineCount(5), ColumnCount(10) };
-    auto const minSize =
-        ImageSize { Width::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.columns),
-                    Height::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.lines) };
-    auto const scaledMinSize = minSize / contentScale();
-
-    window()->setMinimumSize(QSize(scaledMinSize.width.as<int>(), scaledMinSize.height.as<int>()));
+    window()->setMinimumSize(QSize(unbox<int>(minimumSize.width), unbox<int>(minimumSize.height)));
 }
 // }}}
 
@@ -1136,6 +1149,18 @@ void TerminalDisplay::notify(std::string_view /*_title*/, std::string_view /*_bo
     // TODO: showNotification callback to Controller?
 }
 
+void TerminalDisplay::adaptToWidgetSize()
+{
+    // Resize widget (same pixels, but adjusted terminal rows/columns and margin)
+    Require(_renderer != nullptr);
+    Require(_session != nullptr);
+
+    auto const qtBaseDisplaySize =
+        ImageSize { vtbackend::Width::cast_from(width()), vtbackend::Height::cast_from(height()) };
+    auto const actualDisplaySize = qtBaseDisplaySize * contentScale();
+    applyResize(actualDisplaySize, *_session, *_renderer);
+}
+
 void TerminalDisplay::resizeWindow(vtbackend::Width newWidth, vtbackend::Height newHeight)
 {
     Require(_session != nullptr);
@@ -1146,26 +1171,7 @@ void TerminalDisplay::resizeWindow(vtbackend::Width newWidth, vtbackend::Height 
         return;
     }
 
-    auto const pixelsAvailable =
-        vtbackend::ImageSize { vtbackend::Width::cast_from(*newWidth ? *newWidth : (unsigned) width()),
-                               vtbackend::Height::cast_from(*newHeight ? *newHeight : (unsigned) height()) };
-
-    auto const newPageSize =
-        PageSize { .lines = vtbackend::LineCount(unbox<int>(pixelsAvailable.height)
-                                                 / unbox<int>(gridMetrics().cellSize.height)),
-                   .columns = vtbackend::ColumnCount(unbox<int>(pixelsAvailable.width)
-                                                     / unbox<int>(gridMetrics().cellSize.width)) };
-
-    auto const newPixelsUsed = vtbackend::ImageSize {
-        vtbackend::Width::cast_from(unbox(newPageSize.columns) * unbox<int>(gridMetrics().cellSize.width)),
-        vtbackend::Height::cast_from(unbox(newPageSize.lines) * unbox<int>(gridMetrics().cellSize.height))
-    };
-
-    // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
-    const_cast<config::TerminalProfile&>(profile()).terminalSize = newPageSize;
-    _renderer->setPageSize(newPageSize);
-    auto const l = scoped_lock { terminal() };
-    terminal().resizeScreen(newPageSize, newPixelsUsed);
+    applyResize(vtbackend::ImageSize { newWidth, newHeight }, *_session, *_renderer);
 }
 
 void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend::ColumnCount newColumnCount)
@@ -1195,12 +1201,7 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
     Require(_session != nullptr);
     Require(_renderTarget != nullptr);
 
-    if (applyFontDescription(gridMetrics().cellSize,
-                             pageSize(),
-                             pixelSize(),
-                             fontDPI(),
-                             *_renderer,
-                             std::move(fontDescriptions)))
+    if (applyFontDescription(fontDPI(), *_renderer, std::move(fontDescriptions)))
     {
         // resize widget (same pixels, but adjusted terminal rows/columns and margin)
         applyResize(pixelSize(), *_session, *_renderer);
@@ -1210,20 +1211,14 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
 
 bool TerminalDisplay::setFontSize(text::font_size newFontSize)
 {
-    Require(_session != nullptr);
-    Require(_renderTarget != nullptr);
+    Require(_renderer != nullptr);
 
     displayLog()("Setting display font size and recompute metrics: {}pt", newFontSize.pt);
 
     if (!_renderer->setFontSize(newFontSize))
         return false;
 
-    auto const qtBaseDisplaySize =
-        ImageSize { vtbackend::Width::cast_from(width()), vtbackend::Height::cast_from(height()) };
-    _renderer->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseDisplaySize));
-    // resize widget (same pixels, but adjusted terminal rows/columns and margin)
-    auto const actualDisplaySize = qtBaseDisplaySize * contentScale();
-    applyResize(actualDisplaySize, *_session, *_renderer);
+    adaptToWidgetSize();
     updateMinimumSize();
     // logDisplayInfo();
     return true;

@@ -111,6 +111,7 @@
           <li>Changes VT sequence `DECSCUSR` (`CSI ? 0 SP q` and `CSI ? SP q`) to reset to user-configured cursor style (#1377).</li>
           <li>Remove `contour-latest` terminfo file. Please use `contour` terminfo instead.</li>
           <li>Adds `Command` as modifier to input mappings on MacOS to work along with `Meta` for convenience reasons (#1379).</li>
+          <li>Adds config option `profiles.*.margins` to allow customizing the horizontal / vertical margins (#1384).</li>
         </ul>
       </description>
     </release>
