@@ -1030,6 +1030,16 @@ namespace
                 usedKeys.emplace(basePath + ".default.foreground");
                 colors.defaultForeground = fg.as<string>();
             }
+            if (auto fg = def["bright_foreground"]; fg)
+            {
+                usedKeys.emplace(basePath + ".default.bright_foreground");
+                colors.defaultForegroundBright = fg.as<string>();
+            }
+            if (auto fg = def["dimmed_foreground"]; fg)
+            {
+                usedKeys.emplace(basePath + ".default.dimmed_foreground");
+                colors.defaultForegroundDimmed = fg.as<string>();
+            }
             if (auto bg = def["background"]; bg)
             {
                 usedKeys.emplace(basePath + ".default.background");
