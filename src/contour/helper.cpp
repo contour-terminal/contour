@@ -148,6 +148,7 @@ namespace
 
 bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, TerminalSession& session)
 {
+    qDebug() << "sendKeyEvent" << event;
     using vtbackend::Key;
     using vtbackend::Modifier;
 
@@ -389,17 +390,6 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         session.sendCharEvent(static_cast<char32_t>(key), physicalKey, modifiers, eventType, now);
         event->accept();
         return true;
-    }
-
-    switch (key)
-    {
-            // clang-format off
-        case Qt::Key_BraceLeft: session.sendCharEvent(L'[', physicalKey, modifiers, eventType, now); return true;
-        case Qt::Key_Equal: session.sendCharEvent(L'=', physicalKey, modifiers, eventType, now); return true;
-        case Qt::Key_BraceRight: session.sendCharEvent(L']', physicalKey, modifiers, eventType, now); return true;
-        case Qt::Key_Backspace: session.sendCharEvent(0x08, physicalKey, modifiers, eventType, now); return true;
-        default: break;
-            // clang-format on
     }
 
     if (!event->text().isEmpty())
