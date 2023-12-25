@@ -124,6 +124,9 @@ class TerminalDisplay: public QQuickItem
     [[nodiscard]] vtbackend::ImageSize pixelSize() const;
     [[nodiscard]] vtbackend::ImageSize cellSize() const;
 
+    // general events
+    void adaptToWidgetSize();
+
     // (user requested) actions
     vtbackend::FontDef getFontDef();
     static void copyToClipboard(std::string_view /*_data*/);
@@ -212,10 +215,17 @@ class TerminalDisplay: public QQuickItem
     void watchKdeDpiSetting();
     [[nodiscard]] float uptime() const noexcept;
 
-    [[nodiscard]] vtbackend::PageSize pageSize() const
+    [[nodiscard]] vtbackend::PageSize calculatePageSize() const
     {
         assert(_renderer);
-        return pageSizeForPixels(pixelSize(), _renderer->gridMetrics().cellSize);
+        assert(_session);
+
+        // auto const availablePixels = gridMetrics().cellSize * _session->terminal().pageSize();
+        auto const availablePixels = vtbackend::ImageSize { vtbackend::Width::cast_from(width()),
+                                                            vtbackend::Height::cast_from(height()) };
+        return pageSizeForPixels(availablePixels,
+                                 _renderer->gridMetrics().cellSize,
+                                 applyContentScale(_session->profile().margins, _session->contentScale()));
     }
 
     void updateMinimumSize();

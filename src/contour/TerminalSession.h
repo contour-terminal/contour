@@ -215,7 +215,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_INVOKABLE void applyPendingFontChange(bool answer, bool remember);
     Q_INVOKABLE void executePendingBufferCapture(bool answer, bool remember);
     Q_INVOKABLE void executeShowHostWritableStatusLine(bool answer, bool remember);
-    Q_INVOKABLE void requestWindowResize(QJSValue w, QJSValue h);
+    Q_INVOKABLE void adaptToWidgetSize();
 
     void updateColorPreference(vtbackend::ColorPreference preference);
 

@@ -696,10 +696,10 @@ void TerminalSession::requestWindowResize(LineCount lines, ColumnCount columns)
     _display->post([this, lines, columns]() { _display->resizeWindow(lines, columns); });
 }
 
-void TerminalSession::requestWindowResize(QJSValue w, QJSValue h)
+void TerminalSession::adaptToWidgetSize()
 {
-    requestWindowResize(Width::cast_from(w.toNumber() * contentScale()),
-                        Height::cast_from(h.toNumber() * contentScale()));
+    if (_display)
+        _display->post([this]() { _display->adaptToWidgetSize(); });
 }
 
 void TerminalSession::requestWindowResize(Width width, Height height)
@@ -1493,13 +1493,8 @@ void TerminalSession::configureDisplay()
         _display->toggleFullScreen();
 
     _terminal.setRefreshRate(_display->refreshRate());
-    auto const pageSize = PageSize {
-        LineCount(unbox<int>(_display->pixelSize().height) / unbox<int>(_display->cellSize().height)),
-        ColumnCount(unbox<int>(_display->pixelSize().width) / unbox<int>(_display->cellSize().width)),
-    };
-    _display->setPageSize(pageSize);
     _display->setFonts(_profile.fonts);
-    // TODO: maybe update margin after this call?
+    adaptToWidgetSize();
 
     _display->setHyperlinkDecoration(_profile.hyperlinkDecoration.normal, _profile.hyperlinkDecoration.hover);
 

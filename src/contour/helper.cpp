@@ -54,59 +54,68 @@ namespace
 {
     vtbackend::CellLocation makeMouseCellLocation(int x, int y, TerminalSession const& session) noexcept
     {
-        auto constexpr MarginTop = 0;
-        auto constexpr MarginLeft = 0;
-
         auto const pageSize = session.terminal().totalPageSize();
         auto const cellSize = session.display()->cellSize();
         auto const dpr = session.contentScale();
+
+        auto const marginTop = static_cast<int>(session.profile().margins.vertical * dpr);
+        auto const marginLeft = static_cast<int>(session.profile().margins.horizontal * dpr);
 
         auto const sx = int(double(x) * dpr);
         auto const sy = int(double(y) * dpr);
 
         auto const row = vtbackend::LineOffset(
-            clamp((sy - MarginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
+            clamp((sy - marginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
 
         auto const col = vtbackend::ColumnOffset(
-            clamp((sx - MarginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
+            clamp((sx - marginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
 
         return { row, col };
     }
 
-    PixelCoordinate makeMousePixelPosition(QHoverEvent* event, double dpr) noexcept
+    PixelCoordinate makeMousePixelPosition(QHoverEvent* event,
+                                           config::TerminalProfile::WindowMargins margins,
+                                           double dpr) noexcept
     {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         auto const position = event->position();
 #else
         auto const position = event->pos();
 #endif
-        // TODO: apply margin once supported
-        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) },
-                                 PixelCoordinate::Y { int(double(position.y()) * dpr) } };
+        auto const marginLeft = static_cast<int>(margins.horizontal * dpr);
+        auto const marginTop = static_cast<int>(margins.vertical * dpr);
+        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
+                                 PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
     }
 
-    PixelCoordinate makeMousePixelPosition(QMouseEvent* event, double dpr) noexcept
+    PixelCoordinate makeMousePixelPosition(QMouseEvent* event,
+                                           config::TerminalProfile::WindowMargins margins,
+                                           double dpr) noexcept
     {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         auto const position = event->position();
 #else
         auto const position = QPointF { static_cast<qreal>(event->x()), static_cast<qreal>(event->y()) };
 #endif
-        // TODO: apply margin once supported
-        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) },
-                                 PixelCoordinate::Y { int(double(position.y()) * dpr) } };
+        auto const marginLeft = static_cast<int>(margins.horizontal * dpr);
+        auto const marginTop = static_cast<int>(margins.vertical * dpr);
+        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
+                                 PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
     }
 
-    PixelCoordinate makeMousePixelPosition(QWheelEvent* event, double dpr) noexcept
+    PixelCoordinate makeMousePixelPosition(QWheelEvent* event,
+                                           config::TerminalProfile::WindowMargins margins,
+                                           double dpr) noexcept
     {
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
         auto const position = event->position();
 #else
         auto const position = event->posF();
 #endif
-        // TODO: apply margin once supported
-        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) },
-                                 PixelCoordinate::Y { int(double(position.y()) * dpr) } };
+        auto const marginLeft = static_cast<int>(margins.horizontal * dpr);
+        auto const marginTop = static_cast<int>(margins.vertical * dpr);
+        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
+                                 PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
     }
 
     int mouseWheelDelta(QWheelEvent* event) noexcept
@@ -423,7 +432,8 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     {
         auto const modifier = makeModifiers(event->modifiers());
         auto const button = xDelta > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
-        auto const pixelPosition = makeMousePixelPosition(event, session.contentScale());
+        auto const pixelPosition =
+            makeMousePixelPosition(event, session.profile().margins, session.contentScale());
 
         session.sendMousePressEvent(modifier, button, pixelPosition);
         event->accept();
@@ -434,7 +444,8 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     {
         auto const modifier = makeModifiers(event->modifiers());
         auto const button = yDelta > 0 ? VTMouseButton::WheelUp : VTMouseButton::WheelDown;
-        auto const pixelPosition = makeMousePixelPosition(event, session.contentScale());
+        auto const pixelPosition =
+            makeMousePixelPosition(event, session.profile().margins, session.contentScale());
 
         session.sendMousePressEvent(modifier, button, pixelPosition);
         event->accept();
@@ -443,25 +454,28 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 
 void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
 {
-    session.sendMousePressEvent(makeModifiers(event->modifiers()),
-                                makeMouseButton(event->button()),
-                                makeMousePixelPosition(event, session.contentScale()));
+    session.sendMousePressEvent(
+        makeModifiers(event->modifiers()),
+        makeMouseButton(event->button()),
+        makeMousePixelPosition(event, session.profile().margins, session.contentScale()));
     event->accept();
 }
 
 void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
 {
-    session.sendMouseReleaseEvent(makeModifiers(event->modifiers()),
-                                  makeMouseButton(event->button()),
-                                  makeMousePixelPosition(event, session.contentScale()));
+    session.sendMouseReleaseEvent(
+        makeModifiers(event->modifiers()),
+        makeMouseButton(event->button()),
+        makeMousePixelPosition(event, session.profile().margins, session.contentScale()));
     event->accept();
 }
 
 void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
 {
-    session.sendMouseMoveEvent(makeModifiers(event->modifiers()),
-                               makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
-                               makeMousePixelPosition(event, session.contentScale()));
+    session.sendMouseMoveEvent(
+        makeModifiers(event->modifiers()),
+        makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
+        makeMousePixelPosition(event, session.profile().margins, session.contentScale()));
     event->accept();
 }
 
@@ -472,9 +486,10 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
 #else
     auto const position = event->pos();
 #endif
-    session.sendMouseMoveEvent(makeModifiers(event->modifiers()),
-                               makeMouseCellLocation(position.x(), position.y(), session),
-                               makeMousePixelPosition(event, session.contentScale()));
+    session.sendMouseMoveEvent(
+        makeModifiers(event->modifiers()),
+        makeMouseCellLocation(position.x(), position.y(), session),
+        makeMousePixelPosition(event, session.profile().margins, session.contentScale()));
     event->accept();
 }
 
@@ -541,18 +556,19 @@ vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer)
              renderer.fontDescriptions().emoji.toPattern() };
 }
 
-vtrasterizer::PageMargin computeMargin(ImageSize cellSize, PageSize charCells, ImageSize pixels) noexcept
+vtrasterizer::PageMargin computeMargin(ImageSize cellSize,
+                                       PageSize charCells,
+                                       ImageSize displaySize,
+                                       config::TerminalProfile::WindowMargins minimumMargins) noexcept
 {
     auto const usedHeight = unbox(charCells.lines) * unbox(cellSize.height);
-    auto const freeHeight = unbox(pixels.height) - usedHeight;
-    auto const bottomMargin = freeHeight;
-    auto const topMargin = 0;
 
-    // auto const usedWidth = charCells.columns * regularFont_.maxAdvance();
-    // auto const freeWidth = pixels.width - usedWidth;
-    auto constexpr LeftMargin = 0;
+    auto const topMargin = static_cast<int>(minimumMargins.vertical);
+    auto const bottomMargin = static_cast<int>(
+        std::min(unbox(displaySize.height) - usedHeight - topMargin, minimumMargins.vertical));
+    auto const leftMargin = static_cast<int>(minimumMargins.horizontal);
 
-    return { LeftMargin, topMargin, static_cast<int>(bottomMargin) };
+    return { .left = leftMargin, .top = topMargin, .bottom = bottomMargin };
 }
 
 vtrasterizer::FontDescriptions sanitizeFontDescription(vtrasterizer::FontDescriptions fonts, text::DPI dpi)
@@ -564,20 +580,14 @@ vtrasterizer::FontDescriptions sanitizeFontDescription(vtrasterizer::FontDescrip
     return fonts;
 }
 
-bool applyFontDescription(ImageSize cellSize,
-                          PageSize pageSize,
-                          ImageSize pixelSize,
-                          text::DPI dpi,
+bool applyFontDescription(text::DPI dpi,
                           vtrasterizer::Renderer& renderer,
                           vtrasterizer::FontDescriptions fontDescriptions)
 {
     if (renderer.fontDescriptions() == fontDescriptions)
         return false;
 
-    auto const windowMargin = computeMargin(cellSize, pageSize, pixelSize);
-
     renderer.setFonts(sanitizeFontDescription(std::move(fontDescriptions), dpi));
-    renderer.setMargin(windowMargin);
     renderer.updateFontMetrics();
 
     return true;
@@ -591,14 +601,20 @@ void applyResize(vtbackend::ImageSize newPixelSize,
         return;
 
     auto const oldPageSize = session.terminal().pageSize();
-    auto const newPageSize = pageSizeForPixels(newPixelSize, renderer.gridMetrics().cellSize);
+    auto const newPageSize =
+        pageSizeForPixels(newPixelSize,
+                          renderer.gridMetrics().cellSize,
+                          applyContentScale(session.profile().margins, session.contentScale()));
     vtbackend::Terminal& terminal = session.terminal();
     vtbackend::ImageSize cellSize = renderer.gridMetrics().cellSize;
 
     Require(renderer.hasRenderTarget());
     renderer.renderTarget().setRenderSize(newPixelSize);
     renderer.setPageSize(newPageSize);
-    renderer.setMargin(computeMargin(renderer.gridMetrics().cellSize, newPageSize, newPixelSize));
+    renderer.setMargin(computeMargin(renderer.gridMetrics().cellSize,
+                                     newPageSize,
+                                     newPixelSize,
+                                     applyContentScale(session.profile().margins, session.contentScale())));
 
     if (oldPageSize.lines != newPageSize.lines)
         emit session.lineCountChanged(newPageSize.lines.as<int>());
@@ -607,9 +623,10 @@ void applyResize(vtbackend::ImageSize newPixelSize,
         emit session.columnsCountChanged(newPageSize.columns.as<int>());
 
     auto const viewSize = cellSize * newPageSize;
-    displayLog()("Applying resize {}/{} pixels and {} -> {} cells.",
+    displayLog()("Applying resize {}/{} pixels (margins {}) and {} -> {} cells.",
                  viewSize,
                  newPixelSize,
+                 session.profile().margins,
                  terminal.pageSize(),
                  newPageSize);
 

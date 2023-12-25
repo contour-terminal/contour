@@ -1555,6 +1555,11 @@ namespace
         else
             logger()("Invalid Terminal ID \"{}\", specified", strValue);
 
+        tryLoadChildRelative(
+            usedKeys, profile, basePath, "margins.horizontal", terminalProfile.margins.horizontal, logger);
+        tryLoadChildRelative(
+            usedKeys, profile, basePath, "margins.vertical", terminalProfile.margins.vertical, logger);
+
         tryLoadChildRelative(usedKeys,
                              profile,
                              basePath,

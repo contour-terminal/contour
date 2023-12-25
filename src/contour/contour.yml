@@ -291,6 +291,16 @@ profiles:
             columns: 80
             lines: 25
 
+        # Window margins
+        #
+        # The margin values are applied on both sides and are given in pixels
+        # with DPI yet to be applied to these values.
+        margins:
+            # Horizontal (left/right) margins.
+            horizontal: 5
+            # Vertical (top/bottom) margins.
+            vertical: 5
+
         history:
             # Number of lines to preserve (-1 for infinite).
             limit: 1000

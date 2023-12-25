@@ -161,6 +161,15 @@ struct TerminalProfile
 
     std::string wmClass;
 
+    // Horizontal and vertical margins in pixels.
+    //
+    // Important, DPI is not yet applied to these values.
+    struct WindowMargins
+    {
+        unsigned horizontal = 0;
+        unsigned vertical = 0;
+    } margins;
+
     vtbackend::PageSize terminalSize = { vtbackend::LineCount(10), vtbackend::ColumnCount(40) };
     vtbackend::VTType terminalId = vtbackend::VTType::VT525;
 
@@ -407,4 +416,16 @@ struct fmt::formatter<contour::config::ScrollBarPosition>
         return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
     }
 };
+
+template <>
+struct fmt::formatter<contour::config::TerminalProfile::WindowMargins>: public fmt::formatter<std::string>
+{
+    using WindowMargins = contour::config::TerminalProfile::WindowMargins;
+    auto format(WindowMargins margins, format_context& ctx) -> format_context::iterator
+    {
+        return formatter<std::string>::format(fmt::format("{}x+{}y", margins.horizontal, margins.vertical),
+                                              ctx);
+    }
+};
+
 // }}}
