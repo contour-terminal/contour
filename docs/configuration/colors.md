@@ -10,11 +10,15 @@ color_schemes:
     default:
       background: '#1a1716'
       foreground: '#d0d0d0'
+      bright_foreground: '#ffffff'
+      dimmed_foreground: '#808080'
 
 
 ```
 :octicons-horizontal-rule-16: ==background==  determines the default background color of the terminal. <br/>
-:octicons-horizontal-rule-16: ==foreground==  option sets the default foreground text color of the terminal.
+:octicons-horizontal-rule-16: ==foreground==  option sets the default foreground text color of the terminal. <br/>
+:octicons-horizontal-rule-16: ==bright\_foreground==  option sets the default foreground text color of the terminal when text text is instructed to be bold (/bright). This is only used if profile option `draw_bold_text_with_bright_colors` is set to `true`<br/>
+:octicons-horizontal-rule-16: ==dimmed\_foreground==  option sets the default foreground text color of the terminal when text text is instructed to be dimmed. <br/>
 
 
 

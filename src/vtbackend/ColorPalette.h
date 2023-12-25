@@ -93,6 +93,8 @@ struct ColorPalette
     }
 
     RGBColor defaultForeground = 0xD0D0D0_rgb;
+    RGBColor defaultForegroundBright = 0xFFFFFF_rgb;
+    RGBColor defaultForegroundDimmed = 0x808080_rgb;
     RGBColor defaultBackground = 0x000000_rgb;
 
     CursorColor cursor;

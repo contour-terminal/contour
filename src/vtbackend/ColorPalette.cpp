@@ -97,13 +97,12 @@ void ImageData::updateHash() noexcept
 
 RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target, ColorMode mode) noexcept
 {
-    // clang-format off
     switch (color.type())
     {
-        case ColorType::RGB:
+        case ColorType::RGB: {
             return color.rgb();
-        case ColorType::Indexed:
-        {
+        }
+        case ColorType::Indexed: {
             auto const index = static_cast<size_t>(color.index());
             if (mode == ColorMode::Bright && index < 8)
                 return colorPalette.brightColor(index);
@@ -111,18 +110,28 @@ RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target
                 return colorPalette.dimColor(index);
             else
                 return colorPalette.indexedColor(index);
-            break;
         }
-        case ColorType::Bright:
+        case ColorType::Bright: {
             return colorPalette.brightColor(static_cast<size_t>(color.index()));
+        }
         case ColorType::Undefined:
-        case ColorType::Default:
-            break;
+        case ColorType::Default: {
+            if (target == ColorTarget::Foreground)
+            {
+                switch (mode)
+                {
+                    case ColorMode::Normal: return colorPalette.defaultForeground;
+                    case ColorMode::Bright: return colorPalette.defaultForegroundBright;
+                    case ColorMode::Dimmed: return colorPalette.defaultForegroundDimmed;
+                }
+            }
+            else
+            {
+                return colorPalette.defaultBackground;
+            }
+        }
     }
-    // clang-format on
-    auto const defaultColor =
-        target == ColorTarget::Foreground ? colorPalette.defaultForeground : colorPalette.defaultBackground;
-    return mode == ColorMode::Dimmed ? defaultColor * 0.75 : defaultColor;
+    crispy::unreachable();
 }
 
 } // namespace vtbackend
