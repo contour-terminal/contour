@@ -257,7 +257,8 @@ bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
     if (enabled(eventType))
     {
         if (enabled(KeyboardEventFlag::DisambiguateEscapeCodes)
-            && (modifiers.any() || enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes)))
+            && (modifiers.without(Modifier::Shift).any()
+                || enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes)))
         {
             append("\033[{};{}u",
                    encodeCharacter(characterEvent, physicalKey, modifiers),
