@@ -276,8 +276,7 @@ profiles:
         #         2027: true
         #
         # Default: (empty object)
-        frozen_dec_modes:
-            2026: false
+        #frozen_dec_modes:
 
         # Defines the number of milliseconds to wait before
         # actually executing the LF (linefeed) control code
