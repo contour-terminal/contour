@@ -1226,10 +1226,14 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-osx.dmg"
-      - name: "fetch artifact: Windows"
+      - name: "fetch artifact: Windows (MSI)"
         uses: actions/download-artifact@v3
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
+      - name: "fetch artifact: Windows (ZIP)"
+        uses: actions/download-artifact@v3
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
       # }}}
 
       - name: "inspect"
@@ -1257,5 +1261,6 @@ jobs:
             *.dmg
             *.msi
             *.zst
+            *.zip
           #  *.AppImage
   # }}}
