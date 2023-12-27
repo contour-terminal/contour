@@ -107,6 +107,7 @@
     <release version="0.4.1" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes variable fonts loading</li>
           <li>Fixes Command modifier for input mappings, such as Command+C or Command+V on on MacOS (#1379).</li>
           <li>Fixes CSIu encoding of shift modifier produced characters (#1373).</li>
           <li>Changes VT sequence `DECSCUSR` (`CSI ? 0 SP q` and `CSI ? SP q`) to reset to user-configured cursor style (#1377).</li>
