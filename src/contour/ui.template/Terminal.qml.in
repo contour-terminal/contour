@@ -156,8 +156,8 @@ ContourTerminal
     function onScrollBarPositionChanged() {
         let vt = vtWidget.session;
         let totalLineCount = (vt.pageLineCount + vt.historyLineCount);
-
-        vt.scrollOffset = vt.historyLineCount - vbar.position * totalLineCount;
+        if(vbar.active)
+                vt.scrollOffset = vt.historyLineCount - vbar.position * totalLineCount;
     }
 
     // Callback to be invoked whenever the VT's viewport is changing.
@@ -166,7 +166,7 @@ ContourTerminal
         let vt = vtWidget.session;
         let totalLineCount = (vt.pageLineCount + vt.historyLineCount);
 
-        vbar.position = Math.round((vt.historyLineCount - vt.scrollOffset) / totalLineCount);
+        vbar.position = (vt.historyLineCount - vt.scrollOffset) / totalLineCount;
     }
 
     function updateSizeWidget() {
