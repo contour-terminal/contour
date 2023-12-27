@@ -16,6 +16,7 @@
 
 #include <limits>
 #include <optional>
+#include <string>
 
 // clang-format off
 #include <ft2build.h>
@@ -66,15 +67,16 @@ using namespace std::string_view_literals;
 namespace
 {
 
-struct FontPathAndSize // NOLINT(readability-identifier-naming)
+struct FontInfo // NOLINT(readability-identifier-naming)
 {
     string path;
     text::font_size size;
+    text::font_weight weight;
 };
 
-[[maybe_unused]] bool operator==(FontPathAndSize const& a, FontPathAndSize const& b) noexcept
+[[maybe_unused]] bool operator==(FontInfo const& a, FontInfo const& b) noexcept
 {
-    return a.path == b.path && a.size.pt == b.size.pt;
+    return a.path == b.path && a.size.pt == b.size.pt && a.weight == b.weight;
 }
 
 } // namespace
@@ -82,12 +84,13 @@ struct FontPathAndSize // NOLINT(readability-identifier-naming)
 namespace std
 {
 template <>
-struct hash<FontPathAndSize>
+struct hash<FontInfo>
 {
-    size_t operator()(FontPathAndSize const& fd) const noexcept
+    size_t operator()(FontInfo const& fd) const noexcept
     {
         auto fnv = crispy::fnv<char>();
-        return size_t(fnv(fnv(fd.path), to_string(fd.size.pt))); // SSO should kick in.
+        return size_t(
+            fnv(fnv(fd.path), to_string(fd.size.pt), fmt::format("{}", fd.weight))); // SSO should kick in.
     }
 };
 } // namespace std
@@ -395,7 +398,7 @@ struct open_shaper::Private // {{{
     FT_Library ft {};
     font_locator* locator = nullptr;
     DPI dpi;
-    unordered_map<FontPathAndSize, font_key> fontPathAndSizeToKeyMapping;
+    unordered_map<FontInfo, font_key> fontPathAndSizeToKeyMapping;
     unordered_map<font_key, HbFontInfo> fontKeyToHbFontInfoMapping; // from font_key to FontInfo struct
 
     // Blacklisted font files as we tried them already and failed.
@@ -420,10 +423,12 @@ struct open_shaper::Private // {{{
         return FT_HAS_COLOR(fontKeyToHbFontInfoMapping.at(font).ftFace.get());
     }
 
-    optional<font_key> getOrCreateKeyForFont(font_source const& source, font_size fontSize)
+    optional<font_key> getOrCreateKeyForFont(font_source const& source,
+                                             font_size fontSize,
+                                             font_weight fontWeight)
     {
         auto const sourceId = identifierOf(source);
-        if (auto i = fontPathAndSizeToKeyMapping.find(FontPathAndSize { sourceId, fontSize });
+        if (auto i = fontPathAndSizeToKeyMapping.find(FontInfo { sourceId, fontSize, fontWeight });
             i != fontPathAndSizeToKeyMapping.end())
             return i->second;
 
@@ -444,7 +449,7 @@ struct open_shaper::Private // {{{
         auto fontInfo = HbFontInfo { source, {}, fontSize, std::move(ftFacePtr), std::move(hbFontPtr) };
 
         auto key = create_font_key();
-        fontPathAndSizeToKeyMapping.emplace(pair { FontPathAndSize { sourceId, fontSize }, key });
+        fontPathAndSizeToKeyMapping.emplace(pair { FontInfo { sourceId, fontSize, fontWeight }, key });
         fontKeyToHbFontInfoMapping.emplace(pair { key, std::move(fontInfo) });
         locatorLog()(
             "Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, sourceId, fontSize, dpi, metrics(key));
@@ -505,7 +510,8 @@ struct open_shaper::Private // {{{
         {
             result.resize(initialResultOffset); // rollback to initial size
 
-            optional<font_key> fallbackKeyOpt = getOrCreateKeyForFont(fallbackFont, fontInfo.size);
+            optional<font_key> fallbackKeyOpt =
+                getOrCreateKeyForFont(fallbackFont, fontInfo.size, fontInfo.description.weight);
             if (!fallbackKeyOpt.has_value())
                 continue;
 
@@ -576,7 +582,7 @@ optional<font_key> open_shaper::load_font(font_description const& description, f
     if (sources.empty())
         return nullopt;
 
-    optional<font_key> fontKeyOpt = _d->getOrCreateKeyForFont(sources[0], size);
+    optional<font_key> fontKeyOpt = _d->getOrCreateKeyForFont(sources[0], size, description.weight);
     if (!fontKeyOpt.has_value())
         return nullopt;
 
@@ -611,7 +617,8 @@ optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
     {
         for (font_source const& fallbackFont: fontInfo.fallbacks)
         {
-            optional<font_key> fallbackKeyOpt = _d->getOrCreateKeyForFont(fallbackFont, fontInfo.size);
+            optional<font_key> fallbackKeyOpt =
+                _d->getOrCreateKeyForFont(fallbackFont, fontInfo.size, fontInfo.description.weight);
             if (!fallbackKeyOpt.has_value())
                 continue;
             Require(_d->fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
