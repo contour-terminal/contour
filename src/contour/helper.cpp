@@ -598,8 +598,8 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     vtbackend::Terminal& terminal = session.terminal();
     vtbackend::ImageSize cellSize = renderer.gridMetrics().cellSize;
 
-    Require(renderer.hasRenderTarget());
-    renderer.renderTarget().setRenderSize(newPixelSize);
+    if (renderer.hasRenderTarget())
+        renderer.renderTarget().setRenderSize(newPixelSize);
     renderer.setPageSize(newPageSize);
     renderer.setMargin(computeMargin(renderer.gridMetrics().cellSize,
                                      newPageSize,
