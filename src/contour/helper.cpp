@@ -420,8 +420,14 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     auto const xDelta = event->angleDelta().x() > 0 ? 1 : event->angleDelta().x() < 0 ? -1 : 0;
     if (xDelta)
     {
+        session.addScrollX(xDelta);
+        inputLog()("Accumulate x scroll with current value {} ", session.getScrollX());
+    }
+    if (std::abs(session.getScrollX()) > unbox(session.terminal().cellPixelSize().width))
+    {
         auto const modifier = makeModifiers(event->modifiers());
-        auto const button = xDelta > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
+        auto const button = session.getScrollX() > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
+        session.resetScrollX();
         auto const pixelPosition =
             makeMousePixelPosition(event, session.profile().margins, session.contentScale());
 
@@ -432,8 +438,14 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     auto const yDelta = mouseWheelDelta(event);
     if (yDelta)
     {
+        session.addScrollY(yDelta);
+        inputLog()("Accumulate y scroll with current value {} ", session.getScrollY());
+    }
+    if (std::abs(session.getScrollY()) > unbox(session.terminal().cellPixelSize().height))
+    {
         auto const modifier = makeModifiers(event->modifiers());
-        auto const button = yDelta > 0 ? VTMouseButton::WheelUp : VTMouseButton::WheelDown;
+        auto const button = session.getScrollY() > 0 ? VTMouseButton::WheelUp : VTMouseButton::WheelDown;
+        session.resetScrollY();
         auto const pixelPosition =
             makeMousePixelPosition(event, session.profile().margins, session.contentScale());
 
