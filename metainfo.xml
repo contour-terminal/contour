@@ -107,6 +107,7 @@
     <release version="0.4.1" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes fast scrolling when using trackpad (#1360)</li>
           <li>Fixes variable fonts loading</li>
           <li>Fixes Command modifier for input mappings, such as Command+C or Command+V on on MacOS (#1379).</li>
           <li>Fixes CSIu encoding of shift modifier produced characters (#1373).</li>

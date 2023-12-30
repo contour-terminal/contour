@@ -149,6 +149,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return true;
     }
 
+    int getScrollX() const noexcept { return _accumulatedScrollX; }
+    void addScrollX(int v) noexcept { _accumulatedScrollX += v; }
+    void resetScrollX() noexcept { _accumulatedScrollX = 0; }
+
+    int getScrollY() const noexcept { return _accumulatedScrollY; }
+    void addScrollY(int v) noexcept { _accumulatedScrollY += v; }
+    void resetScrollY() noexcept { _accumulatedScrollY = 0; }
+
     QString title() const;
     void setTitle(QString const& value) { terminal().setWindowTitle(value.toStdString()); }
 
@@ -398,6 +406,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     double _contentScale = 1.0;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
+
+    int _accumulatedScrollX;
+    int _accumulatedScrollY;
 
     vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;
