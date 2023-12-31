@@ -616,7 +616,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void linefeed(ColumnOffset column);
 
     void writeCharToCurrentAndAdvance(char32_t codepoint) noexcept;
-    void clearAndAdvance(int offset) noexcept;
+    void clearAndAdvance(int oldWidth, int newWidth) noexcept;
 
     void scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin);
     void scrollUp(LineCount n, Margin margin);

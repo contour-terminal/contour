@@ -423,7 +423,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
         session.addScrollX(xDelta);
         inputLog()("Accumulate x scroll with current value {} ", session.getScrollX());
     }
-    if (std::abs(session.getScrollX()) > unbox(session.terminal().cellPixelSize().width))
+    if (std::abs(session.getScrollX()) > unbox<int>(session.terminal().cellPixelSize().width))
     {
         auto const modifier = makeModifiers(event->modifiers());
         auto const button = session.getScrollX() > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
@@ -441,7 +441,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
         session.addScrollY(yDelta);
         inputLog()("Accumulate y scroll with current value {} ", session.getScrollY());
     }
-    if (std::abs(session.getScrollY()) > unbox(session.terminal().cellPixelSize().height))
+    if (std::abs(session.getScrollY()) > unbox<int>(session.terminal().cellPixelSize().height))
     {
         auto const modifier = makeModifiers(event->modifiers());
         auto const button = session.getScrollY() > 0 ? VTMouseButton::WheelUp : VTMouseButton::WheelDown;

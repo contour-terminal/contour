@@ -566,8 +566,7 @@ void Screen<Cell>::writeTextInternal(char32_t sourceCodepoint)
     else
     {
         auto const extendedWidth = usePreviousCell().appendCharacter(codepoint);
-        if (extendedWidth > 0)
-            clearAndAdvance(extendedWidth);
+        clearAndAdvance(0, extendedWidth);
         _terminal->markCellDirty(_lastCursorPosition);
     }
 
@@ -592,8 +591,10 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
     {
         // Erase the left half of the wide char.
         Cell& prevCell = line.useCellAt(_cursor.position.column - 1);
-        prevCell.reset();
+        prevCell.reset(_cursor.graphicsRendition);
     }
+
+    auto const oldWidth = cell.width();
 
     cell.write(_cursor.graphicsRendition,
                codepoint,
@@ -602,7 +603,7 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 
     _lastCursorPosition = _cursor.position;
 
-    clearAndAdvance(cell.width());
+    clearAndAdvance(oldWidth, cell.width());
 
     // TODO: maybe move selector API up? So we can make this call conditional,
     //       and only call it when something is selected?
@@ -614,32 +615,23 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::clearAndAdvance(int offset) noexcept
+void Screen<Cell>::clearAndAdvance(int oldWidth, int newWidth) noexcept
 {
-    if (offset == 0)
-        return;
-
     bool const cursorInsideMargin =
         _terminal->isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
     auto const cellsAvailable = cursorInsideMargin ? *(margin().horizontal.to - _cursor.position.column) - 1
                                                    : *pageSize().columns - *_cursor.position.column - 1;
-    auto const n = min(offset, cellsAvailable);
 
-    if (n == offset)
-    {
-        _cursor.position.column++;
-        auto& line = currentLine();
-        for (int i = 1; i < n; ++i) // XXX It's not even clear if other TEs are doing that, too.
-        {
-            line.useCellAt(_cursor.position.column)
-                .reset(_cursor.graphicsRendition.with(CellFlag::WideCharContinuation), _cursor.hyperlink);
-            _cursor.position.column++;
-        }
-    }
+    auto const sgr = newWidth > 1 ? _cursor.graphicsRendition.with(CellFlag::WideCharContinuation)
+                                  : _cursor.graphicsRendition;
+    auto& line = currentLine();
+    for (int i = 1; i < min(max(oldWidth, newWidth), cellsAvailable); ++i)
+        line.useCellAt(_cursor.position.column + i).reset(sgr, _cursor.hyperlink);
+
+    if (newWidth == min(newWidth, cellsAvailable))
+        _cursor.position.column += ColumnOffset::cast_from(newWidth);
     else if (_cursor.autoWrap)
-    {
         _cursor.wrapPending = true;
-    }
 }
 
 template <typename Cell>
