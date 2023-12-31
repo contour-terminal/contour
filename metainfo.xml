@@ -111,6 +111,7 @@
           <li>Fixes variable fonts loading</li>
           <li>Fixes Command modifier for input mappings, such as Command+C or Command+V on on MacOS (#1379).</li>
           <li>Fixes CSIu encoding of shift modifier produced characters (#1373).</li>
+          <li>Fixes screen destruction on sibling cells when overwriting wide characters, such as Emoji, Kanji, etc.</li>
           <li>Changes VT sequence `DECSCUSR` (`CSI ? 0 SP q` and `CSI ? SP q`) to reset to user-configured cursor style (#1377).</li>
           <li>Remove `contour-latest` terminfo file. Please use `contour` terminfo instead.</li>
           <li>Adds `Command` as modifier to input mappings on MacOS to work along with `Meta` for convenience reasons (#1379).</li>
