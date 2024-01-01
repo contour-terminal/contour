@@ -1,5 +1,5 @@
 if(CONTOUR_QT_VERSION EQUAL "6")
-    find_package(Qt6 COMPONENTS Core Gui Quick QuickControls2 Multimedia REQUIRED)
+    find_package(Qt6 COMPONENTS Core Gui Quick QuickControls2 Multimedia OpenGL REQUIRED)
 else()
    find_package(Qt5 COMPONENTS Gui Gui Quick QuickControls2 Multimedia REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
