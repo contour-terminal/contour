@@ -498,7 +498,7 @@ install_deps_fedora()
             qt6-qtdeclarative-devel
             qt6-qtmultimedia-devel
             qt6-qtwayland
-            qt5-qtquickcontrols2-devel
+            qt6-qtquickcontrols2-devel
         "
     else
         packages="$packages
