@@ -108,6 +108,7 @@
       <description>
         <ul>
           <li>Fixes `scripts/install-deps.sh` for openSuSE (Tumbleweed) to install the correct dependencies.</li>
+          <li>Fixes missing dependencies for release .deb packages (#1397).</li>
         </ul>
       </description>
     </release>
