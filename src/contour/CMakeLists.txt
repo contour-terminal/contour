@@ -536,7 +536,7 @@ else()
     endif()
 
     if(LINUX)
-        set(DEPENDS_EXTRA ", libutempter0")
+        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libutempter0")
     endif()
 
     if(CONTOUR_QT_VERSION EQUAL "6")
