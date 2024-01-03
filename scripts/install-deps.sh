@@ -422,12 +422,7 @@ install_deps_suse()
         freetype-devel
         gcc-c++
         harfbuzz-devel
-        libqt5-qtbase
-        libqt5-qtbase-common-devel
-        libqt5-qtbase-devel
-        libqt5-qtmultimedia-devel
-        libqt5-qtx11extras-devel
-        libutempter-devel
+        utempter-devel
         libxcb-devel
         libssh2-devel
         ncurses-devel
@@ -436,6 +431,29 @@ install_deps_suse()
         range-v3-devel
         yaml-cpp-devel
     "
+
+    if test x$QTVER = x6; then
+        packages="$packages
+            qt6-base-common-devel
+            qt6-base-devel
+            qt6-gui-devel
+            qt6-multimedia-devel
+            qt6-opengl-devel
+            qt6-qml-devel
+            qt6-qt5compat-devel
+            qt6-quick-devel
+            qt6-quickcontrols2-devel
+        "
+    else
+        packages="$packages
+            libqt5-qtbase
+            libqt5-qtbase-common-devel
+            libqt5-qtbase-devel
+            libqt5-qtmultimedia-devel
+            libqt5-qtx11extras-devel
+
+        "
+    fi
     # Sadly, gsl-devel system package is too old to be used.
     sudo zypper install $SYSDEP_ASSUME_YES $packages
 }

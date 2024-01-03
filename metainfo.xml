@@ -107,7 +107,7 @@
     <release version="0.4.2" urgency="medium" type="development">
       <description>
         <ul>
-          <li> ... </li>
+          <li>Fixes `scripts/install-deps.sh` for openSuSE (Tumbleweed) to install the correct dependencies.</li>
         </ul>
       </description>
     </release>
