@@ -118,30 +118,43 @@ namespace
                                  PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
     }
 
-    int mouseWheelDelta(QWheelEvent* event) noexcept
+    QPoint transposed(QPoint p) noexcept
     {
-#if 1
-        // FIXME: Temporarily addressing a really bad Qt implementation detail
-        // as tracked here:
-        // https://github.com/contour-terminal/contour/issues/394
-        if (event->pixelDelta().y())
-            return event->pixelDelta().y();
-        if (event->angleDelta().y())
-            return event->angleDelta().y();
+        // NB: We cannot use QPoint::transposed(), because it is not available in older Qt versions.
+        return QPoint { p.y(), p.x() };
+    }
 
-        return 0;
-#else
-        // switch (event->orientation())
-        // {
-        //     case Qt::Orientation::Horizontal:
-        //         return event->pixelDelta().x() ? event->pixelDelta().x()
-        //                                         : event->angleDelta().x();
-        //     case Qt::Orientation::Vertical:
-        //         return event->pixelDelta().y() ? event->pixelDelta().y()
-        //                                         : event->angleDelta().y();
-        // }
-        return event->angleDelta().y();
-#endif
+    void sendWheelEventForDelta(QPoint const& delta,
+                                PixelCoordinate const& position,
+                                vtbackend::Modifiers modifiers,
+                                TerminalSession& session)
+    {
+        using VTMouseButton = vtbackend::MouseButton;
+
+        session.addScrollX(delta.x());
+        session.addScrollY(delta.y());
+
+        inputLog()("[{}] Accumulate scroll with current value {}",
+                   modifiers,
+                   crispy::point { session.getScrollX(), session.getScrollY() });
+
+        if (std::abs(session.getScrollX()) > unbox<int>(session.terminal().cellPixelSize().width))
+        {
+            session.sendMousePressEvent(modifiers,
+                                        session.getScrollX() > 0 ? VTMouseButton::WheelRight
+                                                                 : VTMouseButton::WheelLeft,
+                                        position);
+            session.resetScrollX();
+        }
+
+        if (std::abs(session.getScrollY()) > unbox<int>(session.terminal().cellPixelSize().height))
+        {
+            session.sendMousePressEvent(modifiers,
+                                        session.getScrollY() > 0 ? VTMouseButton::WheelUp
+                                                                 : VTMouseButton::WheelDown,
+                                        position);
+            session.resetScrollY();
+        }
     }
 
 } // namespace
@@ -415,40 +428,37 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 {
     using VTMouseButton = vtbackend::MouseButton;
+    using vtbackend::Modifier;
 
-    auto const xDelta = event->angleDelta().x() > 0 ? 1 : event->angleDelta().x() < 0 ? -1 : 0;
-    if (xDelta)
-    {
-        session.addScrollX(xDelta);
-        inputLog()("Accumulate x scroll with current value {} ", session.getScrollX());
-    }
-    if (std::abs(session.getScrollX()) > unbox<int>(session.terminal().cellPixelSize().width))
-    {
-        auto const modifier = makeModifiers(event->modifiers());
-        auto const button = session.getScrollX() > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
-        session.resetScrollX();
-        auto const pixelPosition =
-            makeMousePixelPosition(event, session.profile().margins, session.contentScale());
+    auto const modifiers = makeModifiers(event->modifiers());
 
-        session.sendMousePressEvent(modifier, button, pixelPosition);
+    // NOTE: Qt is playing some weird games with the mouse wheel events, i.e. if Alt is pressed
+    //       it will send horizontal wheel events instead of vertical ones. We need to compensate
+    //       for that here.
+
+    auto const pixelDelta =
+        (modifiers & Modifier::Alt) ? transposed(event->pixelDelta()) : event->pixelDelta();
+
+    auto const numDegrees =
+        ((modifiers & Modifier::Alt) ? transposed(event->angleDelta()) : event->angleDelta()) / 8;
+
+    auto const pixelPosition =
+        makeMousePixelPosition(event, session.profile().margins, session.contentScale());
+
+    if (!pixelDelta.isNull())
+    {
+        sendWheelEventForDelta(pixelDelta, pixelPosition, modifiers, session);
         event->accept();
     }
-
-    auto const yDelta = mouseWheelDelta(event);
-    if (yDelta)
+    else if (!numDegrees.isNull())
     {
-        session.addScrollY(yDelta);
-        inputLog()("Accumulate y scroll with current value {} ", session.getScrollY());
-    }
-    if (std::abs(session.getScrollY()) > unbox<int>(session.terminal().cellPixelSize().height))
-    {
-        auto const modifier = makeModifiers(event->modifiers());
-        auto const button = session.getScrollY() > 0 ? VTMouseButton::WheelUp : VTMouseButton::WheelDown;
-        session.resetScrollY();
-        auto const pixelPosition =
-            makeMousePixelPosition(event, session.profile().margins, session.contentScale());
-
-        session.sendMousePressEvent(modifier, button, pixelPosition);
+        auto const numSteps = numDegrees / 15;
+        auto const cellSize = session.terminal().cellPixelSize();
+        auto const scaledDelta = QPoint {
+            numSteps.x() * unbox<int>(cellSize.width),
+            numSteps.y() * unbox<int>(cellSize.height),
+        };
+        sendWheelEventForDelta(scaledDelta, pixelPosition, modifiers, session);
         event->accept();
     }
 }
