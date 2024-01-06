@@ -52,6 +52,8 @@ if(CONTOUR_TESTING)
         find_package(Catch2 REQUIRED)
         set(THIRDPARTY_BUILTIN_Catch2 "system package")
     endif()
+else()
+    set(THIRDPARTY_BUILTIN_Catch2 "(tests disabled)")
 endif()
 
 if(TARGET fmt)
