@@ -438,9 +438,11 @@ install_deps_suse()
             qt6-base-devel
             qt6-gui-devel
             qt6-multimedia-devel
+            qt6-multimedia-imports
             qt6-opengl-devel
             qt6-qml-devel
             qt6-qt5compat-devel
+            qt6-qt5compat-imports
             qt6-quick-devel
             qt6-quickcontrols2-devel
         "
@@ -498,7 +500,7 @@ install_deps_fedora()
             qt6-qtdeclarative-devel
             qt6-qtmultimedia-devel
             qt6-qtwayland
-            qt5-qtquickcontrols2-devel
+            qt6-qtquickcontrols2-devel
         "
     else
         packages="$packages
