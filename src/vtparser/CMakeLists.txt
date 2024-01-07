@@ -8,7 +8,12 @@ add_library(vtparser STATIC
     ParserEvents.h
 )
 set_target_properties(vtparser PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-target_link_libraries(vtparser PUBLIC crispy::core unicode::unicode fmt::fmt-header-only Microsoft.GSL::GSL)
+target_link_libraries(vtparser PUBLIC
+    Microsoft.GSL::GSL
+    fmt::fmt-header-only
+    range-v3::range-v3
+    unicode::unicode
+)
 target_include_directories(vtparser PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>

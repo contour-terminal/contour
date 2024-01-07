@@ -2,9 +2,9 @@
 #include <vtparser/Parser.h>
 #include <vtparser/ParserEvents.h>
 
-#include <crispy/indexed.h>
-
 #include <fmt/format.h>
+
+#include <range/v3/view/enumerate.hpp>
 
 #include <map>
 #include <ostream>
@@ -12,20 +12,20 @@
 namespace vtparser
 {
 
-using namespace std;
+using ranges::views::enumerate;
 
 void parserTableDot(std::ostream& os) // {{{
 {
-    using Transition = pair<State, State>;
+    using Transition = std::pair<State, State>;
     using Range = ParserTable::Range;
     using RangeSet = std::vector<Range>;
 
     ParserTable const& table = ParserTable::get();
     // (State, Byte) -> State
     auto transitions = std::map<Transition, RangeSet> {};
-    for ([[maybe_unused]] auto const&& [sourceState, sourceTransitions]: crispy::indexed(table.transitions))
+    for ([[maybe_unused]] auto const&& [sourceState, sourceTransitions]: enumerate(table.transitions))
     {
-        for (auto const [i, targetState]: crispy::indexed(sourceTransitions))
+        for (auto const [i, targetState]: enumerate(sourceTransitions))
         {
             auto const ch = static_cast<uint8_t>(i);
             if (targetState != State::Undefined)
@@ -73,7 +73,7 @@ void parserTableDot(std::ostream& os) // {{{
         os << fmt::format(R"(  "{}" -> "{}" )", sourceState, targetStateName);
         os << "[";
         os << "label=\"";
-        for (auto const&& [rangeCount, u]: crispy::indexed(t.second))
+        for (auto const&& [rangeCount, u]: enumerate(t.second))
         {
             if (rangeCount)
             {
