@@ -7,10 +7,17 @@ endif()
 
 option(STRONGHASH_USE_INTRINSICS "Build StrongHash with AES-NI (x86-64) / NEON (ARM64) support [default: ON]" ON)
 
+if(WIN32)
+    set(PLATFORM_SUFFIX "_win32")
+else()
+    set(PLATFORM_SUFFIX "_unix")
+endif()
+
 set(crispy_SOURCES
     App.cpp App.h
     BufferObject.cpp BufferObject.h
     CLI.cpp CLI.h
+    console${PLATFORM_SUFFIX}.cpp console.h
     Comparison.h
     LRUCache.h
     StrongLRUCache.h
