@@ -613,18 +613,13 @@ void TextRenderer::appendCellTextToClusterGroup(u32string_view codepoints,
                                                 vtbackend::RGBColor color)
 {
     bool const attribsChanged = color != _textClusterGroup.color || style != _textClusterGroup.style;
-    bool const hasText = !codepoints.empty() && codepoints[0] != 0x20;
-    bool const noText = !hasText;
-    bool const textStartFound = !_textStartFound && hasText;
-    if (noText)
-        _textStartFound = false;
-    if (attribsChanged || textStartFound || noText)
+    bool const noText = codepoints.empty() || codepoints[0] == 0x20;
+    if (attribsChanged || noText)
     {
         if (_textClusterGroup.cellCount)
             flushTextClusterGroup(); // also increments text start position
         _textClusterGroup.color = color;
         _textClusterGroup.style = style;
-        _textStartFound = textStartFound;
     }
 
     for (char32_t const codepoint: codepoints)
@@ -697,7 +692,6 @@ void TextRenderer::flushTextClusterGroup()
 
     _textClusterGroup.resetAndMovePenForward(_textClusterGroup.cellCount
                                              * unbox<int>(_gridMetrics.cellSize.width));
-    _textStartFound = false;
 }
 
 Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetadata(
