@@ -427,7 +427,6 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
 void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 {
-    using VTMouseButton = vtbackend::MouseButton;
     using vtbackend::Modifier;
 
     auto const modifiers = makeModifiers(event->modifiers());
