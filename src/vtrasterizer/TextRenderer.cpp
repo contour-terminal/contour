@@ -136,7 +136,6 @@ Making use of reserved glyph slots
 
 #include <crispy/algorithm.h>
 #include <crispy/assert.h>
-#include <crispy/indexed.h>
 #include <crispy/range.h>
 
 #include <libunicode/convert.h>
@@ -146,6 +145,7 @@ Making use of reserved glyph slots
 #include <fmt/ostream.h>
 
 #include <range/v3/algorithm/copy.hpp>
+#include <range/v3/view/enumerate.hpp>
 
 #include <algorithm>
 
@@ -958,7 +958,7 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
         // clang-format on
 
         msg.append(" (");
-        for (auto const [i, codepoint]: crispy::indexed(codepoints))
+        for (auto const [i, codepoint]: ranges::views::enumerate(codepoints))
         {
             if (i)
                 msg.append(" ");

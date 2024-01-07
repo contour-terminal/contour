@@ -4,6 +4,7 @@
 #include <crispy/logstore.h>
 #include <crispy/times.h>
 
+#include <range/v3/view/enumerate.hpp>
 #include <range/v3/view/iota.hpp>
 
 #include <algorithm>
@@ -97,7 +98,7 @@ namespace // {{{ helper
     auto namePrefix(parse_context const& context, char delim = '.') -> string // {{{
     {
         string output;
-        for (size_t i = 0; i < context.currentCommand.size(); ++i) // TODO: use crispy::indexed()
+        for (auto const&& [i, cmd]: ranges::views::enumerate(context.currentCommand))
         {
             command const* v = context.currentCommand.at(i);
             if (i != 0)

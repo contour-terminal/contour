@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/App.h>
-#include <crispy/indexed.h>
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
 #include <fmt/chrono.h>
+
+#include <range/v3/view/enumerate.hpp>
 
 #include <algorithm>
 #include <array>
@@ -276,7 +277,8 @@ void app::customizeLogStoreOutput()
 
         auto result = string {};
 
-        for (auto const [i, line]: crispy::indexed(crispy::split(msg.text(), '\n')))
+        auto const lines = crispy::split(msg.text(), '\n');
+        for (auto const [i, line]: ranges::views::enumerate(lines))
         {
             if (i != 0)
                 result += "        ";
@@ -316,8 +318,8 @@ void app::customizeLogStoreOutput()
         }();
 
         auto result = string {};
-
-        for (auto const [i, line]: crispy::indexed(crispy::split(msg.text(), '\n')))
+        auto const lines = crispy::split(msg.text(), '\n');
+        for (auto const [i, line]: ranges::views::enumerate(lines))
         {
             if (i != 0)
                 result += "        ";
