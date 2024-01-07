@@ -24,7 +24,6 @@ set(crispy_SOURCES
     escape.h
     file_descriptor.h
     flags.h
-    indexed.h
     logstore.cpp logstore.h
     overloaded.h
     reference.h
@@ -125,7 +124,6 @@ if(CRISPY_TESTING)
         StrongLRUHashtable_test.cpp
         TrieMap_test.cpp
         base64_test.cpp
-        indexed_test.cpp
         compose_test.cpp
         utils_test.cpp
         result_test.cpp

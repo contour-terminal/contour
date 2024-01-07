@@ -5,7 +5,6 @@
 
 #include <crispy/defines.h>
 #include <crispy/escape.h>
-#include <crispy/indexed.h>
 #include <crispy/sort.h>
 
 #include <fmt/format.h>

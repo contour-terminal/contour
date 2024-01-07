@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/overloaded.h>
-
 #include <libunicode/convert.h>
 #include <libunicode/scan.h>
 

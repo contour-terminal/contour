@@ -2,22 +2,15 @@
 #pragma once
 #include <vtparser/Parser.h>
 
-#include <crispy/assert.h>
-#include <crispy/escape.h>
-#include <crispy/logstore.h>
-#include <crispy/utils.h>
-
 #include <libunicode/utf8.h>
 
 #include <array>
+#include <cassert>
 #include <string_view>
 #include <tuple>
 
 namespace vtparser
 {
-
-auto const inline vtTraceParserLog =
-    logstore::category("vt.trace.parser", "Logs terminal parser instruction trace.");
 
 namespace
 {
@@ -399,18 +392,6 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     assert(subEnd <= chunk.data() + chunk.size());
     assert(_scanState.next <= chunk.data() + chunk.size());
 
-#if defined(LIBTERMINAL_LOG_TRACE)
-    if (vtTraceParserLog)
-        vtTraceParserLog()(
-            "[Unicode] Scanned text: maxCharCount {}; cells {}; bytes {}; UTF-8 ({}/{}): \"{}\"",
-            maxCharCount,
-            cellCount,
-            byteCount,
-            _scanState.utf8.currentLength,
-            _scanState.utf8.expectedLength,
-            crispy::escape(std::string_view { input, byteCount }));
-#endif
-
     auto const text = std::string_view { subStart, byteCount };
     if (_scanState.utf8.expectedLength == 0)
     {
@@ -451,13 +432,6 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
 {
     (void) actionClass;
     auto const ch = static_cast<char>(codepoint);
-
-#if defined(LIBTERMINAL_LOG_TRACE)
-    if constexpr (TraceStateChanges)
-        if (vtTraceParserLog && action != Action::Ignore && action != Action::Undefined)
-            vtTraceParserLog()(
-                "handle: {} {} {} {}", _state, actionClass, action, crispy::escape(static_cast<uint8_t>(ch)));
-#endif
 
     switch (action)
     {

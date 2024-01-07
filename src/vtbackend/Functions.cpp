@@ -4,7 +4,6 @@
 
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
-#include <crispy/indexed.h>
 #include <crispy/sort.h>
 #include <crispy/times.h>
 #include <crispy/utils.h>

@@ -5,13 +5,13 @@
 
 #include <crispy/algorithm.h>
 #include <crispy/assert.h>
-#include <crispy/indexed.h>
 #include <crispy/times.h>
 
 #include <libunicode/convert.h>
 #include <libunicode/ucd_fmt.h>
 
 #include <range/v3/algorithm/any_of.hpp>
+#include <range/v3/view/enumerate.hpp>
 #include <range/v3/view/iota.hpp>
 
 #include <limits>
@@ -314,7 +314,7 @@ namespace
         if (!missingGlyph)
             return;
 
-        for (auto&& [i, gpos]: crispy::indexed(result))
+        for (auto&& [i, gpos]: ranges::views::enumerate(result))
             if (glyphMissing(gpos))
                 gpos.glyph.index = glyph_index { missingGlyph };
     }
@@ -667,7 +667,7 @@ void open_shaper::shape(font_key font,
         logMessage.append([=]() { auto s = ostringstream(); s << presentation; return s.str(); }());
         // clang-format on
         logMessage.append("):");
-        for (auto [i, codepoint]: crispy::indexed(codepoints))
+        for (auto [i, codepoint]: ranges::views::enumerate(codepoints))
             logMessage.append(" {}:U+{:x}", clusters[i], static_cast<unsigned>(codepoint));
         logMessage.append("\n");
         logMessage.append("Using font: key={}, path=\"{}\"\n", font, identifierOf(fontInfo.primary));
