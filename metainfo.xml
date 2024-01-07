@@ -108,6 +108,7 @@
       <description>
         <ul>
           <li>Fixes some text run segmentation problems, e.g., not making use of some programming ligatures (#395).</li>
+          <li>Fixes mouse scroll wheel events going into the wrong direction if `Alt` modifier was pressed at the same time (#394).</li>
           <li>Fixes `scripts/install-deps.sh` for openSuSE (Tumbleweed) to install the correct dependencies.</li>
           <li>Fixes missing dependencies for release .deb packages (#1397).</li>
         </ul>
