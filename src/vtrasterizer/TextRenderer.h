@@ -199,7 +199,6 @@ class TextRenderer: public Renderable
     };
     TextClusterGroup _textClusterGroup {};
 
-    bool _textStartFound = false;
     bool _updateInitialPenPosition = false;
 };
 
