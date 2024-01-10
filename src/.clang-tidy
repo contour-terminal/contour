@@ -62,8 +62,10 @@ Checks: >-
   -readability-simplify-boolean-expr,
   -readability-uppercase-literal-suffix,
   -readability-use-anyofallof,
+  misc-const-correctness,
 WarningsAsErrors: >-
   readability-identifier-naming,
+  misc-const-correctness,
   modernize-use-nullptr,
 UseColor: true
 HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer)/'
