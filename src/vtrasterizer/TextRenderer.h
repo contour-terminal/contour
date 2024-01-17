@@ -199,7 +199,7 @@ class TextRenderer: public Renderable
     };
     TextClusterGroup _textClusterGroup {};
 
-    bool _updateInitialPenPosition = false;
+    bool _forceUpdateInitialPenPosition = false;
 };
 
 } // namespace vtrasterizer
