@@ -294,24 +294,24 @@ TEST_CASE("strong_lru_hashtable.get_or_emplace", "[lrucache]")
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 4 }, lru_capacity { 2 });
     auto& cache = *cachePtr;
 
-    int& a = cache.get_or_emplace(h(2), [](auto) { return 4; });
+    int const& a = cache.get_or_emplace(h(2), [](auto) { return 4; });
     CHECK(a == 4);
     CHECK(cache.at(h(2)) == 4);
     CHECK(cache.size() == 1);
     CHECK(joinHumanReadable(cache.hashes()) == sh(2));
 
-    int& a2 = cache.get_or_emplace(h(2), [](auto) { return -4; });
+    int const& a2 = cache.get_or_emplace(h(2), [](auto) { return -4; });
     CHECK(a2 == 4);
     CHECK(cache.at(h(2)) == 4);
     CHECK(cache.size() == 1);
 
-    int& b = cache.get_or_emplace(h(3), [](auto) { return 6; });
+    int const& b = cache.get_or_emplace(h(3), [](auto) { return 6; });
     CHECK(b == 6);
     CHECK(cache.at(h(3)) == 6);
     CHECK(cache.size() == 2);
     CHECK(joinHumanReadable(cache.hashes()) == sh(3, 2));
 
-    int& c = cache.get_or_emplace(h(4), [](auto) { return 8; });
+    int const& c = cache.get_or_emplace(h(4), [](auto) { return 8; });
     CHECK(joinHumanReadable(cache.hashes()) == sh(4, 3));
     CHECK(c == 8);
     CHECK(cache.at(h(4)) == 8);
@@ -319,7 +319,7 @@ TEST_CASE("strong_lru_hashtable.get_or_emplace", "[lrucache]")
     CHECK(cache.contains(h(3)));
     CHECK_FALSE(cache.contains(h(2))); // thrown out
 
-    int& b2 = cache.get_or_emplace(h(3), [](auto) { return -3; });
+    int const& b2 = cache.get_or_emplace(h(3), [](auto) { return -3; });
     CHECK(joinHumanReadable(cache.hashes()) == sh(3, 4));
     CHECK(b2 == 6);
     CHECK(cache.at(h(3)) == 6);

@@ -778,7 +778,7 @@ namespace detail
 
         atlas::Buffer operator|(Pixmap a, MosaicBlock const& b)
         {
-            for (RatioBlock block: b.blocks)
+            for (RatioBlock const block: b.blocks)
                 fillBlock(a.buffer, a.size, block.from, block.to, a.filler);
             return std::move(a.buffer);
         }

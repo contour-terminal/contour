@@ -40,7 +40,7 @@ template <typename S>
 /// Takes a textual screenshot using the terminals render buffer.
 [[nodiscard]] inline std::vector<std::string> textScreenshot(vtbackend::Terminal const& terminal)
 {
-    vtbackend::RenderBufferRef renderBuffer = terminal.renderBuffer();
+    vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
 
     std::vector<std::string> lines;
     lines.resize(terminal.pageSize().lines.as<size_t>());

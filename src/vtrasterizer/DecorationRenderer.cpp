@@ -299,7 +299,7 @@ void DecorationRenderer::renderDecoration(Decorator decoration,
     {
         auto const tileIndex = _directMapping.toTileIndex(static_cast<uint32_t>(decoration));
         auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
-        TextureAtlas::TileCreateData tileData = createTileData(decoration, tileLocation);
+        auto const tileData = createTileData(decoration, tileLocation);
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
         renderTile({ pos.x + unbox(i) * unbox<int>(_gridMetrics.cellSize.width) },
                    { pos.y - unbox<int>(tileAttributes.bitmapSize.height) },

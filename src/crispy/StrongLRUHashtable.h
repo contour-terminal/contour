@@ -403,7 +403,7 @@ lru_hashtable_stats strong_lru_hashtable<Value>::fetchAndClearStats() noexcept
 template <typename Value>
 void strong_lru_hashtable<Value>::clear()
 {
-    entry& sentinel = sentinelEntry();
+    entry const& sentinel = sentinelEntry();
     auto entryIndex = sentinel.nextInLRU;
     while (entryIndex)
     {
@@ -795,7 +795,7 @@ uint32_t strong_lru_hashtable<Value>::allocateEntry(strong_hash const& hash, uin
     else
         ++_size;
 
-    uint32_t poppedEntryIndex = sentinel.nextWithSameHash;
+    uint32_t const poppedEntryIndex = sentinel.nextWithSameHash;
     Require(1 <= poppedEntryIndex && poppedEntryIndex <= _capacity.value);
 
     entry& poppedEntry = _entries[poppedEntryIndex];
@@ -850,12 +850,12 @@ inline int strong_lru_hashtable<Value>::validateChange(int adj)
 #if defined(DEBUG_STRONG_LRU_HASHTABLE)
     int count = 0;
 
-    entry& sentinel = sentinelEntry();
+    entry const& sentinel = sentinelEntry();
     size_t lastOrdering = sentinel.ordering;
 
     for (uint32_t entryIndex = sentinel.nextInLRU; entryIndex != 0;)
     {
-        entry& entry = _entries[entryIndex];
+        entry const& entry = _entries[entryIndex];
         Require(entry.ordering < lastOrdering);
         lastOrdering = entry.ordering;
         entryIndex = entry.nextInLRU;

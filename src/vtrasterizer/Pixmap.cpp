@@ -137,20 +137,19 @@ Pixmap& Pixmap::segment_bar(int which)
     auto const b = unbox<int>(size.height) - baseLine - z / 2;
     auto const m = t + (b - t) / 2;
 
+    // clang-format off
     switch (which)
     {
         case 1: return segment_line(*this, Orientation::Horizontal, BaseOffset { t }, From { l }, To { r });
-        case 2:
-            return segment_line(*this, Orientation::Vertical, BaseOffset { r }, From { t + z }, To { m - z });
+        case 2: return segment_line(*this, Orientation::Vertical, BaseOffset { r }, From { t + z }, To { m - z });
         case 3: return segment_line(*this, Orientation::Horizontal, BaseOffset { m }, From { l }, To { r });
-        case 4:
-            return segment_line(*this, Orientation::Vertical, BaseOffset { l }, From { t + z }, To { m - z });
-        case 5:
-            return segment_line(*this, Orientation::Vertical, BaseOffset { r }, From { m + z }, To { b - z });
+        case 4: return segment_line(*this, Orientation::Vertical, BaseOffset { l }, From { t + z }, To { m - z });
+        case 5: return segment_line(*this, Orientation::Vertical, BaseOffset { r }, From { m + z }, To { b - z });
         case 6: return segment_line(*this, Orientation::Horizontal, BaseOffset { b }, From { l }, To { r });
-        case 7:
-            return segment_line(*this, Orientation::Vertical, BaseOffset { l }, From { m + z }, To { b - z });
+        case 7: return segment_line(*this, Orientation::Vertical, BaseOffset { l }, From { m + z }, To { b - z });
+        default: crispy::unreachable();
     }
+    // clang-format on
 
     assert(false);
     return *this;

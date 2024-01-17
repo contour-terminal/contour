@@ -89,7 +89,7 @@ namespace
     }
 
     template <typename T, typename Fn>
-    inline void bound(T& bindable, Fn&& callable)
+    inline void bound(T& bindable, Fn const& callable)
     {
         bindable.bind();
         try
@@ -258,7 +258,7 @@ void OpenGLRenderer::initializeTextureRendering()
     CHECKED_GL(glBindVertexArray(_textVAO));
 
     constexpr auto const BufferStride = (3 + 4 + 4) * sizeof(GLfloat);
-    constexpr auto* const VertexOffset = (void const*) nullptr;
+    constexpr auto const* const VertexOffset = (void const*) nullptr;
     const auto* const TexCoordOffset = (void const*) (3 * sizeof(GLfloat)); // NOLINT
     const auto* const ColorOffset = (void const*) (7 * sizeof(GLfloat));    // NOLINT
 
@@ -355,7 +355,7 @@ void OpenGLRenderer::logInfo()
     displayLog()("[FYI] OpenGL version      : {}.{}", versionMajor, versionMinor);
     displayLog()("[FYI] Widget size         : {} ({})", _renderTargetSize, _viewSize);
 
-    string glslVersions = (char const*) glFunctions.glGetString(GL_SHADING_LANGUAGE_VERSION);
+    string const glslVersions = (char const*) glFunctions.glGetString(GL_SHADING_LANGUAGE_VERSION);
 #if 0 // defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
     QOpenGLExtraFunctions& glFunctionsExtra = *QOpenGLContext::currentContext()->extraFunctions();
     GLint glslNumShaderVersions {};

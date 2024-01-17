@@ -286,13 +286,9 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     void append(std::string_view sequence) { _pendingSequence += sequence; }
 
     template <typename... Args>
-    void append(fmt::format_string<Args...> const& text, Args&&... args)
+    void append(fmt::format_string<Args...> const& text, Args... args)
     {
-#if defined(__APPLE__) || defined(_MSC_VER)
         append(fmt::vformat(text, fmt::make_format_args(args...)));
-#else
-        append(fmt::format(text, std::forward<Args>(args)...));
-#endif
     }
 
     KeyMode _cursorKeysMode = KeyMode::Normal;

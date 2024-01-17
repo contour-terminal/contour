@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <gsl/pointers>
+
 #include <array>
 #include <cerrno>
 
@@ -20,7 +22,7 @@ termios getTerminalSettings(int fd) noexcept;
 termios constructTerminalSettings(int fd) noexcept;
 bool applyTerminalSettings(int fd, termios const& tio);
 bool setFileFlags(int fd, int flags) noexcept;
-void saveClose(int* fd) noexcept;
+void saveClose(gsl::not_null<int*> fd) noexcept;
 void saveDup2(int a, int b) noexcept;
 
 // {{{ impl
@@ -75,9 +77,9 @@ inline void setFileBlocking(int fd, bool blocking) noexcept
     setFileFlags(fd, blocking ? 0 : O_NONBLOCK);
 }
 
-inline void saveClose(int* fd) noexcept
+inline void saveClose(gsl::not_null<int*> fd) noexcept
 {
-    if (fd && *fd != -1)
+    if (*fd != -1)
     {
         ::close(*fd);
         *fd = -1;
@@ -148,7 +150,7 @@ inline void UnixPipe::close()
 
 inline void UnixPipe::closeReader() noexcept
 {
-    util::saveClose(&pfd[0]);
+    util::saveClose(&pfd[0]); // NOLINT(readability-container-data-pointer)
 }
 
 inline void UnixPipe::closeWriter() noexcept

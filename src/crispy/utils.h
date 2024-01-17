@@ -118,14 +118,14 @@ constexpr inline bool split(std::basic_string_view<T> text, T delimiter, Callbac
     size_t b = 0;
     while ((b = text.find(delimiter, a)) != std::basic_string_view<T>::npos)
     {
-        if (!(callback(text.substr(a, b - a))))
+        if (!(std::forward<Callback>(callback)(text.substr(a, b - a))))
             return false;
 
         a = b + 1;
     }
 
     if (a < text.size())
-        return callback(text.substr(a));
+        return std::forward<Callback>(callback)(text.substr(a));
 
     return true;
 }
@@ -164,7 +164,7 @@ inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs
     // e.g.: foo=bar::foo2=bar2:....
     while (i != std::string_view::npos)
     {
-        std::string_view param(text.data() + iBeg, i - iBeg);
+        auto const param = std::string_view(text.data() + iBeg, i - iBeg);
         if (auto const k = param.find('='); k != std::string_view::npos)
         {
             auto const key = param.substr(0, k);
@@ -176,7 +176,7 @@ inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs
         i = text.find(delimiter, iBeg);
     }
 
-    std::string_view param(text.data() + iBeg);
+    auto const param = std::string_view(text.data() + iBeg);
     if (auto const k = param.find('='); k != std::string_view::npos)
     {
         auto const key = param.substr(0, k);
@@ -425,7 +425,7 @@ inline std::string replace(std::string_view text, std::string_view pattern, T&& 
 
     std::ostringstream os;
     os << text.substr(0, i);
-    os << value;
+    os << std::forward<T>(value);
     os << text.substr(i + pattern.size());
     return os.str();
 }
@@ -501,12 +501,12 @@ constexpr T nextPowerOfTwo(T v) noexcept
     return v;
 }
 
-inline std::string humanReadableBytes(long double bytes)
+inline std::string humanReadableBytes(uint64_t bytes)
 {
-    if (bytes <= 1024.0)
+    if (bytes <= 1024)
         return fmt::format("{} bytes", unsigned(bytes));
 
-    auto const kb = bytes / 1024.0;
+    auto const kb = static_cast<long double>(bytes) / 1024.0;
     if (kb <= 1024.0)
         return fmt::format("{:.03} KB", kb);
 
@@ -519,7 +519,7 @@ inline std::string humanReadableBytes(long double bytes)
 }
 
 template <typename... Ts>
-constexpr void ignore_unused(Ts&&... /*values*/) noexcept
+constexpr void ignore_unused(Ts... /*values*/) noexcept
 {
 }
 

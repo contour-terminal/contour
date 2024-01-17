@@ -88,7 +88,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         auto const now = std::chrono::steady_clock::now();
         auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
-        return diff.count();
+        return static_cast<int>(diff.count());
     }
 
     int getFontSize() const noexcept { return static_cast<int>(_profile.fonts.size.pt); }

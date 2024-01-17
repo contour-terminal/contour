@@ -38,7 +38,7 @@ range(Iter, Iter) -> range<Iter>;
 template <typename Container>
 auto reversed(Container&& container)
 {
-    return range(container.rbegin(), container.rend());
+    return range(std::forward<Container>(container).rbegin(), std::forward<Container>(container).rend());
 }
 
 } // namespace crispy

@@ -36,7 +36,7 @@ class VTWriter
     void write(Line<Cell> const& line);
 
     template <typename... T>
-    void write(fmt::format_string<T...> fmt, T&&... args);
+    void write(fmt::format_string<T...> fmt, T const&... args);
     void write(std::string_view s);
     void write(char32_t v);
 
@@ -72,7 +72,7 @@ class VTWriter
 };
 
 template <typename... Ts>
-inline void VTWriter::write(fmt::format_string<Ts...> fmt, Ts&&... args)
+inline void VTWriter::write(fmt::format_string<Ts...> fmt, Ts const&... args)
 {
 #if defined(__APPLE__)
     write(fmt::vformat(fmt, fmt::make_format_args(args...)));

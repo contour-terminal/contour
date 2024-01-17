@@ -23,7 +23,6 @@
 
 using std::bind;
 using std::cout;
-using std::endl;
 using std::exception;
 using std::left;
 using std::max;
@@ -136,7 +135,7 @@ void app::link(std::string command, std::function<int()> handler)
 
 void app::listDebugTags()
 {
-    auto categories = logstore::get();
+    auto& categories = logstore::get();
     sort(begin(categories), end(categories), [](auto const& a, auto const& b) {
         return a.get().name() < b.get().name();
     });
@@ -179,21 +178,21 @@ int app::licenseAction()
     constexpr auto Vert = "\u2502"sv;
     constexpr auto Cross = "\u256A"sv;
 
-    cout << endl
-         << _appTitle << ' ' << _appVersion << endl
-         << "License: " << _appLicense << endl
-         << "\u2550"sv * (_appTitle.size() + _appVersion.size() + 1) << endl
-         << endl;
+    cout << '\n'
+         << _appTitle << ' ' << _appVersion << '\n'
+         << "License: " << _appLicense << '\n'
+         << "\u2550"sv * (_appTitle.size() + _appVersion.size() + 1) << '\n'
+         << '\n';
 
     cout << setw((int) titleWidth) << "Project" << ' ' << Vert << ' ' << setw((int) licenseWidth) << "License"
-         << ' ' << Vert << ' ' << "Project URL" << endl;
+         << ' ' << Vert << ' ' << "Project URL" << '\n';
 
     cout << Horiz * titleWidth << Horiz << Cross << Horiz << Horiz * licenseWidth << Horiz << Cross << Horiz
-         << Horiz * urlWidth << endl;
+         << Horiz * urlWidth << '\n';
 
     for (auto const& project: crispy::cli::about::store())
         cout << setw((int) titleWidth) << project.title << ' ' << Vert << ' ' << setw((int) licenseWidth)
-             << project.license << ' ' << Vert << ' ' << project.url << endl;
+             << project.license << ' ' << Vert << ' ' << project.url << '\n';
 
     return EXIT_SUCCESS;
 }
@@ -229,12 +228,12 @@ int app::run(int argc, char const* argv[])
             if (parameters().get<bool>(name))
                 return handler();
 
-        std::cerr << "Usage error." << endl;
+        std::cerr << "Usage error." << '\n';
         return EXIT_FAILURE;
     }
     catch (exception const& e)
     {
-        std::cerr << fmt::format("Unhandled error caught. {}", e.what()) << endl;
+        std::cerr << fmt::format("Unhandled error caught. {}", e.what()) << '\n';
         return EXIT_FAILURE;
     }
 }
@@ -265,15 +264,13 @@ void app::customizeLogStoreOutput()
             return { tagStart, msgStart, resetSGR };
         }();
 
-#if 1
         auto const fileName = fs::path(msg.location().file_name()).filename().string();
-#else
-        // fileName with path to file relative to project root
-        auto const srcIndex = string_view(msg.location().file_name()).find("src");
-        auto const fileName = string(srcIndex != string_view::npos
-                                         ? string_view(msg.location().file_name()).substr(srcIndex + 4)
-                                         : string(msg.location().file_name()));
-#endif
+
+        // // fileName with path to file relative to project root
+        // auto const srcIndex = string_view(msg.location().file_name()).find("src");
+        // auto const fileName = string(srcIndex != string_view::npos
+        //                                  ? string_view(msg.location().file_name()).substr(srcIndex + 4)
+        //                                  : string(msg.location().file_name()));
 
         auto result = string {};
 

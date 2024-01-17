@@ -233,7 +233,8 @@ namespace
         if (holds_alternative<font_path>(source))
         {
             auto const& sourcePath = get<font_path>(source);
-            FT_Error ec = FT_New_Face(ft, sourcePath.value.c_str(), sourcePath.collectionIndex, &ftFace);
+            FT_Error const ec =
+                FT_New_Face(ft, sourcePath.value.c_str(), sourcePath.collectionIndex, &ftFace);
             if (!ftFace)
             {
                 // clang-format off
@@ -244,9 +245,9 @@ namespace
         }
         else if (holds_alternative<font_memory_ref>(source))
         {
-            int faceIndex = 0;
+            int const faceIndex = 0;
             auto const& memory = get<font_memory_ref>(source);
-            FT_Error ec = FT_New_Memory_Face(
+            FT_Error const ec = FT_New_Memory_Face(
                 ft, memory.data.data(), static_cast<FT_Long>(memory.data.size()), faceIndex, &ftFace);
             if (!ftFace)
             {
@@ -610,7 +611,7 @@ font_metrics open_shaper::metrics(font_key key) const
 optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
 {
     Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
-    HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
+    HbFontInfo const& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
 
     glyph_index glyphIndex { FT_Get_Char_Index(fontInfo.ftFace.get(), codepoint) };
     if (!glyphIndex.value)

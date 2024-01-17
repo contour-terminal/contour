@@ -54,7 +54,7 @@ struct encoder_state
 };
 
 template <typename Alphabet, typename sink>
-constexpr void encode(uint8_t ch, Alphabet const& alphabet, encoder_state& state, sink&& s)
+constexpr void encode(uint8_t ch, Alphabet const& alphabet, encoder_state& state, sink const& s)
 {
     state.pending[state.modulo] = ch;
     if (++state.modulo != 3)
@@ -69,7 +69,7 @@ constexpr void encode(uint8_t ch, Alphabet const& alphabet, encoder_state& state
 }
 
 template <typename Alphabet, typename sink>
-constexpr void finish(Alphabet const& alphabet, encoder_state& state, sink&& s)
+constexpr void finish(Alphabet const& alphabet, encoder_state& state, sink const& s)
 {
     if (state.modulo == 0)
         return;
@@ -87,12 +87,10 @@ constexpr void finish(Alphabet const& alphabet, encoder_state& state, sink&& s)
         }
         break;
         case 1: {
-            // clang-format off
-        s(alphabet[(input[0] >> 2) & 0x3F],
+            s(alphabet[(input[0] >> 2) & 0x3F],
               alphabet[static_cast<size_t>(input[0] & 0x03) << 4],
               '=',
               '=');
-            // clang-format on
             state.modulo = 0;
         }
         break;

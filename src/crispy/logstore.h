@@ -6,6 +6,8 @@
 
 #include <fmt/format.h>
 
+#include <gsl/pointers>
+
 #include <algorithm>
 #include <cassert>
 #include <functional>
@@ -73,14 +75,14 @@ using source_location = source_location_custom;
 class message_builder
 {
   private:
-    category const& _category;
+    gsl::not_null<category const*> _category;
     source_location _location;
     std::string _buffer;
 
   public:
     explicit message_builder(category const& cat, source_location loc = source_location::current());
 
-    [[nodiscard]] category const& get_category() const noexcept { return _category; }
+    [[nodiscard]] category const& get_category() const noexcept { return *_category; }
     [[nodiscard]] source_location const& location() const noexcept { return _location; }
 
     [[nodiscard]] std::string const& text() const noexcept { return _buffer; }
@@ -92,7 +94,7 @@ class message_builder
     }
 
     template <typename... T>
-    message_builder& append(fmt::format_string<T...> fmt, T&&... args)
+    message_builder& append(fmt::format_string<T...> fmt, T const&... args)
     {
         _buffer += fmt::vformat(fmt, fmt::make_format_args(args...));
         return *this;
@@ -103,8 +105,8 @@ class message_builder
         _buffer += msg;
         return *this;
     }
-    template <typename... T>
-    message_builder& operator()(std::string_view fmt, T&&... args)
+    template <typename... Ts>
+    message_builder& operator()(std::string_view fmt, Ts const&... args)
     {
         _buffer += fmt::vformat(fmt, fmt::make_format_args(args...));
         return *this;
@@ -218,8 +220,8 @@ void configure(std::string_view filterString);
 // {{{ implementation
 inline std::string message_builder::message() const
 {
-    if (_category.get_formatter())
-        return _category.get_formatter()(*this);
+    if (_category->get_formatter())
+        return _category->get_formatter()(*this);
     else if (!_buffer.empty() && _buffer.back() == '\n')
         return _buffer;
     else if (!_buffer.empty())
@@ -291,13 +293,13 @@ inline void configure(std::string_view filterString)
 }
 
 inline message_builder::message_builder(logstore::category const& cat, source_location location):
-    _category { cat }, _location { location }
+    _category { &cat }, _location { location }
 {
 }
 
 inline message_builder::~message_builder()
 {
-    _category.sink().write(*this);
+    _category->sink().write(*this);
 }
 
 inline category::category(std::string_view name,

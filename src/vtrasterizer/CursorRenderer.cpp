@@ -78,7 +78,7 @@ void CursorRenderer::initializeDirectMapping()
             auto const directMappingIndex = toDirectMappingIndex(shape, width, 0);
             auto const tileIndex = _directMapping.toTileIndex(directMappingIndex);
             auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
-            TextureAtlas::TileCreateData tileData = createTileData(shape, width, tileLocation);
+            TextureAtlas::TileCreateData const tileData = createTileData(shape, width, tileLocation);
             uint32_t const offsetX = 0;
             auto const tileWidth = _gridMetrics.cellSize.width;
             for (TileSliceIndex const slice: atlas::sliced(tileWidth, offsetX, tileData.bitmapSize))

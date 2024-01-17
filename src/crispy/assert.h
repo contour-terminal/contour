@@ -66,7 +66,7 @@ namespace detail
             else
                 fmt::print("[{}:{}] {} {}\n", file, line, message, text);
         }
-        catch (...)
+        catch (...) // NOLINT(bugprone-empty-catch)
         {
         }
         std::abort();

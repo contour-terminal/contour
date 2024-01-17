@@ -125,7 +125,7 @@ class posix_read_selector
                 ;
         }
 
-        for (int fd: _fds)
+        for (int const fd: _fds)
             if (FD_ISSET(fd, &_reader))
                 _pending.push_back(fd);
 

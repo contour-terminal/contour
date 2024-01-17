@@ -279,7 +279,7 @@ int ContourGuiApp::fontConfigAction()
     vtrasterizer::FontDescriptions const& fonts = _config.profile(_config.defaultProfileName)->fonts;
     text::font_description const& fontDescription = fonts.regular;
     text::font_locator& fontLocator = createFontLocator(fonts.fontLocator);
-    text::font_source_list fontSources = fontLocator.locate(fontDescription);
+    text::font_source_list const fontSources = fontLocator.locate(fontDescription);
 
     fmt::print("Matching fonts using  : {}\n", fonts.fontLocator);
     fmt::print("Font description      : {}\n", fontDescription);
@@ -348,7 +348,7 @@ int ContourGuiApp::terminalGuiAction()
     auto qtArgsCount = static_cast<int>(qtArgsPtr.size());
 
     // NB: We use QApplication over QGuiApplication because we want to use SystemTrayIcon.
-    QApplication app(qtArgsCount, (char**) qtArgsPtr.data());
+    QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
 
     setupQCoreApplication();
 

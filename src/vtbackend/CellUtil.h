@@ -71,12 +71,12 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-[[nodiscard]] inline bool compareText(Cell const& cell, char asciiCharacter) noexcept
+[[nodiscard]] inline bool compareText(Cell const& cell, char32_t character) noexcept
 {
     if (cell.codepointCount() != 1)
-        return asciiCharacter == 0 && cell.codepointCount() == 0;
+        return character == 0 && cell.codepointCount() == 0;
 
-    return cell.codepoint(0) == static_cast<char32_t>(asciiCharacter);
+    return cell.codepoint(0) == character;
 }
 
 template <typename Cell>

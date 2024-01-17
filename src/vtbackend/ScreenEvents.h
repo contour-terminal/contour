@@ -69,8 +69,8 @@ class MockScreenEvents: public ScreenEvents
   public:
     void reply(std::string_view response) override { replyData += response; }
 
-    template <typename... T>
-    void reply(fmt::format_string<T...> fmt, T&&... args)
+    template <typename... Ts>
+    void reply(fmt::format_string<Ts...> fmt, Ts const&... args)
     {
         reply(fmt::vformat(fmt, fmt::make_format_args(args...)));
     }

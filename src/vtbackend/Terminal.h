@@ -626,7 +626,7 @@ class Terminal
     void reply(std::string_view text);
 
     template <typename... Ts>
-    void reply(fmt::format_string<Ts...> message, Ts&&... args)
+    void reply(fmt::format_string<Ts...> message, Ts const&... args)
     {
 #if defined(__APPLE__) || defined(_MSC_VER)
         reply(fmt::vformat(message, fmt::make_format_args(args...)));
@@ -837,7 +837,7 @@ class Terminal
     struct BlinkerState
     {
         bool state = false;
-        std::chrono::milliseconds interval;
+        std::chrono::milliseconds interval {};
     };
     mutable BlinkerState _slowBlinker { false, std::chrono::milliseconds { 500 } };
     mutable BlinkerState _rapidBlinker { false, std::chrono::milliseconds { 300 } };

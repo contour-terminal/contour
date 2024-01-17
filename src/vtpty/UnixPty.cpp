@@ -300,7 +300,7 @@ int UnixPty::write(std::string_view data)
     auto const* buf = data.data();
     auto const size = data.size();
 
-    ssize_t rv = ::write(_masterFd, buf, size);
+    ssize_t const rv = ::write(_masterFd, buf, size);
     if (ptyOutLog)
     {
         if (rv >= 0)
