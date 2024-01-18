@@ -789,7 +789,7 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
 void TerminalSession::sendCharEvent(
     char32_t value, uint32_t physicalKey, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
 {
-    inputLog()("Character {} event received: {} {}",
+    inputLog()("Character {} event received: {} '{}'",
                eventType,
                modifiers,
                crispy::escape(unicode::convert_to<char>(value)));
