@@ -40,7 +40,7 @@ crispy::result<SshHostConfigMap> loadSshConfig(std::filesystem::path const& conf
 crispy::result<SshHostConfigMap> loadSshConfig();
 
 /// SSH Login session.
-class SshSession: public Pty
+class SshSession final: public Pty
 {
   public:
     // clang-format off

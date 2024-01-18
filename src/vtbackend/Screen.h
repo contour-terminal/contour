@@ -54,7 +54,8 @@ class ScreenBase: public SequenceHandler
 
     [[nodiscard]] virtual bool contains(CellLocation coord) const noexcept = 0;
     [[nodiscard]] virtual bool isCellEmpty(CellLocation position) const noexcept = 0;
-    [[nodiscard]] virtual bool compareCellTextAt(CellLocation position, char codepoint) const noexcept = 0;
+    [[nodiscard]] virtual bool compareCellTextAt(CellLocation position,
+                                                 char32_t codepoint) const noexcept = 0;
     [[nodiscard]] virtual std::string cellTextAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual LineFlags lineFlagsAt(LineOffset line) const noexcept = 0;
     virtual void enableLineFlags(LineOffset lineOffset, LineFlags flags, bool enable) noexcept = 0;
@@ -513,7 +514,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return _grid.lineAt(position.line).cellEmptyAt(position.column);
     }
 
-    [[nodiscard]] bool compareCellTextAt(CellLocation position, char codepoint) const noexcept override
+    [[nodiscard]] bool compareCellTextAt(CellLocation position, char32_t codepoint) const noexcept override
     {
         auto const& cell = _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>());
         return CellUtil::compareText(cell, codepoint);

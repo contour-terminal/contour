@@ -258,8 +258,8 @@ crispy::result<SshHostConfigMap> loadSshConfig(std::filesystem::path const& conf
             continue; // Skip empty lines
 
         // Remove leading whitespace
-        size_t start = line.find_first_not_of(" \t");
-        size_t end = line.find('#'); // Ignore comments
+        size_t const start = line.find_first_not_of(" \t");
+        size_t const end = line.find('#'); // Ignore comments
         if (start == std::string::npos || start == end)
             continue; // Skip comment lines or empty lines
 

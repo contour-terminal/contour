@@ -37,24 +37,24 @@ class ContourGuiApp: public QObject, public ContourApp
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
 
     int run(int argc, char const* argv[]) override;
-    crispy::cli::command parameterDefinition() const override;
+    [[nodiscard]] crispy::cli::command parameterDefinition() const override;
 
     void newWindow();
     static void showNotification(std::string_view title, std::string_view content);
 
-    std::string profileName() const;
+    [[nodiscard]] std::string profileName() const;
 
     using ExitStatus = std::optional<std::variant<vtpty::Process::ExitStatus, vtpty::SshSession::ExitStatus>>;
 
-    ExitStatus exitStatus() const noexcept { return _exitStatus; }
+    [[nodiscard]] ExitStatus exitStatus() const noexcept { return _exitStatus; }
 
-    std::optional<std::filesystem::path> dumpStateAtExit() const;
+    [[nodiscard]] std::optional<std::filesystem::path> dumpStateAtExit() const;
 
     void onExit(TerminalSession& session);
 
     config::Config& config() noexcept { return _config; }
-    config::Config const& config() const noexcept { return _config; }
-    config::TerminalProfile const& profile() const noexcept
+    [[nodiscard]] config::Config const& config() const noexcept { return _config; }
+    [[nodiscard]] config::TerminalProfile const& profile() const noexcept
     {
         if (const auto* const profile = config().profile(profileName()))
             return *profile;
@@ -66,13 +66,13 @@ class ContourGuiApp: public QObject, public ContourApp
 
     TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
 
-    std::chrono::seconds earlyExitThreshold() const;
+    [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;
 
-    std::string programPath() const { return _argv[0]; }
+    [[nodiscard]] std::string programPath() const { return _argv[0]; }
 
     [[nodiscard]] static QUrl resolveResource(std::string_view path);
 
-    vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
+    [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
   private:
     static void ensureTermInfoFile();

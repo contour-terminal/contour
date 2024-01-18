@@ -175,7 +175,7 @@ void renderSelection(Selection const& selection, Renderer&& render)
 {
     for (Selection::Range const& range: selection.ranges())
         for (auto const col: crispy::times(*range.fromColumn, *range.length()))
-            render(CellLocation { range.line, ColumnOffset::cast_from(col) });
+            std::forward<Renderer>(render)(CellLocation { range.line, ColumnOffset::cast_from(col) });
 }
 // }}}
 

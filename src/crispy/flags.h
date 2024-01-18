@@ -102,19 +102,19 @@ class flags
         return flags<flag_type>::from_value(_value | static_cast<value_type>(other));
     }
 
-    constexpr flags<flag_type> without(flags<flag_type> other) const noexcept
+    [[nodiscard]] constexpr flags<flag_type> without(flags<flag_type> other) const noexcept
     {
         return flags<flag_type>::from_value(_value & ~other.value());
     }
 
-    constexpr auto operator<=>(flags<flag_type> const& other) const noexcept = default;
+    [[nodiscard]] constexpr auto operator<=>(flags<flag_type> const& other) const noexcept = default;
 
-    constexpr flags<flag_type> operator|(flags<flag_type> other) const noexcept
+    [[nodiscard]] constexpr flags<flag_type> operator|(flags<flag_type> other) const noexcept
     {
         return flags<flag_type>::from_value(_value | other.value());
     }
 
-    constexpr flags<flag_type> operator|(flag_type other) const noexcept
+    [[nodiscard]] constexpr flags<flag_type> operator|(flag_type other) const noexcept
     {
         return flags<flag_type>::from_value(_value | static_cast<value_type>(other));
     }

@@ -114,13 +114,13 @@ namespace
             return terminal.alternateScreen().grid().rightMostNonEmptyAt(lineOffset);
     }
 
-    constexpr std::optional<std::pair<char, bool>> matchingPairOfChar(char input) noexcept
+    constexpr std::optional<std::pair<char, bool>> matchingPairOfChar(char32_t input) noexcept
     {
         auto constexpr Pairs = std::array {
-            std::pair { '(', ')' },
-            std::pair { '[', ']' },
-            std::pair { '{', '}' },
-            std::pair { '<', '>' },
+            std::pair { U'(', U')' },
+            std::pair { U'[', U']' },
+            std::pair { U'{', U'}' },
+            std::pair { U'<', U'>' },
         };
 
         for (auto const& pair: Pairs)
@@ -552,7 +552,7 @@ CellLocation ViCommands::findMatchingPairFrom(CellLocation location) const noexc
         return findMatchingPairLeft(b, a, 0);
 }
 
-CellLocation ViCommands::findMatchingPairLeft(char left, char right, int initialDepth) const noexcept
+CellLocation ViCommands::findMatchingPairLeft(char32_t left, char32_t right, int initialDepth) const noexcept
 {
     auto a = cursorPosition;
     auto depth = initialDepth;
@@ -580,7 +580,7 @@ CellLocation ViCommands::findMatchingPairLeft(char left, char right, int initial
     return a;
 }
 
-CellLocation ViCommands::findMatchingPairRight(char left, char right, int initialDepth) const noexcept
+CellLocation ViCommands::findMatchingPairRight(char32_t left, char32_t right, int initialDepth) const noexcept
 {
     auto depth = initialDepth;
     auto b = cursorPosition;
@@ -750,7 +750,7 @@ CellLocation ViCommands::snapToCellRight(CellLocation location) const noexcept
     return location;
 }
 
-bool ViCommands::compareCellTextAt(CellLocation position, char codepoint) const noexcept
+bool ViCommands::compareCellTextAt(CellLocation position, char32_t codepoint) const noexcept
 {
     return _terminal->currentScreen().compareCellTextAt(position, codepoint);
 }

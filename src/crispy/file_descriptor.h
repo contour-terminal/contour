@@ -35,7 +35,7 @@ struct close_native_handle<int>
     {
         for (;;)
         {
-            int rv = ::close(fd);
+            int const rv = ::close(fd);
             switch (rv)
             {
                 case 0: return;

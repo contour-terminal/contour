@@ -58,7 +58,7 @@ Grid<Cell> setupGrid(PageSize pageSize,
     auto grid = Grid<Cell>(pageSize, reflowOnResize, maxHistoryLineCount);
 
     int cursor = 0;
-    for (string_view line: init)
+    for (string_view const line: init)
     {
         if (cursor == *pageSize.lines)
             grid.scrollUp(LineCount(1));
@@ -214,7 +214,7 @@ TEST_CASE("LogicalLines.iterator", "[grid]")
     grid.lineAt(LineOffset(1)).setWrapped(true);
     logGridText(grid, "After having set wrapped-flag.");
 
-    LogicalLines logicalLines = grid.logicalLines();
+    auto const logicalLines = grid.logicalLines();
     auto lineIt = logicalLines.begin();
 
     // ABC
@@ -411,7 +411,7 @@ TEST_CASE("resize_shrink_lines_with_history", "[grid]")
     auto const newPageSize = PageSize { LineCount(1), ColumnCount(3) };
     auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
     logGridText(grid, "BEFORE");
-    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    CellLocation const newCursorPos = grid.resize(newPageSize, curCursorPos, false);
     logGridText(grid, "AFTER");
     CHECK(grid.pageSize().columns == ColumnCount(3));
     CHECK(grid.pageSize().lines == LineCount(1));

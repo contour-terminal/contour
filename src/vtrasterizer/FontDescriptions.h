@@ -28,7 +28,7 @@ struct FontDescriptions
 {
     double dpiScale = 1.0;
     DPI dpi = { 0, 0 }; // 0 => auto-fill with defaults
-    text::font_size size;
+    text::font_size size { 12.0 };
     text::font_description regular;
     text::font_description bold;
     text::font_description italic;

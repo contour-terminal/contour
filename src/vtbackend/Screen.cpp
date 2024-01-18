@@ -1900,7 +1900,7 @@ void Screen<Cell>::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
     auto const imageOffset = PixelCoordinate {};
     auto const imageSize = pixelSize;
 
-    shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, pixelSize, std::move(rgbaData));
+    shared_ptr<Image const> const imageRef = uploadImage(ImageFormat::RGBA, pixelSize, std::move(rgbaData));
     renderImage(imageRef,
                 topLeft,
                 extent,
@@ -3813,7 +3813,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             return ApplyResult::Ok;
         }
         case CSIUENHCE: {
-            auto const flags = KeyboardEventFlags::from_value(static_cast<unsigned>(seq.param_or(0, 1)));
+            auto const flags = KeyboardEventFlags::from_value(seq.param_or(0, 1));
             auto const mode = seq.param_or(1, 1);
             if (_terminal->keyboardProtocol().stackDepth() <= 1)
                 return ApplyResult::Invalid;

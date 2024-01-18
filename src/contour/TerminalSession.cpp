@@ -1580,7 +1580,7 @@ bool TerminalSession::resetConfig()
         return false;
     }
 
-    config::Config defaultConfig;
+    config::Config const defaultConfig;
     try
     {
         config::loadConfigFromFile(_config.backingFilePath);

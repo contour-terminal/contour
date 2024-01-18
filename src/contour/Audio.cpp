@@ -44,13 +44,13 @@ Audio::Audio()
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     f.setSampleFormat(QAudioFormat::Int16);
-    QAudioDevice info(QMediaDevices::defaultAudioOutput());
+    QAudioDevice const info(QMediaDevices::defaultAudioOutput());
 #else
     f.setSampleSize(16);
     f.setCodec("audio/pcm");
     f.setByteOrder(QAudioFormat::LittleEndian);
     f.setSampleType(QAudioFormat::SignedInt);
-    QAudioDeviceInfo info(QAudioDeviceInfo::defaultOutputDevice());
+    QAudioDeviceInfo const info(QAudioDeviceInfo::defaultOutputDevice());
 #endif
 
     if (!info.isFormatSupported(f))
@@ -121,6 +121,6 @@ void Audio::handleStateChanged(QAudio::State state)
 std::vector<std::int16_t> Audio::createMusicalNote(double volume, int duration, int note) noexcept
 {
     Require(static_cast<int>(note) >= 0 && static_cast<int>(note) < 26);
-    double frequency = note == 0 ? 0 : 440.0 * std::pow(2, (note + 2) / 12.0);
+    double const frequency = note == 0 ? 0 : 440.0 * std::pow(2, (note + 2) / 12.0);
     return ::createMusicalNote(volume, duration, frequency);
 }

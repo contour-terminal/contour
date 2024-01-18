@@ -23,6 +23,7 @@ Checks: >-
   cppcoreguidelines-*,
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-avoid-const-or-ref-data-members,
   -cppcoreguidelines-avoid-do-while,
   -cppcoreguidelines-avoid-magic-numbers,
   -cppcoreguidelines-avoid-non-const-global-variables,
@@ -50,6 +51,7 @@ Checks: >-
   performance-*,
   -performance-no-int-to-ptr,
   readability-*,
+  -readability-avoid-unconditional-preprocessor-if,
   -readability-braces-around-statements,
   -readability-container-contains,
   -readability-else-after-return,
@@ -62,8 +64,10 @@ Checks: >-
   -readability-simplify-boolean-expr,
   -readability-uppercase-literal-suffix,
   -readability-use-anyofallof,
+  misc-const-correctness,
 WarningsAsErrors: >-
   readability-identifier-naming,
+  misc-const-correctness,
   modernize-use-nullptr,
 UseColor: true
 HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer)/'

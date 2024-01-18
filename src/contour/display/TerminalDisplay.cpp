@@ -203,7 +203,7 @@ namespace
     void reportUnhandledException(std::string_view const& where, exception const& e)
     {
         displayLog()("{}", unhandledExceptionMessage(where, e));
-        cerr << unhandledExceptionMessage(where, e) << endl;
+        cerr << unhandledExceptionMessage(where, e) << '\n';
     }
 
     // Returns the config file containing the user-configured DPI setting for KDE desktops.
@@ -896,6 +896,7 @@ void TerminalDisplay::onScrollBarValueChanged(int value)
     scheduleRedraw();
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 std::optional<double> TerminalDisplay::queryContentScaleOverride() const
 {
 #if !defined(__APPLE__) && !defined(_WIN32)

@@ -71,7 +71,7 @@ void tryAttachConsole()
 
 void qtCustomMessageOutput(QtMsgType type, const QMessageLogContext& context, const QString& msg)
 {
-    QByteArray localMsg = msg.toLocal8Bit();
+    QByteArray const localMsg = msg.toLocal8Bit();
     switch (type)
     {
         case QtDebugMsg:

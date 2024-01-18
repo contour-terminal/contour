@@ -32,7 +32,7 @@ TEST_CASE("Functions.SCOSC", "[Functions]")
 TEST_CASE("Functions.DECSLRM", "[Functions]")
 {
     // Maybe it is okay to not care about 0 and 1 arguments? Who's doing that?
-    SupportedSequences availableSequences;
+    SupportedSequences const availableSequences;
     FunctionDefinition const* f =
         vtbackend::selectControl(0, 2, 0, 's', availableSequences.activeSequences());
     REQUIRE(f);
@@ -41,7 +41,7 @@ TEST_CASE("Functions.DECSLRM", "[Functions]")
 
 TEST_CASE("Functions.OSC1", "[Functions]")
 {
-    SupportedSequences availableSequences;
+    SupportedSequences const availableSequences;
     FunctionDefinition const* osc = vtbackend::selectOSCommand(1, availableSequences.activeSequences());
     REQUIRE(osc);
     CHECK(*osc == SETICON);
@@ -49,7 +49,7 @@ TEST_CASE("Functions.OSC1", "[Functions]")
 
 TEST_CASE("Functions.OSC2", "[Functions]")
 {
-    SupportedSequences availableSequences;
+    SupportedSequences const availableSequences;
     FunctionDefinition const* osc = vtbackend::selectOSCommand(2, availableSequences.activeSequences());
     REQUIRE(osc);
     CHECK(*osc == SETWINTITLE);
@@ -57,7 +57,7 @@ TEST_CASE("Functions.OSC2", "[Functions]")
 
 TEST_CASE("Functions.OSC8", "[Functions]")
 {
-    SupportedSequences availableSequences;
+    SupportedSequences const availableSequences;
     FunctionDefinition const* osc = vtbackend::selectOSCommand(8, availableSequences.activeSequences());
     REQUIRE(osc);
     CHECK(*osc == HYPERLINK);
@@ -65,7 +65,7 @@ TEST_CASE("Functions.OSC8", "[Functions]")
 
 TEST_CASE("Functions.OSC777", "[Functions]")
 {
-    SupportedSequences availableSequences;
+    SupportedSequences const availableSequences;
     FunctionDefinition const* osc = vtbackend::selectOSCommand(777, availableSequences.activeSequences());
     REQUIRE(osc);
     CHECK(*osc == NOTIFY);

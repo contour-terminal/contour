@@ -616,7 +616,7 @@ void applyResize(vtbackend::ImageSize newPixelSize,
                           renderer.gridMetrics().cellSize,
                           applyContentScale(session.profile().margins, session.contentScale()));
     vtbackend::Terminal& terminal = session.terminal();
-    vtbackend::ImageSize cellSize = renderer.gridMetrics().cellSize;
+    vtbackend::ImageSize const cellSize = renderer.gridMetrics().cellSize;
 
     if (renderer.hasRenderTarget())
         renderer.renderTarget().setRenderSize(newPixelSize);

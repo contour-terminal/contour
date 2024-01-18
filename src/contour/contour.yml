@@ -536,6 +536,10 @@ color_schemes:
             background: '#1a1716'
             # Default foreground text color.
             foreground: '#d0d0d0'
+            # Default foreground text color when bold(/bright) mode is on.
+            bright_foreground: '#FFFFFF'
+            # Default foreground text color when dim mode is on.
+            dimmed_foreground: '#808080'
 
         # Background image support.
         background_image:

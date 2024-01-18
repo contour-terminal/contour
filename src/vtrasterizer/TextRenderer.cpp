@@ -834,7 +834,9 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
             auto [scaledGlyph, scaleFactor] = text::scale(glyph, emojiBoundingBox);
 
             glyph = std::move(scaledGlyph);
-            rasterizerLog()(" ==> scaled: {}/{}, factor {}", scaledGlyph, emojiBoundingBox, scaleFactor);
+
+            if (rasterizerLog)
+                rasterizerLog()(" ==> scaled: {}/{}, factor {}", glyph, emojiBoundingBox, scaleFactor);
         }
 
         // Assume colored (RGBA) bitmap glyphs to be emoji.

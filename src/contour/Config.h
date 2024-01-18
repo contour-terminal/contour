@@ -294,7 +294,7 @@ struct Config
         return nullptr;
     }
 
-    TerminalProfile const* profile(std::string const& name) const
+    [[nodiscard]] TerminalProfile const* profile(std::string const& name) const
     {
         assert(!name.empty());
         if (auto i = profiles.find(name); i != profiles.end())
@@ -309,7 +309,8 @@ struct Config
             return *prof;
         crispy::unreachable();
     }
-    TerminalProfile const& profile() const noexcept
+
+    [[nodiscard]] TerminalProfile const& profile() const noexcept
     {
         if (auto const* prof = profile(defaultProfileName); prof)
             return *prof;

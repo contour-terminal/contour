@@ -42,7 +42,7 @@ namespace detail
     class FunctionCallEvent: public QEvent
     {
       private:
-        using Fun = typename std::decay<F>::type;
+        using Fun = std::decay_t<F>;
         Fun _fun;
 
       public:

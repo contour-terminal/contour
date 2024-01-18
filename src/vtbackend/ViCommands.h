@@ -55,8 +55,12 @@ class ViCommands: public ViInputHandler::Executor
     [[nodiscard]] CellLocation prev(CellLocation location) const noexcept;
     [[nodiscard]] CellLocation next(CellLocation location) const noexcept;
     [[nodiscard]] CellLocation findMatchingPairFrom(CellLocation location) const noexcept;
-    [[nodiscard]] CellLocation findMatchingPairLeft(char left, char right, int initialDepth) const noexcept;
-    [[nodiscard]] CellLocation findMatchingPairRight(char left, char right, int initialDepth) const noexcept;
+    [[nodiscard]] CellLocation findMatchingPairLeft(char32_t left,
+                                                    char32_t right,
+                                                    int initialDepth) const noexcept;
+    [[nodiscard]] CellLocation findMatchingPairRight(char32_t left,
+                                                     char32_t right,
+                                                     int initialDepth) const noexcept;
     [[nodiscard]] CellLocationRange expandMatchingPair(TextObjectScope scope,
                                                        char left,
                                                        char right) const noexcept;
@@ -83,7 +87,7 @@ class ViCommands: public ViInputHandler::Executor
     /// any codepoints.
     [[nodiscard]] CellLocation snapToCellRight(CellLocation location) const noexcept;
 
-    [[nodiscard]] bool compareCellTextAt(CellLocation position, char codepoint) const noexcept;
+    [[nodiscard]] bool compareCellTextAt(CellLocation position, char32_t codepoint) const noexcept;
 
     // Cursor offset into the grid.
     CellLocation cursorPosition {};

@@ -215,10 +215,10 @@ namespace about
     }
 
     template <typename... Args>
-    void registerProjects(project&& project0, Args&&... more)
+    void registerProjects(project project0, Args... more)
     {
         store().emplace_back(project0);
-        registerProjects(std::forward<Args>(more)...);
+        registerProjects(more...);
     }
 } // namespace about
 

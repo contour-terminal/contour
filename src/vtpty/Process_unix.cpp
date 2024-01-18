@@ -110,7 +110,7 @@ Process::Process(string const& path,
 
 bool Process::isFlatpak()
 {
-    static bool check = fs::exists("/.flatpak-info");
+    static bool const check = fs::exists("/.flatpak-info");
     return check;
 }
 

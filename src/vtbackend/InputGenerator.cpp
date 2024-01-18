@@ -78,7 +78,7 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     // raw C0 code
     if (modifiers == Modifier::Control && characterEvent < 32)
     {
-        append(static_cast<uint8_t>(characterEvent));
+        append(static_cast<char>(characterEvent));
         return true;
     }
 
@@ -608,7 +608,7 @@ inline bool InputGenerator::append(uint8_t byte)
 inline bool InputGenerator::append(unsigned int asciiChar)
 {
     char buf[16];
-    int n = snprintf(buf, sizeof(buf), "%u", asciiChar);
+    int const n = snprintf(buf, sizeof(buf), "%u", asciiChar);
     return append(string_view(buf, static_cast<size_t>(n)));
 }
 

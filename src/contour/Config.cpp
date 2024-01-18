@@ -1222,7 +1222,7 @@ namespace
             auto fileContents = readFile(filePath);
             if (!fileContents)
                 continue;
-            YAML::Node subDocument = YAML::Load(fileContents.value());
+            YAML::Node const subDocument = YAML::Load(fileContents.value());
             UsedKeys usedColorKeys;
             auto colors = loadColorScheme(usedColorKeys, "", subDocument);
             // TODO: Check usedColorKeys for validity.
@@ -1270,7 +1270,7 @@ namespace
             if (node["features"] && node["features"] && node["features"].IsSequence())
             {
                 usedKeys.emplace(fmt::format("{}.{}", basePath, "features"));
-                YAML::Node featuresNode = node["features"];
+                YAML::Node const featuresNode = node["features"];
                 for (auto&& i: featuresNode)
                 {
                     auto const featureNode = i;

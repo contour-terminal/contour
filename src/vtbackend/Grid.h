@@ -153,15 +153,15 @@ struct LogicalLine
         {
             for (auto line = lines.begin(); line != lines.end(); ++line)
             {
-                std::u32string_view textOnThisLine(searchText.data(),
-                                                   lineLength - unbox<size_t>(startPosition));
+                std::u32string_view const textOnThisLine(searchText.data(),
+                                                         lineLength - unbox<size_t>(startPosition));
                 // Find how much of searchText is on this line
                 auto const result = searchPartialMatch(textOnThisLine, line->get());
                 if (result != 0)
                 {
                     // Match the remaining text
-                    std::u32string_view remainingTextToMatch(searchText.data() + result,
-                                                             searchText.size() - result);
+                    std::u32string_view const remainingTextToMatch(searchText.data() + result,
+                                                                   searchText.size() - result);
                     if (matchTextAt(remainingTextToMatch, ColumnOffset(0), line + 1))
                         return CellLocation { i, ColumnOffset(static_cast<int>(lineLength - result)) };
                 }
@@ -201,9 +201,9 @@ struct LogicalLine
         {
             for (auto line = lines.rbegin(); line != lines.rend(); ++line)
             {
-                std::u32string_view textOnThisLine(searchText.data() + searchText.size()
-                                                       - unbox<size_t>(startPosition),
-                                                   unbox<size_t>(startPosition));
+                std::u32string_view const textOnThisLine(searchText.data() + searchText.size()
+                                                             - unbox<size_t>(startPosition),
+                                                         unbox<size_t>(startPosition));
                 auto const result = searchPartialMatchReverse(textOnThisLine, line->get());
                 if (result != 0)
                 {

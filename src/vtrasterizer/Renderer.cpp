@@ -190,7 +190,7 @@ void Renderer::configureTextureAtlas()
     rendererLog()("- Atlas direct mapping : {} (for text rendering)", _atlasDirectMapping ? "enabled" : "disabled");
     // clang-format on
 
-    for (gsl::not_null<Renderable*>& renderable: renderables())
+    for (gsl::not_null<Renderable*> const& renderable: renderables())
         renderable->setTextureAtlas(*_textureAtlas);
 }
 

@@ -167,24 +167,24 @@ TEST_CASE("strong_lru_cache.get_or_emplace", "[lrucache]")
 {
     auto cache = strong_lru_cache<int, int>(strong_hashtable_size { 4 }, lru_capacity { 2 });
 
-    int& a = cache.get_or_emplace(2, [](auto) { return 4; });
+    int const& a = cache.get_or_emplace(2, [](auto) { return 4; });
     CHECK(a == 4);
     CHECK(cache.at(2) == 4);
     CHECK(cache.size() == 1);
     CHECK(joinHumanReadable(cache.keys()) == "2"sv);
 
-    int& a2 = cache.get_or_emplace(2, [](auto) { return -4; });
+    int const& a2 = cache.get_or_emplace(2, [](auto) { return -4; });
     CHECK(a2 == 4);
     CHECK(cache.at(2) == 4);
     CHECK(cache.size() == 1);
 
-    int& b = cache.get_or_emplace(3, [](auto) { return 6; });
+    int const& b = cache.get_or_emplace(3, [](auto) { return 6; });
     CHECK(b == 6);
     CHECK(cache.at(3) == 6);
     CHECK(cache.size() == 2);
     CHECK(joinHumanReadable(cache.keys()) == "3, 2"sv);
 
-    int& c = cache.get_or_emplace(4, [](auto) { return 8; });
+    int const& c = cache.get_or_emplace(4, [](auto) { return 8; });
     CHECK(joinHumanReadable(cache.keys()) == "4, 3"sv);
     CHECK(c == 8);
     CHECK(cache.at(4) == 8);
@@ -192,7 +192,7 @@ TEST_CASE("strong_lru_cache.get_or_emplace", "[lrucache]")
     CHECK(cache.contains(3));
     CHECK_FALSE(cache.contains(2)); // thrown out
 
-    int& b2 = cache.get_or_emplace(3, [](auto) { return -3; });
+    int const& b2 = cache.get_or_emplace(3, [](auto) { return -3; });
     CHECK(joinHumanReadable(cache.keys()) == "3, 4"sv);
     CHECK(b2 == 6);
     CHECK(cache.at(3) == 6);
