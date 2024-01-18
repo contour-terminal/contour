@@ -499,8 +499,14 @@ void TextRenderer::renderLine(vtbackend::RenderLine const& renderLine)
 
 void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
 {
-    if (cell.groupStart)
-        _updateInitialPenPosition = true;
+    // fmt::print("renderCell: {} {} {} {} {}\n",
+    //            cell.position,
+    //            unicode::convert_to<char>(u32string_view(cell.codepoints)),
+    //            _forceUpdateInitialPenPosition ? "forcedRestart" : "-",
+    //            cell.groupStart ? "groupStart" : "-",
+    //            cell.groupEnd ? "groupEnd" : "-");
+
+    _forceUpdateInitialPenPosition = _forceUpdateInitialPenPosition || cell.groupStart;
 
     renderCell(cell.position,
                cell.codepoints,
@@ -516,10 +522,11 @@ void TextRenderer::renderCell(vtbackend::CellLocation position,
                               TextStyle textStyle,
                               vtbackend::RGBColor foregroundColor)
 {
-    if (_updateInitialPenPosition)
+    if (_forceUpdateInitialPenPosition)
     {
-        _updateInitialPenPosition = false;
+        assert(_textClusterGroup.codepoints.empty());
         _textClusterGroup.initialPenPosition = _gridMetrics.mapBottomLeft(position);
+        _forceUpdateInitialPenPosition = false;
     }
 
     bool const isBoxDrawingCharacter = _fontDescriptions.builtinBoxDrawing && graphemeCluster.size() == 1
@@ -531,9 +538,8 @@ void TextRenderer::renderCell(vtbackend::CellLocation position,
             _boxDrawingRenderer.render(position.line, position.column, graphemeCluster[0], foregroundColor);
         if (success)
         {
-            if (!_updateInitialPenPosition)
-                flushTextClusterGroup();
-            _updateInitialPenPosition = true;
+            flushTextClusterGroup();
+            _forceUpdateInitialPenPosition = true;
             return;
         }
     }
@@ -613,8 +619,10 @@ void TextRenderer::appendCellTextToClusterGroup(u32string_view codepoints,
                                                 vtbackend::RGBColor color)
 {
     bool const attribsChanged = color != _textClusterGroup.color || style != _textClusterGroup.style;
-    bool const noText = codepoints.empty() || codepoints[0] == 0x20;
-    if (attribsChanged || noText)
+    bool const cellIsEmpty = codepoints.empty(); //|| codepoints[0] == 0x20;
+    bool const textStartsNewCluster = _textClusterGroup.cellCount == 0 && !cellIsEmpty;
+
+    if (attribsChanged || textStartsNewCluster)
     {
         if (_textClusterGroup.cellCount)
             flushTextClusterGroup(); // also increments text start position
@@ -628,17 +636,14 @@ void TextRenderer::appendCellTextToClusterGroup(u32string_view codepoints,
         _textClusterGroup.clusters.emplace_back(_textClusterGroup.cellCount);
     }
     _textClusterGroup.cellCount++;
+    if (cellIsEmpty)
+        flushTextClusterGroup(); // also increments text start position
 }
 
 void TextRenderer::flushTextClusterGroup()
 {
     if (!_textClusterGroup.codepoints.empty())
     {
-        // fmt::print("TextRenderer.flushTextClusterGroup: textPos={}, cellCount={}, width={}, count={}\n",
-        //            _textClusterGroup.initialPenPosition, _textClusterGroup.cellCount,
-        //            _gridMetrics.cellSize.width,
-        //            _textClusterGroup.codepoints.size());
-
         _textRendererEvents.onBeforeRenderingText();
 
         auto hash = hashTextAndStyle(
