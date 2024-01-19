@@ -265,10 +265,10 @@ bool Terminal::processInputOnce()
 
     if (!readResult)
     {
+        terminalLog()("PTY read failed. {}", strerror(errno));
         if (errno == EINTR || errno == EAGAIN)
             return true;
 
-        terminalLog()("PTY read failed. {}", strerror(errno));
         _pty->close();
         return false;
     }
