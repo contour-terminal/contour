@@ -109,6 +109,10 @@ jobs:
       run: cmake --build build/ --target unicode -- -j3
     - uses: ZedThree/clang-tidy-review@v0.14.0
       id: review
+      with:
+        lgtm_comment_body: ""
+        annotations: true
+        max_comments: 10
     - uses: ZedThree/clang-tidy-review/upload@v0.14.0 # Uploads an artefact containing clang_fixes.json
       id: upload-review
     - if: steps.review.outputs.total_comments > 0 # If there are any comments, fail the check
