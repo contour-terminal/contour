@@ -79,7 +79,7 @@ namespace
 
         std::stringstream sstr;
         crashLogger(sstr);
-        string crashLog = sstr.str();
+        string const crashLog = sstr.str();
 
         auto const logFileName = fmt::format(
             "contour-crash-{:%Y-%m-%d-%H-%M-%S}-pid-{}.log", std::chrono::system_clock::now(), getpid());

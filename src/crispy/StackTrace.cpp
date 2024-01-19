@@ -33,8 +33,6 @@
     #include <unwind.h>
 #endif
 
-#include <iostream>
-
 using std::nullopt;
 using std::optional;
 using std::regex;
@@ -100,15 +98,15 @@ optional<debug_info> stack_trace::getDebugInfoForFrame(void const* frameAddress)
     auto pipe = system_wrap();
     if (!pipe.good())
         return nullopt;
-    pid_t childPid = fork();
+    pid_t const childPid = fork();
     switch (childPid)
     {
         case -1: perror("vfork"); return nullopt;
         case 0: // in child
         {
-            std::string addr2lineExe = "/usr/bin/addr2line";
+            std::string const addr2lineExe = "/usr/bin/addr2line";
             char exe[512] {};
-            if (ssize_t rv = readlink("/proc/self/exe", exe, sizeof(exe)); rv < 0)
+            if (ssize_t const rv = readlink("/proc/self/exe", exe, sizeof(exe)); rv < 0)
                 _exit(EXIT_FAILURE);
             char addr[32];
             snprintf(addr, sizeof(addr), "%p", frameAddress);
