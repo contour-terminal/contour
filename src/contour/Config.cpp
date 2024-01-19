@@ -1512,7 +1512,7 @@ namespace
         terminalProfile.shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
 
         // {{{ Populate environment variables
-        std::optional<fs::path> appTerminfoDir;
+        std::optional<fs::path> appTerminfoDir; // NOLINT(misc-const-correctness)
 #if defined(__APPLE__)
         {
             char buf[1024];

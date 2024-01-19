@@ -285,10 +285,12 @@ class ContourHeadlessBench: public crispy::app
         fmt::print("Test time              : {}.{:03} seconds\n", msecs.count() / 1000, msecs.count() % 1000);
         fmt::print("Data transferred       : {}\n", crispy::humanReadableBytes(bytesTransferred));
         fmt::print("Reader loop iterations : {}\n", loopIterations);
-        fmt::print("Average size per read  : {}\n",
-                   crispy::humanReadableBytes(static_cast<long double>(bytesTransferred)
-                                              / static_cast<long double>(loopIterations)));
-        fmt::print("Transfer speed         : {} per second\n", crispy::humanReadableBytes(mbPerSecs));
+        fmt::print(
+            "Average size per read  : {}\n",
+            crispy::humanReadableBytes(static_cast<uint64_t>(static_cast<long double>(bytesTransferred)
+                                                             / static_cast<long double>(loopIterations))));
+        fmt::print("Transfer speed         : {} per second\n",
+                   crispy::humanReadableBytes(static_cast<uint64_t>(mbPerSecs)));
 
         return EXIT_SUCCESS;
     }

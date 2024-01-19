@@ -81,6 +81,7 @@ void Sequencer::param(char ch) noexcept
         case '7':
         case '8':
         case '9': paramDigit(ch); break;
+        default: crispy::unreachable();
     }
 }
 
