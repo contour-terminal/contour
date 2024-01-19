@@ -22,7 +22,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 - ✅ High-DPI support.
 - ✅ Vertical Line Markers (quickly jump to markers in your history!)
 - ✅ Vi-like input modes for improved selection and copy'n'paste experience and Vi-like `scrolloff` feature.
-- ✅ Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.
+- ✅ Blurred behind transparent background support for Windows 10 and above as well as the KDE and GNOME desktop environment on Linux.
 - ✅ Blurrable Background image support.
 - ✅ Runtime configuration reload
 - ✅ 256-color and Truecolor support
