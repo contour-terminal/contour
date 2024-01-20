@@ -111,6 +111,7 @@
           <li>Fixes mouse scroll wheel events going into the wrong direction if `Alt` modifier was pressed at the same time (#394).</li>
           <li>Fixes `scripts/install-deps.sh` for openSuSE (Tumbleweed) to install the correct dependencies.</li>
           <li>Fixes missing dependencies for release .deb packages (#1397).</li>
+          <li>Fixes legacy keyboard input protocol not reporting non-Alt modifier (#1411).</li>
         </ul>
       </description>
     </release>
