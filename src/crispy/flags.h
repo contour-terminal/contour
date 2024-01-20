@@ -102,6 +102,11 @@ class flags
         return flags<flag_type>::from_value(_value | static_cast<value_type>(other));
     }
 
+    [[nodiscard]] constexpr flags<flag_type> with(flags<flag_type> other) const noexcept
+    {
+        return flags<flag_type>::from_value(_value | other.value());
+    }
+
     [[nodiscard]] constexpr flags<flag_type> without(flags<flag_type> other) const noexcept
     {
         return flags<flag_type>::from_value(_value & ~other.value());
