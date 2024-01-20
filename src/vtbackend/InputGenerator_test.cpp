@@ -121,6 +121,57 @@ TEST_CASE("InputGenerator.Ctrl+_", "[terminal,input]")
     REQUIRE(escape(input.peek()) == escape(c0));
 }
 
+TEST_CASE("InputGenerator.Modifier+ArrowKeys", "[terminal,input]")
+{
+    struct Mapping
+    {
+        Modifiers modifiers;
+        Key key;
+        string_view expected;
+    };
+
+    auto constexpr None = Modifiers {};
+    auto constexpr Alt = Modifiers { Modifier::Alt };
+    auto constexpr Shift = Modifiers { Modifier::Shift };
+    auto constexpr Control = Modifiers { Modifier::Control };
+    auto constexpr Super = Modifiers { Modifier::Super };
+
+    auto constexpr Mappings = std::array {
+        Mapping { None, Key::UpArrow, "\033[A"sv },
+        Mapping { None, Key::DownArrow, "\033[B"sv },
+        Mapping { None, Key::RightArrow, "\033[C"sv },
+        Mapping { None, Key::LeftArrow, "\033[D"sv },
+        Mapping { Shift, Key::UpArrow, "\033[1;2A"sv },
+        Mapping { Shift, Key::DownArrow, "\033[1;2B"sv },
+        Mapping { Shift, Key::RightArrow, "\033[1;2C"sv },
+        Mapping { Shift, Key::LeftArrow, "\033[1;2D"sv },
+        Mapping { Alt, Key::UpArrow, "\033[1;3A"sv },
+        Mapping { Alt, Key::DownArrow, "\033[1;3B"sv },
+        Mapping { Alt, Key::RightArrow, "\033[1;3C"sv },
+        Mapping { Alt, Key::LeftArrow, "\033[1;3D"sv },
+        Mapping { Control, Key::UpArrow, "\033[1;5A"sv },
+        Mapping { Control, Key::DownArrow, "\033[1;5B"sv },
+        Mapping { Control, Key::RightArrow, "\033[1;5C"sv },
+        Mapping { Control, Key::LeftArrow, "\033[1;5D"sv },
+        Mapping { Super, Key::UpArrow, "\033[1;9A"sv },
+        Mapping { Super, Key::DownArrow, "\033[1;9B"sv },
+        Mapping { Super, Key::RightArrow, "\033[1;9C"sv },
+        Mapping { Super, Key::LeftArrow, "\033[1;9D"sv },
+        // some mixes
+        Mapping { Shift | Alt, Key::UpArrow, "\033[1;4A"sv },
+        Mapping { Control | Alt, Key::UpArrow, "\033[1;7A"sv },
+        Mapping { Control | Alt | Super, Key::UpArrow, "\033[1;15A"sv },
+    };
+
+    for (auto const& mapping: Mappings)
+    {
+        auto input = InputGenerator {};
+        input.generate(mapping.key, mapping.modifiers, KeyboardEventType::Press);
+        INFO(fmt::format("Testing {}+{} => {}", mapping.modifiers, mapping.key, escape(mapping.expected)));
+        REQUIRE(escape(input.peek()) == escape(mapping.expected));
+    }
+}
+
 TEST_CASE("InputGenerator.all(Ctrl + A..Z)", "[terminal,input]")
 {
     for (char ch = 'A'; ch <= 'Z'; ++ch)
