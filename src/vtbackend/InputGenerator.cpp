@@ -117,6 +117,9 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
 
 std::string StandardKeyboardInputGenerator::select(Modifiers modifiers, FunctionKeyMapping mapping) const
 {
+    if (modifiers && !mapping.mods.empty())
+        return crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(modifiers));
+
     auto const prefix = modifiers.contains(Modifier::Alt) ? "\033" : ""s;
 
     if (applicationCursorKeys() && !mapping.appCursor.empty())
@@ -124,9 +127,6 @@ std::string StandardKeyboardInputGenerator::select(Modifiers modifiers, Function
 
     if (applicationKeypad() && !mapping.appKeypad.empty())
         return prefix + std::string(mapping.appKeypad);
-
-    if (modifiers && !mapping.mods.empty())
-        return prefix + crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(modifiers));
 
     return prefix + std::string(mapping.std);
 }
