@@ -453,7 +453,6 @@ install_deps_suse()
             libqt5-qtbase-devel
             libqt5-qtmultimedia-devel
             libqt5-qtx11extras-devel
-
         "
     fi
     # Sadly, gsl-devel system package is too old to be used.
