@@ -128,46 +128,13 @@ struct [[nodiscard]] CellLocation
         line += y;
         return *this;
     }
+
+    constexpr auto operator<=>(CellLocation const&) const noexcept = default;
 };
 
 inline std::ostream& operator<<(std::ostream& os, CellLocation coord)
 {
     return os << fmt::format("({}, {})", coord.line, coord.column);
-}
-
-constexpr bool operator==(CellLocation a, CellLocation b) noexcept
-{
-    return a.line == b.line && a.column == b.column;
-}
-constexpr bool operator!=(CellLocation a, CellLocation b) noexcept
-{
-    return !(a == b);
-}
-
-constexpr bool operator<(CellLocation a, CellLocation b) noexcept
-{
-    if (a.line < b.line)
-        return true;
-
-    if (a.line == b.line && a.column < b.column)
-        return true;
-
-    return false;
-}
-
-constexpr bool operator<=(CellLocation a, CellLocation b) noexcept
-{
-    return a < b || a == b;
-}
-
-constexpr bool operator>=(CellLocation a, CellLocation b) noexcept
-{
-    return !(a < b);
-}
-
-constexpr bool operator>(CellLocation a, CellLocation b) noexcept
-{
-    return !(a == b || a < b);
 }
 
 inline CellLocation operator+(CellLocation a, CellLocation b) noexcept

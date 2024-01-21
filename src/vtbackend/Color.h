@@ -72,6 +72,8 @@ struct RGBColor
     explicit RGBColor(std::string const& hexCode);
 
     RGBColor& operator=(std::string const& hexCode);
+
+    constexpr auto operator<=>(RGBColor const&) const noexcept = default;
 };
 
 constexpr RGBColor operator*(RGBColor c, float s) noexcept
@@ -105,16 +107,6 @@ inline double distance(RGBColor e1, RGBColor e2) noexcept
 constexpr RGBColor operator"" _rgb(unsigned long long value)
 {
     return RGBColor { static_cast<uint32_t>(value) };
-}
-
-constexpr bool operator==(RGBColor a, RGBColor b) noexcept
-{
-    return a.red == b.red && a.green == b.green && a.blue == b.blue;
-}
-
-constexpr bool operator!=(RGBColor a, RGBColor b) noexcept
-{
-    return !(a == b);
 }
 
 struct RGBColorPair
@@ -210,17 +202,9 @@ struct RGBAColor
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     constexpr static inline auto White = uint32_t(0xFF'FF'FF'FF);
+
+    constexpr auto operator<=>(RGBAColor const&) const noexcept = default;
 };
-
-constexpr bool operator==(RGBAColor a, RGBAColor b) noexcept
-{
-    return a.value == b.value;
-}
-
-constexpr bool operator!=(RGBAColor a, RGBAColor b) noexcept
-{
-    return !(a == b);
-}
 // }}}
 
 // {{{ Color
