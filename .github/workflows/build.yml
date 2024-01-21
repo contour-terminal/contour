@@ -340,6 +340,7 @@ jobs:
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
             ./build/src/vtbackend/vtbackend_test
+            ./build/src/vtbackend/vtrasterizer_test
             rm -rf _deps build
   # }}}
   # {{{ OS/X
@@ -395,6 +396,8 @@ jobs:
         run: ./build/src/vtparser/vtparser_test
       - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
+      - name: "test: vtrasterizer"
+        run: ./build/src/vtrasterizer/vtrasterizer_test
       - name: "Create Package(s)"
         run: |
           set -ex
@@ -459,6 +462,8 @@ jobs:
         run: .\build\src\vtparser\Release\vtparser_test.exe
       - name: "test: vtbackend"
         run: .\build\src\vtbackend\Release\vtbackend_test.exe
+      - name: "test: vtrasterizer"
+        run: .\build\src\vtbackend\Release\vtrasterizer_test.exe
       - name: "Create Package(s)"
         shell: powershell
         run: |
@@ -588,6 +593,8 @@ jobs:
         run: ./build/src/vtparser/vtparser_test
       - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
+      - name: "test: vtrasterizer"
+        run: ./build/src/vtrasterizer/vtrasterizer_test
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' && matrix.qt_version == '6' }}
         uses: actions/upload-artifact@v3
@@ -598,6 +605,7 @@ jobs:
             build/src/vtparser/vtparser_test
             build/src/vtbackend/vtbackend_test
             build/src/vtbackend/bench-headless
+            build/src/vtrasterizer/vtrasterizer_test
             test/images
           retention-days: 1
   # }}}
@@ -654,6 +662,8 @@ jobs:
   #       run: ./build/src/vtparser/vtparser_test
   #     - name: "test: vtbackend"
   #       run: ./build/src/vtbackend/vtbackend_test
+  #     - name: "test: vtrasterizer"
+  #       run: ./build/src/vtrasterizer/vtrasterizer_test
   #     - name: "linuxdeploy: Creating AppImage"
   #       run: |
   #         set -ex
@@ -802,6 +812,8 @@ jobs:
         run: ./build/src/vtparser/vtparser_test
       - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
+      - name: "test: vtrasterizer"
+        run: ./build/src/vtrasterizer/vtrasterizer_test
       - name: "CPack: Creating DEB package"
         run: |
           set -ex
@@ -862,6 +874,8 @@ jobs:
         run: valgrind --error-exitcode=64 ./build/src/vtparser/vtparser_test
       - name: "test: vtbackend (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/vtbackend/vtbackend_test
+      - name: "test: vtrasterizer (via valgrind)"
+        run: valgrind --error-exitcode=64 ./build/src/vtrasterizer/vtrasterizer_test
   # }}}
   # {{{ Ubuntu 22.04: Test bench-headless
   test_ubuntu2204_bench_headless:
