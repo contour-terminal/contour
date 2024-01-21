@@ -107,14 +107,14 @@ jobs:
             -S . -B build
     - name: "build libunicode"
       run: cmake --build build/ --target unicode -- -j3
-    - uses: ZedThree/clang-tidy-review@v0.14.0
+    - uses: ZedThree/clang-tidy-review@v0.17.0
       id: review
       with:
         lgtm_comment_body: ""
         annotations: true
         build_dir: build
         max_comments: 10
-    - uses: ZedThree/clang-tidy-review/upload@v0.14.0 # Uploads an artefact containing clang_fixes.json
+    - uses: ZedThree/clang-tidy-review/upload@v0.17.0 # Uploads an artefact containing clang_fixes.json
       id: upload-review
     - if: steps.review.outputs.total_comments > 0 # If there are any comments, fail the check
       run: exit 1
