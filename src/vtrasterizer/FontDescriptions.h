@@ -81,6 +81,24 @@ constexpr bool operator<(TextStyle a, TextStyle b) noexcept
 
 // {{{ fmt formatter
 template <>
+struct fmt::formatter<vtrasterizer::TextStyle>: fmt::formatter<std::string_view>
+{
+    auto format(vtrasterizer::TextStyle value, format_context& ctx) -> format_context::iterator
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtrasterizer::TextStyle::Invalid: name = "Invalid"; break;
+            case vtrasterizer::TextStyle::Regular: name = "Regular"; break;
+            case vtrasterizer::TextStyle::Bold: name = "Bold"; break;
+            case vtrasterizer::TextStyle::Italic: name = "Italic"; break;
+            case vtrasterizer::TextStyle::BoldItalic: name = "BoldItalic"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
 struct fmt::formatter<vtrasterizer::FontLocatorEngine>: fmt::formatter<std::string_view>
 {
     auto format(vtrasterizer::FontLocatorEngine value, format_context& ctx) -> format_context::iterator
