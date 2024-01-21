@@ -8,6 +8,7 @@
 #include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/FontDescriptions.h>
 #include <vtrasterizer/RenderTarget.h>
+#include <vtrasterizer/TextClusterGrouper.h>
 #include <vtrasterizer/TextureAtlas.h>
 
 #include <text_shaper/font.h>
@@ -50,7 +51,7 @@ struct TextRendererEvents
 };
 
 /// Text Rendering Pipeline
-class TextRenderer: public Renderable
+class TextRenderer: public Renderable, public TextClusterGrouper::Events
 {
   public:
     TextRenderer(GridMetrics const& gridMetrics,
@@ -90,17 +91,28 @@ class TextRenderer: public Renderable
   private:
     void initializeDirectMapping();
 
-    /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
-    /// at the end of the currently filled line.
-    void appendCellTextToClusterGroup(std::u32string_view codepoints,
-                                      TextStyle style,
-                                      vtbackend::RGBColor color);
+    void renderTextGroup(std::u32string_view codepoints,
+                         gsl::span<unsigned> clusters,
+                         vtbackend::CellLocation initialPenPosition,
+                         TextStyle style,
+                         vtbackend::RGBColor color) override;
+
+    bool renderBoxDrawingCell(vtbackend::CellLocation position,
+                              char32_t codepoint,
+                              vtbackend::RGBColor foregroundColor) override;
 
     /// Gets the text shaping result of the current text cluster group
-    text::shape_result const& getOrCreateCachedGlyphPositions(crispy::strong_hash hash);
-    text::shape_result createTextShapedGlyphPositions();
-    text::shape_result shapeTextRun(unicode::run_segmenter::range const& run);
-    void flushTextClusterGroup();
+    text::shape_result const& getOrCreateCachedGlyphPositions(crispy::strong_hash hash,
+                                                              std::u32string_view codepoints,
+                                                              gsl::span<unsigned> clusters,
+                                                              TextStyle style);
+    text::shape_result createTextShapedGlyphPositions(std::u32string_view codepoints,
+                                                      gsl::span<unsigned> clusters,
+                                                      TextStyle style);
+    text::shape_result shapeTextRun(unicode::run_segmenter::range const& run,
+                                    std::u32string_view codepoints,
+                                    gsl::span<unsigned> clusters,
+                                    TextStyle style);
 
     AtlasTileAttributes const* getOrCreateRasterizedMetadata(crispy::strong_hash const& hash,
                                                              text::glyph_key const& glyphKey,
@@ -133,6 +145,7 @@ class TextRenderer: public Renderable
 
     // general properties
     //
+    TextClusterGrouper _textClusterGrouper;
     TextRendererEvents& _textRendererEvents;
     FontDescriptions& _fontDescriptions;
     FontKeys const& _fonts;
@@ -166,40 +179,6 @@ class TextRenderer: public Renderable
     // sub-renderer
     //
     BoxDrawingRenderer _boxDrawingRenderer;
-
-    // work-data for the current text cluster group
-    struct TextClusterGroup
-    {
-        // pen-start position of this text group
-        crispy::point initialPenPosition {};
-
-        // uniform text style for this text group
-        TextStyle style = TextStyle::Invalid;
-
-        // uniform text color for this text group
-        vtbackend::RGBColor color {};
-
-        // codepoints within this text group with
-        // uniform unicode properties (script, language, direction).
-        std::vector<char32_t> codepoints;
-
-        // cluster indices for each codepoint
-        std::vector<unsigned> clusters;
-
-        // number of grid cells processed
-        int cellCount = 0; // FIXME: EA width vs actual cells
-
-        void resetAndMovePenForward(int penIncrementInX)
-        {
-            codepoints.clear();
-            clusters.clear();
-            cellCount = 0;
-            initialPenPosition.x += penIncrementInX;
-        }
-    };
-    TextClusterGroup _textClusterGroup {};
-
-    bool _forceUpdateInitialPenPosition = false;
 };
 
 } // namespace vtrasterizer
