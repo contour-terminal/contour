@@ -66,7 +66,7 @@ struct FrameWriter
     TextClusterGrouper& grouper;
     CellLocation penPosition;
 
-    constexpr FrameWriter(TextClusterGrouper& grouper, CellLocation penPosition = {}) noexcept:
+    explicit FrameWriter(TextClusterGrouper& grouper, CellLocation penPosition = {}) noexcept:
         grouper(grouper), penPosition(penPosition)
     {
         grouper.beginFrame();
