@@ -69,6 +69,7 @@ jobs:
   check_clang_tidy:
     name: "Check clang-tidy"
     runs-on: ubuntu-22.04
+    if: github.ref != 'refs/heads/master'
     steps:
     - uses: actions/checkout@v3
     - name: ccache
@@ -418,7 +419,6 @@ jobs:
   windows:
     name: "Windows"
     runs-on: windows-latest
-    if: github.ref != 'refs/heads/master'
     steps:
       - uses: actions/checkout@v3
       - name: Run sccache-cache
