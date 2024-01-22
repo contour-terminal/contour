@@ -463,7 +463,7 @@ jobs:
       - name: "test: vtbackend"
         run: .\build\src\vtbackend\Release\vtbackend_test.exe
       - name: "test: vtrasterizer"
-        run: .\build\src\vtbackend\Release\vtrasterizer_test.exe
+        run: .\build\src\vtrasterizer\Release\vtrasterizer_test.exe
       - name: "Create Package(s)"
         shell: powershell
         run: |
