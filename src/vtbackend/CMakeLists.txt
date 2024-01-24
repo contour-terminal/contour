@@ -79,7 +79,22 @@ set(vtbackend_SOURCES
     primitives.cpp
 )
 
-add_library(vtbackend STATIC ${vtbackend_SOURCES} ${vtbackend_HEADERS})
+add_library(vtbackend STATIC ${vtbackend_SOURCES} )
+
+target_sources(vtbackend
+    INTERFACE
+    FILE_SET HEADERS
+    FILES
+    ${vtbackend_HEADERS}
+)
+
+target_sources(vtbackend
+    PRIVATE
+    ${vtbackend_SOURCES}
+)
+
+
+
 set_target_properties(vtbackend PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 target_compile_definitions(vtbackend PRIVATE
     LIBTERMINAL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}

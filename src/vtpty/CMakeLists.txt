@@ -64,6 +64,19 @@ else()
 endif()
 
 add_library(vtpty STATIC ${vtpty_SOURCES} ${vtpty_HEADERS})
+
+target_sources(vtpty
+    INTERFACE
+    FILE_SET HEADERS
+    FILES
+    ${vtpty_HEADERS}
+)
+
+target_sources(vtpty
+    PRIVATE
+    ${vtpty_SOURCES}
+)
+
 set_target_properties(vtpty PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 if(FLATPAK)
     target_compile_definitions(vtpty PRIVATE FLATPAK=1)

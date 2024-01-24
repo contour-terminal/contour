@@ -32,7 +32,14 @@ set(crispy_SOURCES
     utils.cpp utils.h
 )
 
-add_library(crispy-core STATIC ${crispy_SOURCES})
+add_library(crispy-core STATIC)
+
+target_sources(crispy-core
+    PUBLIC
+    ${crispy_SOURCES}
+)
+
+
 add_library(crispy::core ALIAS crispy-core)
 
 set_target_properties(crispy-core PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")

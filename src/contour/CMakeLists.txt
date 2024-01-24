@@ -104,7 +104,15 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/Terminal.qml.in ${CMAKE_C
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/main.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/main.qml)
 # }}}
 
-add_executable(contour ${contour_SRCS} ${QT_RESOURCES})
+add_executable(contour )
+
+
+target_sources(contour
+    PRIVATE
+    ${contour_SRCS}
+    ${QT_RESOURCES}
+)
+
 
 set_target_properties(contour PROPERTIES AUTOMOC ON)
 set_target_properties(contour PROPERTIES AUTORCC ON)

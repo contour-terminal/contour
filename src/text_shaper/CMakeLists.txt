@@ -19,6 +19,7 @@ endif()
 
 # TODO: coretext_shaper.cpp coretext_shaper.h
 add_library(text_shaper STATIC ${text_shaper_SRC})
+
 set_target_properties(text_shaper PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 
 set(TEXT_SHAPER_LIBS unicode::unicode boxed-cpp::boxed-cpp)
