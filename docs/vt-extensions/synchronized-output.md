@@ -1,9 +1,9 @@
-## Synchronized Output
+# Synchronized Output
 
 Synchronized output is merely implementing the feature as inspired by iTerm2 synchronized output,
 except that it's not using the rare DCS but rather the well known `SM ?` and `RM ?`. iTerm2 has now also adopted to use the new syntax instead of using DCS.
 
-### Semantics
+## Semantics
 
 When rendering the screen of the terminal,
 the Emulator usually iterates through each visible grid cell and renders its current state.
@@ -16,7 +16,7 @@ The terminal Emulator keeps processing incoming text and sequences.
 When the synchronized update mode is disabled, the renderer may fetch the latest screen buffer state,
 effectively avoiding the tearing effect by unintentionally rendering in the middle of an application screen update.
 
-### Feature detection
+## Feature detection
 
 Use `CSI ? 2026 $ p` to query the state of the (DEC) mode `2026`. This works for any private mode number.
 If you get nothing back (DECRQM not implemented at all) or you get back a `CSI ? 2026 ; 0 $ y`
@@ -34,28 +34,28 @@ Value | Documentation | Relevance for synchronized output mode ?2026
 `3`   | Permanently set | undefined
 `4`   | Permanently reset | not supported
 
-### Using the feature
+## Using the feature
 
 Use `CSI ? 2026 h` to enable batching output commands into a command queue.
 
 Use `CSI ? 2026 l` when done with your current frame rendering, implicitly updating the render state by reading out the latest grid buffer state.
 
 
-### Notation
+## Notation
 
 Some developers name the beginning and end of such a synchronized frame (and therefore the instance)
 
 * `BSU` (begin synchronized update, `CSI ? 2026 h`), and
 * `ESU` (end synchronized update, `CSI ? 2026 l`).
 
-### Timeout
+## Timeout
 
 So far there is no real consensus on weather a timeout should be and, if so, for how long.
 The toolkit/application implementer should keep this in mind.
 However, a too short timeout (maybe due to a very slow connection) won't be worse
 than having no synchronized output at all.
 
-### Adoption State
+## Adoption State
 
 | Support | Terminal/Tookit/App   | Notes  |
 |---------|------------|--------|
@@ -79,6 +79,6 @@ than having no synchronized output at all.
 
 In case some project is adding support for this feature, please leave a comment or contact me, so we can keep the spec and implementation state table up to date.
 
-### Reference
+## Reference
 
 The original document of this page was stored [here](https://gist.github.com/christianparpart/d8a62cc1ab659194337d73e399004036).
