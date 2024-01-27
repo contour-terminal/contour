@@ -481,6 +481,7 @@ elseif(APPLE)
                     -always-overwrite
                     -verbose=1
                     -no-strip
+                    -codesign=\"${CODE_SIGN_CERTIFICATE_ID}\"
                     -qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui
         )
 
