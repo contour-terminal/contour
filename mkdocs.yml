@@ -106,12 +106,14 @@ nav:
   - VT extensions:
     - vt-extensions/index.md
     - vt-extensions/clickable-links.md
+    - vt-extensions/unicode-core.md
     - vt-extensions/vertical-line-marks.md
     - vt-extensions/color-palette-update-notifications.md
     # TODO(publish when ready): - vt-extensions/csi-u-extended-keyboard-protocol.md
     - vt-extensions/synchronized-output.md
     - vt-extensions/buffer-capture.md
     - vt-extensions/font-settings.md
+    - vt-extensions/line-reflow-mode.md
   - Internals:
     - internals/index.md
     - internals/CODING_STYLE.md
