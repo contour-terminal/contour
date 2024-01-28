@@ -10,6 +10,10 @@ endif()
 
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 
+NumberToHex(${PROJECT_VERSION_MAJOR} HEX_MAJOR)
+NumberToHex(${PROJECT_VERSION_MINOR} HEX_MINOR)
+NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
+
 # {{{ Setup QT_COMPONENTS
 # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
 # NB: Widgets is rquired for SystemTrayIcon's fallback implementation
@@ -277,7 +281,11 @@ set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico"
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
 set(CPACK_CREATE_DESKTOP_LINKS contour)
-set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6DC2432A")
+set(CPACK_WIX_PRODUCT_GUID "0E736497-2B72-4117-95E9-54EC6D${HEX_MAJOR}${HEX_MINOR}${HEX_PATCH}")
+set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6D${HEX_MAJOR}${HEX_MINOR}00")
+if(WIN32)
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "Contour Terminal Emulator ${CONTOUR_VERSION_MAJOR}.${CONTOUR_VERSION_MINOR}")
+endif()
 if(APPLE)
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
 endif()
