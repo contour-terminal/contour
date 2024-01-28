@@ -63,6 +63,7 @@ exec cmake "${ROOTDIR}" \
            -DPEDANTIC_COMPILER=ON \
            -DPEDANTIC_COMPILER_WERROR=ON \
            -DCMAKE_CXX_STANDARD=20 \
+           -DCODE_SIGN_CERTIFICATE_ID="${CODE_SIGN_ID:-}" \
            ${EXTRA_CMAKE_FLAGS} \
            -B "${BUILD_DIR}" \
            -GNinja
