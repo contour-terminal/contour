@@ -83,13 +83,13 @@ namespace // {{{ helpers
 #if defined(CONTOUR_PERF_STATS)
     void logRenderBufferSwap(bool success, uint64_t frameID)
     {
-        if (!RenderBufferLog)
+        if (!renderBufferLog)
             return;
 
         if (success)
-            RenderBufferLog()("Render buffer {} swapped.", frameID);
+            renderBufferLog()("Render buffer {} swapped.", frameID);
         else
-            RenderBufferLog()("Render buffer {} swapping failed.", frameID);
+            renderBufferLog()("Render buffer {} swapping failed.", frameID);
     }
 #endif
 
@@ -447,8 +447,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     ++_lastFrameID;
 
 #if defined(CONTOUR_PERF_STATS)
-    if (TerminalLog)
-        TerminalLog()("{}: Refreshing render buffer.\n", _lastFrameID.load());
+    if (terminalLog)
+        terminalLog()("{}: Refreshing render buffer.\n", _lastFrameID.load());
 #endif
 
     auto baseLine = LineOffset(0);
