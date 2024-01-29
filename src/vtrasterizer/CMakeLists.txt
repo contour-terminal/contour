@@ -26,3 +26,5 @@ if(CONTOUR_TESTING)
     target_link_libraries(vtrasterizer_test vtrasterizer Catch2::Catch2WithMain)
     add_test(vtrasterizer_test ./vtrasterizer_test)
 endif()
+
+message(STATUS "[vtrasterizer] Compile unit tests: ${CONTOUR_TESTINGG}")

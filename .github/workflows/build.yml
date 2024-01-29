@@ -311,7 +311,7 @@ jobs:
   # {{{ FreeBSD
   freebsd:
     if: github.ref == 'refs/heads/master'
-    runs-on: macos-12
+    runs-on: ubuntu-latest
     name: FreeBSD 13
     # env:
     #   MYTOKEN: "value1"
@@ -341,7 +341,7 @@ jobs:
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
             ./build/src/vtbackend/vtbackend_test
-            ./build/src/vtbackend/vtrasterizer_test
+            ./build/src/vtrasterizer/vtrasterizer_test
             rm -rf _deps build
   # }}}
   # {{{ OS/X
