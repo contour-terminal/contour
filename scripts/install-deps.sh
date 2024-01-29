@@ -575,7 +575,7 @@ main()
         Darwin)
             install_deps_darwin
             ;;
-        FreeBSD)
+        FreeBSD|freebsd)
             install_deps_FreeBSD
             ;;
         *)
