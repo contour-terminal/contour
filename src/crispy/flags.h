@@ -52,9 +52,11 @@ class flags
         _value &= ~static_cast<value_type>(flags._value);
     }
 
+    // Tests for existence of all given flags to be present.
+    // @return true if all flags are set in this flags set, false otherwise.
     [[nodiscard]] constexpr bool contains(flags<flag_type> flags) const noexcept
     {
-        return _value & flags.value();
+        return (_value & flags.value()) == flags.value();
     }
 
     [[nodiscard]] constexpr bool test(flag_type flag) const noexcept { return contains(flag); }

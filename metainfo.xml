@@ -107,6 +107,7 @@
     <release version="0.4.2" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes Windows alt/control key modifiers (#1408).</li>
           <li>Fixes Windows built accidentally not including builtin-SSH support (#1427).</li>
           <li>Fixes some text run segmentation problems, e.g., not making use of some programming ligatures (#395).</li>
           <li>Fixes mouse scroll wheel events going into the wrong direction if `Alt` modifier was pressed at the same time (#394).</li>
