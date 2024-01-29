@@ -173,7 +173,7 @@ struct TerminalProfile
     vtbackend::PageSize terminalSize = { vtbackend::LineCount(10), vtbackend::ColumnCount(40) };
     vtbackend::VTType terminalId = vtbackend::VTType::VT525;
 
-    vtbackend::MaxHistoryLineCount maxHistoryLineCount;
+    vtbackend::MaxHistoryLineCount maxHistoryLineCount = vtbackend::LineCount(1000);
     vtbackend::LineCount historyScrollMultiplier = vtbackend::LineCount(3);
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
     vtbackend::StatusDisplayPosition statusDisplayPosition = vtbackend::StatusDisplayPosition::Bottom;
