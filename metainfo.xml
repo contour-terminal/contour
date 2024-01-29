@@ -116,6 +116,7 @@
           <li>Fixes legacy keyboard input protocol not reporting non-Alt modifier (#1411).</li>
           <li>Digitally sign MacOS release binaries using a valid Apple ID.</li>
           <li>Add support for authenticating to SSH servers with a private key without a password and without requesting for one - also allow password retry (#1425).</li>
+          <li>Default history limit is now 1000 lines rather than 0 lines.</li>
         </ul>
       </description>
     </release>
