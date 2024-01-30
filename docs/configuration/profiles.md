@@ -434,15 +434,20 @@ profiles:
 
 With this, the terminal will use the color scheme as specified in `dark` when OS dark mode is on,
 and `light`'s color scheme otherwise.
-
+      
+      
 ### `hyperlink_decoration:`
 section in the configuration file allows you to configure the styling and colorization of hyperlinks when they are displayed in the terminal and when they are hovered over by the cursor.
+
+Possible values: underline, dotted-underline, double-underline, curly-underline, dashed-underline, overline, crossed-out, framed, encircle (if implemented)
+
 ``` yaml
 profiles:
   profile_name:
     hyperlink_decoration:
       normal: dotted
-      hover: underline
+      hover: underline      
+
 ```
 
 ## Default profile
