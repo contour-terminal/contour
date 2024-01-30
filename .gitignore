@@ -48,6 +48,9 @@ sandbox/**
 # Linux/KDE
 .directory
 
+# Python virtual environment
+.venv
+
 # debian: dpkg-buildpackage intermediates
 debian/files
 debian/tmp/**
@@ -61,6 +64,3 @@ install-stamp
 src/contour/ui/RequestPermission.qml
 src/contour/ui/Terminal.qml
 src/contour/ui/main.qml
-
-# Python virtual environment
-.venv
