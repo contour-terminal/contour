@@ -431,9 +431,16 @@ void SshSession::processState()
                 break;
             }
             case State::AuthenticatePrivateKeyStart:
+                _walkIndex = 0;
+                // authenticateWithPrivateKey() is taking the password from _injectedWrite
+                _injectedWrite = "";
+                authenticateWithPrivateKey();
+                break;
+            case State::AuthenticatePrivateKeyRequest: {
                 setState(State::AuthenticatePrivateKeyWaitForInput);
                 injectRead("\U0001F511 Private key password: ");
                 [[fallthrough]];
+            }
             case State::AuthenticatePrivateKeyWaitForInput:
                 // See handlePreAuthenticationPasswordInput()
                 return;
@@ -1172,7 +1179,17 @@ void SshSession::authenticateWithPrivateKey()
 
     if (rc != LIBSSH2_ERROR_NONE)
     {
-        logError("Private key based authentication failed. {}", libssl2ErrorString(rc));
+        // Only log error if we havee tried to authenticate with password,
+        // as the first attempt is always with an empty password.
+        if (_walkIndex != 0)
+            logError("Private key based authentication failed. {}", libssl2ErrorString(rc));
+
+        if (_walkIndex <= MaxPasswordTries)
+        {
+            setState(State::AuthenticatePrivateKeyRequest);
+            ++_walkIndex;
+            return;
+        }
         setState(State::AuthenticatePasswordStart);
         _walkIndex = 0;
         return;

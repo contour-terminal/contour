@@ -1770,14 +1770,16 @@ namespace
             logger()("Invalid render_mode \"{}\" in configuration.", strValue);
 
         auto intValue = LineCount();
-        tryLoadChildRelative(usedKeys, profile, basePath, "history.limit", intValue, logger);
-        // value -1 is used for infinite grid
-        if (unbox(intValue) == -1)
-            terminalProfile.maxHistoryLineCount = Infinite();
-        else if (unbox(intValue) > -1)
-            terminalProfile.maxHistoryLineCount = LineCount(intValue);
-        else
-            terminalProfile.maxHistoryLineCount = LineCount(0);
+        if (tryLoadChildRelative(usedKeys, profile, basePath, "history.limit", intValue, logger))
+        {
+            // value -1 is used for infinite grid
+            if (unbox(intValue) == -1)
+                terminalProfile.maxHistoryLineCount = Infinite();
+            else if (unbox(intValue) > -1)
+                terminalProfile.maxHistoryLineCount = LineCount(intValue);
+            else
+                terminalProfile.maxHistoryLineCount = LineCount(0);
+        }
 
         tryLoadChildRelative(
             usedKeys, profile, basePath, "option_as_alt", terminalProfile.optionKeyAsAlt, logger);
