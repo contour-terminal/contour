@@ -80,6 +80,7 @@ class SshSession final: public Pty
         VerifyHostKey,                      // verify host key against known_hosts file
         AuthenticateAgent,                  // authenticate with SSH agent
         AuthenticatePrivateKeyStart,        // start private key authentication
+        AuthenticatePrivateKeyRequest,      // request private key's password
         AuthenticatePrivateKeyWaitForInput, // wait for private key's password (user input))
         AuthenticatePrivateKey,             // authenticate with private key
         AuthenticatePasswordStart,          // start password authentication
@@ -173,6 +174,7 @@ struct fmt::formatter<vtpty::SshSession::State>: fmt::formatter<std::string_view
             case vtpty::SshSession::State::VerifyHostKey: name = "VerifyHostKey"; break;
             case vtpty::SshSession::State::AuthenticateAgent: name = "AuthenticateAgent"; break;
             case vtpty::SshSession::State::AuthenticatePrivateKeyStart: name = "AuthenticatePrivateKeyStart"; break;
+            case vtpty::SshSession::State::AuthenticatePrivateKeyRequest: name = "AuthenticatePrivateKeyRequest"; break;
             case vtpty::SshSession::State::AuthenticatePrivateKeyWaitForInput: name = "AuthenticatePrivateKeyWaitForInput"; break;
             case vtpty::SshSession::State::AuthenticatePrivateKey: name = "AuthenticatePrivateKey"; break;
             case vtpty::SshSession::State::AuthenticatePasswordStart: name = "AuthenticatePasswordStart"; break;
