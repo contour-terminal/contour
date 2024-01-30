@@ -48,6 +48,9 @@ sandbox/**
 # Linux/KDE
 .directory
 
+# Python virtual environment
+.venv
+
 # debian: dpkg-buildpackage intermediates
 debian/files
 debian/tmp/**
