@@ -2,6 +2,27 @@
 # and is used to inject all the dependencies the operating system's
 # package manager did not provide (not found or too old version).
 
+# {{{ helper: subproject_version(<subproject-name> <result-variable>)
+#
+# Extract version of a sub-project, which was previously included with add_subdirectory().
+function(subproject_version subproject_name VERSION_VAR)
+    # Read CMakeLists.txt for subproject and extract project() call(s) from it.
+    file(STRINGS "${${subproject_name}_SOURCE_DIR}/CMakeLists.txt" project_calls REGEX "[ \t]*project\\(")
+    # For every project() call try to extract its VERSION option
+    foreach(project_call ${project_calls})
+        string(REGEX MATCH "VERSION[ ]+([^ )]+)" version_param "${project_call}")
+        if(version_param)
+            set(version_value "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+    if(version_value)
+        set(${VERSION_VAR} "${version_value}" PARENT_SCOPE)
+    else()
+        message("WARNING: Cannot extract version for subproject '${subproject_name}'")
+    endif()
+endfunction(subproject_version)
+# }}}
+
 set(ContourThirdParties_SRCDIR ${PROJECT_SOURCE_DIR}/_deps/sources)
 if(EXISTS "${ContourThirdParties_SRCDIR}/CMakeLists.txt")
     message(STATUS "Embedding 3rdparty libraries: ${ContourThirdParties_SRCDIR}")
@@ -124,12 +145,21 @@ else()
     set(THIRDPARTY_BUILTIN_termbench "(bench-headless disabled)")
 endif()
 
-find_package(boxed-cpp QUIET)
-if(boxed-cpp_FOUND)
-    set(THIRDPARTY_BUILTIN_boxed_cpp "system package")
-else()
+set(BOXED_CPP_MINIMAL_VERSION "1.2.2")
+if(COMMAND ContourThirdParties_Embed_boxed_cpp)
     ContourThirdParties_Embed_boxed_cpp()
+    subproject_version(boxed-cpp boxed_cpp_version)
+
+    # Assuming the variable is named boxed-cpp_VERSION, adjust if necessary
+    if(NOT DEFINED boxed_cpp_version OR boxed_cpp_version VERSION_LESS BOXED_CPP_MINIMAL_VERSION)
+        message(FATAL_ERROR "Embedded boxed-cpp version must be at least ${BOXED_CPP_MINIMAL_VERSION}, but found ${boxed_cpp_version}")
+    endif()
+
     set(THIRDPARTY_BUILTIN_boxed_cpp "embedded")
+else()
+    find_package(boxed-cpp ${BOXED_CPP_MINIMAL_VERSION} REQUIRED)
+    set(THIRDPARTY_BUILTIN_boxed_cpp "system package")
+    message(STATUS "Found boxed-cpp: ${boxed-cpp_VERSION} (system package)")
 endif()
 
 macro(ContourThirdPartiesSummary2)
