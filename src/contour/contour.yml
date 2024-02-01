@@ -34,7 +34,6 @@ renderer:
     #
     # This does not include direct mapped tiles (US-ASCII glyphs,
     # cursor shapes and decorations), if tile_direct_mapping is set to true).
-    # 
     #
     # Value must be at least as large as grid cells available in the terminal view.
     # This value is automatically adjusted if too small.
@@ -517,15 +516,12 @@ profiles:
             light: default
             dark: default
 
-        
         # Hyperlinks (via OSC-8) can be stylized and colorized on hover.
         # Possible values: underline, dotted-underline, double-underline, curly-underline,
         # dashed-underline, overline, crossed-out, framed, encircle (if implemented)
         hyperlink_decoration:
             normal: dotted
             hover: underline
-            
-
 
 # Color Profiles
 # --------------
