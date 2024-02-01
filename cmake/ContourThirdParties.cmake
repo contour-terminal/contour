@@ -10,7 +10,7 @@ function(subproject_version subproject_name VERSION_VAR)
     file(STRINGS "${${subproject_name}_SOURCE_DIR}/CMakeLists.txt" project_calls REGEX "[ \t]*project\\(")
     # For every project() call try to extract its VERSION option
     foreach(project_call ${project_calls})
-        string(REGEX MATCH "VERSION[ ]+([^ )]+)" version_param "${project_call}")
+        string(REGEX MATCH "VERSION[ ]+\"?([^ \")]+)" version_param "${project_call}")
         if(version_param)
             set(version_value "${CMAKE_MATCH_1}")
         endif()
