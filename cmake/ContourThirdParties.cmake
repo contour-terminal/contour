@@ -149,12 +149,9 @@ set(BOXED_CPP_MINIMAL_VERSION "1.2.2")
 if(COMMAND ContourThirdParties_Embed_boxed_cpp)
     ContourThirdParties_Embed_boxed_cpp()
     subproject_version(boxed-cpp boxed_cpp_version)
-
-    # Assuming the variable is named boxed-cpp_VERSION, adjust if necessary
     if(NOT DEFINED boxed_cpp_version OR boxed_cpp_version VERSION_LESS BOXED_CPP_MINIMAL_VERSION)
         message(FATAL_ERROR "Embedded boxed-cpp version must be at least ${BOXED_CPP_MINIMAL_VERSION}, but found ${boxed_cpp_version}")
     endif()
-
     set(THIRDPARTY_BUILTIN_boxed_cpp "embedded")
 else()
     find_package(boxed-cpp ${BOXED_CPP_MINIMAL_VERSION} REQUIRED)
