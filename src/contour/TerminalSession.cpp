@@ -14,6 +14,7 @@
 
 #include <crispy/StackTrace.h>
 #include <crispy/assert.h>
+#include <crispy/utils.h>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
@@ -827,7 +828,9 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
 
     terminal().tick(steady_clock::now());
 
-    if (terminal().sendMousePressEvent(modifiers, button, pixelPosition, uiHandledHint))
+    if (crispy::locked(_terminal, [&]() {
+            return _terminal.sendMousePressEvent(modifiers, button, pixelPosition, uiHandledHint);
+        }))
         return;
 
     auto const sanitizedModifier = modifiers.contains(_config.bypassMouseProtocolModifiers)
@@ -852,7 +855,8 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     terminal().tick(steady_clock::now());
 
     auto constexpr UiHandledHint = false;
-    terminal().sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
+    crispy::locked(_terminal,
+                   [&]() { _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint); });
 
     if (pos != _currentMousePosition)
     {
@@ -871,8 +875,10 @@ void TerminalSession::sendMouseReleaseEvent(Modifiers modifiers,
 {
     terminal().tick(steady_clock::now());
 
-    auto const uiHandledHint = false;
-    terminal().sendMouseReleaseEvent(modifiers, button, pixelPosition, uiHandledHint);
+    crispy::locked(_terminal, [&]() {
+        auto const uiHandledHint = false;
+        _terminal.sendMouseReleaseEvent(modifiers, button, pixelPosition, uiHandledHint);
+    });
     scheduleRedraw();
 }
 
