@@ -434,6 +434,7 @@ jobs:
       - name: "Create Package(s)"
         run: |
           set -ex
+          echo killing...; sudo pkill -9 XProtect >/dev/null || true; # see https://github.com/actions/runner-images/issues/7522
           cd build; cpack -G DragNDrop --verbose; cd -
           # cmake --build build --target package-verbose
           # ls -hl build/
