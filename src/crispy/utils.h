@@ -1,5 +1,6 @@
 #pragma once
 
+#include <crispy/defines.h>
 #include <crispy/escape.h>
 
 #include <fmt/format.h>
@@ -11,12 +12,17 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#if defined(CRISPY_CONCEPTS_SUPPORTED)
+    #include <concepts>
+#endif
 
 namespace crispy
 {
@@ -296,6 +302,27 @@ class finally // NOLINT(readability-identifier-naming)
   private:
     std::function<void()> _hook {};
 };
+
+#if defined(CRISPY_CONCEPTS_SUPPORTED)
+
+// clang-format off
+template <typename T>
+concept LockableConcept = requires(T t)
+{
+    { t.lock() } -> std::same_as<void>;
+    { t.unlock() } -> std::same_as<void>;
+};
+// clang-format on
+
+#endif
+
+template <typename L, typename F>
+CRISPY_REQUIRES(LockableConcept<L>)
+auto locked(L& lockable, F const& f)
+{
+    auto const _ = std::scoped_lock { lockable };
+    return f();
+}
 
 inline std::optional<unsigned> fromHexDigit(char value)
 {
