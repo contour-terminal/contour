@@ -1253,8 +1253,6 @@ namespace
 
 string Terminal::extractSelectionText() const
 {
-    auto const _ = std::scoped_lock { *this };
-
     if (!_selection || _selection->state() == Selection::State::Waiting)
         return "";
 
@@ -1274,8 +1272,6 @@ string Terminal::extractSelectionText() const
 
 string Terminal::extractLastMarkRange() const
 {
-    auto const _ = std::lock_guard { *this };
-
     // -1 because we always want to start extracting one line above the cursor by default.
     auto const bottomLine =
         _currentScreen->cursor().position.line + LineOffset(-1) + _settings.copyLastMarkRangeOffset;
