@@ -954,17 +954,18 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
 
 bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
 {
-    copyToClipboard(terminal().extractLastMarkRange());
+    crispy::locked(_terminal, [&]() { copyToClipboard(terminal().extractLastMarkRange()); });
     return true;
 }
 
 bool TerminalSession::operator()(actions::CopySelection copySelection)
 {
+
     switch (copySelection.format)
     {
         case actions::CopyFormat::Text:
             // Copy the selection in pure text, plus whitespaces and newline.
-            copyToClipboard(terminal().extractSelectionText());
+            crispy::locked(_terminal, [&]() { copyToClipboard(terminal().extractSelectionText()); });
             break;
         case actions::CopyFormat::HTML:
             // TODO: This requires walking through each selected cell and construct HTML+CSS for it.
@@ -1098,7 +1099,9 @@ bool TerminalSession::operator()(actions::OpenFileManager)
 
 bool TerminalSession::operator()(actions::OpenSelection)
 {
-    QDesktopServices::openUrl(QUrl(QString::fromUtf8(terminal().extractSelectionText().c_str())));
+    crispy::locked(_terminal, [&]() {
+        QDesktopServices::openUrl(QUrl(QString::fromUtf8(terminal().extractSelectionText().c_str())));
+    });
     return true;
 }
 

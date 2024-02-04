@@ -391,17 +391,9 @@ class Terminal
     void updateInputMethodPreeditString(std::string preeditString);
     // }}}
 
-    void lock() const
-    {
-        _outerLock.lock();
-        _innerLock.lock();
-    }
+    void lock() const { _outerLock.lock(); }
 
-    void unlock() const
-    {
-        _outerLock.unlock();
-        _innerLock.unlock();
-    }
+    void unlock() const { _outerLock.unlock(); }
 
     [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return _state.colorPalette; }
     [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
@@ -810,7 +802,6 @@ class Terminal
 
     // synchronization
     std::mutex mutable _outerLock;
-    std::mutex mutable _innerLock;
 
     // terminal clock
     std::chrono::steady_clock::time_point _currentTime;
