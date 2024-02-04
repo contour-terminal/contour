@@ -178,7 +178,7 @@ stack_trace::stack_trace():
 
 string stack_trace::demangleSymbol(const char* symbol)
 {
-#if defined(__linux__) || defined(__APPLE__)
+#if (defined(__linux__) || defined(__APPLE__)) && defined(HAVE_CXXABI_H)
     int status = 0;
     char* demangled = abi::__cxa_demangle(symbol, nullptr, nullptr, &status);
 
