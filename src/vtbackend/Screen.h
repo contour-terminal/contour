@@ -600,6 +600,18 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void restoreGraphicsRendition();
     void saveGraphicsRendition();
 
+    void reply(std::string_view text);
+
+    template <typename... Ts>
+    void reply(fmt::format_string<Ts...> message, Ts const&... args)
+    {
+#if defined(__APPLE__) || defined(_MSC_VER)
+        reply(fmt::vformat(message, fmt::make_format_args(args...)));
+#else
+        reply(fmt::vformat(message, fmt::make_format_args(args...)));
+#endif
+    }
+
   private:
     void writeTextInternal(char32_t codepoint);
 
