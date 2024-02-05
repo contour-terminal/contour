@@ -28,7 +28,7 @@ struct PageSize
     LineCount lines;
     ColumnCount columns;
 
-    [[nodiscard]] int area() const noexcept { return *lines * *columns; }
+    [[nodiscard]] int area() const noexcept { return unbox(lines) * unbox(columns); }
 };
 
 constexpr PageSize operator+(PageSize pageSize, LineCount lines) noexcept
