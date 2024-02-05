@@ -24,6 +24,7 @@ set(crispy_SOURCES
     escape.h
     file_descriptor.h
     flags.h
+    interpolated_string.cpp interpolated_string.h
     logstore.cpp logstore.h
     overloaded.h
     reference.h
@@ -129,6 +130,7 @@ if(CRISPY_TESTING)
         TrieMap_test.cpp
         base64_test.cpp
         compose_test.cpp
+        interpolated_string_test.cpp
         utils_test.cpp
         result_test.cpp
         ring_test.cpp
