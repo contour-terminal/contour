@@ -14,18 +14,6 @@ class ThirdParty {
 $ThirdParties =
 @(
     [ThirdParty]@{
-        Folder  = "GSL-3.1.0";
-        Archive = "gsl-3.1.0.zip";
-        URI     = "https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.zip";
-        Macro   = ""
-    };
-    [ThirdParty]@{
-        Folder  = "Catch2-3.4.0";
-        Archive = "Catch2-3.4.0.zip";
-        URI     = "https://github.com/catchorg/Catch2/archive/refs/tags/v3.4.0.zip";
-        Macro   = ""
-    };
-    [ThirdParty]@{
         Folder  = "libunicode-23d7b30166a914b10526bb8fe7a469a9610c07dc";
         Archive = "libunicode-23d7b30166a914b10526bb8fe7a469a9610c07dc.zip";
         URI     = "https://github.com/contour-terminal/libunicode/archive/23d7b30166a914b10526bb8fe7a469a9610c07dc.zip";

@@ -1,13 +1,15 @@
 {
     "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+    "builtin-baseline": "80403036a665cb8fcc1a1b3e17593d20b03b2489",
     "dependencies": [
-        "catch2",
-        "fmt",
+        { "name": "catch2", "version>=": "3.4.0" },
+        { "name": "fmt", "version>=": "10.2.0" },
+        { "name": "libssh2", "version>=": "1.11.0" },
+        { "name": "ms-gsl"},
+        { "name": "range-v3", "version>=": "0.12.0" },
+        { "name": "yaml-cpp", "version>=": "0.8.0" },
         "fontconfig",
         "freetype",
-        "harfbuzz",
-        "libssh2",
-        "range-v3",
-        "yaml-cpp"
+        "harfbuzz"
     ]
 }
