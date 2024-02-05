@@ -357,15 +357,15 @@ using CellRGBColor = std::variant<RGBColor, CellForegroundColor, CellBackgroundC
 
 struct CellRGBColorPair
 {
-    CellRGBColor foreground;
-    CellRGBColor background;
+    CellRGBColor foreground = CellForegroundColor {};
+    CellRGBColor background = CellBackgroundColor {};
 };
 
 struct CellRGBColorAndAlphaPair
 {
-    CellRGBColor foreground;
+    CellRGBColor foreground = CellForegroundColor {};
     float foregroundAlpha = 1.0f;
-    CellRGBColor background;
+    CellRGBColor background = CellBackgroundColor {};
     float backgroundAlpha = 1.0f;
 };
 
