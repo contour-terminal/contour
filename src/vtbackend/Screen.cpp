@@ -1887,9 +1887,9 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
 {
     auto const columnCount =
-        ColumnCount::cast_from(ceilf(float(*pixelSize.width) / float(*_state->cellPixelSize.width)));
+        ColumnCount::cast_from(ceil(pixelSize.width.as<double>() / _state->cellPixelSize.width.as<double>()));
     auto const lineCount =
-        LineCount::cast_from(ceilf(float(*pixelSize.height) / float(*_state->cellPixelSize.height)));
+        LineCount::cast_from(ceil(pixelSize.height.as<double>() / _state->cellPixelSize.height.as<double>()));
     auto const extent = GridSize { lineCount, columnCount };
     auto const autoScrollAtBottomMargin = !_terminal->isModeEnabled(DECMode::NoSixelScrolling);
     auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : CellLocation {};
@@ -1939,29 +1939,30 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
 
     auto const linesAvailable = pageSize().lines - topLeft.line.as<LineCount>();
     auto const linesToBeRendered = min(gridSize.lines, linesAvailable);
-    auto const columnsAvailable = *pageSize().columns - *topLeft.column;
-    auto const columnsToBeRendered = ColumnCount(min(columnsAvailable, *gridSize.columns));
+    auto const columnsAvailable = pageSize().columns - topLeft.column;
+    auto const columnsToBeRendered = ColumnCount(min(columnsAvailable, gridSize.columns));
     auto const gapColor = RGBAColor {}; // TODO: _cursor.graphicsRendition.backgroundColor;
 
     // TODO: make use of imageOffset and imageSize
     auto const rasterizedImage = make_shared<RasterizedImage>(
         std::move(image), alignmentPolicy, resizePolicy, gapColor, gridSize, _state->cellPixelSize);
-    const auto lastSixelBand = imageSize.height.value % 6;
+    const auto lastSixelBand = unbox(imageSize.height) % 6;
     const LineOffset offset = [&]() {
         auto offset =
-            LineOffset::cast_from(std::ceil(static_cast<float>(imageSize.height.value - lastSixelBand)
-                                            / float(*_state->cellPixelSize.height)))
+            LineOffset::cast_from(std::ceil((imageSize.height - lastSixelBand).as<double>()
+                                            / _state->cellPixelSize.height.as<double>()))
             - 1 * (lastSixelBand == 0);
-        auto const h = imageSize.height.value - 1;
+        auto const h = unbox(imageSize.height) - 1;
         // VT340 has this behavior where for some heights it text cursor is placed not
         // at the final sixel line but a line above it.
         // See
         // https://github.com/hackerb9/vt340test/blob/main/glitches.md#text-cursor-is-left-one-row-too-high-for-certain-sixel-heights
-        if (h % 6 > h % _state->cellPixelSize.height.value)
+        if (h % 6 > h % unbox(_state->cellPixelSize.height))
             return offset - 1;
         return offset;
     }();
-    if (*linesToBeRendered)
+
+    if (unbox(linesToBeRendered))
     {
         for (GridSize::Offset const offset: GridSize { linesToBeRendered, columnsToBeRendered })
         {

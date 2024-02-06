@@ -116,7 +116,10 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
                    Decorator hyperlinkNormal,
                    Decorator hyperlinkHover):
     _atlasHashtableSlotCount { crispy::nextPowerOfTwo(atlasHashtableSlotCount.value) },
-    _atlasTileCount { std::max(atlasTileCount.value, static_cast<uint32_t>(pageSize.area())) },
+    _atlasTileCount {
+        std::max(atlasTileCount.value, static_cast<uint32_t>(pageSize.area() * 3))
+    }, // TODO instead of pagesize use size for fullscreen window
+       // 3 required for huge sixel images rendering due to initial page size smaller than
     _atlasDirectMapping { atlasDirectMapping },
     //.
     _fontDescriptions { std::move(fontDescriptions) },

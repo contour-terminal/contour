@@ -353,12 +353,12 @@ struct GridSize
 
         constexpr Offset makeOffset(int offset) noexcept
         {
-            return Offset { LineOffset(offset / *_width), ColumnOffset(offset % *_width) };
+            return Offset { LineOffset(offset / unbox(_width)), ColumnOffset(offset % unbox(_width)) };
         }
     };
 
     [[nodiscard]] constexpr iterator begin() const noexcept { return iterator { columns, 0 }; }
-    [[nodiscard]] constexpr iterator end() const noexcept { return iterator { columns, *columns * *lines }; }
+    [[nodiscard]] constexpr iterator end() const noexcept { return iterator { columns, unbox(columns) * unbox(lines) }; }
 };
 
 constexpr CellLocation operator+(CellLocation a, GridSize::Offset b) noexcept

@@ -60,9 +60,9 @@ Image::Data RasterizedImage::fragment(CellLocation pos) const
     Image::Data fragData;
     fragData.resize(_cellSize.area() * 4); // RGBA
     auto const availableWidth =
-        min(unbox<int>(_image->width()) - *pixelOffset.column, unbox<int>(_cellSize.width));
+        min(unbox<int>(_image->width()) - unbox(pixelOffset.column), unbox<int>(_cellSize.width));
     auto const availableHeight =
-        min(unbox<int>(_image->height()) - *pixelOffset.line, unbox<int>(_cellSize.height));
+        min(unbox<int>(_image->height()) - unbox(pixelOffset.line), unbox<int>(_cellSize.height));
 
     // auto const availableSize = Size{availableWidth, availableHeight};
     // std::cout << fmt::format(
@@ -90,7 +90,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos) const
     for (int y = 0; y < availableHeight; ++y)
     {
         auto const startOffset = static_cast<size_t>(
-            ((*pixelOffset.line + y) * unbox<int>(_image->width()) + *pixelOffset.column) * 4);
+            ((pixelOffset.line + y) * unbox<int>(_image->width()) + unbox(pixelOffset.column)) * 4);
         const auto* const source = &_image->data()[startOffset];
         target = copy(source, source + static_cast<ptrdiff_t>(availableWidth) * 4, target);
 
