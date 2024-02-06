@@ -402,7 +402,7 @@ install_deps_arch()
         "
     fi
 
-    sudo pacman -S -y $packages
+    sudo pacman -S -y --needed $packages
 }
 
 install_deps_suse()
