@@ -11,7 +11,7 @@ enum class TextShapingEngine
 {
     OpenShaper, //!< Uses open-source implementation: harfbuzz/freetype/fontconfig
     DWrite,     //!< native platform support: Windows
-    CoreText,   //!< native platform support: OS/X
+    CoreText,   //!< native platform support: macOS
 };
 
 enum class FontLocatorEngine
@@ -19,7 +19,7 @@ enum class FontLocatorEngine
     Mock,       //!< mock font locator API
     FontConfig, //!< platform independant font locator API
     DWrite,     //!< native platform support: Windows
-    CoreText,   //!< native font locator on OS/X
+    CoreText,   //!< native font locator on macOS
 };
 
 using DPI = text::DPI;

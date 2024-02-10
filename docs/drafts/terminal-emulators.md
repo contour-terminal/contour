@@ -22,7 +22,7 @@
 - Kitty                             | Extensibility (via kittens, Python)
 - Kuake                             | Quake-like terminal feeling
 - ST                                | <2k lines, minimalistic
-- Terminal.app                      | OS/X default
+- Terminal.app                      | macOS default
 - Terminator                        | GUI multiplexer
 - Terminology                       | visually appealing features
 - Termite (libvte)

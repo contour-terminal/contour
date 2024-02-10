@@ -11,7 +11,7 @@ The same modifier values apply as with input modifiers (see below).
 Modifier to be pressed in order to initiate block-selection
 using the left mouse button.
 
-This is usually the Control modifier, but on OS/X that is not possible,
+This is usually the Control modifier, but on macOS that is not possible,
 so Alt or Meta would be recommended instead.
 
 Supported modifiers:

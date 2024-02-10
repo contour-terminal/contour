@@ -5,7 +5,7 @@
 # Possible (incomplete list of) values are:
 # - auto        The platform will be auto-detected.
 # - xcb         Uses XCB plugin (for X11 environment).
-# - cocoa       Used to be run on Mac OS/X.
+# - cocoa       Used to be run on macOS.
 # - direct2d    Windows platform plugin using Direct2D.
 # - winrt       Windows platform plugin using WinRT.
 #
@@ -89,7 +89,7 @@ bypass_mouse_protocol_modifier: Shift
 # Modifier to be pressed in order to initiate block-selection
 # using the left mouse button.
 #
-# This is usually the Control modifier, but on OS/X that is not possible,
+# This is usually the Control modifier, but on macOS that is not possible,
 # so Alt or Meta would be recommended instead.
 #
 # Supported modifiers:
@@ -363,7 +363,7 @@ profiles:
             # Possible values are:
             # - native          : automatically choose the best available on the current platform
             # - fontconfig      : uses fontconfig to select fonts
-            # - CoreText        : uses OS/X CoreText to select fonts.
+            # - CoreText        : uses macOS CoreText to select fonts.
             # - DirectWrite     : selects DirectWrite engine (Windows only)
             locator: native
 
@@ -373,7 +373,7 @@ profiles:
                 # Supported values are:
                 # - native      : automatically choose the best available on the current platform.
                 # - DirectWrite : selects DirectWrite engine (Windows only)
-                # - CoreText    : selects CoreText engine (Mac OS/X only) (currently not implemented)
+                # - CoreText    : selects CoreText engine (macOS only) (currently not implemented)
                 # - OpenShaper  : selects OpenShaper (harfbuzz/freetype/fontconfig, available on all
                 #                 platforms)
                 engine: native
@@ -746,7 +746,7 @@ color_schemes:
 # - Alt
 # - Control
 # - Shift
-# - Meta (this is the Windows key on Windows OS, and the Command key on OS/X, and Meta on anything else)
+# - Meta (this is the Windows key on Windows OS, and the Command key on macOS, and Meta on anything else)
 #
 # Keys can be expressed case-insensitively symbolic:
 #   APOSTROPHE, ADD, BACKSLASH, COMMA, DECIMAL, DIVIDE, EQUAL, LEFT_BRACKET,

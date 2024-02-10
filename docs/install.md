@@ -6,7 +6,7 @@
 
 Please download Contour for Windows (the `.msi` file) from our [release page](https://github.com/contour-terminal/contour/releases/latest/), and double click on it to install.
 
-## Mac OS/X
+## macOS
 
 ```sh
 brew install contour
@@ -52,7 +52,7 @@ Contour is best installed from supported package managers, but you can build
 from source by following the instruction below. You can Qt 5 or Qt 6,
 by default contour will be compiler with Qt 6, to change Qt version use `QTVER=5 ./scripts/install-deps.sh` to fetch dependencies and cmake flag `-D CONTOUR_QT_VERSION=5`.
 
-### UNIX-like systems (Linux, FreeBSD, OS/X)
+### UNIX-like systems (Linux, FreeBSD, macOS)
 
 #### Prerequisites
 

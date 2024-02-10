@@ -344,9 +344,9 @@ jobs:
             ./build/src/vtrasterizer/vtrasterizer_test
             rm -rf _deps build
   # }}}
-  # {{{ OS/X
+  # {{{ macOS
   osx:
-    name: "OS/X"
+    name: "macOS"
     runs-on: macos-13
     steps:
       - uses: actions/checkout@v3

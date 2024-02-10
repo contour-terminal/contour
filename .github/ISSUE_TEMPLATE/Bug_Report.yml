@@ -44,7 +44,7 @@ body:
       - Windows 10.0.19042.0
       - Ubuntu Linux 20.04
       - Fedora Linux 35
-      - OS/X Monterey 12.0.1
+      - macOS Monterey 12.0.1
       - FreeBSD
   validations:
     required: true
