@@ -47,7 +47,18 @@ struct TextClusterGroup
     TextStyle style {};
     vtbackend::RGBColor color {};
 
+#if defined(__APPLE__)
+    // NB: Don't use default implementation for operator<=>,
+    // as it's not yet supported by std::vector<> on macOS it seems.
+    bool operator==(TextClusterGroup const& other) const noexcept
+    {
+        return codepoints == other.codepoints && clusters == other.clusters
+               && initialPenPosition == other.initialPenPosition && style == other.style
+               && color == other.color;
+    }
+#else
     auto operator<=>(TextClusterGroup const&) const = default;
+#endif
 };
 
 struct BoxDrawingCell
