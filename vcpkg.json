@@ -7,7 +7,7 @@
         { "name": "libssh2", "version>=": "1.11.0" },
         { "name": "ms-gsl"},
         { "name": "range-v3", "version>=": "0.12.0" },
-        { "name": "yaml-cpp", "version>=": "0.8.0" },
+        { "name": "yaml-cpp" },
         "fontconfig",
         "freetype",
         "harfbuzz"

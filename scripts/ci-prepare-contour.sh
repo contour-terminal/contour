@@ -8,9 +8,8 @@ CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-RelWithDebInfo}"
 prepare_build_ubuntu()
 {
    cmake \
-      -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
-      -DCONTOUR_TESTING=ON \
-      -S . -B ${BUILD_DIR} \
+       --preset linux-release \
+       -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
       ${EXTRA_CMAKE_FLAGS}
 }
 

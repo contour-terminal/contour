@@ -41,34 +41,45 @@ if(APPLE)
     find_package(Qt6 COMPONENTS Core Quick REQUIRED)
 endif()
 
-set(contour_SRCS
+set(_source_files
     CaptureScreen.cpp CaptureScreen.h
     main.cpp
 )
 
 if(CONTOUR_FRONTEND_GUI)
-    list(APPEND contour_SRCS
-        Actions.cpp Actions.h
-        Audio.cpp Audio.h
-        BlurBehind.cpp BlurBehind.h
-        Config.cpp Config.h
-        ContourApp.cpp ContourApp.h
-        ContourGuiApp.cpp ContourGuiApp.h
-        TerminalSession.cpp TerminalSession.h
-        TerminalSessionManager.cpp TerminalSessionManager.h
-        helper.cpp helper.h
+    list(APPEND _header_files
+        Actions.h
+        Audio.h
+        BlurBehind.h
+        Config.h
+        ContourApp.h
+        ContourGuiApp.h
+        TerminalSession.h
+        TerminalSessionManager.h
+        helper.h
+    )
+    list(APPEND _source_files
+        Actions.cpp
+        Audio.cpp
+        BlurBehind.cpp
+        Config.cpp
+        ContourApp.cpp
+        ContourGuiApp.cpp
+        TerminalSession.cpp
+        TerminalSessionManager.cpp
+        helper.cpp
     )
 endif()
 
 if(WIN32)
-    list(APPEND contour_SRCS contour.rc)
+    list(APPEND _source_files contour.rc)
 endif()
 
-set(QT_RESOURCES resources.qrc)
+set(_qt_resources resources.qrc)
 if(CONTOUR_QT_VERSION EQUAL "5")
-    qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
+    qt5_add_resources(QT_RESOURCES ${_qt_resources})
 else()
-    qt_add_resources(QT_RESOURCES ${QT_RESOURCES})
+    qt_add_resources(QT_RESOURCES ${_qt_resources})
 endif()
 
 # {{{ configure QML files and their imports
@@ -108,7 +119,19 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/Terminal.qml.in ${CMAKE_C
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/main.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/main.qml)
 # }}}
 
-add_executable(contour ${contour_SRCS} ${QT_RESOURCES})
+set(_qml_files
+    ui.template/RequestPermission.qml.in
+    ui.template/Terminal.qml.in
+    ui.template/main.qml.in
+)
+
+source_group(Sources FILES ${_source_files})
+source_group(Headers FILES ${_header_files})
+source_group(Resources FILES ${_qt_resources})
+source_group(QML FILES ${_qml_files})
+
+add_executable(contour)
+target_sources(contour PRIVATE ${_source_files} ${_header_files} ${_qt_resources} ${_qml_files})
 
 set_target_properties(contour PROPERTIES AUTOMOC ON)
 set_target_properties(contour PROPERTIES AUTORCC ON)
@@ -130,6 +153,9 @@ target_compile_definitions(contour PRIVATE
 
 # Disable all deprecated Qt functions prior to Qt 6.0
 target_compile_definitions(contour PRIVATE QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
+
+# Create custom target to execute contour
+add_custom_target(run COMMAND contour)
 
 if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour PRIVATE CONTOUR_PERF_STATS)
@@ -179,7 +205,7 @@ if(FREEBSD)
     target_link_directories(contour PUBLIC "/usr/local/lib")
 endif()
 
-if(APPLE)
+if(TARGET yaml-cpp::yaml-cpp)
     set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
 else()
     set(YAML_CPP_LIBRARIES yaml-cpp)
@@ -489,8 +515,8 @@ elseif(APPLE)
                     -always-overwrite
                     -verbose=1
                     -no-strip
-                    -codesign=\"${CODE_SIGN_CERTIFICATE_ID}\"
                     -qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui
+                    \"-codesign=${CODE_SIGN_CERTIFICATE_ID}\"
         )
 
         # Recursively iterate through all plugins and populate PLUGIN_PATHS to be passed to fixup_bundle.
