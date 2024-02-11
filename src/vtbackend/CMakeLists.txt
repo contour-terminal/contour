@@ -156,9 +156,7 @@ if(LIBTERMINAL_TESTING)
         )
 
         if(CONTOUR_INSTALL_TOOLS)
-            if(WIN32)
-                install(TARGETS bench-headless DESTINATION bin)
-            elseif(APPLE)
+            if(APPLE)
                 # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
                 set(APP_NAME contour)
                 set(App_Contents "${APP_NAME}.app/Contents")

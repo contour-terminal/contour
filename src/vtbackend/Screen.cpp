@@ -1948,10 +1948,9 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
         std::move(image), alignmentPolicy, resizePolicy, gapColor, gridSize, _state->cellPixelSize);
     const auto lastSixelBand = unbox(imageSize.height) % 6;
     const LineOffset offset = [&]() {
-        auto offset =
-            LineOffset::cast_from(std::ceil((imageSize.height - lastSixelBand).as<double>()
-                                            / _state->cellPixelSize.height.as<double>()))
-            - 1 * (lastSixelBand == 0);
+        auto offset = LineOffset::cast_from(std::ceil((imageSize.height - lastSixelBand).as<double>()
+                                                      / _state->cellPixelSize.height.as<double>()))
+                      - 1 * (lastSixelBand == 0);
         auto const h = unbox(imageSize.height) - 1;
         // VT340 has this behavior where for some heights it text cursor is placed not
         // at the final sixel line but a line above it.

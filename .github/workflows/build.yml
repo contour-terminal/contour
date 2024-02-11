@@ -54,15 +54,17 @@ jobs:
 
   check_clang_format:
     name: "Check C++ style"
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v3
-    - name: Run clang-format style check for C/C++/Protobuf programs.
-      uses: jidicula/clang-format-action@v4.11.0
-      with:
-        clang-format-version: '15'
-        check-path: 'src'
-        #exclude-regex: 'sse2neon.h'
+    - name: Install clang
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 17
+        sudo apt-get install clang-format-17
+    - name: "Clang-format"
+      run: find ./src/ -name "*.cpp" -o -name "*.h" | xargs clang-format-17 --Werror --dry-run
     - name: "Check includes"
       run: ./scripts/check-includes.sh
 
@@ -478,38 +480,24 @@ jobs:
         id: runvcpkg
         with:
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-          vcpkgGitCommitId: 3715d743ac08146d9b7714085c1babdba9f262d5
-      - name: "create build directory"
-        shell: powershell
-        run: |
-          If (!(Test-Path build))
-          {
-                New-Item -ItemType Directory -Force -Path build
-          }
+          vcpkgGitCommitId: 80403036a665cb8fcc1a1b3e17593d20b03b2489
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_TESTING=ON -DCONTOUR_QT_VERSION=6 -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
+        run: cmake --preset windows-cl-release
       - name: "Build"
-        run: cmake --build build/ --config Release
-      - name: "test: crispy"
-        run: .\build\src\crispy\Release\crispy_test.exe
-      - name: "test: vtparser"
-        run: .\build\src\vtparser\Release\vtparser_test.exe
-      - name: "test: vtbackend"
-        run: .\build\src\vtbackend\Release\vtbackend_test.exe
-      - name: "test: vtrasterizer"
-        run: .\build\src\vtrasterizer\Release\vtrasterizer_test.exe
+        run: cmake --build --preset windows-cl-release
+      - name: "Test"
+        run: ctest --preset windows-cl-release
       - name: "Create Package(s)"
         shell: powershell
         run: |
-          cd build
-          cpack -V
-          type "_CPack_Packages/win64/WIX/wix.log"
+          cpack --preset windows-cl-release -V
+          #type "_CPack_Packages/win64/WIX/wix.log"
       - name: inspect
         run: Get-ChildItem -Recurse
       - name: "Rename package(s)"
         run: |
-          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
-          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
+          mv "out\build\windows-cl-release\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
+          mv "out\build\windows-cl-release\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
       - name: "Inspect again"
         run: Get-ChildItem
       - name: "Uploading MSI to artifact store"
@@ -574,7 +562,7 @@ jobs:
             echo "QTVER=6" >> "$GITHUB_OUTPUT"
           fi
       - name: "install dependencies"
-        run: sudo env QTVER="${{ matrix.qt_version }}" ./scripts/install-deps.sh
+        run: sudo env QTVER="${{ matrix.qt_version }}" SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
       - name: Install GCC
@@ -587,6 +575,8 @@ jobs:
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
         run: sudo apt install -y clang-tidy-${{ steps.extract_matrix.outputs.CC_VERSION }}
 
+      - name: Install CMake
+        uses: ssrobins/install-cmake@v1
       - name: "create build directory"
         run: mkdir build
       - name: CMake version
@@ -611,35 +601,25 @@ jobs:
               -DCMAKE_CXX_COMPILER="${CC_EXE}-${CC_VER}" \
               -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}" \
               -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS}" \
-              -DCONTOUR_TESTING=ON \
               -DCMAKE_INSTALL_PREFIX="/usr" \
-              -DCONTOUR_INSTALL_TOOLS=ON \
               -DCONTOUR_QT_VERSION=${{ matrix.qt_version }} \
-              -DPEDANTIC_COMPILER=ON \
-              -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
               -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
-              -S . -B build
+              --preset linux-debug
       - name: "build"
-        run: cmake --build build/ -- -j3
-      - name: "test: crispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: vtparser"
-        run: ./build/src/vtparser/vtparser_test
-      - name: "test: vtbackend"
-        run: ./build/src/vtbackend/vtbackend_test
-      - name: "test: vtrasterizer"
-        run: ./build/src/vtrasterizer/vtrasterizer_test
+        run: cmake --build --preset linux-debug -- -j3
+      - name: "tests"
+        run: cmake --build --preset linux-debug --target test
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' && matrix.qt_version == '6' }}
         uses: actions/upload-artifact@v3
         with:
           name: contour-ubuntu2204-tests
           path: |
-            build/src/crispy/crispy_test
-            build/src/vtparser/vtparser_test
-            build/src/vtbackend/vtbackend_test
-            build/src/vtbackend/bench-headless
-            build/src/vtrasterizer/vtrasterizer_test
+            build/linux-debug/src/crispy/crispy_test
+            build/linux-debug/src/vtparser/vtparser_test
+            build/linux-debug/src/vtbackend/vtbackend_test
+            build/linux-debug/src/vtbackend/bench-headless
+            build/linux-debug/src/vtrasterizer/vtrasterizer_test
             test/images
           retention-days: 1
   # }}}
@@ -815,6 +795,8 @@ jobs:
         run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "create build directory"
         run: mkdir build
+      - name: Install CMake
+        uses: ssrobins/install-cmake@v1
       - name: CMake version
         run: cmake --version
       - name: "cmake"
@@ -832,33 +814,23 @@ jobs:
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
                                -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD \
                                -DCMAKE_INSTALL_PREFIX="/usr" \
-                               -DCONTOUR_INSTALL_TOOLS=ON \
-                               -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
-                               -DPEDANTIC_COMPILER=ON \
-                               -DPEDANTIC_COMPILER_WERROR=OFF \
+                               -DCONTOUR_TESTING=ON \
                                " \
             ./scripts/ci-prepare-contour.sh
       - name: "build"
-        run: cmake --build build/ -- -j3
-      - name: "test: crispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: vtparser"
-        run: ./build/src/vtparser/vtparser_test
-      - name: "test: vtbackend"
-        run: ./build/src/vtbackend/vtbackend_test
-      - name: "test: vtrasterizer"
-        run: ./build/src/vtrasterizer/vtrasterizer_test
+        run: cmake --build --preset linux-release / -- -j3
+      - name: "tests"
+        run: cmake --build --preset linux-release --target test
       - name: "CPack: Creating DEB package"
         run: |
           set -ex
-          cd build
-          cpack -G DEB -V
+          cpack --preset linux-release
           OS_VERSION=${{ matrix.os_version }}
           OS_VERSION=${OS_OVERRIDE/./_}
-          mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
-                "../contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-          mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
-                "../contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
+          mv -v "./build/linux-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
+                "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+          mv -v "./build/linux-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
+                "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v3
         with:
@@ -903,13 +875,13 @@ jobs:
                           ncurses-bin \
                           valgrind
       - name: "test: crispy (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/src/crispy/crispy_test
+        run: valgrind --error-exitcode=64 ./build/linux-debug/src/crispy/crispy_test
       - name: "test: vtparser (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/src/vtparser/vtparser_test
+        run: valgrind --error-exitcode=64 ./build/linux-debug/src/vtparser/vtparser_test
       - name: "test: vtbackend (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/src/vtbackend/vtbackend_test
+        run: valgrind --error-exitcode=64 ./build/linux-debug/src/vtbackend/vtbackend_test
       - name: "test: vtrasterizer (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/src/vtrasterizer/vtrasterizer_test
+        run: valgrind --error-exitcode=64 ./build/linux-debug/src/vtrasterizer/vtrasterizer_test
   # }}}
   # {{{ Ubuntu 22.04: Test bench-headless
   test_ubuntu2204_bench_headless:
@@ -948,7 +920,7 @@ jobs:
                           ncurses-bin \
                           valgrind
       - name: "bench-headless: ${{ matrix.test_case }}"
-        run: valgrind --error-exitcode=64 ./build/src/vtbackend/bench-headless ${{ matrix.test_case }} size 1
+        run: valgrind --error-exitcode=64 ./build/linux-debug/src/vtbackend/bench-headless ${{ matrix.test_case }} size 1
   # }}}
   # {{{ Ubuntu check matrix
   check_ubuntu2204_matrix_test_matrix:

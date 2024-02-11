@@ -2,6 +2,7 @@
 #include <vtbackend/SixelParser.h>
 
 #include <algorithm>
+#include <array>
 
 using std::clamp;
 using std::fill;

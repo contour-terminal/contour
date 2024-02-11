@@ -922,11 +922,12 @@ bool SshSession::connect(std::string_view host, int port)
 
     try
     {
-        auto hints = addrinfo {
-            .ai_family = PF_UNSPEC,
-            .ai_socktype = SOCK_STREAM,
-            .ai_protocol = IPPROTO_TCP,
-        };
+        auto hints = addrinfo {};
+        hints.ai_flags = AI_ADDRCONFIG;
+        hints.ai_family = PF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_protocol = IPPROTO_TCP;
+
         addrinfo* addrList = nullptr;
         if (auto const rc = getaddrinfo(host.data(), nullptr, &hints, &addrList); rc != 0)
         {

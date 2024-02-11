@@ -47,15 +47,19 @@ endif()
 
 set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode::unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
 
-if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL AMD64)
-    target_compile_options(crispy-core PUBLIC -maes)
-elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL aarch64) # ARM64
-    target_compile_options(crispy-core PUBLIC -march=armv8-a+fp+simd+crypto+crc)
-elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL ARM64)
-    message(STATUS "Target architecture: ${CMAKE_SYSTEM_PROCESSOR}")
-else()
-    message(WARNING "Target architecture not detected: ${CMAKE_SYSTEM_PROCESSOR}")
+# if compiler is not MSVC
+if(NOT MSVC)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL AMD64)
+        target_compile_options(crispy-core PUBLIC -maes)
+    elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL aarch64) # ARM64
+        target_compile_options(crispy-core PUBLIC -march=armv8-a+fp+simd+crypto+crc)
+    elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL ARM64)
+        message(STATUS "Target architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+    else()
+        message(WARNING "Target architecture not detected: ${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
 endif()
+
 target_compile_features(crispy-core PUBLIC cxx_std_17)
 target_link_libraries(crispy-core PUBLIC ${CRISPY_CORE_LIBS})
 target_include_directories(crispy-core PUBLIC
