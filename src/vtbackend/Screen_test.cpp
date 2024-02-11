@@ -769,15 +769,19 @@ TEST_CASE("Linefeed", "[screen]")
 
 TEST_CASE("DSR.Unsolicited_ColorPaletteUpdated", "[screen]")
 {
-    auto const lightModeColors = ColorPalette {
-        .defaultForeground = RGBColor { 0x00, 0x00, 0x00 },
-        .defaultBackground = RGBColor { 0xff, 0xff, 0xff },
-    };
+    auto const lightModeColors = []() -> ColorPalette {
+        ColorPalette palette {};
+        palette.defaultForeground = RGBColor { 0x00, 0x00, 0x00 };
+        palette.defaultBackground = RGBColor { 0xff, 0xff, 0xff };
+        return palette;
+    }();
 
-    auto const darkModeColors = ColorPalette {
-        .defaultForeground = RGBColor { 0xff, 0xff, 0xff },
-        .defaultBackground = RGBColor { 0x00, 0x00, 0x00 },
-    };
+    auto const darkModeColors = []() -> ColorPalette {
+        ColorPalette palette {};
+        palette.defaultForeground = RGBColor { 0xff, 0xff, 0xff };
+        palette.defaultBackground = RGBColor { 0x00, 0x00, 0x00 };
+        return palette;
+    }();
 
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
 

@@ -31,12 +31,12 @@ enum class FunctionCategory : uint8_t
 // VT sequence documentation in markdown format
 struct FunctionDocumentation
 {
-    std::string_view mnemonic;
-    std::string_view comment;
-    std::string_view parameters;
-    std::string_view description;
-    std::string_view notes;
-    std::string_view examples;
+    std::string_view mnemonic {};
+    std::string_view comment {};
+    std::string_view parameters {};
+    std::string_view description {};
+    std::string_view notes {};
+    std::string_view examples {};
 };
 
 // {{{ documentation
