@@ -65,8 +65,10 @@ can be insalled via the system package manager.
 
 #### Compile
 
+You can use cmake presets to compile contour. The full list of available presets can be seen using `cmake --list-presets`. To compile release build for linux or MacOs use `linux-release` or `macos-release` accordingly. FreeBSD users can use `linux-release` or configure cmake manually.
+
 ```sh
-cmake --preset linux-release
+cmake --preset linux-release 
 cmake --build --preset linux-release
 
 # Optionally, if you want to install from source

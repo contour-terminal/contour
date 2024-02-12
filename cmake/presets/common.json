@@ -19,8 +19,7 @@
             "name": "release",
             "hidden": true,
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "CMAKE_INSTALL_PREFIX": "/usr/local"
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
             }
         },
         {
