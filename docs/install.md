@@ -66,11 +66,11 @@ can be insalled via the system package manager.
 #### Compile
 
 ```sh
-cmake -S . -B build -G Ninja
-cmake --build build/
+cmake --preset linux-release
+cmake --build --preset linux-release
 
 # Optionally, if you want to install from source
-cmake --build build/ --target install
+cmake --build --preset linux-release --target install
 ```
 
 Please mind, if you want to install into a system root, e.g. `/usr/local`, you may need to prefix
