@@ -1,0 +1,34 @@
+{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "contour-common",
+            "hidden": true,
+            "description": "Common settings for all configurations",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CONTOUR_INSTALL_TOOLS": "ON",
+                "CONTOUR_TESTING": "ON",
+                "LIBTERMINAL_BUILD_BENCH_HEADLESS": "ON",
+                "LIBUNICODE_TESTING": "OFF",
+                "PEDANTIC_COMPILER": "ON",
+                "PEDANTIC_COMPILER_WERROR": "ON"
+            }
+        },
+        {
+            "name": "release",
+            "hidden": true,
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "debug",
+            "hidden": true,
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        }
+    ]
+}

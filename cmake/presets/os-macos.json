@@ -1,0 +1,61 @@
+{
+    "version": 6,
+    "include": [ "common.json" ],
+    "configurePresets": [
+        {
+            "name": "macos-common",
+            "inherits": "contour-common",
+            "generator": "Ninja",
+            "hidden": true,
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "cacheVariables": {
+                "CODE_SIGN_CERTIFICATE_ID": "Developer ID Application: Christian Parpart (6T525MU9UR)",
+                "CMAKE_PREFIX_PATH": "/opt/homebrew/opt/qt"
+            }
+        },
+        {
+            "name": "macos-debug",
+            "displayName": "MacOS - Debug",
+            "inherits": ["macos-common", "debug"]
+        },
+        {
+            "name": "macos-release",
+            "displayName": "MacOS - Release",
+            "inherits": ["macos-common", "release"]
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "macos-debug",
+            "displayName": "MacOS/X - Debug",
+            "configurePreset": "macos-debug"
+        },
+        {
+            "name": "macos-release",
+            "displayName": "MacOS/X - Release",
+            "configurePreset": "macos-release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "macos-debug",
+            "configurePreset": "macos-debug",
+            "output": {"outputOnFailure": true},
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": true
+            }
+        }
+    ],
+    "packagePresets": [
+        {
+            "name": "macos-release",
+            "configurePreset": "macos-release",
+            "generators": [ "DragNDrop" ]
+        }
+    ]
+}
