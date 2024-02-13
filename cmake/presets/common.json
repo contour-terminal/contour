@@ -7,7 +7,6 @@
             "description": "Common settings for all configurations",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CONTOUR_INSTALL_TOOLS": "ON",
                 "CONTOUR_TESTING": "ON",
                 "LIBTERMINAL_BUILD_BENCH_HEADLESS": "ON",
@@ -27,7 +26,8 @@
             "name": "debug",
             "hidden": true,
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
             }
         }
     ]

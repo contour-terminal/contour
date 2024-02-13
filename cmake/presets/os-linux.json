@@ -11,9 +11,14 @@
                 "type": "equals",
                 "lhs": "${hostSystemName}",
                 "rhs": "Linux"
-            },
+            }
+        },
+        {
+            "name": "linux-common-release",
+            "hidden": true,
+            "inherits": "release",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_INSTALL_PREFIX": "/usr/local"
             }
         },
         {
@@ -35,7 +40,7 @@
         {
             "name": "linux-release",
             "displayName": "Linux 64-bit",
-            "inherits": ["linux-common", "release"]
+            "inherits": ["linux-common", "linux-common-release"]
         },
         {
             "name": "linux-debug",
@@ -45,7 +50,7 @@
         {
             "name": "linux-clang-release",
             "displayName": "Linux 64-bit (Clang)",
-            "inherits": ["linux-clang", "release"]
+            "inherits": ["linux-clang", "linux-common-release"]
         },
         {
             "name": "linux-clang-debug",
@@ -55,7 +60,7 @@
         {
             "name": "linux-gcc-release",
             "displayName": "Linux 64-bit (GCC)",
-            "inherits": ["linux-gcc", "release"]
+            "inherits": ["linux-gcc", "linux-common-release"]
         },
         {
             "name": "linux-gcc-debug",
