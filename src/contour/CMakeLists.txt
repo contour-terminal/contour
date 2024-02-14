@@ -77,9 +77,9 @@ endif()
 
 set(_qt_resources resources.qrc)
 if(CONTOUR_QT_VERSION EQUAL "5")
-    qt5_add_resources(QT_RESOURCES ${_qt_resources})
+    qt5_add_resources(_qt_resources ${_qt_resources})
 else()
-    qt_add_resources(QT_RESOURCES ${_qt_resources})
+    qt_add_resources(_qt_resources ${_qt_resources})
 endif()
 
 # {{{ configure QML files and their imports
