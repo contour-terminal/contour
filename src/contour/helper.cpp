@@ -58,8 +58,8 @@ namespace
         auto const cellSize = session.display()->cellSize();
         auto const dpr = session.contentScale();
 
-        auto const marginTop = static_cast<int>(session.profile().margins.vertical * dpr);
-        auto const marginLeft = static_cast<int>(session.profile().margins.horizontal * dpr);
+        auto const marginTop = static_cast<int>(session.profile().margins.value().vertical * dpr);
+        auto const marginLeft = static_cast<int>(session.profile().margins.value().horizontal * dpr);
 
         auto const sx = int(double(x) * dpr);
         auto const sy = int(double(y) * dpr);
@@ -74,7 +74,7 @@ namespace
     }
 
     PixelCoordinate makeMousePixelPosition(QHoverEvent* event,
-                                           config::TerminalProfile::WindowMargins margins,
+                                           config::WindowMargins margins,
                                            double dpr) noexcept
     {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -89,7 +89,7 @@ namespace
     }
 
     PixelCoordinate makeMousePixelPosition(QMouseEvent* event,
-                                           config::TerminalProfile::WindowMargins margins,
+                                           config::WindowMargins margins,
                                            double dpr) noexcept
     {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -104,7 +104,7 @@ namespace
     }
 
     PixelCoordinate makeMousePixelPosition(QWheelEvent* event,
-                                           config::TerminalProfile::WindowMargins margins,
+                                           config::WindowMargins margins,
                                            double dpr) noexcept
     {
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
@@ -388,7 +388,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     }
 
 #if defined(__apple__)
-    if (0x20 <= key && key < 0x80 && (modifiers.alt() && session.profile().optionKeyAsAlt))
+    if (0x20 <= key && key < 0x80 && (modifiers.alt() && session.profile().optionKeyAsAlt.value()))
     {
         auto const ch = static_cast<char32_t>(modifiers.shift() ? std::toupper(key) : std::tolower(key));
         session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
@@ -442,7 +442,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
         ((modifiers & Modifier::Alt) ? transposed(event->angleDelta()) : event->angleDelta()) / 8;
 
     auto const pixelPosition =
-        makeMousePixelPosition(event, session.profile().margins, session.contentScale());
+        makeMousePixelPosition(event, session.profile().margins.value(), session.contentScale());
 
     if (!pixelDelta.isNull())
     {
@@ -467,7 +467,7 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
     session.sendMousePressEvent(
         makeModifiers(event->modifiers()),
         makeMouseButton(event->button()),
-        makeMousePixelPosition(event, session.profile().margins, session.contentScale()));
+        makeMousePixelPosition(event, session.profile().margins.value(), session.contentScale()));
     event->accept();
 }
 
@@ -476,7 +476,7 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
     session.sendMouseReleaseEvent(
         makeModifiers(event->modifiers()),
         makeMouseButton(event->button()),
-        makeMousePixelPosition(event, session.profile().margins, session.contentScale()));
+        makeMousePixelPosition(event, session.profile().margins.value(), session.contentScale()));
     event->accept();
 }
 
@@ -485,7 +485,7 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
     session.sendMouseMoveEvent(
         makeModifiers(event->modifiers()),
         makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
-        makeMousePixelPosition(event, session.profile().margins, session.contentScale()));
+        makeMousePixelPosition(event, session.profile().margins.value(), session.contentScale()));
     event->accept();
 }
 
@@ -499,7 +499,7 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
     session.sendMouseMoveEvent(
         makeModifiers(event->modifiers()),
         makeMouseCellLocation(position.x(), position.y(), session),
-        makeMousePixelPosition(event, session.profile().margins, session.contentScale()));
+        makeMousePixelPosition(event, session.profile().margins.value(), session.contentScale()));
     event->accept();
 }
 
@@ -569,7 +569,7 @@ vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer)
 vtrasterizer::PageMargin computeMargin(ImageSize cellSize,
                                        PageSize charCells,
                                        ImageSize displaySize,
-                                       config::TerminalProfile::WindowMargins minimumMargins) noexcept
+                                       config::WindowMargins minimumMargins) noexcept
 {
     auto const usedHeight = unbox(charCells.lines) * unbox(cellSize.height);
 
@@ -614,17 +614,18 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     auto const newPageSize =
         pageSizeForPixels(newPixelSize,
                           renderer.gridMetrics().cellSize,
-                          applyContentScale(session.profile().margins, session.contentScale()));
+                          applyContentScale(session.profile().margins.value(), session.contentScale()));
     vtbackend::Terminal& terminal = session.terminal();
     vtbackend::ImageSize const cellSize = renderer.gridMetrics().cellSize;
 
     if (renderer.hasRenderTarget())
         renderer.renderTarget().setRenderSize(newPixelSize);
     renderer.setPageSize(newPageSize);
-    renderer.setMargin(computeMargin(renderer.gridMetrics().cellSize,
-                                     newPageSize,
-                                     newPixelSize,
-                                     applyContentScale(session.profile().margins, session.contentScale())));
+    renderer.setMargin(
+        computeMargin(renderer.gridMetrics().cellSize,
+                      newPageSize,
+                      newPixelSize,
+                      applyContentScale(session.profile().margins.value(), session.contentScale())));
 
     if (oldPageSize.lines != newPageSize.lines)
         emit session.lineCountChanged(newPageSize.lines.as<int>());
@@ -636,7 +637,7 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     displayLog()("Applying resize {}/{} pixels (margins {}) and {} -> {} cells.",
                  viewSize,
                  newPixelSize,
-                 session.profile().margins,
+                 session.profile().margins.value(),
                  terminal.pageSize(),
                  newPageSize);
 

@@ -167,8 +167,7 @@ void spawnNewTerminal(std::string const& programPath,
 
 vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer);
 
-constexpr config::TerminalProfile::WindowMargins applyContentScale(
-    config::TerminalProfile::WindowMargins margins, double contentScale) noexcept
+constexpr config::WindowMargins applyContentScale(config::WindowMargins margins, double contentScale) noexcept
 {
     return { .horizontal = static_cast<unsigned>(margins.horizontal * contentScale),
              .vertical = static_cast<unsigned>(margins.vertical * contentScale) };
@@ -177,14 +176,14 @@ constexpr config::TerminalProfile::WindowMargins applyContentScale(
 vtrasterizer::PageMargin computeMargin(vtbackend::ImageSize cellSize,
                                        vtbackend::PageSize charCells,
                                        vtbackend::ImageSize displaySize,
-                                       config::TerminalProfile::WindowMargins minimumMargins) noexcept;
+                                       config::WindowMargins minimumMargins) noexcept;
 
 vtrasterizer::FontDescriptions sanitizeFontDescription(vtrasterizer::FontDescriptions fonts,
                                                        text::DPI screenDPI);
 
 constexpr vtbackend::PageSize pageSizeForPixels(vtbackend::ImageSize totalViewSize,
                                                 vtbackend::ImageSize cellSize,
-                                                config::TerminalProfile::WindowMargins margins)
+                                                config::WindowMargins margins)
 {
     // NB: Multiplied by 2, because margins are applied on both sides of the terminal.
     auto const marginSize = vtbackend::ImageSize { vtbackend::Width::cast_from(2 * margins.horizontal),

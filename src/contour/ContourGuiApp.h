@@ -62,7 +62,7 @@ class ContourGuiApp: public QObject, public ContourApp
         Require(false);
     }
 
-    [[nodiscard]] bool liveConfig() const noexcept { return _config.live; }
+    [[nodiscard]] bool liveConfig() const noexcept { return _config.live.value(); }
 
     TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
 

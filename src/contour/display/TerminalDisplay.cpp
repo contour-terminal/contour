@@ -273,14 +273,14 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
                  "contentScale={}",
                  (void const*) this,
                  (void const*) newSession,
-                 newSession->profile().ssh.hostname.empty()
-                     ? fmt::format("program={}", newSession->profile().shell.program)
+                 newSession->profile().ssh.value().hostname.empty()
+                     ? fmt::format("program={}", newSession->profile().shell.value().program)
                      : fmt::format("{}@{}:{}",
-                                   newSession->profile().ssh.username,
-                                   newSession->profile().ssh.hostname,
-                                   newSession->profile().ssh.port),
-                 newSession->profile().terminalSize,
-                 newSession->profile().fonts.size,
+                                   newSession->profile().ssh.value().username,
+                                   newSession->profile().ssh.value().hostname,
+                                   newSession->profile().ssh.value().port),
+                 newSession->profile().terminalSize.value(),
+                 newSession->profile().fonts.value().size,
                  contentScale());
 
     _session = newSession;
@@ -289,17 +289,17 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     _session->start();
 
-    window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar);
+    window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar.value());
 
     _renderer =
-        make_unique<vtrasterizer::Renderer>(newSession->profile().terminalSize,
-                                            sanitizeFontDescription(profile().fonts, fontDPI()),
+        make_unique<vtrasterizer::Renderer>(newSession->profile().terminalSize.value(),
+                                            sanitizeFontDescription(profile().fonts.value(), fontDPI()),
                                             _session->terminal().colorPalette(),
-                                            newSession->config().textureAtlasHashtableSlots,
-                                            newSession->config().textureAtlasTileCount,
-                                            newSession->config().textureAtlasDirectMapping,
-                                            newSession->profile().hyperlinkDecoration.normal,
-                                            newSession->profile().hyperlinkDecoration.hover
+                                            newSession->config().textureAtlasHashtableSlots.value(),
+                                            newSession->config().textureAtlasTileCount.value(),
+                                            newSession->config().textureAtlasDirectMapping.value(),
+                                            newSession->profile().hyperlinkDecorationNormal.value(),
+                                            newSession->profile().hyperlinkDecorationHover.value()
                                             // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
         );
 
@@ -317,7 +317,7 @@ vtbackend::PageSize TerminalDisplay::windowSize() const noexcept
     if (!_session)
         return vtbackend::PageSize { LineCount(25), ColumnCount(80) };
 
-    return profile().terminalSize;
+    return profile().terminalSize.value();
 }
 
 void TerminalDisplay::sizeChanged()
@@ -460,7 +460,7 @@ void TerminalDisplay::logDisplayInfo()
 
     // clang-format off
     auto const fontSizeInPx = static_cast<int>(ceil((
-        profile().fonts.size.pt / 72.0) * average(fontDPI())
+        profile().fonts.value().size.pt / 72.0) * average(fontDPI())
     ));
     auto const normalScreenSize = vtbackend::ImageSize {
         Width::cast_from(window()->screen()->size().width()),
@@ -579,13 +579,12 @@ void TerminalDisplay::createRenderer()
                      windowSize.height());
     }
 
-    _renderTarget = new OpenGLRenderer(
-        _session->profile().textShader.value_or(builtinShaderConfig(ShaderClass::Text)),
-        _session->profile().backgroundShader.value_or(builtinShaderConfig(ShaderClass::Background)),
-        precalculatedViewSize,
-        precalculatedTargetSize,
-        textureTileSize,
-        viewportMargin);
+    _renderTarget = new OpenGLRenderer(builtinShaderConfig(ShaderClass::Text),
+                                       builtinShaderConfig(ShaderClass::Background),
+                                       precalculatedViewSize,
+                                       precalculatedTargetSize,
+                                       textureTileSize,
+                                       viewportMargin);
     _renderTarget->setWindow(window());
     _renderer->setRenderTarget(*_renderTarget);
 
@@ -946,7 +945,7 @@ double TerminalDisplay::contentScale() const
 ///
 /// @param terminalSize the terminal size in rows and columns
 /// @param cellSize     the size of a single cell in pixels (with content scale already applied)
-constexpr ImageSize computeRequiredSize(config::TerminalProfile::WindowMargins margins,
+constexpr ImageSize computeRequiredSize(config::WindowMargins margins,
                                         ImageSize cellSize,
                                         PageSize totalPageSize) noexcept
 {
@@ -963,7 +962,7 @@ void TerminalDisplay::updateImplicitSize()
     assert(_session);
     assert(window());
 
-    auto const requiredSize = computeRequiredSize(_session->profile().margins,
+    auto const requiredSize = computeRequiredSize(_session->profile().margins.value(),
                                                   _renderer->cellSize() * (1.0 / contentScale()),
                                                   _session->terminal().totalPageSize());
 
@@ -978,8 +977,9 @@ void TerminalDisplay::updateMinimumSize()
     assert(_session);
 
     auto constexpr MinimumTotalPageSize = PageSize { LineCount(5), ColumnCount(10) };
-    auto const minimumSize = computeRequiredSize(
-        _session->profile().margins, _renderer->cellSize() * (1.0 / contentScale()), MinimumTotalPageSize);
+    auto const minimumSize = computeRequiredSize(_session->profile().margins.value(),
+                                                 _renderer->cellSize() * (1.0 / contentScale()),
+                                                 MinimumTotalPageSize);
 
     window()->setMinimumSize(QSize(unbox<int>(minimumSize.width), unbox<int>(minimumSize.height)));
 }
@@ -990,14 +990,10 @@ vtbackend::RefreshRate TerminalDisplay::refreshRate() const
 {
     auto* const screen = window()->screen();
     if (!screen)
-        return { profile().refreshRate.value != 0.0 ? profile().refreshRate
-                                                    : vtbackend::RefreshRate { 30.0 } };
+        return { vtbackend::RefreshRate { 30.0 } };
 
     auto const systemRefreshRate = vtbackend::RefreshRate { static_cast<double>(screen->refreshRate()) };
-    if (1.0 < profile().refreshRate.value && profile().refreshRate.value < systemRefreshRate.value)
-        return profile().refreshRate;
-    else
-        return systemRefreshRate;
+    return systemRefreshRate;
 }
 
 DPI TerminalDisplay::fontDPI() const noexcept
@@ -1230,9 +1226,10 @@ bool TerminalDisplay::setPageSize(PageSize newPageSize)
     if (newPageSize == terminal().pageSize())
         return false;
 
-    auto const viewSize =
-        ImageSize { Width(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.columns)),
-                    Height(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.columns)) };
+    auto const viewSize = ImageSize {
+        Width(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.value().columns)),
+        Height(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.value().columns))
+    };
     _renderer->setPageSize(newPageSize);
     auto const l = scoped_lock { terminal() };
     terminal().resizeScreen(newPageSize, viewSize);

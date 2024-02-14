@@ -32,11 +32,11 @@ ColorPalette::Palette const ColorPalette::defaultColorPalette = []() constexpr {
 
     // normal colors
     colors[0] = 0x000000_rgb; // black
-    colors[1] = 0xa00000_rgb; // red
+    colors[1] = 0xc63939_rgb; // red
     colors[2] = 0x00a000_rgb; // green
     colors[3] = 0xa0a000_rgb; // yellow
-    colors[4] = 0x0000a0_rgb; // blue
-    colors[5] = 0xa000a0_rgb; // magenta
+    colors[4] = 0x4d79ff_rgb; // blue
+    colors[5] = 0xff66ff_rgb; // magenta
     colors[6] = 0x00a0a0_rgb; // cyan
     colors[7] = 0xc0c0c0_rgb; // white
 

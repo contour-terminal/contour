@@ -126,30 +126,29 @@ namespace
     {
         auto settings = vtbackend::Settings {};
 
-        settings.pageSize = profile.terminalSize;
-        settings.ptyBufferObjectSize = config.ptyBufferObjectSize;
-        settings.ptyReadBufferSize = config.ptyReadBufferSize;
-        settings.maxHistoryLineCount = profile.maxHistoryLineCount;
-        settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset;
-        settings.cursorBlinkInterval = profile.inputModes.insert.cursor.cursorBlinkInterval;
-        settings.cursorShape = profile.inputModes.insert.cursor.cursorShape;
-        settings.cursorDisplay = profile.inputModes.insert.cursor.cursorDisplay;
-        settings.smoothLineScrolling = profile.smoothLineScrolling;
-        settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters);
-        settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers;
-        settings.maxImageSize = config.maxImageSize;
-        settings.maxImageRegisterCount = config.maxImageColorRegisters;
-        settings.statusDisplayType = profile.initialStatusDisplayType;
-        settings.statusDisplayPosition = profile.statusDisplayPosition;
+        settings.pageSize = profile.terminalSize.value();
+        settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
+        settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
+        settings.maxHistoryLineCount = profile.maxHistoryLineCount.value();
+        settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset.value();
+        settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
+        settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
+        settings.cursorDisplay = profile.modeInsert.value().cursor.cursorDisplay;
+        settings.smoothLineScrolling = profile.smoothLineScrolling.value();
+        settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
+        settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
+        settings.maxImageSize = config.maxImageSize.value();
+        settings.maxImageRegisterCount = config.maxImageColorRegisters.value();
+        settings.statusDisplayType = profile.initialStatusDisplayType.value();
+        settings.statusDisplayPosition = profile.statusDisplayPosition.value();
         settings.syncWindowTitleWithHostWritableStatusDisplay =
-            profile.syncWindowTitleWithHostWritableStatusDisplay;
-        if (auto const* p = preferredColorPalette(profile.colors, colorPreference))
+            profile.syncWindowTitleWithHostWritableStatusDisplay.value();
+        if (auto const* p = preferredColorPalette(profile.colors.value(), colorPreference))
             settings.colorPalette = *p;
-        settings.refreshRate = profile.refreshRate;
-        settings.primaryScreen.allowReflowOnResize = config.reflowOnResize;
-        settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord;
-        settings.highlightTimeout = profile.highlightTimeout;
-        settings.frozenModes = profile.frozenModes;
+        settings.primaryScreen.allowReflowOnResize = config.reflowOnResize.value();
+        settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord.value();
+        settings.highlightTimeout = profile.highlightTimeout.value();
+        settings.frozenModes = profile.frozenModes.value();
 
         return settings;
     }
@@ -195,10 +194,9 @@ TerminalSession::TerminalSession(unique_ptr<vtpty::Pty> pty, ContourGuiApp& app)
 {
     if (app.liveConfig())
     {
-        sessionLog()("Enable live configuration reloading of file {}.",
-                     _config.backingFilePath.generic_string());
+        sessionLog()("Enable live configuration reloading of file {}.", _config.configFile.generic_string());
         _configFileChangeWatcher = make_unique<QFileSystemWatcher>();
-        _configFileChangeWatcher->addPath(QString::fromStdString(_config.backingFilePath.generic_string()));
+        _configFileChangeWatcher->addPath(QString::fromStdString(_config.configFile.generic_string()));
         connect(_configFileChangeWatcher.get(),
                 SIGNAL(fileChanged(const QString&)),
                 this,
@@ -302,9 +300,9 @@ void TerminalSession::terminate()
 // {{{ Events implementations
 void TerminalSession::bell()
 {
-    emit onBell(_profile.bell.volume);
+    emit onBell(_profile.bell.value().volume);
 
-    if (_profile.bell.alert)
+    if (_profile.bell.value().alert)
         emit onAlert();
 }
 
@@ -323,7 +321,7 @@ void TerminalSession::screenUpdated()
     if (!_display)
         return;
 
-    if (_profile.autoScrollOnUpdate && terminal().viewport().scrolled()
+    if (_profile.autoScrollOnUpdate.value() && terminal().viewport().scrolled()
         && terminal().inputHandler().mode() == ViMode::Insert)
         terminal().viewport().scrollToBottom();
 
@@ -410,7 +408,7 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
         return;
 
     _currentColorPreference = preference;
-    if (auto const* colorPalette = preferredColorPalette(_profile.colors, preference))
+    if (auto const* colorPalette = preferredColorPalette(_profile.colors.value(), preference))
     {
         _terminal.resetColorPalette(*colorPalette);
 
@@ -454,7 +452,7 @@ void TerminalSession::requestShowHostWritableStatusLine()
 {
     if (_display)
         _display->post([this]() {
-            requestPermission(_profile.permissions.displayHostWritableStatusLine,
+            requestPermission(_profile.displayHostWritableStatusLine.value(),
                               GuardedRole::ShowHostWritableStatusLine);
         });
 }
@@ -485,7 +483,7 @@ void TerminalSession::setFontDef(vtbackend::FontDef const& fontDef)
 
     _pendingFontChange = fontDef;
 
-    _display->post([this]() { requestPermission(_profile.permissions.changeFont, GuardedRole::ChangeFont); });
+    _display->post([this]() { requestPermission(_profile.changeFont.value(), GuardedRole::ChangeFont); });
 }
 
 void TerminalSession::applyPendingFontChange(bool allow, bool remember)
@@ -496,7 +494,7 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
     if (!_pendingFontChange)
         return;
 
-    auto const& currentFonts = _profile.fonts;
+    auto const& currentFonts = _profile.fonts.value();
     vtrasterizer::FontDescriptions newFonts = currentFonts;
 
     auto const spec = std::move(_pendingFontChange.value());
@@ -665,7 +663,7 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
 
 void TerminalSession::onSelectionCompleted()
 {
-    switch (_config.onMouseSelection)
+    switch (_config.onMouseSelection.value())
     {
         case config::SelectionAction::CopyToSelectionClipboard:
             if (QClipboard* clipboard = QGuiApplication::clipboard();
@@ -747,11 +745,11 @@ void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
     using vtbackend::ViMode;
     switch (mode)
     {
-        case ViMode::Insert: configureCursor(_profile.inputModes.insert.cursor); break;
-        case ViMode::Normal: configureCursor(_profile.inputModes.normal.cursor); break;
+        case ViMode::Insert: configureCursor(_profile.modeInsert.value().cursor); break;
+        case ViMode::Normal: configureCursor(_profile.modeNormal.value().cursor); break;
         case ViMode::Visual:
         case ViMode::VisualLine:
-        case ViMode::VisualBlock: configureCursor(_profile.inputModes.visual.cursor); break;
+        case ViMode::VisualBlock: configureCursor(_profile.modeVisual.value().cursor); break;
     }
 }
 
@@ -772,13 +770,13 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
         return;
     }
 
-    if (_profile.mouseHideWhileTyping)
+    if (_profile.mouseHideWhileTyping.value())
         _display->setMouseCursorShape(MouseCursorShape::Hidden);
 
     if (eventType != KeyboardEventType::Release)
     {
         if (auto const* actions =
-                config::apply(_config.inputMappings.keyMappings, key, modifiers, matchModeFlags()))
+                config::apply(_config.inputMappings.value().keyMappings, key, modifiers, matchModeFlags()))
         {
             executeAllActions(*actions);
             return;
@@ -804,13 +802,13 @@ void TerminalSession::sendCharEvent(
         return;
     }
 
-    if (_profile.mouseHideWhileTyping)
+    if (_profile.mouseHideWhileTyping.value())
         _display->setMouseCursorShape(MouseCursorShape::Hidden);
 
     if (eventType != KeyboardEventType::Release)
     {
         if (auto const* actions =
-                config::apply(_config.inputMappings.charMappings, value, modifiers, matchModeFlags()))
+                config::apply(_config.inputMappings.value().charMappings, value, modifiers, matchModeFlags()))
         {
             executeAllActions(*actions);
             return;
@@ -833,12 +831,12 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
         }))
         return;
 
-    auto const sanitizedModifier = modifiers.contains(_config.bypassMouseProtocolModifiers)
-                                       ? modifiers.without(_config.bypassMouseProtocolModifiers)
+    auto const sanitizedModifier = modifiers.contains(_config.bypassMouseProtocolModifiers.value())
+                                       ? modifiers.without(_config.bypassMouseProtocolModifiers.value())
                                        : modifiers;
 
-    if (auto const* actions =
-            config::apply(_config.inputMappings.mouseMappings, button, sanitizedModifier, matchModeFlags()))
+    if (auto const* actions = config::apply(
+            _config.inputMappings.value().mouseMappings, button, sanitizedModifier, matchModeFlags()))
         executeAllActions(*actions);
 }
 
@@ -891,7 +889,7 @@ void TerminalSession::sendFocusInEvent()
     terminal().sendFocusInEvent();
 
     if (_display)
-        _display->setBlurBehind(_profile.backgroundBlur);
+        _display->setBlurBehind(_profile.backgroundBlur.value());
 
     scheduleRedraw();
 }
@@ -988,7 +986,7 @@ bool TerminalSession::operator()(actions::CreateDebugDump)
 bool TerminalSession::operator()(actions::DecreaseFontSize)
 {
     auto constexpr OnePt = text::font_size { 1.0 };
-    setFontSize(profile().fonts.size - OnePt);
+    setFontSize(profile().fonts.value().size - OnePt);
 
     emit fontSizeChanged();
     // auto const currentFontSize = view().renderer().fontDescriptions().size;
@@ -999,10 +997,10 @@ bool TerminalSession::operator()(actions::DecreaseFontSize)
 
 bool TerminalSession::operator()(actions::DecreaseOpacity)
 {
-    if (static_cast<uint8_t>(_profile.backgroundOpacity) == 0)
+    if (static_cast<uint8_t>(_profile.backgroundOpacity.value()) == 0)
         return true;
 
-    --_profile.backgroundOpacity;
+    --_profile.backgroundOpacity.value();
 
     emit opacityChanged();
 
@@ -1048,15 +1046,15 @@ bool TerminalSession::operator()(actions::IncreaseFontSize)
     // setFontSize(newFontSize);
 
     emit fontSizeChanged();
-    setFontSize(profile().fonts.size + OnePt);
+    setFontSize(profile().fonts.value().size + OnePt);
     return true;
 }
 
 bool TerminalSession::operator()(actions::IncreaseOpacity)
 {
-    if (static_cast<uint8_t>(_profile.backgroundOpacity) >= std::numeric_limits<uint8_t>::max())
+    if (static_cast<uint8_t>(_profile.backgroundOpacity.value()) >= std::numeric_limits<uint8_t>::max())
         return true;
-    ++_profile.backgroundOpacity;
+    ++_profile.backgroundOpacity.value();
 
     emit opacityChanged();
 
@@ -1081,8 +1079,8 @@ bool TerminalSession::operator()(actions::NoSearchHighlight)
 
 bool TerminalSession::operator()(actions::OpenConfiguration)
 {
-    if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(_config.backingFilePath.string().c_str()))))
-        errorLog()("Could not open configuration file \"{}\".", _config.backingFilePath.generic_string());
+    if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(_config.configFile.string().c_str()))))
+        errorLog()("Could not open configuration file \"{}\".", _config.configFile.generic_string());
 
     return true;
 }
@@ -1148,7 +1146,7 @@ bool TerminalSession::operator()(actions::ResetConfig)
 bool TerminalSession::operator()(actions::ResetFontSize)
 {
     if (config::TerminalProfile const* profile = _config.profile(_profileName))
-        setFontSize(profile->fonts.size);
+        setFontSize(profile->fonts.value().size);
     return true;
 }
 
@@ -1164,7 +1162,7 @@ bool TerminalSession::operator()(actions::ScreenshotVT)
 
 bool TerminalSession::operator()(actions::ScrollDown)
 {
-    terminal().viewport().scrollDown(_profile.historyScrollMultiplier);
+    terminal().viewport().scrollDown(_profile.historyScrollMultiplier.value());
     return true;
 }
 
@@ -1220,7 +1218,7 @@ bool TerminalSession::operator()(actions::ScrollToTop)
 
 bool TerminalSession::operator()(actions::ScrollUp)
 {
-    terminal().viewport().scrollUp(_profile.historyScrollMultiplier);
+    terminal().viewport().scrollUp(_profile.historyScrollMultiplier.value());
     return true;
 }
 
@@ -1343,7 +1341,7 @@ bool TerminalSession::reloadConfig(config::Config newConfig, string const& profi
 {
     // clang-format off
     sessionLog()("Reloading configuration from {} with profile {}",
-                 newConfig.backingFilePath.string(), profileName);
+                 newConfig.configFile.string(), profileName);
     // clang-format on
 
     _config = std::move(newConfig);
@@ -1407,16 +1405,15 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
         return "."s;
     }();
 
-    if (_config.spawnNewProcess)
+    if (_config.spawnNewProcess.value())
     {
         sessionLog()("spawning new process");
-        ::contour::spawnNewTerminal(
-            _app.programPath(), _config.backingFilePath.generic_string(), profileName, wd);
+        ::contour::spawnNewTerminal(_app.programPath(), _config.configFile.generic_string(), profileName, wd);
     }
     else
     {
         sessionLog()("spawning new in-process window");
-        _app.config().profile(_profileName)->shell.workingDirectory = fs::path(wd);
+        _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
         _app.newWindow();
     }
 }
@@ -1442,28 +1439,29 @@ void TerminalSession::configureTerminal()
     auto const l = scoped_lock { _terminal };
     sessionLog()("Configuring terminal.");
 
-    _terminal.setWordDelimiters(_config.wordDelimiters);
-    _terminal.setMouseProtocolBypassModifiers(_config.bypassMouseProtocolModifiers);
-    _terminal.setMouseBlockSelectionModifiers(_config.mouseBlockSelectionModifiers);
-    _terminal.setLastMarkRangeOffset(_profile.copyLastMarkRangeOffset);
+    _terminal.setWordDelimiters(_config.wordDelimiters.value());
+    _terminal.setMouseProtocolBypassModifiers(_config.bypassMouseProtocolModifiers.value());
+    _terminal.setMouseBlockSelectionModifiers(_config.mouseBlockSelectionModifiers.value());
+    _terminal.setLastMarkRangeOffset(_profile.copyLastMarkRangeOffset.value());
 
-    sessionLog()("Setting terminal ID to {}.", _profile.terminalId);
-    _terminal.setTerminalId(_profile.terminalId);
-    _terminal.setMaxImageColorRegisters(_config.maxImageColorRegisters);
-    _terminal.setMaxImageSize(_config.maxImageSize);
-    _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.sixelScrolling);
-    _terminal.setStatusDisplay(_profile.initialStatusDisplayType);
-    sessionLog()("maxImageSize={}, sixelScrolling={}", _config.maxImageSize, _config.sixelScrolling);
+    sessionLog()("Setting terminal ID to {}.", _profile.terminalId.value());
+    _terminal.setTerminalId(_profile.terminalId.value());
+    _terminal.setMaxImageColorRegisters(_config.maxImageColorRegisters.value());
+    _terminal.setMaxImageSize(_config.maxImageSize.value());
+    _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.sixelScrolling.value());
+    _terminal.setStatusDisplay(_profile.initialStatusDisplayType.value());
+    sessionLog()(
+        "maxImageSize={}, sixelScrolling={}", _config.maxImageSize.value(), _config.sixelScrolling.value());
 
     // XXX
     // if (!terminalView.renderer().renderTargetAvailable())
     //     return;
 
-    configureCursor(_profile.inputModes.insert.cursor);
+    configureCursor(_profile.modeInsert.value().cursor);
     updateColorPreference(_app.colorPreference());
-    _terminal.setMaxHistoryLineCount(_profile.maxHistoryLineCount);
-    _terminal.setHighlightTimeout(_profile.highlightTimeout);
-    _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff);
+    _terminal.setMaxHistoryLineCount(_profile.maxHistoryLineCount.value());
+    _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
+    _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)
@@ -1483,7 +1481,7 @@ void TerminalSession::configureDisplay()
         return;
 
     sessionLog()("Configuring display.");
-    _display->setBlurBehind(_profile.backgroundBlur);
+    _display->setBlurBehind(_profile.backgroundBlur.value());
 
     {
         auto const dpr = _display->contentScale();
@@ -1493,19 +1491,20 @@ void TerminalSession::configureDisplay()
         _terminal.setMaxImageSize(actualScreenSize, actualScreenSize);
     }
 
-    if (_profile.maximized)
+    if (_profile.maximized.value())
         _display->setWindowMaximized();
     else
         _display->setWindowNormal();
 
-    if (_profile.fullscreen != _display->isFullScreen())
+    if (_profile.fullscreen.value() != _display->isFullScreen())
         _display->toggleFullScreen();
 
     _terminal.setRefreshRate(_display->refreshRate());
-    _display->setFonts(_profile.fonts);
+    _display->setFonts(_profile.fonts.value());
     adaptToWidgetSize();
 
-    _display->setHyperlinkDecoration(_profile.hyperlinkDecoration.normal, _profile.hyperlinkDecoration.hover);
+    _display->setHyperlinkDecoration(_profile.hyperlinkDecorationNormal.value(),
+                                     _profile.hyperlinkDecorationHover.value());
 
     setWindowTitle(_terminal.windowTitle());
 }
@@ -1543,7 +1542,7 @@ void TerminalSession::setFontSize(text::font_size size)
     if (!_display->setFontSize(size))
         return;
 
-    _profile.fonts.size = size;
+    _profile.fonts.value().size = size;
 }
 
 bool TerminalSession::reloadConfigWithProfile(string const& profileName)
@@ -1553,7 +1552,7 @@ bool TerminalSession::reloadConfigWithProfile(string const& profileName)
 
     try
     {
-        loadConfigFromFile(newConfig, _config.backingFilePath.string());
+        loadConfigFromFile(newConfig, _config.configFile.string());
     }
     catch (exception const& e)
     {
@@ -1579,11 +1578,11 @@ bool TerminalSession::reloadConfigWithProfile(string const& profileName)
 
 bool TerminalSession::resetConfig()
 {
-    auto const ec = config::createDefaultConfig(_config.backingFilePath);
+    auto const ec = config::createDefaultConfig(_config.configFile);
     if (ec)
     {
         errorLog()("Failed to load default config at {}; ({}) {}",
-                   _config.backingFilePath.string(),
+                   _config.configFile.string(),
                    ec.category().name(),
                    ec.message());
         return false;
@@ -1592,14 +1591,14 @@ bool TerminalSession::resetConfig()
     config::Config const defaultConfig;
     try
     {
-        config::loadConfigFromFile(_config.backingFilePath);
+        config::loadConfigFromFile(_config.configFile);
     }
     catch (exception const& e)
     {
         sessionLog()("Failed to load default config: {}", e.what());
     }
 
-    return reloadConfig(defaultConfig, defaultConfig.defaultProfileName);
+    return reloadConfig(defaultConfig, defaultConfig.defaultProfileName.value());
 }
 
 void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
@@ -1612,7 +1611,7 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
     {
         QStringList args;
         args.append("config");
-        args.append(QString::fromStdString(_config.backingFilePath.string()));
+        args.append(QString::fromStdString(_config.configFile.string()));
         args.append(QString::fromUtf8(hyperlink.path().data(), static_cast<int>(hyperlink.path().size())));
         QProcess::execute(QString::fromStdString(_app.programPath()), args);
     }
@@ -1620,7 +1619,7 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
     {
         QStringList args;
         args.append("config");
-        args.append(QString::fromStdString(_config.backingFilePath.string()));
+        args.append(QString::fromStdString(_config.configFile.string()));
         args.append(QString::fromStdString(editorEnv));
         args.append(QString::fromUtf8(hyperlink.path().data(), static_cast<int>(hyperlink.path().size())));
         QProcess::execute(QString::fromStdString(_app.programPath()), args);

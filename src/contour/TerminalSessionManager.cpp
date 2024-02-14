@@ -27,12 +27,12 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app): _app { app }
 std::unique_ptr<vtpty::Pty> TerminalSessionManager::createPty()
 {
     auto const& profile = _app.config().profile(_app.profileName());
-
 #if defined(VTPTY_LIBSSH2)
-    if (!profile->ssh.hostname.empty())
-        return make_unique<vtpty::SshSession>(profile->ssh);
+    if (!profile->ssh.value().hostname.empty())
+        return make_unique<vtpty::SshSession>(profile->ssh.value());
 #endif
-    return make_unique<vtpty::Process>(profile->shell, vtpty::createPty(profile->terminalSize, nullopt));
+    return make_unique<vtpty::Process>(profile->shell.value(),
+                                       vtpty::createPty(profile->terminalSize.value(), nullopt));
 }
 
 TerminalSession* TerminalSessionManager::createSession()
