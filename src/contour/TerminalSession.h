@@ -91,10 +91,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return static_cast<int>(diff.count());
     }
 
-    int getFontSize() const noexcept { return static_cast<int>(_profile.fonts.size.pt); }
+    int getFontSize() const noexcept { return static_cast<int>(_profile.fonts.value().size.pt); }
     float getOpacity() const noexcept
     {
-        return static_cast<float>(_profile.backgroundOpacity) / std::numeric_limits<uint8_t>::max();
+        fmt::print(" ====== OPACITY background {} ", static_cast<float>(_profile.backgroundOpacity.value()));
+        return static_cast<float>(_profile.backgroundOpacity.value()) / std::numeric_limits<uint8_t>::max();
     }
     QString pathToBackground() const
     {
@@ -111,39 +112,51 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         auto color = terminal().isModeEnabled(vtbackend::DECMode::ReverseVideo)
                          ? _terminal.colorPalette().defaultForeground
                          : _terminal.colorPalette().defaultBackground;
-        return QColor(color.red, color.green, color.blue, static_cast<uint8_t>(_profile.backgroundOpacity));
+        auto alpha = static_cast<uint8_t>(_profile.backgroundOpacity.value());
+        return QColor(color.red, color.green, color.blue, alpha);
     }
     float getOpacityBackground() const noexcept
     {
-        if (_terminal.colorPalette().backgroundImage)
+        if (_terminal.colorPalette().backgroundImage.get())
+        {
+            fmt::print(" getOpacityBackground  non zerp \n ");
             return _terminal.colorPalette().backgroundImage->opacity;
+        }
         return 0.0;
     }
     bool getIsImageBackground() const noexcept
     {
         if (_terminal.colorPalette().backgroundImage)
+        {
+            fmt::print(" BACKGROUND IS IMAGE \n");
             return true;
+        }
         return false;
     }
 
     bool getIsBlurBackground() const noexcept
     {
         if (getIsImageBackground())
+        {
+
+            fmt::print(" BACKGROUND IS BLUR \n");
             return _terminal.colorPalette().backgroundImage->blur;
+        }
         return false;
     }
 
     bool getIsScrollbarRight() const noexcept
     {
-        return profile().scrollbarPosition == config::ScrollBarPosition::Right;
+        return profile().scrollbarPosition.value() == config::ScrollBarPosition::Right;
     }
 
     bool getIsScrollbarVisible() const noexcept
     {
-        if (profile().scrollbarPosition == config::ScrollBarPosition::Hidden)
+        if (profile().scrollbarPosition.value() == config::ScrollBarPosition::Hidden)
             return false;
 
-        if ((_currentScreenType == vtbackend::ScreenType::Alternate) && profile().hideScrollbarInAltScreen)
+        if ((_currentScreenType == vtbackend::ScreenType::Alternate)
+            && profile().hideScrollbarInAltScreen.value())
             return false;
 
         return true;
@@ -164,7 +177,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     int pageColumnsCount() const noexcept { return unbox(_terminal.pageSize().columns); }
 
-    bool showResizeIndicator() const noexcept { return _config.profile().sizeIndicatorOnResize; }
+    bool showResizeIndicator() const noexcept { return _config.profile().sizeIndicatorOnResize.value(); }
 
     int historyLineCount() const noexcept { return unbox(_terminal.currentScreen().historyLineCount()); }
 

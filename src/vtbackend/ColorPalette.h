@@ -45,7 +45,7 @@ struct BackgroundImage
     crispy::strong_hash hash;
 
     // image configuration
-    float opacity = 1.0; // normalized value
+    float opacity = 0.5; // normalized value
     bool blur = false;
 };
 
@@ -93,9 +93,9 @@ struct ColorPalette
     }
 
     RGBColor defaultForeground = 0xD0D0D0_rgb;
+    RGBColor defaultBackground = 0x1a1716_rgb;
     RGBColor defaultForegroundBright = 0xFFFFFF_rgb;
     RGBColor defaultForegroundDimmed = 0x808080_rgb;
-    RGBColor defaultBackground = 0x000000_rgb;
 
     CursorColor cursor;
 
@@ -104,30 +104,30 @@ struct ColorPalette
 
     struct
     {
-        RGBColor normal = 0x0070F0_rgb;
+        RGBColor normal = 0xF0F000_rgb;
         RGBColor hover = 0xFF0000_rgb;
     } hyperlinkDecoration;
 
     RGBColorPair inputMethodEditor = { 0xFFFFFF_rgb, 0xFF0000_rgb };
 
-    std::shared_ptr<BackgroundImage const> backgroundImage;
+    std::shared_ptr<BackgroundImage> backgroundImage;
 
     // clang-format off
     CellRGBColorAndAlphaPair yankHighlight { CellForegroundColor {}, 1.0f, 0xffA500_rgb, 0.5f };
 
     CellRGBColorAndAlphaPair searchHighlight { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
-    CellRGBColorAndAlphaPair searchHighlightFocused { CellForegroundColor {}, 1.0f, RGBColor{0xFF, 0x30, 0x30}, 0.5f };
+    CellRGBColorAndAlphaPair searchHighlightFocused {  CellBackgroundColor {}, 1.0f,CellForegroundColor {}, 1.0f };
 
-    CellRGBColorAndAlphaPair wordHighlight { CellForegroundColor {}, 1.0f, RGBColor{0x30, 0x90, 0x90}, 0.4f };
+    CellRGBColorAndAlphaPair wordHighlight { CellForegroundColor {}, 1.0f, 0x909090_rgb, 0.5f };
     CellRGBColorAndAlphaPair wordHighlightCurrent { CellForegroundColor {}, 1.0f, RGBColor{0x90, 0x90, 0x90}, 0.6f };
 
-    CellRGBColorAndAlphaPair selection { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
+    CellRGBColorAndAlphaPair selection { CellForegroundColor {}, 1.0f, 0x4040f0_rgb , 0.5f };
 
-    CellRGBColorAndAlphaPair normalModeCursorline = { 0xFFFFFF_rgb, 0.2f, 0x808080_rgb, 0.8f };
+    CellRGBColorAndAlphaPair normalModeCursorline = { 0xFFFFFF_rgb, 0.2f, 0x808080_rgb, 0.4f };
     // clang-format on
 
-    RGBColorPair indicatorStatusLine = { 0x000000_rgb, 0x808080_rgb };
-    RGBColorPair indicatorStatusLineInactive = { 0x000000_rgb, 0x808080_rgb };
+    RGBColorPair indicatorStatusLine = { 0x808080_rgb, 0x000000_rgb };
+    RGBColorPair indicatorStatusLineInactive = { 0x808080_rgb, 0x000000_rgb };
 };
 
 enum class ColorTarget

@@ -107,6 +107,7 @@
     <release version="0.4.4" urgency="medium" type="development">
       <description>
         <ul>
+          <li> Add generation of config file from internal state (#1282) </li>
           <li> Fixes corruption of sixel image on high resolution (#1049) </li>
         </ul>
       </description>

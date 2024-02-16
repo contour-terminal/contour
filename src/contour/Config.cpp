@@ -2,40 +2,18 @@
 #include <contour/Actions.h>
 #include <contour/Config.h>
 
-#include <vtbackend/ColorPalette.h>
-#include <vtbackend/ControlCode.h>
-#include <vtbackend/InputGenerator.h>
 #include <vtbackend/TerminalState.h>
-#include <vtbackend/primitives.h>
-
-#include <vtpty/Process.h>
-
-#include <text_shaper/mock_font_locator.h>
 
 #include <crispy/StrongHash.h>
 #include <crispy/escape.h>
-#include <crispy/logstore.h>
-#include <crispy/overloaded.h>
-#include <crispy/utils.h>
 
-#include <yaml-cpp/node/detail/iterator_fwd.h>
-#include <yaml-cpp/ostream_wrapper.h>
-#include <yaml-cpp/yaml.h>
+#include <yaml-cpp/emitter.h>
 
 #include <QtCore/QFile>
 #include <QtGui/QOpenGLContext>
 
-#include <algorithm>
-#include <array>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <set>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <utility>
-#include <vector>
 
 #if defined(_WIN32)
     #include <Windows.h>
@@ -80,421 +58,8 @@ namespace contour::config
 
 namespace
 {
+
     auto const configLog = logstore::category("config", "Logs configuration file loading.");
-
-    string processIdAsString()
-    {
-        // There's sadly no better way to platfrom-independantly get the PID.
-        auto stringStream = std::stringstream();
-#if defined(_WIN32)
-        stringStream << static_cast<unsigned>(GetCurrentProcessId());
-#else
-        stringStream << getpid();
-#endif
-        return stringStream.str();
-    }
-
-    struct VariableReplacer
-    {
-        auto operator()(string_view name) -> string
-        {
-            if (name == "pid")
-                return processIdAsString();
-            return ""s;
-        }
-    };
-
-    std::shared_ptr<vtbackend::BackgroundImage const> loadImage(string const& fileName,
-                                                                float opacity,
-                                                                bool blur)
-    {
-        auto const resolvedFileName = homeResolvedPath(fileName, Process::homeDirectory());
-
-        if (!fs::exists(resolvedFileName))
-        {
-            errorLog()("Background image path not found: {}", resolvedFileName.string());
-            return nullptr;
-        }
-
-        auto backgroundImage = vtbackend::BackgroundImage {};
-        backgroundImage.location = resolvedFileName;
-        backgroundImage.hash = crispy::strong_hash::compute(resolvedFileName.string());
-        backgroundImage.opacity = opacity;
-        backgroundImage.blur = blur;
-
-        return make_shared<vtbackend::BackgroundImage const>(std::move(backgroundImage));
-    }
-
-    vtbackend::CellRGBColor parseCellColor(std::string const& text)
-    {
-        auto const upperText = toUpper(text);
-        if (upperText == "CELLBACKGROUND"sv)
-            return vtbackend::CellBackgroundColor {};
-        if (upperText == "CELLFOREGROUND"sv)
-            return vtbackend::CellForegroundColor {};
-        return vtbackend::RGBColor(text);
-    }
-
-    vtbackend::CellRGBColor parseCellColor(UsedKeys& usedKeys,
-                                           YAML::Node const& parentNode,
-                                           std::string const& parentPath,
-                                           std::string const& name,
-                                           vtbackend::CellRGBColor defaultValue)
-    {
-        auto colorNode = parentNode[name];
-        if (!colorNode || !colorNode.IsScalar())
-            return defaultValue;
-        usedKeys.emplace(parentPath + "." + name);
-        return parseCellColor(colorNode.as<string>());
-    }
-
-    std::optional<vtbackend::RGBColorPair> parseRGBColorPair(UsedKeys& usedKeys,
-                                                             string const& basePath,
-                                                             YAML::Node const& baseNode,
-                                                             string const& childNodeName,
-                                                             vtbackend::RGBColorPair defaultPair)
-    {
-        auto node = baseNode[childNodeName];
-        if (!node || !node.IsMap())
-            return nullopt;
-
-        auto const childPath = fmt::format("{}.{}", basePath, childNodeName);
-        usedKeys.emplace(childPath);
-
-        auto rgbColorPair = defaultPair;
-
-        if (auto const value = node["foreground"]; value && value.IsScalar())
-        {
-            rgbColorPair.foreground = value.as<string>();
-            usedKeys.emplace(childPath + ".foreground");
-        }
-
-        if (auto const value = node["background"]; value && value.IsScalar())
-        {
-            rgbColorPair.background = value.as<string>();
-            usedKeys.emplace(childPath + ".background");
-        }
-
-        return rgbColorPair;
-    }
-
-    /// Loads a configuration sub-section to handle cell color foreground/background + alpha.
-    ///
-    /// Example:
-    ///   { foreground: CellColor, foreground_alpha: FLOAT = 1.0,
-    ///     background: CellColor, background_alpha: FLOAT = 1.0 }
-    std::optional<CellRGBColorAndAlphaPair> parseCellRGBColorAndAlphaPair(UsedKeys& usedKeys,
-                                                                          string const& basePath,
-                                                                          YAML::Node const& baseNode,
-                                                                          string const& childNodeName)
-    {
-        auto node = baseNode[childNodeName];
-        if (!node)
-            return nullopt;
-
-        auto const childPath = fmt::format("{}.{}", basePath, childNodeName);
-        usedKeys.emplace(childPath);
-
-        auto cellRGBColorAndAlphaPair = CellRGBColorAndAlphaPair {};
-
-        cellRGBColorAndAlphaPair.foreground =
-            parseCellColor(usedKeys, node, childPath, "foreground", vtbackend::CellForegroundColor {});
-        if (auto alpha = node["foreground_alpha"]; alpha && alpha.IsScalar())
-        {
-            usedKeys.emplace(childPath + ".foreground_alpha");
-            cellRGBColorAndAlphaPair.foregroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
-        }
-
-        cellRGBColorAndAlphaPair.background =
-            parseCellColor(usedKeys, node, childPath, "background", vtbackend::CellBackgroundColor {});
-        if (auto alpha = node["background_alpha"]; alpha && alpha.IsScalar())
-        {
-            usedKeys.emplace(childPath + ".background_alpha");
-            cellRGBColorAndAlphaPair.backgroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
-        }
-
-        return cellRGBColorAndAlphaPair;
-    }
-
-    // TODO:
-    // - [x] report missing keys
-    // - [ ] report superfluous keys (by keeping track of loaded keys, then iterate
-    //       through full document and report any key that has not been loaded but is available)
-    // - [ ] Do we want to report when no color schemes are defined? (at least warn about?)
-    // - [ ] Do we want to report when no input mappings are defined? (at least warn about?)
-
-    vector<fs::path> getTermInfoDirs(optional<fs::path> const& appTerminfoDir)
-    {
-        auto locations = vector<fs::path>();
-
-        if (appTerminfoDir.has_value())
-            locations.emplace_back(appTerminfoDir.value().string());
-
-        locations.emplace_back(Process::homeDirectory() / ".terminfo");
-
-        if (auto const* value = getenv("TERMINFO_DIRS"); value && *value)
-            for (auto const dir: crispy::split(string_view(value), ':'))
-                locations.emplace_back(string(dir));
-
-        locations.emplace_back("/usr/share/terminfo");
-
-        return locations;
-    }
-
-    string getDefaultTERM(optional<fs::path> const& appTerminfoDir)
-    {
-#if defined(_WIN32)
-        return "contour";
-#else
-
-        if (Process::isFlatpak())
-            return "contour";
-
-        auto locations = getTermInfoDirs(appTerminfoDir);
-        auto const terms = vector<string> {
-            "contour", "xterm-256color", "xterm", "vt340", "vt220",
-        };
-
-        for (auto const& prefix: locations)
-            for (auto const& term: terms)
-            {
-                if (access((prefix / term.substr(0, 1) / term).string().c_str(), R_OK) == 0)
-                    return term;
-
-    #if defined(__APPLE__)
-                // I realized that on Apple the `tic` command sometimes installs
-                // the terminfo files into weird paths.
-                if (access((prefix / fmt::format("{:02X}", term.at(0)) / term).string().c_str(), R_OK) == 0)
-                    return term;
-    #endif
-            }
-
-        return "vt100";
-#endif
-    }
-
-    optional<Permission> toPermission(string const& value)
-    {
-        auto const lowerValue = toLower(value);
-        if (lowerValue == "allow")
-            return Permission::Allow;
-        else if (lowerValue == "deny")
-            return Permission::Deny;
-        else if (lowerValue == "ask")
-            return Permission::Ask;
-        return nullopt;
-    }
-
-    void createFileIfNotExists(fs::path const& path)
-    {
-        if (!fs::is_regular_file(path))
-            if (auto const ec = createDefaultConfig(path); ec)
-                throw runtime_error { fmt::format(
-                    "Could not create directory {}. {}", path.parent_path().string(), ec.message()) };
-    }
-
-    template <typename T>
-    bool tryLoadValueRelative(UsedKeys& usedKeys,
-                              YAML::Node const& currentNode,
-                              string const& basePath,
-                              vector<string_view> const& keys,
-                              size_t offset,
-                              T& store,
-                              logstore::message_builder const& logger)
-    {
-        string parentKey = basePath;
-        for (size_t i = 0; i < offset; ++i)
-        {
-            if (!parentKey.empty())
-                parentKey += '.';
-            parentKey += keys.at(i);
-        }
-
-        if (offset == keys.size())
-        {
-            store = currentNode.as<T>();
-            return true;
-        }
-
-        auto const currentKey = string(keys.at(offset));
-
-        auto const child = currentNode[currentKey];
-        if (!child)
-        {
-            auto const defaultStr = crispy::escape(fmt::format("{}", store));
-            auto const defaultStrQuoted = !defaultStr.empty() ? defaultStr : R"("")";
-            for (size_t i = offset; i < keys.size(); ++i)
-            {
-                if (!parentKey.empty())
-                    parentKey += '.';
-                parentKey += keys[i];
-            }
-            logger("Missing key {}. Using default: {}.", parentKey, defaultStrQuoted);
-            return false;
-        }
-
-        usedKeys.emplace(parentKey);
-
-        return tryLoadValueRelative(usedKeys, child, keys, offset + 1, store, logger);
-    }
-
-    template <typename T>
-    bool tryLoadValue(UsedKeys& usedKeys,
-                      YAML::Node const& root,
-                      vector<string_view> const& keys,
-                      size_t offset,
-                      T& store,
-                      logstore::category logger)
-    {
-        string parentKey;
-        for (size_t i = 0; i < offset; ++i)
-        {
-            if (i)
-                parentKey += '.';
-            parentKey += keys.at(i);
-        }
-
-        if (offset == keys.size())
-        {
-            store = root.as<T>();
-            return true;
-        }
-
-        auto const currentKey = string(keys.at(offset));
-
-        auto const child = root[currentKey];
-        if (!child)
-        {
-            auto const defaultStr = crispy::escape(fmt::format("{}", store));
-            for (size_t i = offset; i < keys.size(); ++i)
-            {
-                parentKey += '.';
-                parentKey += keys[i];
-            }
-            logger()(
-                "Missing key {}. Using default: {}.", parentKey, !defaultStr.empty() ? defaultStr : R"("")");
-            return false;
-        }
-
-        usedKeys.emplace(parentKey);
-
-        return tryLoadValue(usedKeys, child, keys, offset + 1, store, logger);
-    }
-
-    template <typename T, typename U>
-    bool tryLoadValue(UsedKeys& usedKeys,
-                      YAML::Node const& root,
-                      vector<string_view> const& keys,
-                      size_t offset,
-                      boxed::boxed<T, U>& store,
-                      logstore::category const& logger)
-    {
-        return tryLoadValue(usedKeys, root, keys, offset, store.value, logger);
-    }
-
-    template <typename T>
-    bool tryLoadValue(UsedKeys& usedKeys,
-                      YAML::Node const& root,
-                      string const& path,
-                      T& store,
-                      logstore::category const& logger)
-    {
-        auto const keys = crispy::split(path, '.');
-        usedKeys.emplace(path);
-        return tryLoadValue(usedKeys, root, keys, 0, store, logger);
-    }
-
-    template <typename T, typename U>
-    bool tryLoadValue(UsedKeys& usedKeys,
-                      YAML::Node const& root,
-                      string const& path,
-                      boxed::boxed<T, U>& store,
-                      logstore::category const& logger)
-    {
-        return tryLoadValue(usedKeys, root, path, store.value, logger);
-    }
-
-    template <typename T>
-    bool tryLoadChild(UsedKeys& usedKeys,
-                      YAML::Node const& doc,
-                      string const& parentPath,
-                      string const& key,
-                      T& store,
-                      logstore::category const& logger)
-    {
-        auto const path = fmt::format("{}.{}", parentPath, key);
-        return tryLoadValue(usedKeys, doc, path, store, logger);
-    }
-
-    template <typename T>
-    bool tryLoadChildRelative(UsedKeys& usedKeys,
-                              YAML::Node const& node,
-                              string const& parentPath,
-                              string const& childKeyPath,
-                              T& store,
-                              logstore::category const& logger)
-    {
-        // return tryLoadValue(usedKeys, node, childKeyPath, store); // XXX parentPath
-        auto const keys = crispy::split(childKeyPath, '.');
-        string s = parentPath;
-        for (auto const key: keys)
-        {
-            s += fmt::format(".{}", key);
-            usedKeys.emplace(s);
-        }
-        return tryLoadValue(usedKeys, node, keys, 0, store, logger);
-    }
-
-    template <typename T, typename U>
-    bool tryLoadChild(UsedKeys& usedKeys,
-                      YAML::Node const& doc,
-                      string const& parentPath,
-                      string const& key,
-                      boxed::boxed<T, U>& store,
-                      logstore::category const& logger)
-    {
-        return tryLoadChild(usedKeys, doc, parentPath, key, store.value, logger);
-    }
-
-    void checkForSuperfluousKeys(YAML::Node root, string const& thePrefix, UsedKeys const& usedKeys)
-    {
-        if (root.IsMap())
-        {
-            for (auto const& mapItem: root)
-            {
-                auto const name = mapItem.first.as<string>();
-                auto const child = mapItem.second;
-                auto const prefix = thePrefix.empty() ? name : fmt::format("{}.{}", thePrefix, name);
-                checkForSuperfluousKeys(child, prefix, usedKeys);
-                if (usedKeys.count(prefix))
-                    continue;
-                if (crispy::startsWith(string_view(prefix), "x-"sv))
-                    continue;
-                configLog()("Superfluous config key found: {}", escape(prefix));
-            }
-        }
-        else if (root.IsSequence())
-        {
-            for (size_t i = 0; i < root.size() && i < 8; ++i)
-            {
-                checkForSuperfluousKeys(root[i], fmt::format("{}.{}", thePrefix, i), usedKeys);
-            }
-        }
-#if 0
-        else if (root.IsScalar())
-        {
-        }
-        else if (root.IsNull())
-        {
-            ; // no-op
-        }
-#endif
-    }
-
-    void checkForSuperfluousKeys(YAML::Node const& root, UsedKeys const& usedKeys)
-    {
-        checkForSuperfluousKeys(root, "", usedKeys);
-    }
 
     optional<std::string> readFile(fs::path const& path)
     {
@@ -529,1456 +94,15 @@ namespace
         return paths;
     }
 
-    optional<vtbackend::Key> parseKey(string const& name)
+    void createFileIfNotExists(fs::path const& path)
     {
-        using vtbackend::Key;
-        auto static constexpr Mappings = array {
-            pair { "F1"sv, Key::F1 },
-            pair { "F2"sv, Key::F2 },
-            pair { "F3"sv, Key::F3 },
-            pair { "F4"sv, Key::F4 },
-            pair { "F5"sv, Key::F5 },
-            pair { "F6"sv, Key::F6 },
-            pair { "F7"sv, Key::F7 },
-            pair { "F8"sv, Key::F8 },
-            pair { "F9"sv, Key::F9 },
-            pair { "F10"sv, Key::F10 },
-            pair { "F11"sv, Key::F11 },
-            pair { "F12"sv, Key::F12 },
-            pair { "F13"sv, Key::F13 },
-            pair { "F14"sv, Key::F14 },
-            pair { "F15"sv, Key::F15 },
-            pair { "F16"sv, Key::F16 },
-            pair { "F17"sv, Key::F17 },
-            pair { "F18"sv, Key::F18 },
-            pair { "F19"sv, Key::F19 },
-            pair { "F20"sv, Key::F20 },
-            pair { "F21"sv, Key::F21 },
-            pair { "F22"sv, Key::F22 },
-            pair { "F23"sv, Key::F23 },
-            pair { "F24"sv, Key::F24 },
-            pair { "F25"sv, Key::F25 },
-            pair { "F26"sv, Key::F26 },
-            pair { "F27"sv, Key::F27 },
-            pair { "F28"sv, Key::F28 },
-            pair { "F29"sv, Key::F29 },
-            pair { "F30"sv, Key::F30 },
-            pair { "F31"sv, Key::F31 },
-            pair { "F32"sv, Key::F32 },
-            pair { "F33"sv, Key::F33 },
-            pair { "F34"sv, Key::F34 },
-            pair { "F35"sv, Key::F35 },
-            pair { "Escape"sv, Key::Escape },
-            pair { "Enter"sv, Key::Enter },
-            pair { "Tab"sv, Key::Tab },
-            pair { "Backspace"sv, Key::Backspace },
-            pair { "DownArrow"sv, Key::DownArrow },
-            pair { "LeftArrow"sv, Key::LeftArrow },
-            pair { "RightArrow"sv, Key::RightArrow },
-            pair { "UpArrow"sv, Key::UpArrow },
-            pair { "Insert"sv, Key::Insert },
-            pair { "Delete"sv, Key::Delete },
-            pair { "Home"sv, Key::Home },
-            pair { "End"sv, Key::End },
-            pair { "PageUp"sv, Key::PageUp },
-            pair { "PageDown"sv, Key::PageDown },
-            pair { "MediaPlay"sv, Key::MediaPlay },
-            pair { "MediaStop"sv, Key::MediaStop },
-            pair { "MediaPrevious"sv, Key::MediaPrevious },
-            pair { "MediaNext"sv, Key::MediaNext },
-            pair { "MediaPause"sv, Key::MediaPause },
-            pair { "MediaTogglePlayPause"sv, Key::MediaTogglePlayPause },
-            pair { "VolumeUp"sv, Key::VolumeUp },
-            pair { "VolumeDown"sv, Key::VolumeDown },
-            pair { "VolumeMute"sv, Key::VolumeMute },
-            pair { "PrintScreen"sv, Key::PrintScreen },
-            pair { "Pause"sv, Key::Pause },
-            pair { "Menu"sv, Key::Menu },
-            pair { "Numpad_0"sv, Key::Numpad_0 },
-            pair { "Numpad_1"sv, Key::Numpad_1 },
-            pair { "Numpad_2"sv, Key::Numpad_2 },
-            pair { "Numpad_3"sv, Key::Numpad_3 },
-            pair { "Numpad_4"sv, Key::Numpad_4 },
-            pair { "Numpad_5"sv, Key::Numpad_5 },
-            pair { "Numpad_6"sv, Key::Numpad_6 },
-            pair { "Numpad_7"sv, Key::Numpad_7 },
-            pair { "Numpad_8"sv, Key::Numpad_8 },
-            pair { "Numpad_9"sv, Key::Numpad_9 },
-            pair { "Numpad_Decimal"sv, Key::Numpad_Decimal },
-            pair { "Numpad_Divide"sv, Key::Numpad_Divide },
-            pair { "Numpad_Multiply"sv, Key::Numpad_Multiply },
-            pair { "Numpad_Subtract"sv, Key::Numpad_Subtract },
-            pair { "Numpad_Add"sv, Key::Numpad_Add },
-            pair { "Numpad_Enter"sv, Key::Numpad_Enter },
-            pair { "Numpad_Equal"sv, Key::Numpad_Equal },
-        };
-
-        auto const lowerName = toLower(name);
-
-        for (auto const& mapping: Mappings)
-            if (lowerName == toLower(mapping.first))
-                return mapping.second;
-
-        return nullopt;
-    }
-
-    optional<variant<vtbackend::Key, char32_t>> parseKeyOrChar(string const& name)
-    {
-        using namespace vtbackend::ControlCode;
-
-        if (auto const key = parseKey(name); key.has_value())
-            return key.value();
-
-        auto const text = QString::fromUtf8(name.c_str()).toUcs4();
-        if (text.size() == 1)
-            return static_cast<char32_t>(text[0]);
-
-        auto constexpr NamedChars = array {
-            pair { "LESS"sv, '<' },        pair { "GREATER"sv, '>' },      pair { "PLUS"sv, '+' },
-            pair { "APOSTROPHE"sv, '\'' }, pair { "ADD"sv, '+' },          pair { "BACKSLASH"sv, 'x' },
-            pair { "COMMA"sv, ',' },       pair { "DECIMAL"sv, '.' },      pair { "DIVIDE"sv, '/' },
-            pair { "EQUAL"sv, '=' },       pair { "LEFT_BRACKET"sv, '[' }, pair { "MINUS"sv, '-' },
-            pair { "MULTIPLY"sv, '*' },    pair { "PERIOD"sv, '.' },       pair { "RIGHT_BRACKET"sv, ']' },
-            pair { "SEMICOLON"sv, ';' },   pair { "SLASH"sv, '/' },        pair { "SUBTRACT"sv, '-' },
-            pair { "SPACE"sv, ' ' },
-        };
-
-        auto const lowerName = toUpper(name);
-        for (auto const& mapping: NamedChars)
-            if (lowerName == mapping.first)
-                return static_cast<char32_t>(mapping.second);
-
-        return nullopt;
-    }
-
-    void parseCursorConfig(CursorConfig& cursorConfig,
-                           YAML::Node const& rootNode,
-                           UsedKeys& usedKeys,
-                           std::string const& basePath)
-    {
-        if (!rootNode)
-            return;
-
-        std::string strValue;
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue, configLog);
-        if (!strValue.empty())
-            cursorConfig.cursorShape = vtbackend::makeCursorShape(strValue);
-
-        bool boolValue = cursorConfig.cursorDisplay == vtbackend::CursorDisplay::Blink;
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue, configLog);
-        cursorConfig.cursorDisplay =
-            boolValue ? vtbackend::CursorDisplay::Blink : vtbackend::CursorDisplay::Steady;
-
-        auto uintValue = cursorConfig.cursorBlinkInterval.count();
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue, configLog);
-        cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
-    }
-
-    optional<vtbackend::Modifier> parseModifierKey(string const& key)
-    {
-        using vtbackend::Modifier;
-        auto const upperKey = toUpper(key);
-        if (upperKey == "ALT")
-            return Modifier::Alt;
-        if (upperKey == "CONTROL")
-            return Modifier::Control;
-        if (upperKey == "SHIFT")
-            return Modifier::Shift;
-        if (upperKey == "SUPER")
-            return Modifier::Super;
-        if (upperKey == "COMMAND")
-            // This represents the Command key on macOS, which is equivalent to the Windows key on Windows,
-            // and the Super key on Linux.
-            return Modifier::Super;
-        if (upperKey == "META")
-            // TODO: This is technically not correct, but we used the term Meta up until now,
-            // to refer to the Windows/Cmd key. But Qt also exposes another modifier called
-            // Meta, which rarely exists on modern keyboards (?), but it we need to support it
-            // as well, especially since extended CSIu protocol exposes it as well.
-            return Modifier::Super; // Return Modifier::Meta in the future.
-        return nullopt;
-    }
-
-    optional<vtbackend::MatchModes> parseMatchModes(UsedKeys& usedKeys,
-                                                    string const& prefix,
-                                                    YAML::Node const& node)
-    {
-        using vtbackend::MatchModes;
-        if (!node)
-            return vtbackend::MatchModes {};
-        usedKeys.emplace(prefix);
-        if (!node.IsScalar())
-            return nullopt;
-
-        auto matchModes = MatchModes {};
-
-        auto const modeStr = node.as<string>();
-        auto const args = crispy::split(modeStr, '|');
-        for (string_view arg: args)
-        {
-            if (arg.empty())
-                continue;
-            bool negate = false;
-            if (arg.front() == '~')
-            {
-                negate = true;
-                arg.remove_prefix(1);
-            }
-
-            MatchModes::Flag flag = MatchModes::Flag::Default;
-            string const upperArg = toUpper(arg);
-            if (upperArg == "ALT"sv)
-                flag = MatchModes::AlternateScreen;
-            else if (upperArg == "APPCURSOR")
-                flag = MatchModes::AppCursor;
-            else if (upperArg == "APPKEYPAD")
-                flag = MatchModes::AppKeypad;
-            else if (upperArg == "INSERT")
-                flag = MatchModes::Insert;
-            else if (upperArg == "SELECT")
-                flag = MatchModes::Select;
-            else if (upperArg == "SEARCH")
-                flag = MatchModes::Search;
-            else if (upperArg == "TRACE")
-                flag = MatchModes::Trace;
-            else
-            {
-                errorLog()("Unknown input_mapping mode: {}", arg);
-                continue;
-            }
-
-            if (negate)
-                matchModes.disable(flag);
-            else
-                matchModes.enable(flag);
-        }
-
-        return matchModes;
-    }
-
-    optional<vtbackend::Modifiers> parseModifiers(UsedKeys& usedKeys,
-                                                  string const& prefix,
-                                                  YAML::Node const& node)
-    {
-        using vtbackend::Modifier;
-        using vtbackend::Modifiers;
-        if (!node)
-            return nullopt;
-        usedKeys.emplace(prefix);
-        if (node.IsScalar())
-            return parseModifierKey(node.as<string>());
-        if (!node.IsSequence())
-            return nullopt;
-
-        vtbackend::Modifiers mods;
-        for (const auto& i: node)
-        {
-            if (!i.IsScalar())
-                return nullopt;
-
-            auto const mod = parseModifierKey(i.as<string>());
-            if (!mod)
-                return nullopt;
-
-            mods |= *mod;
-        }
-        return mods;
-    }
-
-    template <typename Input>
-    void appendOrCreateBinding(vector<vtbackend::InputBinding<Input, ActionList>>& bindings,
-                               vtbackend::MatchModes modes,
-                               vtbackend::Modifiers modifiers,
-                               Input input,
-                               Action action)
-    {
-        for (auto& binding: bindings)
-        {
-            if (match(binding, modes, modifiers, input))
-            {
-                binding.binding.emplace_back(std::move(action));
-                return;
-            }
-        }
-
-        bindings.emplace_back(vtbackend::InputBinding<Input, ActionList> {
-            modes, modifiers, input, ActionList { std::move(action) } });
-    }
-
-    bool tryAddKey(InputMappings& inputMappings,
-                   vtbackend::MatchModes modes,
-                   vtbackend::Modifiers modifiers,
-                   YAML::Node const& node,
-                   Action action)
-    {
-        if (!node)
-            return false;
-
-        if (!node.IsScalar())
-            return false;
-
-        auto const input = parseKeyOrChar(node.as<string>());
-        if (!input.has_value())
-            return false;
-
-        if (holds_alternative<vtbackend::Key>(*input))
-        {
-            appendOrCreateBinding(
-                inputMappings.keyMappings, modes, modifiers, get<vtbackend::Key>(*input), std::move(action));
-        }
-        else if (holds_alternative<char32_t>(*input))
-        {
-            appendOrCreateBinding(
-                inputMappings.charMappings, modes, modifiers, get<char32_t>(*input), std::move(action));
-        }
-        else
-            assert(false && "The impossible happened.");
-
-        return true;
-    }
-
-    optional<vtbackend::MouseButton> parseMouseButton(YAML::Node const& node)
-    {
-        if (!node)
-            return nullopt;
-
-        if (!node.IsScalar())
-            return nullopt;
-
-        auto constexpr static Mappings = array {
-            pair { "WHEELUP"sv, vtbackend::MouseButton::WheelUp },
-            pair { "WHEELDOWN"sv, vtbackend::MouseButton::WheelDown },
-            pair { "LEFT"sv, vtbackend::MouseButton::Left },
-            pair { "MIDDLE"sv, vtbackend::MouseButton::Middle },
-            pair { "RIGHT"sv, vtbackend::MouseButton::Right },
-        };
-        auto const upperName = toUpper(node.as<string>());
-        for (auto const& mapping: Mappings)
-            if (upperName == mapping.first)
-                return mapping.second;
-        return nullopt;
-    }
-
-    bool tryAddMouse(vector<MouseInputMapping>& bindings,
-                     vtbackend::MatchModes modes,
-                     vtbackend::Modifiers modifiers,
-                     YAML::Node const& node,
-                     Action action)
-    {
-        auto mouseButton = parseMouseButton(node);
-        if (!mouseButton)
-            return false;
-
-        appendOrCreateBinding(bindings, modes, modifiers, *mouseButton, std::move(action));
-        return true;
-    }
-
-    optional<Action> parseAction(UsedKeys& usedKeys, string const& prefix, YAML::Node const& parent)
-    {
-        usedKeys.emplace(prefix + ".action");
-
-        auto actionName = parent["action"].as<string>();
-        usedKeys.emplace(prefix + ".action." + actionName);
-        auto actionOpt = actions::fromString(actionName);
-        if (!actionOpt)
-        {
-            errorLog()("Unknown action '{}'.", parent["action"].as<string>());
-            return nullopt;
-        }
-
-        auto action = actionOpt.value();
-
-        if (holds_alternative<actions::ChangeProfile>(action))
-        {
-            if (auto name = parent["name"]; name.IsScalar())
-            {
-                usedKeys.emplace(prefix + ".name");
-                return actions::ChangeProfile { name.as<string>() };
-            }
-            else
-                return nullopt;
-        }
-
-        if (holds_alternative<actions::NewTerminal>(action))
-        {
-            if (auto profile = parent["profile"]; profile && profile.IsScalar())
-            {
-                usedKeys.emplace(prefix + ".profile");
-                return actions::NewTerminal { profile.as<string>() };
-            }
-            else
-                return action;
-        }
-
-        if (holds_alternative<actions::ReloadConfig>(action))
-        {
-            usedKeys.emplace(prefix + ".profile");
-            if (auto profileName = parent["profile"]; profileName.IsScalar())
-            {
-                usedKeys.emplace(prefix + ".profile");
-                return actions::ReloadConfig { profileName.as<string>() };
-            }
-            else
-                return action;
-        }
-
-        if (holds_alternative<actions::SendChars>(action))
-        {
-            if (auto chars = parent["chars"]; chars.IsScalar())
-            {
-                usedKeys.emplace(prefix + ".chars");
-                return actions::SendChars { unescape(chars.as<string>()) };
-            }
-            else
-                return nullopt;
-        }
-
-        if (holds_alternative<actions::CopySelection>(action))
-        {
-            if (auto node = parent["format"]; node && node.IsScalar())
-            {
-                usedKeys.emplace(prefix + ".format");
-                auto const formatString = toUpper(node.as<string>());
-                static auto constexpr Mappings =
-                    std::array<std::pair<std::string_view, actions::CopyFormat>, 4> { {
-                        { "TEXT", actions::CopyFormat::Text },
-                        { "HTML", actions::CopyFormat::HTML },
-                        { "PNG", actions::CopyFormat::PNG },
-                        { "VT", actions::CopyFormat::VT },
-                    } };
-                // NOLINTNEXTLINE(readability-qualified-auto)
-                if (auto const p = std::find_if(Mappings.begin(),
-                                                Mappings.end(),
-                                                [&](auto const& t) { return t.first == formatString; });
-                    p != Mappings.end())
-                {
-                    return actions::CopySelection { p->second };
-                }
-                errorLog()("Invalid format '{}' in CopySelection action. Defaulting to 'text'.",
-                           node.as<string>());
-                return actions::CopySelection { actions::CopyFormat::Text };
-            }
-        }
-
-        if (holds_alternative<actions::PasteClipboard>(action))
-        {
-            if (auto node = parent["strip"]; node && node.IsScalar())
-            {
-                usedKeys.emplace(prefix + ".strip");
-                return actions::PasteClipboard { node.as<bool>() };
-            }
-        }
-
-        if (holds_alternative<actions::WriteScreen>(action))
-        {
-            if (auto chars = parent["chars"]; chars.IsScalar())
-            {
-                usedKeys.emplace(prefix + ".chars");
-                return actions::WriteScreen { unescape(chars.as<string>()) };
-            }
-            else
-                return nullopt;
-        }
-
-        return action;
-    }
-
-    void parseInputMapping(UsedKeys& usedKeys,
-                           string const& prefix,
-                           Config& config,
-                           YAML::Node const& mapping)
-    {
-        using namespace vtbackend;
-
-        auto const action = parseAction(usedKeys, prefix, mapping);
-        auto const mods = parseModifiers(usedKeys, prefix + ".mods", mapping["mods"]);
-        auto const mode = parseMatchModes(usedKeys, prefix + ".mode", mapping["mode"]);
-        if (action && mods && mode)
-        {
-            if (tryAddKey(config.inputMappings, *mode, *mods, mapping["key"], *action))
-            {
-                usedKeys.emplace(prefix + ".key");
-            }
-            else if (tryAddMouse(config.inputMappings.mouseMappings, *mode, *mods, mapping["mouse"], *action))
-            {
-                usedKeys.emplace(prefix + ".mouse");
-            }
-            else
-            {
-                // TODO: log error: invalid key mapping at: mapping.sourceLocation()
-                configLog()("Could not add some input mapping.");
-            }
-        }
-    }
-
-    void updateColorScheme(vtbackend::ColorPalette& colors,
-                           UsedKeys& usedKeys,
-                           string const& basePath,
-                           YAML::Node const& node)
-
-    {
-        if (!node)
-            return;
-
-        usedKeys.emplace(basePath);
-        using vtbackend::RGBColor;
-        if (auto def = node["default"]; def)
-        {
-            usedKeys.emplace(basePath + ".default");
-            if (auto fg = def["foreground"]; fg)
-            {
-                usedKeys.emplace(basePath + ".default.foreground");
-                colors.defaultForeground = fg.as<string>();
-            }
-            if (auto fg = def["bright_foreground"]; fg)
-            {
-                usedKeys.emplace(basePath + ".default.bright_foreground");
-                colors.defaultForegroundBright = fg.as<string>();
-            }
-            if (auto fg = def["dimmed_foreground"]; fg)
-            {
-                usedKeys.emplace(basePath + ".default.dimmed_foreground");
-                colors.defaultForegroundDimmed = fg.as<string>();
-            }
-            if (auto bg = def["background"]; bg)
-            {
-                usedKeys.emplace(basePath + ".default.background");
-                colors.defaultBackground = bg.as<string>();
-            }
-        }
-
-        if (auto p = parseCellRGBColorAndAlphaPair(usedKeys, basePath, node, "search_highlight"))
-            colors.searchHighlight = p.value();
-
-        if (auto p = parseCellRGBColorAndAlphaPair(usedKeys, basePath, node, "search_highlight_focused"))
-            colors.searchHighlightFocused = p.value();
-
-        if (auto p = parseCellRGBColorAndAlphaPair(usedKeys, basePath, node, "word_highlight_current"))
-            colors.wordHighlightCurrent = p.value();
-
-        if (auto p = parseCellRGBColorAndAlphaPair(usedKeys, basePath, node, "word_highlight_other"))
-            colors.wordHighlight = p.value();
-
-        if (auto p = parseCellRGBColorAndAlphaPair(usedKeys, basePath, node, "selection"))
-            colors.selection = p.value();
-
-        if (auto p = parseCellRGBColorAndAlphaPair(usedKeys, basePath, node, "vi_mode_highlight"))
-            colors.yankHighlight = p.value();
-
-        if (auto p = parseCellRGBColorAndAlphaPair(usedKeys, basePath, node, "vi_mode_cursorline"))
-            colors.normalModeCursorline = p.value();
-
-        if (auto p = parseRGBColorPair(
-                usedKeys, basePath, node, "indicator_statusline", colors.indicatorStatusLine))
-            colors.indicatorStatusLine = p.value();
-
-        if (auto p = parseRGBColorPair(usedKeys,
-                                       basePath,
-                                       node,
-                                       "indicator_statusline_inactive",
-                                       colors.indicatorStatusLineInactive))
-            colors.indicatorStatusLineInactive = p.value();
-
-        if (auto const p =
-                parseRGBColorPair(usedKeys, basePath, node, "input_method_editor", colors.inputMethodEditor))
-            colors.inputMethodEditor = p.value();
-
-        if (auto cursor = node["cursor"]; cursor)
-        {
-            usedKeys.emplace(basePath + ".cursor");
-            if (cursor.IsMap())
-            {
-                if (auto color = cursor["default"]; color.IsScalar())
-                {
-                    usedKeys.emplace(basePath + ".cursor.default");
-                    colors.cursor.color = parseCellColor(color.as<string>());
-                }
-                if (auto color = cursor["text"]; color.IsScalar())
-                {
-                    usedKeys.emplace(basePath + ".cursor.text");
-                    colors.cursor.textOverrideColor = parseCellColor(color.as<string>());
-                }
-            }
-            else if (cursor.IsScalar())
-            {
-                errorLog()(
-                    "Deprecated cursor config colorscheme entry. Please update your colorscheme entry for "
-                    "cursor.");
-                colors.cursor.color = RGBColor(cursor.as<string>());
-            }
-            else
-                errorLog()("Invalid cursor config colorscheme entry.");
-        }
-
-        if (auto hyperlink = node["hyperlink_decoration"]; hyperlink)
-        {
-            usedKeys.emplace(basePath + ".hyperlink_decoration");
-            if (auto color = hyperlink["normal"]; color && color.IsScalar() && !color.as<string>().empty())
-            {
-                usedKeys.emplace(basePath + ".hyperlink_decoration.normal");
-                colors.hyperlinkDecoration.normal = color.as<string>();
-            }
-
-            if (auto color = hyperlink["hover"]; color && color.IsScalar() && !color.as<string>().empty())
-            {
-                usedKeys.emplace(basePath + ".hyperlink_decoration.hover");
-                colors.hyperlinkDecoration.hover = color.as<string>();
-            }
-        }
-
-        auto const loadColorMap = [&](YAML::Node const& parent, string const& key, size_t offset) -> bool {
-            auto node = parent[key];
-            if (!node)
-                return false;
-
-            auto const colorKeyPath = fmt::format("{}.{}", basePath, key);
-            usedKeys.emplace(colorKeyPath);
-            if (node.IsMap())
-            {
-                auto const assignColor = [&](size_t index, string const& name) {
-                    if (auto nodeValue = node[name]; nodeValue)
-                    {
-                        usedKeys.emplace(fmt::format("{}.{}", colorKeyPath, name));
-                        if (auto const value = nodeValue.as<string>(); !value.empty())
-                        {
-                            if (value[0] == '#')
-                                colors.palette[offset + index] = value;
-                            else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
-                                colors.palette[offset + index] = RGBColor { nodeValue.as<uint32_t>() };
-                        }
-                    }
-                };
-                assignColor(0, "black");
-                assignColor(1, "red");
-                assignColor(2, "green");
-                assignColor(3, "yellow");
-                assignColor(4, "blue");
-                assignColor(5, "magenta");
-                assignColor(6, "cyan");
-                assignColor(7, "white");
-                return true;
-            }
-            else if (node.IsSequence())
-            {
-                for (size_t i = 0; i < node.size() && i < 8; ++i)
-                    if (node[i].IsScalar())
-                        colors.palette[i] = RGBColor { node[i].as<uint32_t>() };
-                    else
-                        colors.palette[i] = RGBColor { node[i].as<string>() };
-                return true;
-            }
-            return false;
-        };
-
-        loadColorMap(node, "normal", 0);
-        loadColorMap(node, "bright", 8);
-        if (!loadColorMap(node, "dim", 256))
-        {
-            // calculate dim colors based on normal colors
-            for (unsigned i = 0; i < 8; ++i)
-                colors.palette[256 + i] = colors.palette[i] * 0.5f;
-        }
-
-        // TODO: color palette from 16..255
-
-        float opacityValue = 1.0;
-        tryLoadChildRelative(usedKeys, node, basePath, "background_image.opacity", opacityValue, configLog);
-
-        bool imageBlur = false;
-        tryLoadChildRelative(usedKeys, node, basePath, "background_image.blur", imageBlur, configLog);
-
-        string fileName;
-        if (tryLoadChildRelative(usedKeys, node, basePath, "background_image.path", fileName, configLog))
-            colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
-    }
-
-    vtbackend::ColorPalette loadColorScheme(UsedKeys& usedKeys,
-                                            string const& basePath,
-                                            YAML::Node const& node)
-    {
-
-        vtbackend::ColorPalette colors;
-        updateColorScheme(colors, usedKeys, basePath, node);
-        return colors;
-    }
-
-    vtbackend::ColorPalette loadColorSchemeByName(
-        UsedKeys& usedKeys,
-        string const& path,
-        YAML::Node const& nameNode,
-        unordered_map<string, vtbackend::ColorPalette> const& colorschemes,
-        logstore::category& logger)
-    {
-        auto const name = nameNode.as<string>();
-        if (auto i = colorschemes.find(name); i != colorschemes.end())
-        {
-            usedKeys.emplace(path);
-            return i->second;
-        }
-
-        for (fs::path const& prefix: configHomes("contour"))
-        {
-            auto const filePath = prefix / "colorschemes" / (name + ".yml");
-            auto fileContents = readFile(filePath);
-            if (!fileContents)
-                continue;
-            YAML::Node const subDocument = YAML::Load(fileContents.value());
-            UsedKeys usedColorKeys;
-            auto colors = loadColorScheme(usedColorKeys, "", subDocument);
-            // TODO: Check usedColorKeys for validity.
-            logger()("Loaded colors from {}.", filePath.string());
-            return colors;
-        }
-        logger()("Could not open colorscheme file for \"{}\".", name);
-        return vtbackend::ColorPalette {};
-    }
-
-    void softLoadFont(UsedKeys& usedKeys,
-                      string_view basePath,
-                      YAML::Node const& node,
-                      text::font_description& store)
-    {
-        if (node.IsScalar())
-        {
-            store.familyName = node.as<string>();
-            usedKeys.emplace(basePath);
-        }
-        else if (node.IsMap())
-        {
-            usedKeys.emplace(basePath);
-
-            if (node["family"].IsScalar())
-            {
-                usedKeys.emplace(fmt::format("{}.{}", basePath, "family"));
-                store.familyName = node["family"].as<string>();
-            }
-
-            if (node["slant"] && node["slant"].IsScalar())
-            {
-                usedKeys.emplace(fmt::format("{}.{}", basePath, "slant"));
-                if (auto const p = text::make_font_slant(node["slant"].as<string>()))
-                    store.slant = p.value();
-            }
-
-            if (node["weight"] && node["weight"].IsScalar())
-            {
-                usedKeys.emplace(fmt::format("{}.{}", basePath, "weight"));
-                if (auto const p = text::make_font_weight(node["weight"].as<string>()))
-                    store.weight = p.value();
-            }
-
-            if (node["features"] && node["features"] && node["features"].IsSequence())
-            {
-                usedKeys.emplace(fmt::format("{}.{}", basePath, "features"));
-                YAML::Node const featuresNode = node["features"];
-                for (auto&& i: featuresNode)
-                {
-                    auto const featureNode = i;
-                    if (!featureNode.IsScalar())
-                    {
-                        errorLog()("Invalid font feature \"{}\".", featureNode.as<string>());
-                        continue;
-                    }
-
-                    // Feature can be either 4 letter code or optionally ending with - to denote disabling it.
-                    auto const [tag, enabled] = [&]() -> tuple<string, bool> {
-                        auto value = featureNode.as<string>();
-                        if (!value.empty())
-                        {
-                            if (value[0] == '+')
-                                return { value.substr(1), true };
-                            if (value[0] == '-')
-                                return { value.substr(1), false };
-                        }
-                        return { std::move(value), true };
-                    }();
-
-                    if (tag.size() != 4)
-                    {
-                        errorLog()(
-                            "Invalid font feature \"{}\". Font features are denoted as 4-letter codes.",
-                            featureNode.as<string>());
-                        continue;
-                    }
-                    store.features.emplace_back(tag[0], tag[1], tag[2], tag[3], enabled);
-                }
-            }
-        }
-    }
-
-    void softLoadFont(vtrasterizer::TextShapingEngine textShapingEngine,
-                      UsedKeys& usedKeys,
-                      string_view basePath,
-                      YAML::Node const& parentNode,
-                      string const& key,
-                      text::font_description& store)
-    {
-        if (!parentNode)
-            return;
-        auto node = parentNode[key];
-        if (!node)
-            return;
-
-        softLoadFont(usedKeys, fmt::format("{}.{}", basePath, key), node, store);
-
-        if (node.IsMap())
-        {
-            usedKeys.emplace(fmt::format("{}.{}", basePath, key));
-            if (node["features"].IsSequence())
-            {
-                using vtrasterizer::TextShapingEngine;
-                switch (textShapingEngine)
-                {
-                    case TextShapingEngine::OpenShaper: break;
-                    case TextShapingEngine::CoreText:
-                    case TextShapingEngine::DWrite:
-                        // TODO: Implement font feature settings handling for these engines.
-                        errorLog()("The configured text shaping engine {} does not yet support font feature "
-                                   "settings. Ignoring.",
-                                   textShapingEngine);
-                }
-            }
-        }
-    }
-
-    template <typename T>
-    bool sanitizeRange(std::reference_wrapper<T> value, T min, T max)
-    {
-        if (min <= value.get() && value.get() <= max)
-            return true;
-
-        value.get() = std::clamp(value.get(), min, max);
-        return false;
-    }
-
-    optional<vtbackend::VTType> stringToVTType(std::string const& value)
-    {
-        using Type = vtbackend::VTType;
-        auto constexpr static Mappings = array<tuple<string_view, Type>, 10> {
-            tuple { "VT100"sv, Type::VT100 }, tuple { "VT220"sv, Type::VT220 },
-            tuple { "VT240"sv, Type::VT240 }, tuple { "VT330"sv, Type::VT330 },
-            tuple { "VT340"sv, Type::VT340 }, tuple { "VT320"sv, Type::VT320 },
-            tuple { "VT420"sv, Type::VT420 }, tuple { "VT510"sv, Type::VT510 },
-            tuple { "VT520"sv, Type::VT520 }, tuple { "VT525"sv, Type::VT525 }
-        };
-        for (auto const& mapping: Mappings)
-            if (get<0>(mapping) == value)
-                return get<1>(mapping);
-        return nullopt;
-    }
-
-    void updateTerminalProfile(TerminalProfile& terminalProfile,
-                               UsedKeys& usedKeys,
-                               YAML::Node const& profile,
-                               std::string const& parentPath,
-                               std::string const& profileName,
-                               unordered_map<string, vtbackend::ColorPalette> const& colorschemes,
-                               logstore::category logger)
-    {
-        if (auto colors = profile["colors"]; colors) // {{{
-        {
-            usedKeys.emplace(fmt::format("{}.{}.colors", parentPath, profileName));
-            auto const path = fmt::format("{}.{}.{}", parentPath, profileName, "colors");
-            if (colors.IsMap())
-            {
-                terminalProfile.colors =
-                    DualColorConfig { .darkMode = loadColorSchemeByName(
-                                          usedKeys, path + ".dark", colors["dark"], colorschemes, logger),
-                                      .lightMode = loadColorSchemeByName(
-                                          usedKeys, path + ".light", colors["light"], colorschemes, logger) };
-#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
-                errorLog()("Dual color scheme is not supported by your local Qt version. "
-                           "Falling back to single color scheme.");
-#endif
-            }
-            else if (colors.IsScalar())
-            {
-                terminalProfile.colors =
-                    SimpleColorConfig { loadColorSchemeByName(usedKeys, path, colors, colorschemes, logger) };
-            }
-            else
-                logger()("Invalid colors value.");
-        }
-        else
-            logger()("No colors section in profile {} found.", profileName);
-        // }}}
-
-        string const basePath = fmt::format("{}.{}", parentPath, profileName);
-        tryLoadChildRelative(
-            usedKeys, profile, basePath, "escape_sandbox", terminalProfile.shell.escapeSandbox, logger);
-        tryLoadChildRelative(usedKeys, profile, basePath, "shell", terminalProfile.shell.program, logger);
-        if (terminalProfile.shell.program.empty())
-        {
-            if (!terminalProfile.shell.arguments.empty())
-                logger()("No shell defined but arguments. Ignoring arguments.");
-
-            auto loginShell = Process::loginShell(terminalProfile.shell.escapeSandbox);
-            terminalProfile.shell.program = loginShell.front();
-            loginShell.erase(loginShell.begin());
-            terminalProfile.shell.arguments = loginShell;
-        }
-#if defined(VTPTY_LIBSSH2)
-        if (auto const sshNode = profile["ssh"]; sshNode && sshNode.IsMap())
-        {
-            usedKeys.emplace(fmt::format("{}.{}.ssh", parentPath, profileName));
-            auto& ssh = terminalProfile.ssh;
-            std::string strValue;
-            tryLoadChildRelative(usedKeys, profile, basePath, "ssh.host", ssh.hostname, logger);
-
-            // Get SSH config from ~/.ssh/config
-            if (!ssh.hostname.empty())
-            {
-                if (auto const sshConfigResult = vtpty::loadSshConfig(); sshConfigResult)
-                {
-                    // NB: We don't care if we could not load the ~/.ssh/config, we then simply don't use it
-                    auto const& sshConfig = sshConfigResult.value();
-                    if (auto const i = sshConfig.find(ssh.hostname); i != sshConfig.end())
-                    {
-                        configLog()("Using SSH config for host \"{}\" as base. {}",
-                                    ssh.hostname,
-                                    i->second.toString());
-                        ssh = i->second;
-                    }
-                }
-            }
-
-            // Override with values from profile
-            tryLoadChildRelative(usedKeys, profile, basePath, "ssh.port", ssh.port, logger);
-            tryLoadChildRelative(usedKeys, profile, basePath, "ssh.forward_agent", ssh.forwardAgent, logger);
-            if (!tryLoadChildRelative(usedKeys, profile, basePath, "ssh.user", ssh.username, logger)
-                && ssh.username.empty())
-                ssh.username = vtpty::Process::userName();
-            if (tryLoadChildRelative(usedKeys, profile, basePath, "ssh.private_key", strValue, logger))
-                ssh.privateKeyFile = homeResolvedPath(strValue, Process::homeDirectory());
-            if (tryLoadChildRelative(usedKeys, profile, basePath, "ssh.public_key", strValue, logger))
-                ssh.publicKeyFile = homeResolvedPath(strValue, Process::homeDirectory());
-            if (tryLoadChildRelative(usedKeys, profile, basePath, "ssh.known_hosts", strValue, logger))
-                ssh.knownHostsFile = homeResolvedPath(strValue, Process::homeDirectory());
-            else if (auto const p = Process::homeDirectory() / ".ssh" / "known_hosts"; fs::exists(p))
-                ssh.knownHostsFile = p;
-        }
-#endif
-
-        tryLoadChildRelative(usedKeys, profile, basePath, "maximized", terminalProfile.maximized, logger);
-        tryLoadChildRelative(usedKeys, profile, basePath, "fullscreen", terminalProfile.fullscreen, logger);
-        tryLoadChildRelative(
-            usedKeys, profile, basePath, "refresh_rate", terminalProfile.refreshRate.value, logger);
-        tryLoadChildRelative(usedKeys,
-                             profile,
-                             basePath,
-                             "copy_last_mark_range_offset",
-                             terminalProfile.copyLastMarkRangeOffset,
-                             logger);
-        tryLoadChildRelative(
-            usedKeys, profile, basePath, "show_title_bar", terminalProfile.showTitleBar, logger);
-        tryLoadChildRelative(usedKeys,
-                             profile,
-                             basePath,
-                             "size_indicator_on_resize",
-                             terminalProfile.sizeIndicatorOnResize,
-                             logger);
-        bool useBrightColors = false;
-        tryLoadChildRelative(
-            usedKeys, profile, basePath, "draw_bold_text_with_bright_colors", useBrightColors, logger);
-
-        if (auto* simple = get_if<SimpleColorConfig>(&terminalProfile.colors))
-            simple->colors.useBrightColors = useBrightColors;
-        else if (auto* dual = get_if<DualColorConfig>(&terminalProfile.colors))
-        {
-            dual->darkMode.useBrightColors = useBrightColors;
-            dual->lightMode.useBrightColors = useBrightColors;
-        }
-
-        tryLoadChildRelative(usedKeys, profile, basePath, "wm_class", terminalProfile.wmClass, logger);
-
-        if (auto args = profile["arguments"]; args && args.IsSequence())
-        {
-            usedKeys.emplace(fmt::format("{}.arguments", basePath));
-            for (auto const& argNode: args)
-                terminalProfile.shell.arguments.emplace_back(argNode.as<string>());
-        }
-
-        std::string strValue;
-        tryLoadChildRelative(usedKeys, profile, basePath, "initial_working_directory", strValue, logger);
-        if (!strValue.empty())
-            terminalProfile.shell.workingDirectory = fs::path(strValue);
-
-        terminalProfile.shell.workingDirectory = homeResolvedPath(
-            terminalProfile.shell.workingDirectory.generic_string(), Process::homeDirectory());
-
-        terminalProfile.shell.env["TERMINAL_NAME"] = "contour";
-        terminalProfile.shell.env["TERMINAL_VERSION_TRIPLE"] =
-            fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
-        terminalProfile.shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
-
-        // {{{ Populate environment variables
-        std::optional<fs::path> appTerminfoDir; // NOLINT(misc-const-correctness)
-#if defined(__APPLE__)
-        {
-            char buf[1024];
-            uint32_t len = sizeof(buf);
-            if (_NSGetExecutablePath(buf, &len) == 0)
-            {
-                auto p = fs::path(buf).parent_path().parent_path() / "Resources" / "terminfo";
-                if (fs::is_directory(p))
-                {
-                    appTerminfoDir = p;
-                    terminalProfile.shell.env["TERMINFO_DIRS"] = p.string();
-                }
-            }
-        }
-#endif
-
-        if (auto env = profile["environment"]; env)
-        {
-            auto const envpath = basePath + ".environment";
-            usedKeys.emplace(envpath);
-            for (auto i = env.begin(); i != env.end(); ++i)
-            {
-                auto const name = i->first.as<string>();
-                auto const value = i->second.as<string>();
-                usedKeys.emplace(fmt::format("{}.{}", envpath, name));
-                terminalProfile.shell.env[name] = value;
-            }
-        }
-
-        // force some default env
-        if (terminalProfile.shell.env.find("TERM") == terminalProfile.shell.env.end())
-        {
-            terminalProfile.shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
-            logger()("Defaulting TERM to {}.", terminalProfile.shell.env["TERM"]);
-        }
-
-        if (terminalProfile.shell.env.find("COLORTERM") == terminalProfile.shell.env.end())
-            terminalProfile.shell.env["COLORTERM"] = "truecolor";
-
-            // This is currently duplicated. Environment vars belong to each parent struct, not just shell.
-#if defined(VTPTY_LIBSSH2)
-        terminalProfile.ssh.env = terminalProfile.shell.env;
-#endif
-        // }}}
-
-        strValue = fmt::format("{}", terminalProfile.terminalId);
-        tryLoadChildRelative(usedKeys, profile, basePath, "terminal_id", strValue, logger);
-        if (auto const idOpt = stringToVTType(strValue))
-            terminalProfile.terminalId = idOpt.value();
-        else
-            logger()("Invalid Terminal ID \"{}\", specified", strValue);
-
-        tryLoadChildRelative(
-            usedKeys, profile, basePath, "margins.horizontal", terminalProfile.margins.horizontal, logger);
-        tryLoadChildRelative(
-            usedKeys, profile, basePath, "margins.vertical", terminalProfile.margins.vertical, logger);
-
-        tryLoadChildRelative(usedKeys,
-                             profile,
-                             basePath,
-                             "terminal_size.columns",
-                             terminalProfile.terminalSize.columns,
-                             logger);
-        tryLoadChildRelative(
-            usedKeys, profile, basePath, "terminal_size.lines", terminalProfile.terminalSize.lines, logger);
-        {
-            auto constexpr MinimalTerminalSize = PageSize { LineCount(3), ColumnCount(3) };
-            auto constexpr MaximumTerminalSize = PageSize { LineCount(200), ColumnCount(300) };
-
-            if (!sanitizeRange(ref(terminalProfile.terminalSize.columns.value),
-                               *MinimalTerminalSize.columns,
-                               *MaximumTerminalSize.columns))
-                logger()("Terminal width {} out of bounds. Should be between {} and {}.",
-                         terminalProfile.terminalSize.columns,
-                         MinimalTerminalSize.columns,
-                         MaximumTerminalSize.columns);
-
-            if (!sanitizeRange(ref(terminalProfile.terminalSize.lines),
-                               MinimalTerminalSize.lines,
-                               MaximumTerminalSize.lines))
-                logger()("Terminal height {} out of bounds. Should be between {} and {}.",
-                         terminalProfile.terminalSize.lines,
-                         MinimalTerminalSize.lines,
-                         MaximumTerminalSize.lines);
-        }
-
-        strValue = "ask";
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "permissions.capture_buffer", strValue, logger))
-        {
-            if (auto x = toPermission(strValue))
-                terminalProfile.permissions.captureBuffer = x.value();
-        }
-
-        strValue = "ask";
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "permissions.change_font", strValue, logger))
-        {
-            if (auto x = toPermission(strValue))
-                terminalProfile.permissions.changeFont = x.value();
-        }
-
-        strValue = "ask";
-        if (tryLoadChildRelative(usedKeys,
-                                 profile,
-                                 basePath,
-                                 "permissions.display_host_writable_statusline",
-                                 strValue,
-                                 logger))
-        {
-            if (auto x = toPermission(strValue))
-                terminalProfile.permissions.displayHostWritableStatusLine = x.value();
-        }
-
-        if (tryLoadChildRelative(
-                usedKeys, profile, basePath, "font.size", terminalProfile.fonts.size.pt, logger))
-        {
-            if (terminalProfile.fonts.size < MinimumFontSize)
-            {
-                logger()("Invalid font size {} set in config file. Minimum value is {}.",
-                         terminalProfile.fonts.size,
-                         MinimumFontSize);
-                terminalProfile.fonts.size = MinimumFontSize;
-            }
-        }
-
-        tryLoadChildRelative(usedKeys,
-                             profile,
-                             basePath,
-                             "font.builtin_box_drawing",
-                             terminalProfile.fonts.builtinBoxDrawing,
-                             logger);
-
-        auto constexpr NativeTextShapingEngine =
-#if defined(_WIN32)
-            vtrasterizer::TextShapingEngine::DWrite;
-#elif defined(__APPLE__)
-            vtrasterizer::TextShapingEngine::CoreText;
-#else
-            vtrasterizer::TextShapingEngine::OpenShaper;
-#endif
-
-        auto constexpr NativeFontLocator =
-#if defined(_WIN32)
-            vtrasterizer::FontLocatorEngine::DWrite;
-#elif defined(__APPLE__)
-            vtrasterizer::FontLocatorEngine::CoreText;
-#else
-            vtrasterizer::FontLocatorEngine::FontConfig;
-#endif
-
-        strValue = fmt::format("{}", terminalProfile.fonts.textShapingEngine);
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "font.text_shaping.engine", strValue, logger))
-        {
-            auto const lwrValue = toLower(strValue);
-            if (lwrValue == "dwrite" || lwrValue == "directwrite")
-                terminalProfile.fonts.textShapingEngine = vtrasterizer::TextShapingEngine::DWrite;
-            else if (lwrValue == "core" || lwrValue == "coretext")
-                terminalProfile.fonts.textShapingEngine = vtrasterizer::TextShapingEngine::CoreText;
-            else if (lwrValue == "open" || lwrValue == "openshaper")
-                terminalProfile.fonts.textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper;
-            else if (lwrValue == "native")
-                terminalProfile.fonts.textShapingEngine = NativeTextShapingEngine;
-            else
-                logger()("Invalid value for configuration key {}.font.text_shaping.engine: {}",
-                         basePath,
-                         strValue);
-        }
-
-        terminalProfile.fonts.fontLocator = NativeFontLocator;
-        strValue = fmt::format("{}", terminalProfile.fonts.fontLocator);
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "font.locator", strValue, logger))
-        {
-            auto const lwrValue = toLower(strValue);
-            if (lwrValue == "fontconfig")
-                terminalProfile.fonts.fontLocator = vtrasterizer::FontLocatorEngine::FontConfig;
-            else if (lwrValue == "coretext")
-                terminalProfile.fonts.fontLocator = vtrasterizer::FontLocatorEngine::CoreText;
-            else if (lwrValue == "dwrite" || lwrValue == "directwrite")
-                terminalProfile.fonts.fontLocator = vtrasterizer::FontLocatorEngine::DWrite;
-            else if (lwrValue == "native")
-                terminalProfile.fonts.fontLocator = NativeFontLocator;
-            else if (lwrValue == "mock")
-                terminalProfile.fonts.fontLocator = vtrasterizer::FontLocatorEngine::Mock;
-            else
-                logger()("Invalid value for configuration key {}.font.locator: {}", basePath, strValue);
-        }
-
-        bool strictSpacing = false;
-        tryLoadChildRelative(usedKeys, profile, basePath, "font.strict_spacing", strictSpacing, logger);
-
-        auto const fontBasePath = fmt::format("{}.{}.font", parentPath, profileName);
-
-        softLoadFont(terminalProfile.fonts.textShapingEngine,
-                     usedKeys,
-                     fontBasePath,
-                     profile["font"],
-                     "regular",
-                     terminalProfile.fonts.regular);
-
-        terminalProfile.fonts.bold = terminalProfile.fonts.regular;
-        terminalProfile.fonts.bold.weight = text::font_weight::bold;
-        softLoadFont(terminalProfile.fonts.textShapingEngine,
-                     usedKeys,
-                     fontBasePath,
-                     profile["font"],
-                     "bold",
-                     terminalProfile.fonts.bold);
-
-        terminalProfile.fonts.italic = terminalProfile.fonts.regular;
-        terminalProfile.fonts.italic.slant = text::font_slant::italic;
-        softLoadFont(terminalProfile.fonts.textShapingEngine,
-                     usedKeys,
-                     fontBasePath,
-                     profile["font"],
-                     "italic",
-                     terminalProfile.fonts.italic);
-
-        terminalProfile.fonts.boldItalic = terminalProfile.fonts.regular;
-        terminalProfile.fonts.boldItalic.weight = text::font_weight::bold;
-        terminalProfile.fonts.boldItalic.slant = text::font_slant::italic;
-        softLoadFont(terminalProfile.fonts.textShapingEngine,
-                     usedKeys,
-                     fontBasePath,
-                     profile["font"],
-                     "bold_italic",
-                     terminalProfile.fonts.boldItalic);
-
-        terminalProfile.fonts.emoji.familyName = "emoji";
-        terminalProfile.fonts.emoji.spacing = text::font_spacing::mono;
-        softLoadFont(terminalProfile.fonts.textShapingEngine,
-                     usedKeys,
-                     fontBasePath,
-                     profile["font"],
-                     "emoji",
-                     terminalProfile.fonts.emoji);
-
-#if defined(_WIN32)
-        // Windows does not understand font family "emoji", but fontconfig does. Rewrite user-input here.
-        if (terminalProfile.fonts.emoji.familyName == "emoji")
-            terminalProfile.fonts.emoji.familyName = "Segoe UI Emoji";
-#endif
-
-        strValue = "gray";
-        tryLoadChildRelative(usedKeys, profile, basePath, "font.render_mode", strValue, logger);
-        auto const static renderModeMap = array {
-            pair { "lcd"sv, text::render_mode::lcd },           pair { "light"sv, text::render_mode::light },
-            pair { "gray"sv, text::render_mode::gray },         pair { ""sv, text::render_mode::gray },
-            pair { "monochrome"sv, text::render_mode::bitmap },
-        };
-
-        // NOLINTNEXTLINE(readability-qualified-auto)
-        if (auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == strValue; });
-            i != renderModeMap.end())
-            terminalProfile.fonts.renderMode = i->second;
-        else
-            logger()("Invalid render_mode \"{}\" in configuration.", strValue);
-
-        auto intValue = LineCount();
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "history.limit", intValue, logger))
-        {
-            // value -1 is used for infinite grid
-            if (unbox(intValue) == -1)
-                terminalProfile.maxHistoryLineCount = Infinite();
-            else if (unbox(intValue) > -1)
-                terminalProfile.maxHistoryLineCount = LineCount(intValue);
-            else
-                terminalProfile.maxHistoryLineCount = LineCount(0);
-        }
-
-        tryLoadChildRelative(
-            usedKeys, profile, basePath, "option_as_alt", terminalProfile.optionKeyAsAlt, logger);
-
-        strValue = fmt::format("{}", ScrollBarPosition::Right);
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "scrollbar.position", strValue, logger))
-        {
-            auto const literal = toLower(strValue);
-            if (literal == "left")
-                terminalProfile.scrollbarPosition = ScrollBarPosition::Left;
-            else if (literal == "right")
-                terminalProfile.scrollbarPosition = ScrollBarPosition::Right;
-            else if (literal == "hidden")
-                terminalProfile.scrollbarPosition = ScrollBarPosition::Hidden;
-            else
-                logger()("Invalid value for config entry {}: {}", "scrollbar.position", strValue);
-        }
-        tryLoadChildRelative(usedKeys,
-                             profile,
-                             basePath,
-                             "scrollbar.hide_in_alt_screen",
-                             terminalProfile.hideScrollbarInAltScreen,
-                             logger);
-
-        tryLoadChildRelative(usedKeys,
-                             profile,
-                             basePath,
-                             "mouse.hide_while_typing",
-                             terminalProfile.mouseHideWhileTyping,
-                             logger);
-
-        tryLoadChildRelative(usedKeys,
-                             profile,
-                             basePath,
-                             "history.auto_scroll_on_update",
-                             terminalProfile.autoScrollOnUpdate,
-                             logger);
-        tryLoadChildRelative(usedKeys,
-                             profile,
-                             basePath,
-                             "history.scroll_multiplier",
-                             terminalProfile.historyScrollMultiplier,
-                             logger);
-
-        float floatValue = 1.0;
-        tryLoadChildRelative(usedKeys, profile, basePath, "background.opacity", floatValue, logger);
-        terminalProfile.backgroundOpacity =
-            (vtbackend::Opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
-        tryLoadChildRelative(
-            usedKeys, profile, basePath, "background.blur", terminalProfile.backgroundBlur, logger);
-
-        strValue = "dotted-underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.normal);
-        tryLoadChildRelative(usedKeys, profile, basePath, "hyperlink_decoration.normal", strValue, logger);
-        if (auto const pdeco = vtrasterizer::to_decorator(strValue); pdeco.has_value())
-            terminalProfile.hyperlinkDecoration.normal = *pdeco;
-
-        strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
-        tryLoadChildRelative(usedKeys, profile, basePath, "hyperlink_decoration.hover", strValue, logger);
-
-        tryLoadChildRelative(
-            usedKeys, profile, basePath, "vi_mode_scrolloff", terminalProfile.modalCursorScrollOff, logger);
-
-        auto uintValue = terminalProfile.highlightTimeout.count();
-        tryLoadChildRelative(usedKeys, profile, basePath, "vi_mode_highlight_timeout", uintValue, logger);
-        terminalProfile.highlightTimeout = chrono::milliseconds(uintValue);
-        if (auto const pdeco = vtrasterizer::to_decorator(strValue); pdeco.has_value())
-            terminalProfile.hyperlinkDecoration.hover = *pdeco;
-
-        tryLoadChildRelative(usedKeys,
-                             profile,
-                             basePath,
-                             "highlight_word_and_matches_on_double_click",
-                             terminalProfile.highlightDoubleClickedWord,
-                             logger);
-
-        parseCursorConfig(
-            terminalProfile.inputModes.insert.cursor, profile["cursor"], usedKeys, basePath + ".cursor");
-        usedKeys.emplace(basePath + ".cursor");
-
-        if (auto normalModeNode = profile["normal_mode"])
-        {
-            usedKeys.emplace(basePath + ".normal_mode");
-            parseCursorConfig(terminalProfile.inputModes.normal.cursor,
-                              normalModeNode["cursor"],
-                              usedKeys,
-                              basePath + ".normal_mode.cursor");
-            usedKeys.emplace(basePath + ".normal_mode.cursor");
-        }
-
-        if (auto visualModeNode = profile["visual_mode"])
-        {
-            usedKeys.emplace(basePath + ".visual_mode");
-            parseCursorConfig(terminalProfile.inputModes.visual.cursor,
-                              visualModeNode["cursor"],
-                              usedKeys,
-                              basePath + ".visual_mode.cursor");
-            usedKeys.emplace(basePath + ".visual_mode.cursor");
-        }
-
-        strValue = "none";
-        tryLoadChildRelative(usedKeys, profile, basePath, "status_line.display", strValue, logger);
-        if (strValue == "indicator")
-            terminalProfile.initialStatusDisplayType = vtbackend::StatusDisplayType::Indicator;
-        else if (strValue == "none")
-            terminalProfile.initialStatusDisplayType = vtbackend::StatusDisplayType::None;
-        else
-            logger()("Invalid value for config entry {}: {}", "status_line.display", strValue);
-
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "status_line.position", strValue, logger))
-        {
-            auto const literal = toLower(strValue);
-            if (literal == "bottom")
-                terminalProfile.statusDisplayPosition = vtbackend::StatusDisplayPosition::Bottom;
-            else if (literal == "top")
-                terminalProfile.statusDisplayPosition = vtbackend::StatusDisplayPosition::Top;
-            else
-                logger()("Invalid value for config entry {}: {}", "status_line.position", strValue);
-        }
-
-        bool boolValue = false;
-        if (tryLoadChildRelative(
-                usedKeys, profile, basePath, "status_line.sync_to_window_title", boolValue, logger))
-            terminalProfile.syncWindowTitleWithHostWritableStatusDisplay = boolValue;
-
-        strValue = "default";
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "bell.sound", strValue, logger))
-        {
-            if (!strValue.empty())
-            {
-                if (strValue != "off" && strValue != "default")
-                    strValue = "file:" + strValue;
-                terminalProfile.bell.sound = strValue;
-            }
-        }
-
-        boolValue = false;
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "bell.alert", boolValue, logger))
-            terminalProfile.bell.alert = boolValue;
-
-        floatValue = 0.0;
-        if (tryLoadChildRelative(usedKeys, profile, basePath, "bell.volume", floatValue, logger))
-            terminalProfile.bell.volume = std::clamp(floatValue, 0.0f, 1.0f);
-
-        if (auto value = profile["slow_scrolling_time"])
-        {
-            usedKeys.emplace(basePath + ".slow_scrolling_time");
-            if (value.IsScalar())
-            {
-                auto time = value.as<unsigned>();
-                if (time < 10 || time > 2000)
-                {
-                    logger()(
-                        "slow_scrolling_time must be between 10 and 2000 milliseconds. Defaulting to 100");
-                    time = 100;
-                }
-                terminalProfile.smoothLineScrolling = chrono::milliseconds(time);
-            }
-            else
-                logger()("Invalid value for config entry {}", "slow_scrolling_time");
-        }
-
-        if (auto frozenDecModes = profile["frozen_dec_modes"]; frozenDecModes)
-        {
-            usedKeys.emplace(basePath + ".frozen_dec_modes");
-            if (frozenDecModes.IsMap())
-            {
-                for (auto const& modeNode: frozenDecModes)
-                {
-                    auto const modeNumber = std::stoi(modeNode.first.as<string>());
-                    if (!vtbackend::isValidDECMode(modeNumber))
-                    {
-                        errorLog()("Invalid frozen_dec_modes entry: {} (Invalid DEC mode number).",
-                                   modeNumber);
-                        continue;
-                    }
-                    auto const mode = static_cast<vtbackend::DECMode>(modeNumber);
-                    auto const frozenState = modeNode.second.as<bool>();
-                    terminalProfile.frozenModes[mode] = frozenState;
-                }
-            }
-            else
-                errorLog()("Invalid frozen_dec_modes entry.");
-        }
-    }
-
-    TerminalProfile loadTerminalProfile(UsedKeys& usedKeys,
-                                        YAML::Node const& profile,
-                                        std::string const& parentPath,
-                                        std::string const& profileName,
-                                        unordered_map<string, vtbackend::ColorPalette> const& colorschemes)
-    {
-        auto terminalProfile = TerminalProfile {}; // default profile
-        updateTerminalProfile(
-            terminalProfile, usedKeys, profile, parentPath, profileName, colorschemes, configLog);
-        return terminalProfile;
+        if (!fs::is_regular_file(path))
+            if (auto const ec = createDefaultConfig(path); ec)
+                throw runtime_error { fmt::format(
+                    "Could not create directory {}. {}", path.parent_path().string(), ec.message()) };
     }
 
 } // namespace
-// }}}
 
 fs::path configHome(string const& programName)
 {
@@ -2009,9 +133,13 @@ fs::path configHome()
 
 std::string defaultConfigString()
 {
-    QFile file(":/contour/contour.yml");
-    file.open(QFile::ReadOnly);
-    return file.readAll().toStdString();
+    const Config config {};
+    auto configString = YAMLConfigWriter().createString(config);
+
+    auto logger = configLog;
+    logger()(configString);
+
+    return configString;
 }
 
 error_code createDefaultConfig(fs::path const& path)
@@ -2042,7 +170,9 @@ Config loadConfig()
 Config loadConfigFromFile(fs::path const& fileName)
 {
     Config config {};
+
     loadConfigFromFile(config, fileName);
+
     return config;
 }
 
@@ -2053,251 +183,11 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
 {
     auto logger = configLog;
     logger()("Loading configuration from file: {} ", fileName.string());
-    config.backingFilePath = fileName;
-    createFileIfNotExists(config.backingFilePath);
-    auto usedKeys = UsedKeys {};
-    YAML::Node doc;
-    try
-    {
-        doc = YAML::LoadFile(fileName.string());
-    }
-    catch (exception const& e)
-    {
-        errorLog()("Configuration file is corrupted. {}", e.what());
-        auto newfileName = fileName;
-        newfileName.replace_filename("default_contour.yml");
-        createDefaultConfig(newfileName);
-        return loadConfigFromFile(config, newfileName);
-    }
-    tryLoadValue(usedKeys, doc, "word_delimiters", config.wordDelimiters, logger);
+    config.configFile = fileName;
+    createFileIfNotExists(config.configFile);
 
-    if (auto opt =
-            parseModifiers(usedKeys, "bypass_mouse_protocol_modifier", doc["bypass_mouse_protocol_modifier"]);
-        opt.has_value())
-        config.bypassMouseProtocolModifiers = opt.value();
-
-    if (auto opt =
-            parseModifiers(usedKeys, "mouse_block_selection_modifier", doc["mouse_block_selection_modifier"]);
-        opt.has_value())
-        config.mouseBlockSelectionModifiers = opt.value();
-
-    if (doc["on_mouse_select"].IsDefined())
-    {
-        usedKeys.emplace("on_mouse_select");
-        auto const value = toUpper(doc["on_mouse_select"].as<string>());
-        auto constexpr Mappings = array {
-            pair { "COPYTOCLIPBOARD", SelectionAction::CopyToClipboard },
-            pair { "COPYTOSELECTIONCLIPBOARD", SelectionAction::CopyToSelectionClipboard },
-            pair { "NOTHING", SelectionAction::Nothing },
-        };
-        bool found = false;
-        for (auto const& mapping: Mappings)
-            if (mapping.first == value)
-            {
-                config.onMouseSelection = mapping.second;
-                usedKeys.emplace("on_mouse_select");
-                found = true;
-                break;
-            }
-        if (!found)
-            errorLog()("Invalid action specified for on_mouse_select: {}.", value);
-    }
-
-    auto constexpr KnownExperimentalFeatures = array<string_view, 0> {
-        // "tcap"sv
-    };
-
-    if (auto experimental = doc["experimental"]; experimental.IsMap())
-    {
-        usedKeys.emplace("experimental");
-        for (auto const& x: experimental)
-        {
-            auto const key = x.first.as<string>();
-            if (crispy::count(KnownExperimentalFeatures, key) == 0)
-            {
-                errorLog()("Unknown experimental feature tag: {}.", key);
-                continue;
-            }
-
-            usedKeys.emplace("experimental." + x.first.as<string>());
-            if (!x.second.as<bool>())
-                continue;
-
-            errorLog()("Enabling experimental feature {}.", key);
-            config.experimentalFeatures.insert(key);
-        }
-    }
-
-    tryLoadValue(usedKeys, doc, "spawn_new_process", config.spawnNewProcess, logger);
-
-    tryLoadValue(usedKeys, doc, "live_config", config.live, logger);
-
-    if (auto const loggingNode = doc["logging"]; loggingNode && loggingNode.IsMap())
-    {
-        usedKeys.emplace("logging");
-
-        if (auto const tagsNode = loggingNode["tags"]; tagsNode && tagsNode.IsSequence())
-        {
-            usedKeys.emplace("logging.tags");
-            for (auto const& tagNode: tagsNode)
-            {
-                auto const tag = tagNode.as<string>();
-                usedKeys.emplace("logging.tags." + tag);
-                logstore::enable(tag);
-            }
-        }
-    }
-
-    auto logEnabled = false;
-    tryLoadValue(usedKeys, doc, "logging.enabled", logEnabled, logger);
-
-    auto logFilePath = ""s;
-    tryLoadValue(usedKeys, doc, "logging.file", logFilePath, logger);
-
-    if (logEnabled)
-    {
-        logFilePath =
-            homeResolvedPath(replaceVariables(logFilePath, VariableReplacer()), Process::homeDirectory())
-                .generic_string();
-
-        if (!logFilePath.empty())
-        {
-            config.loggingSink = make_shared<logstore::sink>(logEnabled, make_shared<ofstream>(logFilePath));
-            logstore::set_sink(*config.loggingSink);
-        }
-    }
-
-    tryLoadValue(usedKeys, doc, "images.sixel_scrolling", config.sixelScrolling, logger);
-    tryLoadValue(usedKeys, doc, "images.sixel_register_count", config.maxImageColorRegisters, logger);
-    tryLoadValue(usedKeys, doc, "images.max_width", config.maxImageSize.width, logger);
-    tryLoadValue(usedKeys, doc, "images.max_height", config.maxImageSize.height, logger);
-
-    if (auto colorschemes = doc["color_schemes"]; colorschemes)
-    {
-        usedKeys.emplace("color_schemes");
-
-        for (auto i = colorschemes.begin(); i != colorschemes.end(); ++i)
-        {
-            auto const name = i->first.as<string>();
-            auto const path = "color_schemes." + name;
-            updateColorScheme(config.colorschemes[name], usedKeys, path, i->second);
-        }
-    }
-
-    tryLoadValue(usedKeys, doc, "platform_plugin", config.platformPlugin, logger);
-    if (config.platformPlugin == "auto")
-        config.platformPlugin = ""; // Mapping "auto" to its internally equivalent "".
-
-    string renderingBackendStr;
-    if (tryLoadValue(usedKeys, doc, "renderer.backend", renderingBackendStr, logger))
-    {
-        renderingBackendStr = toUpper(renderingBackendStr);
-        if (renderingBackendStr == "OPENGL"sv)
-            config.renderingBackend = RenderingBackend::OpenGL;
-        else if (renderingBackendStr == "SOFTWARE"sv)
-            config.renderingBackend = RenderingBackend::Software;
-        else if (renderingBackendStr != ""sv && renderingBackendStr != "DEFAULT"sv)
-            errorLog()("Unknown renderer: {}.", renderingBackendStr);
-    }
-
-    tryLoadValue(
-        usedKeys, doc, "renderer.tile_hashtable_slots", config.textureAtlasHashtableSlots.value, logger);
-    tryLoadValue(usedKeys, doc, "renderer.tile_cache_count", config.textureAtlasTileCount.value, logger);
-    tryLoadValue(usedKeys, doc, "renderer.tile_direct_mapping", config.textureAtlasDirectMapping, logger);
-
-    if (doc["mock_font_locator"].IsSequence())
-    {
-        vector<text::font_description_and_source> registry;
-        usedKeys.emplace("mock_font_locator");
-        for (size_t i = 0; i < doc["mock_font_locator"].size(); ++i)
-        {
-            auto const node = doc["mock_font_locator"][i];
-            auto const fontBasePath = fmt::format("mock_font_locator.{}", i);
-            text::font_description_and_source fds;
-            softLoadFont(usedKeys, fontBasePath, node, fds.description);
-            fds.source = text::font_path { node["path"].as<string>() };
-            usedKeys.emplace(fmt::format("{}.path", fontBasePath));
-            registry.emplace_back(std::move(fds));
-        }
-        text::mock_font_locator::configure(std::move(registry));
-    }
-
-    tryLoadValue(usedKeys, doc, "read_buffer_size", config.ptyReadBufferSize, logger);
-    if ((config.ptyReadBufferSize % 16) != 0)
-    {
-        // For improved performance ...
-        logger()("read_buffer_size must be a multiple of 16.");
-    }
-
-    tryLoadValue(usedKeys, doc, "pty_buffer_size", config.ptyBufferObjectSize, logger);
-    if (config.ptyBufferObjectSize < 1024 * 256)
-    {
-        // For improved performance ...
-        logger()("pty_buffer_size too small. This cann severily degrade performance. Forcing 256 KB as "
-                 "minimum acceptable setting.");
-        config.ptyBufferObjectSize = 1024 * 256;
-    }
-
-    tryLoadValue(usedKeys, doc, "reflow_on_resize", config.reflowOnResize, logger);
-
-    tryLoadValue(usedKeys, doc, "default_profile", config.defaultProfileName, logger);
-
-    if (auto profiles = doc["profiles"])
-    {
-        auto const parentPath = "profiles"s;
-
-        usedKeys.emplace("profiles");
-        usedKeys.emplace(fmt::format("{}.{}", parentPath, config.defaultProfileName));
-        auto const& defaultProfileNode = profiles[config.defaultProfileName];
-        if (!defaultProfileNode)
-        {
-            logger()("default_profile \"{}\" not found in profiles list."
-                     " Using the first available profile",
-                     escape(config.defaultProfileName));
-
-            if (profiles.begin() != profiles.end())
-                config.defaultProfileName = profiles.begin()->first.as<std::string>();
-            else
-                throw std::runtime_error("No profile is defined in config, exiting contour.");
-        }
-        config.profiles[config.defaultProfileName] = loadTerminalProfile(usedKeys,
-                                                                         profiles[config.defaultProfileName],
-                                                                         parentPath,
-                                                                         config.defaultProfileName,
-                                                                         config.colorschemes);
-
-        if (!config.defaultProfileName.empty() && config.profile(config.defaultProfileName) == nullptr)
-        {
-            errorLog()("default_profile \"{}\" not found in profiles list.",
-                       escape(config.defaultProfileName));
-        }
-        auto dummy = logstore::category("dymmy", "empty logger", logstore::category::state::Disabled);
-
-        for (auto i = profiles.begin(); i != profiles.end(); ++i)
-        {
-            auto const& name = i->first.as<string>();
-            if (name == config.defaultProfileName)
-                continue;
-            auto const profile = i->second;
-            usedKeys.emplace(fmt::format("{}.{}", parentPath, name));
-            config.profiles[name] = config.profiles[config.defaultProfileName];
-            updateTerminalProfile(
-                config.profiles[name], usedKeys, profile, parentPath, name, config.colorschemes, configLog);
-        }
-    }
-
-    if (auto mapping = doc["input_mapping"]; mapping)
-    {
-        usedKeys.emplace("input_mapping");
-        if (mapping.IsSequence())
-            for (size_t i = 0; i < mapping.size(); ++i)
-            {
-                auto prefix = fmt::format("{}.{}", "input_mapping", i);
-                parseInputMapping(usedKeys, prefix, config, mapping[i]);
-            }
-    }
-
-    checkForSuperfluousKeys(doc, usedKeys);
+    auto yamlVisitor = YAMLConfigReader(config.configFile.string(), configLog);
+    yamlVisitor.load(config);
 }
 
 optional<std::string> readConfigFile(std::string const& filename)
@@ -2307,6 +197,1811 @@ optional<std::string> readConfigFile(std::string const& filename)
             return text;
 
     return nullopt;
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::filesystem::path& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        where = crispy::homeResolvedPath(std::filesystem::path(child.as<std::string>()).string(),
+                                         vtpty::Process::homeDirectory());
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     RenderingBackend& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        auto renderBackendStr = crispy::toUpper(child.as<std::string>());
+        if (renderBackendStr == "OPENGL")
+            where = RenderingBackend::OpenGL;
+        else if (renderBackendStr == "SOFTWARE")
+            where = RenderingBackend::Software;
+
+        logger()("Loading entry: {}, value {}", entry, where);
+    }
+}
+
+void YAMLConfigReader::load(Config& c)
+{
+    try
+    {
+
+        loadFromEntry("platform_plugin", c.platformPlugin);
+        if (c.platformPlugin.value() == "auto")
+        {
+            c.platformPlugin = "";
+        }
+        loadFromEntry("default_profile", c.defaultProfileName);
+        loadFromEntry("word_delimiters", c.wordDelimiters);
+        loadFromEntry("read_buffer_size", c.ptyReadBufferSize);
+        loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
+        loadFromEntry("images.sixel_register_count", c.maxImageColorRegisters);
+        loadFromEntry("live_config", c.live);
+        loadFromEntry("spawn_new_process", c.spawnNewProcess);
+        loadFromEntry("images.sixe_scrolling", c.sixelScrolling);
+        loadFromEntry("reflow_on_resize", c.reflowOnResize);
+        loadFromEntry("experimental", c.experimentalFeatures);
+        loadFromEntry("renderer.tile_direct_mapping", c.textureAtlasDirectMapping);
+        loadFromEntry("renderer.tile_hastable_slots", c.textureAtlasHashtableSlots);
+        loadFromEntry("renderer.tile_cache_count", c.textureAtlasTileCount);
+        loadFromEntry("bypass_mouse_protocol_modifier", c.bypassMouseProtocolModifiers);
+        loadFromEntry("on_mouse_select", c.onMouseSelection);
+        loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
+        loadFromEntry("images", c.maxImageSize);
+        loadFromEntry("profiles", c.profiles);
+        // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
+        loadFromEntry("input_mapping", c.inputMappings);
+    }
+    catch (std::exception const& e)
+    {
+        errorLog()("Something went wrong during config file loading, check `contour debug config` output "
+                   "for more info");
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TerminalProfile& where)
+{
+    logger()("loading profile {}\n", entry);
+    auto const child = node[entry];
+    if (child)
+    {
+        // clang-format off
+        if (child["shell"])
+        {
+            loadFromEntry(child, "shell", where.shell);
+        }
+        else if (child["ssh"])
+        {
+            loadFromEntry(child, "ssh", where.ssh);
+        }
+        else
+        {
+            // will create default shell if no shell nor ssh config is provided
+            loadFromEntry(child, "shell", where.shell);
+        }
+        loadFromEntry(child, "escape_sandbox", where.shell.value().escapeSandbox);
+        loadFromEntry(child, "copy_last_mark_range_offset", where.copyLastMarkRangeOffset);
+        loadFromEntry(child, "initial_working_directory", where.shell.value().workingDirectory);
+        loadFromEntry(child, "show_title_bar", where.showTitleBar);
+        loadFromEntry(child, "size_indicator_on_resize", where.sizeIndicatorOnResize);
+        loadFromEntry(child, "fullscreen", where.fullscreen);
+        loadFromEntry(child, "maximized", where.maximized);
+        loadFromEntry(child, "bell", where.bell);
+        loadFromEntry(child, "wm_class", where.wmClass);
+        loadFromEntry(child, "margins", where.margins);
+        loadFromEntry(child, "terminal_id", where.terminalId);
+        loadFromEntry(child, "frozen_dec_modes", where.frozenModes);
+        loadFromEntry(child, "slow_scrolling_time", where.smoothLineScrolling);
+        loadFromEntry(child, "terminal_size", where.terminalSize);
+        if (child["history"])
+        {
+            loadFromEntry(child["history"], "limit", where.maxHistoryLineCount);
+            loadFromEntry(child["history"], "scroll_multiplier", where.historyScrollMultiplier);
+            loadFromEntry(child["history"], "auto_scroll_on_update", where.autoScrollOnUpdate);
+        }
+        if (child["scrollbar"])
+        {
+            loadFromEntry(child["scrollbar"], "position", where.scrollbarPosition);
+            loadFromEntry(child["scrollbar"], "hide_in_alt_screen", where.hideScrollbarInAltScreen);
+        }
+        if (child["mouse"])
+            loadFromEntry(child["mouse"], "hide_while_typing", where.mouseHideWhileTyping);
+        if (child["permissions"])
+        {
+            loadFromEntry(child["permissions"], "capture_buffer", where.captureBuffer);
+            loadFromEntry(child["permissions"], "change_font", where.changeFont);
+            loadFromEntry(child["permissions"],
+                          "display_host_writable_statusline",
+                          where.displayHostWritableStatusLine);
+        }
+        loadFromEntry(child, "highlight_word_and_matches_on_double_click", where.highlightDoubleClickedWord);
+        loadFromEntry(child, "font", where.fonts);
+        loadFromEntry(child, "draw_bold_text_with_bright_colors", where.drawBoldTextWithBrightColors);
+        if (child["cursor"])
+        {
+            loadFromEntry(child["cursor"], "shape", where.modeInsert.value().cursor.cursorShape);
+            loadFromEntry(child["cursor"], "blinking", where.modeInsert.value().cursor.cursorDisplay);
+            loadFromEntry(child["cursor"], "blinking_interval", where.modeInsert.value().cursor.cursorBlinkInterval);
+        }
+        if (child["normal_mode"] && child["normal_mode"]["cursor"])
+        {
+            loadFromEntry(child["normal_mode"]["cursor"], "shape", where.modeNormal.value().cursor.cursorShape);
+            loadFromEntry(child["normal_mode"]["cursor"], "blinking", where.modeNormal.value().cursor.cursorDisplay);
+            loadFromEntry(child["normal_mode"]["cursor"], "blinking_interval", where.modeNormal.value().cursor.cursorBlinkInterval);
+        }
+        if (child["visual_mode"] && child["visual_mode"]["cursor"])
+        {
+            loadFromEntry(child["visual_mode"]["cursor"], "shape", where.modeVisual.value().cursor.cursorShape);
+            loadFromEntry(child["visual_mode"]["cursor"], "blinking", where.modeVisual.value().cursor.cursorDisplay);
+            loadFromEntry(child["visual_mode"]["cursor"], "blinking_interval", where.modeVisual.value().cursor.cursorBlinkInterval);
+            loadFromEntry(child["visual_mode"]["cursor"], "blinking_interval", where.modeVisual.value().cursor.cursorBlinkInterval);
+        }
+        loadFromEntry(child, "vi_mode_highlight_timeout", where.highlightTimeout);
+        loadFromEntry(child, "vi_mode_scrolloff", where.modalCursorScrollOff);
+        if (child["status_line"])
+        {
+            loadFromEntry(child["status_line"], "position", where.statusDisplayPosition);
+            loadFromEntry(child["status_line"], "sync_to_window_title", where.syncWindowTitleWithHostWritableStatusDisplay);
+            loadFromEntry(child["status_line"], "display", where.initialStatusDisplayType);
+        }
+        if (child["background"])
+        {
+            loadFromEntry(child["background"], "opacity", where.backgroundOpacity);
+            loadFromEntry(child["background"], "blur", where.backgroundBlur);
+        }
+        // clang-format on
+
+        loadFromEntry(child, "colors", where.colors);
+
+        if (auto* simple = get_if<SimpleColorConfig>(&(where.colors.value())))
+            simple->colors.useBrightColors = where.drawBoldTextWithBrightColors.value();
+        else if (auto* dual = get_if<DualColorConfig>(&(where.colors.value())))
+        {
+            dual->darkMode.useBrightColors = where.drawBoldTextWithBrightColors.value();
+            dual->lightMode.useBrightColors = where.drawBoldTextWithBrightColors.value();
+        }
+
+        loadFromEntry(child, "hyperlink_decoration.normal", where.hyperlinkDecorationNormal);
+        loadFromEntry(child, "hyperlink_decoration.hover", where.hyperlinkDecorationHover);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::ColorPalette& where)
+{
+    logger()("color palette loading {}", entry);
+    auto child = node[entry];
+    if (!child) // can not load directly from config file
+    {
+
+        logger()("color paletter not found inside config file, checking colorschemes directory {} \n ",
+                 entry);
+        auto const filePath = configFile.remove_filename() / "colorschemes" / (entry + ".yml");
+        auto fileContents = readFile(filePath);
+        if (!fileContents)
+        {
+            logger()("color palette loading failed {} ", entry);
+            return;
+        }
+        child = YAML::Load(fileContents.value());
+    }
+
+    if (child["default"])
+    {
+        logger()("*** loading default colors");
+        loadFromEntry(child["default"], "background", where.defaultBackground);
+        loadFromEntry(child["default"], "foreground", where.defaultForeground);
+    }
+
+    if (child["background_image"] && child["background_image"]["path"]) // ensure that path exist
+    {
+        logger()("*** loading background_image");
+        where.backgroundImage = std::make_shared<vtbackend::BackgroundImage>();
+        loadFromEntry(child, "background_image", where.backgroundImage);
+    }
+
+    if (child["hyperlink_decoration"])
+    {
+        logger()("*** loading hyperlink_decoration");
+        loadFromEntry(child["hyperlink_decoration"], "normal", where.hyperlinkDecoration.normal);
+        loadFromEntry(child["hyperlink_decoration"], "hover", where.hyperlinkDecoration.hover);
+    }
+
+    auto loadWithLog = [&](auto& entry, auto& where) {
+        logger()("*** loading {}", entry);
+        loadFromEntry(child, entry, where);
+    };
+
+    loadWithLog("cursor", where.cursor);
+    loadWithLog("vi_mode_highlight", where.yankHighlight);
+    loadWithLog("vi_mode_cursosrline", where.indicatorStatusLine);
+    loadWithLog("selection", where.selection);
+    loadWithLog("search_highlight", where.searchHighlight);
+    loadWithLog("search_highlight_focused", where.searchHighlightFocused);
+    loadWithLog("word_highlight_current", where.wordHighlightCurrent);
+    loadWithLog("word_highlight_other", where.wordHighlight);
+    loadWithLog("indicator_statusline", where.indicatorStatusLine);
+    loadWithLog("indicator_statusline_inactive", where.indicatorStatusLineInactive);
+    loadWithLog("input_method_editor", where.inputMethodEditor);
+
+    logger()("*** loading pallete");
+    loadFromEntry(child, "", where.palette);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     [[maybe_unused]] std::string const& entry,
+                                     vtbackend::ColorPalette::Palette& colors)
+{
+    auto const loadColorMap = [&](YAML::Node const& parent, std::string const& key, size_t offset) -> bool {
+        auto node = parent[key];
+        if (!node)
+            return false;
+
+        if (node.IsMap())
+        {
+            auto const assignColor = [&](size_t index, std::string const& name) {
+                if (auto nodeValue = node[name]; nodeValue)
+                {
+                    if (auto const value = nodeValue.as<std::string>(); !value.empty())
+                    {
+                        if (value[0] == '#')
+                            colors[offset + index] = value;
+                        else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
+                            colors[offset + index] = vtbackend::RGBColor { nodeValue.as<uint32_t>() };
+                    }
+                }
+            };
+            assignColor(0, "black");
+            assignColor(1, "red");
+            assignColor(2, "green");
+            assignColor(3, "yellow");
+            assignColor(4, "blue");
+            assignColor(5, "magenta");
+            assignColor(6, "cyan");
+            assignColor(7, "white");
+            return true;
+        }
+        else if (node.IsSequence())
+        {
+            for (size_t i = 0; i < node.size() && i < 8; ++i)
+                if (node[i].IsScalar())
+                    colors[i] = vtbackend::RGBColor { node[i].as<uint32_t>() };
+                else
+                    colors[i] = vtbackend::RGBColor { node[i].as<std::string>() };
+            return true;
+        }
+        return false;
+    };
+
+    loadColorMap(node, "normal", 0);
+    loadColorMap(node, "bright", 8);
+    if (!loadColorMap(node, "dim", 256))
+    {
+        // calculate dim colors based on normal colors
+        for (unsigned i = 0; i < 8; ++i)
+            colors[256 + i] = colors[i] * 0.5f;
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::CellRGBColorAndAlphaPair& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "foreground", where.foreground);
+        loadFromEntry(child, "foreground_alpha", where.foregroundAlpha);
+        loadFromEntry(child, "background", where.background);
+        loadFromEntry(child, "background_alpha", where.backgroundAlpha);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::RGBColorPair& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "foreground", where.foreground);
+        loadFromEntry(child, "background", where.background);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::RGBColor& where)
+{
+    auto const child = node[entry];
+    if (child)
+        where = child.as<std::string>();
+    logger()("Loading entry: {}, value {}", entry, where);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::CursorColor& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "default", where.color);
+        loadFromEntry(child, "text", where.textOverrideColor);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::CellRGBColor& where)
+{
+    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtbackend::CellRGBColor> {
+        auto const literal = crispy::toUpper(key);
+        logger()("Loading entry: {}, value {}", entry, where);
+        if (literal == "CELLBACKGROUND")
+            return vtbackend::CellBackgroundColor {};
+        if (literal == "CELLFOREGROUND")
+            return vtbackend::CellForegroundColor {};
+        return vtbackend::RGBColor(key);
+    };
+
+    auto const child = node[entry];
+    if (child)
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::shared_ptr<vtbackend::BackgroundImage>& where)
+{
+    logger()("Loading background_image");
+
+    auto const child = node[entry];
+
+    if (child)
+    {
+        std::string filename;
+        loadFromEntry(child, "path", filename);
+        loadFromEntry(child, "opacity", where->opacity);
+        loadFromEntry(child, "blur", where->blur);
+        auto resolvedPath = crispy::homeResolvedPath(filename, vtpty::Process::homeDirectory());
+        where->location = resolvedPath;
+        where->hash = crispy::strong_hash::compute(resolvedPath.string());
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, Permission& where)
+{
+    auto parseModifierKey = [](std::string const& key) -> std::optional<Permission> {
+        auto const literal = crispy::toLower(key);
+        if (literal == "allow")
+            return Permission::Allow;
+        if (literal == "deny")
+            return Permission::Deny;
+        if (literal == "ask")
+            return Permission::Ask;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry]; child)
+    {
+        if (auto const opt = parseModifierKey(child.as<std::string>()); opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::StatusDisplayType& where)
+{
+    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtbackend::StatusDisplayType> {
+        auto const literal = crispy::toLower(key);
+        logger()("Loading entry: {}, value {}", entry, literal);
+        if (literal == "indicator")
+            return vtbackend::StatusDisplayType::Indicator;
+        if (literal == "none")
+            return vtbackend::StatusDisplayType::None;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        if (auto const opt = parseModifierKey(child.as<std::string>()); opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::Opacity& where)
+{
+    if (auto const child = node[entry])
+    {
+        where = vtbackend::Opacity(static_cast<unsigned>(255 * std::clamp(child.as<float>(), 0.0f, 1.0f)));
+    }
+    logger()("Loading entry: {}, value {}", entry, static_cast<unsigned>(where));
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::Decorator& where)
+{
+    auto parseModifierKey = [](std::string const& key) -> std::optional<vtrasterizer::Decorator> {
+        auto const literal = crispy::toLower(key);
+
+        using std::pair;
+        auto constexpr Mappings = std::array {
+            pair { "underline", vtrasterizer::Decorator::Underline },
+            pair { "dotted-underline", vtrasterizer::Decorator::DottedUnderline },
+            pair { "double-underline", vtrasterizer::Decorator::DoubleUnderline },
+            pair { "curly-underline", vtrasterizer::Decorator::CurlyUnderline },
+            pair { "dashed-underline", vtrasterizer::Decorator::DashedUnderline },
+            pair { "overline", vtrasterizer::Decorator::Overline },
+            pair { "crossed-out", vtrasterizer::Decorator::CrossedOut },
+            pair { "framed", vtrasterizer::Decorator::Framed },
+            pair { "encircle", vtrasterizer::Decorator::Encircle },
+        };
+        for (auto const& mapping: Mappings)
+            if (mapping.first == literal)
+                return { mapping.second };
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, Bell& where)
+{
+    if (auto const child = node[entry])
+    {
+        loadFromEntry(child, "alert", where.alert);
+        loadFromEntry(child, "sound", where.sound);
+        loadFromEntry(child, "volume", where.volume);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtpty::SshHostConfig& where)
+{
+    if (auto const child = node[entry])
+    {
+        loadFromEntry(child, "host", where.hostname);
+        loadFromEntry(child, "port", where.port);
+        loadFromEntry(child, "user", where.username);
+        loadFromEntry(child, "private_key", where.privateKeyFile);
+        loadFromEntry(child, "public_key", where.publicKeyFile);
+        loadFromEntry(child, "known_hosts", where.publicKeyFile);
+        loadFromEntry(child, "forward_agent", where.forwardAgent);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtpty::Process::ExecInfo& where)
+{
+    if (auto const child = node[entry])
+    {
+        where.program = child.as<std::string>();
+    }
+    if (auto args = node["arguments"]; args && args.IsSequence())
+    {
+        for (auto const& argNode: args)
+            where.arguments.emplace_back(argNode.as<string>());
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::vector<text::font_feature>& where)
+{
+    if (auto child = node[entry])
+    {
+        for (auto&& feature: child)
+        {
+            // Feature can be either 4 letter code or optionally ending with - to denote disabling it.
+            auto const [tag, enabled] = [&]() -> tuple<string, bool> {
+                auto value = feature.as<string>();
+                if (!value.empty())
+                {
+                    if (value[0] == '+')
+                        return { value.substr(1), true };
+                    if (value[0] == '-')
+                        return { value.substr(1), false };
+                }
+                return { std::move(value), true };
+            }();
+
+            if (tag.size() != 4)
+            {
+                logger()("Invalid font feature \"{}\". Font features are denoted as 4-letter codes.",
+                         feature.as<string>());
+                continue;
+            }
+            logger()("Enabling font feature {}{}{}{}", tag[0], tag[1], tag[2], tag[3]);
+            where.emplace_back(tag[0], tag[1], tag[2], tag[3], enabled);
+        }
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::set<std::string>& where)
+{
+    if (auto child = node[entry]; child && child.IsMap())
+    {
+        // entries of kind  feature_xyz: true
+        for (auto const& feature: child)
+        {
+            auto const isEnabled = feature.second.as<bool>();
+            if (isEnabled)
+            {
+                where.insert(feature.first.as<std::string>());
+                logger()("Added feature {}", feature.first.as<std::string>());
+            }
+        }
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::map<vtbackend::DECMode, bool>& where)
+{
+
+    if (auto frozenDecModes = node[entry]; frozenDecModes)
+    {
+        if (frozenDecModes.IsMap())
+        {
+            for (auto const& modeNode: frozenDecModes)
+            {
+                auto const modeNumber = std::stoi(modeNode.first.as<string>());
+                if (!vtbackend::isValidDECMode(modeNumber))
+                {
+                    logger()("Invalid frozen_dec_modes entry: {} (Invalid DEC mode number).", modeNumber);
+                    continue;
+                }
+                auto const mode = static_cast<vtbackend::DECMode>(modeNumber);
+                auto const frozenState = modeNode.second.as<bool>();
+                where[mode] = frozenState;
+            }
+        }
+        else
+            logger()("Invalid frozen_dec_modes entry.");
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::LineOffset& where)
+{
+    if (auto const child = node[entry])
+        where = vtbackend::LineOffset(child.as<int>());
+    logger()("Loading entry: {}, value {}", entry, where.template as<int>());
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, WindowMargins& where)
+{
+    if (auto const child = node[entry])
+    {
+        loadFromEntry(child, "horizontal", where.horizontal);
+        loadFromEntry(child, "vertical", where.vertical);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, vtpty::PageSize& where)
+{
+    if (auto const child = node[entry])
+    {
+        loadFromEntry(child, "lines", where.lines);
+        loadFromEntry(child, "columns", where.columns);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::VTType& where)
+{
+    auto parseModifierKey = [](std::string const& key) -> std::optional<vtbackend::VTType> {
+        auto const literal = crispy::toLower(key);
+
+        using Type = vtbackend::VTType;
+        auto constexpr static Mappings = std::array<std::pair<std::string_view, Type>, 10> {
+            std::pair { "VT100", Type::VT100 }, std::pair { "VT220", Type::VT220 },
+            std::pair { "VT240", Type::VT240 }, std::pair { "VT330", Type::VT330 },
+            std::pair { "VT340", Type::VT340 }, std::pair { "VT320", Type::VT320 },
+            std::pair { "VT420", Type::VT420 }, std::pair { "VT510", Type::VT510 },
+            std::pair { "VT520", Type::VT520 }, std::pair { "VT525", Type::VT525 }
+        };
+        for (auto const& mapping: Mappings)
+            if (mapping.first == literal)
+                return mapping.second;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::LineCount& where)
+{
+    if (auto const child = node[entry])
+        where = vtbackend::LineCount(child.as<int>());
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::font_size& where)
+{
+    if (auto const child = node[entry])
+    {
+        auto const size = child.as<double>();
+        if (size < MinimumFontSize.pt)
+        {
+            logger()("Specified font size is smaller than minimal available 8");
+            where = MinimumFontSize;
+            return;
+        }
+        where.pt = size;
+    }
+    logger()("Loading entry: {}, value {}", entry, where.pt);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     text::font_slant& where)
+{
+    if (auto const child = node[entry])
+    {
+        auto opt = text::make_font_slant(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     text::font_weight& where)
+{
+    if (auto const child = node[entry])
+    {
+        auto opt = text::make_font_weight(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     text::font_description& where)
+{
+    if (auto const child = node[entry])
+    {
+        if (child.IsMap())
+        {
+            loadFromEntry(child, "family", where.familyName);
+            loadFromEntry(child, "weight", where.weight);
+            loadFromEntry(child, "slant", where.slant);
+            loadFromEntry(child, "features", where.features);
+        }
+        else // entries like emoji: "emoji"
+        {
+            where.familyName = child.as<std::string>();
+        }
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ColorConfig& where)
+{
+    if (auto const child = node[entry])
+    {
+        logger()("Loading entry: {}", entry);
+        if (child.IsMap())
+        {
+            where = DualColorConfig { .colorSchemeLight = child["light"].as<std::string>(),
+                                      .colorSchemeDark = child["dark"].as<std::string>() };
+            loadFromEntry(doc["color_schemes"],
+                          child["dark"].as<std::string>(),
+                          std::get<DualColorConfig>(where).darkMode);
+            loadFromEntry(doc["color_schemes"],
+                          child["light"].as<std::string>(),
+                          std::get<DualColorConfig>(where).lightMode);
+        }
+        else
+        {
+            where = SimpleColorConfig { .colorScheme = child.as<std::string>() };
+            loadFromEntry(
+                doc["color_schemes"], child.as<std::string>(), std::get<SimpleColorConfig>(where).colors);
+        }
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::TextShapingEngine& where)
+{
+    auto constexpr NativeTextShapingEngine =
+#if defined(_WIN32)
+        vtrasterizer::TextShapingEngine::DWrite;
+#elif defined(__APPLE__)
+        vtrasterizer::TextShapingEngine::CoreText;
+#else
+        vtrasterizer::TextShapingEngine::OpenShaper;
+#endif
+    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtrasterizer::TextShapingEngine> {
+        auto const literal = crispy::toLower(key);
+        logger()("Loading entry: {}, value {}", entry, literal);
+        if (literal == "dwrite" || literal == "directwrite")
+            return vtrasterizer::TextShapingEngine::DWrite;
+        if (literal == "core" || literal == "coretext")
+            return vtrasterizer::TextShapingEngine::CoreText;
+        if (literal == "open" || literal == "openshaper")
+            return vtrasterizer::TextShapingEngine::OpenShaper;
+        if (literal == "native")
+            return NativeTextShapingEngine;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::FontLocatorEngine& where)
+{
+    auto constexpr NativeFontLocator =
+#if defined(_WIN32)
+        vtrasterizer::FontLocatorEngine::DWrite;
+#elif defined(__APPLE__)
+        vtrasterizer::FontLocatorEngine::CoreText;
+#else
+        vtrasterizer::FontLocatorEngine::FontConfig;
+#endif
+    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtrasterizer::FontLocatorEngine> {
+        auto const literal = crispy::toLower(key);
+        logger()("Loading entry: {}, value {}", entry, literal);
+        if (literal == "fontconfig")
+            return vtrasterizer::FontLocatorEngine::FontConfig;
+        if (literal == "coretext")
+            return vtrasterizer::FontLocatorEngine::CoreText;
+        if (literal == "dwrite" || literal == "directwrite")
+            return vtrasterizer::FontLocatorEngine::DWrite;
+        if (literal == "native")
+            return NativeFontLocator;
+        if (literal == "mock")
+            return vtrasterizer::FontLocatorEngine::Mock;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     text::render_mode& where)
+{
+    auto parseModifierKey = [&](std::string const& key) -> std::optional<text::render_mode> {
+        auto const literal = crispy::toLower(key);
+
+        auto constexpr static Mappings = std::array {
+            std::pair { "lcd", text::render_mode::lcd },
+            std::pair { "light", text::render_mode::light },
+            std::pair { "gray", text::render_mode::gray },
+            std::pair { "", text::render_mode::gray },
+            std::pair { "monochrome", text::render_mode::bitmap },
+        };
+        for (auto const& mapping: Mappings)
+            if (mapping.first == literal)
+            {
+                logger()("Loading entry: {}, value {}", entry, literal);
+                return mapping.second;
+            }
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::FontDescriptions& where)
+{
+    if (auto const child = node[entry])
+    {
+
+        loadFromEntry(child, "size", where.size);
+        loadFromEntry(child, "locator", where.fontLocator);
+        loadFromEntry(child, "text_shaping.engine", where.textShapingEngine);
+        loadFromEntry(child, "builtin_box_drawing", where.builtinBoxDrawing);
+        loadFromEntry(child, "render_mode", where.renderMode);
+        loadFromEntry(child, "regular", where.regular);
+
+        // inherit fonts from regular
+        where.bold = where.regular;
+        where.bold.weight = text::font_weight::bold;
+        where.italic = where.regular;
+        where.italic.slant = text::font_slant::italic;
+        where.boldItalic = where.regular;
+        where.boldItalic.slant = text::font_slant::italic;
+        where.boldItalic.weight = text::font_weight::bold;
+
+        loadFromEntry(child, "bold", where.bold);
+        loadFromEntry(child, "italic", where.italic);
+        loadFromEntry(child, "bold_italic", where.boldItalic);
+        loadFromEntry(child, "emoji", where.emoji);
+
+        // need separate loading since we need to save into font itself
+        // TODO : must adhere to default behaviour from test_shaper/font
+        bool strictSpacing = false;
+        loadFromEntry(child, "strict_spacing", strictSpacing);
+        where.regular.strictSpacing = strictSpacing;
+        where.bold.strictSpacing = strictSpacing;
+        where.italic.strictSpacing = strictSpacing;
+        where.boldItalic.strictSpacing = strictSpacing;
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     ScrollBarPosition& where)
+{
+    auto parseModifierKey = [&](std::string const& key) -> std::optional<ScrollBarPosition> {
+        auto const literal = crispy::toLower(key);
+        logger()("Loading entry: {}, value {}", entry, literal);
+        if (literal == "left")
+            return ScrollBarPosition::Left;
+        if (literal == "right")
+            return ScrollBarPosition::Right;
+        if (literal == "hidden")
+            return ScrollBarPosition::Hidden;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::StatusDisplayPosition& where)
+{
+    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtbackend::StatusDisplayPosition> {
+        auto const literal = crispy::toLower(key);
+        logger()("Loading entry: {}, value {}", entry, literal);
+        if (literal == "bottom")
+            return vtbackend::StatusDisplayPosition::Bottom;
+        if (literal == "top")
+            return vtbackend::StatusDisplayPosition::Top;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, std::string& where)
+{
+    if (auto const child = node[entry])
+    {
+        where = child.as<std::string>();
+        logger()("Loading entry: {}, value {}", entry, where);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::ImageSize& where)
+{
+
+    if (auto const child = node[entry])
+    {
+        loadFromEntry(child, "max_width", where.width);
+        loadFromEntry(child, "max_height", where.height);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, InputMappings& where)
+{
+
+    if (auto const child = node[entry])
+    {
+
+        // Clear default mappings if we are loading it
+        where = {};
+        if (child.IsSequence())
+        {
+            for (auto&& mapping: child)
+            {
+                auto action = parseAction(mapping);
+                auto mods = parseModifier(mapping);
+                auto mode = parseMatchModes(mapping);
+                if (action && mods && mode)
+                {
+                    if (tryAddKey(where, *mode, *mods, mapping["key"], *action))
+                    {
+                        logger()(
+                            "Adding input mapping: mods: {:<20} modifiers: {:<20} key: {:<20} action: {:<20}",
+                            *mods,
+                            *mode,
+                            mapping["key"].as<std::string>(),
+                            *action);
+                    }
+                    else if (tryAddMouse(where.mouseMappings, *mode, *mods, mapping["mouse"], *action))
+                    {
+                        logger()("Adding input mapping: mods: {:<20} modifiers: {:<20} mouse: {:<18} action: "
+                                 "{:<20}",
+                                 *mods,
+                                 *mode,
+                                 mapping["mouse"].as<std::string>(),
+                                 *action);
+                    }
+                    else
+                    {
+                        logger()("Could not add some input mapping.");
+                    }
+                }
+            }
+        }
+    }
+}
+
+bool YAMLConfigReader::tryAddMouse(std::vector<MouseInputMapping>& bindings,
+                                   vtbackend::MatchModes modes,
+                                   vtbackend::Modifiers modifier,
+                                   YAML::Node const& node,
+                                   actions::Action action)
+{
+    auto mouseButton = parseMouseButton(node);
+    if (!mouseButton)
+        return false;
+
+    appendOrCreateBinding(bindings, modes, modifier, *mouseButton, std::move(action));
+    return true;
+}
+
+std::optional<vtbackend::MouseButton> YAMLConfigReader::parseMouseButton(YAML::Node const& node)
+{
+    using namespace std::literals::string_view_literals;
+    if (!node)
+        return std::nullopt;
+
+    if (!node.IsScalar())
+        return std::nullopt;
+
+    auto constexpr static Mappings = std::array {
+        std::pair { "WHEELUP"sv, vtbackend::MouseButton::WheelUp },
+        std::pair { "WHEELDOWN"sv, vtbackend::MouseButton::WheelDown },
+        std::pair { "LEFT"sv, vtbackend::MouseButton::Left },
+        std::pair { "MIDDLE"sv, vtbackend::MouseButton::Middle },
+        std::pair { "RIGHT"sv, vtbackend::MouseButton::Right },
+    };
+    auto const upperName = crispy::toUpper(node.as<std::string>());
+    for (auto const& mapping: Mappings)
+        if (upperName == mapping.first)
+            return mapping.second;
+    return std::nullopt;
+}
+
+bool YAMLConfigReader::tryAddKey(InputMappings& inputMappings,
+                                 vtbackend::MatchModes modes,
+                                 vtbackend::Modifiers modifier,
+                                 YAML::Node const& node,
+                                 actions::Action action)
+{
+    if (!node)
+        return false;
+
+    if (!node.IsScalar())
+        return false;
+
+    auto const input = parseKeyOrChar(node.as<std::string>());
+    if (!input.has_value())
+        return false;
+
+    if (holds_alternative<vtbackend::Key>(*input))
+    {
+        appendOrCreateBinding(
+            inputMappings.keyMappings, modes, modifier, get<vtbackend::Key>(*input), std::move(action));
+    }
+    else if (holds_alternative<char32_t>(*input))
+    {
+        appendOrCreateBinding(
+            inputMappings.charMappings, modes, modifier, get<char32_t>(*input), std::move(action));
+    }
+    else
+        assert(false && "The impossible happened.");
+
+    return true;
+}
+
+std::optional<std::variant<vtbackend::Key, char32_t>> YAMLConfigReader::parseKeyOrChar(
+    std::string const& name)
+{
+    using namespace vtbackend::ControlCode;
+    using namespace std::literals::string_view_literals;
+
+    if (auto const key = parseKey(name); key.has_value())
+        return key.value();
+
+    auto const text = QString::fromUtf8(name.c_str()).toUcs4();
+    if (text.size() == 1)
+        return static_cast<char32_t>(text[0]);
+
+    auto constexpr NamedChars =
+        std::array { std::pair { "LESS"sv, '<' },          std::pair { "GREATER"sv, '>' },
+                     std::pair { "PLUS"sv, '+' },          std::pair { "APOSTROPHE"sv, '\'' },
+                     std::pair { "ADD"sv, '+' },           std::pair { "BACKSLASH"sv, 'x' },
+                     std::pair { "COMMA"sv, ',' },         std::pair { "DECIMAL"sv, '.' },
+                     std::pair { "DIVIDE"sv, '/' },        std::pair { "EQUAL"sv, '=' },
+                     std::pair { "LEFT_BRACKET"sv, '[' },  std::pair { "MINUS"sv, '-' },
+                     std::pair { "MULTIPLY"sv, '*' },      std::pair { "PERIOD"sv, '.' },
+                     std::pair { "RIGHT_BRACKET"sv, ']' }, std::pair { "SEMICOLON"sv, ';' },
+                     std::pair { "SLASH"sv, '/' },         std::pair { "SUBTRACT"sv, '-' },
+                     std::pair { "SPACE"sv, ' ' } };
+
+    auto const lowerName = crispy::toUpper(name);
+    for (auto const& mapping: NamedChars)
+        if (lowerName == mapping.first)
+            return static_cast<char32_t>(mapping.second);
+
+    return std::nullopt;
+}
+
+std::optional<vtbackend::Key> YAMLConfigReader::parseKey(std::string const& name)
+{
+    using vtbackend::Key;
+    using namespace std::literals::string_view_literals;
+    auto static constexpr Mappings = std::array {
+        std::pair { "F1"sv, Key::F1 },
+        std::pair { "F2"sv, Key::F2 },
+        std::pair { "F3"sv, Key::F3 },
+        std::pair { "F4"sv, Key::F4 },
+        std::pair { "F5"sv, Key::F5 },
+        std::pair { "F6"sv, Key::F6 },
+        std::pair { "F7"sv, Key::F7 },
+        std::pair { "F8"sv, Key::F8 },
+        std::pair { "F9"sv, Key::F9 },
+        std::pair { "F10"sv, Key::F10 },
+        std::pair { "F11"sv, Key::F11 },
+        std::pair { "F12"sv, Key::F12 },
+        std::pair { "F13"sv, Key::F13 },
+        std::pair { "F14"sv, Key::F14 },
+        std::pair { "F15"sv, Key::F15 },
+        std::pair { "F16"sv, Key::F16 },
+        std::pair { "F17"sv, Key::F17 },
+        std::pair { "F18"sv, Key::F18 },
+        std::pair { "F19"sv, Key::F19 },
+        std::pair { "F20"sv, Key::F20 },
+        std::pair { "F21"sv, Key::F21 },
+        std::pair { "F22"sv, Key::F22 },
+        std::pair { "F23"sv, Key::F23 },
+        std::pair { "F24"sv, Key::F24 },
+        std::pair { "F25"sv, Key::F25 },
+        std::pair { "F26"sv, Key::F26 },
+        std::pair { "F27"sv, Key::F27 },
+        std::pair { "F28"sv, Key::F28 },
+        std::pair { "F29"sv, Key::F29 },
+        std::pair { "F30"sv, Key::F30 },
+        std::pair { "F31"sv, Key::F31 },
+        std::pair { "F32"sv, Key::F32 },
+        std::pair { "F33"sv, Key::F33 },
+        std::pair { "F34"sv, Key::F34 },
+        std::pair { "F35"sv, Key::F35 },
+        std::pair { "Escape"sv, Key::Escape },
+        std::pair { "Enter"sv, Key::Enter },
+        std::pair { "Tab"sv, Key::Tab },
+        std::pair { "Backspace"sv, Key::Backspace },
+        std::pair { "DownArrow"sv, Key::DownArrow },
+        std::pair { "LeftArrow"sv, Key::LeftArrow },
+        std::pair { "RightArrow"sv, Key::RightArrow },
+        std::pair { "UpArrow"sv, Key::UpArrow },
+        std::pair { "Insert"sv, Key::Insert },
+        std::pair { "Delete"sv, Key::Delete },
+        std::pair { "Home"sv, Key::Home },
+        std::pair { "End"sv, Key::End },
+        std::pair { "PageUp"sv, Key::PageUp },
+        std::pair { "PageDown"sv, Key::PageDown },
+        std::pair { "MediaPlay"sv, Key::MediaPlay },
+        std::pair { "MediaStop"sv, Key::MediaStop },
+        std::pair { "MediaPrevious"sv, Key::MediaPrevious },
+        std::pair { "MediaNext"sv, Key::MediaNext },
+        std::pair { "MediaPause"sv, Key::MediaPause },
+        std::pair { "MediaTogglePlayPause"sv, Key::MediaTogglePlayPause },
+        std::pair { "VolumeUp"sv, Key::VolumeUp },
+        std::pair { "VolumeDown"sv, Key::VolumeDown },
+        std::pair { "VolumeMute"sv, Key::VolumeMute },
+        std::pair { "PrintScreen"sv, Key::PrintScreen },
+        std::pair { "Pause"sv, Key::Pause },
+        std::pair { "Menu"sv, Key::Menu },
+    };
+
+    auto const lowerName = crispy::toLower(name);
+
+    for (auto const& mapping: Mappings)
+        if (lowerName == crispy::toLower(mapping.first))
+            return mapping.second;
+
+    return std::nullopt;
+}
+
+std::optional<vtbackend::MatchModes> YAMLConfigReader::parseMatchModes(YAML::Node const& nodeYAML)
+{
+    using vtbackend::MatchModes;
+
+    auto node = nodeYAML["mode"];
+    if (!node)
+        return MatchModes {};
+    if (!node.IsScalar())
+        return std::nullopt;
+
+    auto matchModes = MatchModes {};
+
+    auto const modeStr = node.as<std::string>();
+    auto const args = crispy::split(modeStr, '|');
+    for (std::string_view arg: args)
+    {
+        if (arg.empty())
+            continue;
+        bool negate = false;
+        if (arg.front() == '~')
+        {
+            negate = true;
+            arg.remove_prefix(1);
+        }
+
+        MatchModes::Flag flag = MatchModes::Flag::Default;
+        std::string const upperArg = crispy::toUpper(arg);
+        if (upperArg == "ALT")
+            flag = MatchModes::AlternateScreen;
+        if (upperArg == "ALTSCREEN")
+            flag = MatchModes::AlternateScreen;
+        else if (upperArg == "APPCURSOR")
+            flag = MatchModes::AppCursor;
+        else if (upperArg == "APPKEYPAD")
+            flag = MatchModes::AppKeypad;
+        else if (upperArg == "INSERT")
+            flag = MatchModes::Insert;
+        else if (upperArg == "SELECT")
+            flag = MatchModes::Select;
+        else if (upperArg == "SEARCH")
+            flag = MatchModes::Search;
+        else if (upperArg == "TRACE")
+            flag = MatchModes::Trace;
+        else
+        {
+            errorLog()("Unknown input_mapping mode: {}", arg);
+            continue;
+        }
+
+        if (negate)
+            matchModes.disable(flag);
+        else
+            matchModes.enable(flag);
+    }
+
+    return matchModes;
+}
+
+std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifier(YAML::Node const& nodeYAML)
+{
+    using vtbackend::Modifier;
+    auto node = nodeYAML["mods"];
+    if (!node)
+        return std::nullopt;
+    if (node.IsScalar())
+        return parseModifierKey(node.as<std::string>());
+    if (!node.IsSequence())
+        return std::nullopt;
+
+    vtbackend::Modifiers mods;
+    for (const auto& i: node)
+    {
+        if (!i.IsScalar())
+            return std::nullopt;
+
+        auto const mod = parseModifierKey(i.as<std::string>());
+        if (!mod)
+            return std::nullopt;
+
+        mods |= *mod;
+    }
+    return mods;
+}
+
+std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifierKey(std::string const& key)
+{
+    using vtbackend::Modifier;
+    auto const upperKey = crispy::toUpper(key);
+    if (upperKey == "ALT")
+        return Modifier::Alt;
+    if (upperKey == "CONTROL")
+        return Modifier::Control;
+    if (upperKey == "SHIFT")
+        return Modifier::Shift;
+    if (upperKey == "SUPER")
+        return Modifier::Super;
+    if (upperKey == "META")
+        // TODO: This is technically not correct, but we used the term Meta up until now,
+        // to refer to the Windows/Cmd key. But Qt also exposes another modifier called
+        // Meta, which rarely exists on modern keyboards (?), but it we need to support it
+        // as well, especially since extended CSIu protocol exposes it as well.
+        return Modifier::Super; // Return Modifier::Meta in the future.
+    return std::nullopt;
+}
+
+std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& node)
+{
+    if (auto actionNode = node["action"])
+    {
+        auto actionName = actionNode.as<std::string>();
+        auto actionOpt = actions::fromString(actionName);
+        if (!actionOpt)
+        {
+            logger()("Unknown action '{}'.", actionNode["action"].as<std::string>());
+            return std::nullopt;
+        }
+        auto action = actionOpt.value();
+        if (holds_alternative<actions::ChangeProfile>(action))
+        {
+            if (auto name = node["name"]; name.IsScalar())
+            {
+                return actions::ChangeProfile { actionNode.as<std::string>() };
+            }
+            else
+                return std::nullopt;
+        }
+
+        if (holds_alternative<actions::NewTerminal>(action))
+        {
+            if (auto profile = node["profile"]; profile && profile.IsScalar())
+            {
+                return actions::NewTerminal { profile.as<std::string>() };
+            }
+            else
+                return action;
+        }
+
+        if (holds_alternative<actions::ReloadConfig>(action))
+        {
+            if (auto profileName = node["profile"]; profileName.IsScalar())
+            {
+                return actions::ReloadConfig { profileName.as<std::string>() };
+            }
+            else
+                return action;
+        }
+
+        if (holds_alternative<actions::SendChars>(action))
+        {
+            if (auto chars = node["chars"]; chars.IsScalar())
+            {
+                return actions::SendChars { crispy::unescape(chars.as<std::string>()) };
+            }
+            else
+                return std::nullopt;
+        }
+
+        if (holds_alternative<actions::CopySelection>(action))
+        {
+            if (auto nodeFormat = node["format"]; nodeFormat && nodeFormat.IsScalar())
+            {
+                auto const formatString = crispy::toUpper(nodeFormat.as<std::string>());
+                static auto constexpr Mappings =
+                    std::array<std::pair<std::string_view, actions::CopyFormat>, 4> { {
+                        { "TEXT", actions::CopyFormat::Text },
+                        { "HTML", actions::CopyFormat::HTML },
+                        { "PNG", actions::CopyFormat::PNG },
+                        { "VT", actions::CopyFormat::VT },
+                    } };
+                // NOLINTNEXTLINE(readability-qualified-auto)
+                if (auto const p = std::find_if(Mappings.begin(),
+                                                Mappings.end(),
+                                                [&](auto const& t) { return t.first == formatString; });
+                    p != Mappings.end())
+                {
+                    return actions::CopySelection { p->second };
+                }
+                logger()("Invalid format '{}' in CopySelection action. Defaulting to 'text'.",
+                         nodeFormat.as<std::string>());
+                return actions::CopySelection { actions::CopyFormat::Text };
+            }
+        }
+
+        if (holds_alternative<actions::PasteClipboard>(action))
+        {
+            if (auto nodeStrip = node["strip"]; nodeStrip && nodeStrip.IsScalar())
+            {
+                return actions::PasteClipboard { nodeStrip.as<bool>() };
+            }
+        }
+
+        if (holds_alternative<actions::WriteScreen>(action))
+        {
+            if (auto chars = node["chars"]; chars.IsScalar())
+            {
+                return actions::WriteScreen { chars.as<std::string>() };
+            }
+            else
+                return std::nullopt;
+        }
+
+        return action;
+    }
+    return std::nullopt;
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     contour::config::SelectionAction& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+
+        auto const value = crispy::toUpper(child.as<std::string>());
+        auto constexpr Mappings = std::array {
+            std::pair { "COPYTOCLIPBOARD", contour::config::SelectionAction::CopyToClipboard },
+            std::pair { "COPYTOSELECTIONCLIPBOARD",
+                        contour::config::SelectionAction::CopyToSelectionClipboard },
+            std::pair { "NOTHING", contour::config::SelectionAction::Nothing },
+        };
+        logger()("Loading entry: {}, value {}", entry, value);
+        bool found = false;
+        for (auto const& mapping: Mappings)
+            if (mapping.first == value)
+            {
+                where = mapping.second;
+                found = true;
+            }
+        if (!found)
+            where = contour::config::SelectionAction::Nothing;
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::CursorShape& where)
+{
+
+    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtbackend::CursorShape> {
+        auto const upperKey = crispy::toUpper(key);
+        logger()("Loading entry: {}, value {}", entry, upperKey);
+        if (upperKey == "BLOCK")
+            return vtbackend::CursorShape::Block;
+        if (upperKey == "RECTANGLE")
+        {
+            return vtbackend::CursorShape::Rectangle;
+        }
+        if (upperKey == "UNDERSCORE")
+            return vtbackend::CursorShape::Underscore;
+        if (upperKey == "BAR")
+            return vtbackend::CursorShape::Bar;
+        return std::nullopt;
+    };
+
+    auto const child = node[entry];
+    if (child)
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::Modifiers& where)
+{
+    if (auto const child = node[entry])
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::CursorDisplay& where)
+{
+    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtbackend::CursorDisplay> {
+        auto const upperKey = crispy::toUpper(key);
+        logger()("Loading entry: {}, value {}", entry, upperKey);
+        if (upperKey == "TRUE")
+            return vtbackend::CursorDisplay::Blink;
+        if (upperKey == "FALSE")
+            return vtbackend::CursorDisplay::Steady;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     crispy::lru_capacity& where)
+{
+    if (auto const child = node[entry])
+        where.value = child.as<uint32_t>();
+    logger()("Loading entry: {}, value {}", entry, where.value);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::MaxHistoryLineCount& where)
+{
+    if (auto const child = node[entry])
+    {
+        auto value = child.as<int>();
+        if (value == -1)
+            where = vtbackend::Infinite {};
+        else
+            where = vtbackend::LineCount(value);
+    }
+    if (std::holds_alternative<vtbackend::Infinite>(where))
+        logger()("Loading entry: {}, value {}", entry, "Infinity");
+    else
+        logger()("Loading entry: {}, value {}", entry, std::get<vtbackend::LineCount>(where));
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     crispy::strong_hashtable_size& where)
+{
+    if (auto const child = node[entry])
+        where.value = child.as<uint32_t>();
+    logger()("Loading entry: {}, value {}", entry, where.value);
+}
+
+std::string YAMLConfigWriter::createString(Config const& c)
+{
+    auto doc = std::string {};
+    constexpr int OneOffset = 4;
+
+    auto const process = [&](auto v) {
+        doc.append(format(addOffset(v.documentation, Offset::levels * OneOffset), v.value()));
+    };
+
+    auto const processWithDoc = [&](auto&& docString, auto... val) {
+        doc.append(fmt::format(
+            fmt::runtime(format(addOffset(std::string(docString.value), Offset::levels * OneOffset), val...)),
+            fmt::arg("comment", "#")));
+    };
+
+    process(c.platformPlugin);
+
+    // inside renderer:
+    scoped([&]() {
+        doc.append("renderer: \n");
+        process(c.renderingBackend);
+        process(c.textureAtlasDirectMapping);
+        process(c.textureAtlasHashtableSlots);
+        process(c.textureAtlasTileCount);
+    });
+
+    process(c.wordDelimiters);
+    process(c.ptyReadBufferSize);
+    process(c.ptyBufferObjectSize);
+    process(c.defaultProfileName);
+    process(c.spawnNewProcess);
+    process(c.reflowOnResize);
+    process(c.bypassMouseProtocolModifiers);
+    process(c.mouseBlockSelectionModifiers);
+    process(c.onMouseSelection);
+    process(c.live);
+    process(c.experimentalFeatures);
+
+    // inside images:
+    doc.append("\nimages: \n");
+
+    scoped([&]() {
+        process(c.sixelScrolling);
+        process(c.maxImageColorRegisters);
+        process(c.maxImageSize);
+    });
+
+    // inside profiles:
+    doc.append(fmt::format(fmt::runtime(c.profiles.documentation), fmt::arg("comment", "#")));
+    {
+        const auto _ = Offset {};
+        for (auto&& [name, entry]: c.profiles.value())
+        {
+            doc.append(fmt::format("    {}: \n", name));
+            {
+                const auto _ = Offset {};
+                process(entry.shell);
+                process(entry.maximized);
+                process(entry.fullscreen);
+                process(entry.bell);
+                process(entry.showTitleBar);
+                process(entry.sizeIndicatorOnResize);
+                process(entry.copyLastMarkRangeOffset);
+                process(entry.wmClass);
+                process(entry.terminalSize);
+                process(entry.terminalId);
+                process(entry.smoothLineScrolling);
+
+                process(entry.margins);
+                // history: section
+                doc.append(addOffset("history:\n", Offset::levels * OneOffset));
+                {
+                    const auto _ = Offset {};
+                    process(entry.maxHistoryLineCount);
+                    process(entry.historyScrollMultiplier);
+                    process(entry.autoScrollOnUpdate);
+                }
+
+                // scrollbar: section
+                doc.append(addOffset("scrollbar:\n", Offset::levels * OneOffset));
+                ;
+                {
+                    const auto _ = Offset {};
+                    process(entry.scrollbarPosition);
+                    process(entry.hideScrollbarInAltScreen);
+                }
+
+                // mouse: section
+                doc.append(addOffset("mouse:\n", Offset::levels * OneOffset));
+                {
+                    const auto _ = Offset {};
+                    process(entry.mouseHideWhileTyping);
+                }
+
+                //  permissions: section
+                doc.append(addOffset("\n"
+                                     "permissions:\n",
+                                     Offset::levels * OneOffset));
+                {
+                    const auto _ = Offset {};
+                    process(entry.changeFont);
+                    process(entry.captureBuffer);
+                    process(entry.displayHostWritableStatusLine);
+                }
+                process(entry.highlightDoubleClickedWord);
+                process(entry.fonts);
+                process(entry.drawBoldTextWithBrightColors);
+                process(entry.modeInsert);
+                process(entry.modeNormal);
+                process(entry.modeVisual);
+                process(entry.highlightTimeout);
+                process(entry.modalCursorScrollOff);
+
+                // status_line
+                doc.append(addOffset("\n"
+                                     "status_line:\n",
+                                     Offset::levels * OneOffset));
+                {
+                    const auto _ = Offset {};
+                    process(entry.initialStatusDisplayType);
+                    process(entry.statusDisplayPosition);
+                    process(entry.syncWindowTitleWithHostWritableStatusDisplay);
+                }
+
+                doc.append(addOffset("\n"
+                                     "background:\n",
+                                     Offset::levels * OneOffset));
+                {
+                    const auto _ = Offset {};
+                    process(entry.backgroundOpacity);
+                    process(entry.backgroundBlur);
+                }
+
+                process(entry.colors);
+
+                doc.append(addOffset("\n"
+                                     "hyperlink_decoration:\n",
+                                     Offset::levels * OneOffset));
+                {
+                    const auto _ = Offset {};
+                    process(entry.hyperlinkDecorationNormal);
+                    process(entry.hyperlinkDecorationHover);
+                }
+            }
+        };
+    }
+
+    doc.append(fmt::format(fmt::runtime(c.colorschemes.documentation), fmt::arg("comment", "#")));
+    scoped([&]() {
+        for (auto&& [name, entry]: c.colorschemes.value())
+        {
+            doc.append(fmt::format("    {}: \n", name));
+
+            {
+                const auto _ = Offset {};
+                doc.append(fmt::format(fmt::runtime(addOffset("{comment} Default colors\n"
+                                                              "default:\n",
+                                                              Offset::levels * OneOffset)),
+                                       fmt::arg("comment", "#")));
+                {
+                    const auto _ = Offset {};
+                    processWithDoc(
+                        documentation::DefaultColors, entry.defaultBackground, entry.defaultForeground);
+
+                    // processWithDoc("# Background image support.\n"
+                    //                "background_image:\n"
+                    //                "    # Full path to the image to use as background.\n"
+                    //                "    #\n"
+                    //                "    # Default: empty string (disabled)\n"
+                    //                "    # path: '/Users/trapni/Pictures/bg.png'\n"
+                    //                "\n"
+                    //                "    # Image opacity to be applied to make the image not look to
+                    //                intense\n" "    # and not get too distracted by the background
+                    //                image.\n" "    opacity: {}\n"
+                    //                "\n"
+                    //                "    # Optionally blurs background image to make it less
+                    //                distracting\n" "    # and keep the focus on the actual terminal
+                    //                contents.\n" "    #\n" "    blur: {}\n",
+                    //                entry.backgroundImage->opacity,
+                    //                entry.backgroundImage->blur);
+
+                    // processWithDoc("# Mandates the color of the cursor and potentially overridden
+                    // text.\n"
+                    //                "#\n"
+                    //                "# The color can be specified in RGB as usual, plus\n"
+                    //                "# - CellForeground: Selects the cell's foreground color.\n"
+                    //                "# - CellBackground: Selects the cell's background color.\n"
+                    //                "cursor:\n"
+                    //                "    # Specifies the color to be used for the actual cursor
+                    //                shape.\n" "    #\n" "    default: {}\n" "    # Specifies the
+                    //                color to be used for the characters that would\n" "    # be
+                    //                covered otherwise.\n" "    #\n" "    text: {}\n",
+                    //                entry.cursor.color, entry.cursor.textOverrideColor);
+
+                    processWithDoc(documentation::HyperlinkDecoration,
+                                   entry.hyperlinkDecoration.normal,
+                                   entry.hyperlinkDecoration.hover);
+
+                    processWithDoc(documentation::YankHighlight,
+                                   entry.yankHighlight.foreground,
+                                   entry.yankHighlight.foregroundAlpha,
+                                   entry.yankHighlight.background,
+                                   entry.yankHighlight.backgroundAlpha);
+
+                    processWithDoc(documentation::NormalModeCursorline,
+                                   entry.normalModeCursorline.foreground,
+                                   entry.normalModeCursorline.foregroundAlpha,
+                                   entry.normalModeCursorline.background,
+                                   entry.normalModeCursorline.backgroundAlpha);
+
+                    processWithDoc(documentation::Selection,
+                                   entry.selection.foreground,
+                                   entry.selection.foregroundAlpha,
+                                   entry.selection.background,
+                                   entry.selection.backgroundAlpha);
+
+                    processWithDoc(documentation::SearchHighlight,
+                                   entry.searchHighlight.foreground,
+                                   entry.searchHighlight.foregroundAlpha,
+                                   entry.searchHighlight.background,
+                                   entry.searchHighlight.backgroundAlpha);
+
+                    processWithDoc(documentation::SearchHighlihtFocused,
+                                   entry.searchHighlightFocused.foreground,
+                                   entry.searchHighlightFocused.foregroundAlpha,
+                                   entry.searchHighlightFocused.background,
+                                   entry.searchHighlightFocused.backgroundAlpha);
+
+                    processWithDoc(documentation::WordHighlightCurrent,
+                                   entry.wordHighlightCurrent.foreground,
+                                   entry.wordHighlightCurrent.foregroundAlpha,
+                                   entry.wordHighlightCurrent.background,
+                                   entry.wordHighlightCurrent.backgroundAlpha);
+
+                    processWithDoc(documentation::WordHighlight,
+                                   entry.wordHighlight.foreground,
+                                   entry.wordHighlight.foregroundAlpha,
+                                   entry.wordHighlight.background,
+                                   entry.wordHighlight.backgroundAlpha);
+
+                    processWithDoc(documentation::IndicatorStatusLine,
+                                   entry.indicatorStatusLine.foreground,
+                                   entry.indicatorStatusLine.background);
+
+                    processWithDoc(documentation::IndicatorStatusLineInactive,
+                                   entry.indicatorStatusLineInactive.foreground,
+                                   entry.indicatorStatusLineInactive.background);
+
+                    processWithDoc(documentation::InputMethodEditor,
+                                   entry.inputMethodEditor.foreground,
+                                   entry.inputMethodEditor.background);
+
+                    processWithDoc(documentation::NormalColors,
+                                   entry.normalColor(0),
+                                   entry.normalColor(1),
+                                   entry.normalColor(2),
+                                   entry.normalColor(3),
+                                   entry.normalColor(4),
+                                   entry.normalColor(5),
+                                   entry.normalColor(6),
+                                   entry.normalColor(7));
+
+                    processWithDoc(documentation::BrightColors,
+                                   entry.brightColor(0),
+                                   entry.brightColor(1),
+                                   entry.brightColor(2),
+                                   entry.brightColor(3),
+                                   entry.brightColor(4),
+                                   entry.brightColor(5),
+                                   entry.brightColor(6),
+                                   entry.brightColor(7));
+
+                    processWithDoc(documentation::DimColors,
+                                   entry.dimColor(0),
+                                   entry.dimColor(1),
+                                   entry.dimColor(2),
+                                   entry.dimColor(3),
+                                   entry.dimColor(4),
+                                   entry.dimColor(5),
+                                   entry.dimColor(6),
+                                   entry.dimColor(7));
+                }
+
+                doc.append(addOffset("", Offset::levels * OneOffset));
+            }
+        }
+    });
+
+    doc.append(fmt::format(fmt::runtime(c.inputMappings.documentation), fmt::arg("comment", "#")));
+    {
+        const auto _ = Offset {};
+        for (auto&& entry: c.inputMappings.value().keyMappings)
+            doc.append(addOffset(format(entry), Offset::levels * OneOffset));
+
+        for (auto&& entry: c.inputMappings.value().charMappings)
+            doc.append(addOffset(format(entry), Offset::levels * OneOffset));
+
+        for (auto&& entry: c.inputMappings.value().mouseMappings)
+            doc.append(addOffset(format(entry), Offset::levels * OneOffset));
+    }
+    return doc;
 }
 
 } // namespace contour::config

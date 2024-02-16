@@ -437,6 +437,7 @@ jobs:
         run: |
           set -ex
           echo killing...; sudo pkill -9 XProtect >/dev/null || true; # see https://github.com/actions/runner-images/issues/7522
+          echo waiting...; while pgrep XProtect; do sleep 3; done;
           cd build; cpack -G DragNDrop --verbose; cd -
           # cmake --build build --target package-verbose
           # ls -hl build/
@@ -472,7 +473,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
-          version: "6.6.*"
+          version: "6.6.1"
           #version: "5.15.*"
           modules: qtmultimedia qt5compat qtshadertools
       - name: "vcpkg: Install dependencies"

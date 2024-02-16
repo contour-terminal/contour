@@ -11,9 +11,10 @@
 namespace vtbackend
 {
 
+// TODO : use boxed type
 struct RefreshRate
 {
-    double value;
+    double value { 24 };
 };
 
 struct RefreshInterval

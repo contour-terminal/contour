@@ -223,9 +223,10 @@ class TerminalDisplay: public QQuickItem
         // auto const availablePixels = gridMetrics().cellSize * _session->terminal().pageSize();
         auto const availablePixels = vtbackend::ImageSize { vtbackend::Width::cast_from(width()),
                                                             vtbackend::Height::cast_from(height()) };
-        return pageSizeForPixels(availablePixels,
-                                 _renderer->gridMetrics().cellSize,
-                                 applyContentScale(_session->profile().margins, _session->contentScale()));
+        return pageSizeForPixels(
+            availablePixels,
+            _renderer->gridMetrics().cellSize,
+            applyContentScale(_session->profile().margins.value(), _session->contentScale()));
     }
 
     void updateMinimumSize();
