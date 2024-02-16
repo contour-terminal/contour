@@ -3705,6 +3705,28 @@ TEST_CASE("DECSTR", "[screen]")
             == CellLocation { LineOffset(0), ColumnOffset(0) });
 }
 
+TEST_CASE("SGRSAVE and SGRRESTORE", "[screen]")
+{
+    auto mock = MockTerm { ColumnCount(8), LineCount(4) };
+
+    mock.writeToScreen(SGR(31, 42, 4)); // red on green, underline
+    auto& cursor = mock.terminal.currentScreen().cursor();
+    REQUIRE(cursor.graphicsRendition.foregroundColor == IndexedColor::Red);
+    REQUIRE(cursor.graphicsRendition.backgroundColor == IndexedColor::Green);
+    REQUIRE(cursor.graphicsRendition.flags.contains(CellFlag::Underline));
+
+    mock.writeToScreen(SGRSAVE());
+    mock.writeToScreen(SGR(33, 44, 24)); // yellow on blue, no underline
+    REQUIRE(cursor.graphicsRendition.foregroundColor == IndexedColor::Yellow);
+    REQUIRE(cursor.graphicsRendition.backgroundColor == IndexedColor::Blue);
+    REQUIRE(!cursor.graphicsRendition.flags.contains(CellFlag::Underline));
+
+    mock.writeToScreen(SGRRESTORE());
+    REQUIRE(cursor.graphicsRendition.foregroundColor == IndexedColor::Red);
+    REQUIRE(cursor.graphicsRendition.backgroundColor == IndexedColor::Green);
+    REQUIRE(cursor.graphicsRendition.flags.contains(CellFlag::Underline));
+}
+
 TEST_CASE("LS1 and LS0", "[screen]")
 {
     auto mock = MockTerm { ColumnCount(8), LineCount(4) };

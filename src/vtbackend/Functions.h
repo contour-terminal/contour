@@ -117,6 +117,8 @@ constexpr inline auto WINMANIP = FunctionDocumentation { .mnemonic = "WINMANIP",
 constexpr inline auto XTCAPTURE = FunctionDocumentation { .mnemonic = "XTCAPTURE", .comment = "Report screen buffer capture." };
 constexpr inline auto XTPOPCOLORS = FunctionDocumentation { .mnemonic = "XTPOPCOLORS", .comment = "Pops the color palette from the palette's saved-stack." };
 constexpr inline auto XTPUSHCOLORS = FunctionDocumentation { .mnemonic = "XTPUSHCOLORS", .comment = "Pushes the color palette onto the palette's saved-stack." };
+constexpr inline auto SGRRESTORE = FunctionDocumentation { .mnemonic = "SGRRESTORE", .comment = "Restores video attributes." };
+constexpr inline auto SGRSAVE = FunctionDocumentation { .mnemonic = "SGRSAVE", .comment = "Saves video attributes onto stack." };
 constexpr inline auto XTREPORTCOLORS = FunctionDocumentation { .mnemonic = "XTREPORTCOLORS", .comment = "Reports number of color palettes on the stack." };
 constexpr inline auto XTRESTORE = FunctionDocumentation { .mnemonic = "XTRESTORE", .comment = "Restore DEC private modes." };
 constexpr inline auto XTSAVE = FunctionDocumentation { .mnemonic = "XTSAVE", .comment = "Save DEC private modes." };
@@ -578,6 +580,8 @@ constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt
 constexpr inline auto XTCAPTURE   = detail::CSI('>', 0, 2, std::nullopt, 't', VTExtension::Contour, documentation::XTCAPTURE);
 constexpr inline auto XTPOPCOLORS    = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'Q', VTExtension::XTerm, documentation::XTPOPCOLORS);
 constexpr inline auto XTPUSHCOLORS   = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'P', VTExtension::XTerm, documentation::XTPUSHCOLORS);
+constexpr inline auto SGRRESTORE  = detail::CSI(std::nullopt, 0, ArgsMax, '#', '}', VTExtension::XTerm, documentation:: SGRRESTORE);
+constexpr inline auto SGRSAVE     = detail::CSI(std::nullopt, 0, ArgsMax, '#', '{', VTExtension::XTerm, documentation::SGRSAVE);
 constexpr inline auto XTREPORTCOLORS = detail::CSI(std::nullopt, 0, 0, '#', 'R', VTExtension::XTerm, documentation::XTREPORTCOLORS);
 constexpr inline auto XTRESTORE   = detail::CSI('?', 0, ArgsMax, std::nullopt, 'r', VTExtension::XTerm, documentation::XTRESTORE);
 constexpr inline auto XTSAVE      = detail::CSI('?', 0, ArgsMax, std::nullopt, 's', VTExtension::XTerm, documentation::XTSAVE);
@@ -726,6 +730,8 @@ constexpr static auto allFunctionsArray() noexcept
         SD,
         SETMARK,
         SGR,
+        SGRRESTORE,
+        SGRSAVE,
         SM,
         SU,
         TBC,

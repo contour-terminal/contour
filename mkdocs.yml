@@ -114,6 +114,7 @@ nav:
     - vt-extensions/buffer-capture.md
     - vt-extensions/font-settings.md
     - vt-extensions/line-reflow-mode.md
+    - vt-extensions/save-and-restore-sgr-attributes.md
   - Internals:
     - internals/index.md
     - internals/CODING_STYLE.md

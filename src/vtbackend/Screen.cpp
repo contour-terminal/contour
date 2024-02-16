@@ -805,6 +805,20 @@ void Screen<Cell>::setCurrentColumn(ColumnOffset n)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
+void Screen<Cell>::restoreGraphicsRendition()
+{
+    _cursor.graphicsRendition = _savedGraphicsRenditions;
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void Screen<Cell>::saveGraphicsRendition()
+{
+    _savedGraphicsRenditions = _cursor.graphicsRendition;
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 string Screen<Cell>::renderMainPageText() const
 {
     return _grid.renderMainPageText();
@@ -3735,6 +3749,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case SD: scrollDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
         case SETMARK: setMark(); break;
         case SGR: return impl::applySGR(*_terminal, seq, 0, seq.parameterCount());
+        case SGRRESTORE: restoreGraphicsRendition(); return ApplyResult::Ok;
+        case SGRSAVE: saveGraphicsRendition(); return ApplyResult::Ok;
         case SM: {
             ApplyResult r = ApplyResult::Ok;
             crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {

@@ -597,6 +597,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void restoreCursor() override;
     void restoreCursor(Cursor const& savedCursor);
 
+    void restoreGraphicsRendition();
+    void saveGraphicsRendition();
+
   private:
     void writeTextInternal(char32_t codepoint);
 
@@ -638,6 +641,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     gsl::not_null<TerminalState*> _state;
     gsl::not_null<Margin*> _margin;
     Grid<Cell> _grid;
+
+    GraphicsAttributes _savedGraphicsRenditions {};
 
     CellLocation _lastCursorPosition {};
 
