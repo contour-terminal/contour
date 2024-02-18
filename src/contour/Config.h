@@ -319,6 +319,18 @@ struct TerminalProfile
     };
     ConfigEntry<vtbackend::StatusDisplayPosition, documentation::StatusDisplayPosition>
         statusDisplayPosition { vtbackend::StatusDisplayPosition::Bottom };
+    ConfigEntry<std::string, documentation::IndicatorStatusLineLeft> indicatorStatusLineLeft {
+        " {InputMode:Bold,Color=#FFFF00}"
+        "{SearchPrompt:Left= │ }"
+        "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
+        "{ProtectedMode:Bold,Left= │ }"
+    };
+    ConfigEntry<std::string, documentation::IndicatorStatusLineMiddle> indicatorStatusLineMiddle {
+        " {Clock:Bold} {Title:Left= « ,Right= » }"
+    };
+    ConfigEntry<std::string, documentation::IndicatorStatusLineRight> indicatorStatusLineRight {
+        "{HistoryLineCount:Faint,Color=#c0c0c0} "
+    };
     ConfigEntry<bool, documentation::SyncWindowTitleWithHostWritableStatusDisplay>
         syncWindowTitleWithHostWritableStatusDisplay { false };
     ConfigEntry<bool, documentation::HideScrollbarInAltScreen> hideScrollbarInAltScreen { true };
@@ -351,7 +363,7 @@ struct TerminalProfile
     ConfigEntry<std::chrono::milliseconds, documentation::HighlightTimeout> highlightTimeout { 100 };
     ConfigEntry<bool, documentation::HighlightDoubleClickerWord> highlightDoubleClickedWord { true };
     ConfigEntry<vtbackend::StatusDisplayType, documentation::InitialStatusLine> initialStatusDisplayType {
-        vtbackend::StatusDisplayType::None
+        vtbackend::StatusDisplayType::Indicator
     };
     ConfigEntry<vtbackend::Opacity, documentation::BackgroundOpacity> backgroundOpacity { vtbackend::Opacity(
         0xFF) };

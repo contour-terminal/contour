@@ -507,7 +507,7 @@ void Screen<Cell>::writeTextEnd()
         return;
 
     if (vtTraceSequenceLog)
-        vtTraceSequenceLog()("text: \"{}\"", _pendingCharTraceLog);
+        vtTraceSequenceLog()("[{}] text: \"{}\"", _name, _pendingCharTraceLog);
 
     _pendingCharTraceLog.clear();
 #endif
@@ -1790,7 +1790,10 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setGraphicsRendition(GraphicsRendition rendition)
 {
-    _terminal->setGraphicsRendition(rendition);
+    if (rendition == GraphicsRendition::Reset)
+        _cursor.graphicsRendition = {};
+    else
+        _cursor.graphicsRendition.flags = CellUtil::makeCellFlags(rendition, _cursor.graphicsRendition.flags);
 }
 
 template <typename Cell>
@@ -2546,50 +2549,6 @@ namespace impl
             return ApplyResult::Invalid;
         }
 
-        optional<RGBColor> parseColor(string_view const& value)
-        {
-            try
-            {
-                // "rgb:RR/GG/BB"
-                //  0123456789a
-                if (value.size() == 12 && value.substr(0, 4) == "rgb:" && value[6] == '/' && value[9] == '/')
-                {
-                    auto const r = crispy::to_integer<16, uint8_t>(value.substr(4, 2));
-                    auto const g = crispy::to_integer<16, uint8_t>(value.substr(7, 2));
-                    auto const b = crispy::to_integer<16, uint8_t>(value.substr(10, 2));
-                    return RGBColor { r.value(), g.value(), b.value() };
-                }
-
-                // "#RRGGBB"
-                if (value.size() == 7 && value[0] == '#')
-                {
-                    auto const r = crispy::to_integer<16, uint8_t>(value.substr(1, 2));
-                    auto const g = crispy::to_integer<16, uint8_t>(value.substr(3, 2));
-                    auto const b = crispy::to_integer<16, uint8_t>(value.substr(5, 2));
-                    return RGBColor { r.value(), g.value(), b.value() };
-                }
-
-                // "#RGB"
-                if (value.size() == 4 && value[0] == '#')
-                {
-                    auto const r = crispy::to_integer<16, uint8_t>(value.substr(1, 1));
-                    auto const g = crispy::to_integer<16, uint8_t>(value.substr(2, 1));
-                    auto const b = crispy::to_integer<16, uint8_t>(value.substr(3, 1));
-                    auto const rr = static_cast<uint8_t>(r.value() << 4);
-                    auto const gg = static_cast<uint8_t>(g.value() << 4);
-                    auto const bb = static_cast<uint8_t>(b.value() << 4);
-                    return RGBColor { rr, gg, bb };
-                }
-
-                return std::nullopt;
-            }
-            catch (...)
-            {
-                // that will be a formatting error in stoul() then.
-                return std::nullopt;
-            }
-        }
-
         Color parseColor(Sequence const& seq, size_t* pi)
         {
             // We are at parameter index `i`.
@@ -2701,9 +2660,7 @@ namespace impl
             return Color {};
         }
 
-        template <typename Target>
-        CRISPY_REQUIRES((CellConcept<Target> || std::is_same_v<Target, Terminal>) )
-        ApplyResult applySGR(Target& target, Sequence const& seq, size_t parameterStart, size_t parameterEnd)
+        ApplyResult applySGR(auto& target, Sequence const& seq, size_t parameterStart, size_t parameterEnd)
         {
             if (parameterStart == parameterEnd)
             {
@@ -2916,7 +2873,7 @@ namespace impl
             auto const& value = seq.intermediateCharacters();
             if (value == "?")
                 screen.requestDynamicColor(name);
-            else if (auto color = parseColor(value); color.has_value())
+            else if (auto color = vtbackend::parseColor(value); color.has_value())
                 screen.setDynamicColor(name, color.value());
             else
                 return ApplyResult::Invalid;
@@ -2948,7 +2905,7 @@ namespace impl
                     queryColor((uint8_t) index);
                     index = -1;
                 }
-                else if (auto const color = parseColor(value))
+                else if (auto const color = vtbackend::parseColor(value))
                 {
                     setColor((uint8_t) index, color.value());
                     index = -1;
@@ -3408,10 +3365,10 @@ void Screen<Cell>::processSequence(Sequence const& seq)
     {
         if (auto const* fd = seq.functionDefinition(_terminal->activeSequences()))
         {
-            vtTraceSequenceLog()("Processing {:<14} {}", fd->documentation.mnemonic, seq.text());
+            vtTraceSequenceLog()("[{}] Processing {:<14} {}", _name, fd->documentation.mnemonic, seq.text());
         }
         else
-            vtTraceSequenceLog()("Processing unknown sequence: {}", seq.text());
+            vtTraceSequenceLog()("[{}] Processing unknown sequence: {}", _name, seq.text());
     }
 #endif
 
@@ -3750,7 +3707,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case SCOSC: saveCursor(); break;
         case SD: scrollDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
         case SETMARK: setMark(); break;
-        case SGR: return impl::applySGR(*_terminal, seq, 0, seq.parameterCount());
+        case SGR: return impl::applySGR(*this, seq, 0, seq.parameterCount());
         case SGRRESTORE: restoreGraphicsRendition(); return ApplyResult::Ok;
         case SGRSAVE: saveGraphicsRendition(); return ApplyResult::Ok;
         case SM: {

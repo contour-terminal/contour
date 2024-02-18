@@ -395,6 +395,8 @@ constexpr Opacity& operator--(Opacity& value) noexcept
 }
 // }}}
 
+std::optional<RGBColor> parseColor(std::string_view const& value);
+
 } // namespace vtbackend
 
 // {{{ fmtlib custom formatter

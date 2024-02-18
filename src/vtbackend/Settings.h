@@ -43,6 +43,13 @@ struct Settings
     unsigned maxImageRegisterCount = 256;
     StatusDisplayType statusDisplayType = StatusDisplayType::None;
     StatusDisplayPosition statusDisplayPosition = StatusDisplayPosition::Bottom;
+    struct
+    {
+        std::string left { "{VTType} │ {InputMode:Bold,Color=#C0C030}{SearchPrompt:Left= │ }"
+                           "{TraceMode:Bold,Color=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }" };
+        std::string middle { "{Title:Left= « ,Right= » ,Color=#20c0c0}" };
+        std::string right { "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold} " };
+    } indicatorStatusLine;
     bool syncWindowTitleWithHostWritableStatusDisplay = true;
     CursorDisplay cursorDisplay = CursorDisplay::Steady;
     CursorShape cursorShape = CursorShape::Block;

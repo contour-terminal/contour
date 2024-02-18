@@ -4,10 +4,13 @@
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/RenderBufferBuilder.h>
+#include <vtbackend/Sequencer.h>
 #include <vtbackend/Terminal.h>
 #include <vtbackend/TerminalState.h>
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
+
+#include <vtparser/Parser.h>
 
 #include <vtpty/MockPty.h>
 
@@ -53,31 +56,6 @@ namespace // {{{ helpers
     {
         while (!value.empty() && value.back() == ' ')
             value.pop_back();
-    }
-
-    string_view modeString(ViMode mode) noexcept
-    {
-        switch (mode)
-        {
-            case ViMode::Normal: return "NORMAL"sv;
-            case ViMode::Insert: return "INSERT"sv;
-            case ViMode::Visual: return "VISUAL"sv;
-            case ViMode::VisualLine: return "VISUAL LINE"sv;
-            case ViMode::VisualBlock: return "VISUAL BLOCK"sv;
-        }
-        crispy::unreachable();
-    }
-
-    std::string codepointText(std::u32string const& codepoints)
-    {
-        std::string text;
-        for (auto const codepoint: codepoints)
-        {
-            if (!text.empty())
-                text += ' ';
-            text += fmt::format("U+{:X}", static_cast<unsigned>(codepoint));
-        }
-        return text;
     }
 
 #if defined(CONTOUR_PERF_STATS)
@@ -158,6 +136,9 @@ Terminal::Terminal(Events& eventListener,
     _currentScreen { &_primaryScreen },
     _viewport { *this, std::bind(&Terminal::onViewportChanged, this) },
     _traceHandler { *this },
+    _indicatorStatusLineDefinition { parseStatusLineDefinition(_settings.indicatorStatusLine.left,
+                                                               _settings.indicatorStatusLine.middle,
+                                                               _settings.indicatorStatusLine.right) },
     _selectionHelper { this },
     _refreshInterval { _settings.refreshRate }
 {
@@ -541,102 +522,60 @@ void Terminal::updateIndicatorStatusLine()
 {
     Require(_state.activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
 
-    auto const _ = crispy::finally { [this]() {
-        // Cleaning up.
-        verifyState();
-    } };
-
     auto const colors =
         _state.focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
+
+    auto const backupForeground = _indicatorStatusScreen.colorPalette().defaultForeground;
+    auto const backupBackground = _indicatorStatusScreen.colorPalette().defaultBackground;
+    _indicatorStatusScreen.colorPalette().defaultForeground = colors.foreground;
+    _indicatorStatusScreen.colorPalette().defaultBackground = colors.background;
+
+    auto const _ = crispy::finally { [&]() {
+        // Cleaning up.
+        _indicatorStatusScreen.colorPalette().defaultForeground = backupForeground;
+        _indicatorStatusScreen.colorPalette().defaultBackground = backupBackground;
+        verifyState();
+    } };
 
     // Prepare old status line's cursor position and some other flags.
     _indicatorStatusScreen.moveCursorTo({}, {});
     _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = colors.foreground;
     _indicatorStatusScreen.cursor().graphicsRendition.backgroundColor = colors.background;
-
-    // Run status-line update.
-    // We cannot use VT writing here, because we shall not interfere with the application's VT state.
-    // TODO: Future improvement would be to allow full VT sequence support for the Indicator-status-line,
-    // such that we can pass display-control partially over to some user/thirdparty configuration.
     _indicatorStatusScreen.clearLine();
-    _indicatorStatusScreen.writeTextFromExternal(
-        fmt::format(" {} │ {}", _state.terminalId, modeString(inputHandler().mode())));
 
-    if (!_state.searchMode.pattern.empty() || _state.inputHandler.isEditingSearch())
-        _indicatorStatusScreen.writeTextFromExternal(" SEARCH");
+    using Styling = StatusLineStyling;
+    auto const& definitions = _indicatorStatusLineDefinition;
 
-    if (!allowInput())
+    if (!definitions.left.empty())
     {
-        _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = BrightColor::Red;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags.enable(CellFlag::Bold);
-        _indicatorStatusScreen.writeTextFromExternal(" (PROTECTED)");
-        _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = colors.foreground;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags.disable(CellFlag::Bold);
+        auto const leftVT = serializeToVT(*this, definitions.left, Styling::Enabled);
+        writeToScreenInternal(_indicatorStatusScreen, leftVT);
     }
 
-    if (_state.executionMode != ExecutionMode::Normal)
+    if (!definitions.middle.empty() || !definitions.right.empty())
     {
-        _indicatorStatusScreen.writeTextFromExternal(" | ");
-        _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = BrightColor::Yellow;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags |= CellFlag::Bold;
-        _indicatorStatusScreen.writeTextFromExternal("TRACING");
-        if (!_traceHandler.pendingSequences().empty())
-            _indicatorStatusScreen.writeTextFromExternal(
-                fmt::format(" (#{}): {}",
-                            _traceHandler.pendingSequences().size(),
-                            _traceHandler.pendingSequences().front()));
+        // Don't show the middle segment if text is too long.
+        auto const middleLength = serializeToVT(*this, definitions.middle, Styling::Disabled).size();
+        auto const center = pageSize().columns / ColumnCount(2) - ColumnCount(1);
+        _indicatorStatusScreen.moveCursorToColumn(
+            ColumnOffset::cast_from(center - ColumnOffset::cast_from(middleLength / 2)));
+        auto const middleVT = serializeToVT(*this, definitions.middle, Styling::Enabled);
+        if (unbox<size_t>(center) > middleLength)
+            writeToScreenInternal(_indicatorStatusScreen, middleVT);
 
-        _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = colors.foreground;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags.disable(CellFlag::Bold);
-    }
+        // Don't show the right part if the left and middle segments are too long.
+        // That is, if the current cursor position is past the beginning of the right segment.
+        // Also don't show if the right text is too long.
+        auto const rightLength = serializeToVT(*this, definitions.right, Styling::Disabled).size();
+        if (ColumnCount::cast_from(rightLength) < _indicatorStatusScreen.pageSize().columns)
+        {
+            _indicatorStatusScreen.moveCursorToColumn(
+                boxed_cast<ColumnOffset>(_indicatorStatusScreen.pageSize().columns)
+                - ColumnOffset::cast_from(rightLength));
 
-    // TODO: Disabled for now, but generally I want that functionality, but configurable somehow.
-    auto constexpr IndicatorLineShowCodepoints = false;
-    if (IndicatorLineShowCodepoints)
-    {
-        auto const cursorPosition = _state.inputHandler.mode() == ViMode::Insert
-                                        ? _indicatorStatusScreen.cursor().position
-                                        : _state.viCommands.cursorPosition;
-        auto const text =
-            codepointText(isPrimaryScreen() ? _primaryScreen.useCellAt(cursorPosition).codepoints()
-                                            : alternateScreen().useCellAt(cursorPosition).codepoints());
-        _indicatorStatusScreen.writeTextFromExternal(fmt::format(" | {}", text));
-    }
-
-    if (_state.inputHandler.isEditingSearch())
-        _indicatorStatusScreen.writeTextFromExternal(fmt::format(
-            " │ Search: {}█", unicode::convert_to<char>(u32string_view(_state.searchMode.pattern))));
-
-    auto rightString = ""s;
-
-    if (isPrimaryScreen())
-    {
-        if (viewport().scrollOffset().value)
-            rightString += fmt::format(
-                "{}/{} {:3}%",
-                viewport().scrollOffset(),
-                _primaryScreen.historyLineCount(),
-                int((double(viewport().scrollOffset()) / double(_primaryScreen.historyLineCount())) * 100));
-        else
-            rightString += fmt::format("{}", _primaryScreen.historyLineCount());
-    }
-
-    if (!rightString.empty())
-        rightString += " │ ";
-
-    // NB: Cannot use std::chrono::system_clock::now() here, because MSVC can't handle it.
-    rightString += fmt::format("{:%H:%M} ", fmt::localtime(std::time(nullptr)));
-
-    auto const columnsAvailable = _indicatorStatusScreen.pageSize().columns.as<int>()
-                                  - _indicatorStatusScreen.cursor().position.column.as<int>();
-    if (rightString.size() <= static_cast<size_t>(columnsAvailable))
-    {
-        _indicatorStatusScreen.cursor().position.column =
-            ColumnOffset::cast_from(_indicatorStatusScreen.pageSize().columns)
-            - ColumnOffset::cast_from(rightString.size()) - ColumnOffset(1);
-        _indicatorStatusScreen.updateCursorIterator();
-
-        _indicatorStatusScreen.writeTextFromExternal(rightString);
+            auto const rightVT = serializeToVT(*this, definitions.right, Styling::Enabled);
+            writeToScreenInternal(_indicatorStatusScreen, rightVT);
+        }
     }
 }
 
@@ -1041,6 +980,295 @@ string_view Terminal::lockedWriteToPtyBuffer(string_view data)
     auto const _ = std::scoped_lock { *_currentPtyBuffer };
     auto const ref = _currentPtyBuffer->writeAtEnd(chunk);
     return string_view(ref.data(), ref.size());
+}
+
+// {{{ SequenceBuilder<Handler>
+// SequenceBuilder<Handler> implements ParserEvents interface to handle parsed VT sequences.
+template <typename Handler>
+class SequenceBuilder
+{
+  public:
+    explicit SequenceBuilder(Handler& handler):
+        _sequence {}, _parameterBuilder { _sequence.parameters() }, _handler { handler }
+    {
+    }
+
+    // {{{ ParserEvents interface
+    void error(std::string_view errorString);
+    void print(char32_t codepoint);
+    size_t print(std::string_view chars, size_t cellCount);
+    void printEnd();
+    void execute(char controlCode);
+    void clear() noexcept;
+    void collect(char ch);
+    void collectLeader(char leader) noexcept;
+    void param(char ch) noexcept;
+    void paramDigit(char ch) noexcept;
+    void paramSeparator() noexcept;
+    void paramSubSeparator() noexcept;
+    void dispatchESC(char finalChar);
+    void dispatchCSI(char finalChar);
+    void startOSC();
+    void putOSC(char ch);
+    void dispatchOSC();
+    void hook(char finalChar);
+    void put(char ch);
+    void unhook();
+    void startAPC() {}
+    void putAPC(char) {}
+    void dispatchAPC() {}
+    void startPM() {}
+    void putPM(char) {}
+    void dispatchPM() {}
+
+    [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept;
+    // }}}
+
+  private:
+    void handleSequence();
+
+    Sequence _sequence {};
+    SequenceParameterBuilder _parameterBuilder;
+    Handler& _handler;
+
+    std::unique_ptr<ParserExtension> _hookedParser {};
+    std::unique_ptr<SixelImageBuilder> _sixelImageBuilder {};
+};
+
+template <typename Handler>
+inline void SequenceBuilder<Handler>::clear() noexcept
+{
+    _sequence.clearExceptParameters();
+    _parameterBuilder.reset();
+}
+
+template <typename Handler>
+inline void SequenceBuilder<Handler>::paramDigit(char ch) noexcept
+{
+    _parameterBuilder.multiplyBy10AndAdd(static_cast<uint8_t>(ch - '0'));
+}
+
+template <typename Handler>
+inline void SequenceBuilder<Handler>::paramSeparator() noexcept
+{
+    _parameterBuilder.nextParameter();
+}
+
+template <typename Handler>
+inline void SequenceBuilder<Handler>::paramSubSeparator() noexcept
+{
+    _parameterBuilder.nextSubParameter();
+}
+
+template <typename Handler>
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+void SequenceBuilder<Handler>::error(std::string_view errorString)
+{
+    if (vtParserLog)
+        vtParserLog()("Parser error: {}", errorString);
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::print(char32_t codepoint)
+{
+    _handler.writeText(codepoint);
+}
+
+template <typename Handler>
+size_t SequenceBuilder<Handler>::print(string_view chars, size_t cellCount)
+{
+    return _handler.writeText(chars, cellCount);
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::printEnd()
+{
+    _handler.writeTextEnd();
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::execute(char controlCode)
+{
+    _handler.executeControlCode(controlCode);
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::collect(char ch)
+{
+    _sequence.intermediateCharacters().push_back(ch);
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::collectLeader(char leader) noexcept
+{
+    _sequence.setLeader(leader);
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::param(char ch) noexcept
+{
+    switch (ch)
+    {
+        case ';': paramSeparator(); break;
+        case ':': paramSubSeparator(); break;
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9': paramDigit(ch); break;
+        default: crispy::unreachable();
+    }
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::dispatchESC(char finalChar)
+{
+    _sequence.setCategory(FunctionCategory::ESC);
+    _sequence.setFinalChar(finalChar);
+    handleSequence();
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::dispatchCSI(char finalChar)
+{
+    _sequence.setCategory(FunctionCategory::CSI);
+    _sequence.setFinalChar(finalChar);
+    handleSequence();
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::startOSC()
+{
+    _sequence.setCategory(FunctionCategory::OSC);
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::putOSC(char ch)
+{
+    if (_sequence.intermediateCharacters().size() + 1 < Sequence::MaxOscLength)
+        _sequence.intermediateCharacters().push_back(ch);
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::dispatchOSC()
+{
+    auto const [code, skipCount] = vtparser::extractCodePrefix(_sequence.intermediateCharacters());
+    _parameterBuilder.set(static_cast<Sequence::Parameter>(code));
+    _sequence.intermediateCharacters().erase(0, skipCount);
+    handleSequence();
+    clear();
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::hook(char finalChar)
+{
+    _handler.hook(finalChar);
+    _sequence.setCategory(FunctionCategory::DCS);
+    _sequence.setFinalChar(finalChar);
+
+    handleSequence();
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::put(char ch)
+{
+    if (_hookedParser)
+        _hookedParser->pass(ch);
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::unhook()
+{
+    if (_hookedParser)
+    {
+        _hookedParser->finalize();
+        _hookedParser.reset();
+    }
+}
+
+template <typename Handler>
+size_t SequenceBuilder<Handler>::maxBulkTextSequenceWidth() const noexcept
+{
+    return _handler.maxBulkTextSequenceWidth();
+}
+
+size_t Terminal::maxBulkTextSequenceWidth() const noexcept
+{
+    if (!isPrimaryScreen())
+        return 0;
+
+    if (!_primaryScreen.currentLine().isTrivialBuffer())
+        return 0;
+
+    assert(_state.mainScreenMargin.horizontal.to >= _currentScreen->cursor().position.column);
+
+    return unbox<size_t>(_state.mainScreenMargin.horizontal.to - _currentScreen->cursor().position.column);
+}
+
+template <typename Handler>
+void SequenceBuilder<Handler>::handleSequence()
+{
+    _parameterBuilder.fixiate();
+    _handler.processSequence(_sequence);
+}
+// }}}
+
+struct LocalSequenceHandler // {{{
+{
+    Terminal& terminal;
+    Screen<StatusDisplayCell>& targetScreen;
+    uint64_t instructionCounter = 0;
+
+    void executeControlCode(char controlCode)
+    {
+        instructionCounter++;
+        targetScreen.executeControlCode(controlCode);
+    }
+
+    void processSequence(Sequence const& seq)
+    {
+        instructionCounter = 0;
+        targetScreen.processSequence(seq);
+    }
+
+    void writeText(char32_t codepoint)
+    {
+        instructionCounter++;
+        targetScreen.writeText(codepoint);
+    }
+
+    [[nodiscard]] size_t writeText(std::string_view chars, size_t cellCount)
+    {
+        assert(!chars.empty());
+        instructionCounter += chars.size();
+        targetScreen.writeText(chars, cellCount);
+        return terminal.settings().pageSize.columns.as<size_t>()
+               - terminal.currentScreen().cursor().position.column.as<size_t>();
+    }
+
+    void writeTextEnd() { targetScreen.writeTextEnd(); }
+
+    void hook(char /*finalChar*/) { instructionCounter++; }
+
+    [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
+    {
+        return terminal.maxBulkTextSequenceWidth();
+    }
+};
+// }}}
+
+void Terminal::writeToScreenInternal(Screen<StatusDisplayCell>& screen, std::string_view vtStream)
+{
+    auto sequenceHandler = LocalSequenceHandler { *this, screen };
+    auto sequenceBuilder = SequenceBuilder { sequenceHandler };
+    auto parser = vtparser::Parser { sequenceBuilder };
+
+    parser.parseFragment(vtStream);
 }
 
 void Terminal::writeToScreenInternal(std::string_view vtStream)

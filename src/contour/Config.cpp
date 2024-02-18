@@ -403,6 +403,13 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
             loadFromEntry(child["status_line"], "position", where.statusDisplayPosition);
             loadFromEntry(child["status_line"], "sync_to_window_title", where.syncWindowTitleWithHostWritableStatusDisplay);
             loadFromEntry(child["status_line"], "display", where.initialStatusDisplayType);
+
+            if (child["status_line"]["indicator"])
+            {
+                loadFromEntry(child["status_line"]["indicator"], "left", where.indicatorStatusLineLeft);
+                loadFromEntry(child["status_line"]["indicator"], "middle", where.indicatorStatusLineMiddle);
+                loadFromEntry(child["status_line"]["indicator"], "right", where.indicatorStatusLineRight);
+            }
         }
         if (child["background"])
         {
@@ -1933,6 +1940,14 @@ std::string YAMLConfigWriter::createString(Config const& c)
                     process(entry.initialStatusDisplayType);
                     process(entry.statusDisplayPosition);
                     process(entry.syncWindowTitleWithHostWritableStatusDisplay);
+
+                    doc.append(addOffset("indicator:\n", Offset::levels * OneOffset));
+                    {
+                        const auto _ = Offset {};
+                        process(entry.indicatorStatusLineLeft);
+                        process(entry.indicatorStatusLineMiddle);
+                        process(entry.indicatorStatusLineRight);
+                    }
                 }
 
                 doc.append(addOffset("\n"

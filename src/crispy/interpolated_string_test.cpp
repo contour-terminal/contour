@@ -22,8 +22,7 @@ TEST_CASE("interpolated_string.parse_interpolated_string")
 {
     using crispy::parse_interpolated_string;
 
-    auto const interpolated = parse_interpolated_string(
-        "< {Clock:Bold,Italic,Color=#FFFF00} | {VTType}");
+    auto const interpolated = parse_interpolated_string("< {Clock:Bold,Italic,Color=#FFFF00} | {VTType}");
 
     CHECK(interpolated.size() == 4);
 

@@ -8,6 +8,7 @@
 #include <vtbackend/Selector.h>
 #include <vtbackend/Sequence.h>
 #include <vtbackend/Settings.h>
+#include <vtbackend/StatusLineBuilder.h>
 #include <vtbackend/TerminalState.h>
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/Viewport.h>
@@ -321,6 +322,10 @@ class Terminal
 
     /// Writes a given VT-sequence to screen - but without acquiring the lock (must be already acquired).
     void writeToScreenInternal(std::string_view vtStream);
+
+    /// Writes a given VT-sequence to screen - but without acquiring the lock (must be already acquired).
+    /// This version of the function is used to write to the status line and should not be used by the shell.
+    void writeToScreenInternal(Screen<StatusDisplayCell>& screen, std::string_view vtStream);
 
     // viewport management
     [[nodiscard]] Viewport& viewport() noexcept { return _viewport; }
@@ -744,6 +749,10 @@ class Terminal
         return _supportedVTSequences.activeSequences();
     }
 
+    size_t maxBulkTextSequenceWidth() const noexcept;
+
+    TraceHandler const& traceHandler() const noexcept { return _traceHandler; }
+
   private:
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
@@ -845,6 +854,8 @@ class Terminal
     gsl::not_null<ScreenBase*> _currentScreen;
     Viewport _viewport;
     TraceHandler _traceHandler;
+
+    StatusLineDefinition _indicatorStatusLineDefinition;
     // clang-format on
     // }}}
 

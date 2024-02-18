@@ -6,11 +6,8 @@
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
 
+#include <cassert>
 #include <string_view>
-
-using std::get;
-using std::holds_alternative;
-using std::string_view;
 
 using namespace std::string_view_literals;
 
@@ -34,7 +31,7 @@ void Sequencer::print(char32_t codepoint)
     _terminal.sequenceHandler().writeText(codepoint);
 }
 
-size_t Sequencer::print(string_view chars, size_t cellCount)
+size_t Sequencer::print(std::string_view chars, size_t cellCount)
 {
     assert(!chars.empty());
 
@@ -45,7 +42,7 @@ size_t Sequencer::print(string_view chars, size_t cellCount)
            - _terminal.currentScreen().cursor().position.column.as<size_t>();
 }
 
-void Sequencer::printEnd()
+void Sequencer::printEnd() noexcept
 {
     _terminal.sequenceHandler().writeTextEnd();
 }
@@ -99,7 +96,7 @@ void Sequencer::dispatchCSI(char finalChar)
     handleSequence();
 }
 
-void Sequencer::startOSC()
+void Sequencer::startOSC() noexcept
 {
     _sequence.setCategory(FunctionCategory::OSC);
 }
@@ -145,17 +142,7 @@ void Sequencer::unhook()
 
 size_t Sequencer::maxBulkTextSequenceWidth() const noexcept
 {
-    if (!_terminal.isPrimaryScreen())
-        return 0;
-
-    if (!_terminal.primaryScreen().currentLine().isTrivialBuffer())
-        return 0;
-
-    assert(_terminal.state().mainScreenMargin.horizontal.to
-           >= _terminal.currentScreen().cursor().position.column);
-
-    return unbox<size_t>(_terminal.state().mainScreenMargin.horizontal.to
-                         - _terminal.currentScreen().cursor().position.column);
+    return _terminal.maxBulkTextSequenceWidth();
 }
 
 void Sequencer::handleSequence()

@@ -39,6 +39,7 @@ set(vtbackend_HEADERS
     Sequence.h
     Sequencer.h
     SixelParser.h
+    StatusLineBuilder.h
     Terminal.h
     VTType.h
     VTWriter.h
@@ -69,6 +70,7 @@ set(vtbackend_SOURCES
     Sequence.cpp
     Sequencer.cpp
     SixelParser.cpp
+    StatusLineBuilder.cpp
     Terminal.cpp
     TerminalState.cpp
     VTType.cpp
