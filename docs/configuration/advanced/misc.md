@@ -8,7 +8,7 @@ Possible (incomplete list of) values are:
 
 - auto        The platform will be auto-detected.
 - xcb         Uses XCB plugin (for X11 environment).
-- cocoa       Used to be run on Mac OS/X.
+- cocoa       Used to be run on macOS.
 - direct2d    Windows platform plugin using Direct2D.
 - winrt       Windows platform plugin using WinRT.
 

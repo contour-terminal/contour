@@ -4,7 +4,7 @@ mock_font_locator:
     - { family: "monospace", slant: normal, weight: normal, path: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf" }
     - { family: "emoji", slant: normal, weight: normal, path: "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf" }
 
-    # That would be it for Mac OS/X
+    # That would be it for macOS
     # - { family: "monospace", slant: normal, weight: normal, path: "/Users/trapni/Library/Fonts/JetBrains Mono Regular Nerd Font Complete Mono.ttf" }
     # - { family: "emoji", slant: normal, weight: normal, path: "/System/Library/Fonts/Apple Color Emoji.ttc" }
 

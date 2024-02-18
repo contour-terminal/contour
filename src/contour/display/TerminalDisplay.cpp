@@ -45,7 +45,7 @@
 
 namespace fs = std::filesystem;
 
-// Temporarily disabled (I think it was OS/X that didn't like glDebugMessageCallback).
+// Temporarily disabled (I think it was macOS that didn't like glDebugMessageCallback).
 // #define CONTOUR_DEBUG_OPENGL 1
 
 #if defined(_MSC_VER)

@@ -487,7 +487,7 @@ elseif(APPLE)
     endforeach()
     # }}}
 
-    set(CODE_SIGN_CERTIFICATE_ID "-" CACHE STRING "Mac OS/X Code signature ID") # TODO: Use proper ID on CI
+    set(CODE_SIGN_CERTIFICATE_ID "-" CACHE STRING "macOS Code signature ID") # TODO: Use proper ID on CI
     include(DeployQt)  # Just to get access to ${MACDEPLOYQT_EXECUTABLE}
     get_filename_component(_macdeployqt_path "${MACDEPLOYQT_EXECUTABLE}" PATH)
     message(STATUS "macdeployqt path: ${_macdeployqt_path}")

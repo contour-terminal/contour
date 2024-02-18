@@ -39,7 +39,7 @@
       for everyday use. It is aiming for power users with a modern feature mindset.
     </p>
     <ul>
-      <li>Available on all 4 major platforms, Linux, OS/X, FreeBSD, Windows.</li>
+      <li>Available on all 4 major platforms, Linux, macOS, FreeBSD, Windows.</li>
       <li>GPU-accelerated rendering.</li>
       <li>Font ligatures support (such as in Fira Code).</li>
       <li>Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)</li>
@@ -163,7 +163,7 @@
           <li>Fixes GUI terminating on idle input in some conditions.</li>
           <li>Fixes search term rendering highlighting for search terms containing whitespaces (#966).</li>
           <li>Fixes rendering in cases of glyphs with inverted orientation (#1115).</li>
-          <li>Fixes Emoji rendering being too small on OS/X (#1215)</li>
+          <li>Fixes Emoji rendering being too small on macOS (#1215)</li>
           <li>Fixes config option `show_title_bar` (#1153)</li>
           <li>Fixes VT sequence DECSTBM and DECSLRM defaulting parameters (#1164).</li>
           <li>Fixes VT sequence DECFRA (#1189).</li>
@@ -318,7 +318,7 @@
           <li>Fixes mouse reporting in primary screen when viewport has been scrolled into the scrollback area.</li>
           <li>Fixes VT sequence `DECSTR` (soft reset) to not move the cursor to home position.</li>
           <li>Fixes cursor movements for the vi-like cursor (normal mode).</li>
-          <li>Fixes Alt+Backspace on OS/X.</li>
+          <li>Fixes Alt+Backspace on macOS.</li>
           <li>Fixes default config entry `profiles.*.draw_bold_text_with_bright_colors` (it was renamed from `profiles.*.bold_is_bright`). Please rename this in your existing configuration if not done yet.</li>
           <li>Fixes sometimes rendering two cursors when statusline is shown.</li>
           <li>Fixes normal mode's page top (S-H)/ page bottom (S-L) cursor movements to respect scroll offset.</li>
@@ -490,7 +490,7 @@
       <description>
         <ul>
           <li>Adds Vi-like input modes for improved selection and copy'n'paste experience.</li>
-          <li>Adds contour executable to search path for spawned shell process on OS/X and Windows.</li>
+          <li>Adds contour executable to search path for spawned shell process on macOS and Windows.</li>
           <li>Adds customizability to dim colors (#664).</li>
           <li>Adds the profile configuration option: `draw_bold_text_with_bright_colors`.</li>
           <li>Fixes `CSI K` accidentally removing line flags, e.g. line marks (#658).</li>
@@ -616,7 +616,7 @@
           <li>Changes tcap-query feature from experimental to always enabled (not configurable anymore).</li>
           <li>Automatically detect if `contour` or `contour-latest` terminfo entries are present use that as default.</li>
           <li>Fixes VT sequences that cause a cursor restore to sometimes crash.</li>
-          <li>Fixes terminfo installation path on OS/X and tries to auto-set `TERMINFO_DIRS` to it on startup (#443).</li>
+          <li>Fixes terminfo installation path on macOS and tries to auto-set `TERMINFO_DIRS` to it on startup (#443).</li>
           <li>Fixes terminfo entry `pairs`.</li>
           <li>Fixes SGR 24 to remove any kind of underline (#451).</li>
           <li>Fixes font fallback for `open_shaper` where in rare cases the text was not rendered at all.</li>
@@ -626,7 +626,7 @@
           <li>Fixes SEGV with overflowing (Sixel) images (#409).</li>
           <li>Fixes XTSMGRAPHICS for invalid SetValue actions and setting Sixel image size limits (#422).</li>
           <li>Fixes internal pixel width/height tracking in VT screen, which did affect sizes of rendered Sixel images (#408).</li>
-          <li>Fixes configuring a custom shell on OS/X (#425).</li>
+          <li>Fixes configuring a custom shell on macOS (#425).</li>
           <li>Fixes off-by-one bug in builtin box drawing (#424).</li>
           <li>Fixes assertion in text renderer with regards to colored glyphs.</li>
           <li>Fixes Sixel background select to support transparency (#450).</li>
@@ -665,7 +665,7 @@
           <li>Adds support for bypassing the mouse protocol via Shift-click (configurable via `bypass_mouse_protocol_modifier`)</li>
           <li>Adds improved debug logging. via CLI flag `-d` (`--enable-debug`) to accept a comma seperated list of tags to enable logging for. Appending a `*` at the end of a debug tag will enable all debug tags that match prefix its prefix.  The list of available debuglog tags can be found via CLI flag `-D` (`--list-debug-tags`).</li>
           <li>Adds support for different font render modes: `lcd`, `light`, `gray`, `monochrome` in `profiles.NAME.font.render_mode` (default: `lcd`).</li>
-          <li>Adds support for different text render engines: `OpenShaper`, `DirectWrite` and `CoreText` for upcoming native platform support on Windows (and later OS/X).</li>
+          <li>Adds support for different text render engines: `OpenShaper`, `DirectWrite` and `CoreText` for upcoming native platform support on Windows (and later macOS).</li>
           <li>Adds support for different font location engines: `fontconfig` (others will follow).</li>
           <li>Adds experimental text reflow.</li>
           <li>Adds OpenFileManager action to configuration.</li>
@@ -699,7 +699,7 @@
           <li>Adds new CLI command: `contour set profile to NAME` to change the profile on the fly.</li>
           <li>Adds new CLI command: `contour generate terminfo output OUTPUT_FILE` to create a Contour terminfo file.</li>
           <li>Adds new CLI command: `contour generate config output OUTPUT_FILE` to create a new default config.</li>
-          <li>Adds new CLI command: `contour generate integration shell SHELL output OUTPUT_FILE` to create the shell integreation file for the given shell (only zsh supported for now). Also adds a pre-generated shell integration file for Linux (and OS/X) to `/usr/share/contour/shell-integration.zsh`.</li>
+          <li>Adds new CLI command: `contour generate integration shell SHELL output OUTPUT_FILE` to create the shell integreation file for the given shell (only zsh supported for now). Also adds a pre-generated shell integration file for Linux (and macOS) to `/usr/share/contour/shell-integration.zsh`.</li>
           <li>Unicode data updated to version 14.0 beta.</li>
           <li>Adds support for building with Qt 6 (disabled by default).</li>
           <li>Adds support for building with mimalloc (experimental, disabled by default).</li>
@@ -724,7 +724,7 @@
     <release version="0.1.0" date="2020-12-24">
       <description>
         <ul>
-          <li>Available on all 3 major platforms, Linux, OS/X, Windows.</li>
+          <li>Available on all 3 major platforms, Linux, macOS, Windows.</li>
           <li>Emoji support (-: 🌈 💝 😛 👪 :-)</li>
           <li>Font ligatures support (such as in Fira Code).</li>
           <li>Bold and italic fonts</li>

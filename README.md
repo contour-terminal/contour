@@ -13,7 +13,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 
 ## Features
 
-- ✅ Available on all 4 major platforms, Linux, OS/X, FreeBSD, Windows.
+- ✅ Available on all 4 major platforms, Linux, macOS, FreeBSD, Windows.
 - ✅ GPU-accelerated rendering.
 - ✅ Font ligatures support (such as in Fira Code).
 - ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)
@@ -70,7 +70,7 @@ Click the following button to install Contour from the Flathub store.
 
 ## Requirements
 
-- **operating system**: A *recent* operating system (OS/X 12, Windows 10+, an up-to-date Linux, or FreeBSD)
+- **operating system**: A *recent* operating system (macOS 12, Windows 10+, an up-to-date Linux, or FreeBSD)
 - **GPU**: driver must support at least OpenGL 3.3 hardware accelerated or as software rasterizer.
 - **CPU**: x86-64 AMD or Intel with AES-NI instruction set or ARMv8 with crypto extensions.
 
@@ -89,7 +89,7 @@ by default contour will be compiled with Qt 6, to change Qt version use
 `QTVER=5 ./scripts/install-deps.sh` to fetch dependencies and cmake flag
 `-D CONTOUR_QT_VERSION=5`.
 
-### UNIX-like systems (Linux, FreeBSD, OS/X)
+### UNIX-like systems (Linux, FreeBSD, macOS)
 
 #### Prerequisites
 

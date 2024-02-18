@@ -222,7 +222,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
         if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch)
             continue;
 
-#if defined(FC_COLOR) // Not available on OS/X?
+#if defined(FC_COLOR) // Not available on macOS?
 // FcBool color = FcFalse;
 // FcPatternGetInteger(font, FC_COLOR, 0, &color);
 // if (color && !color)
