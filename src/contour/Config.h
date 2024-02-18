@@ -841,6 +841,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ColorPalette::Palette& colors);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ColorPalette& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TerminalProfile& where);
+    void defaultSettings(vtpty::Process::ExecInfo& shell);
     // clang-format on
 
     void load(Config& c);
