@@ -108,8 +108,8 @@
       <description>
         <ul>
           <li>Add generation of config file from internal state (#1282)</li>
-          <li>Fixes corruption of sixel image on high resolution (#1049)</li>
           <li>Add SGRSAVE and SGRRESTORE VT sequences to save and restore SGR state (They intentionally conflict with XTPUSHSGR and XTPOPSGR)</li>
+          <li>Fixes corruption of sixel image on high resolution (#1049)</li>
         </ul>
       </description>
     </release>
