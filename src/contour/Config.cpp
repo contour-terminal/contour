@@ -432,11 +432,13 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 {
     logger()("color palette loading {}", entry);
     auto child = node[entry];
+
     if (!child) // can not load directly from config file
     {
 
-        logger()("color paletter not found inside config file, checking colorschemes directory {} \n ",
-                 entry);
+        logger()(
+            "color paletter not found inside config file, checking colorschemes directory for {}.yml file",
+            entry);
         auto const filePath = configFile.remove_filename() / "colorschemes" / (entry + ".yml");
         auto fileContents = readFile(filePath);
         if (!fileContents)
@@ -444,9 +446,23 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             logger()("color palette loading failed {} ", entry);
             return;
         }
-        child = YAML::Load(fileContents.value());
+        logger()("color palette loading from file {}", filePath.string());
+        try
+        {
+            return loadFromEntry(YAML::Load(fileContents.value()), where);
+        }
+        catch (std::exception const& e)
+        {
+            logger()("Something went wrong: {}", e.what());
+        }
     }
 
+    loadFromEntry(child, where);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPalette& where)
+{
+    auto child = node;
     if (child["default"])
     {
         logger()("*** loading default colors");
@@ -534,14 +550,18 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         return false;
     };
 
+    logger()("*** loading normal color map");
     loadColorMap(node, "normal", 0);
+    logger()("*** loading bright color map");
     loadColorMap(node, "bright", 8);
+    logger()("*** loading dim color map");
     if (!loadColorMap(node, "dim", 256))
     {
         // calculate dim colors based on normal colors
         for (unsigned i = 0; i < 8; ++i)
             colors[256 + i] = colors[i] * 0.5f;
     }
+    logger()("*** color palette is loaded");
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -976,6 +996,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
             loadFromEntry(doc["color_schemes"],
                           child["dark"].as<std::string>(),
                           std::get<DualColorConfig>(where).darkMode);
+
             loadFromEntry(doc["color_schemes"],
                           child["light"].as<std::string>(),
                           std::get<DualColorConfig>(where).lightMode);
