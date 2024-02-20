@@ -897,33 +897,33 @@ struct YAMLConfigWriter
         return fmt::format(fmt::runtime(doc), args..., fmt::arg("comment", "#"));
     }
 
-    [[nodiscard]] std::string static format(KeyInputMapping v)
+    [[nodiscard]] std::string format(KeyInputMapping v)
     {
-        return fmt::format(fmt::runtime("{:<30},{:<30},{:<30}\n"),
-                           fmt::format(fmt::runtime("- {{ mods: [{}]"), v.modifiers),
-                           fmt::format(fmt::runtime(" key: '{}'"), v.input),
-                           fmt::format(fmt::runtime(" action: {} }}"), v.binding[0]));
+        return format("{:<30},{:<30},{:<30}\n",
+                           format("- {{ mods: [{}]", format(v.modifiers)),
+                           format(" key: '{}'", v.input),
+                           format(" action: {} }}", v.binding[0]));
     }
 
-    [[nodiscard]] std::string static format(CharInputMapping v)
+    [[nodiscard]] std::string format(CharInputMapping v)
     {
-        auto actionAndModes = fmt::format(fmt::runtime(" action: {} }}"), v.binding[0]);
+        auto actionAndModes = format(" action: {} }}", v.binding[0]);
         if (v.modes.any())
         {
-            actionAndModes = fmt::format(fmt::runtime(" action: {}, mode: '{}' }}"), v.binding[0], v.modes);
+            actionAndModes = format(" action: {}, mode: '{}' }}", v.binding[0], v.modes);
         }
-        return fmt::format(fmt::runtime("{:<30},{:<30},{:<30}\n"),
-                           fmt::format(fmt::runtime("- {{ mods: [{}]"), v.modifiers),
-                           fmt::format(fmt::runtime(" key: '{}'"), static_cast<char>(v.input)),
+        return format("{:<30},{:<30},{:<30}\n",
+                           format("- {{ mods: [{}]", format(v.modifiers)),
+                           format(" key: '{}'", static_cast<char>(v.input)),
                            actionAndModes);
     }
 
-    [[nodiscard]] std::string static format(MouseInputMapping v)
+    [[nodiscard]] std::string format(MouseInputMapping v)
     {
-        auto actionAndModes = fmt::format(fmt::runtime(" action: {} }}"), v.binding[0]);
-        return fmt::format(fmt::runtime("{:<30},{:<30},{:<30}\n"),
-                           fmt::format(fmt::runtime("- {{ mods: [{}]"), v.modifiers),
-                           fmt::format(fmt::runtime(" mouse: {}"), v.input),
+        auto actionAndModes = format(" action: {} }}", v.binding[0]);
+        return format("{:<30},{:<30},{:<30}\n",
+                           format("- {{ mods: [{}]", format(v.modifiers)),
+                           format(" mouse: {}", v.input),
                            actionAndModes);
     }
 
@@ -936,6 +936,29 @@ struct YAMLConfigWriter
         result.append("]");
         return result;
     }
+
+    [[nodiscard]] std::string static format(vtbackend::Modifiers const& flags)
+    {
+        std::string result;
+        for (auto i = 0u; i < sizeof(vtbackend::Modifier) * 8; ++i)
+        {
+            auto const flag = static_cast<vtbackend::Modifier>(1 << i);
+            if (!flags.test(flag))
+                continue;
+
+            // We assume that only valid enum values resulting into non-empty strings.
+            auto const element = fmt::format("{}", flag);
+            if (element.empty())
+                continue;
+
+            if (!result.empty())
+                result += ',';
+
+            result += element;
+        }
+        return result;
+    }
+
 
     [[nodiscard]] std::string format(std::string_view doc, vtrasterizer::FontDescriptions const& v)
     {
