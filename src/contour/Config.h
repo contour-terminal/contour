@@ -891,40 +891,46 @@ struct YAMLConfigWriter
 
     std::string createString(Config const& c);
 
+    template <typename T>
+    auto format(T v)
+    {
+        return fmt::format("{}", v);
+    }
+
     template <typename... T>
     [[nodiscard]] std::string format(std::string_view doc, T... args)
     {
-        return fmt::format(fmt::runtime(doc), args..., fmt::arg("comment", "#"));
+        return fmt::format(fmt::runtime(doc), format(args)..., fmt::arg("comment", "#"));
     }
 
-    [[nodiscard]] std::string static format(KeyInputMapping v)
+    [[nodiscard]] std::string format(KeyInputMapping v)
     {
-        return fmt::format(fmt::runtime("{:<30},{:<30},{:<30}\n"),
-                           fmt::format(fmt::runtime("- {{ mods: [{}]"), v.modifiers),
-                           fmt::format(fmt::runtime(" key: '{}'"), v.input),
-                           fmt::format(fmt::runtime(" action: {} }}"), v.binding[0]));
+        return format("{:<30},{:<30},{:<30}\n",
+                      format("- {{ mods: [{}]", format(v.modifiers)),
+                      format(" key: '{}'", v.input),
+                      format(" action: {} }}", v.binding[0]));
     }
 
-    [[nodiscard]] std::string static format(CharInputMapping v)
+    [[nodiscard]] std::string format(CharInputMapping v)
     {
-        auto actionAndModes = fmt::format(fmt::runtime(" action: {} }}"), v.binding[0]);
+        auto actionAndModes = format(" action: {} }}", v.binding[0]);
         if (v.modes.any())
         {
-            actionAndModes = fmt::format(fmt::runtime(" action: {}, mode: '{}' }}"), v.binding[0], v.modes);
+            actionAndModes = format(" action: {}, mode: '{}' }}", v.binding[0], v.modes);
         }
-        return fmt::format(fmt::runtime("{:<30},{:<30},{:<30}\n"),
-                           fmt::format(fmt::runtime("- {{ mods: [{}]"), v.modifiers),
-                           fmt::format(fmt::runtime(" key: '{}'"), static_cast<char>(v.input)),
-                           actionAndModes);
+        return format("{:<30},{:<30},{:<30}\n",
+                      format("- {{ mods: [{}]", format(v.modifiers)),
+                      format(" key: '{}'", static_cast<char>(v.input)),
+                      actionAndModes);
     }
 
-    [[nodiscard]] std::string static format(MouseInputMapping v)
+    [[nodiscard]] std::string format(MouseInputMapping v)
     {
-        auto actionAndModes = fmt::format(fmt::runtime(" action: {} }}"), v.binding[0]);
-        return fmt::format(fmt::runtime("{:<30},{:<30},{:<30}\n"),
-                           fmt::format(fmt::runtime("- {{ mods: [{}]"), v.modifiers),
-                           fmt::format(fmt::runtime(" mouse: {}"), v.input),
-                           actionAndModes);
+        auto actionAndModes = format(" action: {} }}", v.binding[0]);
+        return format("{:<30},{:<30},{:<30}\n",
+                      format("- {{ mods: [{}]", format(v.modifiers)),
+                      format(" mouse: {}", v.input),
+                      actionAndModes);
     }
 
     [[nodiscard]] std::string static format(std::vector<text::font_feature> const& v)
@@ -934,6 +940,28 @@ struct YAMLConfigWriter
         result.append(v | ranges::views::transform([](auto f) { return fmt::format("{}", f); })
                       | ranges::views::join(", ") | ranges::to<std::string>);
         result.append("]");
+        return result;
+    }
+
+    [[nodiscard]] std::string static format(vtbackend::Modifiers const& flags)
+    {
+        std::string result;
+        for (auto i = 0u; i < sizeof(vtbackend::Modifier) * 8; ++i)
+        {
+            auto const flag = static_cast<vtbackend::Modifier>(1 << i);
+            if (!flags.test(flag))
+                continue;
+
+            // We assume that only valid enum values resulting into non-empty strings.
+            auto const element = fmt::format("{}", flag);
+            if (element.empty())
+                continue;
+
+            if (!result.empty())
+                result += ',';
+
+            result += element;
+        }
         return result;
     }
 
@@ -966,6 +994,16 @@ struct YAMLConfigWriter
         args.append("]");
         return format(doc, v.program, args);
     }
+
+    [[nodiscard]] std::string static format(vtbackend::CellRGBColor const& v)
+    {
+        if (std::holds_alternative<vtbackend::RGBColor>(v))
+            return fmt::format("'{}'", v);
+
+        return fmt::format("{}", v);
+    }
+
+    [[nodiscard]] std::string static format(vtbackend::RGBColor const& v) { return fmt::format("'{}'", v); }
 
     [[nodiscard]] std::string format(std::string_view doc, vtbackend::MaxHistoryLineCount v)
     {
