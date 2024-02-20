@@ -891,18 +891,24 @@ struct YAMLConfigWriter
 
     std::string createString(Config const& c);
 
+    template <typename T>
+    auto format(T v)
+    {
+        return fmt::format("{}", v);
+    }
+
     template <typename... T>
     [[nodiscard]] std::string format(std::string_view doc, T... args)
     {
-        return fmt::format(fmt::runtime(doc), args..., fmt::arg("comment", "#"));
+        return fmt::format(fmt::runtime(doc), format(args)..., fmt::arg("comment", "#"));
     }
 
     [[nodiscard]] std::string format(KeyInputMapping v)
     {
         return format("{:<30},{:<30},{:<30}\n",
-                           format("- {{ mods: [{}]", format(v.modifiers)),
-                           format(" key: '{}'", v.input),
-                           format(" action: {} }}", v.binding[0]));
+                      format("- {{ mods: [{}]", format(v.modifiers)),
+                      format(" key: '{}'", v.input),
+                      format(" action: {} }}", v.binding[0]));
     }
 
     [[nodiscard]] std::string format(CharInputMapping v)
@@ -913,18 +919,18 @@ struct YAMLConfigWriter
             actionAndModes = format(" action: {}, mode: '{}' }}", v.binding[0], v.modes);
         }
         return format("{:<30},{:<30},{:<30}\n",
-                           format("- {{ mods: [{}]", format(v.modifiers)),
-                           format(" key: '{}'", static_cast<char>(v.input)),
-                           actionAndModes);
+                      format("- {{ mods: [{}]", format(v.modifiers)),
+                      format(" key: '{}'", static_cast<char>(v.input)),
+                      actionAndModes);
     }
 
     [[nodiscard]] std::string format(MouseInputMapping v)
     {
         auto actionAndModes = format(" action: {} }}", v.binding[0]);
         return format("{:<30},{:<30},{:<30}\n",
-                           format("- {{ mods: [{}]", format(v.modifiers)),
-                           format(" mouse: {}", v.input),
-                           actionAndModes);
+                      format("- {{ mods: [{}]", format(v.modifiers)),
+                      format(" mouse: {}", v.input),
+                      actionAndModes);
     }
 
     [[nodiscard]] std::string static format(std::vector<text::font_feature> const& v)
@@ -959,7 +965,6 @@ struct YAMLConfigWriter
         return result;
     }
 
-
     [[nodiscard]] std::string format(std::string_view doc, vtrasterizer::FontDescriptions const& v)
     {
         return format(doc,
@@ -989,6 +994,16 @@ struct YAMLConfigWriter
         args.append("]");
         return format(doc, v.program, args);
     }
+
+    [[nodiscard]] std::string static format(vtbackend::CellRGBColor const& v)
+    {
+        if (std::holds_alternative<vtbackend::RGBColor>(v))
+            return fmt::format("'{}'", v);
+
+        return fmt::format("{}", v);
+    }
+
+    [[nodiscard]] std::string static format(vtbackend::RGBColor const& v) { return fmt::format("'{}'", v); }
 
     [[nodiscard]] std::string format(std::string_view doc, vtbackend::MaxHistoryLineCount v)
     {
