@@ -102,6 +102,56 @@ namespace
                     "Could not create directory {}. {}", path.parent_path().string(), ec.message()) };
     }
 
+    vector<fs::path> getTermInfoDirs(optional<fs::path> const& appTerminfoDir)
+    {
+        auto locations = vector<fs::path>();
+
+        if (appTerminfoDir.has_value())
+            locations.emplace_back(appTerminfoDir.value().string());
+
+        locations.emplace_back(Process::homeDirectory() / ".terminfo");
+
+        if (auto const* value = getenv("TERMINFO_DIRS"); value && *value)
+            for (auto const dir: crispy::split(string_view(value), ':'))
+                locations.emplace_back(string(dir));
+
+        locations.emplace_back("/usr/share/terminfo");
+
+        return locations;
+    }
+
+    string getDefaultTERM(optional<fs::path> const& appTerminfoDir)
+    {
+#if defined(_WIN32)
+        return "contour";
+#else
+
+        if (Process::isFlatpak())
+            return "contour";
+
+        auto locations = getTermInfoDirs(appTerminfoDir);
+        auto const terms = vector<string> {
+            "contour", "xterm-256color", "xterm", "vt340", "vt220",
+        };
+
+        for (auto const& prefix: locations)
+            for (auto const& term: terms)
+            {
+                if (access((prefix / term.substr(0, 1) / term).string().c_str(), R_OK) == 0)
+                    return term;
+
+    #if defined(__APPLE__)
+                // I realized that on Apple the `tic` command sometimes installs
+                // the terminfo files into weird paths.
+                if (access((prefix / fmt::format("{:02X}", term.at(0)) / term).string().c_str(), R_OK) == 0)
+                    return term;
+    #endif
+            }
+
+        return "vt100";
+#endif
+    }
+
 } // namespace
 
 fs::path configHome(string const& programName)
@@ -286,6 +336,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
             // will create default shell if no shell nor ssh config is provided
             loadFromEntry(child, "shell", where.shell);
         }
+        // inforce some default shell setup
+        defaultSettings(where.shell.value());
+
         loadFromEntry(child, "escape_sandbox", where.shell.value().escapeSandbox);
         loadFromEntry(child, "copy_last_mark_range_offset", where.copyLastMarkRangeOffset);
         loadFromEntry(child, "initial_working_directory", where.shell.value().workingDirectory);
@@ -379,11 +432,13 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 {
     logger()("color palette loading {}", entry);
     auto child = node[entry];
+
     if (!child) // can not load directly from config file
     {
 
-        logger()("color paletter not found inside config file, checking colorschemes directory {} \n ",
-                 entry);
+        logger()(
+            "color paletter not found inside config file, checking colorschemes directory for {}.yml file",
+            entry);
         auto const filePath = configFile.remove_filename() / "colorschemes" / (entry + ".yml");
         auto fileContents = readFile(filePath);
         if (!fileContents)
@@ -391,9 +446,23 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             logger()("color palette loading failed {} ", entry);
             return;
         }
-        child = YAML::Load(fileContents.value());
+        logger()("color palette loading from file {}", filePath.string());
+        try
+        {
+            return loadFromEntry(YAML::Load(fileContents.value()), where);
+        }
+        catch (std::exception const& e)
+        {
+            logger()("Something went wrong: {}", e.what());
+        }
     }
 
+    loadFromEntry(child, where);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPalette& where)
+{
+    auto child = node;
     if (child["default"])
     {
         logger()("*** loading default colors");
@@ -481,14 +550,18 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         return false;
     };
 
+    logger()("*** loading normal color map");
     loadColorMap(node, "normal", 0);
+    logger()("*** loading bright color map");
     loadColorMap(node, "bright", 8);
+    logger()("*** loading dim color map");
     if (!loadColorMap(node, "dim", 256))
     {
         // calculate dim colors based on normal colors
         for (unsigned i = 0; i < 8; ++i)
             colors[256 + i] = colors[i] * 0.5f;
     }
+    logger()("*** color palette is loaded");
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -923,6 +996,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
             loadFromEntry(doc["color_schemes"],
                           child["dark"].as<std::string>(),
                           std::get<DualColorConfig>(where).darkMode);
+
             loadFromEntry(doc["color_schemes"],
                           child["light"].as<std::string>(),
                           std::get<DualColorConfig>(where).lightMode);
@@ -1202,6 +1276,42 @@ bool YAMLConfigReader::tryAddMouse(std::vector<MouseInputMapping>& bindings,
     return true;
 }
 
+void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
+{
+    shell.env["TERMINAL_NAME"] = "contour";
+    shell.env["TERMINAL_VERSION_TRIPLE"] =
+        fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
+    shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
+
+    // {{{ Populate environment variables
+    std::optional<fs::path> appTerminfoDir; // NOLINT(misc-const-correctness)
+#if defined(__APPLE__)
+    {
+        char buf[1024];
+        uint32_t len = sizeof(buf);
+        if (_NSGetExecutablePath(buf, &len) == 0)
+        {
+            auto p = fs::path(buf).parent_path().parent_path() / "Resources" / "terminfo";
+            if (fs::is_directory(p))
+            {
+                appTerminfoDir = p;
+                shell.env["TERMINFO_DIRS"] = p.string();
+            }
+        }
+    }
+#endif
+
+    // force some default env
+    if (shell.env.find("TERM") == shell.env.end())
+    {
+        shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
+        logger()("Defaulting TERM to {}.", shell.env["TERM"]);
+    }
+
+    if (shell.env.find("COLORTERM") == shell.env.end())
+        shell.env["COLORTERM"] = "truecolor";
+}
+
 std::optional<vtbackend::MouseButton> YAMLConfigReader::parseMouseButton(YAML::Node const& node)
 {
     using namespace std::literals::string_view_literals;
@@ -1396,7 +1506,7 @@ std::optional<vtbackend::MatchModes> YAMLConfigReader::parseMatchModes(YAML::Nod
         std::string const upperArg = crispy::toUpper(arg);
         if (upperArg == "ALT")
             flag = MatchModes::AlternateScreen;
-        if (upperArg == "ALTSCREEN")
+        else if (upperArg == "ALTSCREEN")
             flag = MatchModes::AlternateScreen;
         else if (upperArg == "APPCURSOR")
             flag = MatchModes::AppCursor;
