@@ -564,9 +564,7 @@ else()
     )
 
     set(DEPENDS_EXTRA ", libyaml-cpp0.7")
-    if ("${LSB_RELEASE_NUMBER}" STREQUAL "18.04")
-        set(DEPENDS_EXTRA ", libyaml-cpp0.5v5")
-    elseif("${LSB_RELEASE_NUMBER}" STREQUAL "20.04")
+    if("${LSB_RELEASE_NUMBER}" STREQUAL "20.04")
         set(DEPENDS_EXTRA ", libyaml-cpp0.6")
     endif()
 

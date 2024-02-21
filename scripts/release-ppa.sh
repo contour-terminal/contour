@@ -8,7 +8,6 @@ KEY_ID="5E39E916156361EA1021D2B5427FBA118140755D"
 EMAIL="christian@parpart.family"
 SETMARK="\033[>M"
 
-# bionic    : Ubuntu 18.04 (LTS)
 # focal     : Ubuntu 20.04 (LTS)
 # hirsute   : Ubuntu 21.04
 DISTRIBUTIONS=(hirsute focal bionic)

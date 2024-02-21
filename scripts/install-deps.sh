@@ -299,10 +299,6 @@ install_deps_ubuntu()
 
     if [ ! "${NAME}" = "Debian GNU/Linux" ]; then
         # We cannot use [[ nor < here because that's not in /bin/sh.
-        if [ "$RELEASE" = "18.04" ]; then
-            # Old Ubuntu's (especially 18.04 LTS) doesn't have a proper std::filesystem implementation.
-            packages="$packages g++-8"
-        fi
         if [ "$RELEASE" = "22.04" ] || [ "$RELEASE" = "22.10"  ]; then
             packages="$packages"
         fi
@@ -314,7 +310,7 @@ install_deps_ubuntu()
 
     fetch_and_unpack_gsl
     case $RELEASE in
-        "18.04" | "19.04" | "20.04" | "21.04" | "21.10" | "22.04" | "23.04")
+        "20.04" | "22.04" | "23.04")
             # Older Ubuntu's don't have a recent enough fmt / range-v3, so supply it.
             fetch_and_unpack_range
             fetch_and_unpack_fmtlib
