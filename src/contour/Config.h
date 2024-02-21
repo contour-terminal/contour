@@ -326,10 +326,10 @@ struct TerminalProfile
         "{ProtectedMode:Bold,Left= │ }"
     };
     ConfigEntry<std::string, documentation::IndicatorStatusLineMiddle> indicatorStatusLineMiddle {
-        " {Clock:Bold} {Title:Left= « ,Right= » }"
+        "{Title:Left= « ,Right= » }"
     };
     ConfigEntry<std::string, documentation::IndicatorStatusLineRight> indicatorStatusLineRight {
-        "{HistoryLineCount:Faint,Color=#c0c0c0} "
+        "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}"
     };
     ConfigEntry<bool, documentation::SyncWindowTitleWithHostWritableStatusDisplay>
         syncWindowTitleWithHostWritableStatusDisplay { false };
