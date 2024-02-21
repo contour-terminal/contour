@@ -807,8 +807,10 @@ void TerminalSession::sendCharEvent(
 
     if (eventType != KeyboardEventType::Release)
     {
+        // find if action exist for the given key, and ignore if editing search prompt
         if (auto const* actions =
-                config::apply(_config.inputMappings.value().charMappings, value, modifiers, matchModeFlags()))
+                config::apply(_config.inputMappings.value().charMappings, value, modifiers, matchModeFlags());
+            actions && !_terminal.inputHandler().isEditingSearch())
         {
             executeAllActions(*actions);
             return;
