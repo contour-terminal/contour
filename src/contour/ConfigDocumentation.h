@@ -171,6 +171,10 @@ constexpr StringLiteral StatusDisplayPosition {
     "\n"
 };
 
+constexpr StringLiteral IndicatorStatusLineLeft { "left: \"{}\"\n" };
+constexpr StringLiteral IndicatorStatusLineMiddle { "middle: \"{}\"\n" };
+constexpr StringLiteral IndicatorStatusLineRight { "right: \"{}\"\n" };
+
 constexpr StringLiteral SyncWindowTitleWithHostWritableStatusDisplay {
     "{comment} Synchronize the window title with the Host Writable status_line if\n"
     "{comment} and only if the host writable status line was denied to be shown.\n"

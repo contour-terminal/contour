@@ -126,6 +126,15 @@ class flags
         return flags<flag_type>::from_value(_value | static_cast<value_type>(other));
     }
 
+    [[nodiscard]] auto reduce(auto init, auto f) const
+    {
+        auto result = std::move(init);
+        for (auto i = 0u; i < sizeof(flag_type) * 8; ++i)
+            if (auto const flag = static_cast<flag_type>(1 << i); test(flag))
+                result = f(std::move(result), flag);
+        return result;
+    }
+
   private:
     value_type _value = 0;
 };

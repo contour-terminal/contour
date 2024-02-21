@@ -57,6 +57,7 @@ class ScreenBase: public SequenceHandler
     [[nodiscard]] virtual bool compareCellTextAt(CellLocation position,
                                                  char32_t codepoint) const noexcept = 0;
     [[nodiscard]] virtual std::string cellTextAt(CellLocation position) const noexcept = 0;
+    [[nodiscard]] virtual CellFlags cellFlagsAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual LineFlags lineFlagsAt(LineOffset line) const noexcept = 0;
     virtual void enableLineFlags(LineOffset lineOffset, LineFlags flags, bool enable) noexcept = 0;
     [[nodiscard]] virtual bool isLineFlagEnabledAt(LineOffset line, LineFlags flags) const noexcept = 0;
@@ -526,6 +527,12 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).toUtf8();
     }
 
+    [[nodiscard]] CellFlags cellFlagsAt(CellLocation position) const noexcept override
+    {
+        // TODO: This is not efficient. We should have a direct access to the flags.
+        return _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).flags();
+    }
+
     [[nodiscard]] LineFlags lineFlagsAt(LineOffset line) const noexcept override
     {
         return _grid.lineAt(line).flags();
@@ -599,6 +606,14 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     void restoreGraphicsRendition();
     void saveGraphicsRendition();
+
+    void reply(std::string_view text);
+
+    template <typename... Ts>
+    void reply(fmt::format_string<Ts...> message, Ts const&... args)
+    {
+        reply(fmt::vformat(message, fmt::make_format_args(args...)));
+    }
 
   private:
     void writeTextInternal(char32_t codepoint);

@@ -141,6 +141,9 @@ namespace
         settings.maxImageRegisterCount = config.maxImageColorRegisters.value();
         settings.statusDisplayType = profile.initialStatusDisplayType.value();
         settings.statusDisplayPosition = profile.statusDisplayPosition.value();
+        settings.indicatorStatusLine.left = profile.indicatorStatusLineLeft.value();
+        settings.indicatorStatusLine.middle = profile.indicatorStatusLineMiddle.value();
+        settings.indicatorStatusLine.right = profile.indicatorStatusLineRight.value();
         settings.syncWindowTitleWithHostWritableStatusDisplay =
             profile.syncWindowTitleWithHostWritableStatusDisplay.value();
         if (auto const* p = preferredColorPalette(profile.colors.value(), colorPreference))

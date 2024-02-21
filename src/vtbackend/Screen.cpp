@@ -507,7 +507,7 @@ void Screen<Cell>::writeTextEnd()
         return;
 
     if (vtTraceSequenceLog)
-        vtTraceSequenceLog()("text: \"{}\"", _pendingCharTraceLog);
+        vtTraceSequenceLog()("[{}] text: \"{}\"", _name, _pendingCharTraceLog);
 
     _pendingCharTraceLog.clear();
 #endif
@@ -891,14 +891,14 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::deviceStatusReport()
 {
-    _terminal->reply("\033[0n");
+    reply("\033[0n");
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::reportCursorPosition()
 {
-    _terminal->reply("\033[{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1);
+    reply("\033[{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1);
 }
 
 template <typename Cell>
@@ -910,7 +910,7 @@ void Screen<Cell>::reportColorPaletteUpdate()
 
     auto const modeHint = isLightColor(_state->colorPalette.defaultForeground) ? DarkModeHint : LightModeHint;
 
-    _terminal->reply("\033[?{};{}n", ColorPaletteUpdateDsrReplyId, modeHint);
+    reply("\033[?{};{}n", ColorPaletteUpdateDsrReplyId, modeHint);
     _terminal->flushInput();
 }
 
@@ -919,8 +919,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::reportExtendedCursorPosition()
 {
     auto const pageNum = 1;
-    _terminal->reply(
-        "\033[{};{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1, pageNum);
+    reply("\033[{};{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1, pageNum);
 }
 
 template <typename Cell>
@@ -964,7 +963,7 @@ void Screen<Cell>::sendDeviceAttributes()
                                  // TODO: DeviceAttributes::TechnicalCharacters |
                                  DeviceAttributes::UserDefinedKeys);
 
-    _terminal->reply("\033[?{};{}c", id, attrs);
+    reply("\033[?{};{}c", id, attrs);
 }
 
 template <typename Cell>
@@ -985,7 +984,7 @@ void Screen<Cell>::sendTerminalId()
     // ROM cardridge registration number (always 0)
     auto constexpr Pc = 0;
 
-    _terminal->reply("\033[>{};{};{}c", pp, Pv, Pc);
+    reply("\033[>{};{};{}c", pp, Pv, Pc);
 }
 
 // {{{ ED
@@ -1626,15 +1625,15 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
         if (data.empty())
             return;
         if (currentChunkSize == 0) // initiate chunk
-            _terminal->reply("\033^{};", CaptureBufferCode);
+            reply("\033^{};", CaptureBufferCode);
         else if (currentChunkSize + data.size() >= MaxChunkSize)
         {
             vtCaptureBufferLog()("Transferred chunk of {} bytes.", currentChunkSize);
-            _terminal->reply("\033\\"); // ST
-            _terminal->reply("\033^{};", CaptureBufferCode);
+            reply("\033\\"); // ST
+            reply("\033^{};", CaptureBufferCode);
             currentChunkSize = 0;
         }
-        _terminal->reply(data);
+        reply(data);
         currentChunkSize += data.size();
     };
     LineOffset const bottomLine = boxed_cast<LineOffset>(pageSize().lines - 1);
@@ -1666,10 +1665,10 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
     }
 
     if (currentChunkSize != 0)
-        _terminal->reply("\033\\"); // ST
+        reply("\033\\"); // ST
 
     vtCaptureBufferLog()("Capturing buffer finished.");
-    _terminal->reply("\033^{};\033\\", CaptureBufferCode); // mark the end
+    reply("\033^{};\033\\", CaptureBufferCode); // mark the end
 }
 
 template <typename Cell>
@@ -1791,7 +1790,10 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setGraphicsRendition(GraphicsRendition rendition)
 {
-    _terminal->setGraphicsRendition(rendition);
+    if (rendition == GraphicsRendition::Reset)
+        _cursor.graphicsRendition = {};
+    else
+        _cursor.graphicsRendition.flags = CellUtil::makeCellFlags(rendition, _cursor.graphicsRendition.flags);
 }
 
 template <typename Cell>
@@ -1835,7 +1837,7 @@ void Screen<Cell>::requestAnsiMode(unsigned int mode)
 
     auto const code = toAnsiModeNum(static_cast<AnsiMode>(mode));
 
-    _terminal->reply("\033[{};{}$y", code, static_cast<unsigned>(modeResponse));
+    reply("\033[{};{}$y", code, static_cast<unsigned>(modeResponse));
 }
 
 template <typename Cell>
@@ -1849,7 +1851,7 @@ void Screen<Cell>::requestDECMode(unsigned int mode)
 
     auto const code = toDECModeNum(static_cast<DECMode>(mode));
 
-    _terminal->reply("\033[?{};{}$y", code, static_cast<unsigned>(modeResponse));
+    reply("\033[?{};{}$y", code, static_cast<unsigned>(modeResponse));
 }
 
 template <typename Cell>
@@ -2043,8 +2045,7 @@ void Screen<Cell>::requestDynamicColor(DynamicColorName name)
 
     if (color.has_value())
     {
-        _terminal->reply(
-            "\033]{};{}\033\\", setDynamicColorCommand(name), setDynamicColorValue(color.value()));
+        reply("\033]{};{}\033\\", setDynamicColorCommand(name), setDynamicColorValue(color.value()));
     }
 }
 
@@ -2057,12 +2058,12 @@ void Screen<Cell>::requestPixelSize(RequestPixelSize area)
         case RequestPixelSize::WindowArea: [[fallthrough]]; // TODO
         case RequestPixelSize::TextArea: {
             // Result is CSI  4 ;  height ;  width t
-            _terminal->reply("\033[4;{};{}t", pixelSize().height, pixelSize().width);
+            reply("\033[4;{};{}t", pixelSize().height, pixelSize().width);
             break;
         }
         case RequestPixelSize::CellArea:
             // Result is CSI  6 ;  height ;  width t
-            _terminal->reply("\033[6;{};{}t", _state->cellPixelSize.height, _state->cellPixelSize.width);
+            reply("\033[6;{};{}t", _state->cellPixelSize.height, _state->cellPixelSize.width);
             break;
     }
 }
@@ -2073,11 +2074,9 @@ void Screen<Cell>::requestCharacterSize(RequestPixelSize area)
 {
     switch (area)
     {
-        case RequestPixelSize::TextArea:
-            _terminal->reply("\033[8;{};{}t", pageSize().lines, pageSize().columns);
-            break;
+        case RequestPixelSize::TextArea: reply("\033[8;{};{}t", pageSize().lines, pageSize().columns); break;
         case RequestPixelSize::WindowArea:
-            _terminal->reply("\033[9;{};{}t", pageSize().lines, pageSize().columns);
+            reply("\033[9;{};{}t", pageSize().lines, pageSize().columns);
             break;
         case RequestPixelSize::CellArea:
             Guarantee(false
@@ -2173,7 +2172,7 @@ void Screen<Cell>::requestStatusString(RequestStatusString value)
         return nullopt;
     }(value);
 
-    _terminal->reply("\033P{}$r{}\033\\", response.has_value() ? 1 : 0, response.value_or(""), "\"p");
+    reply("\033P{}$r{}\033\\", response.has_value() ? 1 : 0, response.value_or(""), "\"p");
 }
 
 template <typename Cell>
@@ -2200,7 +2199,7 @@ void Screen<Cell>::requestTabStops()
     }
     dcs << "\033\\"sv; // ST
 
-    _terminal->reply(dcs.str());
+    reply(dcs.str());
 }
 
 namespace
@@ -2219,18 +2218,18 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestCapability(std::string_view name)
 {
     if (booleanCapability(name))
-        _terminal->reply("\033P1+r{}\033\\", toHexString(name));
+        reply("\033P1+r{}\033\\", toHexString(name));
     else if (auto const value = numericCapability(name); value != Database::Npos)
     {
         auto hexValue = fmt::format("{:X}", value);
         if (hexValue.size() % 2)
             hexValue.insert(hexValue.begin(), '0');
-        _terminal->reply("\033P1+r{}={}\033\\", toHexString(name), hexValue);
+        reply("\033P1+r{}={}\033\\", toHexString(name), hexValue);
     }
     else if (auto const value = stringCapability(name); !value.empty())
-        _terminal->reply("\033P1+r{}={}\033\\", toHexString(name), asHex(value));
+        reply("\033P1+r{}={}\033\\", toHexString(name), asHex(value));
     else
-        _terminal->reply("\033P0+r\033\\");
+        reply("\033P0+r\033\\");
 }
 
 template <typename Cell>
@@ -2238,18 +2237,18 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestCapability(capabilities::Code code)
 {
     if (booleanCapability(code))
-        _terminal->reply("\033P1+r{}\033\\", code.hex());
+        reply("\033P1+r{}\033\\", code.hex());
     else if (auto const value = numericCapability(code); value >= 0)
     {
         auto hexValue = fmt::format("{:X}", value);
         if (hexValue.size() % 2)
             hexValue.insert(hexValue.begin(), '0');
-        _terminal->reply("\033P1+r{}={}\033\\", code.hex(), hexValue);
+        reply("\033P1+r{}={}\033\\", code.hex(), hexValue);
     }
     else if (auto const value = stringCapability(code); !value.empty())
-        _terminal->reply("\033P1+r{}={}\033\\", code.hex(), asHex(value));
+        reply("\033P1+r{}={}\033\\", code.hex(), asHex(value));
     else
-        _terminal->reply("\033P0+r\033\\");
+        reply("\033P0+r\033\\");
 }
 
 template <typename Cell>
@@ -2386,32 +2385,31 @@ void Screen<Cell>::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action acti
             {
                 case Action::Read: {
                     auto const value = _state->imageColorPalette->size();
-                    _terminal->reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
+                    reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
                     break;
                 }
                 case Action::ReadLimit: {
                     auto const value = _state->imageColorPalette->maxSize();
-                    _terminal->reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
+                    reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
                     break;
                 }
                 case Action::ResetToDefault: {
                     auto const value = _state->maxImageColorRegisters;
                     _state->imageColorPalette->setSize(value);
-                    _terminal->reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
+                    reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
                     break;
                 }
                 case Action::SetToValue:
                     visit(overloaded {
                               [&](int number) {
                                   _state->imageColorPalette->setSize(static_cast<unsigned>(number));
-                                  _terminal->reply(
-                                      "\033[?{};{};{}S", NumberOfColorRegistersItem, Success, number);
+                                  reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, number);
                               },
                               [&](ImageSize) {
-                                  _terminal->reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Failure, 0);
+                                  reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Failure, 0);
                               },
                               [&](monostate) {
-                                  _terminal->reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Failure, 0);
+                                  reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Failure, 0);
                               },
                           },
                           value);
@@ -2424,19 +2422,19 @@ void Screen<Cell>::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action acti
             {
                 case Action::Read: {
                     auto const viewportSize = pixelSize();
-                    _terminal->reply("\033[?{};{};{};{}S",
-                                     SixelItem,
-                                     Success,
-                                     min(viewportSize.width, _state->effectiveImageCanvasSize.width),
-                                     min(viewportSize.height, _state->effectiveImageCanvasSize.height));
+                    reply("\033[?{};{};{};{}S",
+                          SixelItem,
+                          Success,
+                          min(viewportSize.width, _state->effectiveImageCanvasSize.width),
+                          min(viewportSize.height, _state->effectiveImageCanvasSize.height));
                 }
                 break;
                 case Action::ReadLimit:
-                    _terminal->reply("\033[?{};{};{};{}S",
-                                     SixelItem,
-                                     Success,
-                                     _settings->maxImageSize.width,
-                                     _settings->maxImageSize.height);
+                    reply("\033[?{};{};{};{}S",
+                          SixelItem,
+                          Success,
+                          _settings->maxImageSize.width,
+                          _settings->maxImageSize.height);
                     break;
                 case Action::ResetToDefault:
                     // The limit is the default at the same time.
@@ -2449,10 +2447,10 @@ void Screen<Cell>::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action acti
                         size.width = min(size.width, _settings->maxImageSize.width);
                         size.height = min(size.height, _settings->maxImageSize.height);
                         _state->effectiveImageCanvasSize = size;
-                        _terminal->reply("\033[?{};{};{};{}S", SixelItem, Success, size.width, size.height);
+                        reply("\033[?{};{};{};{}S", SixelItem, Success, size.width, size.height);
                     }
                     else
-                        _terminal->reply("\033[?{};{};{}S", SixelItem, Failure, 0);
+                        reply("\033[?{};{};{}S", SixelItem, Failure, 0);
                     break;
             }
             break;
@@ -2549,50 +2547,6 @@ namespace impl
                 return ApplyResult::Ok;
             }
             return ApplyResult::Invalid;
-        }
-
-        optional<RGBColor> parseColor(string_view const& value)
-        {
-            try
-            {
-                // "rgb:RR/GG/BB"
-                //  0123456789a
-                if (value.size() == 12 && value.substr(0, 4) == "rgb:" && value[6] == '/' && value[9] == '/')
-                {
-                    auto const r = crispy::to_integer<16, uint8_t>(value.substr(4, 2));
-                    auto const g = crispy::to_integer<16, uint8_t>(value.substr(7, 2));
-                    auto const b = crispy::to_integer<16, uint8_t>(value.substr(10, 2));
-                    return RGBColor { r.value(), g.value(), b.value() };
-                }
-
-                // "#RRGGBB"
-                if (value.size() == 7 && value[0] == '#')
-                {
-                    auto const r = crispy::to_integer<16, uint8_t>(value.substr(1, 2));
-                    auto const g = crispy::to_integer<16, uint8_t>(value.substr(3, 2));
-                    auto const b = crispy::to_integer<16, uint8_t>(value.substr(5, 2));
-                    return RGBColor { r.value(), g.value(), b.value() };
-                }
-
-                // "#RGB"
-                if (value.size() == 4 && value[0] == '#')
-                {
-                    auto const r = crispy::to_integer<16, uint8_t>(value.substr(1, 1));
-                    auto const g = crispy::to_integer<16, uint8_t>(value.substr(2, 1));
-                    auto const b = crispy::to_integer<16, uint8_t>(value.substr(3, 1));
-                    auto const rr = static_cast<uint8_t>(r.value() << 4);
-                    auto const gg = static_cast<uint8_t>(g.value() << 4);
-                    auto const bb = static_cast<uint8_t>(b.value() << 4);
-                    return RGBColor { rr, gg, bb };
-                }
-
-                return std::nullopt;
-            }
-            catch (...)
-            {
-                // that will be a formatting error in stoul() then.
-                return std::nullopt;
-            }
         }
 
         Color parseColor(Sequence const& seq, size_t* pi)
@@ -2706,9 +2660,7 @@ namespace impl
             return Color {};
         }
 
-        template <typename Target>
-        CRISPY_REQUIRES((CellConcept<Target> || std::is_same_v<Target, Terminal>) )
-        ApplyResult applySGR(Target& target, Sequence const& seq, size_t parameterStart, size_t parameterEnd)
+        ApplyResult applySGR(auto& target, Sequence const& seq, size_t parameterStart, size_t parameterEnd)
         {
             if (parameterStart == parameterEnd)
             {
@@ -2921,7 +2873,7 @@ namespace impl
             auto const& value = seq.intermediateCharacters();
             if (value == "?")
                 screen.requestDynamicColor(name);
-            else if (auto color = parseColor(value); color.has_value())
+            else if (auto color = vtbackend::parseColor(value); color.has_value())
                 screen.setDynamicColor(name, color.value());
             else
                 return ApplyResult::Invalid;
@@ -2953,7 +2905,7 @@ namespace impl
                     queryColor((uint8_t) index);
                     index = -1;
                 }
-                else if (auto const color = parseColor(value))
+                else if (auto const color = vtbackend::parseColor(value))
                 {
                     setColor((uint8_t) index, color.value());
                     index = -1;
@@ -3399,6 +3351,13 @@ void Screen<Cell>::restoreCursor(Cursor const& savedCursor)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
+void Screen<Cell>::reply(std::string_view text)
+{
+    _terminal->reply(text);
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::processSequence(Sequence const& seq)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
@@ -3406,10 +3365,10 @@ void Screen<Cell>::processSequence(Sequence const& seq)
     {
         if (auto const* fd = seq.functionDefinition(_terminal->activeSequences()))
         {
-            vtTraceSequenceLog()("Processing {:<14} {}", fd->documentation.mnemonic, seq.text());
+            vtTraceSequenceLog()("[{}] Processing {:<14} {}", _name, fd->documentation.mnemonic, seq.text());
         }
         else
-            vtTraceSequenceLog()("Processing unknown sequence: {}", seq.text());
+            vtTraceSequenceLog()("[{}] Processing unknown sequence: {}", _name, seq.text());
     }
 #endif
 
@@ -3512,7 +3471,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case DA2: sendTerminalId(); break;
         case DA3:
             // terminal identification, 4 hex codes
-            _terminal->reply("\033P!|C0000000\033\\");
+            reply("\033P!|C0000000\033\\");
             break;
         case DCH: deleteCharacters(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case DECCARA: {
@@ -3748,7 +3707,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case SCOSC: saveCursor(); break;
         case SD: scrollDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
         case SETMARK: setMark(); break;
-        case SGR: return impl::applySGR(*_terminal, seq, 0, seq.parameterCount());
+        case SGR: return impl::applySGR(*this, seq, 0, seq.parameterCount());
         case SGRRESTORE: restoreGraphicsRendition(); return ApplyResult::Ok;
         case SGRSAVE: saveGraphicsRendition(); return ApplyResult::Ok;
         case SM: {
@@ -3782,7 +3741,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case XTREPORTCOLORS: _terminal->reportColorPaletteStack(); return ApplyResult::Ok;
         case XTSMGRAPHICS: return impl::XTSMGRAPHICS(seq, *this);
         case XTVERSION:
-            _terminal->reply(fmt::format("\033P>|{} {}\033\\", LIBTERMINAL_NAME, LIBTERMINAL_VERSION_STRING));
+            reply("\033P>|{} {}\033\\", LIBTERMINAL_NAME, LIBTERMINAL_VERSION_STRING);
             return ApplyResult::Ok;
         case DECSSDT: {
             // Changes the status line display type.
@@ -3825,7 +3784,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             return ApplyResult::Ok;
         }
         case CSIUQUERY: {
-            _terminal->reply("\033[?{}u", _terminal->keyboardProtocol().flags().value());
+            reply("\033[?{}u", _terminal->keyboardProtocol().flags().value());
             return ApplyResult::Ok;
         }
         case CSIUENHCE: {

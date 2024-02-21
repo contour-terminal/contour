@@ -90,6 +90,7 @@ nav:
     - configuration/index.md
     - configuration/profiles.md
     - configuration/colors.md
+    - configuration/indicator-statusline.md
     #- Images (Advanced) : configuration/advanced/images.md
     #- Mouse (Advanced) : configuration/advanced/images.md
     #- Misc (Advanced) : configuration/advanced/mouse.md

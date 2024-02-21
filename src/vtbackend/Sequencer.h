@@ -13,11 +13,9 @@
 #include <libunicode/convert.h>
 #include <libunicode/utf8.h>
 
-#include <cassert>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace vtbackend
 {
@@ -129,7 +127,7 @@ class Sequencer
     void error(std::string_view errorString);
     void print(char32_t codepoint);
     size_t print(std::string_view chars, size_t cellCount);
-    void printEnd();
+    void printEnd() noexcept;
     void execute(char controlCode);
     void clear() noexcept;
     void collect(char ch);
@@ -140,7 +138,7 @@ class Sequencer
     void paramSubSeparator() noexcept;
     void dispatchESC(char finalChar);
     void dispatchCSI(char finalChar);
-    void startOSC();
+    void startOSC() noexcept;
     void putOSC(char ch);
     void dispatchOSC();
     void hook(char finalChar);
