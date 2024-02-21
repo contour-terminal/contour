@@ -112,6 +112,7 @@
           <li>Add SGRSAVE and SGRRESTORE VT sequences to save and restore SGR state (They intentionally conflict with XTPUSHSGR and XTPOPSGR)</li>
           <li>Fixes corruption of sixel image on high resolution (#1049)</li>
           <li>Fixes bad wording of OS/X to macOS (#1462)</li>
+          <li>Fixed key bindings and search prompt collision (#1472)</li>
         </ul>
       </description>
     </release>
