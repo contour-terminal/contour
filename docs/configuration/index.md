@@ -38,7 +38,9 @@ option specifies the default PTY read buffer size in bytes. It is an advanced op
 option sets the size in bytes per PTY Buffer Object. It is an advanced option for internal storage and should be changed carefully. The default value is `1048576`. <br/>
 ### `default_profile`
 option determines the default profile to use in the terminal. <br/>
-`spawn_new_process`
+### 'early_exit_threshold' 
+option determines the early threshold time. If contour atempts to close earlier than specified threshold, additional message will be printed that contour terminated too early and additional key press is required to close contour. <br/>
+### `spawn_new_process`
 flag determines whether a new process should be spawned when creating a new terminal. The default value is `false`. <br/>
 ### `reflow_on_resize`
 option controls whether or not the lines in the terminal should be reflowed when a resize event occurs. The default value is `true`. <br/>

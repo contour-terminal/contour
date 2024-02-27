@@ -663,6 +663,9 @@ struct Config
     ConfigEntry<vtbackend::Modifiers, documentation::MouseBlockSelectionModifiers>
         mouseBlockSelectionModifiers { vtbackend::Modifier::Control };
     ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings };
+    ConfigEntry<unsigned, documentation::EarlyExitThreshold> earlyExitThreshold {
+        documentation::DefaultEarlyExitThreshold
+    };
     ConfigEntry<bool, documentation::SpawnNewProcess> spawnNewProcess { false };
     ConfigEntry<bool, documentation::SixelScrolling> sixelScrolling { true };
     ConfigEntry<vtbackend::ImageSize, documentation::MaxImageSize> maxImageSize { { vtpty::Width { 0 },

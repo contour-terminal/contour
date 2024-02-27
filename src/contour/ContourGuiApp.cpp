@@ -109,7 +109,7 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
                     "Dumps internal state at exit into the given directory. This is for debugging contour.",
                     "PATH" },
                 CLI::option { "early-exit-threshold",
-                              CLI::value { 6u },
+                              CLI::value { -1 },
                               "If the spawned process exits earlier than the given threshold seconds, an "
                               "error message will be printed and the window not closed immediately." },
                 CLI::option { "working-directory",
@@ -149,7 +149,17 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
 
 std::chrono::seconds ContourGuiApp::earlyExitThreshold() const
 {
-    return std::chrono::seconds(parameters().get<unsigned>("contour.terminal.early-exit-threshold"));
+    auto const configThreshold = config().earlyExitThreshold.value();
+    auto const parameterThreshold = parameters().get<int>("contour.terminal.early-exit-threshold");
+
+    // default threshold is config::documentation::DefaultEarlyExitThreshold seconds
+    if (parameterThreshold >= 0)
+        return std::chrono::seconds(parameterThreshold);
+
+    if (configThreshold != config::documentation::DefaultEarlyExitThreshold)
+        return std::chrono::seconds(configThreshold);
+
+    return std::chrono::seconds(config::documentation::DefaultEarlyExitThreshold);
 }
 
 string ContourGuiApp::profileName() const

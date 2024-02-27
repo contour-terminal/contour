@@ -294,6 +294,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
         loadFromEntry("images.sixel_register_count", c.maxImageColorRegisters);
         loadFromEntry("live_config", c.live);
+        loadFromEntry("early_exit_threshold", c.earlyExitThreshold);
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("images.sixe_scrolling", c.sixelScrolling);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
@@ -1848,6 +1849,7 @@ std::string YAMLConfigWriter::createString(Config const& c)
     process(c.ptyReadBufferSize);
     process(c.ptyBufferObjectSize);
     process(c.defaultProfileName);
+    process(c.earlyExitThreshold);
     process(c.spawnNewProcess);
     process(c.reflowOnResize);
     process(c.bypassMouseProtocolModifiers);
