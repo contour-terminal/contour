@@ -108,6 +108,7 @@
       <description>
         <ul>
           <li>Add 'early_exit_threshold' config option (#1460)</li>
+          <li>Add AppImage package with Qt6 support (#586)</li>
           <li>Add ability to customize the indicator statusline through configuration (#687)</li>
           <li>Add generation of config file from internal state (#1282)</li>
           <li>Add SGRSAVE and SGRRESTORE VT sequences to save and restore SGR state (They intentionally conflict with XTPUSHSGR and XTPOPSGR)</li>
