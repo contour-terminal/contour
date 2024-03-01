@@ -8,8 +8,7 @@ Categories=Qt;System;TerminalEmulator;
 Actions=NewWindow;
 X-KDE-AuthorizeAction=shell_access
 StartupWMClass=contour
-MimeType=inode/directory;
-Keywords=File;Manager;Browser;Explorer;Launcher;Vi;Vim;Python
+MimeType=application/x-executable;;
 
 Name=Contour
 

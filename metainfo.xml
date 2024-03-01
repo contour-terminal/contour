@@ -107,13 +107,14 @@
     <release version="0.4.4" urgency="medium" type="development">
       <description>
         <ul>
-          <li>Adds 'early_exit_threshold' config option (#1460)</li>
+          <li>Add 'early_exit_threshold' config option (#1460)</li>
           <li>Add ability to customize the indicator statusline through configuration (#687)</li>
           <li>Add generation of config file from internal state (#1282)</li>
           <li>Add SGRSAVE and SGRRESTORE VT sequences to save and restore SGR state (They intentionally conflict with XTPUSHSGR and XTPOPSGR)</li>
+          <li>Update of contour.desktop file (#1423)</li>
           <li>Fixes corruption of sixel image on high resolution (#1049)</li>
           <li>Fixes bad wording of OS/X to macOS (#1462)</li>
-          <li>Fixed key bindings and search prompt collision (#1472)</li>
+          <li>Fixes key bindings and search prompt collision (#1472)</li>
         </ul>
       </description>
     </release>
