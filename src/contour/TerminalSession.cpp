@@ -288,7 +288,6 @@ void TerminalSession::mainLoop()
     }
 
     sessionLog()("Event loop terminating (PTY {}).", _terminal.device().isClosed() ? "closed" : "open");
-    onClosed();
 }
 
 void TerminalSession::terminate()
@@ -572,15 +571,6 @@ void TerminalSession::notify(string_view title, string_view content)
 void TerminalSession::onClosed()
 {
     auto const _ = std::scoped_lock { _onClosedMutex };
-    auto isClosedAlready = _onClosedHandled.load();
-    if (isClosedAlready || !_onClosedHandled.compare_exchange_weak(isClosedAlready, true))
-    {
-        sessionLog()("onClosed called: thread {}, display {}", crispy::threadName(), _display ? "yes" : "no");
-        if (_display)
-            _display->closeDisplay();
-        return;
-    }
-
     sessionLog()("Terminal device closed (thread {})", crispy::threadName());
 
     if (!_terminal.device().isClosed())
@@ -625,6 +615,15 @@ void TerminalSession::onClosed()
             _terminal.writeToScreen(fmt::format("\r\n{}{}{}", SGR, EL, text));
         _terminal.writeToScreen("\r\n");
         _terminatedAndWaitingForKeyPress = true;
+        return;
+    }
+
+    auto isClosedAlready = _onClosedHandled.load();
+    if (isClosedAlready || !_onClosedHandled.compare_exchange_weak(isClosedAlready, true))
+    {
+        sessionLog()("onClosed called: thread {}, display {}", crispy::threadName(), _display ? "yes" : "no");
+        if (_display)
+            _display->closeDisplay();
         return;
     }
 

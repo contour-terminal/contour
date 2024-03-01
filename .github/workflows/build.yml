@@ -193,6 +193,8 @@ jobs:
           arch="${{ matrix.arch }}"
           echo "PLATFORM=${arch%% *}" >> "$GITHUB_OUTPUT"
           echo "ARCH=${arch##* }" >> "$GITHUB_OUTPUT"
+      - name: "update APT database"
+        run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set environment variables
@@ -245,6 +247,8 @@ jobs:
           arch="${{ matrix.arch }}"
           echo "PLATFORM=${arch%% *}" >> "$GITHUB_OUTPUT"
           echo "ARCH=${arch##* }" >> "$GITHUB_OUTPUT"
+      - name: "update APT database"
+        run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set environment variables
@@ -1169,6 +1173,8 @@ jobs:
     needs: [package_for_Ubuntu]
     steps:
     - uses: actions/checkout@v3
+    - name: "update APT database"
+      run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
       run: sudo apt -qy install libxml2-utils
     - name: set environment variables
@@ -1190,6 +1196,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - name: "update APT database"
+        run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars.sh and check-release.sh
         run: sudo apt -qy install libxml2-utils
       - name: set variables
@@ -1220,6 +1228,8 @@ jobs:
       discussions: write
     steps:
       - uses: actions/checkout@v3
+      - name: "update APT database"
+        run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set variables

@@ -522,6 +522,7 @@ constexpr StringLiteral PTYBufferObjectSize {
 };
 
 constexpr StringLiteral ReflowOnResize {
+    "\n"
     "{comment} Whether or not to reflow the lines on terminal resize events. \n"
     "reflow_on_resize: {} \n"
 };
@@ -743,9 +744,15 @@ constexpr StringLiteral InputMappings {
 };
 
 constexpr StringLiteral SpawnNewProcess {
+    "\n"
     "{comment} Flag to determine whether to spawn new process or not when creating new terminal \n"
     "spawn_new_process: {} \n"
 };
+
+constexpr unsigned DefaultEarlyExitThreshold = 5u;
+constexpr StringLiteral EarlyExitThreshold { "\n"
+                                             "{comment} Time in seconds to check for early threshold \n"
+                                             "early_exit_threshold: {} \n" };
 
 constexpr StringLiteral SixelScrolling { "{comment} Enable or disable sixel scrolling (SM/RM ?80 default) \n"
                                          "sixel_scrolling: {} \n" };

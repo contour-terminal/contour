@@ -64,6 +64,9 @@ pty_buffer_size: 1048576
 
 default_profile: main
 
+# Time in seconds to check for early threshold
+early_exit_threshold: 5
+
 # Flag to determine whether to spawn new process or not when creating new terminal
 # Default: false
 spawn_new_process: false
