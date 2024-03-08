@@ -342,7 +342,15 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
         loadFromEntry(child, "escape_sandbox", where.shell.value().escapeSandbox);
         loadFromEntry(child, "copy_last_mark_range_offset", where.copyLastMarkRangeOffset);
-        loadFromEntry(child, "initial_working_directory", where.shell.value().workingDirectory);
+        if(child["initial_working_directory"])
+            {
+                loadFromEntry(child, "initial_working_directory", where.shell.value().workingDirectory);
+            }
+        else
+            {
+                where.shell.value().workingDirectory = homeResolvedPath(where.shell.value().workingDirectory.generic_string(), Process::homeDirectory());
+            }
+
         loadFromEntry(child, "show_title_bar", where.showTitleBar);
         loadFromEntry(child, "size_indicator_on_resize", where.sizeIndicatorOnResize);
         loadFromEntry(child, "fullscreen", where.fullscreen);
@@ -1834,18 +1842,35 @@ std::string YAMLConfigWriter::createString(Config const& c)
             fmt::arg("comment", "#")));
     };
 
-    process(c.platformPlugin);
+    auto const processWordDelimiters = [&]() {
+        auto wordDelimiters = c.wordDelimiters.value();
+        wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
+        wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
+        doc.append(fmt::format(
+            fmt::runtime(format(addOffset(c.wordDelimiters.documentation, Offset::levels * OneOffset),
+                                wordDelimiters)),
+            fmt::arg("comment", "#")));
+    };
+
+    if (c.platformPlugin.value() == "")
+    {
+        processWithDoc(documentation::PlatformPlugin, std::string { "auto" });
+    }
+    else
+    {
+        process(c.platformPlugin);
+    }
 
     // inside renderer:
     scoped([&]() {
         doc.append("renderer: \n");
         process(c.renderingBackend);
-        process(c.textureAtlasDirectMapping);
         process(c.textureAtlasHashtableSlots);
         process(c.textureAtlasTileCount);
+        process(c.textureAtlasDirectMapping);
     });
 
-    process(c.wordDelimiters);
+    processWordDelimiters();
     process(c.ptyReadBufferSize);
     process(c.ptyBufferObjectSize);
     process(c.defaultProfileName);
@@ -1877,16 +1902,26 @@ std::string YAMLConfigWriter::createString(Config const& c)
             {
                 const auto _ = Offset {};
                 process(entry.shell);
-                process(entry.maximized);
-                process(entry.fullscreen);
-                process(entry.bell);
+                process(entry.ssh);
+
+                processWithDoc(documentation::EscapeSandbox, entry.shell.value().escapeSandbox);
+                process(entry.copyLastMarkRangeOffset);
+                processWithDoc(documentation::InitialWorkingDirectory, [&entry = entry]() {
+                    auto fromConfig = entry.shell.value().workingDirectory.string();
+                    if (fromConfig.empty())
+                        return std::string { "\"~\"" };
+                    return fromConfig;
+                }());
                 process(entry.showTitleBar);
                 process(entry.sizeIndicatorOnResize);
-                process(entry.copyLastMarkRangeOffset);
+                process(entry.fullscreen);
+                process(entry.maximized);
+                process(entry.bell);
                 process(entry.wmClass);
-                process(entry.terminalSize);
                 process(entry.terminalId);
+                processWithDoc(documentation::FrozenDecMode, 0);
                 process(entry.smoothLineScrolling);
+                process(entry.terminalSize);
 
                 process(entry.margins);
                 // history: section
@@ -1894,8 +1929,8 @@ std::string YAMLConfigWriter::createString(Config const& c)
                 {
                     const auto _ = Offset {};
                     process(entry.maxHistoryLineCount);
-                    process(entry.historyScrollMultiplier);
                     process(entry.autoScrollOnUpdate);
+                    process(entry.historyScrollMultiplier);
                 }
 
                 // scrollbar: section
@@ -1915,9 +1950,18 @@ std::string YAMLConfigWriter::createString(Config const& c)
                 }
 
                 //  permissions: section
-                doc.append(addOffset("\n"
-                                     "permissions:\n",
-                                     Offset::levels * OneOffset));
+                processWithDoc(
+                    documentation::StringLiteral {
+                        "\n"
+                        "{comment} Some VT sequences should need access permissions.\n"
+                        "{comment} \n"
+                        "{comment}  These can be to:\n"
+                        "{comment}  - allow     Allows the given functionality\n"
+                        "{comment}  - deny      Denies the given functionality\n"
+                        "{comment}  - ask       Asks the user interactively via popup dialog for "
+                        "permission of the given action.\n"
+                        "permissions:\n" },
+                    0);
                 {
                     const auto _ = Offset {};
                     process(entry.changeFont);
