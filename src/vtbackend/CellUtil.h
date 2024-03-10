@@ -103,12 +103,12 @@ template <CellConcept Cell>
     if (!AllowWidthChange)
         return 0;
 
-    auto const newWidth = [codepoint]() {
+    auto const newWidth = [codepoint]() -> int {
         switch (codepoint)
         {
             case 0xFE0E: return 1;
             case 0xFE0F: return 2;
-            default: return unicode::width(codepoint);
+            default: return static_cast<int>(unicode::width(codepoint));
         }
     }();
 

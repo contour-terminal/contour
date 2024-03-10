@@ -373,11 +373,15 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     if (!maxCharCount)
         return { ProcessKind::FallbackToFSM, 0 };
 
-    _scanState.next = nullptr;
     auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
-    auto const [cellCount, subStart, subEnd] = unicode::scan_text(_scanState, chunk, maxCharCount);
 
-    if (_scanState.next == input)
+    _graphemeLineSegmenter.reset(chunk);
+    unicode::grapheme_segmentation_result result = _graphemeLineSegmenter.process(maxCharCount);
+    auto const cellCount = result.width;
+    auto const* subStart = result.text.data();
+    auto const* subEnd = subStart + result.text.size();
+
+    if (result.text.empty())
         return { ProcessKind::FallbackToFSM, 0 };
 
     // We do not test on cellCount>0 because the scan could contain only a ZWJ (zero width
@@ -390,10 +394,10 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
 
     assert(cellCount <= maxCharCount);
     assert(subEnd <= chunk.data() + chunk.size());
-    assert(_scanState.next <= chunk.data() + chunk.size());
+    assert(_graphemeLineSegmenter.next() <= chunk.data() + chunk.size());
 
     auto const text = std::string_view { subStart, byteCount };
-    if (_scanState.utf8.expectedLength == 0)
+    if (!_graphemeLineSegmenter.is_utf8_byte_pending())
     {
         if (!text.empty())
             _eventListener.print(text, cellCount);
@@ -407,14 +411,14 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
             _eventListener.execute(*input++);
     }
 
-    auto const count = static_cast<size_t>(std::distance(input, _scanState.next));
+    auto const count = static_cast<size_t>(std::distance(input, _graphemeLineSegmenter.next())); 
     return { ProcessKind::ContinueBulk, count };
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
 {
-    unicode::ConvertResult const r = unicode::from_utf8(_scanState.utf8, (uint8_t) ch);
+    unicode::ConvertResult const r = _graphemeLineSegmenter.process_single_byte(static_cast<uint8_t>(ch));
     if (std::holds_alternative<unicode::Incomplete>(r))
         return;
 
@@ -422,7 +426,7 @@ void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
     auto const codepoint = std::holds_alternative<unicode::Success>(r) ? std::get<unicode::Success>(r).value
                                                                        : ReplacementCharacter;
     _eventListener.print(codepoint);
-    _scanState.lastCodepointHint = codepoint;
+    _graphemeLineSegmenter.reset_last_codepoint_hint(codepoint);
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
@@ -435,7 +439,7 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
 
     switch (action)
     {
-        case Action::GroundStart: _scanState.lastCodepointHint = 0; break;
+        case Action::GroundStart: _graphemeLineSegmenter.reset_last_codepoint_hint(); break;
         case Action::Clear: _eventListener.clear(); break;
         case Action::CollectLeader: _eventListener.collectLeader(ch); break;
         case Action::Collect: _eventListener.collect(ch); break;

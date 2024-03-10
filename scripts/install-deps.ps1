@@ -14,9 +14,9 @@ class ThirdParty {
 $ThirdParties =
 @(
     [ThirdParty]@{
-        Folder  = "libunicode-23d7b30166a914b10526bb8fe7a469a9610c07dc";
-        Archive = "libunicode-23d7b30166a914b10526bb8fe7a469a9610c07dc.zip";
-        URI     = "https://github.com/contour-terminal/libunicode/archive/23d7b30166a914b10526bb8fe7a469a9610c07dc.zip";
+        Folder  = "libunicode-dabfea48f7fd2a8bf6ae19e37581de5c127c607f";
+        Archive = "libunicode-dabfea48f7fd2a8bf6ae19e37581de5c127c607f.zip";
+        URI     = "https://github.com/contour-terminal/libunicode/archive/dabfea48f7fd2a8bf6ae19e37581de5c127c607f.zip";
         Macro   = "libunicode"
     };
     [ThirdParty]@{

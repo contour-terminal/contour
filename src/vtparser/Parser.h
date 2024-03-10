@@ -2,7 +2,7 @@
 #pragma once
 
 #include <libunicode/convert.h>
-#include <libunicode/scan.h>
+#include <libunicode/grapheme_line_segmenter.h>
 
 #include <fmt/core.h>
 
@@ -692,7 +692,10 @@ class Parser
 
     [[nodiscard]] State state() const noexcept { return _state; }
 
-    [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept { return _scanState.lastCodepointHint; }
+    [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept
+    {
+        return _graphemeLineSegmenter.last_codepoint_hint();
+    }
 
     void printUtf8Byte(char ch);
 
@@ -714,7 +717,7 @@ class Parser
     //
     State _state = State::Ground;
     EventListener& _eventListener;
-    unicode::scan_state _scanState {};
+    unicode::grapheme_line_segmenter<void> _graphemeLineSegmenter;
 };
 
 /// @returns parsed tuple with OSC code and offset to first data parameter byte.
