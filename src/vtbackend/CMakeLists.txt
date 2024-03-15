@@ -72,7 +72,6 @@ set(vtbackend_SOURCES
     SixelParser.cpp
     StatusLineBuilder.cpp
     Terminal.cpp
-    TerminalState.cpp
     VTType.cpp
     VTWriter.cpp
     Viewport.cpp

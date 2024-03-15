@@ -1,20 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/ColorPalette.h>
+#include <vtbackend/Cursor.h>
+#include <vtbackend/Grid.h>
+#include <vtbackend/Hyperlink.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/InputHandler.h>
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/ScreenEvents.h>
 #include <vtbackend/Selector.h>
 #include <vtbackend/Sequence.h>
+#include <vtbackend/Sequencer.h>
 #include <vtbackend/Settings.h>
 #include <vtbackend/StatusLineBuilder.h>
-#include <vtbackend/TerminalState.h>
+#include <vtbackend/ViCommands.h>
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/Viewport.h>
 #include <vtbackend/cell/CellConcept.h>
 #include <vtbackend/cell/CellConfig.h>
+#include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
+
+#include <vtparser/Parser.h>
 
 #include <vtpty/Pty.h>
 
@@ -27,11 +35,14 @@
 #include <gsl/pointers>
 
 #include <atomic>
+#include <bitset>
 #include <chrono>
+#include <condition_variable>
 #include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <stack>
 #include <string_view>
 
 namespace vtbackend
@@ -41,12 +52,124 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 class Screen;
 
+class ScreenBase;
+
 /// Helping information to visualize IME text that has not been comitted yet.
 struct InputMethodData
 {
     // If this string is non-empty, the IME is active and the given data
     // shall be displayed at the cursor's location.
     std::string preeditString;
+};
+
+// {{{ Modes
+/// API for setting/querying terminal modes.
+///
+/// This abstracts away the actual implementation for more intuitive use and easier future adaptability.
+class Modes
+{
+  public:
+    void set(AnsiMode mode, bool enabled) { _ansi.set(static_cast<size_t>(mode), enabled); }
+
+    bool set(DECMode mode, bool enabled)
+    {
+        if (_decFrozen[static_cast<size_t>(mode)])
+        {
+            errorLog()("Attempt to change frozen DEC mode {}. Ignoring.", mode);
+            return false;
+        }
+        _dec.set(static_cast<size_t>(mode), enabled);
+        return true;
+    }
+
+    [[nodiscard]] bool enabled(AnsiMode mode) const noexcept { return _ansi[static_cast<size_t>(mode)]; }
+    [[nodiscard]] bool enabled(DECMode mode) const noexcept { return _dec[static_cast<size_t>(mode)]; }
+
+    [[nodiscard]] bool frozen(DECMode mode) const noexcept
+    {
+        assert(isValidDECMode(static_cast<unsigned int>(mode)));
+        return _decFrozen.test(static_cast<size_t>(mode));
+    }
+
+    void freeze(DECMode mode)
+    {
+        assert(isValidDECMode(static_cast<unsigned int>(mode)));
+
+        if (mode == DECMode::BatchedRendering)
+        {
+            errorLog()("Attempt to freeze batched rendering. Ignoring.");
+            return;
+        }
+
+        _decFrozen.set(static_cast<size_t>(mode), true);
+        terminalLog()("Freezing {} DEC mode to permanently-{}.", mode, enabled(mode) ? "set" : "reset");
+    }
+
+    void unfreeze(DECMode mode)
+    {
+        assert(isValidDECMode(static_cast<unsigned int>(mode)));
+        _decFrozen.set(static_cast<size_t>(mode), false);
+        terminalLog()("Unfreezing permanently-{} DEC mode {}.", mode, enabled(mode));
+    }
+
+    void save(std::vector<DECMode> const& modes)
+    {
+        for (DECMode const mode: modes)
+            _savedModes[mode].push_back(enabled(mode));
+    }
+
+    void restore(std::vector<DECMode> const& modes)
+    {
+        for (DECMode const mode: modes)
+        {
+            if (auto i = _savedModes.find(mode); i != _savedModes.end() && !i->second.empty())
+            {
+                auto& saved = i->second;
+                set(mode, saved.back());
+                saved.pop_back();
+            }
+        }
+    }
+
+  private:
+    std::bitset<32> _ansi;                            // AnsiMode
+    std::bitset<8452 + 1> _dec;                       // DECMode
+    std::bitset<8452 + 1> _decFrozen;                 // DECMode
+    std::map<DECMode, std::vector<bool>> _savedModes; // saved DEC modes
+};
+// }}}
+
+struct Search
+{
+    std::u32string pattern;
+    ScrollOffset initialScrollOffset {};
+    bool initiatedByDoubleClick = false;
+};
+
+// Mandates what execution mode the terminal will take to process VT sequences.
+//
+enum class ExecutionMode
+{
+    // Normal execution mode, with no tracing enabled.
+    Normal,
+
+    // Trace mode is enabled and waiting for command to continue execution.
+    Waiting,
+
+    // Tracing mode is enabled and execution is stopped after each VT sequence.
+    SingleStep,
+
+    // Tracing mode is enabled, execution is stopped after queue of pending VT sequences is empty.
+    BreakAtEmptyQueue,
+
+    // Trace mode is enabled and execution is stopped at frame marker.
+    // TODO: BreakAtFrame,
+};
+
+enum class WrapPending
+{
+    Yes,
+    No,
 };
 
 // Implements Trace mode handling for the given controls.
@@ -173,25 +296,31 @@ class Terminal
     LineCount maxHistoryLineCount() const noexcept;
 
     void setTerminalId(VTType id) noexcept;
+    VTType terminalId() const noexcept { return _terminalId; }
 
-    void setMaxImageSize(ImageSize size) noexcept { _state.effectiveImageCanvasSize = size; }
+    void setMaxImageSize(ImageSize size) noexcept { _effectiveImageCanvasSize = size; }
+    ImageSize maxImageSize() const noexcept { return _effectiveImageCanvasSize; }
 
     void setMaxImageSize(ImageSize effective, ImageSize limit)
     {
-        _state.effectiveImageCanvasSize = effective;
+        _effectiveImageCanvasSize = effective;
         _settings.maxImageSize = limit;
     }
 
-    bool isModeEnabled(AnsiMode m) const noexcept { return _state.modes.enabled(m); }
-    bool isModeEnabled(DECMode m) const noexcept { return _state.modes.enabled(m); }
+    // {{{ Modes handling
+    bool isModeEnabled(AnsiMode m) const noexcept { return _modes.enabled(m); }
+    bool isModeEnabled(DECMode m) const noexcept { return _modes.enabled(m); }
     void setMode(AnsiMode mode, bool enable);
     void setMode(DECMode mode, bool enable);
+    void saveModes(std::vector<DECMode> const& modes) { _modes.save(modes); }
+    void restoreModes(std::vector<DECMode> const& modes) { _modes.restore(modes); }
     void freezeMode(DECMode mode, bool enable)
     {
         setMode(mode, enable);
-        _state.modes.freeze(mode);
+        _modes.freeze(mode);
     }
-    void unfreezeMode(DECMode mode) { _state.modes.unfreeze(mode); }
+    void unfreezeMode(DECMode mode) { _modes.unfreeze(mode); }
+    // }}}
 
     void setTopBottomMargin(std::optional<LineOffset> top, std::optional<LineOffset> bottom);
     void setLeftRightMargin(std::optional<ColumnOffset> left, std::optional<ColumnOffset> right);
@@ -208,8 +337,8 @@ class Terminal
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
     // [[nodiscard]] CellLocation clampToOrigin(CellLocation coord) const noexcept
     // {
-    //     return { std::clamp(coord.line, LineOffset { 0 }, _state.margin.vertical.to),
-    //              std::clamp(coord.column, ColumnOffset { 0 }, _state.margin.horizontal.to) };
+    //     return { std::clamp(coord.line, LineOffset { 0 }, _margin.vertical.to),
+    //              std::clamp(coord.column, ColumnOffset { 0 }, _margin.horizontal.to) };
     // }
 
     [[nodiscard]] LineOffset clampedLine(LineOffset line) const noexcept
@@ -241,8 +370,8 @@ class Terminal
     }
     // }}}
 
-    [[nodiscard]] constexpr ImageSize cellPixelSize() const noexcept { return _state.cellPixelSize; }
-    constexpr void setCellPixelSize(ImageSize cellPixelSize) { _state.cellPixelSize = cellPixelSize; }
+    [[nodiscard]] constexpr ImageSize cellPixelSize() const noexcept { return _cellPixelSize; }
+    constexpr void setCellPixelSize(ImageSize cellPixelSize) { _cellPixelSize = cellPixelSize; }
 
     /// Retrieves the time point this terminal instance has been spawned.
     [[nodiscard]] std::chrono::steady_clock::time_point currentTime() const noexcept { return _currentTime; }
@@ -255,11 +384,13 @@ class Terminal
 
     [[nodiscard]] PageSize totalPageSize() const noexcept { return _settings.pageSize; }
 
+    [[nodiscard]] ImageSize pixelSize() const noexcept { return cellPixelSize() * pageSize(); }
+
     // Returns number of lines for the currently displayed status line,
     // or 0 if status line is currently not displayed.
     [[nodiscard]] LineCount statusLineHeight() const noexcept
     {
-        switch (_state.statusDisplayType)
+        switch (_statusDisplayType)
         {
             case StatusDisplayType::None: return LineCount(0);
             case StatusDisplayType::Indicator: return _indicatorStatusScreen.pageSize().lines;
@@ -308,13 +439,13 @@ class Terminal
     void updateHighlights() { _eventListener.updateHighlights(); }
     void playSound(vtbackend::Sequence::Parameters const& params) { _eventListener.playSound(params); }
 
-    bool applicationCursorKeys() const noexcept { return _state.inputGenerator.applicationCursorKeys(); }
-    bool applicationKeypad() const noexcept { return _state.inputGenerator.applicationKeypad(); }
+    bool applicationCursorKeys() const noexcept { return _inputGenerator.applicationCursorKeys(); }
+    bool applicationKeypad() const noexcept { return _inputGenerator.applicationKeypad(); }
 
     bool hasInput() const noexcept;
     void flushInput();
 
-    std::string_view peekInput() const noexcept { return _state.inputGenerator.peek(); }
+    std::string_view peekInput() const noexcept { return _inputGenerator.peek(); }
     // }}}
 
     /// Writes a given VT-sequence to screen.
@@ -396,13 +527,17 @@ class Terminal
     void updateInputMethodPreeditString(std::string preeditString);
     // }}}
 
-    void lock() const { _outerLock.lock(); }
+    void lock() const { _stateMutex.lock(); }
+    void unlock() const { _stateMutex.unlock(); }
 
-    void unlock() const { _outerLock.unlock(); }
+    [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return _colorPalette; }
+    [[nodiscard]] ColorPalette& colorPalette() noexcept { return _colorPalette; }
+    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _defaultColorPalette; }
 
-    [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return _state.colorPalette; }
-    [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
-    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
+    [[nodiscard]] std::vector<ColorPalette> const& savedColorPalettes() const noexcept
+    {
+        return _savedColorPalettes;
+    }
 
     void setColorPalette(ColorPalette const& palette) noexcept;
     void resetColorPalette() noexcept { setColorPalette(defaultColorPalette()); }
@@ -417,7 +552,7 @@ class Terminal
 
     [[nodiscard]] ScreenBase& activeDisplay() noexcept
     {
-        switch (_state.activeStatusDisplay)
+        switch (_activeStatusDisplay)
         {
             case ActiveStatusDisplay::Main: return *_currentScreen;
             case ActiveStatusDisplay::StatusLine: return _hostWritableStatusLineScreen;
@@ -429,7 +564,7 @@ class Terminal
     [[nodiscard]] SequenceHandler& sequenceHandler() noexcept
     {
         // TODO: avoid double-switch by introducing a `SequenceHandler& sequenceHandler` member.
-        switch (_state.executionMode.load())
+        switch (_executionMode.load())
         {
             case ExecutionMode::Normal: return activeDisplay();
             case ExecutionMode::BreakAtEmptyQueue:
@@ -439,9 +574,9 @@ class Terminal
         crispy::unreachable();
     }
 
-    bool isPrimaryScreen() const noexcept { return _state.screenType == ScreenType::Primary; }
-    bool isAlternateScreen() const noexcept { return _state.screenType == ScreenType::Alternate; }
-    ScreenType screenType() const noexcept { return _state.screenType; }
+    bool isPrimaryScreen() const noexcept { return _currentScreenType == ScreenType::Primary; }
+    bool isAlternateScreen() const noexcept { return _currentScreenType == ScreenType::Alternate; }
+    ScreenType screenType() const noexcept { return _currentScreenType; }
     void setScreen(ScreenType screenType);
 
     ScreenBase& screenForType(ScreenType type) noexcept
@@ -481,6 +616,12 @@ class Terminal
             return _viewport.translateScreenToGridCoordinate(_currentMousePosition);
         return std::nullopt;
     }
+
+    [[nodiscard]] CellLocation normalModeCursorPosition() const noexcept
+    {
+        return _viCommands.cursorPosition;
+    }
+    void moveNormalModeCursorTo(CellLocation pos) noexcept { _viCommands.moveCursorTo(pos); }
 
     // {{{ cursor management
     CursorDisplay cursorDisplay() const noexcept { return _settings.cursorDisplay; }
@@ -581,6 +722,9 @@ class Terminal
     [[nodiscard]] std::string extractSelectionText() const;
     [[nodiscard]] std::string extractLastMarkRange() const;
 
+    HyperlinkStorage& hyperlinks() noexcept { return _hyperlinks; }
+    HyperlinkStorage const& hyperlinks() const noexcept { return _hyperlinks; }
+
     /// Tests whether or not the mouse is currently hovering a hyperlink.
     [[nodiscard]] bool isMouseHoveringHyperlink() const noexcept
     {
@@ -596,7 +740,7 @@ class Terminal
         return {};
     }
 
-    [[nodiscard]] ExecutionMode executionMode() const noexcept { return _state.executionMode; }
+    [[nodiscard]] ExecutionMode executionMode() const noexcept { return _executionMode; }
     void setExecutionMode(ExecutionMode mode);
 
     bool processInputOnce();
@@ -644,6 +788,9 @@ class Terminal
     void setMouseWheelMode(InputGenerator::MouseWheelMode mode);
     void setWindowTitle(std::string_view title);
     [[nodiscard]] std::string const& windowTitle() const noexcept;
+    [[nodiscard]] bool focused() const noexcept { return _focused; }
+    [[nodiscard]] Search& search() noexcept { return _search; }
+    [[nodiscard]] Search const& search() const noexcept { return _search; }
     void saveWindowTitle();
     void restoreWindowTitle();
     void setTerminalProfile(std::string const& configProfileName);
@@ -659,18 +806,15 @@ class Terminal
 
     void onViewportChanged();
 
-    void setMaxImageColorRegisters(unsigned value) noexcept { _state.maxImageColorRegisters = value; }
-
     /// @returns either an empty string or a file:// URL of the last set working directory.
     [[nodiscard]] std::string const& currentWorkingDirectory() const noexcept
     {
-        return _state.currentWorkingDirectory;
+        return _currentWorkingDirectory;
     }
 
-    void verifyState();
+    void setCurrentWorkingDirectory(std::string text) { _currentWorkingDirectory = std::move(text); }
 
-    [[nodiscard]] TerminalState& state() noexcept { return _state; }
-    [[nodiscard]] TerminalState const& state() const noexcept { return _state; }
+    void verifyState();
 
     void applyPageSizeToCurrentBuffer();
     void applyPageSizeToMainDisplay(ScreenType screenType);
@@ -691,19 +835,20 @@ class Terminal
 
     void onSelectionUpdated();
 
-    [[nodiscard]] ViInputHandler& inputHandler() noexcept { return _state.inputHandler; }
-    [[nodiscard]] ViInputHandler const& inputHandler() const noexcept { return _state.inputHandler; }
+    [[nodiscard]] ViInputHandler& inputHandler() noexcept { return _inputHandler; }
+    [[nodiscard]] ViInputHandler const& inputHandler() const noexcept { return _inputHandler; }
 
     [[nodiscard]] ExtendedKeyboardInputGenerator& keyboardProtocol() noexcept
     {
-        return _state.inputGenerator.keyboardProtocol();
+        return _inputGenerator.keyboardProtocol();
     }
 
     void resetHighlight();
 
-    StatusDisplayType statusDisplayType() const noexcept { return _state.statusDisplayType; }
+    StatusDisplayType statusDisplayType() const noexcept { return _statusDisplayType; }
     void setStatusDisplay(StatusDisplayType statusDisplayType);
     void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
+    constexpr ActiveStatusDisplay activeStatusDisplay() const noexcept { return _activeStatusDisplay; }
 
     void pushStatusDisplay(StatusDisplayType statusDisplayType);
     void popStatusDisplay();
@@ -724,6 +869,9 @@ class Terminal
                                                      bool initiatedByDoubleClick = false);
     [[nodiscard]] std::optional<CellLocation> search(CellLocation searchPosition);
 
+    [[nodiscard]] std::optional<CellLocation> searchNextMatch(CellLocation cursorPosition);
+    [[nodiscard]] std::optional<CellLocation> searchPrevMatch(CellLocation cursorPosition);
+
     bool setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick);
     void clearSearch();
 
@@ -733,10 +881,10 @@ class Terminal
     [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
         CellLocation position) const noexcept;
 
-    Settings& factorySettings() noexcept { return _factorySettings; }
-    Settings const& factorySettings() const noexcept { return _factorySettings; }
-    Settings const& settings() const noexcept { return _settings; }
-    Settings& settings() noexcept { return _settings; }
+    [[nodiscard]] Settings& factorySettings() noexcept { return _factorySettings; }
+    [[nodiscard]] Settings const& factorySettings() const noexcept { return _factorySettings; }
+    [[nodiscard]] Settings const& settings() const noexcept { return _settings; }
+    [[nodiscard]] Settings& settings() noexcept { return _settings; }
 
     // Renders current visual terminal state to the render buffer.
     //
@@ -744,14 +892,64 @@ class Terminal
     // @param includeSelection boolean to indicate whether or not to include colorize selection.
     void fillRenderBuffer(RenderBuffer& output, bool includeSelection); // <- acquires the lock
 
-    gsl::span<FunctionDefinition const> activeSequences() const noexcept
+    [[nodiscard]] gsl::span<FunctionDefinition const> activeSequences() const noexcept
     {
         return _supportedVTSequences.activeSequences();
     }
 
-    size_t maxBulkTextSequenceWidth() const noexcept;
+    // {{{ VT parser related
 
-    TraceHandler const& traceHandler() const noexcept { return _traceHandler; }
+    [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept;
+
+    [[nodiscard]] TraceHandler const& traceHandler() const noexcept { return _traceHandler; }
+
+    [[nodiscard]] constexpr auto const& parser() const noexcept { return _parser; }
+    [[nodiscard]] constexpr auto& parser() noexcept { return _parser; }
+
+    [[nodiscard]] bool usingStdoutFastPipe() const noexcept { return _usingStdoutFastPipe; }
+
+    void hookParser(std::unique_ptr<ParserExtension> parserExtension) noexcept
+    {
+        _sequencer.hookParser(std::move(parserExtension));
+    }
+
+    constexpr void resetInstructionCounter() noexcept { _instructionCounter = 0; }
+    constexpr void incrementInstructionCounter(size_t n = 1) noexcept { _instructionCounter += n; }
+    [[nodiscard]] constexpr uint64_t instructionCounter() const noexcept { return _instructionCounter; }
+    // }}}
+
+    std::vector<ColumnOffset>& tabs() noexcept { return _tabs; }
+    std::vector<ColumnOffset> const& tabs() const noexcept { return _tabs; }
+
+    ImagePool& imagePool() noexcept { return _imagePool; }
+    ImagePool const& imagePool() const noexcept { return _imagePool; }
+
+    bool syncWindowTitleWithHostWritableStatusDisplay() const noexcept
+    {
+        return _syncWindowTitleWithHostWritableStatusDisplay;
+    }
+
+    void setSyncWindowTitleWithHostWritableStatusDisplay(bool value) noexcept
+    {
+        _syncWindowTitleWithHostWritableStatusDisplay = value;
+    }
+
+    [[nodiscard]] std::optional<StatusDisplayType> savedStatusDisplayType() const noexcept
+    {
+        return _savedStatusDisplayType;
+    }
+
+    void setSavedStatusDisplayType(std::optional<StatusDisplayType> value) noexcept
+    {
+        _savedStatusDisplayType = value;
+    }
+
+    // {{{ Sixel image configuration
+    void setMaxSixelColorRegisters(unsigned value) noexcept { _maxSixelColorRegisters = value; }
+    [[nodiscard]] unsigned maxSixelColorRegisters() const noexcept { return _maxSixelColorRegisters; }
+    std::shared_ptr<SixelColorPalette>& sixelColorPalette() noexcept { return _sixelColorPalette; }
+    [[nodiscard]] bool usePrivateColorRegisters() const noexcept { return _usePrivateColorRegisters; }
+    // }}}
 
   private:
     void mainLoop();
@@ -779,7 +977,7 @@ class Terminal
 
     bool allowPassMouseEventToApp(Modifiers currentlyPressedModifier) const noexcept
     {
-        return _state.inputGenerator.mouseProtocol().has_value() && allowInput()
+        return _inputGenerator.mouseProtocol().has_value() && allowInput()
                && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier);
     }
 
@@ -807,10 +1005,9 @@ class Terminal
     // configuration state
     Settings _factorySettings;
     Settings _settings;
-    TerminalState _state;
 
     // synchronization
-    std::mutex mutable _outerLock;
+    std::mutex mutable _stateMutex;
 
     // terminal clock
     std::chrono::steady_clock::time_point _currentTime;
@@ -846,18 +1043,13 @@ class Terminal
     // }}}
 
     // {{{ Displays this terminal manages
-    // clang-format off
     Screen<PrimaryScreenCell> _primaryScreen;
     Screen<AlternateScreenCell> _alternateScreen;
     Screen<StatusDisplayCell> _hostWritableStatusLineScreen;
     Screen<StatusDisplayCell> _indicatorStatusScreen;
     gsl::not_null<ScreenBase*> _currentScreen;
     Viewport _viewport;
-    TraceHandler _traceHandler;
-
     StatusLineDefinition _indicatorStatusLineDefinition;
-    // clang-format on
-    // }}}
 
     // {{{ selection states
     std::unique_ptr<Selection> _selection;
@@ -889,10 +1081,80 @@ class Terminal
     std::atomic<bool> _renderBufferUpdateEnabled = true; // for "Synchronized Updates" feature
     std::optional<HighlightRange> _highlightRange = std::nullopt;
     SupportedSequences _supportedVTSequences;
+
+    // Execution Trace mode
+    std::atomic<ExecutionMode> _executionMode = ExecutionMode::Normal;
+    std::mutex _breakMutex;
+    std::condition_variable _breakCondition;
+    TraceHandler _traceHandler;
+
+    /// contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
+    ImageSize _cellPixelSize;
+
+    ColorPalette _defaultColorPalette;
+    ColorPalette _colorPalette;
+    std::vector<ColorPalette> _savedColorPalettes;
+    size_t _lastSavedColorPalette = 0;
+
+    bool _focused = true;
+
+    VTType _terminalId = VTType::VT525;
+
+    Modes _modes;
+    std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
+
+    // Screen margin - shared across all screens that are covering the main area,
+    // i.e. the primary screen and alternate screen.
+    // This excludes all status lines, title lines, etc.
+    Margin _mainScreenMargin;
+    Margin _hostWritableScreenMargin;
+    Margin _indicatorScreenMargin;
+
+    unsigned _maxSixelColorRegisters = 256;
+    ImageSize _effectiveImageCanvasSize;
+    std::shared_ptr<SixelColorPalette> _sixelColorPalette;
+    ImagePool _imagePool;
+
+    std::vector<ColumnOffset> _tabs;
+
+    ScreenType _currentScreenType = ScreenType::Primary;
+    StatusDisplayType _statusDisplayType = StatusDisplayType::None;
+    bool _syncWindowTitleWithHostWritableStatusDisplay = false;
+    std::optional<StatusDisplayType> _savedStatusDisplayType = std::nullopt;
+    ActiveStatusDisplay _activeStatusDisplay = ActiveStatusDisplay::Main;
+
+    Search _search;
+
+    CursorDisplay _cursorDisplay = CursorDisplay::Steady;
+    CursorShape _cursorShape = CursorShape::Block;
+
+    std::string _currentWorkingDirectory = {};
+
+    unsigned _maxImageRegisterCount = 256;
+    bool _usePrivateColorRegisters = false;
+
+    bool _usingStdoutFastPipe = false;
+
+    // Hyperlink related
+    //
+    HyperlinkStorage _hyperlinks {};
+
+    std::string _windowTitle {};
+    std::stack<std::string> _savedWindowTitles {};
+
+    Sequencer _sequencer;
+    vtparser::Parser<Sequencer, false> _parser;
+    uint64_t _instructionCounter = 0;
+
+    InputGenerator _inputGenerator {};
+
+    ViCommands _viCommands;
+    ViInputHandler _inputHandler;
 };
 
 } // namespace vtbackend
 
+// {{{ fmt formatter specializations
 template <>
 struct fmt::formatter<vtbackend::TraceHandler::PendingSequence>: fmt::formatter<std::string>
 {
@@ -912,3 +1174,62 @@ struct fmt::formatter<vtbackend::TraceHandler::PendingSequence>: fmt::formatter<
         return formatter<std::string>::format(value, ctx);
     }
 };
+
+template <>
+struct fmt::formatter<vtbackend::AnsiMode>: fmt::formatter<std::string>
+{
+    auto format(vtbackend::AnsiMode mode, format_context& ctx) -> format_context::iterator
+    {
+        return formatter<std::string>::format(to_string(mode), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<vtbackend::DECMode>: fmt::formatter<std::string>
+{
+    auto format(vtbackend::DECMode mode, format_context& ctx) -> format_context::iterator
+    {
+        return formatter<std::string>::format(to_string(mode), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<vtbackend::DynamicColorName>: formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(vtbackend::DynamicColorName value, FormatContext& ctx)
+    {
+        using vtbackend::DynamicColorName;
+        string_view name;
+        switch (value)
+        {
+            case DynamicColorName::DefaultForegroundColor: name = "DefaultForegroundColor"; break;
+            case DynamicColorName::DefaultBackgroundColor: name = "DefaultBackgroundColor"; break;
+            case DynamicColorName::TextCursorColor: name = "TextCursorColor"; break;
+            case DynamicColorName::MouseForegroundColor: name = "MouseForegroundColor"; break;
+            case DynamicColorName::MouseBackgroundColor: name = "MouseBackgroundColor"; break;
+            case DynamicColorName::HighlightForegroundColor: name = "HighlightForegroundColor"; break;
+            case DynamicColorName::HighlightBackgroundColor: name = "HighlightBackgroundColor"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<vtbackend::ExecutionMode>: formatter<std::string_view>
+{
+    auto format(vtbackend::ExecutionMode value, format_context& ctx) -> format_context::iterator
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::ExecutionMode::Normal: name = "NORMAL"; break;
+            case vtbackend::ExecutionMode::Waiting: name = "WAITING"; break;
+            case vtbackend::ExecutionMode::SingleStep: name = "SINGLE STEP"; break;
+            case vtbackend::ExecutionMode::BreakAtEmptyQueue: name = "BREAK AT EMPTY"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+// }}}

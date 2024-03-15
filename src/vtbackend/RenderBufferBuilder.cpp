@@ -136,7 +136,7 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
     // TODO: check if CursorStyle has changed, and update render context accordingly.
 
     auto constexpr InactiveCursorShape = CursorShape::Rectangle; // TODO configurable
-    auto const shape = _terminal->state().focused ? _terminal->cursorShape() : InactiveCursorShape;
+    auto const shape = _terminal->focused() ? _terminal->cursorShape() : InactiveCursorShape;
 
     auto const cursorScreenPosition =
         CellLocation { _baseLine + _cursorPosition->line
@@ -311,7 +311,7 @@ bool RenderBufferBuilder<Cell>::gridLineContainsCursor(LineOffset lineOffset) co
     if (_terminal->currentScreen().cursor().position.line == lineOffset)
         return true;
 
-    if (_cursorPosition && _terminal->state().inputHandler.mode() != ViMode::Insert)
+    if (_cursorPosition && _terminal->inputHandler().mode() != ViMode::Insert)
     {
         auto const viCursor = _terminal->viewport().translateGridToScreenCoordinate(_cursorPosition->line);
         if (viCursor == lineOffset)
@@ -399,21 +399,21 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
     if (_highlightSearchMatches == HighlightSearchMatches::No)
         return;
 
-    auto const& searchMode = _terminal->state().searchMode;
-    if (searchMode.pattern.empty())
+    auto const& search = _terminal->search();
+    if (search.pattern.empty())
         return;
 
     auto const isFullMatch = [&]() -> bool {
         if constexpr (std::is_same_v<Cell, T>)
         {
-            return !CellUtil::beginsWith(u32string_view(searchMode.pattern.data() + _searchPatternOffset,
-                                                        searchMode.pattern.size() - _searchPatternOffset),
+            return !CellUtil::beginsWith(u32string_view(search.pattern.data() + _searchPatternOffset,
+                                                        search.pattern.size() - _searchPatternOffset),
                                          cellText);
         }
         else
         {
-            return crispy::beginsWith(u32string_view(searchMode.pattern.data() + _searchPatternOffset,
-                                                     searchMode.pattern.size() - _searchPatternOffset),
+            return crispy::beginsWith(u32string_view(search.pattern.data() + _searchPatternOffset,
+                                                     search.pattern.size() - _searchPatternOffset),
                                       cellText);
         }
     }();
@@ -430,7 +430,7 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
     else
         _searchPatternOffset += cellText.size();
 
-    if (_searchPatternOffset < searchMode.pattern.size())
+    if (_searchPatternOffset < search.pattern.size())
         return; // match incomplete
 
     // match complete
@@ -442,21 +442,21 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
             _output->cells[offsetIntoFront].position,
             _output->cells.back().position,
         }
-            .contains(_terminal->viewport().translateGridToScreenCoordinate(
-                _terminal->state().viCommands.cursorPosition));
+            .contains(
+                _terminal->viewport().translateGridToScreenCoordinate(_terminal->normalModeCursorPosition()));
 
     auto highlightColors = [&]() -> CellRGBColorAndAlphaPair {
         // Oh yeah, this can be optimized :)
         if (isFocusedMatch)
         {
-            if (_terminal->state().searchMode.initiatedByDoubleClick)
+            if (_terminal->search().initiatedByDoubleClick)
                 return _terminal->colorPalette().wordHighlightCurrent;
             else
                 return _terminal->colorPalette().searchHighlightFocused;
         }
         else
         {
-            if (_terminal->state().searchMode.initiatedByDoubleClick)
+            if (_terminal->search().initiatedByDoubleClick)
                 return _terminal->colorPalette().wordHighlight;
             else
                 return _terminal->colorPalette().searchHighlight;
@@ -616,13 +616,8 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset li
     _prevWidth = screenCell.width();
     _prevHasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
-    _output->cells.emplace_back(makeRenderCell(_terminal->colorPalette(),
-                                               _terminal->state().hyperlinks,
-                                               screenCell,
-                                               fg,
-                                               bg,
-                                               _baseLine + line,
-                                               column));
+    _output->cells.emplace_back(makeRenderCell(
+        _terminal->colorPalette(), _terminal->hyperlinks(), screenCell, fg, bg, _baseLine + line, column));
 
     if (column == ColumnOffset(0))
         _output->cells.back().groupStart = true;

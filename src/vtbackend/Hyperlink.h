@@ -74,7 +74,7 @@ using HyperlinkCache = crispy::lru_cache<HyperlinkId, std::shared_ptr<HyperlinkI
 
 struct HyperlinkStorage
 {
-    HyperlinkCache cache { 1024 };
+    mutable HyperlinkCache cache { 1024 };
     HyperlinkId nextHyperlinkId = HyperlinkId(1);
 
     std::shared_ptr<HyperlinkInfo> hyperlinkById(HyperlinkId id) noexcept
@@ -93,7 +93,7 @@ struct HyperlinkStorage
         return {};
     }
 
-    HyperlinkId hyperlinkIdByUserId(std::string const& id) noexcept
+    HyperlinkId hyperlinkIdByUserId(std::string const& id) const noexcept
     {
         for (auto& href: cache)
         {

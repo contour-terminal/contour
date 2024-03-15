@@ -188,51 +188,29 @@ void ViCommands::searchDone()
 
 void ViCommands::searchCancel()
 {
-    _terminal->state().searchMode.pattern.clear();
+    _terminal->search().pattern.clear();
     _terminal->screenUpdated();
 }
 
 bool ViCommands::jumpToNextMatch(unsigned count)
 {
     for (unsigned i = 0; i < count; ++i)
-    {
-        auto startPosition = cursorPosition;
-        if (startPosition.column < boxed_cast<ColumnOffset>(_terminal->pageSize().columns))
-            startPosition.column++;
-        else if (cursorPosition.line < boxed_cast<LineOffset>(_terminal->pageSize().lines) - 1)
-        {
-            startPosition.line++;
-            startPosition.column = ColumnOffset(0);
-        }
-
-        auto const nextPosition = _terminal->search(startPosition);
-        if (!nextPosition)
+        if (auto const nextPosition = _terminal->searchNextMatch(cursorPosition))
+            moveCursorTo(nextPosition.value());
+        else
             return false;
 
-        moveCursorTo(nextPosition.value());
-    }
     return true;
 }
 
 bool ViCommands::jumpToPreviousMatch(unsigned count)
 {
     for (unsigned i = 0; i < count; ++i)
-    {
-        auto startPosition = cursorPosition;
-        if (startPosition.column != ColumnOffset(0))
-            startPosition.column--;
-        else if (cursorPosition.line > -boxed_cast<LineOffset>(_terminal->currentScreen().historyLineCount()))
-        {
-            startPosition.line--;
-            startPosition.column = boxed_cast<ColumnOffset>(_terminal->pageSize().columns) - 1;
-        }
-
-        auto const nextPosition = _terminal->searchReverse(startPosition);
-        if (!nextPosition)
+        if (auto const nextPosition = _terminal->searchPrevMatch(cursorPosition))
+            moveCursorTo(nextPosition.value());
+        else
             return false;
 
-        moveCursorTo(nextPosition.value());
-    }
     return true;
 }
 

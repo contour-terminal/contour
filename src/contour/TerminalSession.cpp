@@ -470,7 +470,7 @@ void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remembe
     _terminal.setStatusDisplay(vtbackend::StatusDisplayType::HostWritable);
     displayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
     flushInput();
-    _terminal.state().syncWindowTitleWithHostWritableStatusDisplay = false;
+    _terminal.setSyncWindowTitleWithHostWritableStatusDisplay(false);
 }
 
 vtbackend::FontDef TerminalSession::getFontDef()
@@ -1017,16 +1017,22 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 
 bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 {
-    if (_terminal.state().viCommands.jumpToNextMatch(1))
-        _terminal.viewport().makeVisibleWithinSafeArea(_terminal.state().viCommands.cursorPosition.line);
+    auto const nextPosition = _terminal.searchNextMatch(_terminal.normalModeCursorPosition());
+    if (!nextPosition)
+        return false;
+    _terminal.moveNormalModeCursorTo(nextPosition.value());
+    _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
     // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToNextMatch not work?
     return true;
 }
 
 bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
 {
-    if (_terminal.state().viCommands.jumpToPreviousMatch(1))
-        _terminal.viewport().makeVisibleWithinSafeArea(_terminal.state().viCommands.cursorPosition.line);
+    auto const nextPosition = _terminal.searchPrevMatch(_terminal.normalModeCursorPosition());
+    if (!nextPosition)
+        return false;
+    _terminal.moveNormalModeCursorTo(nextPosition.value());
+    _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
     // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToPreviousMatch not work?
     return true;
 }
@@ -1265,7 +1271,7 @@ bool TerminalSession::operator()(actions::ToggleInputProtection)
 bool TerminalSession::operator()(actions::ToggleStatusLine)
 {
     auto const l = scoped_lock { _terminal };
-    if (terminal().state().statusDisplayType != StatusDisplayType::Indicator)
+    if (terminal().statusDisplayType() != StatusDisplayType::Indicator)
         terminal().setStatusDisplay(StatusDisplayType::Indicator);
     else
         terminal().setStatusDisplay(StatusDisplayType::None);
@@ -1273,8 +1279,8 @@ bool TerminalSession::operator()(actions::ToggleStatusLine)
     // `savedStatusDisplayType` holds only a value if the application has been overriding
     // the status display type. But the user now actively requests a given type,
     // so make sure restoring will not destroy the user's desire.
-    if (terminal().state().savedStatusDisplayType)
-        terminal().state().savedStatusDisplayType = terminal().state().statusDisplayType;
+    if (terminal().savedStatusDisplayType())
+        terminal().setSavedStatusDisplayType(terminal().statusDisplayType());
 
     return true;
 }
@@ -1334,7 +1340,7 @@ void TerminalSession::setDefaultCursor()
         return;
 
     using Type = vtbackend::ScreenType;
-    switch (terminal().screenType())
+    switch (_terminal.screenType())
     {
         case Type::Primary: _display->setMouseCursorShape(MouseCursorShape::IBeam); break;
         case Type::Alternate: _display->setMouseCursorShape(MouseCursorShape::Arrow); break;
@@ -1450,7 +1456,7 @@ void TerminalSession::configureTerminal()
 
     sessionLog()("Setting terminal ID to {}.", _profile.terminalId.value());
     _terminal.setTerminalId(_profile.terminalId.value());
-    _terminal.setMaxImageColorRegisters(_config.maxImageColorRegisters.value());
+    _terminal.setMaxSixelColorRegisters(_config.maxImageColorRegisters.value());
     _terminal.setMaxImageSize(_config.maxImageSize.value());
     _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.sixelScrolling.value());
     _terminal.setStatusDisplay(_profile.initialStatusDisplayType.value());
@@ -1532,7 +1538,7 @@ uint8_t TerminalSession::matchModeFlags() const
     if (_terminal.inputHandler().mode() == ViMode::Insert)
         flags |= static_cast<uint8_t>(MatchModes::Flag::Insert);
 
-    if (!_terminal.state().searchMode.pattern.empty())
+    if (!_terminal.search().pattern.empty())
         flags |= static_cast<uint8_t>(MatchModes::Flag::Search);
 
     if (_terminal.executionMode() != ExecutionMode::Normal)

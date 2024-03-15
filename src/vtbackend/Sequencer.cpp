@@ -27,7 +27,7 @@ void Sequencer::error(std::string_view errorString)
 
 void Sequencer::print(char32_t codepoint)
 {
-    _terminal.state().instructionCounter++;
+    _terminal.incrementInstructionCounter();
     _terminal.sequenceHandler().writeText(codepoint);
 }
 
@@ -35,7 +35,7 @@ size_t Sequencer::print(std::string_view chars, size_t cellCount)
 {
     assert(!chars.empty());
 
-    _terminal.state().instructionCounter += chars.size();
+    _terminal.incrementInstructionCounter(chars.size());
     _terminal.sequenceHandler().writeText(chars, cellCount);
 
     return _terminal.settings().pageSize.columns.as<size_t>()
@@ -118,7 +118,7 @@ void Sequencer::dispatchOSC()
 
 void Sequencer::hook(char finalChar)
 {
-    _terminal.state().instructionCounter++;
+    _terminal.incrementInstructionCounter();
     _sequence.setCategory(FunctionCategory::DCS);
     _sequence.setFinalChar(finalChar);
 

@@ -76,6 +76,16 @@ inline ImageSize operator*(ImageSize a, double scalar) noexcept
                        Height::cast_from(std::ceil(double(*a.height) * scalar)) };
 }
 
+constexpr ImageSize min(ImageSize a, ImageSize b) noexcept
+{
+    return ImageSize { std::min(a.width, b.width), std::min(a.height, b.height) };
+}
+
+constexpr ImageSize max(ImageSize a, ImageSize b) noexcept
+{
+    return ImageSize { std::max(a.width, b.width), std::max(a.height, b.height) };
+}
+
 } // namespace vtpty
 
 template <>
