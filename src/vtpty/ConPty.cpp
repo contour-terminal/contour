@@ -144,7 +144,7 @@ Pty::ReadResult ConPty::read(crispy::buffer_object<char>& buffer,
     // TODO: wait for timeout time at most AND got woken up upon wakeupReader() invokcation.
     (void) timeout;
 
-    auto const n = static_cast<DWORD>(min(size, buffer.bytesAvailable()));
+    auto const n = static_cast<DWORD>(std::min(size, buffer.bytesAvailable()));
 
     DWORD nread {};
     if (!ReadFile(_input, buffer.hotEnd(), n, &nread, nullptr))
