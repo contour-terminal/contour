@@ -384,15 +384,6 @@ const InputMappings defaultInputMappings {
                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
                           .input = vtbackend::Key::Enter,
                           .binding = { { actions::ToggleFullscreen {} } } },
-        KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
-                             auto mods = vtbackend::MatchModes();
-                             mods.enable(vtbackend::MatchModes::Select);
-                             mods.enable(vtbackend::MatchModes::Insert);
-                             return mods;
-                         }(),
-                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
-                          .input = vtbackend::Key::Enter,
-                          .binding = { { actions::ToggleFullscreen {} } } },
         KeyInputMapping { .modes {},
                           .modifiers { vtbackend::Modifiers {} },
                           .input = vtbackend::Key::Escape,
@@ -653,7 +644,7 @@ struct Config
     };
     ConfigEntry<std::string, "default_profile: {}\n"> defaultProfileName { "main" };
     ConfigEntry<std::string, documentation::WordDelimiters> wordDelimiters {
-        " /\\\\()\\\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
+        " /\\()\"'-.,:;<>~!@#$%^&*+=[]{{}}~?|│"
     };
     ConfigEntry<vtbackend::Modifiers, documentation::BypassMouseProtocolModifiers>
         bypassMouseProtocolModifiers { vtbackend::Modifier::Shift };
@@ -1008,6 +999,11 @@ struct YAMLConfigWriter
         args.append(v.arguments | ranges::views::join(", ") | ranges::to<std::string>);
         args.append("]");
         return format(doc, v.program, args);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, vtpty::SshHostConfig const& v)
+    {
+        return format(doc, v.hostname);
     }
 
     [[nodiscard]] std::string static format(vtbackend::CellRGBColor const& v)

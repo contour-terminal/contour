@@ -259,7 +259,11 @@ struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
         HANDLE_ACTION(TraceLeave);
         HANDLE_ACTION(TraceStep);
         HANDLE_ACTION(ViNormalMode);
-        HANDLE_ACTION(WriteScreen);
+        if (std::holds_alternative<contour::actions::WriteScreen>(_action))
+        {
+            const auto WriteScreenAction = std::get<contour::actions::WriteScreen>(_action);
+            name = fmt::format("{} chars: '{}'", WriteScreenAction, WriteScreenAction.chars);
+        }
         // }}}
         return formatter<string_view>::format(name, ctx);
     }

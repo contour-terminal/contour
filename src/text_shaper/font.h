@@ -370,7 +370,7 @@ struct fmt::formatter<text::font_slant>: formatter<string_view>
         string_view name;
         switch (value)
         {
-            case text::font_slant::normal: name = "Roman"; break;
+            case text::font_slant::normal: name = "Normal"; break;
             case text::font_slant::italic: name = "Italic"; break;
             case text::font_slant::oblique: name = "Oblique"; break;
         }

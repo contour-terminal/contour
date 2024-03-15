@@ -24,6 +24,22 @@ constexpr StringLiteral Shell {
     "\n"
 };
 
+constexpr StringLiteral InitialWorkingDirectory {
+    "{comment} Sets initial working directory when spawning a new terminal.\n"
+    "{comment} A leading ~ is expanded to the user's home directory.\n"
+    "{comment} Default value is the user's home directory.\n"
+    "initial_working_directory: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral EscapeSandbox {
+    "{comment} If this terminal is being executed from within Flatpak, enforces sandboxing\n"
+    "{comment} then this boolean indicates whether or not that sandbox should be escaped or not.\n"
+    "{comment}\n"
+    "escape_sandbox: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral SshHostConfig {
     "{comment} Builtin SSH-client configuration.\n"
     "{comment} Use this to directly connect to an SSH server.\n"
@@ -407,6 +423,7 @@ constexpr StringLiteral BackgroundBlur {
 };
 
 constexpr StringLiteral Bell {
+    "\n"
     "bell:\n"
     "    {comment} There is no sound for BEL character if set to \"off\".\n"
     "    {comment} If set to \" default \" BEL character sound will be default sound.\n"
@@ -421,7 +438,6 @@ constexpr StringLiteral Bell {
     "\n"
     "    {comment} If this boolean is true, a window alert will "
     "be raised with each bell\n"
-
     "    alert: true\n"
     "\n"
 };
