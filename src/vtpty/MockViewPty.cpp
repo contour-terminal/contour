@@ -4,7 +4,6 @@
 
 #include <crispy/BufferObject.h>
 
-using std::min;
 using std::optional;
 using std::string_view;
 using std::tuple;
@@ -27,7 +26,7 @@ optional<tuple<string_view, bool>> MockViewPty::read(crispy::buffer_object<char>
                                                      std::optional<std::chrono::milliseconds> /*timeout*/,
                                                      size_t size)
 {
-    auto const n = min(min(_outputBuffer.size(), storage.bytesAvailable()), size);
+    auto const n = std::min(std::min(_outputBuffer.size(), storage.bytesAvailable()), size);
     auto result = storage.writeAtEnd(_outputBuffer.substr(0, n));
     _outputBuffer.remove_prefix(n);
     return { tuple { string_view(result.data(), result.size()), false } };

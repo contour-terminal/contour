@@ -362,7 +362,7 @@ struct VTSerializer
 
     std::string visit(StatusLineDefinitions::SearchMode const&)
     {
-        if (!vt.state().searchMode.pattern.empty() || vt.state().inputHandler.isEditingSearch())
+        if (!vt.search().pattern.empty() || vt.inputHandler().isEditingSearch())
             return " SEARCH";
 
         return {};
@@ -370,9 +370,9 @@ struct VTSerializer
 
     std::string visit(StatusLineDefinitions::SearchPrompt const&)
     {
-        if (vt.state().inputHandler.isEditingSearch())
+        if (vt.inputHandler().isEditingSearch())
             return fmt::format("Search: {}█",
-                               unicode::convert_to<char>(std::u32string_view(vt.state().searchMode.pattern)));
+                               unicode::convert_to<char>(std::u32string_view(vt.search().pattern)));
 
         return {};
     }
@@ -406,10 +406,7 @@ struct VTSerializer
         return item.text;
     }
 
-    std::string visit(StatusLineDefinitions::VTType const&)
-    {
-        return fmt::format("{}", vt.state().terminalId);
-    }
+    std::string visit(StatusLineDefinitions::VTType const&) { return fmt::format("{}", vt.terminalId()); }
     // }}}
 };
 

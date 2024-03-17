@@ -41,8 +41,6 @@
 #endif
 
 using std::make_unique;
-using std::max;
-using std::min;
 using std::nullopt;
 using std::numeric_limits;
 using std::optional;
@@ -287,7 +285,7 @@ Pty::ReadResult UnixPty::read(crispy::buffer_object<char>& storage,
     if (auto const fd = _readSelector.wait_one(timeout); fd.has_value())
     {
         auto const l = scoped_lock { storage };
-        if (auto x = readSome(*fd, storage.hotEnd(), min(size, storage.bytesAvailable())))
+        if (auto x = readSome(*fd, storage.hotEnd(), std::min(size, storage.bytesAvailable())))
             return { tuple { x.value(), *fd == _stdoutFastPipe.reader() } };
     }
     else

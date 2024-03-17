@@ -905,59 +905,57 @@ TEST_CASE("ClearLine", "[screen]")
 TEST_CASE("DECFI", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = mock.terminal.primaryScreen();
+    auto& primaryScreen = mock.terminal.primaryScreen();
 
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(4) });
-    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+    REQUIRE(primaryScreen.realCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(4) });
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == primaryScreen.renderMainPageText());
 
     mock.writeToScreen(DECSM(69)); // Enable left right margin mode
     REQUIRE(mock.terminal.isModeEnabled(DECMode::LeftRightMargin));
 
     mock.writeToScreen(DECSLRM(2, 4)); // Set left/right margin
-    REQUIRE(mock.terminal.state().mainScreenMargin.horizontal
-            == Margin::Horizontal { ColumnOffset(1), ColumnOffset(3) });
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(primaryScreen.margin().horizontal == Margin::Horizontal { ColumnOffset(1), ColumnOffset(3) });
+    REQUIRE(primaryScreen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     mock.writeToScreen(DECSTBM(2, 4)); // Set top/bottom margin
-    REQUIRE(mock.terminal.state().mainScreenMargin.vertical
-            == Margin::Vertical { LineOffset(1), LineOffset(3) });
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(primaryScreen.margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+    REQUIRE(primaryScreen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // from 0,0 to 0,1 (from outside margin to left border)
     mock.writeToScreen(DECFI());
-    CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
-    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+    CHECK(primaryScreen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == primaryScreen.renderMainPageText());
 
     // from 0,1 to 0,2
     mock.writeToScreen(DECFI());
-    CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
-    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+    CHECK(primaryScreen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == primaryScreen.renderMainPageText());
 
     // from 0,2 to 0,3
     mock.writeToScreen(DECFI());
-    CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
-    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+    CHECK(primaryScreen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == primaryScreen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left
     mock.writeToScreen(DECFI());
-    CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
-    REQUIRE("12345\n689 0\nACD E\nFHI J\nKLMNO\n" == screen.renderMainPageText());
+    CHECK(primaryScreen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
+    REQUIRE("12345\n689 0\nACD E\nFHI J\nKLMNO\n" == primaryScreen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left
     mock.writeToScreen(DECFI());
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
-    REQUIRE("12345\n69  0\nAD  E\nFI  J\nKLMNO\n" == screen.renderMainPageText());
+    REQUIRE(primaryScreen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
+    REQUIRE("12345\n69  0\nAD  E\nFI  J\nKLMNO\n" == primaryScreen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left (now all empty)
     mock.writeToScreen(DECFI());
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
-    REQUIRE("12345\n6   0\nA   E\nF   J\nKLMNO\n" == screen.renderMainPageText());
+    REQUIRE(primaryScreen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
+    REQUIRE("12345\n6   0\nA   E\nF   J\nKLMNO\n" == primaryScreen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left (looks just like before)
     mock.writeToScreen(DECFI());
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
-    REQUIRE("12345\n6   0\nA   E\nF   J\nKLMNO\n" == screen.renderMainPageText());
+    REQUIRE(primaryScreen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
+    REQUIRE("12345\n6   0\nA   E\nF   J\nKLMNO\n" == primaryScreen.renderMainPageText());
 }
 
 TEST_CASE("InsertColumns", "[screen]")
@@ -3244,15 +3242,14 @@ TEST_CASE("DECTABSR", "[screen]")
 TEST_CASE("save_restore_DEC_modes", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto& screen = mock.terminal.primaryScreen();
 
     mock.terminal.setMode(DECMode::MouseProtocolHighlightTracking, false);
-    screen.saveModes(vector { DECMode::MouseProtocolHighlightTracking });
+    mock.terminal.saveModes({ DECMode::MouseProtocolHighlightTracking });
 
     mock.terminal.setMode(DECMode::MouseProtocolHighlightTracking, true);
     CHECK(mock.terminal.isModeEnabled(DECMode::MouseProtocolHighlightTracking));
 
-    screen.restoreModes(vector { DECMode::MouseProtocolHighlightTracking });
+    mock.terminal.restoreModes({ DECMode::MouseProtocolHighlightTracking });
     CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::MouseProtocolHighlightTracking));
 }
 

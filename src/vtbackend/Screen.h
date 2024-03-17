@@ -8,8 +8,9 @@
 #include <vtbackend/Grid.h>
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
+#include <vtbackend/ScreenBase.h>
 #include <vtbackend/ScreenEvents.h>
-#include <vtbackend/TerminalState.h>
+#include <vtbackend/Sequencer.h>
 #include <vtbackend/VTType.h>
 #include <vtbackend/cell/CellConcept.h>
 
@@ -28,61 +29,18 @@
 #include <gsl/pointers>
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace vtbackend
 {
 
-class ScreenBase: public SequenceHandler
-{
-  public:
-    virtual void verifyState() const = 0;
-    virtual void fail(std::string const& message) const = 0;
-
-    [[nodiscard]] Cursor& cursor() noexcept { return _cursor; }
-    [[nodiscard]] Cursor const& cursor() const noexcept { return _cursor; }
-    [[nodiscard]] Cursor const& savedCursorState() const noexcept { return _savedCursor; }
-    void resetSavedCursorState() { _savedCursor = {}; }
-    virtual void saveCursor() = 0;
-    virtual void restoreCursor() = 0;
-    virtual void reportColorPaletteUpdate() = 0;
-
-    [[nodiscard]] virtual bool contains(CellLocation coord) const noexcept = 0;
-    [[nodiscard]] virtual bool isCellEmpty(CellLocation position) const noexcept = 0;
-    [[nodiscard]] virtual bool compareCellTextAt(CellLocation position,
-                                                 char32_t codepoint) const noexcept = 0;
-    [[nodiscard]] virtual std::string cellTextAt(CellLocation position) const noexcept = 0;
-    [[nodiscard]] virtual CellFlags cellFlagsAt(CellLocation position) const noexcept = 0;
-    [[nodiscard]] virtual LineFlags lineFlagsAt(LineOffset line) const noexcept = 0;
-    virtual void enableLineFlags(LineOffset lineOffset, LineFlags flags, bool enable) noexcept = 0;
-    [[nodiscard]] virtual bool isLineFlagEnabledAt(LineOffset line, LineFlags flags) const noexcept = 0;
-    [[nodiscard]] virtual std::string lineTextAt(LineOffset line,
-                                                 bool stripLeadingSpaces = true,
-                                                 bool stripTrailingSpaces = true) const noexcept = 0;
-    [[nodiscard]] virtual bool isLineEmpty(LineOffset line) const noexcept = 0;
-    [[nodiscard]] virtual uint8_t cellWidthAt(CellLocation position) const noexcept = 0;
-    [[nodiscard]] virtual LineCount historyLineCount() const noexcept = 0;
-    [[nodiscard]] virtual HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept = 0;
-    [[nodiscard]] virtual std::shared_ptr<HyperlinkInfo const> hyperlinkAt(
-        CellLocation pos) const noexcept = 0;
-    virtual void inspect(std::string const& message, std::ostream& os) const = 0;
-    virtual void moveCursorTo(LineOffset line, ColumnOffset column) = 0; // CUP
-    virtual void updateCursorIterator() noexcept = 0;
-
-    [[nodiscard]] virtual std::optional<CellLocation> search(std::u32string_view searchText,
-                                                             CellLocation startPosition) = 0;
-    [[nodiscard]] virtual std::optional<CellLocation> searchReverse(std::u32string_view searchText,
-                                                                    CellLocation startPosition) = 0;
-
-  protected:
-    Cursor _cursor {};
-    Cursor _savedCursor {};
-};
+class Terminal;
+struct Settings;
 
 /**
  * Terminal Screen.
@@ -287,13 +245,10 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void inspect(std::string const& message, std::ostream& os) const override;
 
     // for DECSC and DECRC
-    void saveModes(std::vector<DECMode> const& modes);
-    void restoreModes(std::vector<DECMode> const& modes);
     void requestAnsiMode(unsigned int mode);
     void requestDECMode(unsigned int mode);
 
     [[nodiscard]] PageSize pageSize() const noexcept { return _grid.pageSize(); }
-    [[nodiscard]] ImageSize pixelSize() const noexcept { return _state->cellPixelSize * _settings->pageSize; }
 
     [[nodiscard]] constexpr Margin margin() const noexcept { return *_margin; }
     [[nodiscard]] constexpr Margin& margin() noexcept { return *_margin; }
@@ -466,8 +421,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] Cell& useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
     [[nodiscard]] Cell const& at(CellLocation p) const noexcept { return _grid.at(p.line, p.column); }
 
-    [[nodiscard]] std::string const& windowTitle() const noexcept { return _state->windowTitle; }
-
     /// Finds the next marker right after the given line position.
     ///
     /// @paramn startLine the line number of the current cursor (1..N) for screen area, or
@@ -484,9 +437,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     ///         in the screen area, and in the savedLines area otherwise.
     [[nodiscard]] std::optional<LineOffset> findMarkerUpwards(LineOffset startLine) const;
 
-    /// ScreenBuffer's type, such as main screen or alternate screen.
-    [[nodiscard]] ScreenType bufferType() const noexcept { return _state->screenType; }
-
     void scrollUp(LineCount n) { scrollUp(n, margin()); }
     void scrollDown(LineCount n) { scrollDown(n, margin()); }
 
@@ -499,15 +449,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] bool isLineWrapped(LineOffset lineNumber) const noexcept
     {
         return _grid.isLineWrapped(lineNumber);
-    }
-
-    [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state->colorPalette; }
-    [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return _state->colorPalette; }
-
-    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state->defaultColorPalette; }
-    [[nodiscard]] ColorPalette const& defaultColorPalette() const noexcept
-    {
-        return _state->defaultColorPalette;
     }
 
     [[nodiscard]] bool isCellEmpty(CellLocation position) const noexcept override
@@ -578,19 +519,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return at(position).hyperlink();
     }
 
-    [[nodiscard]] std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept override
-    {
-        return _state->hyperlinks.hyperlinkById(hyperlinkIdAt(pos));
-    }
-
-    [[nodiscard]] HyperlinkStorage const& hyperlinks() const noexcept { return _state->hyperlinks; }
-
-    void resetInstructionCounter() noexcept { _state->instructionCounter = 0; }
-    [[nodiscard]] uint64_t instructionCounter() const noexcept { return _state->instructionCounter; }
-    [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept
-    {
-        return _state->parser.precedingGraphicCharacter();
-    }
+    [[nodiscard]] std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept override;
 
     void applyAndLog(FunctionDefinition const& function, Sequence const& seq);
     [[nodiscard]] ApplyResult apply(FunctionDefinition const& function, Sequence const& seq);
@@ -653,7 +582,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     gsl::not_null<Terminal*> _terminal;
     gsl::not_null<Settings*> _settings;
-    gsl::not_null<TerminalState*> _state;
     gsl::not_null<Margin*> _margin;
     Grid<Cell> _grid;
 

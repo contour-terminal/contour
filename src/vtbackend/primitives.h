@@ -106,6 +106,7 @@ struct PixelCoordinate
     Y y {};
 };
 
+// {{{ CellLocation and related types
 struct [[nodiscard]] CellLocation
 {
     LineOffset line {};
@@ -217,7 +218,6 @@ struct ColumnRange
         return line == location.line && fromColumn <= location.column && location.column <= toColumn;
     }
 };
-
 // }}}
 // {{{ Range
 
@@ -448,7 +448,7 @@ enum class HighlightSearchMatches
 enum class ScreenType
 {
     Primary = 0,
-    Alternate = 1
+    Alternate = 1,
 };
 
 // TODO: Maybe make boxed.h into its own C++ github repo?

@@ -56,8 +56,8 @@ auto setupMockTerminal(std::string_view text,
             mock.writeToScreen("\033[H");
             mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
             // logScreenTextAlways(mock);
-            REQUIRE(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
-            REQUIRE(mock.terminal.state().viCommands.cursorPosition.column.value == 0);
+            REQUIRE(mock.terminal.normalModeCursorPosition().line.value == 0);
+            REQUIRE(mock.terminal.normalModeCursorPosition().column.value == 0);
         }
     };
 }
@@ -74,28 +74,28 @@ TEST_CASE("vi.motions: |", "[vi]")
 
     // middle
     mock.sendCharSequence("15|");
-    CHECK(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
-    CHECK(mock.terminal.state().viCommands.cursorPosition.column.value == 14);
+    CHECK(mock.terminal.normalModeCursorPosition().line.value == 0);
+    CHECK(mock.terminal.normalModeCursorPosition().column.value == 14);
 
     // at right margin
     mock.sendCharSequence("40|");
-    CHECK(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
-    CHECK(mock.terminal.state().viCommands.cursorPosition.column.value == 39);
+    CHECK(mock.terminal.normalModeCursorPosition().line.value == 0);
+    CHECK(mock.terminal.normalModeCursorPosition().column.value == 39);
 
     // at left margin
     mock.sendCharSequence("1|");
-    CHECK(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
-    CHECK(mock.terminal.state().viCommands.cursorPosition.column.value == 0);
+    CHECK(mock.terminal.normalModeCursorPosition().line.value == 0);
+    CHECK(mock.terminal.normalModeCursorPosition().column.value == 0);
 
     // one off right margin
     mock.sendCharSequence("41|");
-    CHECK(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
-    CHECK(mock.terminal.state().viCommands.cursorPosition.column.value == 39);
+    CHECK(mock.terminal.normalModeCursorPosition().line.value == 0);
+    CHECK(mock.terminal.normalModeCursorPosition().column.value == 39);
 
     // without [count] leading to left margin
     mock.sendCharSequence("|");
-    CHECK(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
-    CHECK(mock.terminal.state().viCommands.cursorPosition.column.value == 0);
+    CHECK(mock.terminal.normalModeCursorPosition().line.value == 0);
+    CHECK(mock.terminal.normalModeCursorPosition().column.value == 0);
 }
 
 TEST_CASE("vi.motions: text objects", "[vi]")
@@ -113,10 +113,10 @@ TEST_CASE("vi.motions: text objects", "[vi]")
     SECTION("vi( across multiple lines, nested")
     {
         mock.sendCharSequence("3j31|"); // position cursor onto the * symbol, line 4.
-        REQUIRE(mock.terminal.state().viCommands.cursorPosition == 3_lineOffset + 30_columnOffset);
+        REQUIRE(mock.terminal.normalModeCursorPosition() == 3_lineOffset + 30_columnOffset);
 
         mock.sendCharSequence("vi("); // cursor is now placed at the end of the selection
-        CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 33_columnOffset);
+        CHECK(mock.terminal.normalModeCursorPosition() == 4_lineOffset + 33_columnOffset);
         REQUIRE(mock.terminal.selector() != nullptr);
         vtbackend::Selection const& selection = *mock.terminal.selector();
         CHECK(selection.from() == 3_lineOffset + 17_columnOffset);
@@ -126,10 +126,10 @@ TEST_CASE("vi.motions: text objects", "[vi]")
     SECTION("vi) across multiple lines, nested")
     {
         mock.sendCharSequence("3j31|"); // position cursor onto the * symbol, line 4.
-        REQUIRE(mock.terminal.state().viCommands.cursorPosition == 3_lineOffset + 30_columnOffset);
+        REQUIRE(mock.terminal.normalModeCursorPosition() == 3_lineOffset + 30_columnOffset);
 
         mock.sendCharSequence("vi)"); // cursor is now placed at the end of the selection
-        CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 33_columnOffset);
+        CHECK(mock.terminal.normalModeCursorPosition() == 4_lineOffset + 33_columnOffset);
         REQUIRE(mock.terminal.selector() != nullptr);
         vtbackend::Selection const& selection = *mock.terminal.selector();
         CHECK(selection.from() == 3_lineOffset + 17_columnOffset);
@@ -144,11 +144,11 @@ TEST_CASE("vi.motions: M", "[vi]")
 
     // first move cursor by one right, to also ensure that column is preserved
     mock.sendCharSequence("lM");
-    CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 1_columnOffset);
+    CHECK(mock.terminal.normalModeCursorPosition() == 4_lineOffset + 1_columnOffset);
 
     // running M again won't change anything
     mock.sendCharSequence("M");
-    CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 1_columnOffset);
+    CHECK(mock.terminal.normalModeCursorPosition() == 4_lineOffset + 1_columnOffset);
 }
 
 TEST_CASE("vi.motion: t{char}", "[vi]")
@@ -158,10 +158,10 @@ TEST_CASE("vi.motion: t{char}", "[vi]")
                           "   On the next line.",
                           vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
     mock.sendCharSequence("te"); // jump to the char before first `e`, which is `n`.
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 1_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 1_columnOffset);
 
     mock.sendCharSequence("t "); // jump to the char before first space character, which is `e`.
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 13_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 13_columnOffset);
 }
 
 TEST_CASE("vi.motion: b", "[vi]")
@@ -171,27 +171,27 @@ TEST_CASE("vi.motion: b", "[vi]")
                           "   On the next line.",
                           vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
     mock.sendCharSequence("j$"); // jump to line 2, at the right-most non-space character.
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 1_lineOffset + 19_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 1_lineOffset + 19_columnOffset);
 
     mock.sendCharSequence("b"); // l[ine.]
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 1_lineOffset + 15_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 1_lineOffset + 15_columnOffset);
     mock.sendCharSequence("2b"); // t[he]
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 1_lineOffset + 6_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 1_lineOffset + 6_columnOffset);
     mock.sendCharSequence("3b"); // a[nd] -- on line 1
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 15_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 15_columnOffset);
     mock.sendCharSequence("b"); // T[hree]
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 9_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 9_columnOffset);
     mock.sendCharSequence("b"); // .[.]
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 7_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 7_columnOffset);
     mock.sendCharSequence("b"); // T[wo]
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 4_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 4_columnOffset);
     mock.sendCharSequence("b"); // .
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 3_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 3_columnOffset);
     mock.sendCharSequence("b"); // O[ne]
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 0_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 0_columnOffset);
 
     mock.sendCharSequence("b");
-    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 0_columnOffset);
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 0_columnOffset);
 }
 
 TEST_CASE("ViCommands:modeChanged", "[vi]")
@@ -202,7 +202,7 @@ TEST_CASE("ViCommands:modeChanged", "[vi]")
     SECTION("clearSearch() must be invoked when switch to ViMode::Insert")
     {
         mock.terminal.setNewSearchTerm(U"search_term", true);
-        mock.terminal.state().inputHandler.setMode(vtbackend::ViMode::Insert);
-        REQUIRE(mock.terminal.state().searchMode.pattern.empty());
+        mock.terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
+        REQUIRE(mock.terminal.search().pattern.empty());
     }
 }

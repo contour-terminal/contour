@@ -29,8 +29,6 @@ class MockTerm: public Terminal::NullEvents
     }
 
     decltype(auto) pageSize() const noexcept { return terminal.pageSize(); }
-    decltype(auto) state() noexcept { return terminal.state(); }
-    decltype(auto) state() const noexcept { return terminal.state(); }
 
     PtyDevice& mockPty() noexcept { return static_cast<PtyDevice&>(terminal.device()); }
     PtyDevice const& mockPty() const noexcept { return static_cast<PtyDevice const&>(terminal.device()); }

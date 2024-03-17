@@ -229,9 +229,9 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
     using namespace vtbackend;
 
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
-    auto& vtState = mc.terminal.state();
+    auto& vt = mc.terminal;
 
-    auto const originalPalette = vtState.colorPalette;
+    auto const originalPalette = vt.colorPalette();
 
     auto modifiedPalette = ColorPalette {};
     modifiedPalette.palette[0] = 0xFF6600_rgb;
@@ -239,39 +239,39 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
     SECTION("pop on empty")
     {
         mc.writeToScreen("\033[#Q");
-        REQUIRE(vtState.savedColorPalettes.empty());
-        REQUIRE(vtState.colorPalette.palette == originalPalette.palette);
+        REQUIRE(vt.savedColorPalettes().empty());
+        REQUIRE(vt.colorPalette().palette == originalPalette.palette);
     }
 
     SECTION("default")
     {
         mc.writeToScreen("\033[#P"); // XTPUSHCOLORS (default)
-        REQUIRE(vtState.savedColorPalettes.size() == 1);
-        REQUIRE(vtState.savedColorPalettes.back().palette == originalPalette.palette);
-        vtState.colorPalette.palette[0] = 0x123456_rgb;
-        REQUIRE(vtState.colorPalette.palette != originalPalette.palette);
+        REQUIRE(vt.savedColorPalettes().size() == 1);
+        REQUIRE(vt.savedColorPalettes().back().palette == originalPalette.palette);
+        vt.colorPalette().palette[0] = 0x123456_rgb;
+        REQUIRE(vt.colorPalette().palette != originalPalette.palette);
         mc.writeToScreen("\033[#Q"); // XTPOPCOLORS
-        REQUIRE(vtState.colorPalette.palette == originalPalette.palette);
+        REQUIRE(vt.colorPalette().palette == originalPalette.palette);
     }
 
     SECTION("0")
     {
         mc.writeToScreen("\033[0#P"); // push current color palette to slot 1 (default).
-        REQUIRE(vtState.savedColorPalettes.size() == 1);
+        REQUIRE(vt.savedColorPalettes().size() == 1);
     }
 
     SECTION("1")
     {
-        REQUIRE(vtState.savedColorPalettes.empty());
+        REQUIRE(vt.savedColorPalettes().empty());
         mc.writeToScreen("\033[1#P"); // push current color palette to slot 1.
-        REQUIRE(vtState.savedColorPalettes.size() == 1);
+        REQUIRE(vt.savedColorPalettes().size() == 1);
     }
 
     SECTION("2")
     {
-        REQUIRE(vtState.savedColorPalettes.empty());
+        REQUIRE(vt.savedColorPalettes().empty());
         mc.writeToScreen("\033[2#P"); // push current color palette to slot 1.
-        REQUIRE(vtState.savedColorPalettes.size() == 2);
+        REQUIRE(vt.savedColorPalettes().size() == 2);
         mc.writeToScreen("\033[#R");
         mc.terminal.flushInput();
         REQUIRE(e("\033[2;2#Q") == e(mc.replyData()));
@@ -279,9 +279,9 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 
     SECTION("10")
     {
-        REQUIRE(vtState.savedColorPalettes.empty());
+        REQUIRE(vt.savedColorPalettes().empty());
         mc.writeToScreen("\033[10#P"); // push current color palette to slot 10.
-        REQUIRE(vtState.savedColorPalettes.size() == 10);
+        REQUIRE(vt.savedColorPalettes().size() == 10);
         mc.writeToScreen("\033[#R");
         mc.terminal.flushInput();
         REQUIRE(e("\033[10;10#Q") == e(mc.replyData()));
@@ -289,55 +289,55 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 
     SECTION("11")
     {
-        REQUIRE(vtState.savedColorPalettes.empty());
+        REQUIRE(vt.savedColorPalettes().empty());
         mc.writeToScreen("\033[11#P"); // push current color palette to slot 11: overflow.
-        REQUIRE(vtState.savedColorPalettes.empty());
+        REQUIRE(vt.savedColorPalettes().empty());
     }
 
     SECTION("push and direct copy")
     {
-        vtState.colorPalette.palette[1] = 0x101010_rgb;
-        auto const p1 = vtState.colorPalette;
+        vt.colorPalette().palette[1] = 0x101010_rgb;
+        auto const p1 = vt.colorPalette();
         mc.writeToScreen("\033[#P");
 
-        vtState.colorPalette.palette[3] = 0x303030_rgb;
-        auto const p3 = vtState.colorPalette;
+        vt.colorPalette().palette[3] = 0x303030_rgb;
+        auto const p3 = vt.colorPalette();
         mc.writeToScreen("\033[3#P");
 
-        vtState.colorPalette.palette[2] = 0x202020_rgb;
-        auto const p2 = vtState.colorPalette;
+        vt.colorPalette().palette[2] = 0x202020_rgb;
+        auto const p2 = vt.colorPalette();
         mc.writeToScreen("\033[2#P");
 
-        REQUIRE(vtState.savedColorPalettes.size() == 3);
-        REQUIRE(vtState.colorPalette.palette == vtState.savedColorPalettes[2 - 1].palette);
+        REQUIRE(vt.savedColorPalettes().size() == 3);
+        REQUIRE(vt.colorPalette().palette == vt.savedColorPalettes()[2 - 1].palette);
 
         mc.writeToScreen("\033[1#Q"); // XTPOPCOLORS
-        REQUIRE(vtState.savedColorPalettes.size() == 3);
-        REQUIRE(vtState.colorPalette.palette == vtState.savedColorPalettes[1 - 1].palette);
+        REQUIRE(vt.savedColorPalettes().size() == 3);
+        REQUIRE(vt.colorPalette().palette == vt.savedColorPalettes()[1 - 1].palette);
 
         mc.writeToScreen("\033[2#Q"); // XTPOPCOLORS
-        REQUIRE(vtState.savedColorPalettes.size() == 3);
-        REQUIRE(vtState.colorPalette.palette == vtState.savedColorPalettes[2 - 1].palette);
+        REQUIRE(vt.savedColorPalettes().size() == 3);
+        REQUIRE(vt.colorPalette().palette == vt.savedColorPalettes()[2 - 1].palette);
 
         mc.writeToScreen("\033[3#Q"); // XTPOPCOLORS
-        REQUIRE(vtState.savedColorPalettes.size() == 3);
-        REQUIRE(vtState.colorPalette.palette == vtState.savedColorPalettes[3 - 1].palette);
+        REQUIRE(vt.savedColorPalettes().size() == 3);
+        REQUIRE(vt.colorPalette().palette == vt.savedColorPalettes()[3 - 1].palette);
 
         mc.writeToScreen("\033[#Q"); // XTPOPCOLORS
-        REQUIRE(vtState.savedColorPalettes.size() == 2);
-        REQUIRE(vtState.colorPalette.palette == p3.palette);
+        REQUIRE(vt.savedColorPalettes().size() == 2);
+        REQUIRE(vt.colorPalette().palette == p3.palette);
 
         mc.writeToScreen("\033[#Q"); // XTPOPCOLORS
-        REQUIRE(vtState.savedColorPalettes.size() == 1);
-        REQUIRE(vtState.colorPalette.palette == p2.palette);
+        REQUIRE(vt.savedColorPalettes().size() == 1);
+        REQUIRE(vt.colorPalette().palette == p2.palette);
 
         mc.writeToScreen("\033[#Q"); // XTPOPCOLORS
-        REQUIRE(vtState.savedColorPalettes.empty());
-        REQUIRE(vtState.colorPalette.palette == p1.palette);
+        REQUIRE(vt.savedColorPalettes().empty());
+        REQUIRE(vt.colorPalette().palette == p1.palette);
 
         mc.writeToScreen("\033[#Q"); // XTPOPCOLORS (underflow)
-        REQUIRE(vtState.savedColorPalettes.empty());
-        REQUIRE(vtState.colorPalette.palette == p1.palette);
+        REQUIRE(vt.savedColorPalettes().empty());
+        REQUIRE(vt.colorPalette().palette == p1.palette);
     }
 }
 

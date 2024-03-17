@@ -6,7 +6,6 @@
 #include <vtbackend/RenderBufferBuilder.h>
 #include <vtbackend/Sequencer.h>
 #include <vtbackend/Terminal.h>
-#include <vtbackend/TerminalState.h>
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
 
@@ -105,7 +104,6 @@ Terminal::Terminal(Events& eventListener,
     _eventListener { eventListener },
     _factorySettings { std::move(factorySettings) },
     _settings { _factorySettings },
-    _state { *this },
     _currentTime { now },
     _ptyBufferPool { crispy::nextPowerOfTwo(_settings.ptyBufferObjectSize) },
     _currentPtyBuffer { _ptyBufferPool.allocateBufferObject() },
@@ -113,36 +111,53 @@ Terminal::Terminal(Events& eventListener,
     _pty { std::move(pty) },
     _lastCursorBlink { now },
     _primaryScreen { *this,
-                     &_state.mainScreenMargin,
+                     &_mainScreenMargin,
                      _settings.pageSize,
                      _settings.primaryScreen.allowReflowOnResize,
                      _settings.maxHistoryLineCount,
                      "primary" },
-    _alternateScreen {
-        *this, &_state.mainScreenMargin, _settings.pageSize, false, LineCount(0), "alternate"
-    },
+    _alternateScreen { *this, &_mainScreenMargin, _settings.pageSize, false, LineCount(0), "alternate" },
     _hostWritableStatusLineScreen { *this,
-                                    &_state.hostWritableScreenMargin,
+                                    &_hostWritableScreenMargin,
                                     PageSize { LineCount(1), _settings.pageSize.columns },
                                     false,
                                     LineCount(0),
                                     "host-writable-status-line" },
-    _indicatorStatusScreen { *this,
-                             &_state.indicatorScreenMargin,
-                             PageSize { LineCount(1), _settings.pageSize.columns },
-                             false,
-                             LineCount(0),
-                             "indicator-status-line" },
+    _indicatorStatusScreen {
+        *this,        &_indicatorScreenMargin, PageSize { LineCount(1), _settings.pageSize.columns }, false,
+        LineCount(0), "indicator-status-line"
+    },
     _currentScreen { &_primaryScreen },
     _viewport { *this, std::bind(&Terminal::onViewportChanged, this) },
-    _traceHandler { *this },
     _indicatorStatusLineDefinition { parseStatusLineDefinition(_settings.indicatorStatusLine.left,
                                                                _settings.indicatorStatusLine.middle,
                                                                _settings.indicatorStatusLine.right) },
     _selectionHelper { this },
-    _refreshInterval { _settings.refreshRate }
+    _refreshInterval { _settings.refreshRate },
+    _traceHandler { *this },
+    _cellPixelSize {},
+    _defaultColorPalette { _settings.colorPalette },
+    _colorPalette { _settings.colorPalette },
+    _mainScreenMargin { Margin::Vertical { {}, _settings.pageSize.lines.as<LineOffset>() - LineOffset(1) },
+                        Margin::Horizontal {
+                            {}, _settings.pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) } },
+    _hostWritableScreenMargin { Margin::Vertical { {}, LineOffset(0) },
+                                Margin::Horizontal {
+                                    {}, _settings.pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) } },
+    _maxSixelColorRegisters { _settings.maxImageRegisterCount },
+    _effectiveImageCanvasSize { _settings.maxImageSize },
+    _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
+                                                             _maxSixelColorRegisters) },
+    _imagePool { [this](Image const* image) {
+        discardImage(*image);
+    } },
+    _hyperlinks { HyperlinkCache { 1024 } },
+    _sequencer { *this },
+    _parser { std::ref(_sequencer) },
+    _viCommands { *this },
+    _inputHandler { _viCommands, ViMode::Insert }
 {
-    _state.savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
+    _savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
 
     // TODO(should be this instead?): hardReset();
     setMode(DECMode::AutoWrap, true);
@@ -158,8 +173,8 @@ Terminal::Terminal(Events& eventListener,
 
 void Terminal::onViewportChanged()
 {
-    if (_state.inputHandler.mode() != ViMode::Insert)
-        _state.viCommands.cursorPosition = _viewport.clampCellLocation(_state.viCommands.cursorPosition);
+    if (_inputHandler.mode() != ViMode::Insert)
+        _viCommands.cursorPosition = _viewport.clampCellLocation(_viCommands.cursorPosition);
 
     _eventListener.onScrollOffsetChanged(_viewport.scrollOffset());
     breakLoopAndRefreshRenderBuffer();
@@ -202,19 +217,19 @@ vtpty::Pty::ReadResult Terminal::readFromPty()
 
 void Terminal::setExecutionMode(ExecutionMode mode)
 {
-    auto _ = std::unique_lock(_state.breakMutex);
-    _state.executionMode = mode;
-    _state.breakCondition.notify_one();
+    auto _ = std::unique_lock(_breakMutex);
+    _executionMode = mode;
+    _breakCondition.notify_one();
     _pty->wakeupReader();
 }
 
 bool Terminal::processInputOnce()
 {
     // clang-format off
-    switch (_state.executionMode.load())
+    switch (_executionMode.load())
     {
         case ExecutionMode::BreakAtEmptyQueue:
-            _state.executionMode = ExecutionMode::Waiting;
+            _executionMode = ExecutionMode::Waiting;
             [[fallthrough]];
         case ExecutionMode::Normal:
             if (!_traceHandler.pendingSequences().empty())
@@ -226,15 +241,15 @@ bool Terminal::processInputOnce()
             break;
         case ExecutionMode::Waiting:
         {
-            auto lock = std::unique_lock(_state.breakMutex);
-            _state.breakCondition.wait(lock, [this]() { return _state.executionMode != ExecutionMode::Waiting; });
+            auto lock = std::unique_lock(_breakMutex);
+            _breakCondition.wait(lock, [this]() { return _executionMode != ExecutionMode::Waiting; });
             return true;
         }
         case ExecutionMode::SingleStep:
             if (!_traceHandler.pendingSequences().empty())
             {
                 auto const _ = std::lock_guard { *this };
-                _state.executionMode = ExecutionMode::Waiting;
+                _executionMode = ExecutionMode::Waiting;
                 _traceHandler.flushOne();
                 return true;
             }
@@ -254,7 +269,7 @@ bool Terminal::processInputOnce()
         return false;
     }
     string_view const buf = std::get<0>(*readResult);
-    _state.usingStdoutFastPipe = std::get<1>(*readResult);
+    _usingStdoutFastPipe = std::get<1>(*readResult);
 
     if (buf.empty())
     {
@@ -265,10 +280,10 @@ bool Terminal::processInputOnce()
 
     {
         auto const _ = std::lock_guard { *this };
-        _state.parser.parseFragment(buf);
+        _parser.parseFragment(buf);
     }
 
-    if (!_state.modes.enabled(DECMode::BatchedRendering))
+    if (!_modes.enabled(DECMode::BatchedRendering))
         screenUpdated();
 
 #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
@@ -440,14 +455,14 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, *_currentScreen };
     auto const mainDisplayReverseVideo = isModeEnabled(vtbackend::DECMode::ReverseVideo);
     auto const highlightSearchMatches =
-        _state.searchMode.pattern.empty() ? HighlightSearchMatches::No : HighlightSearchMatches::Yes;
+        _search.pattern.empty() ? HighlightSearchMatches::No : HighlightSearchMatches::Yes;
 
     auto const theCursorPosition =
         optional<CellLocation> { inputHandler().mode() == ViMode::Insert
                                      ? (isModeEnabled(DECMode::VisibleCursor)
                                             ? optional<CellLocation> { currentScreen().cursor().position }
                                             : nullopt)
-                                     : state().viCommands.cursorPosition };
+                                     : _viCommands.cursorPosition };
 
     if (isPrimaryScreen())
         _lastRenderPassHints =
@@ -484,7 +499,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base)
 {
     auto const mainDisplayReverseVideo = isModeEnabled(vtbackend::DECMode::ReverseVideo);
-    switch (_state.statusDisplayType)
+    switch (_statusDisplayType)
     {
         case StatusDisplayType::None:
             //.
@@ -520,20 +535,20 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
 
 void Terminal::updateIndicatorStatusLine()
 {
-    Require(_state.activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
+    Require(_activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
 
     auto const colors =
-        _state.focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
+        _focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
 
-    auto const backupForeground = _indicatorStatusScreen.colorPalette().defaultForeground;
-    auto const backupBackground = _indicatorStatusScreen.colorPalette().defaultBackground;
-    _indicatorStatusScreen.colorPalette().defaultForeground = colors.foreground;
-    _indicatorStatusScreen.colorPalette().defaultBackground = colors.background;
+    auto const backupForeground = _colorPalette.defaultForeground;
+    auto const backupBackground = _colorPalette.defaultBackground;
+    _colorPalette.defaultForeground = colors.foreground;
+    _colorPalette.defaultBackground = colors.background;
 
     auto const _ = crispy::finally { [&]() {
         // Cleaning up.
-        _indicatorStatusScreen.colorPalette().defaultForeground = backupForeground;
-        _indicatorStatusScreen.colorPalette().defaultBackground = backupBackground;
+        _colorPalette.defaultForeground = backupForeground;
+        _colorPalette.defaultBackground = backupBackground;
         verifyState();
     } };
 
@@ -585,14 +600,14 @@ bool Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType even
     _lastCursorBlink = now;
 
     if (allowInput() && eventType != KeyboardEventType::Release
-        && _state.inputHandler.sendKeyPressEvent(key, modifiers))
+        && _inputHandler.sendKeyPressEvent(key, modifiers))
         return true;
 
     // Early exit if KAM is enabled.
     if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
-    bool const success = _state.inputGenerator.generate(key, modifiers, eventType);
+    bool const success = _inputGenerator.generate(key, modifiers, eventType);
     if (success)
     {
         flushInput();
@@ -611,10 +626,10 @@ bool Terminal::sendCharEvent(
     if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
-    if (eventType != KeyboardEventType::Release && _state.inputHandler.sendCharPressEvent(ch, modifiers))
+    if (eventType != KeyboardEventType::Release && _inputHandler.sendCharPressEvent(ch, modifiers))
         return true;
 
-    auto const success = _state.inputGenerator.generate(ch, physicalKey, modifiers, eventType);
+    auto const success = _inputGenerator.generate(ch, physicalKey, modifiers, eventType);
     if (success)
     {
         flushInput();
@@ -640,7 +655,7 @@ bool Terminal::sendMousePressEvent(Modifiers modifiers,
 
     auto const eventHandledByApp =
         allowPassMouseEventToApp(modifiers)
-        && _state.inputGenerator.generateMousePress(
+        && _inputGenerator.generateMousePress(
             modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
 
     // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
@@ -662,13 +677,13 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
         _currentMousePosition.column,
     };
 
-    if (_state.inputHandler.mode() != ViMode::Insert)
-        _state.viCommands.cursorPosition = startPos;
+    if (_inputHandler.mode() != ViMode::Insert)
+        _viCommands.cursorPosition = startPos;
 
     switch (_speedClicks)
     {
         case 1:
-            if (_state.searchMode.initiatedByDoubleClick)
+            if (_search.initiatedByDoubleClick)
                 clearSearch();
             clearSelection();
             if (modifiers == _settings.mouseBlockSelectionModifiers)
@@ -716,12 +731,12 @@ void Terminal::setSelector(std::unique_ptr<Selection> selector)
 
 void Terminal::clearSelection()
 {
-    if (_state.inputHandler.isVisualMode())
+    if (_inputHandler.isVisualMode())
     {
         if (!_leftMouseButtonPressed)
             // Don't clear if in visual mode and mouse wasn't used.
             return;
-        _state.inputHandler.setMode(ViMode::Normal);
+        _inputHandler.setMode(ViMode::Normal);
     }
 
     if (!_selection)
@@ -797,14 +812,14 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     auto relativePos = _viewport.translateScreenToGridCoordinate(newPosition);
     if (shouldExtendSelection && _leftMouseButtonPressed)
     {
-        _state.viCommands.cursorPosition = relativePos;
-        _viewport.makeVisible(_state.viCommands.cursorPosition.line);
+        _viCommands.cursorPosition = relativePos;
+        _viewport.makeVisible(_viCommands.cursorPosition.line);
     }
 
     // Do not handle mouse-move events in sub-cell dimensions.
     if (allowPassMouseEventToApp(modifiers))
     {
-        if (_state.inputGenerator.generateMouseMove(
+        if (_inputGenerator.generateMouseMove(
                 modifiers, relativePos, pixelPosition, uiHandledHint || !selectionAvailable()))
             flushInput();
         if (!isModeEnabled(DECMode::MousePassiveTracking))
@@ -823,9 +838,9 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
             if (currentScreen().isCellEmpty(relativePos)
                 && !currentScreen().compareCellTextAt(relativePos, 0x20))
                 relativePos.column = ColumnOffset { 0 } + unbox(_settings.pageSize.columns - 1);
-            _state.viCommands.cursorPosition = relativePos;
-            if (_state.inputHandler.mode() != ViMode::Insert)
-                _state.inputHandler.setMode(selector()->viMode());
+            _viCommands.cursorPosition = relativePos;
+            if (_inputHandler.mode() != ViMode::Insert)
+                _inputHandler.setMode(selector()->viMode());
             if (selector()->extend(relativePos))
                 breakLoopAndRefreshRenderBuffer();
         }
@@ -847,7 +862,7 @@ bool Terminal::sendMouseReleaseEvent(Modifiers modifiers,
             switch (selector()->state())
             {
                 case Selection::State::InProgress:
-                    if (_state.inputHandler.mode() == ViMode::Insert)
+                    if (_inputHandler.mode() == ViMode::Insert)
                         selector()->complete();
                     _eventListener.onSelectionCompleted();
                     break;
@@ -858,7 +873,7 @@ bool Terminal::sendMouseReleaseEvent(Modifiers modifiers,
     }
 
     if (allowPassMouseEventToApp(modifiers)
-        && _state.inputGenerator.generateMouseRelease(
+        && _inputGenerator.generateMouseRelease(
             modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint))
     {
         flushInput();
@@ -872,10 +887,10 @@ bool Terminal::sendMouseReleaseEvent(Modifiers modifiers,
 
 bool Terminal::sendFocusInEvent()
 {
-    _state.focused = true;
+    _focused = true;
     breakLoopAndRefreshRenderBuffer();
 
-    if (_state.inputGenerator.generateFocusInEvent())
+    if (_inputGenerator.generateFocusInEvent())
     {
         flushInput();
         return true;
@@ -886,10 +901,10 @@ bool Terminal::sendFocusInEvent()
 
 bool Terminal::sendFocusOutEvent()
 {
-    _state.focused = false;
+    _focused = false;
     breakLoopAndRefreshRenderBuffer();
 
-    if (_state.inputGenerator.generateFocusOutEvent())
+    if (_inputGenerator.generateFocusOutEvent())
     {
         flushInput();
         return true;
@@ -903,14 +918,14 @@ void Terminal::sendPaste(string_view text)
     if (!allowInput())
         return;
 
-    if (_state.inputHandler.isEditingSearch())
+    if (_inputHandler.isEditingSearch())
     {
-        _state.searchMode.pattern += unicode::convert_to<char32_t>(text);
+        _search.pattern += unicode::convert_to<char32_t>(text);
         screenUpdated();
         return;
     }
 
-    _state.inputGenerator.generatePaste(text);
+    _inputGenerator.generatePaste(text);
     flushInput();
 }
 
@@ -919,34 +934,34 @@ void Terminal::sendRawInput(string_view text)
     if (!allowInput())
         return;
 
-    if (_state.inputHandler.isEditingSearch())
+    if (_inputHandler.isEditingSearch())
     {
         inputLog()("Sending raw input to search input: {}", crispy::escape(text));
-        _state.searchMode.pattern += unicode::convert_to<char32_t>(text);
+        _search.pattern += unicode::convert_to<char32_t>(text);
         screenUpdated();
         return;
     }
 
     inputLog()("Sending raw input to stdin: {}", crispy::escape(text));
-    _state.inputGenerator.generateRaw(text);
+    _inputGenerator.generateRaw(text);
     flushInput();
 }
 
 bool Terminal::hasInput() const noexcept
 {
-    return !_state.inputGenerator.peek().empty();
+    return !_inputGenerator.peek().empty();
 }
 
 void Terminal::flushInput()
 {
-    if (_state.inputGenerator.peek().empty())
+    if (_inputGenerator.peek().empty())
         return;
 
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
-    auto const input = _state.inputGenerator.peek();
+    auto const input = _inputGenerator.peek();
     auto const rv = _pty->write(input);
     if (rv > 0)
-        _state.inputGenerator.consume(rv);
+        _inputGenerator.consume(rv);
 }
 
 void Terminal::writeToScreen(string_view vtStream)
@@ -961,11 +976,11 @@ void Terminal::writeToScreen(string_view vtStream)
             auto const chunk =
                 vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
             vtStream.remove_prefix(chunk.size());
-            _state.parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
+            _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
         }
     }
 
-    if (!_state.modes.enabled(DECMode::BatchedRendering))
+    if (!_modes.enabled(DECMode::BatchedRendering))
     {
         screenUpdated();
     }
@@ -1205,9 +1220,9 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
     if (!_primaryScreen.currentLine().isTrivialBuffer())
         return 0;
 
-    assert(_state.mainScreenMargin.horizontal.to >= _currentScreen->cursor().position.column);
+    assert(_mainScreenMargin.horizontal.to >= _currentScreen->cursor().position.column);
 
-    return unbox<size_t>(_state.mainScreenMargin.horizontal.to - _currentScreen->cursor().position.column);
+    return unbox<size_t>(_mainScreenMargin.horizontal.to - _currentScreen->cursor().position.column);
 }
 
 template <typename Handler>
@@ -1277,7 +1292,7 @@ void Terminal::writeToScreenInternal(std::string_view vtStream)
     {
         auto const chunk = lockedWriteToPtyBuffer(vtStream);
         vtStream.remove_prefix(chunk.size());
-        _state.parser.parseFragment(chunk);
+        _parser.parseFragment(chunk);
     }
 }
 
@@ -1326,7 +1341,7 @@ optional<chrono::milliseconds> Terminal::nextRender() const
             nextBlink = std::min(nextBlink, _rapidBlinker.interval - passedRapidBlink);
     }
 
-    if (_state.statusDisplayType == StatusDisplayType::Indicator)
+    if (_statusDisplayType == StatusDisplayType::Indicator)
     {
         auto const currentSecond =
             chrono::time_point_cast<chrono::seconds>(chrono::system_clock::now()).time_since_epoch().count()
@@ -1383,13 +1398,13 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 
     // Adjust Normal-mode's cursor in order to avoid drift when growing/shrinking in main page line count.
     if (mainDisplayPageSize.lines > oldMainDisplayPageSize.lines)
-        _state.viCommands.cursorPosition.line +=
+        _viCommands.cursorPosition.line +=
             boxed_cast<LineOffset>(mainDisplayPageSize.lines - oldMainDisplayPageSize.lines);
     else if (oldMainDisplayPageSize.lines > mainDisplayPageSize.lines)
-        _state.viCommands.cursorPosition.line -=
+        _viCommands.cursorPosition.line -=
             boxed_cast<LineOffset>(oldMainDisplayPageSize.lines - mainDisplayPageSize.lines);
 
-    _state.viCommands.cursorPosition = clampToScreen(_state.viCommands.cursorPosition);
+    _viCommands.cursorPosition = clampToScreen(_viCommands.cursorPosition);
 
     verifyState();
 }
@@ -1410,14 +1425,13 @@ void Terminal::verifyState()
     Require(_hostWritableStatusLineScreen.grid().pageSize().columns == _settings.pageSize.columns);
     Require(_indicatorStatusScreen.grid().pageSize().columns == _settings.pageSize.columns);
 
-    Require(_state.tabs.empty() || _state.tabs.back() < unbox<ColumnOffset>(_settings.pageSize.columns));
+    Require(_tabs.empty() || _tabs.back() < unbox<ColumnOffset>(_settings.pageSize.columns));
 
     _currentScreen->verifyState();
 
-    Require(0 <= *_state.mainScreenMargin.horizontal.from
-            && *_state.mainScreenMargin.horizontal.to < *pageSize().columns);
-    Require(0 <= *_state.mainScreenMargin.vertical.from
-            && *_state.mainScreenMargin.vertical.to < *pageSize().lines);
+    Require(0 <= *_mainScreenMargin.horizontal.from
+            && *_mainScreenMargin.horizontal.to < *pageSize().columns);
+    Require(0 <= *_mainScreenMargin.vertical.from && *_mainScreenMargin.vertical.to < *pageSize().lines);
 #endif
 }
 
@@ -1622,7 +1636,7 @@ void Terminal::reply(string_view text)
     // most likely that's not the main thread, which will however write
     // the actual input events.
     // TODO: introduce new mutex to guard terminal writes.
-    _state.inputGenerator.generateRaw(text);
+    _inputGenerator.generateRaw(text);
 
     auto const* syncReply = getenv("CONTOUR_SYNC_PTY_OUTPUT");
 
@@ -1642,12 +1656,12 @@ void Terminal::requestWindowResize(ImageSize size)
 
 void Terminal::setApplicationkeypadMode(bool enabled)
 {
-    _state.inputGenerator.setApplicationKeypadMode(enabled);
+    _inputGenerator.setApplicationKeypadMode(enabled);
 }
 
 void Terminal::setBracketedPaste(bool enabled)
 {
-    _state.inputGenerator.setBracketedPaste(enabled);
+    _inputGenerator.setBracketedPaste(enabled);
 }
 
 void Terminal::setCursorStyle(CursorDisplay display, CursorShape shape)
@@ -1655,8 +1669,8 @@ void Terminal::setCursorStyle(CursorDisplay display, CursorShape shape)
     _settings.cursorDisplay = display;
     _settings.cursorShape = shape;
 
-    _state.cursorDisplay = display;
-    _state.cursorShape = shape;
+    _cursorDisplay = display;
+    _cursorShape = shape;
 }
 
 void Terminal::setCursorVisibility(bool /*visible*/)
@@ -1666,47 +1680,47 @@ void Terminal::setCursorVisibility(bool /*visible*/)
 
 void Terminal::setGenerateFocusEvents(bool enabled)
 {
-    _state.inputGenerator.setGenerateFocusEvents(enabled);
+    _inputGenerator.setGenerateFocusEvents(enabled);
 }
 
 void Terminal::setMouseProtocol(MouseProtocol protocol, bool enabled)
 {
-    _state.inputGenerator.setMouseProtocol(protocol, enabled);
+    _inputGenerator.setMouseProtocol(protocol, enabled);
 }
 
 void Terminal::setMouseTransport(MouseTransport transport)
 {
-    _state.inputGenerator.setMouseTransport(transport);
+    _inputGenerator.setMouseTransport(transport);
 }
 
 void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode mode)
 {
-    _state.inputGenerator.setMouseWheelMode(mode);
+    _inputGenerator.setMouseWheelMode(mode);
 }
 
 void Terminal::setWindowTitle(string_view title)
 {
-    _state.windowTitle = title;
+    _windowTitle = title;
     _eventListener.setWindowTitle(title);
 }
 
 std::string const& Terminal::windowTitle() const noexcept
 {
-    return _state.windowTitle;
+    return _windowTitle;
 }
 
 void Terminal::saveWindowTitle()
 {
-    _state.savedWindowTitles.push(_state.windowTitle);
+    _savedWindowTitles.push(_windowTitle);
 }
 
 void Terminal::restoreWindowTitle()
 {
-    if (!_state.savedWindowTitles.empty())
+    if (!_savedWindowTitles.empty())
     {
-        _state.windowTitle = _state.savedWindowTitles.top();
-        _state.savedWindowTitles.pop();
-        setWindowTitle(_state.windowTitle);
+        _windowTitle = _savedWindowTitles.top();
+        _savedWindowTitles.pop();
+        setWindowTitle(_windowTitle);
     }
 }
 
@@ -1718,7 +1732,7 @@ void Terminal::setTerminalProfile(string const& configProfileName)
 void Terminal::useApplicationCursorKeys(bool enable)
 {
     auto const keyMode = enable ? KeyMode::Application : KeyMode::Normal;
-    _state.inputGenerator.setCursorKeysMode(keyMode);
+    _inputGenerator.setCursorKeysMode(keyMode);
 }
 
 void Terminal::setMode(AnsiMode mode, bool enable)
@@ -1734,7 +1748,7 @@ void Terminal::setMode(AnsiMode mode, bool enable)
             popStatusDisplay();
     }
 
-    _state.modes.set(mode, enable);
+    _modes.set(mode, enable);
 }
 
 void Terminal::setMode(DECMode mode, bool enable)
@@ -1745,13 +1759,12 @@ void Terminal::setMode(DECMode mode, bool enable)
         return;
     }
 
-    if (_state.modes.frozen(mode))
+    if (_modes.frozen(mode))
     {
-        if (_state.modes.enabled(mode) != enable)
+        if (_modes.enabled(mode) != enable)
         {
-            terminalLog()("Attempt to change permanently-{} mode {}.",
-                          _state.modes.enabled(mode) ? "set" : "reset",
-                          mode);
+            terminalLog()(
+                "Attempt to change permanently-{} mode {}.", _modes.enabled(mode) ? "set" : "reset", mode);
         }
         return;
     }
@@ -1763,7 +1776,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!enable)
             {
-                _state.mainScreenMargin.horizontal =
+                _mainScreenMargin.horizontal =
                     Margin::Horizontal { ColumnOffset(0),
                                          boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1) };
                 _supportedVTSequences.enableSequence(SCOSC);
@@ -1797,7 +1810,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             setMode(DECMode::LeftRightMargin, false); // DECSLRM
 
             // DECCOLM clears data from the status line if the status line is set to host-writable.
-            if (_state.statusDisplayType == StatusDisplayType::HostWritable)
+            if (_statusDisplayType == StatusDisplayType::HostWritable)
                 _hostWritableStatusLineScreen.clearScreen();
 
             // Erases all data in page memory
@@ -1807,7 +1820,7 @@ void Terminal::setMode(DECMode mode, bool enable)
         }
         break;
         case DECMode::BatchedRendering:
-            if (_state.modes.enabled(DECMode::BatchedRendering) != enable)
+            if (_modes.enabled(DECMode::BatchedRendering) != enable)
                 synchronizedOutput(enable);
             break;
         case DECMode::TextReflow:
@@ -1852,7 +1865,7 @@ void Terminal::setMode(DECMode mode, bool enable)
         case DECMode::MouseExtended: setMouseTransport(MouseTransport::Extended); break;
         case DECMode::MouseURXVT: setMouseTransport(MouseTransport::URXVT); break;
         case DECMode::MousePassiveTracking:
-            _state.inputGenerator.setPassiveMouseTracking(enable);
+            _inputGenerator.setPassiveMouseTracking(enable);
             setMode(DECMode::MouseSGR, enable);                    // SGR is required.
             setMode(DECMode::MouseProtocolButtonTracking, enable); // ButtonTracking is default
             break;
@@ -1869,7 +1882,7 @@ void Terminal::setMode(DECMode mode, bool enable)
                 setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
             break;
         case DECMode::FocusTracking: setGenerateFocusEvents(enable); break;
-        case DECMode::UsePrivateColorRegisters: _state.usePrivateColorRegisters = enable; break;
+        case DECMode::UsePrivateColorRegisters: _usePrivateColorRegisters = enable; break;
         case DECMode::VisibleCursor: setCursorVisibility(enable); break;
         case DECMode::MouseProtocolX10: setMouseProtocol(MouseProtocol::X10, enable); break;
         case DECMode::MouseProtocolNormalTracking:
@@ -1906,7 +1919,7 @@ void Terminal::setMode(DECMode mode, bool enable)
         default: break;
     }
 
-    _state.modes.set(mode, enable);
+    _modes.set(mode, enable);
 }
 
 void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset> bottom)
@@ -1918,8 +1931,8 @@ void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset>
 
     if (sanitizedTop < sanitizedBottom)
     {
-        _state.mainScreenMargin.vertical.from = sanitizedTop;
-        _state.mainScreenMargin.vertical.to = sanitizedBottom;
+        _mainScreenMargin.vertical.from = sanitizedTop;
+        _mainScreenMargin.vertical.to = sanitizedBottom;
     }
 }
 
@@ -1931,8 +1944,8 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOf
     auto const sanitizedLeft = std::max(left.value_or(defaultLeft), defaultLeft);
     if (sanitizedLeft < sanitizedRight)
     {
-        _state.mainScreenMargin.horizontal.from = sanitizedLeft;
-        _state.mainScreenMargin.horizontal.to = sanitizedRight;
+        _mainScreenMargin.horizontal.from = sanitizedLeft;
+        _mainScreenMargin.horizontal.to = sanitizedRight;
     }
 }
 
@@ -2014,7 +2027,7 @@ void Terminal::hardReset()
     // Ensure that the alternate screen buffer is having the correct size, as well.
     applyPageSizeToMainDisplay(ScreenType::Alternate);
 
-    _state.modes = Modes {};
+    _modes = Modes {};
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
@@ -2029,8 +2042,8 @@ void Terminal::hardReset()
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
 
-    _state.imagePool.clear();
-    _state.tabs.clear();
+    _imagePool.clear();
+    _tabs.clear();
 
     resetColorPalette();
 
@@ -2061,7 +2074,7 @@ void Terminal::hardReset()
 
     setStatusDisplay(_factorySettings.statusDisplayType);
 
-    _state.inputGenerator.reset();
+    _inputGenerator.reset();
 }
 
 void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
@@ -2078,7 +2091,7 @@ void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
 
 void Terminal::setScreen(ScreenType type)
 {
-    if (type == _state.screenType)
+    if (type == _currentScreenType)
         return;
 
     switch (type)
@@ -2096,7 +2109,7 @@ void Terminal::setScreen(ScreenType type)
             break;
     }
 
-    _state.screenType = type;
+    _currentScreenType = type;
 
     // Ensure correct screen buffer size for the buffer we've just switched to.
     applyPageSizeToCurrentBuffer();
@@ -2132,12 +2145,12 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     auto const statuslineMargin =
         Margin { Margin::Vertical { {}, statusLineHeight().as<LineOffset>() - 1 },
                  Margin::Horizontal { {}, _settings.pageSize.columns.as<ColumnOffset>() - 1 } };
-    _state.indicatorScreenMargin = statuslineMargin;
-    _state.hostWritableScreenMargin = statuslineMargin;
+    _indicatorScreenMargin = statuslineMargin;
+    _hostWritableScreenMargin = statuslineMargin;
 
     // truncating tabs
-    while (!_state.tabs.empty() && _state.tabs.back() >= unbox<ColumnOffset>(_settings.pageSize.columns))
-        _state.tabs.pop_back();
+    while (!_tabs.empty() && _tabs.back() >= unbox<ColumnOffset>(_settings.pageSize.columns))
+        _tabs.pop_back();
 
     // verifyState();
 }
@@ -2149,7 +2162,7 @@ void Terminal::discardImage(Image const& image)
 
 void Terminal::markCellDirty(CellLocation position) noexcept
 {
-    if (_state.activeStatusDisplay != ActiveStatusDisplay::Main)
+    if (_activeStatusDisplay != ActiveStatusDisplay::Main)
         return;
 
     if (!_selection)
@@ -2162,7 +2175,7 @@ void Terminal::markCellDirty(CellLocation position) noexcept
 
 void Terminal::markRegionDirty(Rect area) noexcept
 {
-    if (_state.activeStatusDisplay != ActiveStatusDisplay::Main)
+    if (_activeStatusDisplay != ActiveStatusDisplay::Main)
         return;
 
     if (!_selection)
@@ -2196,7 +2209,7 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
 {
     // Adjust Normal-mode's cursor accordingly to make it fixed at the scroll-offset as if nothing has
     // happened.
-    _state.viCommands.cursorPosition.line -= n;
+    _viCommands.cursorPosition.line -= n;
 
     // Adjust viewport accordingly to make it fixed at the scroll-offset as if nothing has happened.
     if (viewport().scrolled())
@@ -2225,7 +2238,7 @@ LineCount Terminal::maxHistoryLineCount() const noexcept
 
 void Terminal::setTerminalId(VTType id) noexcept
 {
-    _state.terminalId = id;
+    _terminalId = id;
     _supportedVTSequences.reset(id);
 }
 
@@ -2233,14 +2246,14 @@ void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
 {
     assert(_currentScreen.get() != &_indicatorStatusScreen);
 
-    if (_state.statusDisplayType == statusDisplayType)
+    if (_statusDisplayType == statusDisplayType)
         return;
 
     markScreenDirty();
 
-    auto const statusLineVisibleBefore = _state.statusDisplayType != StatusDisplayType::None;
+    auto const statusLineVisibleBefore = _statusDisplayType != StatusDisplayType::None;
     auto const statusLineVisibleAfter = statusDisplayType != StatusDisplayType::None;
-    _state.statusDisplayType = statusDisplayType;
+    _statusDisplayType = statusDisplayType;
 
     if (statusLineVisibleBefore != statusLineVisibleAfter)
         resizeScreen(_settings.pageSize, nullopt);
@@ -2248,16 +2261,16 @@ void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
 
 void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
 {
-    if (_state.activeStatusDisplay == activeDisplay)
+    if (_activeStatusDisplay == activeDisplay)
         return;
 
-    _state.activeStatusDisplay = activeDisplay;
+    _activeStatusDisplay = activeDisplay;
 
     // clang-format off
     switch (activeDisplay)
     {
         case ActiveStatusDisplay::Main:
-            switch (_state.screenType)
+            switch (_currentScreenType)
             {
                 case ScreenType::Primary:
                     _currentScreen = &_primaryScreen;
@@ -2280,19 +2293,19 @@ void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
 void Terminal::pushStatusDisplay(StatusDisplayType type)
 {
     // Only remember the outermost saved status display type.
-    if (!_state.savedStatusDisplayType)
-        _state.savedStatusDisplayType = _state.statusDisplayType;
+    if (!_savedStatusDisplayType)
+        _savedStatusDisplayType = _statusDisplayType;
 
     setStatusDisplay(type);
 }
 
 void Terminal::popStatusDisplay()
 {
-    if (!_state.savedStatusDisplayType)
+    if (!_savedStatusDisplayType)
         return;
 
-    setStatusDisplay(_state.savedStatusDisplayType.value());
-    _state.savedStatusDisplayType.reset();
+    setStatusDisplay(_savedStatusDisplayType.value());
+    _savedStatusDisplayType.reset();
 }
 
 void Terminal::setAllowInput(bool enabled)
@@ -2302,12 +2315,12 @@ void Terminal::setAllowInput(bool enabled)
 
 bool Terminal::setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick)
 {
-    _state.searchMode.initiatedByDoubleClick = initiatedByDoubleClick;
+    _search.initiatedByDoubleClick = initiatedByDoubleClick;
 
-    if (_state.searchMode.pattern == text)
+    if (_search.pattern == text)
         return false;
 
-    _state.searchMode.pattern = std::move(text);
+    _search.pattern = std::move(text);
     return true;
 }
 
@@ -2331,7 +2344,7 @@ optional<CellLocation> Terminal::search(std::u32string text,
 
 optional<CellLocation> Terminal::search(CellLocation searchPosition)
 {
-    auto const searchText = u32string_view(_state.searchMode.pattern);
+    auto const searchText = u32string_view(_search.pattern);
     auto const matchLocation = currentScreen().search(searchText, searchPosition);
 
     if (matchLocation)
@@ -2341,10 +2354,38 @@ optional<CellLocation> Terminal::search(CellLocation searchPosition)
     return matchLocation;
 }
 
+std::optional<CellLocation> Terminal::searchNextMatch(CellLocation cursorPosition)
+{
+    auto startPosition = cursorPosition;
+    if (startPosition.column < boxed_cast<ColumnOffset>(pageSize().columns))
+        startPosition.column++;
+    else if (cursorPosition.line < boxed_cast<LineOffset>(pageSize().lines) - 1)
+    {
+        startPosition.line++;
+        startPosition.column = ColumnOffset(0);
+    }
+
+    return search(startPosition);
+}
+
+std::optional<CellLocation> Terminal::searchPrevMatch(CellLocation cursorPosition)
+{
+    auto startPosition = cursorPosition;
+    if (startPosition.column != ColumnOffset(0))
+        startPosition.column--;
+    else if (cursorPosition.line > -boxed_cast<LineOffset>(currentScreen().historyLineCount()))
+    {
+        startPosition.line--;
+        startPosition.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+    }
+
+    return searchReverse(startPosition);
+}
+
 void Terminal::clearSearch()
 {
-    _state.searchMode.pattern.clear();
-    _state.searchMode.initiatedByDoubleClick = false;
+    _search.pattern.clear();
+    _search.initiatedByDoubleClick = false;
 }
 
 bool Terminal::wordDelimited(CellLocation position) const noexcept
@@ -2377,7 +2418,7 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
 
 optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 {
-    auto const searchText = u32string_view(_state.searchMode.pattern);
+    auto const searchText = u32string_view(_search.pattern);
     auto const matchLocation = currentScreen().searchReverse(searchText, searchPosition);
 
     if (matchLocation)
@@ -2457,13 +2498,13 @@ constexpr auto MagicStackTopId = size_t { 0 };
 
 void Terminal::setColorPalette(ColorPalette const& palette) noexcept
 {
-    _state.colorPalette = palette;
+    _colorPalette = palette;
 }
 
 void Terminal::resetColorPalette(ColorPalette const& colors)
 {
-    _state.colorPalette = colors;
-    _state.defaultColorPalette = colors;
+    _colorPalette = colors;
+    _defaultColorPalette = colors;
     _settings.colorPalette = colors;
     _factorySettings.colorPalette = colors;
 
@@ -2476,38 +2517,37 @@ void Terminal::pushColorPalette(size_t slot)
     if (slot > MaxColorPaletteSaveStackSize)
         return;
 
-    auto const index = slot == MagicStackTopId
-                           ? _state.savedColorPalettes.empty() ? 0 : _state.savedColorPalettes.size() - 1
-                           : slot - 1;
+    auto const index =
+        slot == MagicStackTopId ? _savedColorPalettes.empty() ? 0 : _savedColorPalettes.size() - 1 : slot - 1;
 
-    if (index >= _state.savedColorPalettes.size())
-        _state.savedColorPalettes.resize(index + 1);
+    if (index >= _savedColorPalettes.size())
+        _savedColorPalettes.resize(index + 1);
 
     // That's a totally weird idea.
     // Looking at the xterm's source code, and simply mimmicking their semantics without questioning,
     // simply to stay compatible (sadface).
-    if (slot != MagicStackTopId && _state.lastSavedColorPalette < _state.savedColorPalettes.size())
-        _state.lastSavedColorPalette = _state.savedColorPalettes.size();
+    if (slot != MagicStackTopId && _lastSavedColorPalette < _savedColorPalettes.size())
+        _lastSavedColorPalette = _savedColorPalettes.size();
 
-    _state.savedColorPalettes[index] = _state.colorPalette;
+    _savedColorPalettes[index] = _colorPalette;
 }
 
 void Terminal::reportColorPaletteStack()
 {
     // XTREPORTCOLORS
-    reply(fmt::format("\033[{};{}#Q", _state.savedColorPalettes.size(), _state.lastSavedColorPalette));
+    reply(fmt::format("\033[{};{}#Q", _savedColorPalettes.size(), _lastSavedColorPalette));
 }
 
 void Terminal::popColorPalette(size_t slot)
 {
-    if (_state.savedColorPalettes.empty())
+    if (_savedColorPalettes.empty())
         return;
 
-    auto const index = slot == MagicStackTopId ? _state.savedColorPalettes.size() - 1 : slot - 1;
+    auto const index = slot == MagicStackTopId ? _savedColorPalettes.size() - 1 : slot - 1;
 
-    setColorPalette(_state.savedColorPalettes[index]);
+    setColorPalette(_savedColorPalettes[index]);
     if (slot == MagicStackTopId)
-        _state.savedColorPalettes.pop_back();
+        _savedColorPalettes.pop_back();
 }
 
 // {{{ TraceHandler
@@ -2583,5 +2623,66 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
     }
 }
 // }}}
+
+// Applies a FunctionDefinition to a given context, emitting the respective command.
+std::string to_string(AnsiMode mode)
+{
+    switch (mode)
+    {
+        case AnsiMode::KeyboardAction: return "KeyboardAction";
+        case AnsiMode::Insert: return "Insert";
+        case AnsiMode::SendReceive: return "SendReceive";
+        case AnsiMode::AutomaticNewLine: return "AutomaticNewLine";
+    }
+
+    return fmt::format("({})", static_cast<unsigned>(mode));
+}
+
+std::string to_string(DECMode mode)
+{
+    switch (mode)
+    {
+        case DECMode::UseApplicationCursorKeys: return "UseApplicationCursorKeys";
+        case DECMode::DesignateCharsetUSASCII: return "DesignateCharsetUSASCII";
+        case DECMode::Columns132: return "Columns132";
+        case DECMode::SmoothScroll: return "SmoothScroll";
+        case DECMode::ReverseVideo: return "ReverseVideo";
+        case DECMode::MouseProtocolX10: return "MouseProtocolX10";
+        case DECMode::MouseProtocolNormalTracking: return "MouseProtocolNormalTracking";
+        case DECMode::MouseProtocolHighlightTracking: return "MouseProtocolHighlightTracking";
+        case DECMode::MouseProtocolButtonTracking: return "MouseProtocolButtonTracking";
+        case DECMode::MouseProtocolAnyEventTracking: return "MouseProtocolAnyEventTracking";
+        case DECMode::SaveCursor: return "SaveCursor";
+        case DECMode::ExtendedAltScreen: return "ExtendedAltScreen";
+        case DECMode::Origin: return "Origin";
+        case DECMode::AutoWrap: return "AutoWrap";
+        case DECMode::PrinterExtend: return "PrinterExtend";
+        case DECMode::LeftRightMargin: return "LeftRightMargin";
+        case DECMode::ShowToolbar: return "ShowToolbar";
+        case DECMode::BlinkingCursor: return "BlinkingCursor";
+        case DECMode::VisibleCursor: return "VisibleCursor";
+        case DECMode::ShowScrollbar: return "ShowScrollbar";
+        case DECMode::AllowColumns80to132: return "AllowColumns80to132";
+        case DECMode::DebugLogging: return "DebugLogging";
+        case DECMode::UseAlternateScreen: return "UseAlternateScreen";
+        case DECMode::BracketedPaste: return "BracketedPaste";
+        case DECMode::FocusTracking: return "FocusTracking";
+        case DECMode::NoSixelScrolling: return "NoSixelScrolling";
+        case DECMode::UsePrivateColorRegisters: return "UsePrivateColorRegisters";
+        case DECMode::MouseExtended: return "MouseExtended";
+        case DECMode::MouseSGR: return "MouseSGR";
+        case DECMode::MouseURXVT: return "MouseURXVT";
+        case DECMode::MouseSGRPixels: return "MouseSGRPixels";
+        case DECMode::MouseAlternateScroll: return "MouseAlternateScroll";
+        case DECMode::MousePassiveTracking: return "MousePassiveTracking";
+        case DECMode::ReportGridCellSelection: return "ReportGridCellSelection";
+        case DECMode::BatchedRendering: return "BatchedRendering";
+        case DECMode::Unicode: return "Unicode";
+        case DECMode::TextReflow: return "TextReflow";
+        case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
+        case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
+    }
+    return fmt::format("({})", static_cast<unsigned>(mode));
+}
 
 } // namespace vtbackend
