@@ -1185,12 +1185,14 @@ void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend:
     if (*newLineCount)
         requestedPageSize.lines = newLineCount;
 
-    auto const pixels = vtbackend::ImageSize {
-        boxed_cast<vtbackend::Width>(requestedPageSize.columns) * gridMetrics().cellSize.width,
-        boxed_cast<vtbackend::Height>(requestedPageSize.lines) * gridMetrics().cellSize.height
+    // Qt uses unscaled pixels, so we need to adjust the requested size to the actual content scale.
+    auto const unscaledCellSize = gridMetrics().cellSize / contentScale();
+    auto const unscaledViewSize = vtbackend::ImageSize {
+        unscaledCellSize.width * boxed_cast<vtbackend::Width>(requestedPageSize.columns),
+        unscaledCellSize.height * boxed_cast<vtbackend::Height>(requestedPageSize.lines)
     };
 
-    window()->resize(QSize(pixels.width.as<int>(), pixels.height.as<int>()));
+    window()->resize(QSize(unscaledViewSize.width.as<int>(), unscaledViewSize.height.as<int>()));
 }
 
 void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
