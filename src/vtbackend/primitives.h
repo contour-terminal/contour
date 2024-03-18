@@ -21,45 +21,15 @@ using LineCount = vtpty::LineCount;
 using ColumnCount = vtpty::ColumnCount;
 using PageSize = vtpty::PageSize;
 
-namespace detail::tags // {{{
-{
-    // clang-format off
-    // column types
-    struct ColumnOffset {};
-    struct ColumnPosition {};
-
-    // line types
-    struct LineOffset {};
-    struct ScrollOffset {};
-
-    // misc.
-    struct TabStopCount {};
-
-    // generic length
-    struct Length {};
-
-    // range
-    struct From {};
-    struct To {};
-
-    // margin
-    struct Top {};
-    struct Left {};
-    struct Bottom {};
-    struct Right {};
-    // clang-format on
-} // namespace detail::tags
-// }}}
-
 // {{{ Column types
 
 /// ColumnPosition represents the absolute column on the visibile screen area
 /// (usually the main page unless scrolled upwards).
 ///
 /// A column position starts at 1.
-using ColumnPosition = boxed::boxed<int, detail::tags::ColumnPosition>;
+using ColumnPosition = boxed::boxed<int>;
 
-using ColumnOffset = boxed::boxed<int, detail::tags::ColumnOffset>;
+using ColumnOffset = boxed::boxed<int>;
 
 // }}}
 // {{{ Line types
@@ -75,7 +45,7 @@ using MaxHistoryLineCount = std::variant<LineCount, Infinite>;
 ///
 /// *  0  is top-most line on main page
 /// *  -1 is the bottom most line in scrollback
-using LineOffset = boxed::boxed<int, detail::tags::LineOffset>;
+using LineOffset = boxed::boxed<int>;
 
 /// Represents the number of lines the viewport has been scrolled up into
 /// the scrollback lines history.
@@ -83,7 +53,7 @@ using LineOffset = boxed::boxed<int, detail::tags::LineOffset>;
 /// A value of 0 means that it is not scrolled at all (bottom), and
 /// a value equal to the number of scrollback lines means it is scrolled
 /// to the top.
-using ScrollOffset = boxed::boxed<int, detail::tags::ScrollOffset>;
+using ScrollOffset = boxed::boxed<int>;
 
 constexpr int operator*(LineCount a, ColumnCount b) noexcept
 {
@@ -222,10 +192,10 @@ struct ColumnRange
 // {{{ Range
 
 /// Represents the first value of a range.
-using From = boxed::boxed<int, detail::tags::From>;
+using From = boxed::boxed<int>;
 
 /// Represents the last value of a range (inclusive).
-using To = boxed::boxed<int, detail::tags::To>;
+using To = boxed::boxed<int>;
 
 // Range (e.g. a range of lines from X to Y).
 struct Range
@@ -248,10 +218,10 @@ struct Range
 
 // Rectangular operations
 //
-using Top = boxed::boxed<int, detail::tags::Top>;
-using Left = boxed::boxed<int, detail::tags::Left>;
-using Bottom = boxed::boxed<int, detail::tags::Bottom>;
-using Right = boxed::boxed<int, detail::tags::Right>;
+using Top = boxed::boxed<int>;
+using Left = boxed::boxed<int>;
+using Bottom = boxed::boxed<int>;
+using Right = boxed::boxed<int>;
 
 // Rectangular screen operations
 //
@@ -294,7 +264,7 @@ constexpr Range vertical(PageMargin m) noexcept
 // {{{ Length
 
 // Lengths and Ranges
-using Length = boxed::boxed<int, detail::tags::Length>;
+using Length = boxed::boxed<int>;
 
 // }}}
 // {{{ Coordinate types
@@ -380,7 +350,7 @@ constexpr GridSize::iterator end(GridSize const& s) noexcept
 // }}}
 // {{{ misc
 
-using TabStopCount = boxed::boxed<int, detail::tags::TabStopCount>;
+using TabStopCount = boxed::boxed<int>;
 
 // }}}
 // {{{ convenience methods

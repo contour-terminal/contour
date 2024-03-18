@@ -29,10 +29,7 @@ enum class ImageFormat
     RGBA,
 };
 
-// clang-format off
-namespace detail { struct ImageId {}; }
-using ImageId = boxed::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier
-// clang-format on
+using ImageId = boxed::boxed<uint32_t>; // unique numerical image identifier
 
 struct ImageStats
 {
@@ -198,11 +195,7 @@ class ImageFragment
     CellLocation _offset;
 };
 
-namespace detail
-{
-    struct ImageFragmentId;
-}
-using ImageFragmentId = boxed::boxed<uint16_t, detail::ImageFragmentId>;
+using ImageFragmentId = boxed::boxed<uint16_t>;
 
 inline bool operator==(ImageFragment const& a, ImageFragment const& b) noexcept
 {

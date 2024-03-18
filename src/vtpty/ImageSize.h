@@ -7,20 +7,11 @@
 
 namespace vtpty
 {
-
-// clang-format off
-namespace detail::tags
-{
-    struct Width {};
-    struct Height {};
-}
-// clang-format on
-
 /// Representsthe width in pixels of an image (see ImageSize).
-using Width = boxed::boxed<unsigned, detail::tags::Width>;
+using Width = boxed::boxed<unsigned>;
 
 /// Representsthe height in pixels of an image (see ImageSize).
-using Height = boxed::boxed<unsigned, detail::tags::Height>;
+using Height = boxed::boxed<unsigned>;
 
 /// ImageSize represents the 2-dimensional size of an image (pixmap).
 struct ImageSize

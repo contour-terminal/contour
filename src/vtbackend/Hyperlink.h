@@ -60,13 +60,7 @@ struct HyperlinkInfo
     }
 };
 
-namespace detail
-{
-    struct HyperlinkTag
-    {
-    };
-} // namespace detail
-using HyperlinkId = boxed::boxed<uint16_t, detail::HyperlinkTag>;
+using HyperlinkId = boxed::boxed<uint16_t>;
 
 bool is_local(HyperlinkInfo const& hyperlink);
 

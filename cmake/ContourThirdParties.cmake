@@ -150,7 +150,7 @@ else()
     set(THIRDPARTY_BUILTIN_termbench "(bench-headless disabled)")
 endif()
 
-set(BOXED_CPP_MINIMAL_VERSION "1.2.2")
+set(BOXED_CPP_MINIMAL_VERSION "1.3.0")
 if(COMMAND ContourThirdParties_Embed_boxed_cpp)
     ContourThirdParties_Embed_boxed_cpp()
     subproject_version(boxed-cpp boxed_cpp_version)
