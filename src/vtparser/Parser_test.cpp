@@ -2,6 +2,8 @@
 #include <vtparser/Parser.h>
 #include <vtparser/ParserEvents.h>
 
+#include <crispy/escape.h>
+
 #include <libunicode/convert.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -17,9 +19,15 @@ class MockParserEvents final: public vtparser::NullParserEvents
     size_t maxCharCount = 80;
 
     void error(string_view const& msg) override { INFO(fmt::format("Parser error received. {}", msg)); }
-    void print(char32_t ch) override { text += unicode::convert_to<char>(ch); }
+
+    void print(char32_t ch) override
+    {
+        UNSCOPED_INFO(fmt::format("print: U+{:X}", (unsigned) ch));
+        text += unicode::convert_to<char>(ch);
+    }
     size_t print(std::string_view s, size_t cellCount) override
     {
+        UNSCOPED_INFO(fmt::format("print: {}", crispy::escape(s)));
         text += s;
         return maxCharCount -= cellCount;
     }
