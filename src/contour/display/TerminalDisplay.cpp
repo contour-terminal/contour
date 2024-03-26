@@ -950,8 +950,8 @@ constexpr ImageSize computeRequiredSize(config::WindowMargins margins,
                                         PageSize totalPageSize) noexcept
 {
     // We multiply by 2 because the margins are applied to both sides of the terminal.
-    auto const marginSize = ImageSize { vtbackend::Width::cast_from(margins.horizontal * 2),
-                                        vtbackend::Height::cast_from(margins.vertical * 2) };
+    auto const marginSize = ImageSize { vtbackend::Width::cast_from(unbox(margins.horizontal) * 2),
+                                        vtbackend::Height::cast_from(unbox(margins.vertical) * 2) };
 
     return (cellSize * totalPageSize + marginSize);
 }

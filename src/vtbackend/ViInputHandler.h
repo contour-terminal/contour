@@ -187,8 +187,8 @@ class ViInputHandler: public InputHandler
 
     ViInputHandler(Executor& theExecutor, ViMode initialMode);
 
-    bool sendKeyPressEvent(Key key, Modifiers modifiers) override;
-    bool sendCharPressEvent(char32_t ch, Modifiers modifiers) override;
+    Handled sendKeyPressEvent(Key key, Modifiers modifiers) override;
+    Handled sendCharPressEvent(char32_t ch, Modifiers modifiers) override;
 
     void setMode(ViMode mode);
     void toggleMode(ViMode mode);
@@ -236,8 +236,8 @@ class ViInputHandler: public InputHandler
 
     bool parseCount(char32_t ch, Modifiers modifiers);
     bool parseTextObject(char32_t ch, Modifiers modifiers);
-    bool handleSearchEditor(char32_t ch, Modifiers modifiers);
-    bool handleModeSwitches(char32_t ch, Modifiers modifiers);
+    Handled handleSearchEditor(char32_t ch, Modifiers modifiers);
+    Handled handleModeSwitches(char32_t ch, Modifiers modifiers);
     void startSearch();
 
     ViMode _viMode = ViMode::Normal;

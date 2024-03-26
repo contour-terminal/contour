@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/Config.h>
 #include <contour/TerminalSession.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
@@ -58,8 +59,8 @@ namespace
         auto const cellSize = session.display()->cellSize();
         auto const dpr = session.contentScale();
 
-        auto const marginTop = static_cast<int>(session.profile().margins.value().vertical * dpr);
-        auto const marginLeft = static_cast<int>(session.profile().margins.value().horizontal * dpr);
+        auto const marginTop = static_cast<int>(unbox(session.profile().margins.value().vertical) * dpr);
+        auto const marginLeft = static_cast<int>(unbox(session.profile().margins.value().horizontal) * dpr);
 
         auto const sx = int(double(x) * dpr);
         auto const sy = int(double(y) * dpr);
@@ -82,8 +83,8 @@ namespace
 #else
         auto const position = event->pos();
 #endif
-        auto const marginLeft = static_cast<int>(margins.horizontal * dpr);
-        auto const marginTop = static_cast<int>(margins.vertical * dpr);
+        auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
+        auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
         return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
                                  PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
     }
@@ -97,8 +98,8 @@ namespace
 #else
         auto const position = QPointF { static_cast<qreal>(event->x()), static_cast<qreal>(event->y()) };
 #endif
-        auto const marginLeft = static_cast<int>(margins.horizontal * dpr);
-        auto const marginTop = static_cast<int>(margins.vertical * dpr);
+        auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
+        auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
         return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
                                  PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
     }
@@ -112,8 +113,8 @@ namespace
 #else
         auto const position = event->posF();
 #endif
-        auto const marginLeft = static_cast<int>(margins.horizontal * dpr);
-        auto const marginTop = static_cast<int>(margins.vertical * dpr);
+        auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
+        auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
         return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
                                  PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
     }
@@ -573,10 +574,10 @@ vtrasterizer::PageMargin computeMargin(ImageSize cellSize,
 {
     auto const usedHeight = unbox(charCells.lines) * unbox(cellSize.height);
 
-    auto const topMargin = static_cast<int>(minimumMargins.vertical);
-    auto const bottomMargin = static_cast<int>(
-        std::min(unbox(displaySize.height) - usedHeight - topMargin, minimumMargins.vertical));
-    auto const leftMargin = static_cast<int>(minimumMargins.horizontal);
+    auto const topMargin = unbox<int>(minimumMargins.vertical);
+    auto const bottomMargin = unbox<int>(std::min(
+        config::VerticalMargin(unbox(displaySize.height) - usedHeight - topMargin), minimumMargins.vertical));
+    auto const leftMargin = unbox<int>(minimumMargins.horizontal);
 
     return { .left = leftMargin, .top = topMargin, .bottom = bottomMargin };
 }

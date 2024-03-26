@@ -185,10 +185,20 @@ enum class RenderingBackend
     OpenGL,
 };
 
+struct HorizontalMarginTag
+{
+};
+struct VerticalMarginTag
+{
+};
+
+using HorizontalMargin = boxed::boxed<unsigned, HorizontalMarginTag>;
+using VerticalMargin = boxed::boxed<unsigned, VerticalMarginTag>;
+
 struct WindowMargins
 {
-    unsigned horizontal = 0; // TODO use boxed
-    unsigned vertical = 0;   // TODO use boxed
+    HorizontalMargin horizontal { 0 };
+    VerticalMargin vertical { 0 };
 };
 
 template <typename T, documentation::StringLiteral doc>
@@ -302,7 +312,8 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::MouseHideWhileTyping> mouseHideWhileTyping { true };
     ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
     ConfigEntry<std::string, documentation::WMClass> wmClass { "contour" };
-    ConfigEntry<WindowMargins, documentation::Margins> margins { { 0u, 0u } };
+    ConfigEntry<WindowMargins, documentation::Margins> margins { { HorizontalMargin { 0u },
+                                                                   VerticalMargin { 0u } } };
     ConfigEntry<vtbackend::PageSize, documentation::TerminalSize> terminalSize { {
         vtbackend::LineCount(25),
         vtbackend::ColumnCount(80),
