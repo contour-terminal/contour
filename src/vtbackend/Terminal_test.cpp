@@ -399,7 +399,7 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
 
     // We want to ensure that this call is returning false if the app has not explicitly requested
     // to listen on mouse events (without passive mode being on).
-    REQUIRE(appHandledMouse == false);
+    REQUIRE(appHandledMouse == Handled { false });
 
     CHECK(mock.terminal.selector()->state() == Selection::State::Waiting);
 

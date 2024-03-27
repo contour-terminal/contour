@@ -169,8 +169,8 @@ vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer);
 
 constexpr config::WindowMargins applyContentScale(config::WindowMargins margins, double contentScale) noexcept
 {
-    return { .horizontal = static_cast<unsigned>(margins.horizontal * contentScale),
-             .vertical = static_cast<unsigned>(margins.vertical * contentScale) };
+    return { .horizontal = config::HorizontalMargin(unbox(margins.horizontal) * contentScale),
+             .vertical = config::VerticalMargin(unbox(margins.vertical) * contentScale) };
 }
 
 vtrasterizer::PageMargin computeMargin(vtbackend::ImageSize cellSize,
@@ -186,8 +186,9 @@ constexpr vtbackend::PageSize pageSizeForPixels(vtbackend::ImageSize totalViewSi
                                                 config::WindowMargins margins)
 {
     // NB: Multiplied by 2, because margins are applied on both sides of the terminal.
-    auto const marginSize = vtbackend::ImageSize { vtbackend::Width::cast_from(2 * margins.horizontal),
-                                                   vtbackend::Height::cast_from(2 * margins.vertical) };
+    auto const marginSize =
+        vtbackend::ImageSize { vtbackend::Width::cast_from(2 * unbox(margins.horizontal)),
+                               vtbackend::Height::cast_from(2 * unbox(margins.vertical)) };
 
     auto const usableViewSize = totalViewSize - marginSize;
 

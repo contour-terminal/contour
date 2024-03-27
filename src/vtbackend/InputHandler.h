@@ -3,8 +3,15 @@
 
 #include <vtbackend/InputGenerator.h>
 
+#include <boxed-cpp/boxed.hpp>
+
 namespace vtbackend
 {
+
+struct HandledTag
+{
+};
+using Handled = boxed::boxed<bool, HandledTag>;
 
 /**
  * Generic input handler interface.
@@ -16,8 +23,8 @@ class InputHandler
 {
   public:
     virtual ~InputHandler() = default;
-    virtual bool sendKeyPressEvent(Key key, Modifiers modifiers) = 0;
-    virtual bool sendCharPressEvent(char32_t codepoint, Modifiers modifiers) = 0;
+    virtual Handled sendKeyPressEvent(Key key, Modifiers modifiers) = 0;
+    virtual Handled sendCharPressEvent(char32_t codepoint, Modifiers modifiers) = 0;
 };
 
 } // namespace vtbackend

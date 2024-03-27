@@ -323,7 +323,7 @@ void ViInputHandler::setMode(ViMode theMode)
     _executor->modeChanged(theMode);
 }
 
-bool ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
+Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
 {
     if (_searchEditMode != SearchEditMode::Disabled)
     {
@@ -335,14 +335,14 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
             case Key::Escape: return handleSearchEditor('\x1B', modifiers);
             default: break;
         }
-        return true;
+        return Handled { true };
     }
 
     // clang-format off
     switch (_viMode)
     {
         case ViMode::Insert:
-            return false;
+            return Handled{false};
         case ViMode::Normal:
             break;
         case ViMode::Visual:
@@ -352,7 +352,7 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
             {
                 clearPendingInput();
                 setMode(ViMode::Normal);
-                return true;
+                return Handled{true};
             }
             break;
     }
@@ -376,7 +376,7 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
             return sendCharPressEvent(mappedText, modifiers);
 
     if (modifiers.any())
-        return true;
+        return Handled { true };
 
     auto const keyMappings = std::array<std::pair<Key, std::string_view>, 10> { {
         { Key::DownArrow, "<Down>" },
@@ -401,10 +401,10 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
     if (_pendingInput.empty())
     {
         errorLog()("ViInputHandler: Unhandled key: {} ({})", key, modifiers);
-        return false;
+        return Handled { false };
     }
 
-    return handlePendingInput();
+    return Handled { handlePendingInput() };
 }
 
 void ViInputHandler::startSearchExternally()
@@ -423,7 +423,7 @@ void ViInputHandler::startSearchExternally()
     }
 }
 
-bool ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
+Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
 {
     assert(_searchEditMode != SearchEditMode::Disabled);
 
@@ -467,26 +467,26 @@ bool ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
                            (unsigned) ch);
     }
 
-    return true;
+    return Handled { true };
 }
 
-bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers)
+Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers)
 {
     if (_searchEditMode != SearchEditMode::Disabled)
         return handleSearchEditor(ch, modifiers);
 
     if (_viMode == ViMode::Insert)
-        return false;
+        return Handled { false };
 
     if (ch == 033 && modifiers.none())
     {
         clearPendingInput();
         setMode(ViMode::Normal);
-        return true;
+        return Handled { true };
     }
 
     if (parseCount(ch, modifiers))
-        return true;
+        return Handled { true };
 
     appendModifierToPendingInput(ch > 0x20 ? modifiers.without(Modifier::Shift) : modifiers);
 
@@ -502,13 +502,13 @@ bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers)
     if (_pendingInput.empty())
     {
         errorLog()("ViInputHandler: Unhandled char: {} ({})", static_cast<uint32_t>(ch), modifiers);
-        return false;
+        return Handled { false };
     }
 
     if (handlePendingInput())
-        return true;
+        return Handled { true };
 
-    return false;
+    return Handled { false };
 }
 
 bool ViInputHandler::parseCount(char32_t ch, Modifiers modifiers)
