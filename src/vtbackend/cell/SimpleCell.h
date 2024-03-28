@@ -169,6 +169,8 @@ inline void SimpleCell::setCharacter(char32_t codepoint)
 
 inline int SimpleCell::appendCharacter(char32_t codepoint)
 {
+    assert(codepoint != 0);
+    assert(!_codepoints.empty() && "Use setCharacter() for first character.");
     _codepoints.push_back(codepoint);
 
     auto const diff = CellUtil::computeWidthChange(*this, codepoint);

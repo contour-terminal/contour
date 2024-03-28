@@ -325,6 +325,7 @@ inline void CompactCell::setCharacter(char32_t codepoint) noexcept
 inline int CompactCell::appendCharacter(char32_t codepoint) noexcept
 {
     assert(codepoint != 0);
+    assert(_codepoint != 0);
 
     CellExtra& ext = extra();
     if (ext.codepoints.size() < MaxCodepoints - 1)

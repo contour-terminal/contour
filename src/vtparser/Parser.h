@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <crispy/logstore.h>
+
 #include <libunicode/convert.h>
 #include <libunicode/grapheme_line_segmenter.h>
 
@@ -19,6 +21,8 @@
 
 namespace vtparser
 {
+
+auto const inline vtTraceParserLog = logstore::category("vt.trace.parser", "Logs terminal parser trace.");
 
 // NOLINTBEGIN(readability-identifier-naming)
 enum class State : uint8_t

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/GraphicsAttributes.h>
 #include <vtbackend/Line.h>
+#include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
 
+#include <libunicode/grapheme_line_segmenter.h>
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/utf8.h>
 #include <libunicode/width.h>
@@ -154,76 +156,106 @@ std::string Line<Cell>::toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailin
 }
 
 template <CellConcept Cell>
+struct TrivialLineInflater
+{
+    TrivialLineBuffer const& input;
+    InflatedLineBuffer<Cell> columns;
+
+    explicit TrivialLineInflater(TrivialLineBuffer const& input): input { input }
+    {
+        columns.reserve(unbox<size_t>(input.displayWidth));
+    }
+
+    InflatedLineBuffer<Cell> inflate() &&
+    {
+        vtParserLog()("Inflating TrivialLineBuffer: '{}'", input.text.data() ? crispy::escape(input.text.data()) : "");
+        auto lineSegmenter = unicode::grapheme_line_segmenter { *this, input.text.view() };
+        auto result = lineSegmenter.process(std::numeric_limits<unsigned>::max());
+        assert(result.stop_condition == unicode::StopCondition::EndOfInput);
+        vtParserLog()("Inflated {}/{} columns", columns.size(), input.displayWidth);
+
+        // Fill remaining columns
+        for (unsigned i = columns.size(); i < unbox<size_t>(input.displayWidth); ++i)
+        {
+            columns.emplace_back(input.fillAttributes);
+        }
+        assert(columns.size() == unbox<size_t>(input.displayWidth));
+
+        return std::move(columns);
+    }
+
+    void on_invalid(std::string_view /*invalid*/) noexcept
+    {
+        fmt::print("inflate invalid\n");
+        static constexpr char32_t ReplacementCharacter { 0xFFFD };
+
+        columns.emplace_back();
+        columns.back().setHyperlink(input.hyperlink);
+        columns.back().write(input.textAttributes, ReplacementCharacter, 1);
+    }
+
+    void on_ascii(std::string_view text) noexcept
+    {
+        fmt::print("inflate ASCII: '{}'\n", text);
+        for (auto const ch: text)
+        {
+            columns.emplace_back();
+            columns.back().setHyperlink(input.hyperlink);
+            columns.back().write(input.textAttributes, ch, 1);
+        }
+    }
+
+    void on_grapheme_cluster(std::string_view text, unsigned width) noexcept
+    {
+        fmt::print("inflate GC: '{}', width: {}\n", text, width);
+        columns.emplace_back(input.textAttributes, input.hyperlink);
+        Cell& cell = columns.back();
+        cell.setHyperlink(input.hyperlink);
+
+        auto utf8DecoderState = unicode::utf8_decoder_state {};
+        for (auto const ch: text)
+        {
+            unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState, static_cast<uint8_t>(ch));
+            if (auto const* cp = std::get_if<unicode::Success>(&r))
+            {
+                std::cout << fmt::format(" - codepoint: U+{:X}\n", (unsigned) cp->value);
+                if (cell.codepointCount() == 0)
+                    cell.setCharacter(cp->value);
+                else
+                    (void) cell.appendCharacter(cp->value);
+            }
+        }
+
+        fmt::print(" -> result (UTF-8): \"{}\"\n", cell.toUtf8());
+
+        // Fill remaining columns for wide characters
+        for (unsigned i = 1; i < width; ++i)
+        {
+            std::cout << fmt::format(" - continuation\n");
+            columns.emplace_back(input.textAttributes.with(CellFlag::WideCharContinuation), input.hyperlink);
+            cell.setWidth(width);
+        }
+    }
+};
+
+template <CellConcept Cell>
 InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 {
-    static constexpr char32_t ReplacementCharacter { 0xFFFD };
-
-    auto columns = InflatedLineBuffer<Cell> {};
-    columns.reserve(unbox<size_t>(input.displayWidth));
-
-    auto lastChar = char32_t { 0 };
-    auto utf8DecoderState = unicode::utf8_decoder_state {};
-    auto gapPending = 0;
-
-    for (char const ch: input.text.view())
-    {
-        unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState, static_cast<uint8_t>(ch));
-        if (holds_alternative<unicode::Incomplete>(r))
-            continue;
-
-        auto const nextChar =
-            holds_alternative<unicode::Success>(r) ? get<unicode::Success>(r).value : ReplacementCharacter;
-
-        if (unicode::grapheme_segmenter::breakable(lastChar, nextChar))
-        {
-            while (gapPending > 0)
-            {
-                columns.emplace_back(input.textAttributes.with(CellFlag::WideCharContinuation),
-                                     input.hyperlink);
-                --gapPending;
-            }
-            auto const charWidth = unicode::width(nextChar);
-            columns.emplace_back(Cell {});
-            columns.back().setHyperlink(input.hyperlink);
-            columns.back().write(input.textAttributes, nextChar, static_cast<uint8_t>(charWidth));
-            gapPending = charWidth - 1;
-        }
-        else
-        {
-            Cell& prevCell = columns.back();
-            auto const extendedWidth = prevCell.appendCharacter(nextChar);
-            if (extendedWidth > 0)
-            {
-                auto const cellsAvailable = *input.displayWidth - static_cast<int>(columns.size()) + 1;
-                auto const n = min(extendedWidth, cellsAvailable);
-                for (int i = 1; i < n; ++i)
-                {
-                    columns.emplace_back(Cell { input.textAttributes });
-                    columns.back().setHyperlink(input.hyperlink);
-                }
-            }
-        }
-        lastChar = nextChar;
-    }
-
-    while (gapPending > 0)
-    {
-        columns.emplace_back(Cell { input.textAttributes, input.hyperlink });
-        --gapPending;
-    }
-
-    assert(columns.size() == unbox<size_t>(input.usedColumns));
-    assert(unbox(input.displayWidth) > 0);
-
-    while (columns.size() < unbox<size_t>(input.displayWidth))
-        columns.emplace_back(Cell { input.fillAttributes });
-
-    return columns;
+    return TrivialLineInflater<Cell>(input).inflate();
 }
+
 } // end namespace vtbackend
 
+// {{{ Explicit instantiation of Line<Cell> for supported cell types.
 #include <vtbackend/cell/CompactCell.h>
-template class vtbackend::Line<vtbackend::CompactCell>;
-
 #include <vtbackend/cell/SimpleCell.h>
-template class vtbackend::Line<vtbackend::SimpleCell>;
+
+namespace vtbackend
+{
+
+template class Line<CompactCell>;
+template class Line<SimpleCell>;
+template InflatedLineBuffer<SimpleCell> inflate(TrivialLineBuffer const& input);
+
+} // namespace vtbackend
+// }}}

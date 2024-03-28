@@ -13,6 +13,7 @@ target_link_libraries(vtparser PUBLIC
     fmt::fmt-header-only
     range-v3::range-v3
     unicode::unicode
+    crispy::core
 )
 target_include_directories(vtparser PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
@@ -24,7 +25,8 @@ if(VTPARSER_TESTING)
     enable_testing()
     add_executable(vtparser_test
         Parser_test.cpp
+        test_main.cpp
     )
-    target_link_libraries(vtparser_test vtparser Catch2::Catch2WithMain)
+    target_link_libraries(vtparser_test vtparser Catch2::Catch2)
     add_test(vtparser_test ./vtparser_test)
 endif()

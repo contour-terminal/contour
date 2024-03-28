@@ -52,6 +52,7 @@ concept CellConcept = requires(T t, T const& u) {
 
     t.setCharacter(char32_t {});
     { t.appendCharacter(char32_t {}) } -> std::same_as<int>;
+    // TODO(pr) rename appendCharacter function to extendGraphemeCluster(codepoint)
 
     { u.toUtf8() } -> std::convertible_to<std::string>;
 

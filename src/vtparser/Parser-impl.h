@@ -365,6 +365,16 @@ template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
     -> std::tuple<ProcessKind, size_t>
 {
+    // auto constexpr StopConditionStr = [](unicode::StopCondition value) -> std::string_view {
+    //     switch (value)
+    //     {
+    //         case unicode::StopCondition::UnexpectedInput: return "UnexpectedInput";
+    //         case unicode::StopCondition::EndOfInput: return "EndOfInput";
+    //         case unicode::StopCondition::EndOfWidth: return "EndOfWidth";
+    //     }
+    //     return "Unknown";
+    // };
+
     auto const* input = begin;
     if (_state != State::Ground)
         return { ProcessKind::FallbackToFSM, 0 };
@@ -375,11 +385,28 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
 
     auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
 
-    _graphemeLineSegmenter.reset(chunk);
-    unicode::grapheme_segmentation_result result = _graphemeLineSegmenter.process(maxCharCount);
-    auto const cellCount = result.width;
+    if (_graphemeLineSegmenter.next() == begin)
+        _graphemeLineSegmenter.expand_buffer_by(chunk.size());
+    else
+        _graphemeLineSegmenter.reset(chunk);
+    // if (_graphemeLineSegmenter.end() == begin)
+    //     _graphemeLineSegmenter.expand_buffer_by(chunk.size());
+    // else
+    //     _graphemeLineSegmenter.reset(chunk);
+    // TODO(pr) What if the last call to parseBulkText was only a partial read, and we have
+    //          more text to read? Then we should not just call reset() but expand_buffer_by().
+    // _graphemeLineSegmenter.reset(chunk);
+
+    unicode::grapheme_segmentation_result const result = _graphemeLineSegmenter.process(maxCharCount);
+    unicode::grapheme_segmentation_result const flushResult =
+        _graphemeLineSegmenter.flush(maxCharCount - result.width);
+    // TODO(pr) this flush should only happen if non-text was reeived, e.g. a control sequence, or
+    //          if the last codepoint was fully processed. Otherwise, we should not flush, but
+    //          continue processing the next codepoint (in the NEXT call).
+
+    auto const cellCount = result.width + flushResult.width;
     auto const* subStart = result.text.data();
-    auto const* subEnd = subStart + result.text.size();
+    auto const* subEnd = subStart + result.text.size() + flushResult.text.size();
 
     if (result.text.empty())
         return { ProcessKind::FallbackToFSM, 0 };
@@ -400,7 +427,10 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     if (!_graphemeLineSegmenter.is_utf8_byte_pending())
     {
         if (!text.empty())
+        {
+            vtTraceParserLog()("Printing fast-scanned text \"{}\" with {} cells.", text, cellCount);
             _eventListener.print(text, cellCount);
+        }
 
         // This optimization is for the `cat`-people.
         // It further optimizes the throughput performance by bypassing
@@ -411,7 +441,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
             _eventListener.execute(*input++);
     }
 
-    auto const count = static_cast<size_t>(std::distance(input, _graphemeLineSegmenter.next())); 
+    auto const count = static_cast<size_t>(std::distance(input, _graphemeLineSegmenter.next()));
     return { ProcessKind::ContinueBulk, count };
 }
 
@@ -436,6 +466,9 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
 {
     (void) actionClass;
     auto const ch = static_cast<char>(codepoint);
+
+    if (vtTraceParserLog)
+        vtTraceParserLog()("Parser.handle: {} {} {:X}", actionClass, action, (unsigned) ch);
 
     switch (action)
     {
