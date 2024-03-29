@@ -17,7 +17,7 @@ class failure
     using error_type = E;
 
     constexpr failure(const failure&) = default;
-    constexpr failure(failure&&) = default;
+    constexpr failure(failure&&) noexcept = default;
 
     template <typename Err = E>
     constexpr explicit failure(Err&& e): _value { std::forward<Err>(e) }
@@ -36,7 +36,7 @@ class failure
     }
 
     constexpr failure& operator=(const failure&) = default;
-    constexpr failure& operator=(failure&&) = default;
+    constexpr failure& operator=(failure&&) noexcept = default;
 
     constexpr const E& error() const& noexcept { return _value; }
     constexpr E& error() & noexcept { return _value; }
