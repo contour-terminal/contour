@@ -114,6 +114,20 @@ TEST_CASE("result.or_else")
     // test const lvalue reference
     auto const c = b.or_else([](error_code e) -> result { return failure { error_code(int(e) + 1) }; });
     REQUIRE(c.error() == error_code::E3);
+
+    // ensure chaining works over rvalues
+    auto const b2 = result { failure { error_code::E1 } } // E1
+                        .or_else([](error_code) { return result { 12 }; })
+                        .or_else([](error_code) { return result { 13 }; });
+    REQUIRE(b2.value() == 12);
+
+    // ensure chaining works over lvalues
+    auto const someError = result { failure { error_code::E1 } };
+    auto const c2 = someError // E1
+                        .or_else([](error_code) { return result { 14 }; })
+                        .or_else([](error_code) { return result { 15 }; })
+                        .or_else([](error_code) { return result { 16 }; });
+    REQUIRE(c2.value() == 14);
 }
 
 TEST_CASE("result.emplace")

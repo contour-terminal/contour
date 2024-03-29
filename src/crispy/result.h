@@ -19,7 +19,7 @@ class failure
     constexpr failure(const failure&) = default;
     constexpr failure(failure&&) noexcept = default;
 
-    template <typename Err = E>
+    template <typename Err = E, typename = std::enable_if_t<std::is_constructible_v<E, Err&&>>>
     constexpr explicit failure(Err&& e): _value { std::forward<Err>(e) }
     {
     }
