@@ -181,10 +181,15 @@ fs::path configHome()
     return configHome("contour");
 }
 
+std::string createString(Config const& c)
+{
+    return createString(c, YAMLConfigWriter());
+}
+
 std::string defaultConfigString()
 {
     const Config config {};
-    auto configString = YAMLConfigWriter().createString(config);
+    auto configString = createString(config);
 
     auto logger = configLog;
     logger()(configString);
@@ -1827,29 +1832,27 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     logger()("Loading entry: {}, value {}", entry, where.value);
 }
 
-std::string YAMLConfigWriter::createString(Config const& c)
+template <typename Writer>
+std::string createString(Config const& c)
 {
     auto doc = std::string {};
-    constexpr int OneOffset = 4;
-
+    Writer writer;
     auto const process = [&](auto v) {
-        doc.append(format(addOffset(v.documentation, Offset::levels * OneOffset), v.value()));
+        doc.append(writer.process(v.documentation, v.value()));
     };
 
     auto const processWithDoc = [&](auto&& docString, auto... val) {
-        doc.append(fmt::format(
-            fmt::runtime(format(addOffset(std::string(docString.value), Offset::levels * OneOffset), val...)),
-            fmt::arg("comment", "#")));
+        doc.append(
+            fmt::format(fmt::runtime(writer.process(docString.value, val...)), fmt::arg("comment", "#")));
     };
 
     auto const processWordDelimiters = [&]() {
         auto wordDelimiters = c.wordDelimiters.value();
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
-        doc.append(fmt::format(
-            fmt::runtime(format(addOffset(c.wordDelimiters.documentation, Offset::levels * OneOffset),
-                                wordDelimiters)),
-            fmt::arg("comment", "#")));
+        doc.append(
+            fmt::format(fmt::runtime(writer.process(documentation::WordDelimiters.value, wordDelimiters)),
+                        fmt::arg("comment", "#")));
     };
 
     if (c.platformPlugin.value() == "")
@@ -1862,7 +1865,7 @@ std::string YAMLConfigWriter::createString(Config const& c)
     }
 
     // inside renderer:
-    scoped([&]() {
+    writer.scoped([&]() {
         doc.append("renderer: \n");
         process(c.renderingBackend);
         process(c.textureAtlasHashtableSlots);
@@ -1886,7 +1889,7 @@ std::string YAMLConfigWriter::createString(Config const& c)
     // inside images:
     doc.append("\nimages: \n");
 
-    scoped([&]() {
+    writer.scoped([&]() {
         process(c.sixelScrolling);
         process(c.maxImageColorRegisters);
         process(c.maxImageSize);
@@ -1895,12 +1898,12 @@ std::string YAMLConfigWriter::createString(Config const& c)
     // inside profiles:
     doc.append(fmt::format(fmt::runtime(c.profiles.documentation), fmt::arg("comment", "#")));
     {
-        const auto _ = Offset {};
+        const auto _ = typename Writer::Offset {};
         for (auto&& [name, entry]: c.profiles.value())
         {
             doc.append(fmt::format("    {}: \n", name));
             {
-                const auto _ = Offset {};
+                const auto _ = typename Writer::Offset {};
                 process(entry.shell);
                 process(entry.ssh);
 
@@ -1925,27 +1928,27 @@ std::string YAMLConfigWriter::createString(Config const& c)
 
                 process(entry.margins);
                 // history: section
-                doc.append(addOffset("history:\n", Offset::levels * OneOffset));
+                doc.append(Writer::addOffset("history:\n", Writer::Offset::levels * Writer::OneOffset));
                 {
-                    const auto _ = Offset {};
+                    const auto _ = typename Writer::Offset {};
                     process(entry.maxHistoryLineCount);
                     process(entry.autoScrollOnUpdate);
                     process(entry.historyScrollMultiplier);
                 }
 
                 // scrollbar: section
-                doc.append(addOffset("scrollbar:\n", Offset::levels * OneOffset));
+                doc.append(Writer::addOffset("scrollbar:\n", Writer::Offset::levels * Writer::OneOffset));
                 ;
                 {
-                    const auto _ = Offset {};
+                    const auto _ = typename Writer::Offset {};
                     process(entry.scrollbarPosition);
                     process(entry.hideScrollbarInAltScreen);
                 }
 
                 // mouse: section
-                doc.append(addOffset("mouse:\n", Offset::levels * OneOffset));
+                doc.append(Writer::addOffset("mouse:\n", Writer::Offset::levels * Writer::OneOffset));
                 {
-                    const auto _ = Offset {};
+                    const auto _ = typename Writer::Offset {};
                     process(entry.mouseHideWhileTyping);
                 }
 
@@ -1963,7 +1966,7 @@ std::string YAMLConfigWriter::createString(Config const& c)
                         "permissions:\n" },
                     0);
                 {
-                    const auto _ = Offset {};
+                    const auto _ = typename Writer::Offset {};
                     process(entry.changeFont);
                     process(entry.captureBuffer);
                     process(entry.displayHostWritableStatusLine);
@@ -1978,40 +1981,40 @@ std::string YAMLConfigWriter::createString(Config const& c)
                 process(entry.modalCursorScrollOff);
 
                 // status_line
-                doc.append(addOffset("\n"
-                                     "status_line:\n",
-                                     Offset::levels * OneOffset));
+                doc.append(Writer::addOffset("\n"
+                                             "status_line:\n",
+                                             Writer::Offset::levels * Writer::OneOffset));
                 {
-                    const auto _ = Offset {};
+                    const auto _ = typename Writer::Offset {};
                     process(entry.initialStatusDisplayType);
                     process(entry.statusDisplayPosition);
                     process(entry.syncWindowTitleWithHostWritableStatusDisplay);
 
-                    doc.append(addOffset("indicator:\n", Offset::levels * OneOffset));
+                    doc.append(Writer::addOffset("indicator:\n", Writer::Offset::levels * Writer::OneOffset));
                     {
-                        const auto _ = Offset {};
+                        const auto _ = typename Writer::Offset {};
                         process(entry.indicatorStatusLineLeft);
                         process(entry.indicatorStatusLineMiddle);
                         process(entry.indicatorStatusLineRight);
                     }
                 }
 
-                doc.append(addOffset("\n"
-                                     "background:\n",
-                                     Offset::levels * OneOffset));
+                doc.append(Writer::addOffset("\n"
+                                             "background:\n",
+                                             Writer::Offset::levels * Writer::OneOffset));
                 {
-                    const auto _ = Offset {};
+                    const auto _ = typename Writer::Offset {};
                     process(entry.backgroundOpacity);
                     process(entry.backgroundBlur);
                 }
 
                 process(entry.colors);
 
-                doc.append(addOffset("\n"
-                                     "hyperlink_decoration:\n",
-                                     Offset::levels * OneOffset));
+                doc.append(Writer::addOffset("\n"
+                                             "hyperlink_decoration:\n",
+                                             Writer::Offset::levels * Writer::OneOffset));
                 {
-                    const auto _ = Offset {};
+                    const auto _ = typename Writer::Offset {};
                     process(entry.hyperlinkDecorationNormal);
                     process(entry.hyperlinkDecorationHover);
                 }
@@ -2020,19 +2023,20 @@ std::string YAMLConfigWriter::createString(Config const& c)
     }
 
     doc.append(fmt::format(fmt::runtime(c.colorschemes.documentation), fmt::arg("comment", "#")));
-    scoped([&]() {
+    writer.scoped([&]() {
         for (auto&& [name, entry]: c.colorschemes.value())
         {
             doc.append(fmt::format("    {}: \n", name));
 
             {
-                const auto _ = Offset {};
-                doc.append(fmt::format(fmt::runtime(addOffset("{comment} Default colors\n"
-                                                              "default:\n",
-                                                              Offset::levels * OneOffset)),
-                                       fmt::arg("comment", "#")));
+                const auto _ = typename Writer::Offset {};
+                doc.append(
+                    fmt::format(fmt::runtime(Writer::addOffset("{comment} Default colors\n"
+                                                               "default:\n",
+                                                               Writer::Offset::levels * Writer::OneOffset)),
+                                fmt::arg("comment", "#")));
                 {
-                    const auto _ = Offset {};
+                    const auto _ = typename Writer::Offset {};
                     processWithDoc(
                         documentation::DefaultColors, entry.defaultBackground, entry.defaultForeground);
 
@@ -2155,22 +2159,22 @@ std::string YAMLConfigWriter::createString(Config const& c)
                                    entry.dimColor(7));
                 }
 
-                doc.append(addOffset("", Offset::levels * OneOffset));
+                doc.append(Writer::addOffset("", Writer::Offset::levels * Writer::OneOffset));
             }
         }
     });
 
     doc.append(fmt::format(fmt::runtime(c.inputMappings.documentation), fmt::arg("comment", "#")));
     {
-        const auto _ = Offset {};
+        const auto _ = typename Writer::Offset {};
         for (auto&& entry: c.inputMappings.value().keyMappings)
-            doc.append(addOffset(format(entry), Offset::levels * OneOffset));
+            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::levels * Writer::OneOffset));
 
         for (auto&& entry: c.inputMappings.value().charMappings)
-            doc.append(addOffset(format(entry), Offset::levels * OneOffset));
+            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::levels * Writer::OneOffset));
 
         for (auto&& entry: c.inputMappings.value().mouseMappings)
-            doc.append(addOffset(format(entry), Offset::levels * OneOffset));
+            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::levels * Writer::OneOffset));
     }
     return doc;
 }
