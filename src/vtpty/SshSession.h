@@ -119,6 +119,14 @@ class SshSession final: public Pty
     void setState(State nextState);
 
     void logInfo(std::string_view message) const;
+    void logInject(std::string_view message) const;
+    void logInfoWithInject(std::string_view message) const;
+
+    template <typename... Args>
+    void logInfoWithInject(fmt::format_string<Args...> fmt, Args&&... args) const
+    {
+        logInfoWithInject(fmt::format(fmt, std::forward<Args>(args)...));
+    }
 
     template <typename... Args>
     void logInfo(fmt::format_string<Args...> fmt, Args&&... args) const

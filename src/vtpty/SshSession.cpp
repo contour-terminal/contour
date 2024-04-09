@@ -612,9 +612,10 @@ void SshSession::processState()
 void SshSession::start()
 {
     if (_config.port == 22)
-        logInfo("Starting SSH session to host: {}@{}", _config.username, _config.hostname);
+        logInfoWithInject("Starting SSH session to host: {}@{}", _config.username, _config.hostname);
     else
-        logInfo("Starting SSH session to host: {}@{}:{}", _config.username, _config.hostname, _config.port);
+        logInfoWithInject(
+            "Starting SSH session to host: {}@{}:{}", _config.username, _config.hostname, _config.port);
 
     assert(_state == State::Initial);
     // auto const _ = std::lock_guard { _mutex };
@@ -897,16 +898,25 @@ void SshSession::injectRead(std::string_view buf)
     _injectCV.notify_all();
 }
 
+void SshSession::logInject(std::string_view message) const
+{
+    const_cast<SshSession*>(this)->injectRead(fmt::format("\U0001F511 \033[1;33m{}\033[m\r\n", message));
+}
+
 void SshSession::logInfo(std::string_view message) const
 {
     sshLog()("{}", message);
-    const_cast<SshSession*>(this)->injectRead(fmt::format("\U0001F511 \033[1;33m{}\033[m\r\n", message));
+}
+
+void SshSession::logInfoWithInject(std::string_view message) const
+{
+    logInfo(message);
+    logInject(message);
 }
 
 void SshSession::logError(std::string_view message) const
 {
     errorLog()("{}", message);
-    const_cast<SshSession*>(this)->injectRead(fmt::format("\U0001F511 \033[1;31m{}\033[m\r\n", message));
 }
 
 bool SshSession::connect(std::string_view host, int port)
@@ -968,9 +978,9 @@ bool SshSession::connect(std::string_view host, int port)
                 auto const addrAndPort =
                     port == 22 ? std::string(addrStr) : fmt::format("{}:{}", addrStr, port);
                 if (host != addrStr)
-                    logInfo("Connected to {} ({})", host, addrAndPort);
+                    logInfoWithInject("Connected to {} ({})", host, addrAndPort);
                 else
-                    logInfo("Connected to {}", addrAndPort);
+                    logInfoWithInject("Connected to {}", addrAndPort);
                 return true;
             }
 
@@ -1196,7 +1206,7 @@ void SshSession::authenticateWithPrivateKey()
         return;
     }
 
-    logInfo("Successfully authenticated with private key.");
+    logInfoWithInject("Successfully authenticated with private key.");
 
     setState(State::OpenChannel);
 }
@@ -1234,7 +1244,7 @@ void SshSession::authenticateWithPassword()
         return;
     }
 
-    logInfo("Successfully authenticated with password.");
+    logInfoWithInject("Successfully authenticated with password.");
 
     setState(State::OpenChannel);
 }
@@ -1289,7 +1299,8 @@ bool SshSession::authenticateWithAgent()
         }
         if (rc == LIBSSH2_ERROR_NONE)
         {
-            logInfo("Successfully authenticated with SSH agent with identity: {}", identity->comment);
+            logInfoWithInject("Successfully authenticated with SSH agent with identity: {}",
+                              identity->comment);
             setState(State::OpenChannel);
             return true;
         }
