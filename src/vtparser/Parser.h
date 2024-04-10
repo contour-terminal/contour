@@ -22,6 +22,14 @@
 namespace vtparser
 {
 
+#if defined(__GNUC__) || defined(__clang__)
+    #define VTPARSER_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+    #define VTPARSER_NOINLINE __declspec(noinline)
+#else
+    #define VTPARSER_NOINLINE /*!*/
+#endif
+
 auto const inline vtTraceParserLog = logstore::category("vt.trace.parser", "Logs terminal parser trace.");
 
 // NOLINTBEGIN(readability-identifier-naming)

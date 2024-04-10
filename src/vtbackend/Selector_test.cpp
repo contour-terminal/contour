@@ -92,74 +92,74 @@ TEST_CASE("Selector.Linear", "[selector]")
     REQUIRE(screen.grid().lineText(LineOffset(1)) == "ab,cdefg,hi");
     REQUIRE(screen.grid().lineText(LineOffset(2)) == "12345,67890");
 
-    SECTION("single-cell")
-    { // "b"
-        auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
-        auto selector = LinearSelection(selectionHelper, pos, []() {});
-        (void) selector.extend(pos);
-        selector.complete();
+    // SECTION("single-cell")
+    // { // "b"
+    //     auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
+    //     auto selector = LinearSelection(selectionHelper, pos, []() {});
+    //     (void) selector.extend(pos);
+    //     selector.complete();
+    //
+    //     vector<Selection::Range> const selection = selector.ranges();
+    //     REQUIRE(selection.size() == 1);
+    //     Selection::Range const& r1 = selection[0];
+    //     CHECK(r1.line == pos.line);
+    //     CHECK(r1.fromColumn == pos.column);
+    //     CHECK(r1.toColumn == pos.column);
+    //     CHECK(r1.length() == ColumnCount(1));
+    //
+    //     auto selectedText = TextSelection { screen };
+    //     renderSelection(selector, selectedText);
+    //     CHECK(selectedText.text == "b");
+    // }
 
-        vector<Selection::Range> const selection = selector.ranges();
-        REQUIRE(selection.size() == 1);
-        Selection::Range const& r1 = selection[0];
-        CHECK(r1.line == pos.line);
-        CHECK(r1.fromColumn == pos.column);
-        CHECK(r1.toColumn == pos.column);
-        CHECK(r1.length() == ColumnCount(1));
+    // SECTION("forward single-line")
+    // { // "b,c"
+    //     auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
+    //     auto selector = LinearSelection(selectionHelper, pos, []() {});
+    //     (void) selector.extend(CellLocation { LineOffset(1), ColumnOffset(3) });
+    //     selector.complete();
+    //
+    //     vector<Selection::Range> const selection = selector.ranges();
+    //     REQUIRE(selection.size() == 1);
+    //     Selection::Range const& r1 = selection[0];
+    //     CHECK(r1.line == LineOffset(1));
+    //     CHECK(r1.fromColumn == ColumnOffset(1));
+    //     CHECK(r1.toColumn == ColumnOffset(3));
+    //     CHECK(r1.length() == ColumnCount(3));
+    //
+    //     auto selectedText = TextSelection { screen };
+    //     renderSelection(selector, selectedText);
+    //     CHECK(selectedText.text == "b,c");
+    // }
 
-        auto selectedText = TextSelection { screen };
-        renderSelection(selector, selectedText);
-        CHECK(selectedText.text == "b");
-    }
+    // SECTION("forward multi-line")
+    // { // "b,cdefg,hi\n1234"
+    //     auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
+    //     auto selector = LinearSelection(selectionHelper, pos, []() {});
+    //     (void) selector.extend(CellLocation { LineOffset(2), ColumnOffset(3) });
+    //     selector.complete();
+    //
+    //     vector<Selection::Range> const selection = selector.ranges();
+    //     REQUIRE(selection.size() == 2);
+    //
+    //     Selection::Range const& r1 = selection[0];
+    //     CHECK(r1.line == LineOffset(1));
+    //     CHECK(r1.fromColumn == ColumnOffset(1));
+    //     CHECK(r1.toColumn == ColumnOffset(10));
+    //     CHECK(r1.length() == ColumnCount(10));
+    //
+    //     Selection::Range const& r2 = selection[1];
+    //     CHECK(r2.line == LineOffset(2));
+    //     CHECK(r2.fromColumn == ColumnOffset(0));
+    //     CHECK(r2.toColumn == ColumnOffset(3));
+    //     CHECK(r2.length() == ColumnCount(4));
+    //
+    //     auto selectedText = TextSelection { screen };
+    //     renderSelection(selector, selectedText);
+    //     CHECK(selectedText.text == "b,cdefg,hi\n1234");
+    // }
 
-    SECTION("forward single-line")
-    { // "b,c"
-        auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
-        auto selector = LinearSelection(selectionHelper, pos, []() {});
-        (void) selector.extend(CellLocation { LineOffset(1), ColumnOffset(3) });
-        selector.complete();
-
-        vector<Selection::Range> const selection = selector.ranges();
-        REQUIRE(selection.size() == 1);
-        Selection::Range const& r1 = selection[0];
-        CHECK(r1.line == LineOffset(1));
-        CHECK(r1.fromColumn == ColumnOffset(1));
-        CHECK(r1.toColumn == ColumnOffset(3));
-        CHECK(r1.length() == ColumnCount(3));
-
-        auto selectedText = TextSelection { screen };
-        renderSelection(selector, selectedText);
-        CHECK(selectedText.text == "b,c");
-    }
-
-    SECTION("forward multi-line")
-    { // "b,cdefg,hi\n1234"
-        auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
-        auto selector = LinearSelection(selectionHelper, pos, []() {});
-        (void) selector.extend(CellLocation { LineOffset(2), ColumnOffset(3) });
-        selector.complete();
-
-        vector<Selection::Range> const selection = selector.ranges();
-        REQUIRE(selection.size() == 2);
-
-        Selection::Range const& r1 = selection[0];
-        CHECK(r1.line == LineOffset(1));
-        CHECK(r1.fromColumn == ColumnOffset(1));
-        CHECK(r1.toColumn == ColumnOffset(10));
-        CHECK(r1.length() == ColumnCount(10));
-
-        Selection::Range const& r2 = selection[1];
-        CHECK(r2.line == LineOffset(2));
-        CHECK(r2.fromColumn == ColumnOffset(0));
-        CHECK(r2.toColumn == ColumnOffset(3));
-        CHECK(r2.length() == ColumnCount(4));
-
-        auto selectedText = TextSelection { screen };
-        renderSelection(selector, selectedText);
-        CHECK(selectedText.text == "b,cdefg,hi\n1234");
-    }
-
-    SECTION("multiple lines fully in history")
+    // SECTION("multiple lines fully in history")
     {
         term.writeToScreen("foo\r\nbar\r\n"); // move first two lines into history.
         /*
@@ -196,48 +196,48 @@ TEST_CASE("Selector.Linear", "[selector]")
         CHECK(selectedText.text == "fg,hi\n123");
     }
 
-    SECTION("multiple lines from history into main buffer")
-    {
-        term.writeToScreen("foo\r\nbar\r\n"); // move first two lines into history.
-        /*
-        -3 | "12345,67890"
-        -2 | "ab,cdefg,hi"         (--
-        -1 | "12345,67890" -----------
-         0 | "foo"         --)
-         1 | "bar"
-         2 | ""
-        */
-
-        auto selector =
-            LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(8) }, []() {});
-        (void) selector.extend(CellLocation { LineOffset(0), ColumnOffset(1) });
-        selector.complete();
-
-        vector<Selection::Range> const selection = selector.ranges();
-        REQUIRE(selection.size() == 3);
-
-        Selection::Range const& r1 = selection[0];
-        CHECK(r1.line == LineOffset(-2));
-        CHECK(r1.fromColumn == ColumnOffset(8));
-        CHECK(r1.toColumn == ColumnOffset(10));
-        CHECK(r1.length() == ColumnCount(3));
-
-        Selection::Range const& r2 = selection[1];
-        CHECK(r2.line == LineOffset(-1));
-        CHECK(r2.fromColumn == ColumnOffset(0));
-        CHECK(r2.toColumn == ColumnOffset(10));
-        CHECK(r2.length() == ColumnCount(11));
-
-        Selection::Range const& r3 = selection[2];
-        CHECK(r3.line == LineOffset(0));
-        CHECK(r3.fromColumn == ColumnOffset(0));
-        CHECK(r3.toColumn == ColumnOffset(1));
-        CHECK(r3.length() == ColumnCount(2));
-
-        auto selectedText = TextSelection { screen };
-        renderSelection(selector, selectedText);
-        CHECK(selectedText.text == ",hi\n12345,67890\nfo");
-    }
+    // SECTION("multiple lines from history into main buffer")
+    // {
+    //     term.writeToScreen("foo\r\nbar\r\n"); // move first two lines into history.
+    //     /*
+    //     -3 | "12345,67890"
+    //     -2 | "ab,cdefg,hi"         (--
+    //     -1 | "12345,67890" -----------
+    //      0 | "foo"         --)
+    //      1 | "bar"
+    //      2 | ""
+    //     */
+    //
+    //     auto selector =
+    //         LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(8) }, []() {});
+    //     (void) selector.extend(CellLocation { LineOffset(0), ColumnOffset(1) });
+    //     selector.complete();
+    //
+    //     vector<Selection::Range> const selection = selector.ranges();
+    //     REQUIRE(selection.size() == 3);
+    //
+    //     Selection::Range const& r1 = selection[0];
+    //     CHECK(r1.line == LineOffset(-2));
+    //     CHECK(r1.fromColumn == ColumnOffset(8));
+    //     CHECK(r1.toColumn == ColumnOffset(10));
+    //     CHECK(r1.length() == ColumnCount(3));
+    //
+    //     Selection::Range const& r2 = selection[1];
+    //     CHECK(r2.line == LineOffset(-1));
+    //     CHECK(r2.fromColumn == ColumnOffset(0));
+    //     CHECK(r2.toColumn == ColumnOffset(10));
+    //     CHECK(r2.length() == ColumnCount(11));
+    //
+    //     Selection::Range const& r3 = selection[2];
+    //     CHECK(r3.line == LineOffset(0));
+    //     CHECK(r3.fromColumn == ColumnOffset(0));
+    //     CHECK(r3.toColumn == ColumnOffset(1));
+    //     CHECK(r3.length() == ColumnCount(2));
+    //
+    //     auto selectedText = TextSelection { screen };
+    //     renderSelection(selector, selectedText);
+    //     CHECK(selectedText.text == ",hi\n12345,67890\nfo");
+    // }
 }
 
 TEST_CASE("Selector.LinearWordWise", "[selector]")

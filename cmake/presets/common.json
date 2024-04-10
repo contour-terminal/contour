@@ -30,6 +30,14 @@
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "LIBUNICODE_TABLEGEN_FASTBUILD": "ON"
             }
+        },
+        {
+            "name": "gcc-like-debug",
+            "hidden": true,
+            "inherits": ["debug"],
+            "cacheVariables": {
+                "CMAKE_CXX_FLAGS_DEBUG": "-O0 -ggdb3 -fno-inline-small-functions -ginline-points -fno-omit-frame-pointer"
+            }
         }
     ]
 }

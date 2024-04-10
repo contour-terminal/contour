@@ -20,7 +20,7 @@
         {
             "name": "macos-debug",
             "displayName": "MacOS - Debug",
-            "inherits": ["macos-common", "debug"]
+            "inherits": ["macos-common", "gcc-like-debug"]
         },
         {
             "name": "macos-release",
