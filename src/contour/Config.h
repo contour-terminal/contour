@@ -55,6 +55,7 @@
 #include <regex>
 #include <set>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <type_traits>
 #include <unordered_map>
@@ -884,13 +885,9 @@ struct YAMLConfigReader
                      actions::Action action);
 };
 
-struct YAMLConfigWriter
+struct Writer
 {
-    std::string static addOffset(std::string const& doc, size_t off)
-    {
-        auto offset = std::string(off, ' ');
-        return std::regex_replace(doc, std::regex(".+\n"), offset + "$&");
-    }
+    virtual ~Writer() = default;
 
     struct Offset
     {
@@ -906,8 +903,6 @@ struct YAMLConfigWriter
         lambda();
     }
 
-    std::string createString(Config const& c);
-
     template <typename T>
     auto format(T v)
     {
@@ -918,6 +913,36 @@ struct YAMLConfigWriter
     [[nodiscard]] std::string format(std::string_view doc, T... args)
     {
         return fmt::format(fmt::runtime(doc), format(args)..., fmt::arg("comment", "#"));
+    }
+};
+
+template <typename T>
+std::string createString(Config const& c, T)
+{
+    return createString<T>(c);
+}
+
+struct YAMLConfigWriter: Writer
+{
+
+    static constexpr int OneOffset = 4;
+    using Writer::format;
+    std::string static addOffset(std::string const& doc, size_t off)
+    {
+        auto offset = std::string(off, ' ');
+        return std::regex_replace(doc, std::regex(".+\n"), offset + "$&");
+    }
+
+    template <typename T>
+    std::string process(std::string doc, T val)
+    {
+        return format(addOffset(doc, Offset::levels * OneOffset), val);
+    }
+
+    template <typename... T>
+    std::string process(std::string doc, T... val)
+    {
+        return format(addOffset(doc, Offset::levels * OneOffset), val...);
     }
 
     [[nodiscard]] std::string format(KeyInputMapping v)
