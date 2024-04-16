@@ -1272,20 +1272,24 @@ struct LocalSequenceHandler // {{{
         instructionCounter = 0;
         targetScreen.processSequence(seq);
     }
-
     void writeText(char32_t codepoint)
     {
         instructionCounter++;
         targetScreen.writeText(codepoint);
     }
 
-    [[nodiscard]] size_t writeText(std::string_view chars, size_t cellCount)
+    [[nodiscard]] size_t writeText(std::string_view chars, size_t)
     {
-        assert(!chars.empty());
-        instructionCounter += chars.size();
-        targetScreen.writeText(chars, cellCount);
-        return terminal.settings().pageSize.columns.as<size_t>()
-               - terminal.currentScreen().cursor().position.column.as<size_t>();
+        // implementation of targetScreen.writeText(chars, cellCount)
+        // is buggy and does not work correctly
+        // so we do not use optimization for
+        // ParserEvents::print(chars,cellCount)
+        // but write char by char
+        // TODO fix targetScreen.writeText(chars, cellCount)
+        for (auto c: chars)
+            targetScreen.writeText(c);
+
+        return 0;
     }
 
     void writeTextEnd() { targetScreen.writeTextEnd(); }
