@@ -2,8 +2,6 @@
 #include <contour/Actions.h>
 #include <contour/Config.h>
 
-#include <vtbackend/TerminalState.h>
-
 #include <crispy/StrongHash.h>
 #include <crispy/escape.h>
 
