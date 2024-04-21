@@ -21,6 +21,10 @@
     #include <unistd.h>
 #endif
 
+#if defined(_WIN32)
+    #include <Windows.h>
+#endif
+
 using std::bind;
 using std::cout;
 using std::exception;
@@ -110,11 +114,7 @@ app::app(std::string appName, std::string appTitle, std::string appVersion, std:
     _appLicense { std::move(appLicense) },
     _localStateDir { xdgStateHome() / _appName }
 {
-    if (char const* logFilterString = getenv("LOG"))
-    {
-        logstore::configure(logFilterString);
-        customizeLogStoreOutput();
-    }
+    basicSetup();
 
     _instance = this;
 
@@ -126,6 +126,39 @@ app::app(std::string appName, std::string appTitle, std::string appVersion, std:
 app::~app()
 {
     _instance = nullptr;
+}
+
+void app::basicSetup() noexcept
+{
+    enableVTProcessing();
+    enableUtf8Output();
+    if (char const* logFilterString = getenv("LOG"))
+    {
+        logstore::configure(logFilterString);
+        customizeLogStoreOutput();
+    }
+}
+
+void app::enableVTProcessing() noexcept
+{
+#if defined(_WIN32)
+    // Enable VT output processing on Conhost.
+    HANDLE stdoutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD savedModes {}; // NOTE: Is it required to restore that upon process exit?
+    if (GetConsoleMode(stdoutHandle, &savedModes) != FALSE)
+    {
+        SetConsoleMode(stdoutHandle,
+                       savedModes | ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT
+                           | ENABLE_WRAP_AT_EOL_OUTPUT);
+    }
+#endif
+}
+
+void app::enableUtf8Output() noexcept
+{
+#if defined(_WIN32)
+    SetConsoleOutputCP(CP_UTF8);
+#endif
 }
 
 void app::link(std::string command, std::function<int()> handler)

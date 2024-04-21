@@ -3,8 +3,6 @@
 #include <vtparser/ParserEvents.h>
 
 #include <crispy/App.h>
-#include <crispy/logstore.h>
-
 #include <crispy/escape.h>
 
 #include <libunicode/convert.h>
@@ -12,10 +10,6 @@
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
-
-#if defined(_WIN32)
-    #include <Windows.h>
-#endif
 
 using namespace std;
 
@@ -101,40 +95,9 @@ TEST_CASE("Parser.APC")
     REQUIRE(listener.text == "ABCDEF");
 }
 
-namespace
-{
-
-struct SetupTeardown
-{
-    SetupTeardown()
-    {
-#if defined(_WIN32)
-        const auto stdoutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
-        const auto stdoutCP = GetConsoleOutputCP();
-        DWORD stdoutMode;
-        GetConsoleMode(stdoutHandle, &stdoutMode);
-        SetConsoleMode(stdoutHandle,
-                       ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT
-                           | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-        SetConsoleOutputCP(CP_UTF8);
-#endif
-
-        char const* logFilterString = getenv("LOG");
-        if (logFilterString)
-        {
-            logstore::configure(logFilterString);
-            crispy::app::customizeLogStoreOutput();
-        }
-    }
-
-    ~SetupTeardown() = default;
-};
-
-} // namespace
-
 int main(int argc, char const* argv[])
 {
-    auto const _ = SetupTeardown {};
+    crispy::app::basicSetup();
 
     int const result = Catch::Session().run(argc, argv);
 
