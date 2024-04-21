@@ -25,7 +25,6 @@ if(VTPARSER_TESTING)
     enable_testing()
     add_executable(vtparser_test
         Parser_test.cpp
-        test_main.cpp
     )
     target_link_libraries(vtparser_test vtparser Catch2::Catch2)
     add_test(vtparser_test ./vtparser_test)

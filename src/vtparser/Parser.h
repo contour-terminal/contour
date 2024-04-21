@@ -720,7 +720,12 @@ class Parser
         FallbackToFSM
     };
 
-    std::tuple<ProcessKind, size_t> parseBulkText(char const* begin, char const* end) noexcept;
+    auto parseBulkText(char const* begin, char const* end) noexcept -> std::tuple<ProcessKind, size_t>;
+    auto makeParseBulkResult(char const* begin,
+                             unsigned maxCharCount,
+                             unicode::StopCondition resultStopCondition,
+                             unsigned resultWidth,
+                             unsigned e) noexcept -> std::tuple<ProcessKind, size_t>;
     void processOnceViaStateMachine(uint8_t ch);
 
     void handle(ActionClass actionClass, Action action, uint8_t codepoint);

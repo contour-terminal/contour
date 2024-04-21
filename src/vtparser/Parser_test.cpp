@@ -2,11 +2,20 @@
 #include <vtparser/Parser.h>
 #include <vtparser/ParserEvents.h>
 
+#include <crispy/App.h>
+#include <crispy/logstore.h>
+
 #include <crispy/escape.h>
 
 #include <libunicode/convert.h>
 
+#define CATCH_CONFIG_RUNNER
+#include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
+
+#if defined(_WIN32)
+    #include <Windows.h>
+#endif
 
 using namespace std;
 
@@ -20,11 +29,18 @@ class MockParserEvents final: public vtparser::NullParserEvents
 
     void error(string_view const& msg) override { INFO(fmt::format("Parser error received. {}", msg)); }
 
+    void execute(char ch) override
+    {
+        UNSCOPED_INFO(fmt::format("execute: U+{:X}", (unsigned) ch));
+        text += ch;
+    }
+
     void print(char32_t ch) override
     {
         UNSCOPED_INFO(fmt::format("print: U+{:X}", (unsigned) ch));
         text += unicode::convert_to<char>(ch);
     }
+
     size_t print(std::string_view s, size_t cellCount) override
     {
         UNSCOPED_INFO(fmt::format("print: {}", crispy::escape(s)));
@@ -40,6 +56,17 @@ class MockParserEvents final: public vtparser::NullParserEvents
     void putPM(char ch) override { pm += ch; }
     void dispatchPM() override { pm += "}"; }
 };
+
+TEST_CASE("Parser.utf8_sequence", "[Parser]")
+{
+    MockParserEvents textListener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(textListener);
+
+    p.parseFragment("Hall\xC3\xB6le\r\nHow are you?");
+    // FIXME: a trailing zero is appended to the string, which is not expected.
+
+    CHECK(textListener.text == "Hall\xC3\xB6le\r\nHow are you?");
+}
 
 TEST_CASE("Parser.utf8_single", "[Parser]")
 {
@@ -72,4 +99,47 @@ TEST_CASE("Parser.APC")
     REQUIRE(p.state() == vtparser::State::Ground);
     REQUIRE(listener.apc == "{Gi=1,a=q;}");
     REQUIRE(listener.text == "ABCDEF");
+}
+
+namespace
+{
+
+struct SetupTeardown
+{
+    SetupTeardown()
+    {
+#if defined(_WIN32)
+        const auto stdoutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+        const auto stdoutCP = GetConsoleOutputCP();
+        DWORD stdoutMode;
+        GetConsoleMode(stdoutHandle, &stdoutMode);
+        SetConsoleMode(stdoutHandle,
+                       ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT
+                           | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        SetConsoleOutputCP(CP_UTF8);
+#endif
+
+        char const* logFilterString = getenv("LOG");
+        if (logFilterString)
+        {
+            logstore::configure(logFilterString);
+            crispy::app::customizeLogStoreOutput();
+        }
+    }
+
+    ~SetupTeardown() = default;
+};
+
+} // namespace
+
+int main(int argc, char const* argv[])
+{
+    auto const _ = SetupTeardown {};
+
+    int const result = Catch::Session().run(argc, argv);
+
+    // avoid closing extern console to close on VScode/windows
+    // system("pause");
+
+    return result;
 }

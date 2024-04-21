@@ -374,7 +374,7 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
-    -> std::tuple<ProcessKind, size_t>
+-> std::tuple<ProcessKind, size_t>
 {
     auto const* input = begin;
     if (_state != State::Ground)
@@ -415,6 +415,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     assert(_graphemeLineSegmenter.next() <= chunk.data() + chunk.size());
 
     auto const byteCount = static_cast<size_t>(std::distance(subStart, subEnd));
+    assert(byteCount == result.text.size());
     // if (byteCount == 0)
     //     return { ProcessKind::FallbackToFSM, 0 };
 
@@ -422,7 +423,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     {
         if (byteCount > 0)
         {
-            auto const text = std::string_view { subStart, byteCount };
+            auto const text = std::string_view{ subStart, byteCount };
             if (vtTraceParserLog)
                 vtTraceParserLog()("Printing fast-scanned text \"{}\" with {} cells.", text, cellCount);
             _eventListener.print(text, cellCount);
@@ -433,25 +434,41 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
         // the FSM for the `(TEXT LF+)+`-case.
         //
         // As of bench-headless, the performance incrrease is about 50x.
-        if (input != end
-            && *input == '\n') // TODO(pr) This is not correct. We should check and consume CR+LF.
-            _eventListener.execute(*input++);
+        if (input + byteCount != end && *input == '\n')
+        {
+            auto x = makeParseBulkResult(input, maxCharCount, unicode::StopCondition::EndOfInput, result.width, 1);
+            _eventListener.execute('\n');
+            return x;
+        }
+        else if ((input + byteCount + 1) != end && input[byteCount] == '\r' && input[byteCount + 1] == '\n')
+        {
+            // TODO: should have flushed first
+            auto x = makeParseBulkResult(input, maxCharCount, unicode::StopCondition::EndOfInput, result.width, 2);
+            _eventListener.execute('\r');
+            _eventListener.execute('\n');
+            return x;
+        }
     }
+    return makeParseBulkResult(input, maxCharCount, result.stop_condition, result.width, 0);
+}
 
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
+auto Parser<EventListener, TraceStateChanges>::makeParseBulkResult(char const* input, unsigned maxCharCount, unicode::StopCondition resultStopCondition, unsigned resultWidth, unsigned e) noexcept -> std::tuple<ProcessKind, size_t>
+{
     assert(input <= _graphemeLineSegmenter.next());
     auto const count = static_cast<size_t>(std::distance(input, _graphemeLineSegmenter.next()));
 
-    switch (result.stop_condition)
+    switch (resultStopCondition)
     {
         case unicode::StopCondition::UnexpectedInput: //
-            return { ProcessKind::FallbackToFSM, count };
+            return { ProcessKind::FallbackToFSM, count + e };
         case unicode::StopCondition::EndOfWidth: //
-            return { ProcessKind::FallbackToFSM, count };
+            return { ProcessKind::FallbackToFSM, count + e };
         case unicode::StopCondition::EndOfInput:
             if (!_graphemeLineSegmenter.is_utf8_byte_pending())
             {
                 unicode::grapheme_segmentation_result const flushResult =
-                    _graphemeLineSegmenter.flush(maxCharCount - result.width);
+                    _graphemeLineSegmenter.flush(maxCharCount - resultWidth);
                 std::cout << "flushResult: " << flushResult << '\n';
                 if (!flushResult.text.empty())
                 {
@@ -462,7 +479,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
                     _eventListener.print(text, flushResult.width);
                 }
             }
-            return { ProcessKind::ContinueBulk, count };
+            return { ProcessKind::ContinueBulk, count + e };
     }
     crispy::unreachable();
     std::abort();
