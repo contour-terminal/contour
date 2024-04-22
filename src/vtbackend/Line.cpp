@@ -170,9 +170,9 @@ struct TrivialLineInflater
     {
         vtParserLog()("Inflating TrivialLineBuffer: '{}'", input.text.data() ? crispy::escape(input.text.data()) : "");
         auto lineSegmenter = unicode::grapheme_line_segmenter { *this, input.text.view() };
-        auto result = lineSegmenter.process(std::numeric_limits<unsigned>::max());
+        [[maybe_unused]] auto result = lineSegmenter.process(std::numeric_limits<unsigned>::max());
         assert(result.stop_condition == unicode::StopCondition::EndOfInput);
-        auto const flushed = lineSegmenter.flush(std::numeric_limits<unsigned>::max());
+        [[maybe_unused]] auto const flushed = lineSegmenter.flush(std::numeric_limits<unsigned>::max());
         assert(flushed.stop_condition == unicode::StopCondition::EndOfInput);
         vtParserLog()("Inflated {}/{} columns", columns.size(), input.displayWidth);
 
