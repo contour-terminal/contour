@@ -389,6 +389,7 @@ namespace
             gpos.presentation = presentation;
             result.emplace_back(gpos);
         }
+
         return crispy::none_of(result, glyphMissing);
     }
 } // namespace

@@ -582,7 +582,6 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     text::shape_result const& glyphPositions =
         getOrCreateCachedGlyphPositions(hash, codepoints, clusters, style);
     crispy::point pen = _gridMetrics.mapBottomLeft(initialPenPosition);
-    auto const advanceX = unbox(_gridMetrics.cellSize.width);
 
     for (auto const& glyphPosition: glyphPositions)
     {
@@ -590,7 +589,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         {
             auto const pen1 = applyGlyphPositionToPen(pen, *attributes, glyphPosition);
             renderRasterizedGlyph(pen1, color, *attributes);
-            pen.x += static_cast<decltype(pen.x)>(advanceX);
+            pen.x += unbox<decltype(pen.x)>(_gridMetrics.cellSize.width);
             continue;
         }
 
@@ -617,10 +616,14 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
 
         if (glyphPosition.advance.x)
         {
+
+            auto numberOfCellsToAdvance =
+                std::rint(glyphPosition.advance.x / unbox<double>(_gridMetrics.cellSize.width));
             // Only advance horizontally, as we're (guess what) a terminal. :-)
             // Only advance in fixed-width steps.
-            // Only advance iff there harfbuzz told us to.
-            pen.x += static_cast<decltype(pen.x)>(advanceX);
+            // Only advance if there harfbuzz told us to.
+            pen.x +=
+                static_cast<decltype(pen.x)>(numberOfCellsToAdvance * (unbox(_gridMetrics.cellSize.width)));
         }
     }
 }
