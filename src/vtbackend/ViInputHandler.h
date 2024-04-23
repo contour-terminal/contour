@@ -188,8 +188,8 @@ class ViInputHandler: public InputHandler
 
     ViInputHandler(Executor& theExecutor, ViMode initialMode);
 
-    Handled sendKeyPressEvent(Key key, Modifiers modifiers) override;
-    Handled sendCharPressEvent(char32_t ch, Modifiers modifiers) override;
+    Handled sendKeyPressEvent(Key key, Modifiers modifiers, KeyboardEventType eventType) override;
+    Handled sendCharPressEvent(char32_t ch, Modifiers modifiers, KeyboardEventType eventType) override;
 
     void setMode(ViMode mode);
     void toggleMode(ViMode mode);
@@ -238,7 +238,7 @@ class ViInputHandler: public InputHandler
                          std::vector<std::string_view> const& commands,
                          CommandHandler const& handler);
     void appendModifierToPendingInput(Modifiers modifiers);
-    [[nodiscard]] bool handlePendingInput();
+    void handlePendingInput();
     void clearPendingInput();
     [[nodiscard]] unsigned count() const noexcept { return _count ? _count : 1; }
 

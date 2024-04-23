@@ -10,8 +10,6 @@
 
 #include <variant>
 
-using std::nullopt;
-using std::optional;
 using std::pair;
 using std::vector;
 using namespace std::string_view_literals;
@@ -274,10 +272,9 @@ void ViInputHandler::appendModifierToPendingInput(Modifiers modifiers)
         _pendingInput += "C-";
 }
 
-bool ViInputHandler::handlePendingInput()
+void ViInputHandler::handlePendingInput()
 {
-    if (_pendingInput.empty())
-        return false;
+    assert(!_pendingInput.empty());
 
     auto constexpr TrieMapAllowWildcardDot = true;
 
@@ -301,8 +298,6 @@ bool ViInputHandler::handlePendingInput()
     {
         inputLog()("Incomplete input: {}", _pendingInput);
     }
-
-    return true;
 }
 
 void ViInputHandler::clearPendingInput()
@@ -323,8 +318,11 @@ void ViInputHandler::setMode(ViMode theMode)
     _executor->modeChanged(theMode);
 }
 
-Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
+Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
+    if (eventType == KeyboardEventType::Release)
+        return Handled { true };
+
     if (_searchEditMode != SearchEditMode::Disabled)
     {
         // TODO: support cursor movements.
@@ -342,9 +340,9 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
     switch (_viMode)
     {
         case ViMode::Insert:
-            return Handled{false};
-        case ViMode::Normal:
-            break;
+            // In insert mode we do not handle any key events here.
+            // The terminal will handle them and send them to the application.
+            return Handled { false };
         case ViMode::Visual:
         case ViMode::VisualLine:
         case ViMode::VisualBlock:
@@ -352,8 +350,11 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
             {
                 clearPendingInput();
                 setMode(ViMode::Normal);
-                return Handled{true};
+                return Handled { false };
             }
+            [[fallthrough]];
+        case ViMode::Normal:
+            // We keep on handling key events below.
             break;
     }
     // clang-format on
@@ -373,7 +374,7 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
 
     for (auto const& [mappedKey, mappedText]: charMappings)
         if (key == mappedKey)
-            return sendCharPressEvent(mappedText, modifiers);
+            return sendCharPressEvent(mappedText, modifiers, eventType);
 
     if (modifiers.any())
         return Handled { true };
@@ -401,10 +402,11 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers)
     if (_pendingInput.empty())
     {
         errorLog()("ViInputHandler: Unhandled key: {} ({})", key, modifiers);
-        return Handled { false };
+        return Handled { true };
     }
 
-    return Handled { handlePendingInput() };
+    handlePendingInput();
+    return Handled { true };
 }
 
 void ViInputHandler::startSearchExternally()
@@ -470,8 +472,11 @@ Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
     return Handled { true };
 }
 
-Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers)
+Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers, KeyboardEventType eventType)
 {
+    if (eventType == KeyboardEventType::Release)
+        return Handled { true };
+
     if (_searchEditMode != SearchEditMode::Disabled)
         return handleSearchEditor(ch, modifiers);
 
@@ -505,10 +510,12 @@ Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers)
         return Handled { false };
     }
 
-    if (handlePendingInput())
-        return Handled { true };
+    if (!_pendingInput.empty())
+        handlePendingInput();
+    else
+        errorLog()("ViInputHandler: Unhandled character: {} ({})", (unsigned) ch, modifiers);
 
-    return Handled { false };
+    return Handled { true };
 }
 
 bool ViInputHandler::parseCount(char32_t ch, Modifiers modifiers)
