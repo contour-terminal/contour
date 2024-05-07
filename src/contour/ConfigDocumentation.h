@@ -571,6 +571,14 @@ constexpr StringLiteral WordDelimiters { "{comment} Word delimiters when selecti
                                          "word_delimiters: \"{}\" \n"
                                          "\n" };
 
+constexpr StringLiteral ExtendedWordDelimiters {
+    "{comment} Word delimiters for second selection when selecting word-wise. \n"
+    "{comment} Setting allows you to set less strict boundaried between words, for example \n"
+    "{comment} if you want to select whole ip address during selection set delimieters to \" \" (space) \n"
+    "extended_word_delimiters: \"{}\" \n"
+    "\n"
+};
+
 constexpr StringLiteral BypassMouseProtocolModifiers {
     "{comment} This keyboard modifier can be used to bypass the terminal's mouse protocol, \n"
     "{comment} which can be used to select screen content even if the an application \n"

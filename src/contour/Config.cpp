@@ -293,6 +293,7 @@ void YAMLConfigReader::load(Config& c)
         }
         loadFromEntry("default_profile", c.defaultProfileName);
         loadFromEntry("word_delimiters", c.wordDelimiters);
+        loadFromEntry("extended_word_delimiters", c.extendedWordDelimiters);
         loadFromEntry("read_buffer_size", c.ptyReadBufferSize);
         loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
         loadFromEntry("images.sixel_register_count", c.maxImageColorRegisters);
@@ -1853,6 +1854,16 @@ std::string createString(Config const& c)
                         fmt::arg("comment", "#")));
     };
 
+    auto const processExtendedWordDelimiters = [&]() {
+        auto wordDelimiters = c.extendedWordDelimiters.value();
+        wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
+        wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
+        doc.append(
+            fmt::format(fmt::runtime(writer.process(documentation::ExtendedWordDelimiters.value, wordDelimiters)),
+                        fmt::arg("comment", "#")));
+    };
+
+
     if (c.platformPlugin.value() == "")
     {
         processWithDoc(documentation::PlatformPlugin, std::string { "auto" });
@@ -1872,6 +1883,7 @@ std::string createString(Config const& c)
     });
 
     processWordDelimiters();
+    processExtendedWordDelimiters();
     process(c.ptyReadBufferSize);
     process(c.ptyBufferObjectSize);
     process(c.defaultProfileName);

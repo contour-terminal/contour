@@ -658,6 +658,10 @@ struct Config
     ConfigEntry<std::string, documentation::WordDelimiters> wordDelimiters {
         " /\\()\"'-.,:;<>~!@#$%^&*+=[]{{}}~?|│"
     };
+    ConfigEntry<std::string, documentation::ExtendedWordDelimiters> extendedWordDelimiters {
+        " /\\()\"'-.,:;<>~!@#$%^&*+=[]{{}}~?|│"
+    };
+
     ConfigEntry<vtbackend::Modifiers, documentation::BypassMouseProtocolModifiers>
         bypassMouseProtocolModifiers { vtbackend::Modifier::Shift };
     ConfigEntry<contour::config::SelectionAction, documentation::OnMouseSelection> onMouseSelection {

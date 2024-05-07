@@ -654,8 +654,8 @@ class Terminal
     // }}}
 
     // {{{ selection management
-    // TODO: move you, too?
     void setWordDelimiters(std::string const& wordDelimiters);
+    void setExtendedWordDelimiters(std::string const& wordDelimiters);
     std::u32string const& wordDelimiters() const noexcept { return _settings.wordDelimiters; }
 
     Selection const* selector() const noexcept { return _selection.get(); }
@@ -877,6 +877,7 @@ class Terminal
 
     // Tests if the grid cell at the given location does contain a word delimiter.
     [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;
+    [[nodiscard]] bool wordDelimited(CellLocation position, std::u32string_view wordDelimiters) const noexcept;
 
     [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
         CellLocation position) const noexcept;
@@ -1058,12 +1059,12 @@ class Terminal
         Terminal* terminal;
         explicit SelectionHelper(Terminal* self): terminal { self } {}
         [[nodiscard]] PageSize pageSize() const noexcept override;
-        [[nodiscard]] bool wordDelimited(CellLocation pos) const noexcept override;
         [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override;
         [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override;
         [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override;
     };
     SelectionHelper _selectionHelper;
+    SelectionHelper _extendedSelectionHelper;
     // }}}
 
     // {{{ Render buffer state

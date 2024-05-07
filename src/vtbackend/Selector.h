@@ -20,8 +20,8 @@ namespace vtbackend
 struct SelectionHelper
 {
     virtual ~SelectionHelper() = default;
+    std::function<bool(CellLocation)> wordDelimited;
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
-    [[nodiscard]] virtual bool wordDelimited(CellLocation pos) const noexcept = 0;
     [[nodiscard]] virtual bool wrappedLine(LineOffset line) const noexcept = 0;
     [[nodiscard]] virtual bool cellEmpty(CellLocation pos) const noexcept = 0;
     [[nodiscard]] virtual int cellWidth(CellLocation pos) const noexcept = 0;
