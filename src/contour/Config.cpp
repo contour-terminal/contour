@@ -1858,11 +1858,10 @@ std::string createString(Config const& c)
         auto wordDelimiters = c.extendedWordDelimiters.value();
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
-        doc.append(
-            fmt::format(fmt::runtime(writer.process(documentation::ExtendedWordDelimiters.value, wordDelimiters)),
-                        fmt::arg("comment", "#")));
+        doc.append(fmt::format(
+            fmt::runtime(writer.process(documentation::ExtendedWordDelimiters.value, wordDelimiters)),
+            fmt::arg("comment", "#")));
     };
-
 
     if (c.platformPlugin.value() == "")
     {

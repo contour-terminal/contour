@@ -877,7 +877,8 @@ class Terminal
 
     // Tests if the grid cell at the given location does contain a word delimiter.
     [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;
-    [[nodiscard]] bool wordDelimited(CellLocation position, std::u32string_view wordDelimiters) const noexcept;
+    [[nodiscard]] bool wordDelimited(CellLocation position,
+                                     std::u32string_view wordDelimiters) const noexcept;
 
     [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
         CellLocation position) const noexcept;
@@ -1161,8 +1162,8 @@ class Terminal
 template <>
 struct fmt::formatter<vtbackend::TraceHandler::PendingSequence>: fmt::formatter<std::string>
 {
-    auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence,
+                format_context& ctx) -> format_context::iterator
     {
         std::string value;
         if (auto const* p = std::get_if<vtbackend::Sequence>(&pendingSequence))
