@@ -20,7 +20,6 @@ struct TestSelectionHelper: public vtbackend::SelectionHelper
     explicit TestSelectionHelper(Screen<T>& self): screen { &self } {}
 
     [[nodiscard]] PageSize pageSize() const noexcept override { return screen->pageSize(); }
-    [[nodiscard]] bool wordDelimited(CellLocation /*pos*/) const noexcept override { return true; } // TODO
     [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override
     {
         return screen->isLineWrapped(line);

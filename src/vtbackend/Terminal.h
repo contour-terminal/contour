@@ -654,8 +654,8 @@ class Terminal
     // }}}
 
     // {{{ selection management
-    // TODO: move you, too?
     void setWordDelimiters(std::string const& wordDelimiters);
+    void setExtendedWordDelimiters(std::string const& wordDelimiters);
     std::u32string const& wordDelimiters() const noexcept { return _settings.wordDelimiters; }
 
     Selection const* selector() const noexcept { return _selection.get(); }
@@ -877,6 +877,8 @@ class Terminal
 
     // Tests if the grid cell at the given location does contain a word delimiter.
     [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;
+    [[nodiscard]] bool wordDelimited(CellLocation position,
+                                     std::u32string_view wordDelimiters) const noexcept;
 
     [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
         CellLocation position) const noexcept;
@@ -958,6 +960,17 @@ class Terminal
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
     void updateHoveringHyperlinkState();
+
+    struct TheSelectionHelper: public vtbackend::SelectionHelper
+    {
+        Terminal* terminal;
+        explicit TheSelectionHelper(Terminal* self): terminal { self } {}
+        [[nodiscard]] PageSize pageSize() const noexcept override;
+        [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override;
+        [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override;
+        [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override;
+    };
+    void triggerWordWiseSelection(CellLocation startPos, TheSelectionHelper const& selectionHelper);
     bool handleMouseSelection(Modifiers modifiers);
 
     /// Tests if the text selection should be extended by the given mouse position or not.
@@ -1053,17 +1066,8 @@ class Terminal
 
     // {{{ selection states
     std::unique_ptr<Selection> _selection;
-    struct SelectionHelper: public vtbackend::SelectionHelper
-    {
-        Terminal* terminal;
-        explicit SelectionHelper(Terminal* self): terminal { self } {}
-        [[nodiscard]] PageSize pageSize() const noexcept override;
-        [[nodiscard]] bool wordDelimited(CellLocation pos) const noexcept override;
-        [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override;
-        [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override;
-        [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override;
-    };
-    SelectionHelper _selectionHelper;
+    TheSelectionHelper _selectionHelper;
+    TheSelectionHelper _extendedSelectionHelper;
     // }}}
 
     // {{{ Render buffer state
@@ -1158,8 +1162,8 @@ class Terminal
 template <>
 struct fmt::formatter<vtbackend::TraceHandler::PendingSequence>: fmt::formatter<std::string>
 {
-    auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence,
+                format_context& ctx) -> format_context::iterator
     {
         std::string value;
         if (auto const* p = std::get_if<vtbackend::Sequence>(&pendingSequence))

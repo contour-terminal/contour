@@ -1450,6 +1450,7 @@ void TerminalSession::configureTerminal()
     sessionLog()("Configuring terminal.");
 
     _terminal.setWordDelimiters(_config.wordDelimiters.value());
+    _terminal.setExtendedWordDelimiters(_config.extendedWordDelimiters.value());
     _terminal.setMouseProtocolBypassModifiers(_config.bypassMouseProtocolModifiers.value());
     _terminal.setMouseBlockSelectionModifiers(_config.mouseBlockSelectionModifiers.value());
     _terminal.setLastMarkRangeOffset(_profile.copyLastMarkRangeOffset.value());

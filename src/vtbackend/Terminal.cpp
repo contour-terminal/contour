@@ -27,6 +27,8 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 
@@ -133,6 +135,7 @@ Terminal::Terminal(Events& eventListener,
                                                                _settings.indicatorStatusLine.middle,
                                                                _settings.indicatorStatusLine.right) },
     _selectionHelper { this },
+    _extendedSelectionHelper { this },
     _refreshInterval { _settings.refreshRate },
     _traceHandler { *this },
     _cellPixelSize {},
@@ -364,22 +367,17 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
     return true;
 }
 
-PageSize Terminal::SelectionHelper::pageSize() const noexcept
+PageSize Terminal::TheSelectionHelper::pageSize() const noexcept
 {
     return terminal->pageSize();
 }
 
-bool Terminal::SelectionHelper::wordDelimited(CellLocation pos) const noexcept
-{
-    return terminal->wordDelimited(pos);
-}
-
-bool Terminal::SelectionHelper::wrappedLine(LineOffset line) const noexcept
+bool Terminal::TheSelectionHelper::wrappedLine(LineOffset line) const noexcept
 {
     return terminal->isLineWrapped(line);
 }
 
-bool Terminal::SelectionHelper::cellEmpty(CellLocation pos) const noexcept
+bool Terminal::TheSelectionHelper::cellEmpty(CellLocation pos) const noexcept
 {
     // Word selection may be off by one
     pos.column = std::min(pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
@@ -387,7 +385,7 @@ bool Terminal::SelectionHelper::cellEmpty(CellLocation pos) const noexcept
     return terminal->currentScreen().isCellEmpty(pos);
 }
 
-int Terminal::SelectionHelper::cellWidth(CellLocation pos) const noexcept
+int Terminal::TheSelectionHelper::cellWidth(CellLocation pos) const noexcept
 {
     // Word selection may be off by one
     pos.column = std::min(pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
@@ -664,13 +662,28 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     return Handled { eventHandledByApp && !isModeEnabled(DECMode::MousePassiveTracking) };
 }
 
+void Terminal::triggerWordWiseSelection(CellLocation startPos, TheSelectionHelper const& selectionHelper)
+{
+    setSelector(std::make_unique<WordWiseSelection>(selectionHelper, startPos, selectionUpdatedHelper()));
+
+    if (_selection->extend(startPos))
+        onSelectionUpdated();
+
+    if (_settings.visualizeSelectedWord)
+    {
+        auto const text = extractSelectionText();
+        auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
+        setNewSearchTerm(text32, true);
+    }
+}
+
 bool Terminal::handleMouseSelection(Modifiers modifiers)
 {
     verifyState();
 
     double const diffMs = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
     _lastClick = _currentTime;
-    _speedClicks = (diffMs >= 0.0 && diffMs <= 750.0 ? _speedClicks : 0) % 3 + 1;
+    _speedClicks = (diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4 + 1;
 
     auto const startPos = CellLocation {
         _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
@@ -697,19 +710,9 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
                     std::make_unique<LinearSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
             }
             break;
-        case 2:
-            setSelector(
-                std::make_unique<WordWiseSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
-            if (_selection->extend(startPos))
-                onSelectionUpdated();
-            if (_settings.visualizeSelectedWord)
-            {
-                auto const text = extractSelectionText();
-                auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
-                setNewSearchTerm(text32, true);
-            }
-            break;
-        case 3:
+        case 2: triggerWordWiseSelection(startPos, _selectionHelper); break;
+        case 3: triggerWordWiseSelection(startPos, _extendedSelectionHelper); break;
+        case 4:
             setSelector(
                 std::make_unique<FullLineSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
             if (_selection->extend(startPos))
@@ -1448,6 +1451,20 @@ void Terminal::setCursorShape(CursorShape shape)
 void Terminal::setWordDelimiters(string const& wordDelimiters)
 {
     _settings.wordDelimiters = unicode::from_utf8(wordDelimiters);
+
+    _selectionHelper.wordDelimited = [wordDelimiters = _settings.wordDelimiters,
+                                      this](CellLocation const& pos) {
+        return this->wordDelimited(pos, wordDelimiters);
+    };
+}
+
+void Terminal::setExtendedWordDelimiters(string const& wordDelimiters)
+{
+    _settings.extendedWordDelimiters = unicode::from_utf8(wordDelimiters);
+    _extendedSelectionHelper.wordDelimited = [extendedDelimieters = _settings.extendedWordDelimiters,
+                                              this](CellLocation const& pos) {
+        return this->wordDelimited(pos, extendedDelimieters);
+    };
 }
 
 namespace
@@ -2390,13 +2407,18 @@ void Terminal::clearSearch()
 
 bool Terminal::wordDelimited(CellLocation position) const noexcept
 {
+    return wordDelimited(position, u32string_view(_settings.wordDelimiters));
+}
+
+bool Terminal::wordDelimited(CellLocation position, std::u32string_view wordDelimiters) const noexcept
+{
     // Word selection may be off by one
     position.column = std::min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
 
     if (isPrimaryScreen())
-        return _primaryScreen.grid().cellEmptyOrContainsOneOf(position, _settings.wordDelimiters);
+        return _primaryScreen.grid().cellEmptyOrContainsOneOf(position, wordDelimiters);
     else
-        return _alternateScreen.grid().cellEmptyOrContainsOneOf(position, _settings.wordDelimiters);
+        return _alternateScreen.grid().cellEmptyOrContainsOneOf(position, wordDelimiters);
 }
 
 std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
