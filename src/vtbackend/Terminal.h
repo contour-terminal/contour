@@ -959,6 +959,17 @@ class Terminal
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
     void updateHoveringHyperlinkState();
+
+    struct TheSelectionHelper: public vtbackend::SelectionHelper
+    {
+        Terminal* terminal;
+        explicit TheSelectionHelper(Terminal* self): terminal { self } {}
+        [[nodiscard]] PageSize pageSize() const noexcept override;
+        [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override;
+        [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override;
+        [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override;
+    };
+    void triggerWordWiseSelection(CellLocation startPos, TheSelectionHelper const& selectionHelper);
     bool handleMouseSelection(Modifiers modifiers);
 
     /// Tests if the text selection should be extended by the given mouse position or not.
@@ -1054,17 +1065,8 @@ class Terminal
 
     // {{{ selection states
     std::unique_ptr<Selection> _selection;
-    struct SelectionHelper: public vtbackend::SelectionHelper
-    {
-        Terminal* terminal;
-        explicit SelectionHelper(Terminal* self): terminal { self } {}
-        [[nodiscard]] PageSize pageSize() const noexcept override;
-        [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override;
-        [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override;
-        [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override;
-    };
-    SelectionHelper _selectionHelper;
-    SelectionHelper _extendedSelectionHelper;
+    TheSelectionHelper _selectionHelper;
+    TheSelectionHelper _extendedSelectionHelper;
     // }}}
 
     // {{{ Render buffer state
