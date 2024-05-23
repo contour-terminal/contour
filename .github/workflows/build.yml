@@ -859,6 +859,9 @@ jobs:
           # use Qt6 for 22.04
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=6"
           fi
+          if [[ "${{ matrix.os_version }}" = "24.04" ]]; then
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_PACKAGE_TERMINFO=OFF"
+          fi
           BUILD_DIR="build" \
             CMAKE_BUILD_TYPE=RelWithDebInfo \
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
