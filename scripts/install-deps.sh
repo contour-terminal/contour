@@ -305,7 +305,6 @@ install_deps_ubuntu()
         if [ "$RELEASE" = "23.04" ]; then
             packages="$packages qml6-moduile-qtquick3d-spatialaudio"
         fi
-
     fi
 
     fetch_and_unpack_gsl

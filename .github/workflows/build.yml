@@ -38,7 +38,7 @@ jobs:
   # {{{ Common checks
   check_common:
     name: "Check CI scripts"
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v3
     - name: "Checking for common errors in build, deployment, and CI."
@@ -46,7 +46,7 @@ jobs:
 
   check_PR_TODOs:
     name: "Check PR-TODOs"
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v3
     - name: "Checking for open PR-related TODO items"
@@ -54,7 +54,7 @@ jobs:
 
   check_clang_format:
     name: "Check C++ style"
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v3
     - name: Install clang
@@ -70,14 +70,14 @@ jobs:
 
   check_clang_tidy:
     name: "Check clang-tidy"
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: github.ref != 'refs/heads/master'
     steps:
     - uses: actions/checkout@v3
     - name: ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
-        key: "ccache-ubuntu2204-clang-tidy"
+        key: "ccache-ubuntu2404-clang-tidy"
         max-size: 256M
     - name: "update APT database"
       run: sudo apt -q update
@@ -93,20 +93,18 @@ jobs:
     - name: "Post-fix embedded dependency permissions."
       run: sudo find _deps/sources -exec chown $UID {} \;
     - name: Install Clang
-      run: sudo apt install -y clang-15 clang-tidy-15
+      run: sudo apt install -y clang-18 clang-tidy-18
     - name: "cmake"
       run: |
         cmake \
             -DCMAKE_BUILD_TYPE="Debug" \
-            -DCMAKE_CXX_COMPILER="clang++-15" \
+            -DCMAKE_CXX_COMPILER="clang++-18" \
             -DCONTOUR_INSTALL_TOOLS=ON \
             -DCONTOUR_QT_VERSION=6 \
             -DCONTOUR_TESTING=ON \
             -DENABLE_TIDY=OFF \
             -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
             -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
-            -DPEDANTIC_COMPILER=ON \
-            -DPEDANTIC_COMPILER_WERROR=OFF \
             -S . -B build
     - name: "build libunicode"
       run: cmake --build build/ --target unicode -- -j3
@@ -137,7 +135,7 @@ jobs:
 
   check_links:
     name: "Check links"
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v3
       - name: Run linksafe
@@ -158,7 +156,7 @@ jobs:
 
   editorconfig:
     name: "Check editorconfig"
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v2
       - uses: editorconfig-checker/action-editorconfig-checker@main
@@ -520,7 +518,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   # }}}
-  # {{{ Ubuntu CC matrix
+  # {{{ Ubuntu 22.04 CC matrix
   ubuntu_2204_cc_matrix:
     strategy:
       fail-fast: false
@@ -628,16 +626,122 @@ jobs:
             test/images
           retention-days: 1
   # }}}
-  # {{{ Linux AppImage (Using Ubuntu 22.04 as base).
-  package_for_AppImage:
-    name: "Packaging for AppImage"
-    runs-on: ubuntu-22.04
+  # {{{ Ubuntu 24.04 CC matrix
+  ubuntu_2404_cc_matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [20]
+        build_type: ["RelWithDebInfo"]
+        compiler:
+          [
+            "GCC 14",
+            "Clang 18",
+          ]
+        qt_version: [6]
+    name: "Ubuntu Linux 24.04 (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
+    runs-on: ubuntu-24.04
+    outputs:
+      id: "${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
     steps:
       - uses: actions/checkout@v3
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: "ccache-ubuntu2004-AppImage"
+          key: "ccache-ubuntu2404-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}-${{ matrix.qt_version  }}"
+          max-size: 256M
+      - name: "update APT database"
+        run: sudo apt -q update
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: set environment variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Set up output var: CC_VERSION"
+        id: extract_matrix
+        run: |
+          CC_VERSION=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
+          echo "CC_VERSION=${CC_VERSION}" >> "$GITHUB_OUTPUT"
+      - name: "Set up QTVER var"
+        id: set_qtver
+        run: |
+          if [[ ${{ matrix.qt_version }} = "5" ]]; then
+            echo "QTVER=5" >> "$GITHUB_OUTPUT"
+          else
+            echo "QTVER=6" >> "$GITHUB_OUTPUT"
+          fi
+      - name: "install dependencies"
+        run: sudo env QTVER="${{ matrix.qt_version }}" SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
+      - name: Install GCC
+        if: ${{ startsWith(matrix.compiler, 'GCC') }}
+        run: sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
+      - name: Install Clang
+        if: ${{ startsWith(matrix.compiler, 'Clang') }}
+        run: sudo apt install -y clang-${{ steps.extract_matrix.outputs.CC_VERSION }} #libc++-dev libc++abi-dev
+      - name: Install Clang-Tidy
+        if: ${{ startsWith(matrix.compiler, 'Clang') }}
+        run: sudo apt install -y clang-tidy-${{ steps.extract_matrix.outputs.CC_VERSION }}
+      - name: "create build directory"
+        run: mkdir build
+      - name: CMake version
+        run: cmake --version
+      - name: "cmake"
+        run: |
+          CC_NAME=$(echo "${{ matrix.compiler }}" | awk '{ print tolower($1); }')
+          CC_VER=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
+          test "${{ matrix.compiler }}" = "GCC 8"  && EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
+          test "${CC_NAME}" = "gcc" && CC_EXE="g++"
+          if [[ "${CC_NAME}" = "clang" ]]; then
+              CC_EXE="clang++"
+              # CMAKE_CXX_FLAGS="-stdlib=libc++"
+              # CMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -lc++abi"
+              # EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DENABLE_TIDY=ON"
+              # EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=OFF"
+          fi
+          cmake \
+              $EXTRA_CMAKE_FLAGS \
+              -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
+              -DCMAKE_CXX_STANDARD=${{ matrix.cxx }} \
+              -DCMAKE_CXX_COMPILER="${CC_EXE}-${CC_VER}" \
+              -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}" \
+              -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS}" \
+              -DCMAKE_INSTALL_PREFIX="/usr" \
+              -DCONTOUR_QT_VERSION=${{ matrix.qt_version }} \
+              -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
+              -DPEDANTIC_COMPILER_WERROR=OFF \
+              --preset linux-debug
+      - name: "build"
+        run: cmake --build --preset linux-debug -- -j3
+      - name: "tests"
+        run: cmake --build --preset linux-debug --target test
+      - name: "Upload unit tests"
+        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' && matrix.qt_version == '6' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: contour-ubuntu2204-tests
+          path: |
+            build/linux-debug/src/crispy/crispy_test
+            build/linux-debug/src/vtparser/vtparser_test
+            build/linux-debug/src/vtbackend/vtbackend_test
+            build/linux-debug/src/vtbackend/bench-headless
+            build/linux-debug/src/vtrasterizer/vtrasterizer_test
+            test/images
+          retention-days: 1
+  # }}}
+  # {{{ Linux AppImage (Using Ubuntu 24.04 as base).
+  package_for_AppImage:
+    name: "Packaging for AppImage"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: "ccache-ubuntu2404-AppImage"
           max-size: 256M
       - name: "Update apt database"
         run: sudo apt-get update
@@ -661,8 +765,6 @@ jobs:
         run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "create build directory"
         run: mkdir build
-      - name: Install CMake
-        uses: ssrobins/install-cmake@v1
       - name: CMake version
         run: cmake --version
       - name: "cmake"
@@ -676,6 +778,7 @@ jobs:
                                -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD \
                                -DCMAKE_INSTALL_PREFIX="$(pwd)/AppDir" \
                                -DCONTOUR_TESTING=ON \
+                               -DPEDANTIC_COMPILER_WERROR=OFF \
                                " \
             ./scripts/ci-prepare-contour.sh
       - name: "build"
@@ -701,13 +804,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   # }}}
-  # {{{ Ubuntu 20.04 / 22.04
+  # {{{ Ubuntu 20.04 / 22.04 / 24.04
   package_for_Ubuntu:
     name: "Packaging for Ubuntu ${{ matrix.os_version }}"
     strategy:
       fail-fast: false
       matrix:
-        os_version: ['20.04', '22.04']
+        os_version: ['20.04', '22.04', '24.04']
     runs-on: ubuntu-${{ matrix.os_version }}
     steps:
       - name: Checkout code
@@ -742,6 +845,7 @@ jobs:
       - name: "create build directory"
         run: mkdir build
       - name: Install CMake
+        if: matrix.os_version != '24.04'
         uses: ssrobins/install-cmake@v1
       - name: CMake version
         run: cmake --version
@@ -755,12 +859,16 @@ jobs:
           # use Qt6 for 22.04
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=6"
           fi
+          if [[ "${{ matrix.os_version }}" = "24.04" ]]; then
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_PACKAGE_TERMINFO=OFF"
+          fi
           BUILD_DIR="build" \
             CMAKE_BUILD_TYPE=RelWithDebInfo \
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
                                -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD \
                                -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_TESTING=ON \
+                               -DPEDANTIC_COMPILER_WERROR=OFF \
                                " \
             ./scripts/ci-prepare-contour.sh
       - name: "build"
@@ -900,7 +1008,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ['20.04', '22.04']
+        os_version: ['20.04', '22.04', '24.04']
     runs-on: ubuntu-${{ matrix.os_version }}
     steps:
     - name: "update APT database"
@@ -961,7 +1069,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ['20.04', '22.04']
+        os_version: ['20.04', '22.04', '24.04']
     runs-on: ubuntu-${{ matrix.os_version }}
     env:
       # I'm giving up on eliminating all leaks for now.
@@ -1022,7 +1130,7 @@ jobs:
   # {{{ GUI: external test: notcurses
   test_notcurses:
     name: "GUI: notcurses-demo ${{ matrix.name }}"
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [package_for_Ubuntu, build_notcurses]
     strategy:
       fail-fast: false
@@ -1101,10 +1209,10 @@ jobs:
         REPOSITORY: ${{ github.event.repository.name }}
     - uses: actions/download-artifact@v3
       with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
     - uses: actions/download-artifact@v3
       with:
-        name: "notcurses-install-22.04"
+        name: "notcurses-install-24.04"
         path: ~/opt/notcurses
     - name: "fix executable bits"
       run: |
@@ -1117,7 +1225,7 @@ jobs:
       timeout-minutes: 1
       run: ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
     - name: "install contour"
-      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
+      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
     - name: "contour executable test"
       run: |
         contour version
@@ -1168,7 +1276,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ['20.04', '22.04']
+        os_version: ['20.04', '22.04', '24.04']
     runs-on: ubuntu-${{ matrix.os_version}}
     needs: [package_for_Ubuntu]
     steps:
@@ -1247,6 +1355,10 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb
+      - name: "fetch artifact: Ubuntu 24.04"
+        uses: actions/download-artifact@v4
+        with:
+          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
       - name: "fetch artifact: Fedora 39"
         uses: actions/download-artifact@v3
         with:

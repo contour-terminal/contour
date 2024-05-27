@@ -251,7 +251,7 @@ endif()
 # }}}
 
 # {{{ Build terminfo file
-if(NOT(WIN32))
+if(NOT(WIN32) AND CONTOUR_PACKAGE_TERMINFO)
     set(terminfo_file "contour.terminfo")
     set(terminfo_basedir "${CMAKE_CURRENT_BINARY_DIR}/terminfo")
     set_source_files_properties("${terminfo_file}" PROPERTIES GENERATED TRUE)
@@ -566,6 +566,9 @@ else()
     set(DEPENDS_EXTRA ", libyaml-cpp0.7")
     if("${LSB_RELEASE_NUMBER}" STREQUAL "20.04")
         set(DEPENDS_EXTRA ", libyaml-cpp0.6")
+    endif()
+    if("${LSB_RELEASE_NUMBER}" STREQUAL "24.04")
+        set(DEPENDS_EXTRA ", libyaml-cpp0.8")
     endif()
 
     if(LINUX)

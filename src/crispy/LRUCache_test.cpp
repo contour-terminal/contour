@@ -32,7 +32,8 @@ static std::string join(std::vector<T> const& list, std::string_view delimiter =
     {
         if (i)
             s += delimiter;
-        s += fmt::format("{}", list[i]);
+        auto val = list[i];
+        s += fmt::format("{}", val);
     }
     return s;
 }
