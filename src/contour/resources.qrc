@@ -8,6 +8,7 @@
         <file>shell-integration/shell-integration.zsh</file>
         <file>shell-integration/shell-integration.fish</file>
         <file>shell-integration/shell-integration.tcsh</file>
+        <file>shell-integration/shell-integration.bash</file>
         <file>ui/RequestPermission.qml</file>
         <file>ui/Terminal.qml</file>
         <file>ui/main.qml</file>
