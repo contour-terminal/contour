@@ -124,6 +124,7 @@
           <li>Fixes key bindings and search prompt collision (#1472)</li>
           <li>Fixes `CSI 8 ; (COLS) ; (ROWS) t` to resize the terminal with respect to High-DPI</li>
           <li>Fixes screen sampling with multiple monitors (#940)</li>
+          <li>Fixes bell sound in spawned window in same process (#1515)</li>
         </ul>
       </description>
     </release>

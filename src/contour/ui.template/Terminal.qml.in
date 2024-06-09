@@ -110,7 +110,7 @@ ContourTerminal
     MediaPlayer {
         id: bellSoundEffect
         objectName: "Bell"
-        source: "qrc:/contour/bell.wav"
+        source: session.bellSource
         @qml_media_player@
     }
 
