@@ -35,6 +35,7 @@ struct ClearHistoryAndReset{};
 struct CopyPreviousMarkRange{};
 struct CopySelection{ CopyFormat format = CopyFormat::Text; };
 struct CreateDebugDump{};
+struct CreateSelection{ std::string delimiters; };
 struct DecreaseFontSize{};
 struct DecreaseOpacity{};
 struct FocusNextSearchMatch{};
@@ -89,6 +90,7 @@ using Action = std::variant<CancelSelection,
                             CopyPreviousMarkRange,
                             CopySelection,
                             CreateDebugDump,
+                            CreateSelection,
                             DecreaseFontSize,
                             DecreaseOpacity,
                             FocusNextSearchMatch,
@@ -154,6 +156,7 @@ DECLARE_ACTION_FMT(ClearHistoryAndReset)
 DECLARE_ACTION_FMT(CopyPreviousMarkRange)
 DECLARE_ACTION_FMT(CopySelection)
 DECLARE_ACTION_FMT(CreateDebugDump)
+DECLARE_ACTION_FMT(CreateSelection)
 DECLARE_ACTION_FMT(DecreaseFontSize)
 DECLARE_ACTION_FMT(DecreaseOpacity)
 DECLARE_ACTION_FMT(FocusNextSearchMatch)
@@ -263,6 +266,11 @@ struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
         {
             const auto WriteScreenAction = std::get<contour::actions::WriteScreen>(_action);
             name = fmt::format("{} chars: '{}'", WriteScreenAction, WriteScreenAction.chars);
+        }
+        if (std::holds_alternative<contour::actions::CreateSelection>(_action))
+        {
+            const auto CreateSelectionAction = std::get<contour::actions::CreateSelection>(_action);
+            name = fmt::format("{} delimiters: '{}'", CreateSelectionAction, CreateSelectionAction.delimiters);
         }
         // }}}
         return formatter<string_view>::format(name, ctx);

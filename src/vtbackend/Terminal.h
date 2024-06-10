@@ -953,6 +953,8 @@ class Terminal
     [[nodiscard]] bool usePrivateColorRegisters() const noexcept { return _usePrivateColorRegisters; }
     // }}}
 
+    void triggerWordWiseSelectionWithCustomDelimiters(std::string const& delimiters);
+
   private:
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
@@ -1068,6 +1070,7 @@ class Terminal
     std::unique_ptr<Selection> _selection;
     TheSelectionHelper _selectionHelper;
     TheSelectionHelper _extendedSelectionHelper;
+    TheSelectionHelper _customSelectionHelper;
     // }}}
 
     // {{{ Render buffer state

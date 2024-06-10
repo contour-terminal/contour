@@ -987,6 +987,12 @@ bool TerminalSession::operator()(actions::CreateDebugDump)
     return true;
 }
 
+bool TerminalSession::operator()(actions::CreateSelection customSelector)
+{
+    _terminal.triggerWordWiseSelectionWithCustomDelimiters(customSelector.delimiters);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::DecreaseFontSize)
 {
     auto constexpr OnePt = text::font_size { 1.0 };

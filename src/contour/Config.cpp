@@ -1698,6 +1698,16 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 return std::nullopt;
         }
 
+        if (holds_alternative<actions::CreateSelection>(action))
+        {
+            if (auto delimiters = node["delimiters"]; delimiters.IsScalar())
+            {
+                return actions::CreateSelection { delimiters.as<std::string>() };
+            }
+            else
+                return std::nullopt;
+        }
+
         return action;
     }
     return std::nullopt;
