@@ -88,6 +88,8 @@ struct Settings
     };
     PrimaryScreen primaryScreen;
 
+    bool fromSearchIntoInsertMode = true;
+
     // TODO: we could configure also the number of lines of the host writable statusline and indicator
     // statusline.
 };

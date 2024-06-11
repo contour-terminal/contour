@@ -117,6 +117,7 @@
           <li>Add extended word selection feature (#1023)</li>
           <li>Add shell integration for bash shell.</li>
           <li>Add better bell sound (#1378)</li>
+          <li>Add config entry to configure behaviour on exit from search mode</li>
           <li>Update of contour.desktop file (#1423)</li>
           <li>Fixed overlap of glyphs for long codepoints (#1349)</li>
           <li>Fixed too verbose info during ssh session login (#1447)</li>

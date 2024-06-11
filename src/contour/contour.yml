@@ -220,6 +220,9 @@ profiles:
         # whether or not to put the window into maximized mode.
         maximized: false
 
+        # Whether or not to switch from search mode into insert on exit
+        search_mode_switch: true
+
         bell:
             # There is no sound for BEL character if set to "off".
             # If set to "default" BEL character sound will be default sound.
