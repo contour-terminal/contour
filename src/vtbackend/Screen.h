@@ -374,30 +374,11 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return useCellAt(_lastCursorPosition.line, _lastCursorPosition.column);
     }
 
-    void updateCursorIterator() noexcept override
-    {
-#if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
-        _currentLine = &_grid.lineAt(_cursor.position.line);
-#endif
-    }
+    void updateCursorIterator() noexcept override { _currentLine = &_grid.lineAt(_cursor.position.line); }
 
-    [[nodiscard]] Line<Cell>& currentLine() noexcept
-    {
-#if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
-        return *_currentLine;
-#else
-        return _grid.lineAt(_cursor.position.line);
-#endif
-    }
+    [[nodiscard]] Line<Cell>& currentLine() noexcept { return *_currentLine; }
 
-    [[nodiscard]] Line<Cell> const& currentLine() const noexcept
-    {
-#if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
-        return *_currentLine;
-#else
-        return _grid.lineAt(_cursor.position.line);
-#endif
-    }
+    [[nodiscard]] Line<Cell> const& currentLine() const noexcept { return *_currentLine; }
 
     [[nodiscard]] Cell& useCurrentCell() noexcept { return currentLine().useCellAt(_cursor.position.column); }
 
@@ -589,9 +570,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     CellLocation _lastCursorPosition {};
 
-#if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
     Line<Cell>* _currentLine = nullptr;
-#endif
     std::unique_ptr<SixelImageBuilder> _sixelImageBuilder;
 
 #if defined(LIBTERMINAL_LOG_TRACE)
