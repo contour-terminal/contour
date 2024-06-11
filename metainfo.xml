@@ -121,6 +121,7 @@
           <li>Fixes bad wording of OS/X to macOS (#1462)</li>
           <li>Fixes key bindings and search prompt collision (#1472)</li>
           <li>Fixes `CSI 8 ; (COLS) ; (ROWS) t` to resize the terminal with respect to High-DPI</li>
+          <li>Fixes screen sampling with multiple monitors (#940)</li>
         </ul>
       </description>
     </release>
