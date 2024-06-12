@@ -139,16 +139,15 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             // TODO (default to Underline for now)
             [[fallthrough]];
         case Decorator::Underline: {
-            auto const thicknessHalf = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
-            auto const thickness = thicknessHalf * 2;
-            auto const y0 = max(0, (underlinePosition() - static_cast<int>(thicknessHalf)));
+            auto const thickness = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
+            auto const y0 = max(0, (underlinePosition() - static_cast<int>(thickness)));
             auto const height = vtbackend::Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(imageSize.area(), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
-                    for (unsigned x = 0; x < unbox(width); ++x)
-                        image[(*height - y0 - y) * *width + x] = 0xFF;
+                    for (auto x: crispy::times(unbox(width)))
+                        image[(unbox(height) - y0 - y) * unbox(width) + x] = 0xFF;
                 return image;
             });
         }
@@ -163,10 +162,10 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 auto image = atlas::Buffer(imageSize.area(), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                 {
-                    for (unsigned x = 0; x < unbox(width); ++x)
+                    for (auto x: crispy::times(unbox(width)))
                     {
-                        image[(*height - y1 - y) * *width + x] = 0xFF; // top line
-                        image[(*height - y0 - y) * *width + x] = 0xFF; // bottom line
+                        image[(unbox(height) - y1 - y) * unbox(width) + x] = 0xFF; // top line
+                        image[(unbox(height) - y0 - y) * unbox(width) + x] = 0xFF; // bottom line
                     }
                 }
                 return image;
@@ -182,7 +181,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto block = blockElement(imageSize);
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
                 auto const thicknessHalf = max(1, int(ceil(underlineThickness() / 2.0)));
-                for (int x = 0; x < unbox<int>(width); ++x)
+                for (auto x: crispy::times(unbox(width)))
                 {
                     // Using Wu's antialiasing algorithm to paint the curved line.
                     // See: https://dl.acm.org/doi/pdf/10.1145/127719.122734
@@ -208,9 +207,9 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const x1 = unbox(width) / 2;
             auto block = blockElement(ImageSize { width, height });
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
-                for (unsigned y = 0; y < dotHeight; ++y)
+                for (auto y: crispy::times(dotHeight))
                 {
-                    for (unsigned x = 0; x < dotWidth; ++x)
+                    for (auto x: crispy::times(dotWidth))
                     {
                         block.paint(int(x + x0), int(y + y0));
                         block.paint(int(x + x1), int(y + y0));
@@ -230,9 +229,9 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
-                    for (unsigned x = 0; x < unbox(width); ++x)
-                        if (fabsf(float(x) / float(*width) - 0.5f) >= 0.25f)
-                            image[(*height - y0 - y) * *width + x] = 0xFF;
+                    for (auto x: crispy::times(unbox(width)))
+                        if (fabsf(float(x) / unbox<float>(width) - 0.5f) >= 0.25f)
+                            image[(unbox(height) - y0 - y) * unbox(width) + x] = 0xFF;
                 return image;
             });
         }
@@ -247,16 +246,16 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 for (unsigned y = gap; y < thickness + gap; ++y)
                     for (unsigned x = gap; x < unbox(width) - gap; ++x)
                     {
-                        image[y * *width + x] = 0xFF;
-                        image[(*cellHeight - 1 - y) * *width + x] = 0xFF;
+                        image[y * unbox(width) + x] = 0xFF;
+                        image[(unbox(cellHeight) - 1 - y) * unbox(width) + x] = 0xFF;
                     }
 
                 // Draws the left and right vertical lines
                 for (unsigned y = gap; y < unbox(cellHeight) - gap; y++)
                     for (unsigned x = gap; x < thickness + gap; ++x)
                     {
-                        image[y * *width + x] = 0xFF;
-                        image[y * *width + (*width - 1 - x)] = 0xFF;
+                        image[y * unbox(width) + x] = 0xFF;
+                        image[y * unbox(width) + (unbox(width) - 1 - x)] = 0xFF;
                     }
                 return image;
             });
@@ -267,9 +266,9 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const imageSize = ImageSize { width, cellHeight };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(cellHeight), 0);
-                for (unsigned y = 0; y < thickness; ++y)
-                    for (unsigned x = 0; x < unbox(width); ++x)
-                        image[y * *width + x] = 0xFF;
+                for (auto y: crispy::times(thickness))
+                    for (auto x: crispy::times(unbox(width)))
+                        image[y * unbox(width) + x] = 0xFF;
                 return image;
             });
         }
@@ -280,8 +279,8 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
-                    for (unsigned x = 0; x < unbox(width); ++x)
-                        image[y * *width + x] = 0xFF;
+                    for (auto x: crispy::times(unbox(width)))
+                        image[y * unbox(width) + x] = 0xFF;
                 return image;
             });
         }
