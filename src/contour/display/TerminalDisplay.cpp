@@ -520,6 +520,17 @@ void TerminalDisplay::onBeforeSynchronize()
     if (!_session)
         return;
 
+    // find screen with biggest width
+    QScreen* screenToUse = window()->screen();
+    for (auto screen: window()->screen()->virtualSiblings())
+    {
+        if (screen->size().width() > screenToUse->size().width())
+        {
+            screenToUse = screen;
+        }
+    }
+    window()->setScreen(screenToUse);
+
     if (!_renderTarget)
     {
         // This is the first call, so create the renderer (on demand) now.
@@ -535,7 +546,8 @@ void TerminalDisplay::onBeforeSynchronize()
     auto const windowSize = window()->size() * dpr;
     Require(width() > 1.0 && height() > 1.0);
 
-    auto const viewSize = ImageSize { Width::cast_from(width() * dpr), Height::cast_from(height() * dpr) };
+    auto const viewSize =
+        ImageSize { Width::cast_from(windowSize.width()), Height::cast_from(windowSize.height()) };
 
     _renderTarget->setRenderSize(
         ImageSize { Width::cast_from(windowSize.width()), Height::cast_from(windowSize.height()) });
