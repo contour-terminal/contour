@@ -228,6 +228,8 @@ int ContourApp::integrationAction()
             file.setFileName(":/contour/shell-integration/shell-integration.fish");
         else if (shell == "tcsh")
             file.setFileName(":/contour/shell-integration/shell-integration.tcsh");
+        else if (shell == "bash")
+            file.setFileName(":/contour/shell-integration/shell-integration.bash");
         else
         {
             std::cerr << fmt::format("Cannot generate shell integration for an unsupported shell, {}.\n",
