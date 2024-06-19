@@ -770,6 +770,7 @@ color_schemes:
 # - ClearHistoryAndReset    Clears the history, performs a terminal hard reset and attempts to force a redraw of the currently running application.
 # - CopyPreviousMarkRange   Copies the most recent range that is delimited by vertical line marks into clipboard.
 # - CopySelection     Copies the current selection into the clipboard buffer.
+# - CreateSelection   Creates selection with custom delimiters configured via `delimiters` member.
 # - DecreaseFontSize  Decreases the font size by 1 pixel.
 # - DecreaseOpacity   Decreases the default-background opacity by 5%.
 # - FocusNextSearchMatch     Focuses the next search match (if any).

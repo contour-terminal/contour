@@ -301,6 +301,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::CopyPreviousMarkRange);
     bool operator()(actions::CopySelection);
     bool operator()(actions::CreateDebugDump);
+    bool operator()(actions::CreateSelection);
     bool operator()(actions::DecreaseFontSize);
     bool operator()(actions::DecreaseOpacity);
     bool operator()(actions::FollowHyperlink);

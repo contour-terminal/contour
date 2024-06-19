@@ -136,6 +136,7 @@ Terminal::Terminal(Events& eventListener,
                                                                _settings.indicatorStatusLine.right) },
     _selectionHelper { this },
     _extendedSelectionHelper { this },
+    _customSelectionHelper { this },
     _refreshInterval { _settings.refreshRate },
     _traceHandler { *this },
     _cellPixelSize {},
@@ -723,6 +724,24 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
 
     breakLoopAndRefreshRenderBuffer();
     return true;
+}
+
+void Terminal::triggerWordWiseSelectionWithCustomDelimiters(string const& delimiters)
+{
+    verifyState();
+    auto const startPos = CellLocation {
+        _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
+        _currentMousePosition.column,
+    };
+    if (_inputHandler.mode() != ViMode::Insert)
+        _viCommands.cursorPosition = startPos;
+    _customSelectionHelper.wordDelimited = [wordDelimiters = unicode::from_utf8(delimiters),
+                                            this](CellLocation const& pos) {
+        return this->wordDelimited(pos, wordDelimiters);
+    };
+
+    triggerWordWiseSelection(startPos, _customSelectionHelper);
+    breakLoopAndRefreshRenderBuffer();
 }
 
 void Terminal::setSelector(std::unique_ptr<Selection> selector)

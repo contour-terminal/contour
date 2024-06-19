@@ -34,6 +34,7 @@ optional<Action> fromString(string const& name)
         mapAction<actions::CopyPreviousMarkRange>("CopyPreviousMarkRange"),
         mapAction<actions::CopySelection>("CopySelection"),
         mapAction<actions::CreateDebugDump>("CreateDebugDump"),
+        mapAction<actions::CreateSelection>("CreateSelection"),
         mapAction<actions::DecreaseFontSize>("DecreaseFontSize"),
         mapAction<actions::DecreaseOpacity>("DecreaseOpacity"),
         mapAction<actions::FocusNextSearchMatch>("FocusNextSearchMatch"),
