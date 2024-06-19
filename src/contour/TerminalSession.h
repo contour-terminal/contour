@@ -78,6 +78,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(bool isScrollbarVisible READ getIsScrollbarVisible NOTIFY isScrollbarVisibleChanged)
     Q_PROPERTY(int fontSize READ getFontSize)
     Q_PROPERTY(int upTime READ getUptime)
+    Q_PROPERTY(QString bellSource READ getBellSource)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
@@ -91,10 +92,23 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return static_cast<int>(diff.count());
     }
 
+    QString getBellSource() const noexcept
+    {
+        if (_profile.bell.value().sound == "default")
+        {
+            return QString("qrc:/contour/bell.wav");
+        }
+        if (_profile.bell.value().sound == "off")
+        {
+            return QString();
+        }
+
+        return QString::fromStdString(_profile.bell.value().sound);
+    }
+
     int getFontSize() const noexcept { return static_cast<int>(_profile.fonts.value().size.pt); }
     float getOpacity() const noexcept
     {
-        fmt::print(" ====== OPACITY background {} ", static_cast<float>(_profile.backgroundOpacity.value()));
         return static_cast<float>(_profile.backgroundOpacity.value()) / std::numeric_limits<uint8_t>::max();
     }
     QString pathToBackground() const
@@ -119,7 +133,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         if (_terminal.colorPalette().backgroundImage.get())
         {
-            fmt::print(" getOpacityBackground  non zerp \n ");
             return _terminal.colorPalette().backgroundImage->opacity;
         }
         return 0.0;
@@ -128,7 +141,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         if (_terminal.colorPalette().backgroundImage)
         {
-            fmt::print(" BACKGROUND IS IMAGE \n");
             return true;
         }
         return false;
@@ -138,8 +150,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         if (getIsImageBackground())
         {
-
-            fmt::print(" BACKGROUND IS BLUR \n");
             return _terminal.colorPalette().backgroundImage->blur;
         }
         return false;
