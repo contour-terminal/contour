@@ -3,6 +3,7 @@
 
 #include <vtbackend/InputHandler.h>
 #include <vtbackend/Selector.h>
+#include <vtbackend/Settings.h>
 #include <vtbackend/primitives.h>
 
 #include <crispy/TrieMap.h>
@@ -214,12 +215,19 @@ class ViInputHandler: public InputHandler
 
     void startSearchExternally();
 
+    void setSearchModeSwitch(bool enabled);
+
   private:
     enum class ModeSelect
     {
         Normal,
         Visual
     };
+
+    struct
+    {
+        bool fromSearchIntoInsertMode { true };
+    } _settings;
 
     using CommandHandler = std::function<void()>;
     using CommandHandlerMap = crispy::trie_map<std::string, CommandHandler>;

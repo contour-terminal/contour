@@ -118,6 +118,13 @@ constexpr StringLiteral MouseHideWhileTyping { "{comment} whether or not to hide
                                                "hide_while_typing: {}\n"
                                                "\n" };
 
+constexpr StringLiteral SeachModeSwitch {
+    "{comment} Whether or not to switch from search mode into insert on exit. If this value is set to true,\n"
+    "{comment} it will go back to insert mode, otherwise it will go back to normal mode.\n"
+    "search_mode_switch: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral CopyLastMarkRangeOffset {
     "{comment} Advanced value that is useful when CopyPreviousMarkRange is used \n"
     "{comment} with multiline-prompts. This offset value is being added to the \n"

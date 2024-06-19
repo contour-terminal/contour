@@ -437,7 +437,7 @@ Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
             _executor->searchCancel();
             break;
         case '\x0D'_key:
-            if (_searchEditMode == SearchEditMode::ExternallyEnabled)
+            if (_settings.fromSearchIntoInsertMode && _searchEditMode == SearchEditMode::ExternallyEnabled)
                 setMode(ViMode::Insert);
             _searchEditMode = SearchEditMode::Disabled;
             _executor->searchDone();
@@ -549,6 +549,11 @@ void ViInputHandler::startSearch()
 void ViInputHandler::toggleMode(ViMode newMode)
 {
     setMode(newMode != _viMode ? newMode : ViMode::Normal);
+}
+
+void ViInputHandler::setSearchModeSwitch(bool enabled)
+{
+    _settings.fromSearchIntoInsertMode = enabled;
 }
 
 } // namespace vtbackend
