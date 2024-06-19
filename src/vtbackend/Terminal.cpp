@@ -4,7 +4,7 @@
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/RenderBufferBuilder.h>
-#include <vtbackend/Sequencer.h>
+#include <vtbackend/SequenceBuilder.h>
 #include <vtbackend/Terminal.h>
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
@@ -156,8 +156,8 @@ Terminal::Terminal(Events& eventListener,
         discardImage(*image);
     } },
     _hyperlinks { HyperlinkCache { 1024 } },
-    _sequencer { *this },
-    _parser { std::ref(_sequencer) },
+    _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
+    _parser { std::ref(_sequenceBuilder) },
     _viCommands { *this },
     _inputHandler { _viCommands, ViMode::Insert }
 {
@@ -1019,221 +1019,6 @@ string_view Terminal::lockedWriteToPtyBuffer(string_view data)
     return string_view(ref.data(), ref.size());
 }
 
-// {{{ SequenceBuilder<Handler>
-// SequenceBuilder<Handler> implements ParserEvents interface to handle parsed VT sequences.
-template <typename Handler>
-class SequenceBuilder
-{
-  public:
-    explicit SequenceBuilder(Handler& handler):
-        _sequence {}, _parameterBuilder { _sequence.parameters() }, _handler { handler }
-    {
-    }
-
-    // {{{ ParserEvents interface
-    void error(std::string_view errorString);
-    void print(char32_t codepoint);
-    size_t print(std::string_view chars, size_t cellCount);
-    void printEnd();
-    void execute(char controlCode);
-    void clear() noexcept;
-    void collect(char ch);
-    void collectLeader(char leader) noexcept;
-    void param(char ch) noexcept;
-    void paramDigit(char ch) noexcept;
-    void paramSeparator() noexcept;
-    void paramSubSeparator() noexcept;
-    void dispatchESC(char finalChar);
-    void dispatchCSI(char finalChar);
-    void startOSC();
-    void putOSC(char ch);
-    void dispatchOSC();
-    void hook(char finalChar);
-    void put(char ch);
-    void unhook();
-    void startAPC() {}
-    void putAPC(char) {}
-    void dispatchAPC() {}
-    void startPM() {}
-    void putPM(char) {}
-    void dispatchPM() {}
-
-    [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept;
-    // }}}
-
-  private:
-    void handleSequence();
-
-    Sequence _sequence {};
-    SequenceParameterBuilder _parameterBuilder;
-    Handler& _handler;
-
-    std::unique_ptr<ParserExtension> _hookedParser {};
-    std::unique_ptr<SixelImageBuilder> _sixelImageBuilder {};
-};
-
-template <typename Handler>
-inline void SequenceBuilder<Handler>::clear() noexcept
-{
-    _sequence.clearExceptParameters();
-    _parameterBuilder.reset();
-}
-
-template <typename Handler>
-inline void SequenceBuilder<Handler>::paramDigit(char ch) noexcept
-{
-    _parameterBuilder.multiplyBy10AndAdd(static_cast<uint8_t>(ch - '0'));
-}
-
-template <typename Handler>
-inline void SequenceBuilder<Handler>::paramSeparator() noexcept
-{
-    _parameterBuilder.nextParameter();
-}
-
-template <typename Handler>
-inline void SequenceBuilder<Handler>::paramSubSeparator() noexcept
-{
-    _parameterBuilder.nextSubParameter();
-}
-
-template <typename Handler>
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-void SequenceBuilder<Handler>::error(std::string_view errorString)
-{
-    if (vtParserLog)
-        vtParserLog()("Parser error: {}", errorString);
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::print(char32_t codepoint)
-{
-    _handler.writeText(codepoint);
-}
-
-template <typename Handler>
-size_t SequenceBuilder<Handler>::print(string_view chars, size_t cellCount)
-{
-    return _handler.writeText(chars, cellCount);
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::printEnd()
-{
-    _handler.writeTextEnd();
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::execute(char controlCode)
-{
-    _handler.executeControlCode(controlCode);
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::collect(char ch)
-{
-    _sequence.intermediateCharacters().push_back(ch);
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::collectLeader(char leader) noexcept
-{
-    _sequence.setLeader(leader);
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::param(char ch) noexcept
-{
-    switch (ch)
-    {
-        case ';': paramSeparator(); break;
-        case ':': paramSubSeparator(); break;
-        case '0':
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case '6':
-        case '7':
-        case '8':
-        case '9': paramDigit(ch); break;
-        default: crispy::unreachable();
-    }
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::dispatchESC(char finalChar)
-{
-    _sequence.setCategory(FunctionCategory::ESC);
-    _sequence.setFinalChar(finalChar);
-    handleSequence();
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::dispatchCSI(char finalChar)
-{
-    _sequence.setCategory(FunctionCategory::CSI);
-    _sequence.setFinalChar(finalChar);
-    handleSequence();
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::startOSC()
-{
-    _sequence.setCategory(FunctionCategory::OSC);
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::putOSC(char ch)
-{
-    if (_sequence.intermediateCharacters().size() + 1 < Sequence::MaxOscLength)
-        _sequence.intermediateCharacters().push_back(ch);
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::dispatchOSC()
-{
-    auto const [code, skipCount] = vtparser::extractCodePrefix(_sequence.intermediateCharacters());
-    _parameterBuilder.set(static_cast<Sequence::Parameter>(code));
-    _sequence.intermediateCharacters().erase(0, skipCount);
-    handleSequence();
-    clear();
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::hook(char finalChar)
-{
-    _handler.hook(finalChar);
-    _sequence.setCategory(FunctionCategory::DCS);
-    _sequence.setFinalChar(finalChar);
-
-    handleSequence();
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::put(char ch)
-{
-    if (_hookedParser)
-        _hookedParser->pass(ch);
-}
-
-template <typename Handler>
-void SequenceBuilder<Handler>::unhook()
-{
-    if (_hookedParser)
-    {
-        _hookedParser->finalize();
-        _hookedParser.reset();
-    }
-}
-
-template <typename Handler>
-size_t SequenceBuilder<Handler>::maxBulkTextSequenceWidth() const noexcept
-{
-    return _handler.maxBulkTextSequenceWidth();
-}
-
 size_t Terminal::maxBulkTextSequenceWidth() const noexcept
 {
     if (!isPrimaryScreen())
@@ -1247,38 +1032,26 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
     return unbox<size_t>(_mainScreenMargin.horizontal.to - _currentScreen->cursor().position.column);
 }
 
-template <typename Handler>
-void SequenceBuilder<Handler>::handleSequence()
+// {{{ SimpleSequenceHandler
+// This simple sequence handler is used to write to the screen
+// without any optimizations (and no parser hooking).
+// We use this for rendering the status line.
+struct SimpleSequenceHandler
 {
-    _parameterBuilder.fixiate();
-    _handler.processSequence(_sequence);
-}
-// }}}
-
-struct LocalSequenceHandler // {{{
-{
-    Terminal& terminal;
     Screen<StatusDisplayCell>& targetScreen;
-    uint64_t instructionCounter = 0;
 
-    void executeControlCode(char controlCode)
-    {
-        instructionCounter++;
-        targetScreen.executeControlCode(controlCode);
-    }
+    void executeControlCode(char controlCode) { targetScreen.executeControlCode(controlCode); }
 
     void processSequence(Sequence const& seq)
     {
-        instructionCounter = 0;
+        // NB: We might want to check for some VT sequences that should not be processed here.
+        // We might make use of Terminal::activeSequences() here somehow.
         targetScreen.processSequence(seq);
     }
-    void writeText(char32_t codepoint)
-    {
-        instructionCounter++;
-        targetScreen.writeText(codepoint);
-    }
 
-    [[nodiscard]] size_t writeText(std::string_view chars, size_t)
+    void writeText(char32_t codepoint) { targetScreen.writeText(codepoint); }
+
+    void writeText(std::string_view chars, size_t /*cellCount*/)
     {
         // implementation of targetScreen.writeText(chars, cellCount)
         // is buggy and does not work correctly
@@ -1288,25 +1061,23 @@ struct LocalSequenceHandler // {{{
         // TODO fix targetScreen.writeText(chars, cellCount)
         for (auto c: chars)
             targetScreen.writeText(c);
-
-        return 0;
     }
 
     void writeTextEnd() { targetScreen.writeTextEnd(); }
 
-    void hook(char /*finalChar*/) { instructionCounter++; }
-
     [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
     {
-        return terminal.maxBulkTextSequenceWidth();
+        // Returning 0 here, because we do not make use of the performance optimized bulk write above.
+        return 0;
     }
 };
 // }}}
 
 void Terminal::writeToScreenInternal(Screen<StatusDisplayCell>& screen, std::string_view vtStream)
 {
-    auto sequenceHandler = LocalSequenceHandler { *this, screen };
-    auto sequenceBuilder = SequenceBuilder { sequenceHandler };
+    auto sequenceHandler = SimpleSequenceHandler { screen };
+    auto sequenceBuilder = SequenceBuilder { sequenceHandler, NoOpInstructionCounter() };
+    // auto sequenceBuilder = SequenceBuilder { *this, NoOpInstructionCounter() };
     auto parser = vtparser::Parser { sequenceBuilder };
 
     parser.parseFragment(vtStream);

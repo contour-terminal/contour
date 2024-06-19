@@ -36,7 +36,7 @@ set(vtbackend_HEADERS
     Screen.h
     Selector.h
     Sequence.h
-    Sequencer.h
+    SequenceBuilder.h
     SixelParser.h
     StatusLineBuilder.h
     Terminal.h
@@ -67,7 +67,6 @@ set(vtbackend_SOURCES
     Screen.cpp
     Selector.cpp
     Sequence.cpp
-    Sequencer.cpp
     SixelParser.cpp
     StatusLineBuilder.cpp
     Terminal.cpp
