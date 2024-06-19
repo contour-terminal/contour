@@ -115,7 +115,8 @@
           <li>Add SGRSAVE and SGRRESTORE VT sequences to save and restore SGR state (They intentionally conflict with XTPUSHSGR and XTPOPSGR)</li>
           <li>Add extended word selection feature (#1023)</li>
           <li>Add extended word selection feature (#1023)</li>
-          <li>Adds shell integration for bash shell.</li>
+          <li>Add shell integration for bash shell.</li>
+          <li>Add better bell sound (#1378)</li>
           <li>Update of contour.desktop file (#1423)</li>
           <li>Fixed overlap of glyphs for long codepoints (#1349)</li>
           <li>Fixed too verbose info during ssh session login (#1447)</li>

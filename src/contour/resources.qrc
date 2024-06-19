@@ -1,7 +1,7 @@
 <RCC>
     <qresource prefix="/contour">
         <file alias="bell.oga">res/bell.oga</file>
-        <file>bell.wav</file>
+        <file alias="bell.wav">res/bell.wav</file>
         <file alias="logo-256.png">res/images/contour-logo-256.png</file>
         <file alias="logo.png">res/images/contour-logo-256.png</file>
         <file>contour.yml</file>
