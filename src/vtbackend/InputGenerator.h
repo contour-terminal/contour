@@ -631,8 +631,8 @@ struct fmt::formatter<vtbackend::Modifier>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::InputGenerator::MouseWheelMode>: formatter<std::string_view>
 {
-    auto format(vtbackend::InputGenerator::MouseWheelMode value, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtbackend::InputGenerator::MouseWheelMode value,
+                format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)

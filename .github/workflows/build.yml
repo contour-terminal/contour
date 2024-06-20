@@ -61,10 +61,10 @@ jobs:
       run: |
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 17
-        sudo apt-get install clang-format-17
+        sudo ./llvm.sh 18
+        sudo apt-get install clang-format-18
     - name: "Clang-format"
-      run: find ./src/ -name "*.cpp" -o -name "*.h" | xargs clang-format-17 --Werror --dry-run
+      run: find ./src/ -name "*.cpp" -o -name "*.h" | xargs clang-format-18 --Werror --dry-run
     - name: "Check includes"
       run: ./scripts/check-includes.sh
 

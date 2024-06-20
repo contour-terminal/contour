@@ -2,11 +2,11 @@
 #include <vtbackend/ControlCode.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/Screen.h>
+#include <vtbackend/SixelParser.h>
 #include <vtbackend/Terminal.h>
 #include <vtbackend/VTType.h>
 #include <vtbackend/VTWriter.h>
 #include <vtbackend/logging.h>
-#include <vtbackend/SixelParser.h>
 
 #include <crispy/App.h>
 #include <crispy/Comparison.h>
@@ -3758,9 +3758,10 @@ unique_ptr<ParserExtension> Screen<Cell>::hookSixel(Sequence const& seq)
         aspectVertical,
         aspectHorizontal,
         transparentBackground ? RGBAColor { 0, 0, 0, 0 } : _terminal->colorPalette().defaultBackground,
-        _terminal->usePrivateColorRegisters() ? make_shared<SixelColorPalette>(
-            _terminal->maxSixelColorRegisters(), std::clamp(_terminal->maxSixelColorRegisters(), 0u, 16384u))
-                                              : _terminal->sixelColorPalette());
+        _terminal->usePrivateColorRegisters()
+            ? make_shared<SixelColorPalette>(_terminal->maxSixelColorRegisters(),
+                                             std::clamp(_terminal->maxSixelColorRegisters(), 0u, 16384u))
+            : _terminal->sixelColorPalette());
 
     return make_unique<SixelParser>(*_sixelImageBuilder, [this]() {
         {

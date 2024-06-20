@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include <vtbackend/cell/CellConcept.h>
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/Terminal.h>
+#include <vtbackend/cell/CellConcept.h>
 #include <vtbackend/primitives.h>
 
 #include <gsl/pointers>

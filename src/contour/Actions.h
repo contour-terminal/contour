@@ -270,7 +270,8 @@ struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
         if (std::holds_alternative<contour::actions::CreateSelection>(_action))
         {
             const auto CreateSelectionAction = std::get<contour::actions::CreateSelection>(_action);
-            name = fmt::format("{} delimiters: '{}'", CreateSelectionAction, CreateSelectionAction.delimiters);
+            name =
+                fmt::format("{} delimiters: '{}'", CreateSelectionAction, CreateSelectionAction.delimiters);
         }
         // }}}
         return formatter<string_view>::format(name, ctx);

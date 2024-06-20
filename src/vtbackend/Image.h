@@ -229,8 +229,7 @@ class ImagePool
   public:
     using OnImageRemove = std::function<void(Image const*)>;
 
-    ImagePool(
-        OnImageRemove onImageRemove = [](auto) {}, ImageId nextImageId = ImageId(1));
+    ImagePool(OnImageRemove onImageRemove = [](auto) {}, ImageId nextImageId = ImageId(1));
 
     /// Creates an RGBA image of given size in pixels.
     std::shared_ptr<Image const> create(ImageFormat format, ImageSize pixelSize, Image::Data&& data);
@@ -290,8 +289,8 @@ struct fmt::formatter<vtbackend::ImageStats>: formatter<std::string>
 template <>
 struct fmt::formatter<std::shared_ptr<vtbackend::Image const>>: fmt::formatter<std::string>
 {
-    auto format(std::shared_ptr<vtbackend::Image const> const& image, format_context& ctx)
-        -> format_context::iterator
+    auto format(std::shared_ptr<vtbackend::Image const> const& image,
+                format_context& ctx) -> format_context::iterator
     {
         std::string text;
         if (!image)

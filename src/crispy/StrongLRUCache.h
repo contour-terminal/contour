@@ -200,19 +200,16 @@ template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
 inline bool strong_lru_cache<Key, Value, Hasher>::try_emplace(Key key, ValueConstructFn constructValue)
 {
-    return _hashtable->try_emplace(Hasher {}(key), [&](auto v) {
-        return entry { key, constructValue(std::move(v)) };
-    });
+    return _hashtable->try_emplace(Hasher {}(key),
+                                   [&](auto v) { return entry { key, constructValue(std::move(v)) }; });
 }
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
 inline Value& strong_lru_cache<Key, Value, Hasher>::get_or_emplace(Key key, ValueConstructFn constructValue)
 {
-    return _hashtable->get_or_emplace(Hasher {}(key),
-                                      [&](auto v) {
-                                          return entry { key, constructValue(v) };
-                                      })
+    return _hashtable
+        ->get_or_emplace(Hasher {}(key), [&](auto v) { return entry { key, constructValue(v) }; })
         .value;
 }
 
@@ -246,8 +243,8 @@ template <typename K, typename V>
 struct fmt::formatter<crispy::detail::lru_cache_entry<K, V>>
 {
     static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(crispy::detail::lru_cache_entry<K, V> const& entry, format_context& ctx)
-        -> format_context::iterator
+    static auto format(crispy::detail::lru_cache_entry<K, V> const& entry,
+                       format_context& ctx) -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "{}: {}", entry.key, entry.value);
     }

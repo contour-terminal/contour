@@ -62,8 +62,9 @@ namespace vtbackend::CellUtil
 }
 
 template <CellConcept Cell>
-[[nodiscard]] inline RGBColor
-    makeUnderlineColor(ColorPalette const& colorPalette, RGBColor defaultColor, Cell const& cell) noexcept
+[[nodiscard]] inline RGBColor makeUnderlineColor(ColorPalette const& colorPalette,
+                                                 RGBColor defaultColor,
+                                                 Cell const& cell) noexcept
 {
     return makeUnderlineColor(colorPalette, defaultColor, cell.underlineColor(), cell.flags());
 }
