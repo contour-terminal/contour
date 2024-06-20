@@ -50,8 +50,7 @@ struct Settings;
  * allowing the object owner to control which part of the screen (or history)
  * to be viewn.
  */
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 class Screen final: public ScreenBase, public capabilities::StaticDatabase
 {
   public:
@@ -581,15 +580,13 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     std::string_view _name;
 };
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 inline void Screen<Cell>::scrollUp(LineCount n, Margin margin)
 {
     scrollUp(n, cursor().graphicsRendition, margin);
 }
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 inline bool Screen<Cell>::isContiguousToCurrentLine(std::string_view continuationChars) const noexcept
 {
     auto const& line = currentLine();

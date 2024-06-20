@@ -1,17 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#ifdef __has_include
-    #if __has_include(<version>)
-        #include <version>
-    #endif
-#endif
-
-// clang-format off
-
-#if defined(__cpp_concepts) && __cpp_concepts >= 201500L && \
-    defined(__cpp_lib_concepts) && __cpp_lib_concepts >= 202002L
-
 #include <vtbackend/CellFlags.h>
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
@@ -39,58 +28,53 @@ namespace vtbackend
  * but won't be needed for scrollback.
  */
 template <typename T>
-concept CellConcept = requires(T t, T const& u)
-{
+concept CellConcept = requires(T t, T const& u) {
     T(GraphicsAttributes {});
     T(GraphicsAttributes {}, HyperlinkId {});
 
     t.reset();
-    t.reset(GraphicsAttributes{});
-    t.reset(GraphicsAttributes{}, HyperlinkId{});
+    t.reset(GraphicsAttributes {});
+    t.reset(GraphicsAttributes {}, HyperlinkId {});
 
     { u.empty() } noexcept -> std::same_as<bool>;
 
-    t.write(GraphicsAttributes{}, char32_t{}, uint8_t{});
-    t.write(GraphicsAttributes{}, char32_t{}, uint8_t{}, HyperlinkId{});
-    t.writeTextOnly(char32_t{}, uint8_t{});
+    t.write(GraphicsAttributes {}, char32_t {}, uint8_t {});
+    t.write(GraphicsAttributes {}, char32_t {}, uint8_t {}, HyperlinkId {});
+    t.writeTextOnly(char32_t {}, uint8_t {});
 
     { u.codepoints() } -> std::convertible_to<std::u32string>;
-    { u.codepoint(size_t{}) } noexcept -> std::same_as<char32_t>;
+    { u.codepoint(size_t {}) } noexcept -> std::same_as<char32_t>;
     { u.codepointCount() } noexcept -> std::same_as<size_t>;
 
-    t.setCharacter(char32_t{});
-    { t.appendCharacter(char32_t{}) } -> std::same_as<int>;
+    t.setCharacter(char32_t {});
+    { t.appendCharacter(char32_t {}) } -> std::same_as<int>;
 
     { u.toUtf8() } -> std::convertible_to<std::string>;
 
     { u.width() } noexcept -> std::convertible_to<uint8_t>;
-    { t.setWidth(uint8_t{}) } noexcept;
+    { t.setWidth(uint8_t {}) } noexcept;
 
     { u.flags() } noexcept -> std::same_as<CellFlags>;
-    { u.isFlagEnabled(CellFlags{}) } noexcept -> std::same_as<bool>;
+    { u.isFlagEnabled(CellFlags {}) } noexcept -> std::same_as<bool>;
     t.resetFlags();
-    t.resetFlags(CellFlags{});
+    t.resetFlags(CellFlags {});
 
-    t.setGraphicsRendition(GraphicsRendition{});
+    t.setGraphicsRendition(GraphicsRendition {});
 
-    t.setForegroundColor(Color{});
+    t.setForegroundColor(Color {});
     { u.foregroundColor() } noexcept -> std::same_as<Color>;
 
-    t.setBackgroundColor(Color{});
+    t.setBackgroundColor(Color {});
     { u.backgroundColor() } noexcept -> std::same_as<Color>;
 
-    t.setUnderlineColor(Color{});
+    t.setUnderlineColor(Color {});
     { u.underlineColor() } noexcept -> std::same_as<Color>;
 
     { u.imageFragment() } -> std::same_as<std::shared_ptr<ImageFragment>>;
-    t.setImageFragment(std::shared_ptr<RasterizedImage>{}, CellLocation{} /*offset*/);
+    t.setImageFragment(std::shared_ptr<RasterizedImage> {}, CellLocation {} /*offset*/);
 
     { u.hyperlink() } -> std::same_as<HyperlinkId>;
-    t.setHyperlink(HyperlinkId{});
+    t.setHyperlink(HyperlinkId {});
 };
 
-
 } // namespace vtbackend
-
-// clang-format on
-#endif

@@ -48,8 +48,7 @@
 namespace vtbackend
 {
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 class Screen;
 
 class ScreenBase;
