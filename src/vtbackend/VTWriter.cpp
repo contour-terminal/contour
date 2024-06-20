@@ -187,7 +187,7 @@ void VTWriter::setBackgroundColor(Color color)
     }
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 void VTWriter::write(Line<Cell> const& line)
 {
     if (line.isTrivialBuffer())

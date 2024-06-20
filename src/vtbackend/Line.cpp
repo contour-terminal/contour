@@ -14,7 +14,7 @@ using std::min;
 namespace vtbackend
 {
 
-template <typename Cell>
+template <CellConcept Cell>
 typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount newColumnCount)
 {
     using crispy::comparison;
@@ -79,7 +79,7 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount newColumnCoun
     return {};
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 inline void Line<Cell>::resize(ColumnCount count)
 {
     assert(*count >= 0);
@@ -95,7 +95,7 @@ inline void Line<Cell>::resize(ColumnCount count)
     inflatedBuffer().resize(unbox<size_t>(count));
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 gsl::span<Cell const> Line<Cell>::trim_blank_right() const noexcept
 {
     auto i = inflatedBuffer().data();
@@ -107,7 +107,7 @@ gsl::span<Cell const> Line<Cell>::trim_blank_right() const noexcept
     return gsl::make_span(i, e);
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 std::string Line<Cell>::toUtf8() const
 {
     if (isTrivialBuffer())
@@ -130,13 +130,13 @@ std::string Line<Cell>::toUtf8() const
     return str;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 std::string Line<Cell>::toUtf8Trimmed() const
 {
     return toUtf8Trimmed(true, true);
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 std::string Line<Cell>::toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const
 {
     std::string output = toUtf8();
@@ -156,7 +156,7 @@ std::string Line<Cell>::toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailin
     return output;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 {
     static constexpr char32_t ReplacementCharacter { 0xFFFD };

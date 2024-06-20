@@ -61,16 +61,14 @@ namespace vtbackend::CellUtil
     return apply(colorPalette, underlineColor, ColorTarget::Foreground, mode);
 }
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 [[nodiscard]] inline RGBColor
     makeUnderlineColor(ColorPalette const& colorPalette, RGBColor defaultColor, Cell const& cell) noexcept
 {
     return makeUnderlineColor(colorPalette, defaultColor, cell.underlineColor(), cell.flags());
 }
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 [[nodiscard]] inline bool compareText(Cell const& cell, char32_t character) noexcept
 {
     if (cell.codepointCount() != 1)
@@ -79,15 +77,13 @@ CRISPY_REQUIRES(CellConcept<Cell>)
     return cell.codepoint(0) == character;
 }
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 [[nodiscard]] inline bool empty(Cell const& cell) noexcept
 {
     return (cell.codepointCount() == 0 || cell.codepoint(0) == 0x20) && !cell.imageFragment();
 }
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 [[nodiscard]] inline int computeWidthChange(Cell const& cell, char32_t codepoint) noexcept
 {
     constexpr bool AllowWidthChange = false; // TODO: make configurable
@@ -106,8 +102,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
     return newWidth - cell.width();
 }
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 [[nodiscard]] inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept
 {
     assert(!text.empty());
@@ -173,8 +168,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
     return flags;
 }
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 inline void applyGraphicsRendition(GraphicsRendition sgr, Cell& cell) noexcept
 {
     cell.resetFlags(makeCellFlags(sgr, cell.flags()));

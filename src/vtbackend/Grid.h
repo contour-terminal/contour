@@ -101,7 +101,7 @@ constexpr bool operator!=(Margin const& a, PageSize b) noexcept
 }
 // }}}
 
-template <typename Cell>
+template <CellConcept Cell>
 using Lines = crispy::ring<Line<Cell>>;
 
 struct RenderPassHints
@@ -113,7 +113,7 @@ struct RenderPassHints
  * Represents a logical grid line, i.e. a sequence lines that were written without
  * an explicit linefeed, triggering an auto-wrap.
  */
-template <typename Cell>
+template <CellConcept Cell>
 struct LogicalLine
 {
     LineOffset top {};
@@ -339,19 +339,19 @@ struct LogicalLine
     }
 };
 
-template <typename Cell>
+template <CellConcept Cell>
 bool operator==(LogicalLine<Cell> const& a, LogicalLine<Cell> const& b) noexcept
 {
     return a.top == b.top && a.bottom == b.bottom;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 bool operator!=(LogicalLine<Cell> const& a, LogicalLine<Cell> const& b) noexcept
 {
     return !(a == b);
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 struct LogicalLines
 {
     LineOffset topMostLine;
@@ -452,7 +452,7 @@ struct LogicalLines
     }
 };
 
-template <typename Cell>
+template <CellConcept Cell>
 struct ReverseLogicalLines
 {
     LineOffset topMostLine;
@@ -581,8 +581,7 @@ struct ReverseLogicalLines
  *       1                          pageSize.columns
  * </pre>
  */
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 class Grid
 {
     // TODO: Rename all "History" to "Scrollback"?
@@ -828,37 +827,33 @@ class Grid
     LineCount _linesUsed;
 };
 
-template <typename Cell>
+template <CellConcept Cell>
 std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid);
 
-template <typename Cell>
+template <CellConcept Cell>
 std::string dumpGrid(Grid<Cell> const& grid);
 
 // {{{ impl
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 constexpr LineFlags Grid<Cell>::defaultLineFlags() const noexcept
 {
     return _reflowOnResize ? LineFlag::Wrappable : LineFlag::None;
 }
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 constexpr LineCount Grid<Cell>::linesUsed() const noexcept
 {
     return _linesUsed;
 }
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 bool Grid<Cell>::isLineWrapped(LineOffset line) const noexcept
 {
     return line >= -boxed_cast<LineOffset>(historyLineCount())
            && boxed_cast<LineCount>(line) < _pageSize.lines && lineAt(line).wrapped();
 }
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
+template <CellConcept Cell>
 template <typename RendererT>
 [[nodiscard]] RenderPassHints Grid<Cell>::render(
     RendererT&& render, // NOLINT(cppcoreguidelines-missing-std-forward)
