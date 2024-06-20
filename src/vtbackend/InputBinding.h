@@ -61,8 +61,8 @@ template <typename I, typename O>
 struct fmt::formatter<vtbackend::InputBinding<I, O>>
 {
     static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(vtbackend::InputBinding<I, O> const& binding, format_context& ctx)
-        -> format_context::iterator
+    static auto format(vtbackend::InputBinding<I, O> const& binding,
+                       format_context& ctx) -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "{} {} {}", binding.modes, binding.modifiers, binding.input);
     }

@@ -220,7 +220,7 @@ namespace // {{{ helper
 
         // STR
         return value { string(text) };
-    }                                        // }}}
+    } // }}}
     value parseValue(parse_context& context) // {{{
     {
         if (holds_alternative<bool>(context.currentOption->v))

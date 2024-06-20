@@ -111,8 +111,8 @@ void DecorationRenderer::renderCell(vtbackend::RenderCell const& cell)
                              cell.attributes.decorationColor);
 }
 
-auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocation tileLocation)
-    -> TextureAtlas::TileCreateData
+auto DecorationRenderer::createTileData(Decorator decoration,
+                                        atlas::TileLocation tileLocation) -> TextureAtlas::TileCreateData
 {
     auto const width = _gridMetrics.cellSize.width;
 

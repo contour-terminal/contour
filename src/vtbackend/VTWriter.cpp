@@ -63,12 +63,14 @@ string VTWriter::sgrFlush(vector<unsigned> const& sgr)
         return "";
 
     auto const params =
-        sgr.size() != 1 || sgr[0] != 0 ? accumulate(
-            begin(sgr),
-            end(sgr),
-            string {},
-            [](auto a, auto b) { return a.empty() ? fmt::format("{}", b) : fmt::format("{};{}", a, b); })
-                                       : string();
+        sgr.size() != 1 || sgr[0] != 0
+            ? accumulate(begin(sgr),
+                         end(sgr),
+                         string {},
+                         [](auto a, auto b) {
+                             return a.empty() ? fmt::format("{}", b) : fmt::format("{};{}", a, b);
+                         })
+            : string();
 
     return fmt::format("\033[{}m", params);
 }

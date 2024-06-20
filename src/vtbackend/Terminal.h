@@ -1194,8 +1194,8 @@ class Terminal
 template <>
 struct fmt::formatter<vtbackend::TraceHandler::PendingSequence>: fmt::formatter<std::string>
 {
-    auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence, format_context& ctx)
-        -> format_context::iterator
+    auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence,
+                format_context& ctx) -> format_context::iterator
     {
         std::string value;
         if (auto const* p = std::get_if<vtbackend::Sequence>(&pendingSequence))

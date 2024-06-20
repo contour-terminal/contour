@@ -505,30 +505,31 @@ concept ParserEventsConcept = requires(T& handler, T const& immutable) {
     { handler.error(std::string_view {}) } -> std::same_as<void>;
 
     /**
-     * This action only occurs in ground state. The current code should be mapped to a glyph
-     * according to the character set mappings and shift states in effect, and that glyph should
-     * be displayed. 20 (SP) and 7F (DEL) have special behaviour in later VT series, as
-     * described in ground.
+     * This action only occurs in ground state. The current code should be mapped
+     * to a glyph according to the character set mappings and shift states in
+     * effect, and that glyph should be displayed. 20 (SP) and 7F (DEL) have
+     * special behaviour in later VT series, as described in ground.
      */
     { handler.print(char32_t {}) } -> std::same_as<void>;
 
     /**
      * Optimization that passes in ASCII chars between [0x20 .. 0x7F].
      *
-     * @param cellCount reflects the sum of the East Asian Width attribute for all passed codepoints.
+     * @param cellCount reflects the sum of the East Asian Width attribute for all
+     * passed codepoints.
      */
     { handler.print(std::string_view {}, size_t {}) } -> std::same_as<size_t>;
 
     /**
      * Marks the end of a print sequence.
-     * After this call, it is expected that the terminal will have processed the print sequence and
-     * is ready to accept non-print sequence input again.
+     * After this call, it is expected that the terminal will have processed the
+     * print sequence and is ready to accept non-print sequence input again.
      */
     { handler.printEnd() } -> std::same_as<void>;
 
     /**
-     * Returns the number of terminal columns (cells) that are still available in the current line
-     * until the right page margin would be hit.
+     * Returns the number of terminal columns (cells) that are still available in
+     * the current line until the right page margin would be hit.
      *
      * This accessor is used to determine whether or not bulk text processing can
      * be used or not.
@@ -536,27 +537,31 @@ concept ParserEventsConcept = requires(T& handler, T const& immutable) {
     { immutable.maxBulkTextSequenceWidth() } noexcept -> std::same_as<size_t>;
 
     /**
-     * The C0 or C1 control function should be executed, which may have any one of a variety of
-     * effects, including changing the cursor position, suspending or resuming communications or
-     * changing the shift states in effect. There are no parameters to this action.
+     * The C0 or C1 control function should be executed, which may have any one of
+     * a variety of effects, including changing the cursor position, suspending or
+     * resuming communications or changing the shift states in effect. There are
+     * no parameters to this action.
      */
     { handler.execute(char {}) } -> std::same_as<void>;
 
     /**
-     * This action causes the current private flag, intermediate characters, final character and
-     * parameters to be forgotten. This occurs on entry to the escape, csi entry and dcs entry
-     * states, so that erroneous sequences like CSI 3 ; 1 CSI 2 J are handled correctly.
+     * This action causes the current private flag, intermediate characters, final
+     * character and parameters to be forgotten. This occurs on entry to the
+     * escape, csi entry and dcs entry states, so that erroneous sequences like
+     * CSI 3 ; 1 CSI 2 J are handled correctly.
      */
     { handler.clear() } -> std::same_as<void>;
 
     /**
-     * The private marker or intermediate character should be stored for later use in selecting
-     * a control function to be executed when a final character arrives. X3.64 doesn’t place any
-     * limit on the number of intermediate characters allowed before a final character, although
-     * it doesn’t define any control sequences with more than one. Digital defined escape
-     * sequences with two intermediate characters, and control sequences and device control
-     * strings with one. If more than two intermediate characters arrive, the parser can just
-     * flag this so that the dispatch can be turned into a null operation.
+     * The private marker or intermediate character should be stored for later use
+     * in selecting a control function to be executed when a final character
+     * arrives. X3.64 doesn’t place any limit on the number of intermediate
+     * characters allowed before a final character, although it doesn’t define any
+     * control sequences with more than one. Digital defined escape sequences with
+     * two intermediate characters, and control sequences and device control
+     * strings with one. If more than two intermediate characters arrive, the
+     * parser can just flag this so that the dispatch can be turned into a null
+     * operation.
      */
     { handler.collect(char {}) } -> std::same_as<void>;
 
@@ -566,12 +571,13 @@ concept ParserEventsConcept = requires(T& handler, T const& immutable) {
     { handler.collectLeader(char {}) } -> std::same_as<void>;
 
     /**
-     * This action collects the characters of a parameter string for a control sequence or
-     * device control sequence and builds a list of parameters. The characters processed by this
-     * action are the digits 0-9 (codes 30-39) and the semicolon (code 3B). The semicolon
-     * separates parameters. There is no limit to the number of characters in a parameter
-     * string, although a maximum of 16 parameters need be stored. If more than 16 parameters
-     * arrive, all the extra parameters are silently ignored.
+     * This action collects the characters of a parameter string for a control
+     * sequence or device control sequence and builds a list of parameters. The
+     * characters processed by this action are the digits 0-9 (codes 30-39) and
+     * the semicolon (code 3B). The semicolon separates parameters. There is no
+     * limit to the number of characters in a parameter string, although a maximum
+     * of 16 parameters need be stored. If more than 16 parameters arrive, all the
+     * extra parameters are silently ignored.
      */
     { handler.param(char {}) } -> std::same_as<void>;
     { handler.paramDigit(char {}) } -> std::same_as<void>;
@@ -579,17 +585,19 @@ concept ParserEventsConcept = requires(T& handler, T const& immutable) {
     { handler.paramSubSeparator() } -> std::same_as<void>;
 
     /**
-     * The final character of an escape sequence has arrived, so determined the control function
-     * to be executed from the intermediate character(s) and final character, and execute it.
-     * The intermediate characters are available because collect stored them as they arrived.
+     * The final character of an escape sequence has arrived, so determined the
+     * control function to be executed from the intermediate character(s) and
+     * final character, and execute it. The intermediate characters are available
+     * because collect stored them as they arrived.
      */
     { handler.dispatchESC(char {}) } -> std::same_as<void>;
 
     /**
-     * A final character has arrived, so determine the control function to be executed from
-     * private marker, intermediate character(s) and final character, and execute it, passing in
-     * the parameter list. The private marker and intermediate characters are available because
-     * collect stored them as they arrived.
+     * A final character has arrived, so determine the control function to be
+     * executed from private marker, intermediate character(s) and final
+     * character, and execute it, passing in the parameter list. The private
+     * marker and intermediate characters are available because collect stored
+     * them as they arrived.
      */
     { handler.dispatchCSI(char {}) } -> std::same_as<void>;
 
@@ -598,44 +606,46 @@ concept ParserEventsConcept = requires(T& handler, T const& immutable) {
      * this action initializes an external parser (the “OSC Handler”)
      * to handle the characters from the control string.
      *
-     * OSC control strings are not structured in the same way as device control strings,
-     * so there is no choice of parsers.
+     * OSC control strings are not structured in the same way as device control
+     * strings, so there is no choice of parsers.
      */
     { handler.startOSC() } -> std::same_as<void>;
 
     /**
-     * This action passes characters from the control string to the OSC Handler as they arrive.
-     * There is therefore no need to buffer characters until the end of the control string is recognised.
+     * This action passes characters from the control string to the OSC Handler as
+     * they arrive. There is therefore no need to buffer characters until the end
+     * of the control string is recognised.
      */
     { handler.putOSC(char {}) } -> std::same_as<void>;
 
     /**
-     * This action is called when the OSC string is terminated by ST, CAN, SUB or ESC,
-     * to allow the OSC handler to finish neatly.
+     * This action is called when the OSC string is terminated by ST, CAN, SUB or
+     * ESC, to allow the OSC handler to finish neatly.
      */
     { handler.dispatchOSC() } -> std::same_as<void>;
 
     /**
-     * This action is invoked when a final character arrives in the first part of a device
-     * control string. It determines the control function from the private marker, intermediate
-     * character(s) and final character, and executes it, passing in the parameter list. It also
-     * selects a handler function for the rest of the characters in the control string. This
-     * handler function will be called by the put action for every character in the control
-     * string as it arrives.
+     * This action is invoked when a final character arrives in the first part of
+     * a device control string. It determines the control function from the
+     * private marker, intermediate character(s) and final character, and executes
+     * it, passing in the parameter list. It also selects a handler function for
+     * the rest of the characters in the control string. This handler function
+     * will be called by the put action for every character in the control string
+     * as it arrives.
      */
     { handler.hook(char {}) } -> std::same_as<void>;
 
     /**
-     * This action passes characters from the data string part of a device control string to a
-     * handler that has previously been selected by the hook action. C0 controls are also passed
-     * to the handler.
+     * This action passes characters from the data string part of a device control
+     * string to a handler that has previously been selected by the hook action.
+     * C0 controls are also passed to the handler.
      */
     { handler.put(char {}) } -> std::same_as<void>;
 
     /**
-     * When a device control string is terminated by ST, CAN, SUB or ESC, this action calls the
-     * previously selected handler function with an “end of data” parameter. This allows the
-     * handler to finish neatly.
+     * When a device control string is terminated by ST, CAN, SUB or ESC, this
+     * action calls the previously selected handler function with an “end of data”
+     * parameter. This allows the handler to finish neatly.
      */
     { handler.unhook() } -> std::same_as<void>;
 
