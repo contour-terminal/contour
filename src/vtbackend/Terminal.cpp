@@ -598,12 +598,10 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
 
-    if (allowInput() && eventType != KeyboardEventType::Release
-        && _inputHandler.sendKeyPressEvent(key, modifiers))
+    if (!allowInput())
         return Handled { true };
 
-    // Early exit if KAM is enabled.
-    if (isModeEnabled(AnsiMode::KeyboardAction))
+    if (_inputHandler.sendKeyPressEvent(key, modifiers, eventType))
         return Handled { true };
 
     bool const success = _inputGenerator.generate(key, modifiers, eventType);
@@ -622,10 +620,10 @@ Handled Terminal::sendCharEvent(
     _lastCursorBlink = now;
 
     // Early exit if KAM is enabled.
-    if (isModeEnabled(AnsiMode::KeyboardAction))
+    if (!allowInput())
         return Handled { true };
 
-    if (eventType != KeyboardEventType::Release && _inputHandler.sendCharPressEvent(ch, modifiers))
+    if (_inputHandler.sendCharPressEvent(ch, modifiers, eventType))
         return Handled { true };
 
     auto const success = _inputGenerator.generate(ch, physicalKey, modifiers, eventType);
