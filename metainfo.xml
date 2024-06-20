@@ -130,6 +130,7 @@
           <li>Fixes screen sampling with multiple monitors (#940)</li>
           <li>Fixes bell sound in spawned window in same process (#1515)</li>
           <li>Fixes status line crush (#1511)</li>
+          <li>Fixes application window icon on (KDE) Wayland</li>
         </ul>
       </description>
     </release>

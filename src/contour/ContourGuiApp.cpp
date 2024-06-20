@@ -468,7 +468,7 @@ void ContourGuiApp::setupQCoreApplication()
     auto const* profile = _config.profile(profileName());
     Require(profile);
 
-    auto const defaultAppName = QStringLiteral("contour");
+    auto const defaultAppName = QStringLiteral(CONTOUR_APP_ID);
     auto const defaultOrgDomain = QStringLiteral("contour-terminal.org");
     auto const defaultOrgName = QStringLiteral("contour");
 
@@ -489,6 +489,8 @@ void ContourGuiApp::setupQCoreApplication()
     // application id on Wayland when using Qt.
     if (platformName == "wayland" && !wmClass.isEmpty())
         QGuiApplication::setDesktopFileName(wmClass);
+    else
+        QGuiApplication::setDesktopFileName(defaultAppName);
 
     QCoreApplication::setOrganizationDomain(defaultOrgDomain);
     QCoreApplication::setOrganizationName(defaultOrgName);

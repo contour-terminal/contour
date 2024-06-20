@@ -313,7 +313,7 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::MouseHideWhileTyping> mouseHideWhileTyping { true };
     ConfigEntry<bool, documentation::SeachModeSwitch> searchModeSwitch { true };
     ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
-    ConfigEntry<std::string, documentation::WMClass> wmClass { "contour" };
+    ConfigEntry<std::string, documentation::WMClass> wmClass {};
     ConfigEntry<WindowMargins, documentation::Margins> margins { { HorizontalMargin { 0u },
                                                                    VerticalMargin { 0u } } };
     ConfigEntry<vtbackend::PageSize, documentation::TerminalSize> terminalSize { {
