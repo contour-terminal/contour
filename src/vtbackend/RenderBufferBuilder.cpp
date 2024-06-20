@@ -100,7 +100,7 @@ namespace
 
 } // namespace
 
-template <typename Cell>
+template <CellConcept Cell>
 RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& terminal,
                                                RenderBuffer& output,
                                                LineOffset base,
@@ -124,7 +124,7 @@ RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& terminal,
         output.cursor = renderCursor();
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
 {
     if (!_cursorPosition || !_terminal->cursorCurrentlyVisible()
@@ -146,7 +146,7 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
     return RenderCursor { cursorScreenPosition, shape, cellWidth };
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const& colorPalette,
                                                              u32string graphemeCluster,
                                                              ColumnCount width,
@@ -169,7 +169,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
     return renderCell;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const& colorPalette,
                                                              char32_t codepoint,
                                                              CellFlags flags,
@@ -192,7 +192,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
     return renderCell;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& colorPalette,
                                                      HyperlinkStorage const& hyperlinks,
                                                      Cell const& screenCell,
@@ -234,7 +234,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& colorPa
     return renderCell;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosition,
                                                           CellFlags cellFlags,
                                                           Color foregroundColor,
@@ -269,7 +269,7 @@ RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosit
                       rapidBlink);
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 RenderAttributes RenderBufferBuilder<Cell>::createRenderAttributes(
     CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept
 {
@@ -286,7 +286,7 @@ RenderAttributes RenderBufferBuilder<Cell>::createRenderAttributes(
     return renderAttributes;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& lineBuffer,
                                                        LineOffset lineOffset) const
 {
@@ -303,7 +303,7 @@ RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& 
     return renderLine;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 bool RenderBufferBuilder<Cell>::gridLineContainsCursor(LineOffset lineOffset) const noexcept
 {
     if (_terminal->currentScreen().cursor().position.line == lineOffset)
@@ -319,7 +319,7 @@ bool RenderBufferBuilder<Cell>::gridLineContainsCursor(LineOffset lineOffset) co
     return false;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset)
 {
     // if (lineBuffer.text.size())
@@ -390,7 +390,7 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
     _output->cells[backIndex].groupEnd = true;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 template <typename T>
 void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
 {
@@ -474,7 +474,7 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
     _searchPatternOffset = 0;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 void RenderBufferBuilder<Cell>::startLine(LineOffset line) noexcept
 {
     _lineNr = line;
@@ -484,7 +484,7 @@ void RenderBufferBuilder<Cell>::startLine(LineOffset line) noexcept
     _useCursorlineColoring = isCursorLine(line);
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 bool RenderBufferBuilder<Cell>::isCursorLine(LineOffset line) const noexcept
 {
     return _terminal->inputHandler().mode() != ViMode::Insert && _cursorPosition
@@ -494,7 +494,7 @@ bool RenderBufferBuilder<Cell>::isCursorLine(LineOffset line) const noexcept
                          .line;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 void RenderBufferBuilder<Cell>::endLine() noexcept
 {
     if (!_output->cells.empty())
@@ -503,7 +503,7 @@ void RenderBufferBuilder<Cell>::endLine() noexcept
     }
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPosition,
                                                       GraphicsAttributes textAttributes,
                                                       std::string_view text,
@@ -564,7 +564,7 @@ ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPositio
     return columnCountRendered;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(CellLocation screenPosition,
                                                            CellLocation gridPosition)
 {
@@ -599,7 +599,7 @@ bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(CellLocation screenPo
     return true;
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset line, ColumnOffset column)
 {
     auto const screenPosition = CellLocation { line, column };

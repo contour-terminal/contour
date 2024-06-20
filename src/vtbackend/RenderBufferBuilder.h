@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <vtbackend/cell/CellConcept.h>
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/Terminal.h>
 #include <vtbackend/primitives.h>
@@ -16,7 +17,7 @@ namespace vtbackend
 /**
  * RenderBufferBuilder<Cell> renders the current screen state into a RenderBuffer.
  */
-template <typename Cell>
+template <CellConcept Cell>
 class RenderBufferBuilder
 {
   public:
