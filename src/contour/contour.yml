@@ -238,7 +238,9 @@ profiles:
             alert: true
 
         # Defines the class part of the WM_CLASS property of the window.
-        wm_class: "contour"
+        # This is specific to X11, but also used on Wayland.
+        # Default: "org.contourterminal.Contour"
+        wm_class: "org.contourterminal.Contour"
 
         # Tells Contour how to handle Option-Key events on MacOS.
         # This value is ignored on other platforms.

@@ -149,6 +149,7 @@ target_compile_definitions(contour PRIVATE
     CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
     CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
     CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    CONTOUR_APP_ID="${AppId}"
 )
 
 # Disable all deprecated Qt functions prior to Qt 6.0
