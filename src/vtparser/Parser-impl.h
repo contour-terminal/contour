@@ -318,7 +318,7 @@ constexpr ParserTable ParserTable::get() // {{{
     return t;
 } // }}}
 
-template <typename EventListener, bool TraceStateChanges>
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char const> data)
 {
     const auto* input = data.data();
@@ -341,7 +341,7 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
     }
 }
 
-template <typename EventListener, bool TraceStateChanges>
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_t ch)
 {
     auto const s = static_cast<size_t>(_state);
@@ -361,7 +361,7 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
         _eventListener.error("Parser error: Unknown action for state/input pair.");
 }
 
-template <typename EventListener, bool TraceStateChanges>
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
     -> std::tuple<ProcessKind, size_t>
 {
@@ -411,7 +411,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     return { ProcessKind::ContinueBulk, count };
 }
 
-template <typename EventListener, bool TraceStateChanges>
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
 {
     unicode::ConvertResult const r = unicode::from_utf8(_scanState.utf8, (uint8_t) ch);
@@ -425,7 +425,7 @@ void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
     _scanState.lastCodepointHint = codepoint;
 }
 
-template <typename EventListener, bool TraceStateChanges>
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
                                                       Action action,
                                                       uint8_t codepoint)
