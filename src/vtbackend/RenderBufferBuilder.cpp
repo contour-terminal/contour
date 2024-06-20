@@ -15,8 +15,6 @@ using namespace std;
 namespace vtbackend
 {
 
-using crispy::beginsWith;
-
 namespace
 {
     ColumnCount graphemeClusterWidth(std::u32string_view cluster) noexcept
