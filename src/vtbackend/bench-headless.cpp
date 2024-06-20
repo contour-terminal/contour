@@ -4,6 +4,8 @@
 #include <vtbackend/cell/CellConfig.h>
 #include <vtbackend/logging.h>
 
+#include <vtparser/ParserEvents.h>
+
 #include <vtpty/MockViewPty.h>
 
 #include <crispy/App.h>

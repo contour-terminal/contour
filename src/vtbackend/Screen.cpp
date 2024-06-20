@@ -6,6 +6,7 @@
 #include <vtbackend/VTType.h>
 #include <vtbackend/VTWriter.h>
 #include <vtbackend/logging.h>
+#include <vtbackend/SixelParser.h>
 
 #include <crispy/App.h>
 #include <crispy/Comparison.h>

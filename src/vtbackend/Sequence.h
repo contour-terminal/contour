@@ -7,6 +7,7 @@
 #include <gsl/span>
 
 #include <cassert>
+#include <concepts>
 #include <iterator>
 #include <string>
 #include <string_view>
@@ -360,6 +361,15 @@ class SequenceHandler
     virtual void writeText(char32_t codepoint) = 0;
     virtual void writeText(std::string_view codepoints, size_t cellCount) = 0;
     virtual void writeTextEnd() = 0;
+};
+
+template <typename T>
+concept SequenceHandlerConcept = requires(T t) {
+    { t.executeControlCode('\x00') } -> std::same_as<void>;
+    { t.processSequence(Sequence {}) } -> std::same_as<void>;
+    { t.writeText(U'a') } -> std::same_as<void>;
+    { t.writeText("a", size_t(1)) } -> std::same_as<void>;
+    { t.writeTextEnd() } -> std::same_as<void>;
 };
 
 } // namespace vtbackend

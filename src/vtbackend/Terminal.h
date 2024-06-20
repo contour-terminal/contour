@@ -11,7 +11,7 @@
 #include <vtbackend/ScreenEvents.h>
 #include <vtbackend/Selector.h>
 #include <vtbackend/Sequence.h>
-#include <vtbackend/Sequencer.h>
+#include <vtbackend/SequenceBuilder.h>
 #include <vtbackend/Settings.h>
 #include <vtbackend/StatusLineBuilder.h>
 #include <vtbackend/ViCommands.h>
@@ -911,7 +911,7 @@ class Terminal
 
     void hookParser(std::unique_ptr<ParserExtension> parserExtension) noexcept
     {
-        _sequencer.hookParser(std::move(parserExtension));
+        _sequenceBuilder.hookParser(std::move(parserExtension));
     }
 
     constexpr void resetInstructionCounter() noexcept { _instructionCounter = 0; }
@@ -1148,8 +1148,37 @@ class Terminal
     std::string _windowTitle {};
     std::stack<std::string> _savedWindowTitles {};
 
-    Sequencer _sequencer;
-    vtparser::Parser<Sequencer, false> _parser;
+    struct ModeDependantSequenceHandler
+    {
+        Terminal& terminal;
+        void executeControlCode(char controlCode)
+        {
+            terminal.sequenceHandler().executeControlCode(controlCode);
+        }
+        void processSequence(Sequence const& sequence)
+        {
+            terminal.sequenceHandler().processSequence(sequence);
+        }
+        void writeText(char32_t codepoint) { terminal.sequenceHandler().writeText(codepoint); }
+        void writeText(std::string_view codepoints, size_t cellCount)
+        {
+            terminal.sequenceHandler().writeText(codepoints, cellCount);
+        }
+        void writeTextEnd() { terminal.sequenceHandler().writeTextEnd(); }
+        size_t maxBulkTextSequenceWidth() const noexcept { return terminal.maxBulkTextSequenceWidth(); }
+    };
+
+    struct TerminalInstructionCounter
+    {
+        Terminal& terminal;
+        void operator()() noexcept { terminal.incrementInstructionCounter(); }
+        void operator()(size_t increment) noexcept { terminal.incrementInstructionCounter(increment); }
+    };
+
+    using StandardSequenceBuilder = SequenceBuilder<ModeDependantSequenceHandler, TerminalInstructionCounter>;
+
+    StandardSequenceBuilder _sequenceBuilder;
+    vtparser::Parser<StandardSequenceBuilder, false> _parser;
     uint64_t _instructionCounter = 0;
 
     InputGenerator _inputGenerator {};
