@@ -1403,16 +1403,19 @@ void Screen<Cell>::hyperlink(string id, string uri)
         _cursor.hyperlink = {};
     else
     {
-        if (!id.empty())
+        auto cacheId { std::move(id) };
+        if (!cacheId.empty())
         {
-            _cursor.hyperlink = _terminal->hyperlinks().hyperlinkIdByUserId(id);
+            cacheId += uri;
+            _cursor.hyperlink = _terminal->hyperlinks().hyperlinkIdByUserId(cacheId);
             if (_cursor.hyperlink != HyperlinkId {})
                 return;
         }
-
+        // We ignore the user id since we need to ensure it's unique. We generate our own.
         _cursor.hyperlink = _terminal->hyperlinks().nextHyperlinkId++;
         _terminal->hyperlinks().cache.emplace(
-            _cursor.hyperlink, make_shared<HyperlinkInfo>(HyperlinkInfo { std::move(id), std::move(uri) }));
+            _cursor.hyperlink,
+            make_shared<HyperlinkInfo>(HyperlinkInfo { std::move(cacheId), std::move(uri) }));
     }
     // TODO:
     // Care about eviction.
@@ -2981,9 +2984,9 @@ namespace impl
                     id = p->second;
 
                 if (pos + 1 != value.size())
-                    screen.hyperlink(id, value.substr(pos + 1));
+                    screen.hyperlink(std::move(id), value.substr(pos + 1));
                 else
-                    screen.hyperlink(string { id }, string {});
+                    screen.hyperlink(std::move(id), string {});
 
                 return ApplyResult::Ok;
             }
