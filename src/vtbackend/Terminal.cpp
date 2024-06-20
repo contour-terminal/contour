@@ -1488,7 +1488,7 @@ void Terminal::setExtendedWordDelimiters(string const& wordDelimiters)
 
 namespace
 {
-    template <typename Cell>
+    template <CellConcept Cell>
     struct SelectionRenderer
     {
         gsl::not_null<Terminal const*> term;
