@@ -20,10 +20,10 @@
 #include <vtbackend/Image.h>
 #include <vtbackend/primitives.h>
 
+#include <concepts>
+
 namespace vtbackend
 {
-
-#include <concepts>
 
 /**
  * Terminal Cell Concept!
