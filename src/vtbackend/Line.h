@@ -4,6 +4,7 @@
 #include <vtbackend/CellUtil.h>
 #include <vtbackend/GraphicsAttributes.h>
 #include <vtbackend/Hyperlink.h>
+#include <vtbackend/cell/CellConcept.h>
 #include <vtbackend/primitives.h>
 
 #include <crispy/BufferObject.h>
@@ -64,14 +65,14 @@ struct TrivialLineBuffer
     }
 };
 
-template <typename Cell>
+template <CellConcept Cell>
 using InflatedLineBuffer = std::vector<Cell>;
 
 /// Unpacks a TrivialLineBuffer into an InflatedLineBuffer<Cell>.
-template <typename Cell>
+template <CellConcept Cell>
 InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input);
 
-template <typename Cell>
+template <CellConcept Cell>
 using LineStorage = std::variant<TrivialLineBuffer, InflatedLineBuffer<Cell>>;
 
 /**
@@ -80,7 +81,7 @@ using LineStorage = std::variant<TrivialLineBuffer, InflatedLineBuffer<Cell>>;
  * TODO: Use custom allocator for ensuring cache locality of Cells to sibling lines.
  * TODO: Make the line optimization work.
  */
-template <typename Cell>
+template <CellConcept Cell>
 class Line
 {
   public:
@@ -428,7 +429,7 @@ class Line
     LineFlags _flags;
 };
 
-template <typename Cell>
+template <CellConcept Cell>
 inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
 {
     if (auto trivialbuffer = std::get_if<TrivialBuffer>(&_storage))
@@ -436,7 +437,7 @@ inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
     return std::get<InflatedBuffer>(_storage);
 }
 
-template <typename Cell>
+template <CellConcept Cell>
 inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::inflatedBuffer() const
 {
     return const_cast<Line<Cell>*>(this)->inflatedBuffer();
