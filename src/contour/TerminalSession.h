@@ -78,7 +78,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(bool isScrollbarVisible READ getIsScrollbarVisible NOTIFY isScrollbarVisibleChanged)
     Q_PROPERTY(int fontSize READ getFontSize)
     Q_PROPERTY(int upTime READ getUptime)
-    Q_PROPERTY(QString bellSource READ getBellSource)
+    Q_PROPERTY(QString bellSource READ getBellSource NOTIFY onBell)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 

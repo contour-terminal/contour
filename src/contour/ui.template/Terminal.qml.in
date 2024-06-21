@@ -11,8 +11,6 @@ ContourTerminal
 {
     property url bellSoundSource: "qrc:/contour/bell.wav"
 
-    signal showNotification(string title, string content)
-
     id: vtWidget
     visible: true
 
