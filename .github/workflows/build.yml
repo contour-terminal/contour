@@ -40,7 +40,7 @@ jobs:
     name: "Check CI scripts"
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: "Checking for common errors in build, deployment, and CI."
       run: ./scripts/check-common.sh
 
@@ -48,7 +48,7 @@ jobs:
     name: "Check PR-TODOs"
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: "Checking for open PR-related TODO items"
       run: ./scripts/check-pr-todos.sh
 
@@ -56,7 +56,7 @@ jobs:
     name: "Check C++ style"
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Install clang
       run: |
         wget https://apt.llvm.org/llvm.sh
@@ -109,7 +109,7 @@ jobs:
     name: "Check links"
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Run linksafe
         uses: Yaraslaut/linksafe@main
         with: # comma seperated lists
@@ -130,7 +130,7 @@ jobs:
     name: "Check editorconfig"
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: editorconfig-checker/action-editorconfig-checker@main
       - run: editorconfig-checker
   # }}}
@@ -146,7 +146,7 @@ jobs:
     name: "Archlinux ${{ matrix.arch }}"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
         with:
@@ -204,7 +204,7 @@ jobs:
     name: "Fedora ${{ matrix.os_version }} ${{ matrix.arch }}"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v2
@@ -293,7 +293,7 @@ jobs:
     #   MYTOKEN: "value1"
     #   MYTOKEN2: "value2"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Test in FreeBSD
         id: test
         uses: vmactions/freebsd-vm@v1
@@ -325,7 +325,7 @@ jobs:
     name: "macOS"
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: set variables
         id: set_vars
         run: |
@@ -430,7 +430,7 @@ jobs:
     name: "Windows"
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.3
       - name: setup environment
@@ -508,7 +508,7 @@ jobs:
     outputs:
       id: "${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -616,7 +616,7 @@ jobs:
     outputs:
       id: "${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -786,7 +786,7 @@ jobs:
     runs-on: ubuntu-${{ matrix.os_version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: "update APT database"
         run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars
@@ -1051,7 +1051,7 @@ jobs:
       # Valgrind is much more precise, but 10x slower.
       CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: "update APT database"
       run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
@@ -1169,7 +1169,7 @@ jobs:
       # Valgrind is much more precise, but 10x slower.
       CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: "update APT database"
       run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
@@ -1252,7 +1252,7 @@ jobs:
     runs-on: ubuntu-${{ matrix.os_version}}
     needs: [package_for_Ubuntu]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: "update APT database"
       run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
@@ -1307,7 +1307,7 @@ jobs:
       contents: write
       discussions: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: "update APT database"
         run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars
