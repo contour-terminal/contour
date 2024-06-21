@@ -1,0 +1,20 @@
+FROM yaraslaut/static_qt:20.04
+
+ARG ARCH="x86_64"
+
+RUN apt-get install -y git libutempter-dev make
+
+WORKDIR /
+COPY . /contour
+RUN CC=clang CXX=clang++ sh /contour/scripts/install-static.sh
+
+WORKDIR /contour
+RUN cmake -S . -B build -G Ninja \
+    -D CONTOUR_BUILD_STATIC=ON \
+    -D CONTOUR_USE_CPM=ON \
+    -D CMAKE_CXX_COMPILER=clang++-18 \
+    -D CMAKE_C_COMPILER=clang-18 \
+    -D CMAKE_CXX_FLAGS="-I/contour/build/_deps/yaml-cpp-src/include" \
+    -D CMAKE_PREFIX_PATH=/usr/local/Qt-6.7.1/lib/cmake
+RUN cmake --build build --verbose
+RUN ldd ./build/src/contour/contour

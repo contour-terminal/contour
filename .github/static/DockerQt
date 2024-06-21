@@ -1,0 +1,50 @@
+FROM ubuntu:20.04
+ARG ARCH="x86_64"
+
+RUN apt-get update
+RUN apt-get install -y lsb-release software-properties-common gnupg
+RUN apt-get install -y wget ninja-build ccache libstdc++-10-dev
+
+# QT DEPS
+RUN apt-get install -y libgl-dev libglu-dev  libx11-xcb-dev libxkbcommon-x11-dev libpcre2-dev libz-dev libfreetype6-dev libpng-dev libjpeg-dev libsqlite3-dev libharfbuzz-dev libb2-dev libdouble-conversion-dev libfontconfig1-dev
+RUN apt-get install -y "libxcb*-dev"
+
+WORKDIR /
+RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.29.4/cmake-3.29.4-linux-$ARCH.sh
+
+# cmake bin
+RUN sh /cmake-3.29.4-linux-$ARCH.sh --skip-license --prefix=/usr
+RUN rm /cmake-3.29.4-linux-$ARCH.sh
+
+# Install compilers
+RUN wget -q https://apt.llvm.org/llvm.sh
+RUN chmod +x llvm.sh
+RUN ./llvm.sh 18
+
+WORKDIR /
+RUN bash -c "\
+    wget -q https://download.qt.io/official_releases/qt/6.7/6.7.1/single/qt-everywhere-src-6.7.1.tar.xz &&\
+    tar xf qt-everywhere-src-6.7.1.tar.xz &&\
+    rm qt-everywhere-src-6.7.1.tar.xz &&\
+    cd qt-everywhere-src-6.7.1 &&\
+    cmake -S . -B build -G Ninja \
+       -D CMAKE_CXX_COMPILER=clang++-18 \
+       -D CMAKE_C_COMPILER=clang-18 \
+       -D CMAKE_INSTALL_PREFIX=\/usr \
+       -D QT_BUILD_SUBMODULES=\"qtbase;qt5compat;qtmultimedia;qtdeclarative\" \
+       -D BUILD_SHARED_LIBS=OFF \
+       -D INPUT_icu=no \
+       -D INPUT_pcre=system \
+       -D INPUT_glib=no \
+       -D INPUT_fontconfig=no \
+       -D INPUT_optimize_size=yes \
+       -D QT_USE_CCACHE=OFF \
+       -D CMAKE_BUILD_TYPE=Release &&\
+    cmake --build build --parallel &&\
+    cmake --build build --target install &&\
+    cd \/ && \
+    rm -rf /qt-everywhere-src-6.7.1"
+
+WORKDIR /
+RUN ln -s /bin/clang-18 /bin/clang
+RUN ln -s /bin/clang++-18 /bin/clang++

@@ -12,9 +12,11 @@
 #include <crispy/utils.h>
 
 #include <QtCore/QProcess>
+#include <QtQml/qqmlextensionplugin.h>
 #if !defined(__APPLE__) && !defined(_WIN32)
     #include <QtDBus/QDBusConnection>
 #endif
+#include <QtCore/QtPlugin>
 #include <QtDBus/QtDBus>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QStyleHints>

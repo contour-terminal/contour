@@ -1,0 +1,14 @@
+To build static image we need to build qt static docker container and put it on dockerhub :
+```
+docker buildx build --tag qt_static:20.04 --progress=plain -f .github/static/DockerQt --load .
+docker tag qt_static:20.04 yaraslaut/static_qt:20.04
+docker push yaraslaut/static_qt:20.04
+```
+
+Then we can use it to build contour inside github actions with
+```
+docker buildx build --tag static_contour --progress=plain -f .github/static/DockerUbuntu --load .
+docker create --name contour_static contour_static
+docker cp contour_static:/contour/build/src/contour/contour .
+docker container rm contour_static
+```
