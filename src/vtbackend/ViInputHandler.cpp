@@ -177,17 +177,18 @@ void ViInputHandler::registerAllCommands()
         char const key = theKey;
         ViOperator const op = viOperator;
 
-        auto const s1 = [](char ch) { return std::string(1, ch); };
-        registerCommand(ModeSelect::Normal, s1(toupper(key)), [this, op]() { _executor->execute(op, ViMotion::FullLine, count()); });
+        // operate on the full line, with yy or oo.
+        registerCommand(ModeSelect::Normal,
+                        fmt::format("{}{}", key, key),
+                        [this, op]() { _executor->execute(op, ViMotion::FullLine, count()); });
 
-        auto const s2 = [key](char ch) { return fmt::format("{}{}", key, ch); };
-        registerCommand(ModeSelect::Normal, s2(key), [this, op]() { _executor->execute(op, ViMotion::FullLine, count()); });
-        registerCommand(ModeSelect::Normal, s2('b'), [this, op]() { _executor->execute(op, ViMotion::WordBackward, count()); });
-        registerCommand(ModeSelect::Normal, s2('e'), [this, op]() { _executor->execute(op, ViMotion::WordEndForward, count()); });
-        registerCommand(ModeSelect::Normal, s2('w'), [this, op]() { _executor->execute(op, ViMotion::WordForward, count()); });
-        registerCommand(ModeSelect::Normal, s2('B'), [this, op]() { _executor->execute(op, ViMotion::BigWordBackward, count()); });
-        registerCommand(ModeSelect::Normal, s2('E'), [this, op]() { _executor->execute(op, ViMotion::BigWordEndForward, count()); });
-        registerCommand(ModeSelect::Normal, s2('W'), [this, op]() { _executor->execute(op, ViMotion::BigWordForward, count()); });
+        for (auto && [motionChars, motion]: MotionMappings)
+        {
+            // Passing motion as motion=motion (new variable) is yet another workaround for Clang 15 (Ubuntu) this time.
+            registerCommand(ModeSelect::Normal,
+                            fmt::format("{}{}", key, motionChars),
+                            [this, op, motion=motion]() { _executor->execute(op, motion, count()); });
+        }
 
         auto const s3 = [key](char ch) { return fmt::format("{}{}.", key, ch); };
         registerCommand(ModeSelect::Normal, s3('t'), [this, op]() { _executor->execute(op, ViMotion::TillBeforeCharRight, count(), _lastChar); });
@@ -242,6 +243,9 @@ void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command,
     Require(!!handler);
 
     auto commandStr = crispy::replace(std::string(command.data(), command.size()), "<Space>", " ");
+
+    inputLog()(
+        "Registering command: {} in mode: {}", commandStr, modes == ModeSelect::Normal ? "Normal" : "Visual");
 
     switch (modes)
     {
@@ -359,7 +363,7 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
     }
     // clang-format on
 
-    auto const charMappings = std::array<std::pair<Key, char32_t>, 10> { {
+    auto const charMappings = std::array<std::pair<Key, char32_t>, 12> { {
         { Key::Numpad_0, '0' },
         { Key::Numpad_1, '1' },
         { Key::Numpad_2, '2' },
@@ -370,6 +374,8 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
         { Key::Numpad_7, '7' },
         { Key::Numpad_8, '8' },
         { Key::Numpad_9, '9' },
+        { Key::Backspace, '\b' },
+        { Key::Enter, '\n' },
     } };
 
     for (auto const& [mappedKey, mappedText]: charMappings)
