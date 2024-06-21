@@ -24,6 +24,8 @@ target_compile_definitions(ContourTerminalDisplay PRIVATE QT_DISABLE_DEPRECATED_
 
 target_compile_definitions(ContourTerminalDisplay PRIVATE CONTOUR_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
 
+target_compile_definitions(ContourTerminalDisplay PRIVATE CONTOUR_APP_ID="${AppId}")
+
 option(CONTOUR_DEBUG_OPENGL "Enables OpenGL debugging." OFF)
 if(CONTOUR_DEBUG_OPENGL)
     target_compile_definitions(ContourTerminalDisplay PRIVATE Q_ENABLE_OPENGL_FUNCTIONS_DEBUG)
