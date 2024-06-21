@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/Process.h>
 #include <vtpty/UnixPty.h>
 #include <vtpty/UnixUtils.h>
 
@@ -8,6 +9,7 @@
 #include <crispy/logstore.h>
 
 #include <cassert>
+#include <csignal>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -151,11 +153,30 @@ bool UnixPty::Slave::login()
     // But doing it ourselfs allows for a little more flexibility.
     // return login_tty(_slaveFd) == 0;
 
+    sigset_t signals;
+    sigemptyset(&signals);
+    sigprocmask(SIG_SETMASK, &signals, nullptr);
+
+    // clang-format off
+    struct sigaction act {};
+    act.sa_handler = SIG_DFL;
+    // clang-format on
+
+    for (auto const signo: { SIGCHLD, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGALRM })
+        sigaction(signo, &act, nullptr);
+
     setsid();
 
 #if defined(TIOCSCTTY)
-    if (ioctl(_slaveFd, TIOCSCTTY, nullptr) == -1)
-        return false;
+    // Set the controlling terminal, unless we are running inside a flatpak.
+    // Because flatpak does not allow setting the controlling terminal.
+    // - https://github.com/flatpak/flatpak/issues/3697
+    // - https://github.com/flatpak/flatpak/issues/3285
+    if (!Process::isFlatpak())
+    {
+        if (ioctl(_slaveFd, TIOCSCTTY, nullptr) == -1)
+            return false;
+    }
 #endif
 
     for (int const fd: { 0, 1, 2 })
