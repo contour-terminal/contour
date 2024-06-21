@@ -21,6 +21,10 @@ jobs:
       - name: Checkout main
         uses: actions/checkout@v2
 
+      - name: Extract changes for the releases from metainfo.xml
+        run: |
+          ./scripts/extract-changelog-from-metainfo.py metainfo.xml docs/release-notes.md
+
       - name: Deploy docs
         uses: mhausenblas/mkdocs-deploy-gh-pages@master
         env:
