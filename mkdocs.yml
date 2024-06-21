@@ -86,6 +86,7 @@ nav:
     - CONTRIBUTING.md
   - Getting started:
     - Installation: install.md
+    - Release Notes: release-notes.md # This page is auto-generated from metainfo.xml by the CI/CD pipeline
   - Configuration:
     - configuration/index.md
     - configuration/profiles.md
