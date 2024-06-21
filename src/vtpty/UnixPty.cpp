@@ -49,7 +49,6 @@ using std::optional;
 using std::runtime_error;
 using std::scoped_lock;
 using std::string_view;
-using std::tuple;
 
 using namespace std::string_literals;
 
@@ -297,9 +296,9 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     return string_view { target, static_cast<size_t>(rv) };
 }
 
-Pty::ReadResult UnixPty::read(crispy::buffer_object<char>& storage,
-                              std::optional<std::chrono::milliseconds> timeout,
-                              size_t size)
+std::optional<Pty::ReadResult> UnixPty::read(crispy::buffer_object<char>& storage,
+                                             std::optional<std::chrono::milliseconds> timeout,
+                                             size_t size)
 {
     assert(_readSelector.size() > 0);
 
@@ -307,11 +306,11 @@ Pty::ReadResult UnixPty::read(crispy::buffer_object<char>& storage,
     {
         auto const l = scoped_lock { storage };
         if (auto x = readSome(*fd, storage.hotEnd(), std::min(size, storage.bytesAvailable())))
-            return { tuple { x.value(), *fd == _stdoutFastPipe.reader() } };
+            return ReadResult { .data = x.value(), .fromStdoutFastPipe = *fd == _stdoutFastPipe.reader() };
     }
     else
         errno = EAGAIN;
-    return nullopt;
+    return std::nullopt;
 }
 
 int UnixPty::write(std::string_view data)

@@ -689,9 +689,9 @@ void SshSession::waitForClosed()
     _closedCV.wait(lock, [this]() -> bool { return isClosed(); });
 }
 
-SshSession::ReadResult SshSession::read(crispy::buffer_object<char>& storage,
-                                        std::optional<std::chrono::milliseconds> timeout,
-                                        size_t size)
+std::optional<SshSession::ReadResult> SshSession::read(crispy::buffer_object<char>& storage,
+                                                       std::optional<std::chrono::milliseconds> timeout,
+                                                       size_t size)
 {
     auto injectLock = std::unique_lock { _injectMutex };
     _injectCV.wait(injectLock, [this]() { return _state == State::Operational || !_injectedRead.empty(); });
@@ -701,7 +701,8 @@ SshSession::ReadResult SshSession::read(crispy::buffer_object<char>& storage,
         auto const nread = std::min(size, _injectedRead.size());
         std::copy_n(_injectedRead.begin(), nread, storage.hotEnd());
         _injectedRead.erase(0, nread);
-        return std::tuple { std::string_view { storage.hotEnd(), nread }, false };
+        return ReadResult { .data = std::string_view { storage.hotEnd(), nread },
+                            .fromStdoutFastPipe = false };
     }
 
     if (_state == State::AuthenticatePasswordWaitForInput)
@@ -745,7 +746,7 @@ SshSession::ReadResult SshSession::read(crispy::buffer_object<char>& storage,
         ptyInLog()(
             "{} received: \"{}\"", "ssh", crispy::escape(target.data(), target.data() + target.size()));
 
-    return std::tuple { target, isStdFastPipe };
+    return ReadResult { .data = target, .fromStdoutFastPipe = isStdFastPipe };
 }
 
 void SshSession::wakeupReader()

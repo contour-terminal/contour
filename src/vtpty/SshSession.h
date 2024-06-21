@@ -59,9 +59,9 @@ class SshSession final: public Pty
     void close() override;
     void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override;
-    [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage,
-                                  std::optional<std::chrono::milliseconds> timeout,
-                                  size_t size) override;
+    [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t size) override;
     void wakeupReader() override;
     [[nodiscard]] int write(std::string_view buf) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;

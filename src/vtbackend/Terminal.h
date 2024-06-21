@@ -1007,7 +1007,7 @@ class Terminal
     }
 
     // Reads from PTY.
-    [[nodiscard]] vtpty::Pty::ReadResult readFromPty();
+    [[nodiscard]] std::optional<vtpty::Pty::ReadResult> readFromPty();
 
     // Writes partially or all input data to the PTY buffer object and returns a string view to it.
     [[nodiscard]] std::string_view lockedWriteToPtyBuffer(std::string_view data);

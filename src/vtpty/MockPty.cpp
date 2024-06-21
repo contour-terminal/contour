@@ -3,10 +3,8 @@
 #include <crispy/BufferObject.h>
 
 using namespace std::chrono;
-using std::nullopt;
 using std::optional;
 using std::string_view;
-using std::tuple;
 
 namespace vtpty
 {
@@ -20,16 +18,16 @@ PtySlave& MockPty::slave() noexcept
     return _slave;
 }
 
-Pty::ReadResult MockPty::read(crispy::buffer_object<char>& storage,
-                              std::optional<std::chrono::milliseconds> /*timeout*/,
-                              size_t size)
+std::optional<Pty::ReadResult> MockPty::read(crispy::buffer_object<char>& storage,
+                                             std::optional<std::chrono::milliseconds> /*timeout*/,
+                                             size_t size)
 {
     auto const n =
         std::min(size, std::min(_outputBuffer.size() - _outputReadOffset, storage.bytesAvailable()));
     auto const chunk = string_view { _outputBuffer.data() + _outputReadOffset, n };
     _outputReadOffset += n;
     auto const pooled = storage.writeAtEnd(chunk);
-    return { tuple { string_view(pooled.data(), pooled.size()), false } };
+    return ReadResult { .data = string_view(pooled.data(), pooled.size()), .fromStdoutFastPipe = false };
 }
 
 void MockPty::wakeupReader()

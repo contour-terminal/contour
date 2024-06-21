@@ -246,7 +246,7 @@ class ContourHeadlessBench: public crispy::app
                 auto const readResult = pty.read(*bufferObject, std::chrono::seconds(2), PtyReadSize);
                 if (!readResult)
                     break;
-                auto const dataChunk = get<string_view>(readResult.value());
+                auto const dataChunk = readResult.value().data;
                 if (dataChunk.empty())
                     break;
                 bytesTransferred += dataChunk.size();

@@ -52,7 +52,11 @@ class PtySlaveDummy: public PtySlave
 class Pty
 {
   public:
-    using ReadResult = std::optional<std::tuple<std::string_view, bool>>;
+    struct ReadResult
+    {
+        std::string_view data {};
+        bool fromStdoutFastPipe = false;
+    };
 
     virtual ~Pty() = default;
 
@@ -82,9 +86,9 @@ class Pty
     /// @returns A view to the consumed buffer. The boolean in the ReadResult
     ///          indicates whether or not this data was coming through
     ///          the stdout-fastpipe.
-    [[nodiscard]] virtual ReadResult read(crispy::buffer_object<char>& storage,
-                                          std::optional<std::chrono::milliseconds> timeout,
-                                          size_t size) = 0;
+    [[nodiscard]] virtual std::optional<ReadResult> read(crispy::buffer_object<char>& storage,
+                                                         std::optional<std::chrono::milliseconds> timeout,
+                                                         size_t size) = 0;
 
     /// Inerrupts the read() operation on this PTY if a read() is currently in progress.
     ///

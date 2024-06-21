@@ -195,7 +195,7 @@ void Terminal::setLastMarkRangeOffset(LineOffset value) noexcept
     _settings.copyLastMarkRangeOffset = value;
 }
 
-vtpty::Pty::ReadResult Terminal::readFromPty()
+std::optional<vtpty::Pty::ReadResult> Terminal::readFromPty()
 {
     auto const timeout =
 #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
@@ -272,8 +272,8 @@ bool Terminal::processInputOnce()
         _pty->close();
         return false;
     }
-    string_view const buf = std::get<0>(*readResult);
-    _usingStdoutFastPipe = std::get<1>(*readResult);
+    string_view const buf = readResult->data;
+    _usingStdoutFastPipe = readResult->fromStdoutFastPipe;
 
     if (buf.empty())
     {
