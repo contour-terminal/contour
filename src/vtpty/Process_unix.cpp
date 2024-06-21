@@ -174,9 +174,9 @@ void Process::start()
                     fmt::format("--env=TERMINFO={}", terminfoBaseDirectory.generic_string()));
                 if (stdoutFastPipe)
                 {
+                    realArgs.emplace_back(fmt::format("--forward-fd={}", StdoutFastPipeFdStr));
                     realArgs.emplace_back(
                         fmt::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFdStr));
-                    realArgs.emplace_back(fmt::format("--forward-fd={}", StdoutFastPipeFdStr));
                 }
                 if (!_d->cwd.empty())
                     realArgs.emplace_back(fmt::format("--directory={}", _d->cwd.generic_string()));
