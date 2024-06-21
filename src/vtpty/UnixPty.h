@@ -59,9 +59,9 @@ class UnixPty final: public Pty
     void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
-    [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage,
-                                  std::optional<std::chrono::milliseconds> timeout,
-                                  size_t size) override;
+    [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t size) override;
     int write(std::string_view data) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override;

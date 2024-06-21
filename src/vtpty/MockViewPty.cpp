@@ -4,10 +4,6 @@
 
 #include <crispy/BufferObject.h>
 
-using std::optional;
-using std::string_view;
-using std::tuple;
-
 namespace vtpty
 {
 
@@ -22,14 +18,14 @@ PtySlave& MockViewPty::slave() noexcept
     return _slave;
 }
 
-optional<tuple<string_view, bool>> MockViewPty::read(crispy::buffer_object<char>& storage,
-                                                     std::optional<std::chrono::milliseconds> /*timeout*/,
-                                                     size_t size)
+std::optional<Pty::ReadResult> MockViewPty::read(crispy::buffer_object<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> /*timeout*/,
+                                                 size_t size)
 {
     auto const n = std::min(std::min(_outputBuffer.size(), storage.bytesAvailable()), size);
     auto result = storage.writeAtEnd(_outputBuffer.substr(0, n));
     _outputBuffer.remove_prefix(n);
-    return { tuple { string_view(result.data(), result.size()), false } };
+    return ReadResult { .data = std::string_view(result.data(), result.size()), .fromStdoutFastPipe = false };
 }
 
 void MockViewPty::wakeupReader()

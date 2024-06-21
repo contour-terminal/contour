@@ -137,9 +137,9 @@ void ConPty::close()
     }
 }
 
-Pty::ReadResult ConPty::read(crispy::buffer_object<char>& buffer,
-                             std::optional<std::chrono::milliseconds> timeout,
-                             size_t size)
+std::optional<Pty::ReadResult> ConPty::read(crispy::buffer_object<char>& buffer,
+                                            std::optional<std::chrono::milliseconds> timeout,
+                                            size_t size)
 {
     // TODO: wait for timeout time at most AND got woken up upon wakeupReader() invokcation.
     (void) timeout;
@@ -153,7 +153,7 @@ Pty::ReadResult ConPty::read(crispy::buffer_object<char>& buffer,
     if (ptyInLog)
         ptyInLog()("{} received: \"{}\"", "master", crispy::escape(buffer.hotEnd(), buffer.hotEnd() + nread));
 
-    return { tuple { string_view { buffer.hotEnd(), nread }, false } };
+    return ReadResult { .data = string_view { buffer.hotEnd(), nread }, .fromStdoutFastPipe = false };
 }
 
 void ConPty::wakeupReader()
