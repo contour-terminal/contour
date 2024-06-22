@@ -6,6 +6,7 @@ on:
     paths:
       - 'docs/**'
       - '.github/workflows/docs.yml'
+      - 'metainfo.xml'
     branches:
       - master
 
