@@ -62,8 +62,7 @@ namespace
 tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::ImageSize boundingBox)
 {
     // NB: We're only supporting down-scaling.
-    assert(bitmap.bitmapSize.width >= boundingBox.width);
-    assert(bitmap.bitmapSize.height >= boundingBox.height);
+    assert(bitmap.bitmapSize.width >= boundingBox.width || bitmap.bitmapSize.height >= boundingBox.height);
 
     auto const ratioX = unbox<double>(bitmap.bitmapSize.width) / unbox<double>(boundingBox.width);
     auto const ratioY = unbox<double>(bitmap.bitmapSize.height) / unbox<double>(boundingBox.height);
