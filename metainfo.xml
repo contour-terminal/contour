@@ -107,13 +107,13 @@
     <release version="0.4.4" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Add CoreText font fallback implementation for macOS (#1533)</li>
           <li>Add Ubuntu-24.04 in github actions (#1460)</li>
           <li>Add 'early_exit_threshold' config option (#1460)</li>
           <li>Add AppImage package with Qt6 support (#586)</li>
           <li>Add ability to customize the indicator statusline through configuration (#687)</li>
           <li>Add generation of config file from internal state (#1282)</li>
           <li>Add SGRSAVE and SGRRESTORE VT sequences to save and restore SGR state (They intentionally conflict with XTPUSHSGR and XTPOPSGR)</li>
-          <li>Add extended word selection feature (#1023)</li>
           <li>Add extended word selection feature (#1023)</li>
           <li>Add some more missing vi input motions, such as `y$`, `o$`, and many others as initiated by `y` and `o` (#1441)</li>
           <li>Add shell integration for bash shell.</li>
