@@ -6,6 +6,8 @@
 #include <text_shaper/font_locator.h>
 
 #import <AppKit/AppKit.h>
+#import <CoreText/CTFont.h>
+#import <CoreText/CTFontDescriptor.h>
 #import <CoreText/CoreText.h>
 #import <Foundation/Foundation.h>
 
@@ -13,9 +15,9 @@ namespace text
 {
     namespace
     {
-        font_path ctFontPath(NSString const* _name)
+        font_path ctFontPath(NSString const* name)
         {
-            auto const fontRef = CTFontDescriptorCreateWithNameAndSize((CFStringRef)_name, 16.0);
+            auto const fontRef = CTFontDescriptorCreateWithNameAndSize((CFStringRef)name, 16.0);
 
             CFURLRef const url = (CFURLRef)CTFontDescriptorCopyAttribute(fontRef, kCTFontURLAttribute);
             NSString const* fontPath = [NSString stringWithString: [(NSURL const*)CFBridgingRelease(url) path]];
@@ -23,9 +25,29 @@ namespace text
             return font_path{[fontPath cStringUsingEncoding: [NSString defaultCStringEncoding]]};
         }
 
-        constexpr font_weight ctFontWeight(int _weight) noexcept
+        constexpr NSFontWeight makeFontWeight(font_weight value) noexcept
         {
-            switch (_weight)
+            switch (value)
+            {
+                case font_weight::thin: return NSFontWeightThin;
+                case font_weight::extra_light: return NSFontWeightUltraLight;
+                case font_weight::light: return NSFontWeightLight;
+                case font_weight::demilight: return NSFontWeightLight; // does not exist on CoreText
+                case font_weight::book: return NSFontWeightRegular; // does not exist on CoreText
+                case font_weight::normal: return NSFontWeightRegular;
+                case font_weight::medium: return NSFontWeightMedium;
+                case font_weight::demibold: return NSFontWeightSemibold;
+                case font_weight::bold: return NSFontWeightBold;
+                case font_weight::extra_bold: return NSFontWeightHeavy;
+                case font_weight::black: return NSFontWeightBlack;
+                case font_weight::extra_black: return NSFontWeightBlack; // does not exist on CoreText
+            }
+            return NSFontWeightRegular;
+        }
+
+        [[maybe_unused]] constexpr font_weight ctFontWeight(int weight) noexcept
+        {
+            switch (weight)
             {
             case 2: return font_weight::thin;
             case 3: return font_weight::extra_light;
@@ -40,12 +62,12 @@ namespace text
             }
         }
 
-        constexpr font_slant ctFontSlant(int _slant) noexcept
+        [[maybe_unused]] constexpr font_slant ctFontSlant(int slant) noexcept
         {
-            if (unsigned(_slant) & NSItalicFontMask)
+            if (unsigned(slant) & NSItalicFontMask)
                 return font_slant::italic;
 
-            if (unsigned(_slant) & (NSUnitalicFontMask | NSUnboldFontMask))
+            if (unsigned(slant) & (NSUnitalicFontMask | NSUnboldFontMask))
                 return font_slant::normal;
 
             // Figure out how to get Oblique font, even though according to some docs.
@@ -65,70 +87,80 @@ namespace text
         }
     };
 
-
     coretext_locator::coretext_locator() :
         _d{ new Private(), [](Private* p) { delete p; } }
     {
     }
 
-    font_source_list coretext_locator::locate(font_description const& _fd)
+    font_source_list coretext_locator::locate(font_description const& description)
     {
-        locatorLog()("Locating font chain for: {}", _fd);
+        locatorLog()("Locating font chain for: {}", description);
 
-        font_source_list output;
+        font_source_list fonts;
 
-        // "Emoji"
-        auto const familyName = crispy::toLower(_fd.familyName) != "emoji"
-                              ? _fd.familyName.c_str()
-                              : "Apple Color Emoji";
+        CFStringRef familyName = CFStringCreateWithCString(
+            kCFAllocatorDefault, description.familyName.c_str(), kCFStringEncodingUTF8);
 
-        NSArray<NSArray *>* fonts = [_d->fm
-            availableMembersOfFontFamily: [NSString
-                stringWithCString: familyName
-                encoding: [NSString defaultCStringEncoding]
-            ]
-        ];
+        bool const isItalic = description.slant == font_slant::italic;
+        auto const fontWeight = makeFontWeight(description.weight);
+        auto const fontSlant = isItalic ? NSFontItalicTrait : 0;
 
-        if (fonts == nil)
-        {
-            locatorLog()("No fonts found. Falling back to font family: Menlo.");
-            fonts = [_d->fm availableMembersOfFontFamily:@"Menlo"];
+        CTFontDescriptorRef descriptor = CTFontDescriptorCreateWithAttributes(
+            (__bridge CFDictionaryRef) @{
+                (id)kCTFontFamilyNameAttribute: (__bridge id)familyName,
+                (id)kCTFontWeightTrait: @(fontWeight),
+                (id)kCTFontSlantTrait: @(fontSlant)
+            });
+
+        CTFontRef font = CTFontCreateWithFontDescriptor(descriptor, 0.0, nullptr);
+        if (font) {
+            auto* const fontURL = (NSURL const*) CTFontCopyAttribute(font, kCTFontURLAttribute);
+            fonts.emplace_back(font_path { fontURL.path.UTF8String } );
+            CFRelease(fontURL);
         }
 
-        for (bool const forceWeight: {true, false})
-        {
-            for ([[maybe_unused]] bool const forceSlant: {true, false})
-            {
-                for (NSArray* object in fonts)
-                {
-                    auto path = ctFontPath([object objectAtIndex: 0]);
-                    auto const weight = ctFontWeight([[object objectAtIndex: 2] intValue]);
+        // Get Fallback List
+        auto const* cascadeList = (CFArrayRef) CTFontCopyDefaultCascadeListForLanguages(
+            font,
+            (CFArrayRef) NSLocale.preferredLanguages
+        );
 
-                    if (forceWeight && weight != _fd.weight)
-                        continue;
-
-                    auto const slant = ctFontSlant([[object objectAtIndex: 3] intValue]);
-
-                    if (slant != _fd.slant)
-                        continue;
-
-                    output.emplace_back(ctFontPath([object objectAtIndex: 0]));
+        if (cascadeList) {
+            for (CFIndex i = 0; i < CFArrayGetCount(cascadeList); i++) {
+                const auto* fallbackFont = (CTFontDescriptorRef) CFArrayGetValueAtIndex(cascadeList, i);
+                if (fallbackFont) {
+                    CTFontRef fallbackFontRef = CTFontCreateWithFontDescriptor(fallbackFont, 0.0, nullptr);
+                    if (fallbackFontRef) {
+                        auto const* const fontURL = (NSURL const*) CTFontCopyAttribute(fallbackFontRef, kCTFontURLAttribute);
+                        if (fontURL)
+                        {
+                            fonts.emplace_back(font_path { fontURL.path.UTF8String });
+                            CFRelease(fontURL);
+                        }
+                        else
+                            locatorLog()("No URL found for fallback font at index {}", i);
+                        CFRelease(fallbackFontRef);
+                    }
                 }
-                if (!output.empty())
-                    break;
+                else
+                    locatorLog()("No fallback font found at index {}", i);
             }
-            if (!output.empty())
-                break;
         }
+        else
+            locatorLog()("No fallback fonts found");
 
-        return output;
+        CFRelease(cascadeList);
+        CFRelease(familyName);
+        CFBridgingRelease(familyName);
+
+        return fonts;
     }
 
     font_source_list coretext_locator::all()
     {
         font_source_list output;
 
-        NSArray<NSString *> const* fonts = [_d->fm availableFonts];
+        NSArray<NSString *> const* const fonts = [_d->fm availableFonts];
 
         for (NSString const* fontName in fonts) {
             output.emplace_back(ctFontPath(fontName));
