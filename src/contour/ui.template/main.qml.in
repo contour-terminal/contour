@@ -31,7 +31,7 @@ ApplicationWindow
         id: vtui
         focus: true
         visible : true
-        anchors.centerIn: parent
+        anchors.fill: parent
         onShowNotification: (title, content) => appWindow.showNotification(title, content)
         onOpacityChanged: appWindow.applyOpacity()
     }
