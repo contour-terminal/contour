@@ -166,7 +166,7 @@ constexpr inline auto SETXPROP = FunctionDocumentation { .mnemonic = "SETXPROP",
 // }}}
 
 /// Defines a function with all its syntax requirements plus some additional meta information.
-struct FunctionDefinition // TODO: rename Function
+struct Function
 {
     FunctionCategory category;  // (3 bits) C0, ESC, CSI, OSC, DCS
     char leader;                // (3 bits) 0x3C..0x3F (one of: < = > ?, or 0x00 for none)
@@ -248,7 +248,7 @@ struct FunctionDefinition // TODO: rename Function
     constexpr operator id_type() const noexcept { return id(); }
 };
 
-constexpr int compare(FunctionDefinition const& a, FunctionDefinition const& b)
+constexpr int compare(Function const& a, Function const& b)
 {
     if (a.category != b.category)
         return static_cast<int>(a.category) - static_cast<int>(b.category);
@@ -269,12 +269,12 @@ constexpr int compare(FunctionDefinition const& a, FunctionDefinition const& b)
 }
 
 // clang-format off
-constexpr bool operator==(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) == 0; }
-constexpr bool operator!=(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) != 0; }
-constexpr bool operator<=(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) <= 0; }
-constexpr bool operator>=(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) >= 0; }
-constexpr bool operator<(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) < 0; }
-constexpr bool operator>(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) > 0; }
+constexpr bool operator==(Function const& a, Function const& b) noexcept { return compare(a, b) == 0; }
+constexpr bool operator!=(Function const& a, Function const& b) noexcept { return compare(a, b) != 0; }
+constexpr bool operator<=(Function const& a, Function const& b) noexcept { return compare(a, b) <= 0; }
+constexpr bool operator>=(Function const& a, Function const& b) noexcept { return compare(a, b) >= 0; }
+constexpr bool operator<(Function const& a, Function const& b) noexcept { return compare(a, b) < 0; }
+constexpr bool operator>(Function const& a, Function const& b) noexcept { return compare(a, b) > 0; }
 // clang-format on
 
 struct FunctionSelector
@@ -291,7 +291,7 @@ struct FunctionSelector
     char finalSymbol;
 };
 
-constexpr int compare(FunctionSelector const& a, FunctionDefinition const& b) noexcept
+constexpr int compare(FunctionSelector const& a, Function const& b) noexcept
 {
     if (a.category != b.category)
         return static_cast<int>(a.category) - static_cast<int>(b.category);
@@ -324,29 +324,29 @@ namespace detail // {{{
                       std::string_view comment,
                       VTType vt = VTType::VT100) noexcept
     {
-        return FunctionDefinition { .category = FunctionCategory::C0,
-                                    .leader = 0,
-                                    .intermediate = 0,
-                                    .finalSymbol = finalCharacter,
-                                    .minimumParameters = 0,
-                                    .maximumParameters = 0,
-                                    .conformanceLevel = vt,
-                                    .extension = VTExtension::None,
-                                    .documentation =
-                                        FunctionDocumentation { .mnemonic = mnemonic, .comment = comment } };
+        return Function { .category = FunctionCategory::C0,
+                          .leader = 0,
+                          .intermediate = 0,
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = 0,
+                          .maximumParameters = 0,
+                          .conformanceLevel = vt,
+                          .extension = VTExtension::None,
+                          .documentation =
+                              FunctionDocumentation { .mnemonic = mnemonic, .comment = comment } };
     }
 
     constexpr auto OSC(uint16_t code, VTExtension ext, FunctionDocumentation documentation) noexcept
     {
-        return FunctionDefinition { .category = FunctionCategory::OSC,
-                                    .leader = 0,
-                                    .intermediate = 0,
-                                    .finalSymbol = 0,
-                                    .minimumParameters = 0,
-                                    .maximumParameters = code,
-                                    .conformanceLevel = VTType::VT100,
-                                    .extension = ext,
-                                    .documentation = documentation };
+        return Function { .category = FunctionCategory::OSC,
+                          .leader = 0,
+                          .intermediate = 0,
+                          .finalSymbol = 0,
+                          .minimumParameters = 0,
+                          .maximumParameters = code,
+                          .conformanceLevel = VTType::VT100,
+                          .extension = ext,
+                          .documentation = documentation };
     }
 
     constexpr auto ESC(std::optional<char> intermediate,
@@ -354,15 +354,15 @@ namespace detail // {{{
                        VTType vt,
                        FunctionDocumentation documentation) noexcept
     {
-        return FunctionDefinition { .category = FunctionCategory::ESC,
-                                    .leader = 0,
-                                    .intermediate = intermediate.value_or(0),
-                                    .finalSymbol = finalCharacter,
-                                    .minimumParameters = 0,
-                                    .maximumParameters = 0,
-                                    .conformanceLevel = vt,
-                                    .extension = VTExtension::None,
-                                    .documentation = documentation };
+        return Function { .category = FunctionCategory::ESC,
+                          .leader = 0,
+                          .intermediate = intermediate.value_or(0),
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = 0,
+                          .maximumParameters = 0,
+                          .conformanceLevel = vt,
+                          .extension = VTExtension::None,
+                          .documentation = documentation };
     }
 
     constexpr auto CSI(std::optional<char> leader,
@@ -374,15 +374,15 @@ namespace detail // {{{
                        FunctionDocumentation documentation) noexcept
     {
         // TODO: static_assert on leader/intermediate range-or-null
-        return FunctionDefinition { .category = FunctionCategory::CSI,
-                                    .leader = leader.value_or(0),
-                                    .intermediate = intermediate.value_or(0),
-                                    .finalSymbol = finalCharacter,
-                                    .minimumParameters = argc0,
-                                    .maximumParameters = argc1,
-                                    .conformanceLevel = vt,
-                                    .extension = VTExtension::None,
-                                    .documentation = documentation };
+        return Function { .category = FunctionCategory::CSI,
+                          .leader = leader.value_or(0),
+                          .intermediate = intermediate.value_or(0),
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = argc0,
+                          .maximumParameters = argc1,
+                          .conformanceLevel = vt,
+                          .extension = VTExtension::None,
+                          .documentation = documentation };
     }
 
     constexpr auto CSI(std::optional<char> leader,
@@ -394,15 +394,15 @@ namespace detail // {{{
                        FunctionDocumentation documentation) noexcept
     {
         // TODO: static_assert on leader/intermediate range-or-null
-        return FunctionDefinition { .category = FunctionCategory::CSI,
-                                    .leader = leader.value_or(0),
-                                    .intermediate = intermediate.value_or(0),
-                                    .finalSymbol = finalCharacter,
-                                    .minimumParameters = argc0,
-                                    .maximumParameters = argc1,
-                                    .conformanceLevel = VTType::VT100,
-                                    .extension = ext,
-                                    .documentation = documentation };
+        return Function { .category = FunctionCategory::CSI,
+                          .leader = leader.value_or(0),
+                          .intermediate = intermediate.value_or(0),
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = argc0,
+                          .maximumParameters = argc1,
+                          .conformanceLevel = VTType::VT100,
+                          .extension = ext,
+                          .documentation = documentation };
     }
 
     constexpr auto DCS(std::optional<char> leader,
@@ -414,15 +414,15 @@ namespace detail // {{{
                        FunctionDocumentation documentation) noexcept
     {
         // TODO: static_assert on leader/intermediate range-or-null
-        return FunctionDefinition { .category = FunctionCategory::DCS,
-                                    .leader = leader.value_or(0),
-                                    .intermediate = intermediate.value_or(0),
-                                    .finalSymbol = finalCharacter,
-                                    .minimumParameters = argc0,
-                                    .maximumParameters = argc1,
-                                    .conformanceLevel = vt,
-                                    .extension = VTExtension::None,
-                                    .documentation = documentation };
+        return Function { .category = FunctionCategory::DCS,
+                          .leader = leader.value_or(0),
+                          .intermediate = intermediate.value_or(0),
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = argc0,
+                          .maximumParameters = argc1,
+                          .conformanceLevel = vt,
+                          .extension = VTExtension::None,
+                          .documentation = documentation };
     }
 
     constexpr auto DCS(std::optional<char> leader,
@@ -434,15 +434,15 @@ namespace detail // {{{
                        FunctionDocumentation documentation) noexcept
     {
         // TODO: static_assert on leader/intermediate range-or-null
-        return FunctionDefinition { .category = FunctionCategory::DCS,
-                                    .leader = leader.value_or(0),
-                                    .intermediate = intermediate.value_or(0),
-                                    .finalSymbol = finalCharacter,
-                                    .minimumParameters = argc0,
-                                    .maximumParameters = argc1,
-                                    .conformanceLevel = VTType::VT100,
-                                    .extension = ext,
-                                    .documentation = documentation };
+        return Function { .category = FunctionCategory::DCS,
+                          .leader = leader.value_or(0),
+                          .intermediate = intermediate.value_or(0),
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = argc0,
+                          .maximumParameters = argc1,
+                          .conformanceLevel = VTType::VT100,
+                          .extension = ext,
+                          .documentation = documentation };
     }
 } // namespace detail
 // }}}
@@ -785,9 +785,7 @@ inline auto allFunctions() noexcept
 {
     static auto const funcs = []() constexpr {
         auto funcs = allFunctionsArray();
-        crispy::sort(funcs, [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr {
-            return compare(a, b);
-        });
+        crispy::sort(funcs, [](Function const& a, Function const& b) constexpr { return compare(a, b); });
         return funcs;
     }();
 
@@ -811,33 +809,32 @@ class SupportedSequences
     [[nodiscard]] constexpr auto cend() const noexcept { return cbegin() + _lastIndex; }
 
   public:
-    [[nodiscard]] constexpr gsl::span<FunctionDefinition const> allSequences() const noexcept
+    [[nodiscard]] constexpr gsl::span<Function const> allSequences() const noexcept
     {
-        return gsl::span<FunctionDefinition const>(cbegin(), _supportedSequences.size());
+        return gsl::span<Function const>(cbegin(), _supportedSequences.size());
     }
 
-    [[nodiscard]] constexpr gsl::span<FunctionDefinition const> activeSequences() const noexcept
+    [[nodiscard]] constexpr gsl::span<Function const> activeSequences() const noexcept
     {
-        return gsl::span<FunctionDefinition const>(cbegin(), _lastIndex);
+        return gsl::span<Function const>(cbegin(), _lastIndex);
     }
 
     CRISPY_CONSTEXPR void reset(VTType vt) noexcept
     {
         // Partition the array such that first half contains all sequences with VTType less than or
         // equal to given VTTYpe.
-        auto* itr = std::partition(
-            begin(),
-            _supportedSequences.data() + _supportedSequences.size(),
-            [vt](const FunctionDefinition& value) noexcept { return value.conformanceLevel <= vt; });
+        auto* itr =
+            std::partition(begin(),
+                           _supportedSequences.data() + _supportedSequences.size(),
+                           [vt](const Function& value) noexcept { return value.conformanceLevel <= vt; });
 
         _lastIndex = std::distance(begin(), itr);
-        gsl::span<FunctionDefinition> availableDefinition(begin(), _lastIndex);
-        crispy::sort(
-            availableDefinition,
-            [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr { return compare(a, b); });
+        gsl::span<Function> availableDefinition(begin(), _lastIndex);
+        crispy::sort(availableDefinition,
+                     [](Function const& a, Function const& b) constexpr { return compare(a, b); });
     }
 
-    CRISPY_CONSTEXPR void disableSequence(FunctionDefinition seq) noexcept
+    CRISPY_CONSTEXPR void disableSequence(Function seq) noexcept
     {
         auto* seqIter = std::find(begin(), end(), seq);
         if (seqIter != end())
@@ -848,7 +845,7 @@ class SupportedSequences
         }
     }
 
-    CRISPY_CONSTEXPR void enableSequence(FunctionDefinition seq) noexcept
+    CRISPY_CONSTEXPR void enableSequence(Function seq) noexcept
     {
         auto* const endArray = _supportedSequences.data() + _supportedSequences.size();
         auto* seqIter = std::find(end(), endArray, seq);
@@ -857,23 +854,21 @@ class SupportedSequences
             // Maybe could be done better since rest of the data is sorted
             std::iter_swap(end(), seqIter);
             ++_lastIndex;
-            gsl::span<FunctionDefinition> arr(begin(), end());
-            crispy::sort(arr, [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr {
-                return compare(a, b);
-            });
+            gsl::span<Function> arr(begin(), end());
+            crispy::sort(arr, [](Function const& a, Function const& b) constexpr { return compare(a, b); });
         }
     }
 
   private:
-    std::array<FunctionDefinition, allFunctionsArray().size()> _supportedSequences = allFunctions();
+    std::array<Function, allFunctionsArray().size()> _supportedSequences = allFunctions();
     size_t _lastIndex = allFunctions().size(); // No of total active sequences
 };
 
 /// Selects a FunctionDefinition based on a FunctionSelector.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-FunctionDefinition const* select(FunctionSelector const& selector,
-                                 gsl::span<FunctionDefinition const> availableDefinition) noexcept;
+Function const* select(FunctionSelector const& selector,
+                       gsl::span<Function const> availableDefinition) noexcept;
 
 /// Selects a FunctionDefinition based on given input Escape sequence fields.
 ///
@@ -883,9 +878,9 @@ FunctionDefinition const* select(FunctionSelector const& selector,
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectEscape(char intermediate,
-                                              char finalCharacter,
-                                              gsl::span<FunctionDefinition const> availableDefinition)
+inline Function const* selectEscape(char intermediate,
+                                    char finalCharacter,
+                                    gsl::span<Function const> availableDefinition)
 {
     return select({ FunctionCategory::ESC, 0, 0, intermediate, finalCharacter }, availableDefinition);
 }
@@ -900,11 +895,11 @@ inline FunctionDefinition const* selectEscape(char intermediate,
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectControl(char leader,
-                                               int argc,
-                                               char intermediate,
-                                               char finalCharacter,
-                                               gsl::span<FunctionDefinition const> availableDefinition)
+inline Function const* selectControl(char leader,
+                                     int argc,
+                                     char intermediate,
+                                     char finalCharacter,
+                                     gsl::span<Function const> availableDefinition)
 {
     return select({ FunctionCategory::CSI, leader, argc, intermediate, finalCharacter }, availableDefinition);
 }
@@ -916,8 +911,7 @@ inline FunctionDefinition const* selectControl(char leader,
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectOSCommand(int id,
-                                                 gsl::span<FunctionDefinition const> availableDefinition)
+inline Function const* selectOSCommand(int id, gsl::span<Function const> availableDefinition)
 {
     return select({ FunctionCategory::OSC, 0, id, 0, 0 }, availableDefinition);
 }
@@ -925,13 +919,10 @@ inline FunctionDefinition const* selectOSCommand(int id,
 } // namespace vtbackend
 
 template <>
-struct std::hash<vtbackend::FunctionDefinition>
+struct std::hash<vtbackend::Function>
 {
     /// This is actually perfect hashing.
-    constexpr uint32_t operator()(vtbackend::FunctionDefinition const& fun) const noexcept
-    {
-        return fun.id();
-    }
+    constexpr uint32_t operator()(vtbackend::Function const& fun) const noexcept { return fun.id(); }
 };
 
 // {{{ fmtlib support
@@ -970,9 +961,9 @@ struct fmt::formatter<vtbackend::FunctionCategory>: fmt::formatter<std::string_v
 };
 
 template <>
-struct fmt::formatter<vtbackend::FunctionDefinition>: fmt::formatter<std::string>
+struct fmt::formatter<vtbackend::Function>: fmt::formatter<std::string>
 {
-    auto format(const vtbackend::FunctionDefinition f, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::Function f, format_context& ctx) -> format_context::iterator
     {
         std::string value;
         switch (f.category)

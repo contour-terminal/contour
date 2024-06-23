@@ -53,7 +53,6 @@ inline std::string escape(T begin, T end, numeric_escape numericEscape = numeric
     return result;
 }
 
-
 template <typename T>
 inline std::string escapeMarkdown(T begin, T end)
 {
@@ -71,8 +70,6 @@ inline std::string escapeMarkdown(T begin, T end)
     return result;
 }
 
-
-
 inline std::string escape(std::string_view s, numeric_escape numericEscape = numeric_escape::Hex)
 {
     return escape(begin(s), end(s), numericEscape);
@@ -82,7 +79,6 @@ inline std::string escapeMarkdown(std::string_view s)
 {
     return escapeMarkdown(begin(s), end(s));
 }
-
 
 inline std::string unescape(std::string_view escapedText)
 {

@@ -3250,15 +3250,14 @@ void Screen<Cell>::processSequence(Sequence const& seq)
     //         seq.functionDefinition() ? seq.functionDefinition()->comment : ""sv);
 
     _terminal->incrementInstructionCounter();
-    if (FunctionDefinition const* funcSpec = seq.functionDefinition(_terminal->activeSequences());
-        funcSpec != nullptr)
+    if (Function const* funcSpec = seq.functionDefinition(_terminal->activeSequences()); funcSpec != nullptr)
         applyAndLog(*funcSpec, seq);
     else if (vtParserLog)
         vtParserLog()("Unknown VT sequence: {}", seq);
 }
 
 template <CellConcept Cell>
-void Screen<Cell>::applyAndLog(FunctionDefinition const& function, Sequence const& seq)
+void Screen<Cell>::applyAndLog(Function const& function, Sequence const& seq)
 {
     auto const result = apply(function, seq);
     switch (result)
@@ -3279,7 +3278,7 @@ void Screen<Cell>::applyAndLog(FunctionDefinition const& function, Sequence cons
 }
 
 template <CellConcept Cell>
-ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence const& seq)
+ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
 {
     // This function assumed that the incoming instruction has been already resolved to a given
     // FunctionDefinition

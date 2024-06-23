@@ -31,8 +31,8 @@ using std::stringstream;
 namespace vtbackend
 {
 
-FunctionDefinition const* select(FunctionSelector const& selector,
-                                 gsl::span<FunctionDefinition const> availableDefinitions) noexcept
+Function const* select(FunctionSelector const& selector,
+                       gsl::span<Function const> availableDefinitions) noexcept
 {
     auto a = size_t { 0 };
     auto b = availableDefinitions.size() - 1;

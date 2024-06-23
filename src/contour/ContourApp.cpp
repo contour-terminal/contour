@@ -356,13 +356,12 @@ crispy::cli::command ContourApp::parameterDefinition() const
                 CLI::command_list {
                     CLI::command { "vt", "Prints general information about supported VT sequences." },
                 } },
-            CLI::command {
-                "documentation",
-                "Generate documentation for web page",
-                CLI::option_list {},
-                CLI::command_list {
-                    CLI::command { "vt", "VT sequence reference documentation" },
-                } },
+            CLI::command { "documentation",
+                           "Generate documentation for web page",
+                           CLI::option_list {},
+                           CLI::command_list {
+                               CLI::command { "vt", "VT sequence reference documentation" },
+                           } },
             CLI::command {
                 "generate",
                 "Generation utilities.",
