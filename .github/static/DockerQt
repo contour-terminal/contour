@@ -1,4 +1,5 @@
-FROM ubuntu:20.04
+ARG VERSION="20.04"
+FROM ubuntu:$VERSION
 ARG ARCH="x86_64"
 
 RUN apt-get update
