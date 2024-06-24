@@ -33,6 +33,13 @@ RUN bash -c "\
        -D CMAKE_C_COMPILER=clang-18 \
        -D CMAKE_INSTALL_PREFIX=\/usr \
        -D QT_BUILD_SUBMODULES=\"qtbase;qt5compat;qtmultimedia;qtdeclarative\" \
+       -D QT_FEATURE_zstd=OFF \
+       -D QT_FEATURE_png=OFF \
+       -D QT_FEATURE_jpeg=OFF \
+       -D QT_FEATURE_ico=OFF \
+       -D QT_FEATURE_gif=OFF \
+       -D QT_FEATURE_harfbuzz=OFF \
+       -D QT_FEATURE_freetype=OFF \
        -D BUILD_SHARED_LIBS=OFF \
        -D INPUT_icu=no \
        -D INPUT_pcre=system \

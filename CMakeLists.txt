@@ -81,7 +81,7 @@ option(CONTOUR_BUILD_STATIC "Link to static libraries [default: OFF]" OFF)
 if(CONTOUR_BUILD_STATIC)
     set(BUILD_SHARED_LIBS OFF)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-    #set(CMAKE_LINK_SEARCH_START_STATIC ON)
+    set(CMAKE_LINK_SEARCH_END_STATIC ON)
     set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
 endif()
 
