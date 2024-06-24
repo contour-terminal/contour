@@ -23,7 +23,7 @@ namespace vtbackend
 // Or do we want to deal with Image slices right away and just keep those?
 // The latter doesn't require reference counting.
 
-enum class ImageFormat
+enum class ImageFormat : uint8_t
 {
     RGB,
     RGBA,
@@ -88,7 +88,7 @@ class Image: public std::enable_shared_from_this<Image>
 };
 
 /// Image resize hints are used to properly fit/fill the area to place the image onto.
-enum class ImageResize
+enum class ImageResize : uint8_t
 {
     NoResize,
     ResizeToFit, // default
@@ -98,7 +98,7 @@ enum class ImageResize
 
 /// Image alignment policy are used to properly align the image to a given spot when not fully
 /// filling the area this image as to be placed to.
-enum class ImageAlignment
+enum class ImageAlignment : uint8_t
 {
     TopStart,
     TopCenter,

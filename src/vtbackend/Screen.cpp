@@ -1717,7 +1717,7 @@ void Screen<Cell>::setMark()
     currentLine().setMarked(true);
 }
 
-enum class ModeResponse
+enum class ModeResponse : uint8_t
 { // TODO: respect response 0, 3, 4.
     NotRecognized = 0,
     Set = 1,

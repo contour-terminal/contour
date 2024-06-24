@@ -31,7 +31,7 @@ enum class IndexedColor : uint8_t
 };
 
 //! Bright colors. As introduced by aixterm, bright versions of standard 3bit colors.
-enum class BrightColor
+enum class BrightColor : uint8_t
 {
     Black = 0,
     Red = 1,

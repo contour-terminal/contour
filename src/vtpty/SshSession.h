@@ -71,7 +71,7 @@ class SshSession final: public Pty
 
     [[nodiscard]] std::optional<ExitStatus> exitStatus() const;
 
-    enum class State
+    enum class State : uint8_t
     {
         Initial,                            // initial state
         Started,                            // start() has been called

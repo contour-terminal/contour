@@ -76,7 +76,7 @@ constexpr double average(DPI dpi) noexcept
 }
 
 // NOLINTBEGIN(readability-identifier-naming)
-enum class font_weight
+enum class font_weight : uint8_t
 {
     thin,
     extra_light, // aka. ultralight
@@ -113,7 +113,7 @@ constexpr std::optional<font_weight> make_font_weight(std::string_view text)
 }
 
 // NOLINTBEGIN(readability-identifier-naming)
-enum class font_slant
+enum class font_slant : uint8_t
 {
     normal,
     italic,
@@ -132,7 +132,7 @@ constexpr std::optional<font_slant> make_font_slant(std::string_view text)
 }
 
 // NOLINTBEGIN(readability-identifier-naming)
-enum class font_spacing
+enum class font_spacing : uint8_t
 {
     proportional,
     mono
@@ -274,7 +274,7 @@ constexpr bool operator<(glyph_key const& a, glyph_key const& b) noexcept
 }
 
 // NOLINTBEGIN(readability-identifier-naming)
-enum class render_mode
+enum class render_mode : uint8_t
 {
     bitmap, //!< bitmaps are preferred
     gray,   //!< gray-scale anti-aliasing

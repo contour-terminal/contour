@@ -53,7 +53,7 @@ struct SelectionHelper
 class Selection
 {
   public:
-    enum class State
+    enum class State : uint8_t
     {
         /// Inactive, but waiting for the selection to be started (by moving the cursor).
         Waiting,

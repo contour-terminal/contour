@@ -147,7 +147,7 @@ struct Search
 
 // Mandates what execution mode the terminal will take to process VT sequences.
 //
-enum class ExecutionMode
+enum class ExecutionMode : uint8_t
 {
     // Normal execution mode, with no tracing enabled.
     Normal,
@@ -165,7 +165,7 @@ enum class ExecutionMode
     // TODO: BreakAtFrame,
 };
 
-enum class WrapPending
+enum class WrapPending : uint8_t
 {
     Yes,
     No,

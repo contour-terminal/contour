@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <cstdint>
 #include <limits>
 #include <string_view>
 
@@ -48,7 +49,7 @@ enum class C0 : char
 };
 
 // NOLINTBEGIN(readability-identifier-naming)
-enum class C1_7bit
+enum class C1_7bit : char
 {
     SCS_G0 = 0x28,       //!< Set Character Set (0)
     SCS_G1 = 0x29,       //!< Set Character Set (1)
@@ -90,7 +91,7 @@ enum class C1_7bit
     APC = 0x5f,          //!< Application Program Command
 };
 
-enum class C1_8bit
+enum class C1_8bit : uint8_t
 {
     PAD = 0x80,  //!< Padding Character
     HOP = 0x81,  //!< High Octet Preset

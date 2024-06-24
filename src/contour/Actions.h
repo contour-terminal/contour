@@ -13,7 +13,7 @@ namespace contour::actions
 {
 
 // Defines the format to use when extracting a selection range from the terminal.
-enum class CopyFormat
+enum class CopyFormat : uint8_t
 {
     // Copies purely the text (with their whitespaces, and newlines, but no formatting).
     Text,

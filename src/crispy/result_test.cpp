@@ -12,7 +12,7 @@ using crispy::failure;
 namespace
 {
 
-enum class error_code
+enum class error_code : uint8_t
 {
     E0,
     E1,
@@ -22,7 +22,7 @@ enum class error_code
     E5
 };
 
-enum class another_error
+enum class another_error : uint8_t
 {
     E0,
     E1,

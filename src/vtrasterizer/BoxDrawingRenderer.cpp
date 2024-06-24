@@ -12,6 +12,7 @@
 #include <range/v3/view/zip.hpp>
 
 #include <array>
+#include <cstdint>
 
 using namespace std::string_view_literals;
 
@@ -66,7 +67,7 @@ namespace detail
     namespace
     {
 
-        enum class Thickness
+        enum class Thickness : uint8_t
         {
             Light,
             Heavy
@@ -173,7 +174,7 @@ namespace detail
 
         struct ProgressBar
         {
-            enum class Part
+            enum class Part : uint8_t
             {
                 Left,
                 Middle,
@@ -595,7 +596,7 @@ namespace detail
 
         struct DiagonalMosaic
         {
-            enum class Body
+            enum class Body : uint8_t
             {
                 Lower,
                 Upper
@@ -729,7 +730,7 @@ namespace detail
             return pixmap.take();
         }
 
-        enum class UpperOrLower
+        enum class UpperOrLower : uint8_t
         {
             Upper,
             Lower

@@ -25,7 +25,7 @@ namespace vtbackend
 class SixelParser: public ParserExtension
 {
   public:
-    enum class State
+    enum class State : uint8_t
     {
         Ground,           // Sixel data
         RasterSettings,   // '"', configuring the raster
@@ -34,7 +34,7 @@ class SixelParser: public ParserExtension
         ColorParam        // color parameter
     };
 
-    enum class Colorspace
+    enum class Colorspace : uint8_t
     {
         RGB,
         HSL

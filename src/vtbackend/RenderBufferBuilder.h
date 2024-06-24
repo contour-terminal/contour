@@ -117,7 +117,7 @@ class RenderBufferBuilder
     [[nodiscard]] bool gridLineContainsCursor(LineOffset screenLineOffset) const noexcept;
 
     // clang-format off
-    enum class State { Gap, Sequence };
+    enum class State : uint8_t { Gap, Sequence };
     // clang-format on
 
     gsl::not_null<RenderBuffer*> _output;

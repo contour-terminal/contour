@@ -10,7 +10,7 @@ namespace vtbackend
 
 using CharsetMap = std::array<char32_t, 127>;
 
-enum class CharsetId
+enum class CharsetId : uint8_t
 {
     Special, // Special Character and Line Drawing Set
 
@@ -27,7 +27,7 @@ enum class CharsetId
     USASCII
 };
 
-enum class CharsetTable
+enum class CharsetTable : uint8_t
 {
     G0 = 0,
     G1 = 1,

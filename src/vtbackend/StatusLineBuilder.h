@@ -75,7 +75,7 @@ StatusLineDefinition parseStatusLineDefinition(std::string_view left,
                                                std::string_view middle,
                                                std::string_view right);
 
-enum class StatusLineStyling
+enum class StatusLineStyling : uint8_t
 {
     Disabled,
     Enabled

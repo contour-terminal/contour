@@ -78,7 +78,7 @@ class [[nodiscard]] Process: public Pty
 
     [[nodiscard]] std::string workingDirectory() const;
 
-    enum class TerminationHint
+    enum class TerminationHint : uint8_t
     {
         Normal,
         Hangup

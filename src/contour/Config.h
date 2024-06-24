@@ -64,21 +64,21 @@
 namespace contour::config
 {
 
-enum class ScrollBarPosition
+enum class ScrollBarPosition : uint8_t
 {
     Hidden,
     Left,
     Right
 };
 
-enum class Permission
+enum class Permission : uint8_t
 {
     Deny,
     Allow,
     Ask
 };
 
-enum class SelectionAction
+enum class SelectionAction : uint8_t
 {
     Nothing,
     CopyToSelectionClipboard,
@@ -179,7 +179,7 @@ struct SimpleColorConfig
 
 using ColorConfig = std::variant<SimpleColorConfig, DualColorConfig>;
 
-enum class RenderingBackend
+enum class RenderingBackend : uint8_t
 {
     Default,
     Software,

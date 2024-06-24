@@ -57,7 +57,7 @@ namespace vtbackend
  *   ya"       yank around "
  */
 
-enum class ViMotion
+enum class ViMotion : uint8_t
 {
     Explicit,              // <special one for explicit operators>
     Selection,             // <special one for v_ modes>
@@ -102,7 +102,7 @@ enum class ViMotion
     RepeatCharMoveReverse, // ,
 };
 
-enum class ViOperator
+enum class ViOperator : uint8_t
 {
     MoveCursor,
     Yank = 'y',
@@ -112,7 +112,7 @@ enum class ViOperator
     Open = 'o',
 };
 
-enum class TextObject
+enum class TextObject : uint8_t
 {
     AngleBrackets = '<',  // i<  a<
     CurlyBrackets = '{',  // i{  a{
@@ -127,7 +127,7 @@ enum class TextObject
     BigWord = 'W',        // iW  aW
 };
 
-enum class TextObjectScope
+enum class TextObjectScope : uint8_t
 {
     Inner = 'i',
     A = 'a'
@@ -140,7 +140,7 @@ struct RectangularHighlight { CellLocation from; CellLocation to; };
 
 using HighlightRange = std::variant<LinearHighlight, RectangularHighlight>;
 
-enum class SearchEditMode
+enum class SearchEditMode : uint8_t
 {
     Disabled,
     Enabled,
@@ -218,7 +218,7 @@ class ViInputHandler: public InputHandler
     void setSearchModeSwitch(bool enabled);
 
   private:
-    enum class ModeSelect
+    enum class ModeSelect : uint8_t
     {
         Normal,
         Visual

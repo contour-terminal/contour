@@ -17,7 +17,7 @@ namespace vtbackend
  *
  * The integer representational values match the one for DA2's first response parameter.
  */
-enum class VTType
+enum class VTType : uint8_t
 {
     VT100 = 0,
     VT220 = 1,
@@ -31,7 +31,7 @@ enum class VTType
     VT525 = 65,
 };
 
-enum class VTExtension
+enum class VTExtension : uint8_t
 {
     None,
     Unknown,

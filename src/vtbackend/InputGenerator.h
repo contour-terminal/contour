@@ -20,7 +20,7 @@ namespace vtbackend
 {
 
 /// Mutualy exclusive mouse protocls.
-enum class MouseProtocol
+enum class MouseProtocol : uint16_t
 {
     /// Old X10 mouse protocol
     X10 = 9,
@@ -35,7 +35,7 @@ enum class MouseProtocol
 };
 
 // {{{ Modifier
-enum Modifier : unsigned
+enum Modifier : uint8_t
 {
     // NB: These values MUST match the values of the corresponding
     // the bit positions in the modifier mask in CSIu keyboard protocol.
@@ -62,7 +62,7 @@ std::string to_string(Modifiers modifier);
 
 // }}}
 // {{{ KeyInputEvent, Key
-enum class Key
+enum class Key : uint8_t
 {
     // function keys
     F1,
@@ -180,14 +180,14 @@ enum class Key
 
 std::string to_string(Key key);
 
-enum class KeyMode
+enum class KeyMode : uint8_t
 {
     Normal,
     Application
 };
 // }}}
 // {{{ Mouse
-enum class MouseButton
+enum class MouseButton : uint8_t
 {
     Left,
     Right,
@@ -201,7 +201,7 @@ enum class MouseButton
 
 std::string to_string(MouseButton button);
 
-enum class MouseTransport
+enum class MouseTransport : uint8_t
 {
     // CSI M Cb Cx Cy, with Cb, Cx, Cy incremented by 0x20
     Default,
@@ -217,7 +217,7 @@ enum class MouseTransport
 };
 // }}}
 
-enum class KeyboardEventType
+enum class KeyboardEventType : uint8_t
 {
     Press = 1,
     Repeat = 2,
@@ -296,7 +296,7 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     std::string _pendingSequence {};
 };
 
-enum class KeyboardEventFlag
+enum class KeyboardEventFlag : uint8_t
 {
     None = 0,
     DisambiguateEscapeCodes = 1,
@@ -401,7 +401,7 @@ class InputGenerator
     void setMouseTransport(MouseTransport mouseTransport);
     [[nodiscard]] MouseTransport mouseTransport() const noexcept { return _mouseTransport; }
 
-    enum class MouseWheelMode
+    enum class MouseWheelMode : uint8_t
     {
         // mouse wheel generates mouse wheel events as determined by mouse protocol + transport.
         Default,
@@ -472,7 +472,7 @@ class InputGenerator
         }
     }
 
-    enum class MouseEventType
+    enum class MouseEventType : uint8_t
     {
         Press,
         Drag,

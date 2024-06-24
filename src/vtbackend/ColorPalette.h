@@ -17,7 +17,7 @@
 namespace vtbackend
 {
 
-enum class ColorPreference
+enum class ColorPreference : uint8_t
 {
     Dark,
     Light,
@@ -130,13 +130,13 @@ struct ColorPalette
     RGBColorPair indicatorStatusLineInactive = { 0xFFFFFF_rgb, 0x0270c0_rgb };
 };
 
-enum class ColorTarget
+enum class ColorTarget : uint8_t
 {
     Foreground,
     Background,
 };
 
-enum class ColorMode
+enum class ColorMode : uint8_t
 {
     Dimmed,
     Normal,

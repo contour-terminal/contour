@@ -1,3 +1,4 @@
+// NOLINTBEGIN(cppcoreguidelines-macro-to-enum)
 // NOLINTBEGIN(modernize-macro-to-enum)
 
 // Shared preprocessor definitions between C++ and GLSL.
@@ -17,3 +18,4 @@
 #define FRAGMENT_SELECTOR_GLYPH_LCD 3
 
 // NOLINTEND(modernize-macro-to-enum)
+// NOLINTEND(cppcoreguidelines-macro-to-enum)

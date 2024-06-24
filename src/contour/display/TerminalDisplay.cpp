@@ -1119,7 +1119,7 @@ void TerminalDisplay::doDumpStateInternal()
         fs.close();
     }
 
-    enum class ImageBufferFormat
+    enum class ImageBufferFormat : uint8_t
     {
         RGBA,
         RGB,

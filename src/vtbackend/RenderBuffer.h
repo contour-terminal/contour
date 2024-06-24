@@ -99,7 +99,7 @@ struct RenderBufferRef
 
 /// Reflects the current state of a RenderDoubleBuffer object.
 ///
-enum class RenderBufferState
+enum class RenderBufferState : uint8_t
 {
     WaitingForRefresh,
     RefreshBuffersAndTrySwap,

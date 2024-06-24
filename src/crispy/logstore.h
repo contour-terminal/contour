@@ -125,12 +125,12 @@ class category
 {
   public:
     using formatter = std::function<std::string(message_builder const&)>;
-    enum class state
+    enum class state : uint8_t
     {
         Enabled,
         Disabled
     };
-    enum class visibility
+    enum class visibility : uint8_t
     {
         Public,
         Hidden

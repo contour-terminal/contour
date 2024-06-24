@@ -198,7 +198,7 @@ enum class State : uint8_t
 // NOLINTEND(readability-identifier-naming)
 
 /// Actions can be invoked due to various reasons.
-enum class ActionClass
+enum class ActionClass : uint8_t
 {
     /// Action to be invoked because we enter a new state.
     Enter,
@@ -697,7 +697,7 @@ class Parser
     void printUtf8Byte(char ch);
 
   private:
-    enum class ProcessKind
+    enum class ProcessKind : uint8_t
     {
         /// Processing bulk-text in ground state succeed, keep on going.
         ContinueBulk,

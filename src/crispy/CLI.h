@@ -21,7 +21,7 @@ namespace crispy::cli
 using value = std::variant<int, unsigned int, std::string, double, bool>;
 using name = std::string;
 
-enum class presence
+enum class presence : uint8_t
 {
     Optional,
     Required,
@@ -61,7 +61,7 @@ struct option
 
 using option_list = std::vector<option>;
 
-enum class command_select
+enum class command_select : uint8_t
 {
     Explicit,
     Implicit, // only one command at a scope level can be implicit
@@ -87,7 +87,7 @@ struct command
 
 using command_list = command::command_list;
 
-enum class option_style
+enum class option_style : uint8_t
 {
     Natural,
     Posix,
@@ -142,7 +142,7 @@ std::optional<flag_store> parse(command const& command, string_view_list const& 
  */
 std::optional<flag_store> parse(command const& command, int argc, char const* const* argv);
 
-enum class help_element
+enum class help_element : uint8_t
 {
     Header,
     Braces,

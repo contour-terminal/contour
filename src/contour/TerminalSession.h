@@ -37,7 +37,7 @@ class ContourGuiApp;
 /**
  * A set of user-facing activities that are guarded behind a permission-check wall.
  */
-enum class GuardedRole
+enum class GuardedRole : uint8_t
 {
     ChangeFont,
     CaptureBuffer,

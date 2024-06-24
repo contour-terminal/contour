@@ -52,7 +52,7 @@ namespace detail
     };
 } // namespace detail
 
-enum class MouseCursorShape
+enum class MouseCursorShape : uint8_t
 {
     Hidden,
     PointingHand,
@@ -222,7 +222,7 @@ constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape shape)
 }
 
 /// Declares the screen-dirtiness-vs-rendering state.
-enum class RenderState
+enum class RenderState : uint8_t
 {
     CleanIdle,     //!< No screen updates and no rendering currently in progress.
     DirtyIdle,     //!< Screen updates pending and no rendering currently in progress.

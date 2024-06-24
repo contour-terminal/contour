@@ -9,6 +9,7 @@ Checks: >-
   -bugprone-reserved-identifier,
   -bugprone-suspicious-include,
   -bugprone-unchecked-optional-access,
+  -bugprone-chained-comparison,
   clang-analyzer-core.*,
   clang-analyzer-cplusplus.*,
   clang-analyzer-deadcode.*,
@@ -66,12 +67,12 @@ Checks: >-
   -readability-use-anyofallof,
   misc-const-correctness,
 WarningsAsErrors: >-
+  performance-enum-size,
   readability-identifier-naming,
   misc-const-correctness,
   modernize-use-nullptr,
 UseColor: true
-HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer)/'
-AnalyzeTemporaryDtors: false
+HeaderFilterRegex: "contour\/src\/(.*)h"
 FormatStyle:     none
 CheckOptions:
   - key:             bugprone-easily-swappable-parameters.MinimumLength

@@ -12,7 +12,7 @@ namespace vtbackend
 
 class Terminal;
 
-enum class JumpOver
+enum class JumpOver : uint8_t
 {
     Yes,
     No

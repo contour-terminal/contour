@@ -7,14 +7,14 @@
 namespace vtrasterizer
 {
 
-enum class TextShapingEngine
+enum class TextShapingEngine : uint8_t
 {
     OpenShaper, //!< Uses open-source implementation: harfbuzz/freetype/fontconfig
     DWrite,     //!< native platform support: Windows
     CoreText,   //!< native platform support: macOS
 };
 
-enum class FontLocatorEngine
+enum class FontLocatorEngine : uint8_t
 {
     Mock,       //!< mock font locator API
     FontConfig, //!< platform independant font locator API
@@ -58,7 +58,7 @@ inline bool operator!=(FontDescriptions const& a, FontDescriptions const& b) noe
     return !(a == b);
 }
 
-enum class TextStyle
+enum class TextStyle : uint8_t
 {
     Invalid = 0x00,
     Regular = 0x10,
