@@ -544,7 +544,6 @@ void TerminalSession::copyToClipboard(std::string_view data)
 
 void TerminalSession::openDocument(std::string_view fileOrUrl)
 {
-    auto stripped = strip_if(string(fileOrUrl), true);
     sessionLog()("openDocument: {}\n", fileOrUrl);
     QDesktopServices::openUrl(QUrl(QString::fromStdString(std::string(fileOrUrl))));
 }
@@ -987,7 +986,7 @@ bool TerminalSession::operator()(actions::CreateDebugDump)
     return true;
 }
 
-bool TerminalSession::operator()(actions::CreateSelection customSelector)
+bool TerminalSession::operator()(actions::CreateSelection const& customSelector)
 {
     _terminal.triggerWordWiseSelectionWithCustomDelimiters(customSelector.delimiters);
     return true;
@@ -1093,7 +1092,7 @@ bool TerminalSession::operator()(actions::NoSearchHighlight)
     return true;
 }
 
-bool TerminalSession::operator()(actions::OpenConfiguration)
+bool TerminalSession::operator()(actions::OpenConfiguration) const
 {
     if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(_config.configFile.string().c_str()))))
         errorLog()("Could not open configuration file \"{}\".", _config.configFile.generic_string());

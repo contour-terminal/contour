@@ -42,7 +42,7 @@ struct BackgroundImage
     using Location = std::variant<std::filesystem::path, ImageDataPtr>;
 
     Location location;
-    crispy::strong_hash hash;
+    crispy::strong_hash hash {};
 
     // image configuration
     float opacity = 0.5; // normalized value

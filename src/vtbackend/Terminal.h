@@ -1166,7 +1166,10 @@ class Terminal
             terminal.sequenceHandler().writeText(codepoints, cellCount);
         }
         void writeTextEnd() { terminal.sequenceHandler().writeTextEnd(); }
-        size_t maxBulkTextSequenceWidth() const noexcept { return terminal.maxBulkTextSequenceWidth(); }
+        [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
+        {
+            return terminal.maxBulkTextSequenceWidth();
+        }
     };
 
     struct TerminalInstructionCounter

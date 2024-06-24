@@ -39,9 +39,9 @@ class failure
     constexpr failure& operator=(const failure&) = default;
     constexpr failure& operator=(failure&&) noexcept = default;
 
-    constexpr const E& error() const& noexcept { return _value; }
+    [[nodiscard]] constexpr const E& error() const& noexcept { return _value; }
     constexpr E& error() & noexcept { return _value; }
-    constexpr const E&& error() const&& noexcept { return std::move(_value); }
+    [[nodiscard]] constexpr const E&& error() const&& noexcept { return std::move(_value); }
     constexpr E&& error() && noexcept { return std::move(_value); }
 
     constexpr void swap(failure& other) noexcept { std::swap(_value, other._value); }

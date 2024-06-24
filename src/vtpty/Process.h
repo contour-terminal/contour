@@ -96,7 +96,7 @@ class [[nodiscard]] Process: public Pty
     void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override { return pty().isClosed(); }
     [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& storage, std::optional<std::chrono::milliseconds> timeout, size_t n) override { return pty().read(storage, timeout, n); }
-    void wakeupReader() override { return pty().wakeupReader(); }
+    void wakeupReader() override { pty().wakeupReader(); }
     [[nodiscard]] int write(std::string_view data) override { return pty().write(data); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }

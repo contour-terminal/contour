@@ -264,8 +264,6 @@ void app::customizeLogStoreOutput()
             return { tagStart, msgStart, resetSGR };
         }();
 
-        auto const fileName = fs::path(msg.location().file_name()).filename().string();
-
         // // fileName with path to file relative to project root
         // auto const srcIndex = string_view(msg.location().file_name()).find("src");
         // auto const fileName = string(srcIndex != string_view::npos

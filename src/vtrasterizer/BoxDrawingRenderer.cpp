@@ -965,9 +965,10 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
     {
         auto const supersamplingFactor = []() {
             auto constexpr EnvName = "SSA_FACTOR";
-            if (!getenv(EnvName))
+            auto* const envValue = getenv(EnvName);
+            if (!envValue)
                 return 2;
-            auto const val = atoi(getenv(EnvName));
+            auto const val = atoi(envValue);
             if (!(val >= 1 && val <= 8))
                 return 1;
             return val;
@@ -1043,38 +1044,20 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     auto const ld = [=](Ratio a, Ratio b) {
         return lowerDiagonalMosaic(size, a, b);
     };
-    auto const lineArt =
-#if __cplusplus > 201703L
-        [=, this]
-#else
-        [=]
-#endif
-        () {
-            auto b = blockElement<2>(size);
-            b.getlineThickness(_gridMetrics.underline.thickness);
-            return b;
-        };
-    auto const progressBar =
-#if __cplusplus > 201703L
-        [=, this]
-#else
-        [=]
-#endif
-        () {
-            return ProgressBar { size, _gridMetrics.underline.position };
-        };
-    auto const segmentArt =
-#if __cplusplus > 201703L
-        [=, this]
-#else
-        [=]
-#endif
-        () {
-            auto constexpr AntiAliasingSamplingFactor = 1;
-            return blockElement<AntiAliasingSamplingFactor>(size)
-                .getlineThickness(_gridMetrics.underline.thickness)
-                .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
-        };
+    auto const lineArt = [size, this]() {
+        auto b = blockElement<2>(size);
+        b.getlineThickness(_gridMetrics.underline.thickness);
+        return b;
+    };
+    auto const progressBar = [size, this]() {
+        return ProgressBar { size, _gridMetrics.underline.position };
+    };
+    auto const segmentArt = [size, this]() {
+        auto constexpr AntiAliasingSamplingFactor = 1;
+        return blockElement<AntiAliasingSamplingFactor>(size)
+            .getlineThickness(_gridMetrics.underline.thickness)
+            .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
+    };
 
     // TODO: just check notcurses-info to get an idea what may be missing
     // clang-format off

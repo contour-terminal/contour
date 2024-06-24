@@ -470,7 +470,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         logger()("color palette loading from file {}", filePath.string());
         try
         {
-            return loadFromEntry(YAML::Load(fileContents.value()), where);
+            loadFromEntry(YAML::Load(fileContents.value()), where);
+            return;
         }
         catch (std::exception const& e)
         {
@@ -1874,7 +1875,7 @@ std::string createString(Config const& c)
             fmt::arg("comment", "#")));
     };
 
-    if (c.platformPlugin.value() == "")
+    if (c.platformPlugin.value().empty())
     {
         processWithDoc(documentation::PlatformPlugin, std::string { "auto" });
     }

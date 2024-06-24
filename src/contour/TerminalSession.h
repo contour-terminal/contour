@@ -243,26 +243,26 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void attachDisplay(display::TerminalDisplay& display);
     void detachDisplay(display::TerminalDisplay& display);
 
-    Q_INVOKABLE void applyPendingFontChange(bool answer, bool remember);
-    Q_INVOKABLE void executePendingBufferCapture(bool answer, bool remember);
-    Q_INVOKABLE void executeShowHostWritableStatusLine(bool answer, bool remember);
+    Q_INVOKABLE void applyPendingFontChange(bool allow, bool remember);
+    Q_INVOKABLE void executePendingBufferCapture(bool allow, bool remember);
+    Q_INVOKABLE void executeShowHostWritableStatusLine(bool allow, bool remember);
     Q_INVOKABLE void adaptToWidgetSize();
 
     void updateColorPreference(vtbackend::ColorPreference preference);
 
     // vtbackend::Events
     //
-    void requestCaptureBuffer(vtbackend::LineCount lineCount, bool logical) override;
+    void requestCaptureBuffer(vtbackend::LineCount lines, bool logical) override;
     void bell() override;
     void bufferChanged(vtbackend::ScreenType) override;
     void renderBufferUpdated() override;
     void screenUpdated() override;
     vtbackend::FontDef getFontDef() override;
-    void setFontDef(vtbackend::FontDef const& fontSpec) override;
+    void setFontDef(vtbackend::FontDef const& fontDef) override;
     void copyToClipboard(std::string_view data) override;
     void openDocument(std::string_view /*fileOrUrl*/) override;
     void inspect() override;
-    void notify(std::string_view title, std::string_view body) override;
+    void notify(std::string_view title, std::string_view content) override;
     void onClosed() override;
     void pasteFromClipboard(unsigned count, bool strip) override;
     void onSelectionCompleted() override;
@@ -311,7 +311,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::CopyPreviousMarkRange);
     bool operator()(actions::CopySelection);
     bool operator()(actions::CreateDebugDump);
-    bool operator()(actions::CreateSelection);
+    bool operator()(actions::CreateSelection const&);
     bool operator()(actions::DecreaseFontSize);
     bool operator()(actions::DecreaseOpacity);
     bool operator()(actions::FollowHyperlink);
@@ -321,7 +321,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::IncreaseOpacity);
     bool operator()(actions::NewTerminal const&);
     bool operator()(actions::NoSearchHighlight);
-    bool operator()(actions::OpenConfiguration);
+    bool operator()(actions::OpenConfiguration) const;
     bool operator()(actions::OpenFileManager);
     bool operator()(actions::OpenSelection);
     bool operator()(actions::PasteClipboard);

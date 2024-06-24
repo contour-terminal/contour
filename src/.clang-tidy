@@ -76,7 +76,7 @@ WarningsAsErrors: >-
   modernize-use-nullptr,
   modernize-use-constraints,
 UseColor: true
-HeaderFilterRegex: "contour/src"
+HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer)/'
 FormatStyle:     none
 CheckOptions:
   - key:             bugprone-easily-swappable-parameters.MinimumLength
