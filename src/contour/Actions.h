@@ -264,14 +264,14 @@ struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
         HANDLE_ACTION(ViNormalMode);
         if (std::holds_alternative<contour::actions::WriteScreen>(_action))
         {
-            const auto WriteScreenAction = std::get<contour::actions::WriteScreen>(_action);
-            name = fmt::format("{} chars: '{}'", WriteScreenAction, WriteScreenAction.chars);
+            const auto writeScreenAction = std::get<contour::actions::WriteScreen>(_action);
+            name = fmt::format("{} chars: '{}'", writeScreenAction, writeScreenAction.chars);
         }
         if (std::holds_alternative<contour::actions::CreateSelection>(_action))
         {
-            const auto CreateSelectionAction = std::get<contour::actions::CreateSelection>(_action);
+            const auto createSelectionAction = std::get<contour::actions::CreateSelection>(_action);
             name =
-                fmt::format("{} delimiters: '{}'", CreateSelectionAction, CreateSelectionAction.delimiters);
+                fmt::format("{} delimiters: '{}'", createSelectionAction, createSelectionAction.delimiters);
         }
         // }}}
         return formatter<string_view>::format(name, ctx);

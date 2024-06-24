@@ -72,7 +72,7 @@ WarningsAsErrors: >-
   misc-const-correctness,
   modernize-use-nullptr,
 UseColor: true
-HeaderFilterRegex: "contour\/src\/(.*)h"
+HeaderFilterRegex: "contour/src"
 FormatStyle:     none
 CheckOptions:
   - key:             bugprone-easily-swappable-parameters.MinimumLength

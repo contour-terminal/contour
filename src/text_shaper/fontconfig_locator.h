@@ -24,8 +24,8 @@ class fontconfig_locator: public font_locator
     [[nodiscard]] font_source_list resolve(gsl::span<const char32_t> codepoints) override;
 
   private:
-    struct Private;
-    std::unique_ptr<Private, void (*)(Private*)> _d;
+    struct private_tag;
+    std::unique_ptr<private_tag, void (*)(private_tag*)> _d;
 };
 
 } // namespace text

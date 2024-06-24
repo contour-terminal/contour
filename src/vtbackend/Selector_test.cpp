@@ -76,6 +76,7 @@ template <typename T>
 TextSelection(Screen<T> const&) -> TextSelection<T>;
 } // namespace
 
+// NOLINTBEGIN(misc-const-correctness)
 TEST_CASE("Selector.Linear", "[selector]")
 {
     auto screenEvents = ScreenEvents {};
@@ -254,3 +255,4 @@ TEST_CASE("Selector.Rectangular", "[selector]")
 {
     // TODO
 }
+// NOLINTEND(misc-const-correctness)

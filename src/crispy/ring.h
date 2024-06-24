@@ -14,9 +14,9 @@ namespace crispy
 {
 
 template <typename T, typename Vector>
-struct RingIterator;
+struct ring_iterator;
 template <typename T, typename Vector>
-struct RingReverseIterator;
+struct ring_reverse_iterator;
 
 /**
  * Implements an efficient ring buffer over type T
@@ -27,10 +27,10 @@ class basic_ring // NOLINT(readability-identifier-naming)
 {
   public:
     using value_type = T;
-    using iterator = RingIterator<value_type, Vector>;
-    using const_iterator = RingIterator<value_type const, Vector>;
-    using reverse_iterator = RingReverseIterator<value_type, Vector>;
-    using const_reverse_iterator = RingReverseIterator<value_type const, Vector>;
+    using iterator = ring_iterator<value_type, Vector>;
+    using const_iterator = ring_iterator<value_type const, Vector>;
+    using reverse_iterator = ring_reverse_iterator<value_type, Vector>;
+    using const_reverse_iterator = ring_reverse_iterator<value_type const, Vector>;
     using difference_type = long;
     using offset_type = long;
 
@@ -184,7 +184,7 @@ using fixed_size_ring = basic_ring<T, std::array<T, N>>;
 
 // {{{ iterator
 template <typename T, typename Vector>
-struct RingIterator
+struct ring_iterator
 {
     using iterator_category = std::random_access_iterator_tag;
     using value_type = T;
@@ -195,75 +195,76 @@ struct RingIterator
     basic_ring<T, Vector>* ring {};
     difference_type current {};
 
-    RingIterator(basic_ring<T, Vector>* aRing, difference_type aCurrent): ring { aRing }, current { aCurrent }
+    ring_iterator(basic_ring<T, Vector>* aRing, difference_type aCurrent):
+        ring { aRing }, current { aCurrent }
     {
     }
 
-    RingIterator() = default;
+    ring_iterator() = default;
 
-    RingIterator(RingIterator const&) = default;
-    RingIterator& operator=(RingIterator const&) = default;
+    ring_iterator(ring_iterator const&) = default;
+    ring_iterator& operator=(ring_iterator const&) = default;
 
-    RingIterator(RingIterator&&) noexcept = default;
-    RingIterator& operator=(RingIterator&&) noexcept = default;
+    ring_iterator(ring_iterator&&) noexcept = default;
+    ring_iterator& operator=(ring_iterator&&) noexcept = default;
 
-    RingIterator& operator++() noexcept
+    ring_iterator& operator++() noexcept
     {
         ++current;
         return *this;
     }
 
-    RingIterator operator++(int) noexcept
+    ring_iterator operator++(int) noexcept
     {
         auto old = *this;
         ++(*this);
         return old;
     }
 
-    RingIterator& operator--() noexcept
+    ring_iterator& operator--() noexcept
     {
         --current;
         return *this;
     }
 
-    RingIterator operator--(int) noexcept
+    ring_iterator operator--(int) noexcept
     {
         auto old = *this;
         --(*this);
         return old;
     }
 
-    RingIterator& operator+=(int n) noexcept
+    ring_iterator& operator+=(int n) noexcept
     {
         current += n;
         return *this;
     }
-    RingIterator& operator-=(int n) noexcept
+    ring_iterator& operator-=(int n) noexcept
     {
         current -= n;
         return *this;
     }
 
-    RingIterator operator+(difference_type n) noexcept { return RingIterator { ring, current + n }; }
-    RingIterator operator-(difference_type n) noexcept { return RingIterator { ring, current - n }; }
+    ring_iterator operator+(difference_type n) noexcept { return ring_iterator { ring, current + n }; }
+    ring_iterator operator-(difference_type n) noexcept { return ring_iterator { ring, current - n }; }
 
-    RingIterator operator+(RingIterator const& rhs) const noexcept
+    ring_iterator operator+(ring_iterator const& rhs) const noexcept
     {
-        return RingIterator { ring, current + rhs.current };
+        return ring_iterator { ring, current + rhs.current };
     }
-    difference_type operator-(RingIterator const& rhs) const noexcept { return current - rhs.current; }
+    difference_type operator-(ring_iterator const& rhs) const noexcept { return current - rhs.current; }
 
-    friend RingIterator operator+(difference_type n, RingIterator a)
+    friend ring_iterator operator+(difference_type n, ring_iterator a)
     {
-        return RingIterator { a.ring, n + a.current };
+        return ring_iterator { a.ring, n + a.current };
     }
-    friend RingIterator operator-(difference_type n, RingIterator a)
+    friend ring_iterator operator-(difference_type n, ring_iterator a)
     {
-        return RingIterator { a.ring, n - a.current };
+        return ring_iterator { a.ring, n - a.current };
     }
 
-    bool operator==(RingIterator const& rhs) const noexcept { return current == rhs.current; }
-    bool operator!=(RingIterator const& rhs) const noexcept { return current != rhs.current; }
+    bool operator==(ring_iterator const& rhs) const noexcept { return current == rhs.current; }
+    bool operator!=(ring_iterator const& rhs) const noexcept { return current != rhs.current; }
 
     T& operator*() noexcept { return (*ring)[current]; }
     T const& operator*() const noexcept { return (*ring)[current]; }
@@ -275,7 +276,7 @@ struct RingIterator
 
 // {{{ reverse iterator
 template <typename T, typename Vector>
-struct RingReverseIterator
+struct ring_reverse_iterator
 {
     using iterator_category = std::random_access_iterator_tag;
     using value_type = T;
@@ -286,68 +287,71 @@ struct RingReverseIterator
     basic_ring<T, Vector>* ring;
     difference_type current;
 
-    RingReverseIterator(basic_ring<T, Vector>* ring, difference_type current):
+    ring_reverse_iterator(basic_ring<T, Vector>* ring, difference_type current):
         ring { ring }, current { current }
     {
     }
 
-    RingReverseIterator(RingReverseIterator const&) = default;
-    RingReverseIterator& operator=(RingReverseIterator const&) = default;
+    ring_reverse_iterator(ring_reverse_iterator const&) = default;
+    ring_reverse_iterator& operator=(ring_reverse_iterator const&) = default;
 
-    RingReverseIterator(RingReverseIterator&&) noexcept = default;
-    RingReverseIterator& operator=(RingReverseIterator&&) noexcept = default;
+    ring_reverse_iterator(ring_reverse_iterator&&) noexcept = default;
+    ring_reverse_iterator& operator=(ring_reverse_iterator&&) noexcept = default;
 
-    RingReverseIterator& operator++() noexcept
+    ring_reverse_iterator& operator++() noexcept
     {
         ++current;
         return *this;
     }
-    RingReverseIterator& operator++(int) noexcept { return ++(*this); }
+    ring_reverse_iterator& operator++(int) noexcept { return ++(*this); }
 
-    RingReverseIterator& operator--() noexcept
+    ring_reverse_iterator& operator--() noexcept
     {
         --current;
         return *this;
     }
-    RingReverseIterator& operator--(int) noexcept { return --(*this); }
+    ring_reverse_iterator& operator--(int) noexcept { return --(*this); }
 
-    RingReverseIterator& operator+=(int n) noexcept
+    ring_reverse_iterator& operator+=(int n) noexcept
     {
         current += n;
         return *this;
     }
-    RingReverseIterator& operator-=(int n) noexcept
+    ring_reverse_iterator& operator-=(int n) noexcept
     {
         current -= n;
         return *this;
     }
 
-    RingReverseIterator operator+(difference_type n) noexcept
+    ring_reverse_iterator operator+(difference_type n) noexcept
     {
-        return RingReverseIterator { ring, current + n };
+        return ring_reverse_iterator { ring, current + n };
     }
-    RingReverseIterator operator-(difference_type n) noexcept
+    ring_reverse_iterator operator-(difference_type n) noexcept
     {
-        return RingReverseIterator { ring, current - n };
-    }
-
-    RingReverseIterator operator+(RingReverseIterator const& rhs) const noexcept
-    {
-        return RingReverseIterator { ring, current + rhs.current };
-    }
-    difference_type operator-(RingReverseIterator const& rhs) const noexcept { return current - rhs.current; }
-
-    friend RingReverseIterator operator+(difference_type n, RingReverseIterator a)
-    {
-        return RingReverseIterator { a.ring, n + a.current };
-    }
-    friend RingReverseIterator operator-(difference_type n, RingReverseIterator a)
-    {
-        return RingReverseIterator { a.ring, n - a.current };
+        return ring_reverse_iterator { ring, current - n };
     }
 
-    bool operator==(RingReverseIterator const& rhs) const noexcept { return current == rhs.current; }
-    bool operator!=(RingReverseIterator const& rhs) const noexcept { return current != rhs.current; }
+    ring_reverse_iterator operator+(ring_reverse_iterator const& rhs) const noexcept
+    {
+        return ring_reverse_iterator { ring, current + rhs.current };
+    }
+    difference_type operator-(ring_reverse_iterator const& rhs) const noexcept
+    {
+        return current - rhs.current;
+    }
+
+    friend ring_reverse_iterator operator+(difference_type n, ring_reverse_iterator a)
+    {
+        return ring_reverse_iterator { a.ring, n + a.current };
+    }
+    friend ring_reverse_iterator operator-(difference_type n, ring_reverse_iterator a)
+    {
+        return ring_reverse_iterator { a.ring, n - a.current };
+    }
+
+    bool operator==(ring_reverse_iterator const& rhs) const noexcept { return current == rhs.current; }
+    bool operator!=(ring_reverse_iterator const& rhs) const noexcept { return current != rhs.current; }
 
     T& operator*() noexcept { return (*ring)[ring->size() - current - 1]; }
     T const& operator*() const noexcept { return (*ring)[ring->size() - current - 1]; }

@@ -127,18 +127,18 @@ namespace
 
 } // namespace
 
-struct fontconfig_locator::Private
+struct fontconfig_locator::private_tag
 {
     // currently empty, maybe later something (such as caching)?
     FcConfig* ftConfig = nullptr;
 
-    Private()
+    private_tag()
     {
         FcInit();
         ftConfig = FcInitLoadConfigAndFonts(); // Most convenient of all the alternatives
     }
 
-    ~Private()
+    ~private_tag()
     {
         locatorLog()("~fontconfig_locator.dtor");
         FcConfigDestroy(ftConfig);
@@ -147,7 +147,7 @@ struct fontconfig_locator::Private
 };
 
 fontconfig_locator::fontconfig_locator():
-    _d { new Private(), [](Private* p) {
+    _d { new private_tag(), [](private_tag* p) {
             delete p;
         } }
 {

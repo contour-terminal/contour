@@ -43,6 +43,7 @@ using namespace vtbackend::test;
 // TODO: Writing text, leading to page-scroll properly updates viewport.
 // TODO: Writing text, leading to page-scroll properly updates active selection.
 
+// NOLINTBEGIN(misc-const-correctness)
 TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 {
     auto mc = MockTerm { ColumnCount { 6 }, LineCount { 4 } };
@@ -422,3 +423,5 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
     mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
     CHECK(mock.terminal.extractSelectionText().empty());
 }
+
+// NOLINTEND(misc-const-correctness)

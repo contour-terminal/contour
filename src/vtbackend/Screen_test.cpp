@@ -135,6 +135,8 @@ MockTerm<vtpty::MockPty> screenForDECRA()
 } // namespace
 // }}}
 
+// NOLINTBEGIN(misc-const-correctness)
+
 // {{{ writeText
 // AutoWrap disabled: text length is less then available columns in line.
 TEST_CASE("writeText.bulk.A.1", "[screen]")
@@ -3780,3 +3782,8 @@ TEST_CASE("LS1 and LS0", "[screen]")
 // TODO: DeviceStatusReport
 // TODO: SendDeviceAttributes
 // TODO: SendTerminalId
+
+// NOLINTEND(misc-const-correctness)
+
+// NOLINTBEGIN(misc-const-correctness)
+// NOLINTEND(misc-const-correctness)

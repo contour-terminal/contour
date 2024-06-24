@@ -44,6 +44,7 @@ namespace cli = crispy::cli;
 using namespace std::string_view_literals;
 using namespace std::string_literals;
 
+// NOLINTBEGIN(misc-const-correctness)
 TEST_CASE("CLI.option.type.bool")
 {
     auto const cmd = cli::command {
@@ -119,3 +120,4 @@ TEST_CASE("CLI.contour-full-test")
     CHECK(flags.values.at("contour.capture.output") == cli::value { "out.vt"s });
     CHECK(flags.values.at("contour.capture.timeout") == cli::value { 1.0 });
 }
+// NOLINTEND(misc-const-correctness)

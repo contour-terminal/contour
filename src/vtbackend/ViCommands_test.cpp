@@ -65,6 +65,7 @@ auto setupMockTerminal(std::string_view text,
 } // namespace
 // }}}
 
+// NOLINTBEGIN(misc-const-correctness)
 TEST_CASE("vi.motions: |", "[vi]")
 {
     // The meaning of this code shall not be questioned. It's purely for testing.
@@ -206,3 +207,4 @@ TEST_CASE("ViCommands:modeChanged", "[vi]")
         REQUIRE(mock.terminal.search().pattern.empty());
     }
 }
+// NOLINTEND(misc-const-correctness)
