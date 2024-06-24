@@ -65,12 +65,16 @@ Checks: >-
   -readability-simplify-boolean-expr,
   -readability-uppercase-literal-suffix,
   -readability-use-anyofallof,
+  -readability-redundant-member-init,
+  -readability-redundant-inline-specifier,
+  -readability-redundant-casting,
   misc-const-correctness,
 WarningsAsErrors: >-
   performance-enum-size,
   readability-identifier-naming,
   misc-const-correctness,
   modernize-use-nullptr,
+  modernize-use-constraints,
 UseColor: true
 HeaderFilterRegex: "contour/src"
 FormatStyle:     none
