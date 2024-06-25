@@ -13,27 +13,12 @@ class font_locator_provider
   public:
     static font_locator_provider& get();
 
-#if defined(__APPLE__)
-    font_locator& coretext();
-#endif
+    font_locator& native();
 
-#if defined(_WIN32)
-    font_locator& directwrite();
-#endif
-
-    font_locator& fontconfig();
     font_locator& mock();
 
   private:
-#if defined(__APPLE__)
-    std::unique_ptr<font_locator> _coretext {};
-#endif
-
-#if defined(_WIN32)
-    std::unique_ptr<font_locator> _directwrite {};
-#endif
-
-    std::unique_ptr<font_locator> _fontconfig {};
+    std::unique_ptr<font_locator> _native {};
     std::unique_ptr<font_locator> _mock {};
 };
 

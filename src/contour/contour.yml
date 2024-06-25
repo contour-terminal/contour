@@ -370,9 +370,7 @@ profiles:
             # This is implicitly also responsible for font fallback
             # Possible values are:
             # - native          : automatically choose the best available on the current platform
-            # - fontconfig      : uses fontconfig to select fonts
-            # - CoreText        : uses macOS CoreText to select fonts.
-            # - DirectWrite     : selects DirectWrite engine (Windows only)
+            # - mock            : a mock locator that does not actually locate any fonts (for development testing)
             locator: native
 
             # Text shaping related settings

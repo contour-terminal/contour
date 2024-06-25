@@ -18,32 +18,20 @@ font_locator_provider& font_locator_provider::get()
     return instance;
 }
 
+font_locator& font_locator_provider::native()
+{
+    if (!_native)
+    {
 #if defined(__APPLE__)
-font_locator& font_locator_provider::coretext()
-{
-    if (!_coretext)
-        _coretext = make_unique<coretext_locator>();
-
-    return *_coretext;
-}
+        _native = make_unique<coretext_locator>();
+#elif defined(_WIN32)
+        _native = make_unique<directwrite_locator>();
+#else
+        _native = make_unique<fontconfig_locator>();
 #endif
+    }
 
-#if defined(_WIN32)
-font_locator& font_locator_provider::directwrite()
-{
-    if (!_directwrite)
-        _directwrite = make_unique<directwrite_locator>();
-
-    return *_directwrite;
-}
-#endif
-
-font_locator& font_locator_provider::fontconfig()
-{
-    if (!_fontconfig)
-        _fontconfig = make_unique<fontconfig_locator>();
-
-    return *_fontconfig;
+    return *_native;
 }
 
 font_locator& font_locator_provider::mock()
