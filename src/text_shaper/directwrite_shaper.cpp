@@ -78,7 +78,7 @@ namespace
                     float const redAlpha = a * srcR / 255.0;
                     float const greenAlpha = a * srcG / 255.0;
                     float const blueAlpha = a * srcB / 255.0;
-                    float const averageAlpha = (redAlpha + greenAlpha + blueAlpha) / 3.0;
+                    float const averageAlpha = (redAlpha + greenAlpha + blueAlpha) / 3.0f;
 
                     auto const currentR = *_it;
                     auto const currentG = *(_it + 1);
@@ -268,7 +268,7 @@ struct directwrite_shaper::Private
         return int(maxAdvance);
     }
 
-    float pixelPerDip() { return dpi_.x / 96.0; }
+    float pixelPerDip() { return static_cast<float>(dpi_.x) / 96.0f; }
 };
 
 directwrite_shaper::directwrite_shaper(DPI _dpi, font_locator& _locator):
@@ -464,7 +464,7 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
 {
     DxFontInfo const& fontInfo = d->fonts.at(_glyph.font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace;
-    float const fontEmSize = ptToEm(_glyph.size.pt);
+    float const fontEmSize = static_cast<float>(ptToEm(_glyph.size.pt));
 
     UINT16 const glyphIndex = static_cast<UINT16>(_glyph.index.value);
     DWRITE_GLYPH_OFFSET const glyphOffset {};

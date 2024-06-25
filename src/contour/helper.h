@@ -169,8 +169,9 @@ vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer);
 
 constexpr config::WindowMargins applyContentScale(config::WindowMargins margins, double contentScale) noexcept
 {
-    return { .horizontal = config::HorizontalMargin(unbox(margins.horizontal) * contentScale),
-             .vertical = config::VerticalMargin(unbox(margins.vertical) * contentScale) };
+    return { .horizontal =
+                 config::HorizontalMargin(static_cast<int>(unbox(margins.horizontal) * contentScale)),
+             .vertical = config::VerticalMargin(static_cast<int>(unbox(margins.vertical) * contentScale)) };
 }
 
 vtrasterizer::PageMargin computeMargin(vtbackend::ImageSize cellSize,

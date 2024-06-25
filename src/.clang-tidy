@@ -75,6 +75,7 @@ WarningsAsErrors: >-
   misc-const-correctness,
   modernize-use-nullptr,
   modernize-use-constraints,
+  bugprone-narrowing-conversions,
 UseColor: true
 HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer)/'
 FormatStyle:     none

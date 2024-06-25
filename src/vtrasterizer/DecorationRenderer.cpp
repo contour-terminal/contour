@@ -191,8 +191,9 @@ auto DecorationRenderer::createTileData(Decorator decoration,
                     auto const intensity = static_cast<uint8_t>(255 * fabs(y - y1));
                     // block.paintOver(x, yBase + y1, 255 - intensity);
                     // block.paintOver(x, yBase + y2, intensity);
-                    block.paintOverThick(x, yBase + y1, uint8_t(255 - intensity), thicknessHalf, 0);
-                    block.paintOverThick(x, yBase + y2, intensity, thicknessHalf, 0);
+                    block.paintOverThick(
+                        static_cast<int>(x), yBase + y1, uint8_t(255 - intensity), thicknessHalf, 0);
+                    block.paintOverThick(static_cast<int>(x), yBase + y2, intensity, thicknessHalf, 0);
                 }
                 return block.take();
             });

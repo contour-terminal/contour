@@ -292,13 +292,13 @@ namespace std
 template <>
 struct hash<text::font_key>
 {
-    std::size_t operator()(text::font_key key) const noexcept { return key.value; }
+    std::size_t operator()(text::font_key key) const noexcept { return key.value; } // NOLINT
 };
 
 template <>
 struct hash<text::glyph_index>
 {
-    std::size_t operator()(text::glyph_index index) const noexcept { return index.value; }
+    std::size_t operator()(text::glyph_index index) const noexcept { return index.value; } //NOLINT
 };
 
 template <>
