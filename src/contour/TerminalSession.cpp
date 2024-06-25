@@ -189,6 +189,8 @@ TerminalSession::TerminalSession(unique_ptr<vtpty::Pty> pty, ContourGuiApp& app)
     _profile { *_config.profile(_profileName) },
     _app { app },
     _currentColorPreference { app.colorPreference() },
+    _accumulatedScrollX { 0 },
+    _accumulatedScrollY { 0 },
     _terminal { *this,
                 std::move(pty),
                 createSettingsFromConfig(_config, _profile, _currentColorPreference),

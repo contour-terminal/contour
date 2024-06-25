@@ -1731,9 +1731,9 @@ template <CellConcept Cell>
 void Screen<Cell>::requestAnsiMode(unsigned int mode)
 {
     auto const modeResponse = [&](auto mode) -> ModeResponse {
-        if (isValidDECMode(mode))
+        if (isValidAnsiMode(mode))
         {
-            if (_terminal->isModeEnabled(static_cast<DECMode>(mode)))
+            if (_terminal->isModeEnabled(static_cast<AnsiMode>(mode)))
                 return ModeResponse::Set;
             else
                 return ModeResponse::Reset;

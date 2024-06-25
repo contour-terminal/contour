@@ -521,8 +521,8 @@ void TerminalDisplay::onBeforeSynchronize()
         return;
 
     // find screen with biggest width
-    QScreen* screenToUse = window()->screen();
-    for (auto screen: window()->screen()->virtualSiblings())
+    auto* screenToUse = window()->screen();
+    for (auto* screen: window()->screen()->virtualSiblings())
     {
         if (screen->size().width() > screenToUse->size().width())
         {

@@ -793,7 +793,7 @@ TEST_CASE("DSR.Unsolicited_ColorPaletteUpdated", "[screen]")
     mock.terminal.resetColorPalette(lightModeColors);
 
     // This must not trigger an unsolicited DSR by default.
-    REQUIRE(escape(mock.replyData()) == ""sv);
+    REQUIRE(escape(mock.replyData()).empty());
 
     // Request unsolicited DSRs for color palette updates.
     mock.writeToScreen(DECSM(toDECModeNum(DECMode::ReportColorPaletteUpdated)));
@@ -2645,7 +2645,6 @@ TEST_CASE("peek into history", "[screen]")
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     // first line in history
-    auto const m1 = screen.grid().lineText(LineOffset(-2));
     CHECK(screen.grid().lineText(LineOffset(-2)) == "123");
 
     // second line in history

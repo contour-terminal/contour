@@ -1344,7 +1344,6 @@ string Terminal::extractLastMarkRange() const
 
     for (auto lineNum = firstLine; lineNum <= lastLine; ++lineNum)
     {
-        auto const lineText = _primaryScreen.grid().lineAt(lineNum).toUtf8Trimmed();
         text += _primaryScreen.grid().lineAt(lineNum).toUtf8Trimmed();
         text += '\n';
     }
@@ -1355,7 +1354,7 @@ string Terminal::extractLastMarkRange() const
 // {{{ ScreenEvents overrides
 void Terminal::requestCaptureBuffer(LineCount lines, bool logical)
 {
-    return _eventListener.requestCaptureBuffer(lines, logical);
+    _eventListener.requestCaptureBuffer(lines, logical);
 }
 
 void Terminal::requestShowHostWritableStatusLine()
