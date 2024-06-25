@@ -581,8 +581,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept override;
 
-    void applyAndLog(FunctionDefinition const& function, Sequence const& seq);
-    [[nodiscard]] ApplyResult apply(FunctionDefinition const& function, Sequence const& seq);
+    void applyAndLog(Function const& function, Sequence const& seq);
+    [[nodiscard]] ApplyResult apply(Function const& function, Sequence const& seq);
 
     void fail(std::string const& message) const override;
 

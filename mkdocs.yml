@@ -105,6 +105,8 @@ nav:
     - Status line: demo/statusline.md
     - Input modes: input-modes.md
     - Size indicator: demo/size_indicator.md
+  - VT sequence reference:
+    - vt-sequence/index.md
   - VT extensions:
     - vt-extensions/index.md
     - vt-extensions/clickable-links.md

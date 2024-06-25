@@ -253,8 +253,8 @@ class Sequence
     /// @returns the raw VT-sequence string.
     [[nodiscard]] std::string raw() const;
 
-    [[nodiscard]] FunctionDefinition const* functionDefinition(
-        gsl::span<FunctionDefinition const> availableDefinitions) const noexcept
+    [[nodiscard]] Function const* functionDefinition(
+        gsl::span<Function const> availableDefinitions) const noexcept
     {
         return select(selector(), availableDefinitions);
     }

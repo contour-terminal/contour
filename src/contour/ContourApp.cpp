@@ -160,6 +160,7 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.generate.config", bind(&ContourApp::configAction, this));
     link("contour.generate.integration", bind(&ContourApp::integrationAction, this));
     link("contour.info.vt", bind(&ContourApp::infoVT, this));
+    link("contour.documentation.vt", bind(&ContourApp::documentationVT, this));
 }
 
 template <typename Callback>
@@ -176,6 +177,47 @@ auto withOutput(crispy::cli::flag_store const& flags, std::string const& name, C
     }
 
     return callback(*out);
+}
+
+int ContourApp::documentationVT()
+{
+    using category = vtbackend::FunctionCategory;
+    using namespace std::string_view_literals;
+
+    std::string info;
+    auto back = std::back_inserter(info);
+    fmt::format_to(back, "# {}\n", "VT sequences");
+    fmt::format_to(back, "{}\n\n", "List of VT sequences supported by Contour Terminal Emulator.");
+    for (auto const& [category, headline]: { std::pair { category::C0, "Control Codes"sv },
+                                             std::pair { category::ESC, "Escape Sequences"sv },
+                                             std::pair { category::CSI, "Control Sequences"sv },
+                                             std::pair { category::OSC, "Operating System Commands"sv },
+                                             std::pair { category::DCS, "Device Control Sequences"sv } })
+    {
+
+        fmt::format_to(back, "## {}\n\n", headline);
+
+        fmt::format_to(back, "| Sequence | Code | Description |\n");
+        fmt::format_to(back, "|----------|------|-------------|\n");
+        for (auto const& fn: vtbackend::allFunctions())
+        {
+            if (fn.category != category)
+                continue;
+
+            // This could be much more improved in good looking and informationally.
+            // We can also print short/longer description, minimum required VT level,
+            // colored output for easier reading, and maybe more.
+            fmt::format_to(back,
+                           "| `{:}` | {:} | {:} |\n",
+                           crispy::escapeMarkdown(fmt::format("{}", fn)),
+                           fn.documentation.mnemonic,
+                           fn.documentation.comment);
+        }
+        fmt::format_to(back, "\n");
+    }
+
+    std::cout << info;
+    return EXIT_SUCCESS;
 }
 
 int ContourApp::infoVT()
@@ -316,6 +358,12 @@ crispy::cli::command ContourApp::parameterDefinition() const
                 CLI::command_list {
                     CLI::command { "vt", "Prints general information about supported VT sequences." },
                 } },
+            CLI::command { "documentation",
+                           "Generate documentation for web page",
+                           CLI::option_list {},
+                           CLI::command_list {
+                               CLI::command { "vt", "VT sequence reference documentation" },
+                           } },
             CLI::command {
                 "generate",
                 "Generation utilities.",

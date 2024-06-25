@@ -893,7 +893,7 @@ class Terminal
     // @param includeSelection boolean to indicate whether or not to include colorize selection.
     void fillRenderBuffer(RenderBuffer& output, bool includeSelection); // <- acquires the lock
 
-    [[nodiscard]] gsl::span<FunctionDefinition const> activeSequences() const noexcept
+    [[nodiscard]] gsl::span<Function const> activeSequences() const noexcept
     {
         return _supportedVTSequences.activeSequences();
     }

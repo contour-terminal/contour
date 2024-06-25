@@ -26,6 +26,21 @@ jobs:
         run: |
           ./scripts/extract-changelog-from-metainfo.py metainfo.xml docs/release-notes.md
 
+      - name: "update APT database"
+        run: sudo apt -q update
+      - name: "install dependencies"
+        run: sudo env QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+      - name: Install CMake
+        uses: ssrobins/install-cmake@v1
+      - name: "Install-contour"
+        run: cmake --preset linux-debug -B build -G Ninja
+      - name: "build"
+        run: cmake --build build
+      - name: "create vt-sequence directory"
+        run: mkdir docs/vt-sequence
+      - name: "Generate vt documentation"
+        run: ./build/src/contour/contour documentation vt > docs/vt-sequence/index.md
+
       - name: Deploy docs
         uses: mhausenblas/mkdocs-deploy-gh-pages@master
         env:

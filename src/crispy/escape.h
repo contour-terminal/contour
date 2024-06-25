@@ -53,9 +53,31 @@ inline std::string escape(T begin, T end, numeric_escape numericEscape = numeric
     return result;
 }
 
+template <typename T>
+inline std::string escapeMarkdown(T begin, T end)
+{
+    static_assert(sizeof(*std::declval<T>()) == 1,
+                  "should be only 1 byte, such as: char, char8_t, uint8_t, byte, ...");
+
+    auto escapeMarkdown = [](uint8_t ch) -> std::string {
+        if (ch == '`')
+            return "``` ";
+        return fmt::format("{}", static_cast<char>(ch));
+    };
+    auto result = std::string {};
+    for (T cur = begin; cur != end; ++cur)
+        result += escapeMarkdown(static_cast<uint8_t>(*cur));
+    return result;
+}
+
 inline std::string escape(std::string_view s, numeric_escape numericEscape = numeric_escape::Hex)
 {
     return escape(begin(s), end(s), numericEscape);
+}
+
+inline std::string escapeMarkdown(std::string_view s)
+{
+    return escapeMarkdown(begin(s), end(s));
 }
 
 inline std::string unescape(std::string_view escapedText)
