@@ -453,6 +453,7 @@ elseif(APPLE)
 
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
+    install(FILES "res/entitlements.plist" DESTINATION "${App_Contents}")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${INSTALL_CMAKE_DIR}")
     install(DIRECTORY "shell-integration" DESTINATION "${INSTALL_CMAKE_DIR}")
 
