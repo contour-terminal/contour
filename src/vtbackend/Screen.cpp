@@ -1730,10 +1730,16 @@ enum class ModeResponse : uint8_t
 template <CellConcept Cell>
 void Screen<Cell>::requestAnsiMode(unsigned int mode)
 {
-    ModeResponse const modeResponse =
-        isValidAnsiMode(mode)
-            ? _terminal->isModeEnabled(static_cast<AnsiMode>(mode)) ? ModeResponse::Set : ModeResponse::Reset
-            : ModeResponse::NotRecognized;
+    auto const modeResponse = [&](auto mode) -> ModeResponse {
+        if (isValidDECMode(mode))
+        {
+            if (_terminal->isModeEnabled(static_cast<DECMode>(mode)))
+                return ModeResponse::Set;
+            else
+                return ModeResponse::Reset;
+        }
+        return ModeResponse::NotRecognized;
+    }(mode);
 
     auto const code = toAnsiModeNum(static_cast<AnsiMode>(mode));
 
@@ -1743,10 +1749,16 @@ void Screen<Cell>::requestAnsiMode(unsigned int mode)
 template <CellConcept Cell>
 void Screen<Cell>::requestDECMode(unsigned int mode)
 {
-    ModeResponse const modeResponse =
-        isValidDECMode(mode)
-            ? _terminal->isModeEnabled(static_cast<DECMode>(mode)) ? ModeResponse::Set : ModeResponse::Reset
-            : ModeResponse::NotRecognized;
+    auto const modeResponse = [&](auto mode) -> ModeResponse {
+        if (isValidDECMode(mode))
+        {
+            if (_terminal->isModeEnabled(static_cast<DECMode>(mode)))
+                return ModeResponse::Set;
+            else
+                return ModeResponse::Reset;
+        }
+        return ModeResponse::NotRecognized;
+    }(mode);
 
     auto const code = toDECModeNum(static_cast<DECMode>(mode));
 

@@ -72,6 +72,7 @@ Checks: >-
 WarningsAsErrors: >-
   performance-enum-size,
   readability-identifier-naming,
+  readability-avoid-nested-conditional-operator,
   misc-const-correctness,
   modernize-use-nullptr,
   modernize-use-constraints,

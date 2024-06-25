@@ -209,14 +209,13 @@ struct ConfigEntry
 
     std::string documentation = doc.value;
     constexpr ConfigEntry(): _value {} {}
-    //clang-format off
-    constexpr explicit ConfigEntry(T&& in): _value { std::forward<T>(in) } {}
+    constexpr explicit ConfigEntry(T in): _value { std::move(in) } {}
 
     template <typename F>
+        requires(!std::is_same_v<std::remove_cvref_t<F>, T>)
     constexpr explicit ConfigEntry(F&& in): _value { std::forward<F>(in) }
     {
     }
-    //clang-format on
 
     [[nodiscard]] constexpr T const& value() const { return _value; }
     [[nodiscard]] constexpr T& value() { return _value; }
@@ -932,20 +931,20 @@ struct YAMLConfigWriter: Writer
 
     static constexpr int OneOffset = 4;
     using Writer::format;
-    std::string static addOffset(std::string const& doc, size_t off)
+    std::string static addOffset(std::string_view doc, size_t off)
     {
         auto offset = std::string(off, ' ');
-        return std::regex_replace(doc, std::regex(".+\n"), offset + "$&");
+        return std::regex_replace(std::string { doc }, std::regex(".+\n"), offset + "$&");
     }
 
     template <typename T>
-    std::string process(std::string doc, T val)
+    std::string process(std::string_view doc, T val)
     {
         return format(addOffset(doc, Offset::levels * OneOffset), val);
     }
 
     template <typename... T>
-    std::string process(std::string doc, T... val)
+    std::string process(std::string_view doc, T... val)
     {
         return format(addOffset(doc, Offset::levels * OneOffset), val...);
     }

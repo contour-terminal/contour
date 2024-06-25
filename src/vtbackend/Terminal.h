@@ -215,6 +215,7 @@ class TraceHandler: public SequenceHandler
 /// gets updated according to the process' outputted text,
 /// whereas input to the process can be send high-level via the various
 /// send(...) member functions.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) // TODO
 class Terminal
 {
   public:
