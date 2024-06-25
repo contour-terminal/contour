@@ -186,8 +186,8 @@ int ContourApp::documentationVT()
 
     std::string info;
     auto back = std::back_inserter(info);
-    fmt::format_to(back, "#{}\n", "VT sequences");
-    fmt::format_to(back, "{}\n", "List of VT sequences supported by Contour Terminal Emulator.");
+    fmt::format_to(back, "# {}\n", "VT sequences");
+    fmt::format_to(back, "{}\n\n", "List of VT sequences supported by Contour Terminal Emulator.");
     for (auto const& [category, headline]: { std::pair { category::C0, "Control Codes"sv },
                                              std::pair { category::ESC, "Escape Sequences"sv },
                                              std::pair { category::CSI, "Control Sequences"sv },
@@ -195,8 +195,10 @@ int ContourApp::documentationVT()
                                              std::pair { category::DCS, "Device Control Sequences"sv } })
     {
 
-        fmt::format_to(back, "## {}\n", headline);
+        fmt::format_to(back, "## {}\n\n", headline);
 
+        fmt::format_to(back, "| Sequence | Code | Description |\n");
+        fmt::format_to(back, "|----------|------|-------------|\n");
         for (auto const& fn: vtbackend::allFunctions())
         {
             if (fn.category != category)
@@ -206,10 +208,10 @@ int ContourApp::documentationVT()
             // We can also print short/longer description, minimum required VT level,
             // colored output for easier reading, and maybe more.
             fmt::format_to(back,
-                           "`{:}` {:} [`{:}`] <br/>\n",
+                           "| `{:}` | {:} | {:} |\n",
+                           crispy::escapeMarkdown(fmt::format("{}", fn)),
                            fn.documentation.mnemonic,
-                           fn.documentation.comment,
-                           crispy::escapeMarkdown(fmt::format("{}", fn)));
+                           fn.documentation.comment);
         }
         fmt::format_to(back, "\n");
     }
