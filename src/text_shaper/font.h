@@ -298,7 +298,7 @@ struct hash<text::font_key>
 template <>
 struct hash<text::glyph_index>
 {
-    std::size_t operator()(text::glyph_index index) const noexcept { return index.value; } //NOLINT
+    std::size_t operator()(text::glyph_index index) const noexcept { return index.value; } // NOLINT
 };
 
 template <>
