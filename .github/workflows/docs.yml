@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Extract changes for the releases from metainfo.xml
         run: |
@@ -30,8 +30,10 @@ jobs:
         run: sudo apt -q update
       - name: "install dependencies"
         run: sudo env QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
-      - name: Install CMake
-        uses: ssrobins/install-cmake@v1
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
+      - name: "create build directory"
+        run: mkdir build
       - name: "Install-contour"
         run: cmake --preset linux-debug -B build -G Ninja
       - name: "build"
