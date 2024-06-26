@@ -45,7 +45,7 @@
         {
             "name": "linux-debug",
             "displayName": "Linux 64-bit",
-            "inherits": ["linux-common", "debug"]
+            "inherits": ["linux-common", "gcc-like-debug"]
         },
         {
             "name": "linux-clang-release",
@@ -55,7 +55,7 @@
         {
             "name": "linux-clang-debug",
             "displayName": "Linux 64-bit (Clang)",
-            "inherits": ["linux-clang", "debug"]
+            "inherits": ["linux-clang", "gcc-like-debug"]
         },
         {
             "name": "linux-gcc-release",
@@ -65,7 +65,7 @@
         {
             "name": "linux-gcc-debug",
             "displayName": "Linux 64-bit (GCC)",
-            "inherits": ["linux-gcc", "debug"]
+            "inherits": ["linux-gcc", "gcc-like-debug"]
         }
     ],
     "buildPresets": [

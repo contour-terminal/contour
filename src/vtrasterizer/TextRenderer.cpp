@@ -274,12 +274,15 @@ text::font_locator& createFontLocator(FontLocatorEngine engine)
             break;
 
         case FontLocatorEngine::FontConfig:
-            // default case below
-            break;
+#if !defined(_WIN32)
+            locatorLog()("Using font locator: fontconfig.");
+            return text::font_locator_provider::get().fontconfig();
+#else
+            locatorLog()("Font locator fontconfig not supported on this platform.");
+#endif
     }
 
-    locatorLog()("Using font locator: fontconfig.");
-    return text::font_locator_provider::get().fontconfig();
+    crispy::fatal("The impossible happened. No font locator selected.");
 }
 
 // TODO: What's a good value here? Or do we want to make that configurable,

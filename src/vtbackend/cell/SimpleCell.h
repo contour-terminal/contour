@@ -158,7 +158,7 @@ inline void SimpleCell::setCharacter(char32_t codepoint)
     if (codepoint)
     {
         _codepoints.push_back(codepoint);
-        setWidth(static_cast<uint8_t>(std::max(unicode::width(codepoint), 1)));
+        setWidth(static_cast<uint8_t>(std::max(unicode::width(codepoint), 1u)));
     }
     else
         setWidth(1);
@@ -166,6 +166,8 @@ inline void SimpleCell::setCharacter(char32_t codepoint)
 
 inline int SimpleCell::appendCharacter(char32_t codepoint)
 {
+    assert(codepoint != 0);
+    assert(!_codepoints.empty() && "Use setCharacter() for first character.");
     _codepoints.push_back(codepoint);
 
     auto const diff = CellUtil::computeWidthChange(*this, codepoint);

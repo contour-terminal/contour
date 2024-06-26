@@ -5,9 +5,9 @@
         {
             "name": "windows-common",
             "inherits": "contour-common",
+            "generator": "Visual Studio 17 2022",
             "displayName": "Windows - common settings",
             "hidden": true,
-            "toolset": "host=x64",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "condition": {
                 "type": "equals",
@@ -20,7 +20,7 @@
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_SYSTEM_VERSION": "10",
                 "CMAKE_VERBOSE_MAKEFILE": "ON",
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/../vcpkg/scripts/buildsystems/vcpkg.cmake"
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
             }
         },
         { "name": "windows-cl-debug", "inherits": ["windows-common", "debug"], "displayName": "Windows (MSVC) Debug", "description": "Using MSVC compiler (64-bit)" },

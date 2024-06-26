@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <crispy/logstore.h>
+
 #include <libunicode/convert.h>
-#include <libunicode/scan.h>
+#include <libunicode/grapheme_line_segmenter.h>
 
 #include <fmt/core.h>
 
@@ -19,6 +21,16 @@
 
 namespace vtparser
 {
+
+#if defined(__GNUC__) || defined(__clang__)
+    #define VTPARSER_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+    #define VTPARSER_NOINLINE __declspec(noinline)
+#else
+    #define VTPARSER_NOINLINE /*!*/
+#endif
+
+auto const inline vtTraceParserLog = logstore::category("vt.trace.parser", "Logs terminal parser trace.");
 
 // NOLINTBEGIN(readability-identifier-naming)
 enum class State : uint8_t
@@ -692,7 +704,10 @@ class Parser
 
     [[nodiscard]] State state() const noexcept { return _state; }
 
-    [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept { return _scanState.lastCodepointHint; }
+    [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept
+    {
+        return _graphemeLineSegmenter.last_codepoint_hint();
+    }
 
     void printUtf8Byte(char ch);
 
@@ -705,7 +720,12 @@ class Parser
         FallbackToFSM
     };
 
-    std::tuple<ProcessKind, size_t> parseBulkText(char const* begin, char const* end) noexcept;
+    auto parseBulkText(char const* begin, char const* end) noexcept -> std::tuple<ProcessKind, size_t>;
+    auto makeParseBulkResult(char const* begin,
+                             unsigned maxCharCount,
+                             unicode::StopCondition resultStopCondition,
+                             unsigned resultWidth,
+                             unsigned e) noexcept -> std::tuple<ProcessKind, size_t>;
     void processOnceViaStateMachine(uint8_t ch);
 
     void handle(ActionClass actionClass, Action action, uint8_t codepoint);
@@ -714,7 +734,7 @@ class Parser
     //
     State _state = State::Ground;
     EventListener& _eventListener;
-    unicode::scan_state _scanState {};
+    unicode::grapheme_line_segmenter<void> _graphemeLineSegmenter;
 };
 
 /// @returns parsed tuple with OSC code and offset to first data parameter byte.

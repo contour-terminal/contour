@@ -21,7 +21,10 @@ class font_locator_provider
     font_locator& directwrite();
 #endif
 
+#if !defined(_WIN32)
     font_locator& fontconfig();
+#endif
+
     font_locator& mock();
 
   private:
@@ -33,7 +36,9 @@ class font_locator_provider
     std::unique_ptr<font_locator> _directwrite {};
 #endif
 
+#if !defined(_WIN32)
     std::unique_ptr<font_locator> _fontconfig {};
+#endif
     std::unique_ptr<font_locator> _mock {};
 };
 

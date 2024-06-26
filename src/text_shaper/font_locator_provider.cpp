@@ -38,6 +38,7 @@ font_locator& font_locator_provider::directwrite()
 }
 #endif
 
+#if !defined(_WIN32)
 font_locator& font_locator_provider::fontconfig()
 {
     if (!_fontconfig)
@@ -45,6 +46,7 @@ font_locator& font_locator_provider::fontconfig()
 
     return *_fontconfig;
 }
+#endif
 
 font_locator& font_locator_provider::mock()
 {

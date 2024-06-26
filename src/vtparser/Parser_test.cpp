@@ -2,8 +2,13 @@
 #include <vtparser/Parser.h>
 #include <vtparser/ParserEvents.h>
 
+#include <crispy/App.h>
+#include <crispy/escape.h>
+
 #include <libunicode/convert.h>
 
+#define CATCH_CONFIG_RUNNER
+#include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 using namespace std;
@@ -17,9 +22,22 @@ class MockParserEvents final: public vtparser::NullParserEvents
     size_t maxCharCount = 80;
 
     void error(string_view const& msg) override { INFO(fmt::format("Parser error received. {}", msg)); }
-    void print(char32_t ch) override { text += unicode::convert_to<char>(ch); }
+
+    void execute(char ch) override
+    {
+        UNSCOPED_INFO(fmt::format("execute: U+{:X}", (unsigned) ch));
+        text += ch;
+    }
+
+    void print(char32_t ch) override
+    {
+        UNSCOPED_INFO(fmt::format("print: U+{:X}", (unsigned) ch));
+        text += unicode::convert_to<char>(ch);
+    }
+
     size_t print(std::string_view s, size_t cellCount) override
     {
+        UNSCOPED_INFO(fmt::format("print: {}", crispy::escape(s)));
         text += s;
         return maxCharCount -= cellCount;
     }
@@ -32,6 +50,17 @@ class MockParserEvents final: public vtparser::NullParserEvents
     void putPM(char ch) override { pm += ch; }
     void dispatchPM() override { pm += "}"; }
 };
+
+TEST_CASE("Parser.utf8_sequence", "[Parser]")
+{
+    MockParserEvents textListener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(textListener);
+
+    p.parseFragment("Hall\xC3\xB6le\r\nHow are you?");
+    // FIXME: a trailing zero is appended to the string, which is not expected.
+
+    CHECK(textListener.text == "Hall\xC3\xB6le\r\nHow are you?");
+}
 
 TEST_CASE("Parser.utf8_single", "[Parser]")
 {
@@ -64,4 +93,16 @@ TEST_CASE("Parser.APC")
     REQUIRE(p.state() == vtparser::State::Ground);
     REQUIRE(listener.apc == "{Gi=1,a=q;}");
     REQUIRE(listener.text == "ABCDEF");
+}
+
+int main(int argc, char const* argv[])
+{
+    crispy::app::basicSetup();
+
+    int const result = Catch::Session().run(argc, argv);
+
+    // avoid closing extern console to close on VScode/windows
+    // system("pause");
+
+    return result;
 }

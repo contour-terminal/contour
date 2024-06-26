@@ -50,12 +50,22 @@ class SequenceBuilder
     }
     void print(char32_t codepoint)
     {
+        if (vtParserLog)
+        {
+            if (codepoint < 0x80 && std::isprint(static_cast<char>(codepoint)))
+                vtParserLog()("Print: '{}'", static_cast<char>(codepoint));
+            else
+                vtParserLog()("Print: U+{:X}", (unsigned) codepoint);
+        }
         _incrementInstructionCounter();
         _handler.writeText(codepoint);
     }
 
     size_t print(std::string_view chars, size_t cellCount)
     {
+        if (vtParserLog)
+            vtParserLog()("Print: ({}) '{}'", cellCount, crispy::escape(chars));
+
         assert(!chars.empty());
 
         _incrementInstructionCounter(cellCount);
@@ -63,7 +73,13 @@ class SequenceBuilder
         return _handler.maxBulkTextSequenceWidth();
     }
 
-    void printEnd() { _handler.writeTextEnd(); }
+    void printEnd()
+    {
+        if (vtParserLog)
+            vtParserLog()("PrintEnd");
+
+        _handler.writeTextEnd();
+    }
 
     void execute(char controlCode) { _handler.executeControlCode(controlCode); }
 

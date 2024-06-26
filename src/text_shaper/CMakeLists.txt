@@ -2,7 +2,6 @@ set(text_shaper_SRC
     font.cpp font.h
     font_locator.h
     font_locator_provider.cpp font_locator_provider.h
-    fontconfig_locator.cpp fontconfig_locator.h
     mock_font_locator.cpp mock_font_locator.h
     open_shaper.cpp open_shaper.h
     shaper.cpp shaper.h
@@ -12,6 +11,8 @@ if("${CMAKE_SYSTEM}" MATCHES "Windows")
     list(APPEND text_shaper_SRC directwrite_analysis_wrapper.h)
     list(APPEND text_shaper_SRC directwrite_locator.cpp directwrite_locator.h)
     list(APPEND text_shaper_SRC directwrite_shaper.cpp directwrite_shaper.h)
+else()
+    list(APPEND text_shaper_SRC fontconfig_locator.cpp fontconfig_locator.h)
 endif()
 if(APPLE)
     list(APPEND text_shaper_SRC coretext_locator.h coretext_locator.mm)
@@ -52,12 +53,10 @@ elseif("${CMAKE_SYSTEM}" MATCHES "Linux" OR "${CMAKE_SYSTEM}" MATCHES "FreeBSD")
     list(APPEND TEXT_SHAPER_LIBS Fontconfig::Fontconfig)
 elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
     # installed via vcpkg
-    find_package(Fontconfig REQUIRED)
     find_package(harfbuzz CONFIG REQUIRED)
     find_package(Freetype REQUIRED)
     list(APPEND TEXT_SHAPER_LIBS harfbuzz harfbuzz::harfbuzz)
     list(APPEND TEXT_SHAPER_LIBS Freetype::Freetype)
-    list(APPEND TEXT_SHAPER_LIBS Fontconfig::Fontconfig)
     list(APPEND TEXT_SHAPER_LIBS dwrite)
 endif()
 

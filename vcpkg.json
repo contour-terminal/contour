@@ -8,7 +8,6 @@
         { "name": "ms-gsl"},
         { "name": "range-v3", "version>=": "0.12.0" },
         { "name": "yaml-cpp" },
-        "fontconfig",
         "freetype",
         "harfbuzz"
     ]
