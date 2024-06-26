@@ -252,6 +252,7 @@ optional<std::string> readConfigFile(std::string const& filename)
     return nullopt;
 }
 
+// NOLINTBEGIN(readability-convert-member-functions-to-static)
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      std::filesystem::path& where)
@@ -470,7 +471,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         logger()("color palette loading from file {}", filePath.string());
         try
         {
-            return loadFromEntry(YAML::Load(fileContents.value()), where);
+            loadFromEntry(YAML::Load(fileContents.value()), where);
+            return;
         }
         catch (std::exception const& e)
         {
@@ -984,6 +986,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             where = opt.value();
     }
 }
+// NOLINTEND(readability-convert-member-functions-to-static)
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
@@ -1333,6 +1336,7 @@ void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
         shell.env["COLORTERM"] = "truecolor";
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 std::optional<vtbackend::MouseButton> YAMLConfigReader::parseMouseButton(YAML::Node const& node)
 {
     using namespace std::literals::string_view_literals;
@@ -1421,6 +1425,7 @@ std::optional<std::variant<vtbackend::Key, char32_t>> YAMLConfigReader::parseKey
     return std::nullopt;
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 std::optional<vtbackend::Key> YAMLConfigReader::parseKey(std::string const& name)
 {
     using vtbackend::Key;
@@ -1582,6 +1587,7 @@ std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifier(YAML::Node c
     return mods;
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifierKey(std::string const& key)
 {
     using vtbackend::Modifier;
@@ -1874,7 +1880,7 @@ std::string createString(Config const& c)
             fmt::arg("comment", "#")));
     };
 
-    if (c.platformPlugin.value() == "")
+    if (c.platformPlugin.value().empty())
     {
         processWithDoc(documentation::PlatformPlugin, std::string { "auto" });
     }

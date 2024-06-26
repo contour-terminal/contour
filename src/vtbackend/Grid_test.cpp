@@ -134,6 +134,7 @@ Grid<Cell> setupGridForResizeTests2x3a3()
 
 } // namespace
 
+// NOLINTBEGIN(misc-const-correctness)
 TEST_CASE("Grid.setup", "[grid]")
 {
     auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(0));
@@ -899,3 +900,4 @@ TEST_CASE("Grid resize", "[grid]")
 }
 
 // }}}
+// NOLINTEND(misc-const-correctness)

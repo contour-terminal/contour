@@ -13,7 +13,7 @@
 namespace crispy
 {
 
-enum class numeric_escape
+enum class numeric_escape : uint8_t
 {
     Octal,
     Hex
@@ -85,7 +85,7 @@ inline std::string unescape(std::string_view escapedText)
     std::string out;
     out.reserve(escapedText.size());
 
-    enum class state_type
+    enum class state_type : uint8_t
     {
         Text,
         Escape,

@@ -421,12 +421,13 @@ size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view chars, size_t cellC
     {
         // Only use fastpath if the currently line hasn't been inflated already.
         // Because we might lose prior-written textual/SGR information otherwise.
-        line.setBuffer(TrivialLineBuffer { line.trivialBuffer().displayWidth,
-                                           _cursor.graphicsRendition,
-                                           line.trivialBuffer().fillAttributes,
-                                           _cursor.hyperlink,
-                                           ColumnCount::cast_from(cellCount),
-                                           crispy::BufferFragment { _terminal->currentPtyBuffer(), chars } });
+        line.setBuffer(
+            TrivialLineBuffer { line.trivialBuffer().displayWidth,
+                                _cursor.graphicsRendition,
+                                line.trivialBuffer().fillAttributes,
+                                _cursor.hyperlink,
+                                ColumnCount::cast_from(cellCount),
+                                crispy::buffer_fragment { _terminal->currentPtyBuffer(), chars } });
         advanceCursorAfterWrite(ColumnCount::cast_from(cellCount));
     }
     else
@@ -1717,7 +1718,7 @@ void Screen<Cell>::setMark()
     currentLine().setMarked(true);
 }
 
-enum class ModeResponse
+enum class ModeResponse : uint8_t
 { // TODO: respect response 0, 3, 4.
     NotRecognized = 0,
     Set = 1,
@@ -1729,10 +1730,16 @@ enum class ModeResponse
 template <CellConcept Cell>
 void Screen<Cell>::requestAnsiMode(unsigned int mode)
 {
-    ModeResponse const modeResponse =
-        isValidAnsiMode(mode)
-            ? _terminal->isModeEnabled(static_cast<AnsiMode>(mode)) ? ModeResponse::Set : ModeResponse::Reset
-            : ModeResponse::NotRecognized;
+    auto const modeResponse = [&](auto mode) -> ModeResponse {
+        if (isValidAnsiMode(mode))
+        {
+            if (_terminal->isModeEnabled(static_cast<AnsiMode>(mode)))
+                return ModeResponse::Set;
+            else
+                return ModeResponse::Reset;
+        }
+        return ModeResponse::NotRecognized;
+    }(mode);
 
     auto const code = toAnsiModeNum(static_cast<AnsiMode>(mode));
 
@@ -1742,10 +1749,16 @@ void Screen<Cell>::requestAnsiMode(unsigned int mode)
 template <CellConcept Cell>
 void Screen<Cell>::requestDECMode(unsigned int mode)
 {
-    ModeResponse const modeResponse =
-        isValidDECMode(mode)
-            ? _terminal->isModeEnabled(static_cast<DECMode>(mode)) ? ModeResponse::Set : ModeResponse::Reset
-            : ModeResponse::NotRecognized;
+    auto const modeResponse = [&](auto mode) -> ModeResponse {
+        if (isValidDECMode(mode))
+        {
+            if (_terminal->isModeEnabled(static_cast<DECMode>(mode)))
+                return ModeResponse::Set;
+            else
+                return ModeResponse::Reset;
+        }
+        return ModeResponse::NotRecognized;
+    }(mode);
 
     auto const code = toDECModeNum(static_cast<DECMode>(mode));
 

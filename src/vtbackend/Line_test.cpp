@@ -23,7 +23,7 @@ TEST_CASE("Line.BufferFragment", "[Line]")
     auto const bufferFragment = bufferObject->ref(0, 10);
 
     auto const externalView = string_view(bufferObject->data(), 10);
-    auto const fragment = BufferFragment(bufferObject, externalView);
+    auto const fragment = buffer_fragment(bufferObject, externalView);
     CHECK(fragment.view() == externalView);
 }
 

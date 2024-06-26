@@ -43,7 +43,6 @@ TEST_CASE("InputGenerator.Modifier.encodings")
 
 TEST_CASE("InputGenerator.consume")
 {
-    auto received = string {};
     auto input = InputGenerator {};
     input.generateRaw("ABCDEF"sv);
     REQUIRE(input.peek() == "ABCDEF"sv);
@@ -55,7 +54,7 @@ TEST_CASE("InputGenerator.consume")
     input.generateRaw("abcdef"sv);
     REQUIRE(input.peek() == "Fabcdef"sv);
     input.consume(7);
-    REQUIRE(input.peek() == ""sv);
+    REQUIRE(input.peek().empty());
 }
 
 TEST_CASE("InputGenerator.Ctrl+Space", "[terminal,input]")

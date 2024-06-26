@@ -23,7 +23,7 @@ class MatchModes
         Trace = 0x40,
     };
 
-    enum class Status
+    enum class Status : uint8_t
     {
         Any,
         Enabled,

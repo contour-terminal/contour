@@ -521,8 +521,8 @@ void TerminalDisplay::onBeforeSynchronize()
         return;
 
     // find screen with biggest width
-    QScreen* screenToUse = window()->screen();
-    for (auto screen: window()->screen()->virtualSiblings())
+    auto* screenToUse = window()->screen();
+    for (auto* screen: window()->screen()->virtualSiblings())
     {
         if (screen->size().width() > screenToUse->size().width())
         {
@@ -1119,7 +1119,7 @@ void TerminalDisplay::doDumpStateInternal()
         fs.close();
     }
 
-    enum class ImageBufferFormat
+    enum class ImageBufferFormat : uint8_t
     {
         RGBA,
         RGB,

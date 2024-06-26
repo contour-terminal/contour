@@ -12,6 +12,7 @@
 #include <range/v3/view/iota.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 
 namespace vtrasterizer
@@ -62,20 +63,20 @@ constexpr auto linearEq(crispy::point p1, crispy::point p2) noexcept
     };
 }
 
-enum class Dir
+enum class Dir : uint8_t
 {
     Top,
     Right,
     Bottom,
     Left
 };
-enum class Inverted
+enum class Inverted : uint8_t
 {
     No,
     Yes
 };
 
-enum Arc
+enum Arc : uint8_t
 {
     NoArc,
     TopLeft,

@@ -43,7 +43,7 @@ namespace
                || (192 <= codepoint && codepoint <= 255);
     }
 
-    enum class WordSkipClass
+    enum class WordSkipClass : uint8_t
     {
         Word,
         Keyword,

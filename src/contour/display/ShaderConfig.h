@@ -23,7 +23,7 @@
 namespace contour::display
 {
 
-enum class ShaderClass
+enum class ShaderClass : uint8_t
 {
     Background,
     Text

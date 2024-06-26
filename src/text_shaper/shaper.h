@@ -33,7 +33,7 @@ auto const inline rasterizerLog = logstore::category("font.render", "Logs detail
 auto const inline textShapingLog = logstore::category("font.textshaping", "Logs details about text shaping.");
 
 // NOLINTBEGIN(readability-identifier-naming)
-enum class bitmap_format
+enum class bitmap_format : uint8_t
 {
     alpha_mask,
     rgb,

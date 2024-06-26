@@ -5,7 +5,7 @@ namespace crispy
 {
 
 template class buffer_object<char>;
-template class BufferFragment<char>;
+template class buffer_fragment<char>;
 template class buffer_object_pool<char>;
 
 } // namespace crispy

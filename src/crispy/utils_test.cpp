@@ -113,7 +113,7 @@ TEST_CASE("fromHexString")
     CHECK(!crispy::fromHexString("abc"sv));
     CHECK(!crispy::fromHexString("GX"sv));
 
-    CHECK(crispy::fromHexString(""sv).value() == ""sv);
+    CHECK(crispy::fromHexString(""sv).value().empty());
     CHECK(crispy::fromHexString("61"sv).value() == "a"sv);
     CHECK(crispy::fromHexString("4162"sv).value() == "Ab"sv);
 }
@@ -126,7 +126,7 @@ struct variable_collector
 TEST_CASE("replaceVariables")
 {
     // clang-format off
-    CHECK(""sv == crispy::replaceVariables("", variable_collector()));
+    CHECK(crispy::replaceVariables("", variable_collector()).empty());
     CHECK("()"sv == crispy::replaceVariables("${}", variable_collector()));
     CHECK("(Hello)"sv == crispy::replaceVariables("${Hello}", variable_collector()));
     CHECK("(Hello) World"sv == crispy::replaceVariables("${Hello} World", variable_collector()));

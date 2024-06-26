@@ -104,16 +104,6 @@ namespace
         bindable.release();
     }
 
-    template <typename F>
-    inline void checkedGL(F&& region,
-                          logstore::source_location location = logstore::source_location::current()) noexcept
-    {
-        region();
-        auto err = GLenum {};
-        while ((err = glGetError()) != GL_NO_ERROR)
-            displayLog(location)("OpenGL error {} for call.", err);
-    }
-
     QMatrix4x4 ortho(float left, float right, float bottom, float top)
     {
         constexpr float NearPlane = -1.0f;

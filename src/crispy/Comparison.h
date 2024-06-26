@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
+#include <cstdint>
 
 namespace crispy
 {
 
-enum class comparison
+enum class comparison : uint8_t
 {
     Less,
     Equal,

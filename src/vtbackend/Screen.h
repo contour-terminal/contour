@@ -47,14 +47,14 @@ struct Settings;
 // CSI ? Pi ; Pa ; Pv S
 namespace XtSmGraphics
 {
-    enum class Item
+    enum class Item : uint8_t
     {
         NumberOfColorRegisters = 1,
         SixelGraphicsGeometry = 2,
         ReGISGraphicsGeometry = 3,
     };
 
-    enum class Action
+    enum class Action : uint8_t
     {
         Read = 1,
         ResetToDefault = 2,
@@ -68,7 +68,7 @@ namespace XtSmGraphics
 /// TBC - Tab Clear
 ///
 /// This control function clears tab stops.
-enum class HorizontalTabClear
+enum class HorizontalTabClear : uint8_t
 {
     /// Ps = 0 (default)
     AllTabs,
@@ -82,7 +82,7 @@ enum class HorizontalTabClear
 ///  Input: CSI 14 t (for text area size)
 ///  Input: CSI 14; 2 t (for full window size)
 /// Output: CSI 14 ; width ; height ; t
-enum class RequestPixelSize // TODO: rename RequestPixelSize to RequestArea?
+enum class RequestPixelSize : uint8_t // TODO: rename RequestPixelSize to RequestArea?
 {
     CellArea,
     TextArea,
@@ -90,7 +90,7 @@ enum class RequestPixelSize // TODO: rename RequestPixelSize to RequestArea?
 };
 
 /// DECRQSS - Request Status String
-enum class RequestStatusString
+enum class RequestStatusString : uint8_t
 {
     SGR,
     DECSCL,
@@ -114,7 +114,7 @@ inline std::string setDynamicColorValue(
     return fmt::format("rgb:{:04X}/{:04X}/{:04X}", r, g, b);
 }
 
-enum class ApplyResult
+enum class ApplyResult : uint8_t
 {
     Ok,
     Invalid,

@@ -456,12 +456,15 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     auto const highlightSearchMatches =
         _search.pattern.empty() ? HighlightSearchMatches::No : HighlightSearchMatches::Yes;
 
-    auto const theCursorPosition =
-        optional<CellLocation> { inputHandler().mode() == ViMode::Insert
-                                     ? (isModeEnabled(DECMode::VisibleCursor)
-                                            ? optional<CellLocation> { currentScreen().cursor().position }
-                                            : nullopt)
-                                     : _viCommands.cursorPosition };
+    auto const theCursorPosition = [&]() -> std::optional<CellLocation> {
+        if (inputHandler().mode() == ViMode::Insert)
+        {
+            if (isModeEnabled(DECMode::VisibleCursor))
+                return optional<CellLocation> { currentScreen().cursor().position };
+            return std::nullopt;
+        }
+        return _viCommands.cursorPosition;
+    }();
 
     if (isPrimaryScreen())
         _lastRenderPassHints =
@@ -1341,7 +1344,6 @@ string Terminal::extractLastMarkRange() const
 
     for (auto lineNum = firstLine; lineNum <= lastLine; ++lineNum)
     {
-        auto const lineText = _primaryScreen.grid().lineAt(lineNum).toUtf8Trimmed();
         text += _primaryScreen.grid().lineAt(lineNum).toUtf8Trimmed();
         text += '\n';
     }
@@ -1352,7 +1354,7 @@ string Terminal::extractLastMarkRange() const
 // {{{ ScreenEvents overrides
 void Terminal::requestCaptureBuffer(LineCount lines, bool logical)
 {
-    return _eventListener.requestCaptureBuffer(lines, logical);
+    _eventListener.requestCaptureBuffer(lines, logical);
 }
 
 void Terminal::requestShowHostWritableStatusLine()
@@ -2331,8 +2333,12 @@ void Terminal::pushColorPalette(size_t slot)
     if (slot > MaxColorPaletteSaveStackSize)
         return;
 
-    auto const index =
-        slot == MagicStackTopId ? _savedColorPalettes.empty() ? 0 : _savedColorPalettes.size() - 1 : slot - 1;
+    auto const index = [&](size_t slot) {
+        if (slot == MagicStackTopId)
+            return _savedColorPalettes.empty() ? 0 : _savedColorPalettes.size() - 1;
+        else
+            return slot - 1;
+    }(slot);
 
     if (index >= _savedColorPalettes.size())
         _savedColorPalettes.resize(index + 1);

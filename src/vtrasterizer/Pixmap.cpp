@@ -17,7 +17,7 @@ namespace
     struct From { int value; };
     struct To { int value; };
     struct BaseOffset { int value; };
-    enum class Orientation { Horizontal, Vertical };
+    enum class Orientation: uint8_t { Horizontal, Vertical };
     // clang-format on
 
     Pixmap& segment_line(Pixmap& pixmap, Orientation orientation, BaseOffset base, From from, To to)

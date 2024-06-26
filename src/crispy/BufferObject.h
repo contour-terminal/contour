@@ -36,7 +36,7 @@ template <BufferObjectElementType>
 class buffer_object;
 
 template <BufferObjectElementType>
-class BufferFragment;
+class buffer_fragment;
 
 template <BufferObjectElementType T>
 using buffer_object_release = std::function<void(buffer_object<T>*)>;
@@ -95,7 +95,7 @@ class buffer_object: public std::enable_shared_from_this<buffer_object<T>>
     [[nodiscard]] T* data() noexcept;
     [[nodiscard]] T const* data() const noexcept;
 
-    [[nodiscard]] BufferFragment<T> ref(std::size_t offset, std::size_t size) noexcept;
+    [[nodiscard]] buffer_fragment<T> ref(std::size_t offset, std::size_t size) noexcept;
 
     /// Returns a pointer to the first byte in the internal data storage.
     T* begin() noexcept { return data(); }
@@ -130,7 +130,7 @@ class buffer_object: public std::enable_shared_from_this<buffer_object<T>>
     T* _hotEnd;
     T* _end;
 
-    friend class BufferFragment<T>;
+    friend class buffer_fragment<T>;
 
     std::mutex _mutex;
 };
@@ -165,18 +165,18 @@ class buffer_object_pool
  * BufferFragment safely holds a reference to a region of buffer_object.
  */
 template <BufferObjectElementType T>
-class BufferFragment
+class buffer_fragment
 {
   public:
     using span_type = gsl::span<T const>;
 
-    BufferFragment(buffer_object_ptr<T> buffer, span_type region) noexcept;
+    buffer_fragment(buffer_object_ptr<T> buffer, span_type region) noexcept;
 
-    BufferFragment() noexcept = default;
-    BufferFragment(BufferFragment&&) noexcept = default;
-    BufferFragment(BufferFragment const&) noexcept = default;
-    BufferFragment& operator=(BufferFragment&&) noexcept = default;
-    BufferFragment& operator=(BufferFragment const&) noexcept = default;
+    buffer_fragment() noexcept = default;
+    buffer_fragment(buffer_fragment&&) noexcept = default;
+    buffer_fragment(buffer_fragment const&) noexcept = default;
+    buffer_fragment& operator=(buffer_fragment&&) noexcept = default;
+    buffer_fragment& operator=(buffer_fragment const&) noexcept = default;
 
     void reset() noexcept { _region = {}; }
 
@@ -210,10 +210,10 @@ class BufferFragment
 };
 
 template <BufferObjectElementType T>
-BufferFragment(buffer_object_ptr<T>, gsl::span<T const>) -> BufferFragment<T>;
+buffer_fragment(buffer_object_ptr<T>, gsl::span<T const>) -> buffer_fragment<T>;
 
 template <BufferObjectElementType T>
-BufferFragment(buffer_object_ptr<T>, std::basic_string_view<T>) -> BufferFragment<T>;
+buffer_fragment(buffer_object_ptr<T>, std::basic_string_view<T>) -> buffer_fragment<T>;
 
 // {{{ buffer_object implementation
 template <BufferObjectElementType T>
@@ -314,28 +314,28 @@ inline void buffer_object<T>::clear() noexcept
 }
 
 template <BufferObjectElementType T>
-inline BufferFragment<T> buffer_object<T>::ref(std::size_t offset, std::size_t size) noexcept
+inline buffer_fragment<T> buffer_object<T>::ref(std::size_t offset, std::size_t size) noexcept
 {
-    return BufferFragment<T>(this->shared_from_this(), gsl::span<T const>(this->data() + offset, size));
+    return buffer_fragment<T>(this->shared_from_this(), gsl::span<T const>(this->data() + offset, size));
 }
 // }}}
 
 // {{{ BufferFragment implementation
 template <BufferObjectElementType T>
-BufferFragment<T>::BufferFragment(buffer_object_ptr<T> buffer, gsl::span<T const> region) noexcept:
+buffer_fragment<T>::buffer_fragment(buffer_object_ptr<T> buffer, gsl::span<T const> region) noexcept:
     _buffer { std::move(buffer) }, _region { region }
 {
     assert(_buffer->begin() <= _region.data() && (_region.data() + _region.size()) <= _buffer->end());
 }
 
 template <BufferObjectElementType T>
-inline std::size_t BufferFragment<T>::startOffset() const noexcept
+inline std::size_t buffer_fragment<T>::startOffset() const noexcept
 {
     return static_cast<std::size_t>(std::distance((T const*) _buffer->data(), (T const*) data()));
 }
 
 template <BufferObjectElementType T>
-inline std::size_t BufferFragment<T>::endOffset() const noexcept
+inline std::size_t buffer_fragment<T>::endOffset() const noexcept
 {
     return startOffset() + size();
 }

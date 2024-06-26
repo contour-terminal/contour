@@ -394,7 +394,7 @@ namespace
     }
 } // namespace
 
-struct open_shaper::Private // {{{
+struct open_shaper::private_open_shaper // {{{
 {
     crispy::finally ftCleanup;
     FT_Library ft {};
@@ -477,7 +477,7 @@ struct open_shaper::Private // {{{
         return output;
     }
 
-    Private(DPI dpi, font_locator& locator):
+    private_open_shaper(DPI dpi, font_locator& locator):
         ftCleanup { [this]() {
             FT_Done_FreeType(ft);
         } },
@@ -552,7 +552,7 @@ struct open_shaper::Private // {{{
 }; // }}}
 
 open_shaper::open_shaper(DPI dpi, font_locator& locator):
-    _d(new Private(dpi, locator), [](Private* p) { delete p; })
+    _d(new private_open_shaper(dpi, locator), [](private_open_shaper* p) { delete p; })
 {
 }
 

@@ -10,6 +10,7 @@
 
 #include <fmt/format.h>
 
+#include <cstdint>
 #include <variant> // monostate
 #include <vector>
 
@@ -20,7 +21,7 @@ namespace vtrasterizer::atlas
 
 using Buffer = std::vector<uint8_t>;
 
-enum class Format
+enum class Format : uint8_t
 {
     Red = 1,
     RGB = 3,
@@ -152,7 +153,7 @@ struct RenderTile
     vtbackend::ImageSize bitmapSize {}; // bitmap size inside the tile (must not exceed the grid's tile size)
     vtbackend::ImageSize targetSize {}; // dimensions of the bitmap on the render target surface
     std::array<float, 4> color;         // optional; a color being associated with this texture
-    TileLocation tileLocation {};       // what tile to render from which texture atlas
+    TileLocation tileLocation;          // what tile to render from which texture atlas
 
     NormalizedTileLocation normalizedLocation {};
 

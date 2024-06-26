@@ -11,7 +11,7 @@
 namespace vtbackend
 {
 
-enum class HyperlinkState
+enum class HyperlinkState : uint8_t
 {
     /// Default hyperlink state.
     Inactive,

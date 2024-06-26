@@ -189,33 +189,26 @@ namespace detail
         return detail::times_2d<I, T1, T2> { std::move(a), std::move(b) };
     }
 
-    template <typename I,
-              typename T,
-              typename Callable,
-              typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T>, int> = 0>
-    constexpr void operator|(detail::times<I, T> times, Callable callable)
-    {
-        for (auto&& i: times)
-            callable(i);
-    }
-
-    template <typename I,
-              typename T,
-              typename Callable,
-              typename std::enable_if_t<std::is_invocable_r_v<void, Callable>, int> = 0>
+    template <typename I, typename T, typename Callable>
+        requires std::is_invocable_r_v<void, Callable>
     constexpr void operator|(detail::times<I, T> times, Callable callable)
     {
         for ([[maybe_unused]] auto&& i: times)
             callable();
     }
 
+    template <typename I, typename T, typename Callable>
+        requires std::is_invocable_r_v<void, Callable, T>
+    constexpr void operator|(detail::times<I, T> times, Callable callable)
+    {
+        for (auto&& i: times)
+            callable(i);
+    }
+
     // ---------------------------------------------------------------------------------------------------
 
-    template <typename I,
-              typename T1,
-              typename T2,
-              typename Callable,
-              typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T1, T2>, int> = 0>
+    template <typename I, typename T1, typename T2, typename Callable>
+        requires std::is_invocable_v<Callable, T1, T2>
     constexpr void operator|(detail::times_2d<I, T1, T2> times, Callable callable)
     {
         for (auto&& [i, j]: times)
@@ -223,8 +216,6 @@ namespace detail
     }
 
 } // namespace detail
-
-// TODO: give random access hints to STL algorithms
 
 template <typename I, typename T>
 constexpr inline detail::times<I, T> times(T start, I count, T step = T(1))

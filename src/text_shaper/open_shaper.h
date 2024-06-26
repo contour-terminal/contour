@@ -43,8 +43,8 @@ class open_shaper: public shaper
     [[nodiscard]] std::optional<rasterized_glyph> rasterize(glyph_key glyph, render_mode mode) override;
 
   private:
-    struct Private;
-    std::unique_ptr<Private, void (*)(Private*)> _d;
+    struct private_open_shaper;
+    std::unique_ptr<private_open_shaper, void (*)(private_open_shaper*)> _d;
 };
 
 } // namespace text

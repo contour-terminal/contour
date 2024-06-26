@@ -4,6 +4,7 @@
 #include <vtpty/ImageSize.h>
 #include <vtpty/PageSize.h>
 
+#include <cstdint>
 #include <limits>
 #include <ostream>
 #include <variant>
@@ -439,13 +440,13 @@ constexpr ColumnOffset& operator-=(ColumnOffset& a, ColumnCount b) noexcept
 }
 // }}}
 
-enum class HighlightSearchMatches
+enum class HighlightSearchMatches : uint8_t
 {
     No,
     Yes
 };
 
-enum class ScreenType
+enum class ScreenType : uint8_t
 {
     Primary = 0,
     Alternate = 1,
@@ -463,13 +464,13 @@ enum class ScreenType
 // - PhysicalCoordinate
 // - ScrollbackCoordinate
 
-enum class CursorDisplay
+enum class CursorDisplay : uint8_t
 {
     Steady,
     Blink
 };
 
-enum class CursorShape
+enum class CursorShape : uint8_t
 {
     Block,
     Rectangle,
@@ -479,13 +480,13 @@ enum class CursorShape
 
 CursorShape makeCursorShape(std::string const& name);
 
-enum class ControlTransmissionMode
+enum class ControlTransmissionMode : uint8_t
 {
     S7C1T, // 7-bit controls
     S8C1T, // 8-bit controls
 };
 
-enum class GraphicsRendition
+enum class GraphicsRendition : uint8_t
 {
     Reset = 0, //!< Reset any rendition (style as well as foreground / background coloring).
 
@@ -517,7 +518,7 @@ enum class GraphicsRendition
     NoOverline = 55,      //!< Reverses Overline.
 };
 
-enum class StatusDisplayType
+enum class StatusDisplayType : uint8_t
 {
     None,
     Indicator,
@@ -525,7 +526,7 @@ enum class StatusDisplayType
 };
 
 // Mandates the position to show the statusline at.
-enum class StatusDisplayPosition
+enum class StatusDisplayPosition : uint8_t
 {
     // The status line is classically shown at the bottom of the render target.
     Bottom,
@@ -535,7 +536,7 @@ enum class StatusDisplayPosition
 };
 
 // Selects whether the terminal sends data to the main display or the status line.
-enum class ActiveStatusDisplay
+enum class ActiveStatusDisplay : uint8_t
 {
     // Selects the main display. The terminal sends data to the main display only.
     Main,
@@ -546,7 +547,7 @@ enum class ActiveStatusDisplay
     IndicatorStatusLine,
 };
 
-enum class AnsiMode
+enum class AnsiMode : uint8_t
 {
     KeyboardAction = 2,    // KAM
     Insert = 4,            // IRM
@@ -554,7 +555,7 @@ enum class AnsiMode
     AutomaticNewLine = 20, // LNM
 };
 
-enum class DECMode
+enum class DECMode : std::uint16_t
 {
     UseApplicationCursorKeys,
     DesignateCharsetUSASCII,
@@ -669,7 +670,7 @@ enum class DECMode
 };
 
 /// OSC color-setting related commands that can be grouped into one
-enum class DynamicColorName
+enum class DynamicColorName : uint8_t
 {
     DefaultForegroundColor,
     DefaultBackgroundColor,
@@ -680,7 +681,7 @@ enum class DynamicColorName
     HighlightBackgroundColor,
 };
 
-enum class ViMode
+enum class ViMode : uint8_t
 {
     /// Vi-like normal-mode.
     Normal, // <Escape>, <C-[>

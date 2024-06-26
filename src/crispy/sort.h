@@ -56,9 +56,13 @@ constexpr void sort(Container& container)
     if (auto const count = std::size(container); count > 1)
         sort(
             container,
-            [](auto const& a, auto const& b) { return a < b   ? -1
-                                                      : a > b ? +1
-                                                              : 0; },
+            [](auto const& a, auto const& b) {
+                if (a < b)
+                    return -1;
+                if (a > b)
+                    return +1;
+                return 0;
+            },
             0,
             count - 1);
 }

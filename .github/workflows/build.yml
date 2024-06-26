@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: github.ref != 'refs/heads/master'
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
@@ -92,46 +92,18 @@ jobs:
       run: sudo env QTVER=6 ./scripts/install-deps.sh
     - name: "Post-fix embedded dependency permissions."
       run: sudo find _deps/sources -exec chown $UID {} \;
-    - name: Install Clang
-      run: sudo apt install -y clang-18 clang-tidy-18
+    - name: Install clang
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 18
     - name: "cmake"
       run: |
-        cmake \
-            -DCMAKE_BUILD_TYPE="Debug" \
-            -DCMAKE_CXX_COMPILER="clang++-18" \
-            -DCONTOUR_INSTALL_TOOLS=ON \
-            -DCONTOUR_QT_VERSION=6 \
-            -DCONTOUR_TESTING=ON \
-            -DENABLE_TIDY=OFF \
-            -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
-            -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
-            -S . -B build
-    - name: "build libunicode"
-      run: cmake --build build/ --target unicode -- -j3
-    - uses: ZedThree/clang-tidy-review@v0.17.0
-      id: review
-      with:
-        lgtm_comment_body: ""
-        annotations: true
-        build_dir: build
-        max_comments: 10
-    - uses: ZedThree/clang-tidy-review/upload@v0.17.0 # Uploads an artefact containing clang_fixes.json
-      id: upload-review
-    - if: steps.review.outputs.total_comments > 0 # If there are any comments, fail the check
-      run: exit 1
-    # - name: run clang-tidy
-    #   run: |
-    #     set -ex
-    #     for dir in src/*; do
-    #       FILES=$(find $dir -name '*.cpp' -print)
-    #       for file in $FILES; do
-    #         echo "Checking file $file ..."
-    #         clang-tidy \
-    #                   -p build \
-    #                   -header-filter=$PWD/src \
-    #                   $file
-    #       done
-    #     done
+        cmake --preset linux-debug -B build -G Ninja \
+        -D CMAKE_CXX_COMPILER="clang++-18" \
+        -D ENABLE_TIDY=ON -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-18
+    - name: "build"
+      run: cmake --build build
 
   check_links:
     name: "Check links"

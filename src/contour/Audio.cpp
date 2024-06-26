@@ -1,7 +1,9 @@
+
 #include <contour/Audio.h>
 
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
+#include <crispy/times.h>
 
 #include <qbuffer.h>
 #include <qthread.h>
@@ -29,7 +31,7 @@ auto createMusicalNote(double volume, double duration, double frequency) noexcep
     volume /= 7;
     std::vector<std::int16_t> buffer;
     buffer.reserve(static_cast<size_t>(std::ceil(duration * SampleRate)));
-    for (double i = 0; i < duration * SampleRate; ++i)
+    for (const auto i: crispy::times(static_cast<int>(std::ceil(duration * SampleRate))))
         buffer.push_back(static_cast<int16_t>(0x7fff * volume * square_wave(frequency / SampleRate * i * 2)));
     return buffer;
 }

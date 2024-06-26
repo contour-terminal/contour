@@ -338,9 +338,14 @@ TEST_CASE("SixelParser.newline", "[sixel]")
     {
         for (int x = 0; x < ib.size().width.as<int>(); ++x)
         {
-            auto const expectedColor = y < 6 && x < 4    ? PinColors[1]
-                                       : y < 12 && x < 4 ? PinColors[2]
-                                                         : PinColors[0];
+            auto const expectedColor = [&](int x, int y) -> RGBAColor {
+                if (y < 6 && x < 4)
+                    return PinColors[1];
+                if (y < 12 && x < 4)
+                    return PinColors[2];
+                return PinColors[0];
+            }(x, y);
+
             auto const pos = CellLocation { LineOffset(y), ColumnOffset(x) };
             auto const actualColor = ib.at(pos);
 

@@ -19,7 +19,8 @@ class failure
     constexpr failure(const failure&) = default;
     constexpr failure(failure&&) noexcept = default;
 
-    template <typename Err = E, typename = std::enable_if_t<std::is_constructible_v<E, Err&&>>>
+    template <typename Err = E>
+        requires std::is_constructible_v<E, Err&&>
     constexpr explicit failure(Err&& e): _value { std::forward<Err>(e) }
     {
     }
@@ -38,9 +39,9 @@ class failure
     constexpr failure& operator=(const failure&) = default;
     constexpr failure& operator=(failure&&) noexcept = default;
 
-    constexpr const E& error() const& noexcept { return _value; }
+    [[nodiscard]] constexpr const E& error() const& noexcept { return _value; }
     constexpr E& error() & noexcept { return _value; }
-    constexpr const E&& error() const&& noexcept { return std::move(_value); }
+    [[nodiscard]] constexpr const E&& error() const&& noexcept { return std::move(_value); }
     constexpr E&& error() && noexcept { return std::move(_value); }
 
     constexpr void swap(failure& other) noexcept { std::swap(_value, other._value); }
@@ -64,6 +65,10 @@ class failure
 template <typename T>
 failure(T) -> failure<T>;
 
+template <typename T, typename E>
+concept Result = !std::is_reference_v<T> && !std::is_same_v<T, std::remove_cv_t<std::in_place_t>>
+                 && !std::is_same_v<T, typename std::remove_cv_t<failure<E>>>;
+
 // TODO: Finish support for T = void (this is not so important for now, however)
 
 // result<T, E> is a type that represents either a value of type T or an error of type E.
@@ -75,6 +80,7 @@ failure(T) -> failure<T>;
 // The API is kept as close as possible to C++23's std::expected<T, E> type,
 // so that it can be easily replaced once C++23 is available.
 template <typename T, typename E = std::error_code>
+    requires Result<T, E>
 class result
 {
   private:
@@ -82,12 +88,9 @@ class result
     {
     };
 
-    static inline constexpr failure_t Failure {};
-
-    static_assert(!std::is_reference_v<T>, "T must not be a reference");
-    static_assert(!std::is_same_v<T, std::remove_cv_t<std::in_place_t>>, "T must not be in_place_t");
     static_assert(!std::is_same_v<T, std::remove_cv_t<failure_t>>, "T must not be failure_t");
-    static_assert(!std::is_same_v<T, typename std::remove_cv_t<failure<E>>>, "T must not be failure<E>");
+
+    static inline constexpr failure_t Failure {};
 
   public:
     using value_type = T;
@@ -111,13 +114,15 @@ class result
     {
     }
 
-    template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+    template <typename U = T>
+        requires(!std::is_void_v<U>)
     constexpr result(U&& value) noexcept(std::is_nothrow_move_constructible_v<value_type>):
         _data { T { std::forward<U>(value) } }
     {
     }
 
-    template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+    template <typename U = T>
+        requires(!std::is_void_v<U>)
     constexpr result(std::in_place_t, U&& value) noexcept(std::is_nothrow_move_constructible_v<T>):
         _data { std::forward<U>(value) }
     {
@@ -146,13 +151,13 @@ class result
 
     [[nodiscard]] constexpr const T* operator->() const noexcept { return &std::get<value_type>(_data); }
     [[nodiscard]] constexpr T* operator->() noexcept { return &std::get<value_type>(_data); }
-    template <std::enable_if_t<!std::is_same_v<T, void>, int> = 0>
+    template <std::enable_if_t<!std::is_same_v<T, void>, int> = 0> //NOLINT
     [[nodiscard]] constexpr const T& operator*() const& noexcept { return std::get<value_type>(_data); }
-    template <std::enable_if_t<!std::is_same_v<T, void>, int> = 0>
+    template <std::enable_if_t<!std::is_same_v<T, void>, int> = 0> //NOLINT
     [[nodiscard]] constexpr T& operator*() & noexcept { return std::get<value_type>(_data); }
-    template <std::enable_if_t<!std::is_same_v<T, void>, int> = 0>
+    template <std::enable_if_t<!std::is_same_v<T, void>, int> = 0> //NOLINT
     [[nodiscard]] constexpr const T&& operator*() const&& noexcept { return std::move(std::get<value_type>(_data)); }
-    template <std::enable_if_t<!std::is_same_v<T, void>, int> = 0>
+    template <std::enable_if_t<!std::is_same_v<T, void>, int> = 0> //NOLINT
     [[nodiscard]] constexpr T&& operator*() && noexcept { return std::move(std::get<value_type>(_data)); }
 
     [[nodiscard]] constexpr bool has_value() const noexcept { return std::holds_alternative<value_type>(_data); }
@@ -171,14 +176,16 @@ class result
     // clang-format on
 
     // {{{ emplace
-    template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+    template <typename U = T>
+        requires(!std::is_void_v<U>)
     constexpr U& emplace(value_type&& exp) noexcept(std::is_nothrow_move_constructible_v<value_type>)
     {
         _data = std::move(exp);
         return value();
     }
 
-    template <typename U = T, typename = std::enable_if_t<std::is_void_v<U>>>
+    template <typename U = T>
+        requires(!std::is_void_v<U>)
     constexpr void emplace() noexcept
     {
         _data = value_type {};

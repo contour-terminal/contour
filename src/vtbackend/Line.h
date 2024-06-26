@@ -53,7 +53,7 @@ struct TrivialLineBuffer
     HyperlinkId hyperlink {};
 
     ColumnCount usedColumns {};
-    crispy::BufferFragment<char> text {};
+    crispy::buffer_fragment<char> text {};
 
     void reset(GraphicsAttributes attributes) noexcept
     {
@@ -316,7 +316,6 @@ class Line
         }
         else
         {
-            auto const u8Text = unicode::convert_to<char>(text);
             InflatedBuffer const& cells = inflatedBuffer();
             if (text.size() > unbox<size_t>(size()) - unbox<size_t>(startColumn))
                 return false;

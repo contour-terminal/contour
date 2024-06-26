@@ -147,7 +147,7 @@ struct Search
 
 // Mandates what execution mode the terminal will take to process VT sequences.
 //
-enum class ExecutionMode
+enum class ExecutionMode : uint8_t
 {
     // Normal execution mode, with no tracing enabled.
     Normal,
@@ -165,7 +165,7 @@ enum class ExecutionMode
     // TODO: BreakAtFrame,
 };
 
-enum class WrapPending
+enum class WrapPending : uint8_t
 {
     Yes,
     No,
@@ -215,6 +215,7 @@ class TraceHandler: public SequenceHandler
 /// gets updated according to the process' outputted text,
 /// whereas input to the process can be send high-level via the various
 /// send(...) member functions.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) // TODO
 class Terminal
 {
   public:
@@ -1166,7 +1167,10 @@ class Terminal
             terminal.sequenceHandler().writeText(codepoints, cellCount);
         }
         void writeTextEnd() { terminal.sequenceHandler().writeTextEnd(); }
-        size_t maxBulkTextSequenceWidth() const noexcept { return terminal.maxBulkTextSequenceWidth(); }
+        [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
+        {
+            return terminal.maxBulkTextSequenceWidth();
+        }
     };
 
     struct TerminalInstructionCounter

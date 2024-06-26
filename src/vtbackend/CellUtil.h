@@ -19,9 +19,13 @@ namespace vtbackend::CellUtil
                                              bool blinkingState,
                                              bool rapidBlinkState) noexcept
 {
-    auto const fgMode = (cellFlags & CellFlag::Faint)                                    ? ColorMode::Dimmed
-                        : ((cellFlags & CellFlag::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                         : ColorMode::Normal;
+    auto const fgMode = [](CellFlags flags, ColorPalette const& colorPalette) {
+        if (flags & CellFlag::Faint)
+            return ColorMode::Dimmed;
+        if ((flags & CellFlag::Bold) && colorPalette.useBrightColors)
+            return ColorMode::Bright;
+        return ColorMode::Normal;
+    }(cellFlags, colorPalette);
 
     auto constexpr BgMode = ColorMode::Normal;
 
@@ -54,9 +58,13 @@ namespace vtbackend::CellUtil
     if (isDefaultColor(underlineColor))
         return defaultColor;
 
-    auto const mode = (cellFlags & CellFlag::Faint)                                    ? ColorMode::Dimmed
-                      : ((cellFlags & CellFlag::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                       : ColorMode::Normal;
+    auto const mode = [](CellFlags flags, ColorPalette const& colorPalette) {
+        if (flags & CellFlag::Faint)
+            return ColorMode::Dimmed;
+        if ((flags & CellFlag::Bold) && colorPalette.useBrightColors)
+            return ColorMode::Bright;
+        return ColorMode::Normal;
+    }(cellFlags, colorPalette);
 
     return apply(colorPalette, underlineColor, ColorTarget::Foreground, mode);
 }

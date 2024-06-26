@@ -169,7 +169,9 @@ namespace
                 default: return -1;
             }
 #else
-            fd_set sin, sout, serr;
+            fd_set sin;
+            fd_set sout;
+            fd_set serr;
             FD_ZERO(&sin);
             FD_ZERO(&sout);
             FD_ZERO(&serr);
@@ -179,7 +181,7 @@ namespace
 #endif
         }
 
-        int write(char const* buf, size_t size)
+        int write(char const* buf, size_t size) const
         {
 #if defined(_WIN32)
             DWORD nwritten {};
@@ -192,9 +194,9 @@ namespace
 #endif
         }
 
-        int write(string_view text) { return write(text.data(), text.size()); }
+        [[nodiscard]] int write(string_view text) const { return write(text.data(), text.size()); }
 
-        int read(void* buf, size_t size)
+        int read(void* buf, size_t size) const
         {
 #if defined(_WIN32)
             DWORD nread {};
@@ -207,10 +209,11 @@ namespace
 #endif
         }
 
-        optional<tuple<int, int>> screenSize(timeval* timeout)
+        optional<tuple<int, int>> screenSize(timeval* timeout) const
         {
             // Naive implementation. TODO: use select() to poll and time out properly.
-            write("\033[18t");
+            if (write("\033[18t") < 0)
+                return nullopt;
 
             // Consume reply: `CSI 8 ; <LINES> ; <COLUMNS> t`
             string reply;
@@ -315,7 +318,11 @@ bool captureScreen(CaptureSettings const& settings)
         output = *customOutput;
     }
 
-    tty.write(fmt::format("\033[>{};{}t", settings.logicalLines ? '1' : '0', settings.lineCount));
+    if (tty.write(fmt::format("\033[>{};{}t", settings.logicalLines ? '1' : '0', settings.lineCount)) < 0)
+    {
+        cerr << "Could not request screen capture.\r\n";
+        return false;
+    }
 
     return readCaptureReply(tty, &timeout, settings.words, output);
 }

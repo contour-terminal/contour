@@ -53,7 +53,7 @@ struct SelectionHelper
 class Selection
 {
   public:
-    enum class State
+    enum class State : uint8_t
     {
         /// Inactive, but waiting for the selection to be started (by moving the cursor).
         Waiting,
@@ -205,16 +205,22 @@ struct fmt::formatter<vtbackend::Selection>: formatter<std::string>
     auto format(const vtbackend::Selection& selector, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(
-            fmt::format("{}({} from {} to {})",
-                        dynamic_cast<vtbackend::WordWiseSelection const*>(&selector)   ? "WordWiseSelection"
-                        : dynamic_cast<vtbackend::FullLineSelection const*>(&selector) ? "FullLineSelection"
-                        : dynamic_cast<vtbackend::RectangularSelection const*>(&selector)
-                            ? "RectangularSelection"
-                        : dynamic_cast<vtbackend::LinearSelection const*>(&selector) ? "LinearSelection"
-                                                                                     : "Selection",
-                        selector.state(),
-                        selector.from(),
-                        selector.to()),
+            fmt::format(
+                "{}({} from {} to {})",
+                [](auto const* selector) -> std::string_view {
+                    if (dynamic_cast<vtbackend::WordWiseSelection const*>(selector))
+                        return "WordWiseSelection";
+                    if (dynamic_cast<vtbackend::FullLineSelection const*>(selector))
+                        return "FullLineSelection";
+                    if (dynamic_cast<vtbackend::RectangularSelection const*>(selector))
+                        return "RectangularSelection";
+                    if (dynamic_cast<vtbackend::LinearSelection const*>(selector))
+                        return "LinearSelection";
+                    return "Selection";
+                }(&selector),
+                selector.state(),
+                selector.from(),
+                selector.to()),
             ctx);
     }
 };
