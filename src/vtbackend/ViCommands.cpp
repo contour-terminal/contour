@@ -252,6 +252,7 @@ void ViCommands::modeChanged(ViMode mode)
                 _terminal->clearSelection();
             _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
             _terminal->screenUpdated();
+            _terminal->viewport().makeVisibleWithinSafeArea(LineOffset { 0 });
             break;
         case ViMode::Visual:
             _terminal->setSelector(make_unique<LinearSelection>(
