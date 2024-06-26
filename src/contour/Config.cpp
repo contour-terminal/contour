@@ -1954,7 +1954,7 @@ std::string createString(Config const& c)
                 process(entry.copyLastMarkRangeOffset);
                 processWithDoc(documentation::InitialWorkingDirectory, [&entry = entry]() {
                     auto fromConfig = entry.shell.value().workingDirectory.string();
-                    if (fromConfig.empty())
+                    if (fromConfig.empty() || fromConfig == homeResolvedPath("~", Process::homeDirectory()))
                         return std::string { "\"~\"" };
                     return fromConfig;
                 }());
