@@ -6,22 +6,11 @@
 
 namespace vtpty
 {
-
-namespace detail::tags
-{
-    struct LineCount
-    {
-    };
-    struct ColumnCount
-    {
-    };
-} // namespace detail::tags
-
 /// ColumnCount simply represents a number of columns.
-using ColumnCount = boxed::boxed<int, detail::tags::ColumnCount>;
+using ColumnCount = boxed::boxed<int>;
 
 /// LineCount represents a number of lines.
-using LineCount = boxed::boxed<int, detail::tags::LineCount>;
+using LineCount = boxed::boxed<int>;
 
 struct PageSize
 {

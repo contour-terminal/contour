@@ -16,16 +16,8 @@
 namespace vtpty
 {
 
-namespace detail
-{
-    // clang-format off
-    struct PtyMasterHandle {};
-    struct PtySlaveHandle {};
-    // clang-format on
-} // namespace detail
-
-using PtyMasterHandle = boxed::boxed<std::uintptr_t, detail::PtyMasterHandle>;
-using PtySlaveHandle = boxed::boxed<std::uintptr_t, detail::PtySlaveHandle>;
+using PtyMasterHandle = boxed::boxed<std::uintptr_t>;
+using PtySlaveHandle = boxed::boxed<std::uintptr_t>;
 using PtyHandle = std::uintptr_t;
 
 class PtySlave
