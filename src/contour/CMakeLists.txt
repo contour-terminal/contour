@@ -222,6 +222,9 @@ target_link_libraries(contour
 
 # {{{ GUI: Declare Qt build dependencies
 if(CONTOUR_FRONTEND_GUI)
+    if(NOT(WIN32) AND NOT(APPLE))
+        find_package(X11 REQUIRED)
+    endif()
     if(CONTOUR_QT_VERSION EQUAL "6")
         target_link_libraries(contour
             Qt6::Core
@@ -234,7 +237,7 @@ if(CONTOUR_FRONTEND_GUI)
             Qt6::Widgets
         )
         if(NOT(WIN32) AND NOT(APPLE))
-            target_link_libraries(contour xcb)
+            target_link_libraries(contour X11::xcb X11::xcb_cursor)
         endif()
     else()
         target_link_libraries(contour
@@ -245,7 +248,7 @@ if(CONTOUR_FRONTEND_GUI)
             Qt5::Widgets
         )
         if(NOT(WIN32) AND NOT(APPLE))
-            target_link_libraries(contour Qt5::X11Extras xcb)
+            target_link_libraries(contour Qt5::X11Extras X11::xcb)
         endif()
     endif()
 endif()
