@@ -943,19 +943,16 @@ constexpr StringLiteral WordHighlight {
 constexpr StringLiteral IndicatorStatusLine {
     "\n"
     "{comment} Defines the colors to be used for the Indicator status line.\n"
-    "{comment} Values must be in RGB form.\n"
+    "{comment} Configuration consist of different sections: default, inactive, insert_mode, normal_mode, "
+    "visual_mode.\n"
+    "{comment} Each section customize status line colors for corresponding mode.\n"
     "indicator_statusline:\n"
-    "    foreground: {}\n"
-    "    background: {}\n"
-};
-
-constexpr StringLiteral IndicatorStatusLineInactive {
-    "\n"
-    "{comment} Alternate colors to be used for the indicator status line when\n"
-    "{comment} this terminal is currently not in focus.\n"
-    "indicator_statusline_inactive:\n"
-    "    foreground: {}\n"
-    "    background: {}\n"
+    "    default:\n"
+    "        foreground: {}\n"
+    "        background: {}\n"
+    "    inactive:\n"
+    "        foreground: {}\n"
+    "        background: {}\n"
 };
 
 constexpr StringLiteral InputMethodEditor { "\n"

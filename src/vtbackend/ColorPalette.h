@@ -126,8 +126,10 @@ struct ColorPalette
     CellRGBColorAndAlphaPair normalModeCursorline = { 0xFFFFFF_rgb, 0.2f, 0x808080_rgb, 0.4f };
     // clang-format on
 
-    RGBColorPair indicatorStatusLine = { 0xFFFFFF_rgb, 0x0270c0_rgb };
     RGBColorPair indicatorStatusLineInactive = { 0xFFFFFF_rgb, 0x0270c0_rgb };
+    RGBColorPair indicatorStatusLineInsertMode = { 0xFFFFFF_rgb, 0x0270c0_rgb };
+    RGBColorPair indicatorStatusLineNormalMode = { 0xFFFFFF_rgb, 0x0270c0_rgb };
+    RGBColorPair indicatorStatusLineVisualMode = { 0xFFFFFF_rgb, 0x0270c0_rgb };
 };
 
 enum class ColorTarget : uint8_t

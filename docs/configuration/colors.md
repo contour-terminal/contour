@@ -172,37 +172,33 @@ color_schemes:
 
 
 ### `indicator_statusline`
-Defines the colors to be used for the Indicator status line.
+Defines the colors to be used for the Indicator status line. Configuration entry consist of following sections, namely `default`, `inactive`, `insert_mode`, `normal_mode`, `visual_mode`. Each section have `foreground` and `background` options. You can specify only the sections you want to customize after configuring the `default` section.
+Minimal configuration looks like this:
 ``` yaml
 color_schemes:
   default:
     indicator_statusline:
-      foreground: '#808080'
-      background: '#000000'
+        default:
+          foreground: '#808080'
+          background: '#000000'
 ```
-
-
-
-### `indicator_statusline_inactive`
-Alternate colors to be used for the indicator status line when this terminal is currently not in focus.
+Complete configuration looks like this:
 ``` yaml
 color_schemes:
   default:
-    indicator_statusline_inactive:
-      foreground: '#808080'
-      background: '#000000'
-```
-
-
-
-### `input_method_editor`
-Colors for the IME (Input Method Editor) area.
-``` yaml
-color_schemes:
-  default:
-    indicator_statusline_inactive:
-      foreground: '#808080'
-      background: '#000000'
+    indicator_statusline:
+        default:
+          foreground: '#FFFFFF'
+          background: '#0270C0'
+        inactive:
+          foreground: '#FFFFFF'
+          background: '#0270C0'
+        normal_mode:
+          foreground: '#0f0002'
+          background: '#0270C0'
+        visual_mode:
+          foreground: '#ffffff'
+          background: '#0270C0'
 ```
 
 
