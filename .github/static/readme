@@ -8,7 +8,7 @@ docker push yaraslaut/static_qt:20.04
 
 Then we can use it to build contour inside github actions with
 ```
-docker buildx build --tag static_contour --progress=plain -f .github/static/DockerUbuntu --load .
+docker buildx build --tag contour_static --progress=plain -f .github/static/DockerUbuntu --load .
 docker create --name contour_static contour_static
 docker cp contour_static:/contour/build/src/contour/contour .
 docker container rm contour_static

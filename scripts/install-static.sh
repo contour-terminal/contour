@@ -100,3 +100,8 @@ autogen_install_package "https://github.com/PCRE2Project/pcre2/releases/download
 cmake_install_package "double-conversion-3.3.0" "https://github.com/google/double-conversion/archive/refs/tags/v3.3.0.tar.gz"
 # install libX11
 configure_install_package "https://www.x.org/releases/individual/lib/libX11-1.8.9.tar.gz"
+
+# some xcb dependencies
+for package in xcb-proto-1.17.0 xcb-util-0.4.0 libxcb-1.17.0  xcb-util-cursor-0.1.4 xcb-util-keysyms-0.4.1 xcb-util-renderutil-0.3.9; do
+    configure_install_package "https://xcb.freedesktop.org/dist/$package.tar.gz"
+done
