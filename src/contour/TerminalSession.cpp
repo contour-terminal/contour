@@ -36,7 +36,10 @@
 #include <fstream>
 #include <limits>
 
-#if !defined(_WIN32)
+#if defined(__OpenBSD__)
+    #include <pthread_np.h>
+    #define pthread_setname_np pthread_set_name_np
+#elif !defined(_WIN32)
     #include <pthread.h>
 #endif
 

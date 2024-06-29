@@ -95,7 +95,7 @@ if(UNIX)
     check_include_files(unwind.h HAVE_UNWIND_H)
 
     # The following options are all important to get stacktrace dumping working
-    target_link_libraries(crispy-core PUBLIC dl)
+    target_link_libraries(crispy-core PUBLIC ${CMAKE_DL_LIBS})
     if(NOT(FREEBSD))
         target_link_options(crispy-core PUBLIC -rdynamic)
     endif()

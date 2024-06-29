@@ -2,9 +2,9 @@ set(AppId "org.contourterminal.Contour")
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
     set(FREEBSD TRUE)
-endif()
-
-if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+elseif(${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
+    set(OPENBSD TRUE)
+elseif(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     set(LINUX TRUE)
 endif()
 
@@ -222,6 +222,9 @@ target_link_libraries(contour
 
 # {{{ GUI: Declare Qt build dependencies
 if(CONTOUR_FRONTEND_GUI)
+    if(OPENBSD)
+        find_package(X11 REQUIRED)
+    endif()
     if(CONTOUR_QT_VERSION EQUAL "6")
         target_link_libraries(contour
             Qt6::Core
@@ -233,7 +236,9 @@ if(CONTOUR_FRONTEND_GUI)
             Qt6::QuickControls2
             Qt6::Widgets
         )
-        if(NOT(WIN32) AND NOT(APPLE))
+        if(OPENBSD)
+            target_link_libraries(contour X11::xcb X11::xcb_cursor)
+        elseif(NOT(WIN32) AND NOT(APPLE))
             target_link_libraries(contour xcb)
         endif()
     else()
@@ -244,7 +249,9 @@ if(CONTOUR_FRONTEND_GUI)
             Qt5::Network
             Qt5::Widgets
         )
-        if(NOT(WIN32) AND NOT(APPLE))
+        if(OPENBSD)
+            target_link_libraries(contour Qt5::X11Extras X11::xcb)
+        elseif(NOT(WIN32) AND NOT(APPLE))
             target_link_libraries(contour Qt5::X11Extras xcb)
         endif()
     endif()

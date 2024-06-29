@@ -3,6 +3,9 @@
 #if defined(_WIN32)
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
+#elif defined(__OpenBSD__)
+    #include <pthread_np.h>
+    #define pthread_getname_np pthread_get_name_np
 #else
     #include <pthread.h>
 #endif
