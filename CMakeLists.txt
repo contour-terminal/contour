@@ -74,6 +74,17 @@ option(CONTOUR_STACKTRACE_ADDR2LINE "Uses addr2line to pretty-print SEGV stacktr
 option(CONTOUR_BUILD_WITH_MIMALLOC "Builds with mimalloc [default: OFF]" OFF)
 option(CONTOUR_INSTALL_TOOLS "Installs tools, if built [default: OFF]" OFF)
 option(CONTOUR_PACKAGE_TERMINFO "Package terminfo files" ON)
+option(CONTOUR_WITH_UTEMPTER "Build with utempter support [default: ON]" ON)
+option(CONTOUR_USE_CPM "Use CPM to fetch dependencies [default: OFF]" OFF)
+option(CONTOUR_BUILD_STATIC "Link to static libraries [default: OFF]" OFF)
+
+
+if(CONTOUR_BUILD_STATIC)
+    set(BUILD_SHARED_LIBS OFF)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    set(CMAKE_LINK_SEARCH_END_STATIC ON)
+    set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
+endif()
 
 if(NOT WIN32 AND NOT CONTOUR_SANITIZE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CONTOUR_SANITIZE "OFF" CACHE STRING "Choose the sanitizer mode." FORCE)
@@ -102,6 +113,18 @@ if(CONTOUR_TESTING)
     enable_testing()
 endif()
 # ----------------------------------------------------------------------------
+
+if(CONTOUR_USE_CPM)
+    # download CPM.cmake
+    file(
+        DOWNLOAD
+        https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.38.3/CPM.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake
+        EXPECTED_HASH SHA256=cc155ce02e7945e7b8967ddfaff0b050e958a723ef7aad3766d368940cb15494
+    )
+    include(${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake)
+endif()
+
 
 include(ContourThirdParties)
 add_subdirectory(src)

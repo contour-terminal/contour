@@ -67,3 +67,5 @@ src/contour/ui/main.qml
 
 # mkdocs
 docs/vt-sequence/index.md
+
+version.txt

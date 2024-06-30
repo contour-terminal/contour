@@ -23,6 +23,8 @@
 
 using namespace std;
 
+using namespace contour;
+
 namespace
 {
 
@@ -73,19 +75,19 @@ int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
                                                } };
 
     if (options.manyLines)
-        tbp.add(contour::termbench::tests::many_lines());
+        tbp.add(termbench::tests::many_lines());
 
     if (options.longLines)
-        tbp.add(contour::termbench::tests::long_lines());
+        tbp.add(termbench::tests::long_lines());
 
     if (options.sgr)
     {
-        tbp.add(contour::termbench::tests::sgr_fg_lines());
-        tbp.add(contour::termbench::tests::sgr_fgbg_lines());
+        tbp.add(termbench::tests::sgr_fg_lines());
+        tbp.add(termbench::tests::sgr_fgbg_lines());
     }
 
     if (options.binary)
-        tbp.add(contour::termbench::tests::binary());
+        tbp.add(termbench::tests::binary());
 
     tbp.runAll();
 

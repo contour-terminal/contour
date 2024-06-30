@@ -139,9 +139,9 @@ fetch_and_unpack_libunicode()
 fetch_and_unpack_yaml_cpp()
 {
     fetch_and_unpack \
-        yaml-cpp-yaml-cpp-0.7.0 \
-        yaml-cpp-0.7.0.tar.gz \
-        https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.7.0.tar.gz
+        yaml-cpp-0.8.0 \
+        yaml-cpp-0.8.0.tar.gz \
+        https://github.com/jbeder/yaml-cpp/archive/refs/tags/0.8.0.tar.gz
 }
 
 fetch_and_unpack_range()
