@@ -679,6 +679,20 @@ void Terminal::triggerWordWiseSelection(CellLocation startPos, TheSelectionHelpe
     }
 }
 
+void Terminal::setStatusLineDefinition(StatusLineDefinition&& definition)
+{
+    _indicatorStatusLineDefinition = std::move(definition);
+    updateIndicatorStatusLine();
+}
+
+void Terminal::resetStatusLineDefinition()
+{
+    _indicatorStatusLineDefinition = parseStatusLineDefinition(_settings.indicatorStatusLine.left,
+                                                               _settings.indicatorStatusLine.middle,
+                                                               _settings.indicatorStatusLine.right);
+    updateIndicatorStatusLine();
+}
+
 bool Terminal::handleMouseSelection(Modifiers modifiers)
 {
     verifyState();

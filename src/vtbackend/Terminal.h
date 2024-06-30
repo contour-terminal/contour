@@ -955,6 +955,9 @@ class Terminal
 
     void triggerWordWiseSelectionWithCustomDelimiters(std::string const& delimiters);
 
+    void setStatusLineDefinition(StatusLineDefinition&& definition);
+    void resetStatusLineDefinition();
+
   private:
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
