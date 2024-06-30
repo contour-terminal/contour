@@ -121,6 +121,7 @@
           <li>Add better bell sound (#1378)</li>
           <li>Add config entry to configure behaviour on exit from search mode</li>
           <li>Add handling of different input commands (#629)</li>
+          <li>When switching to normal mode screen will stay in same position (#808)</li>
           <li>Update of contour.desktop file (#1423)</li>
           <li>Changed configuration entry values for `font_locator` down to `native` and `mock` only (#1538).</li>
           <li>Fixes forwarding of input while in normal mode (#1468)</li>
