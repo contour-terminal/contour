@@ -26,7 +26,9 @@
 #include FT_LCD_FILTER_H
 // clang-format on
 
-#include <fontconfig/fontconfig.h>
+#if __has_include(<fontconfig/fontconfig.h>)
+    #include <fontconfig/fontconfig.h>
+#endif
 
 #include <harfbuzz/hb-ft.h>
 #include <harfbuzz/hb.h>

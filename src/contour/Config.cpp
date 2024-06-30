@@ -1072,23 +1072,18 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      vtrasterizer::FontLocatorEngine& where)
 {
-    auto constexpr NativeFontLocator =
-#if defined(_WIN32)
-        vtrasterizer::FontLocatorEngine::DWrite;
-#elif defined(__APPLE__)
-        vtrasterizer::FontLocatorEngine::CoreText;
-#else
-        vtrasterizer::FontLocatorEngine::FontConfig;
-#endif
+    auto constexpr NativeFontLocator = vtrasterizer::FontLocatorEngine::Native;
     auto parseModifierKey = [&](std::string const& key) -> std::optional<vtrasterizer::FontLocatorEngine> {
         auto const literal = crispy::toLower(key);
         logger()("Loading entry: {}, value {}", entry, literal);
-        if (literal == "fontconfig")
-            return vtrasterizer::FontLocatorEngine::FontConfig;
-        if (literal == "coretext")
-            return vtrasterizer::FontLocatorEngine::CoreText;
-        if (literal == "dwrite" || literal == "directwrite")
-            return vtrasterizer::FontLocatorEngine::DWrite;
+        for (auto const& deprecated: { "fontconfig", "coretext", "dwrite", "directwrite" })
+        {
+            if (literal == deprecated)
+            {
+                errorLog()("Setting font locator to \"{}\" is deprecated. Use \"native\".", literal);
+                return NativeFontLocator;
+            }
+        }
         if (literal == "native")
             return NativeFontLocator;
         if (literal == "mock")

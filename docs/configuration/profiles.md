@@ -292,7 +292,7 @@ profiles:
 ```
 :octicons-horizontal-rule-16: ==size== Specifies the initial font size in pixels. The default value is 12. <br/>
 :octicons-horizontal-rule-16: ==dpi_scale== Allows applying a DPI scaling factor on top of the system's configured DPI. The default value is 1.0. <br/>
-:octicons-horizontal-rule-16: ==locator==  Determines the font locator engine to use for locating font files and font fallback. Possible values are native, fontconfig, CoreText, and DirectWrite.<br/>
+:octicons-horizontal-rule-16: ==locator==  Determines the font locator engine to use for locating font files and font fallback. Possible values are `native` and `mock`.<br/> `native` will use the operating-system native font location service (e.g. CoreText on macOS and DirectWrite on Windows), whereas `mock` is solely used for testing the software (not recommended by end-users)<br/>
 :octicons-horizontal-rule-16: ==text_shaping.engine== Selects the text shaping and font rendering engine. Supported values are native, DirectWrite, CoreText, and OpenShaper.  <br/>
 :octicons-horizontal-rule-16: ==builtin_box_drawing== Specifies whether to use built-in textures for pixel-perfect box drawing. If disabled, the font's provided box drawing characters will be used. The default value is true.<br/>
 :octicons-horizontal-rule-16: ==render_mode== Specifies the font render mode, which tells the font rasterizer engine what rendering technique to use. Available modes are lcd, light, gray, and monochrome.  <br/>
@@ -434,8 +434,8 @@ profiles:
 
 With this, the terminal will use the color scheme as specified in `dark` when OS dark mode is on,
 and `light`'s color scheme otherwise.
-      
-      
+
+
 ### `hyperlink_decoration:`
 section in the configuration file allows you to configure the styling and colorization of hyperlinks when they are displayed in the terminal and when they are hovered over by the cursor.
 
@@ -446,7 +446,7 @@ profiles:
   profile_name:
     hyperlink_decoration:
       normal: dotted
-      hover: underline      
+      hover: underline
 
 ```
 

@@ -286,7 +286,7 @@ const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDesc
     .emoji = text::font_description { .familyName = { "emoji" } },
     .renderMode = text::render_mode::gray,
     .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
-    .fontLocator = vtrasterizer::FontLocatorEngine::FontConfig,
+    .fontLocator = vtrasterizer::FontLocatorEngine::Native,
     .builtinBoxDrawing = true,
 };
 

@@ -16,10 +16,8 @@ enum class TextShapingEngine : uint8_t
 
 enum class FontLocatorEngine : uint8_t
 {
-    Mock,       //!< mock font locator API
-    FontConfig, //!< platform independant font locator API
-    DWrite,     //!< native platform support: Windows
-    CoreText,   //!< native font locator on macOS
+    Mock,   //!< mock font locator API
+    Native, //!< native platform support
 };
 
 using DPI = text::DPI;
@@ -36,7 +34,7 @@ struct FontDescriptions
     text::font_description emoji;
     text::render_mode renderMode;
     TextShapingEngine textShapingEngine = TextShapingEngine::OpenShaper;
-    FontLocatorEngine fontLocator = FontLocatorEngine::FontConfig;
+    FontLocatorEngine fontLocator = FontLocatorEngine::Native;
     bool builtinBoxDrawing = true;
 };
 
@@ -106,9 +104,7 @@ struct fmt::formatter<vtrasterizer::FontLocatorEngine>: fmt::formatter<std::stri
         string_view name;
         switch (value)
         {
-            case vtrasterizer::FontLocatorEngine::CoreText: name = "CoreText"; break;
-            case vtrasterizer::FontLocatorEngine::DWrite: name = "DirectWrite"; break;
-            case vtrasterizer::FontLocatorEngine::FontConfig: name = "Fontconfig"; break;
+            case vtrasterizer::FontLocatorEngine::Native: name = "Native"; break;
             case vtrasterizer::FontLocatorEngine::Mock: name = "Mock"; break;
         }
         return formatter<string_view>::format(name, ctx);
