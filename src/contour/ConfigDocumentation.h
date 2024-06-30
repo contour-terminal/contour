@@ -699,6 +699,8 @@ constexpr StringLiteral InputMappings {
     "marks "
     "into clipboard.\n"
     "{comment} - CopySelection     Copies the current selection into the clipboard buffer.\n"
+    "{comment} - CreateSelection   Creates selection with custom delimiters configured via `delimiters` "
+    "member.\n"
     "{comment} - DecreaseFontSize  Decreases the font size by 1 pixel.\n"
     "{comment} - DecreaseOpacity   Decreases the default-background opacity by 5%.\n"
     "{comment} - FocusNextSearchMatch     Focuses the next search match (if any).\n"
