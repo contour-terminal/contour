@@ -542,7 +542,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
             if (child["indicator_statusline"][name])
             {
                 logger()("*** loading {} indicator_statusline", name);
-                loadFromEntry(child["indicator_statusline"], name, defaultColor);
+                loadFromEntry(child["indicator_statusline"], name, *defaultColor);
             }
         }
     }
