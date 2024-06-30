@@ -184,7 +184,7 @@ jobs:
           docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/contour.pkg.tar.zst contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst
           docker container rm contour-${{ steps.tags.outputs.ARCH }}
       - name: "Uploading Archlinux .pkg.tar.zst package"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
           path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
@@ -314,7 +314,7 @@ jobs:
           docker container rm contour-${{ steps.tags.outputs.ARCH }}
           echo "pwd: `pwd`" && ls -hla
       - name: "Uploading Fedora RPM package"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
           path: |
@@ -516,14 +516,14 @@ jobs:
       - name: "Inspect again"
         run: Get-ChildItem
       - name: "Uploading MSI to artifact store"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           path: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading ZIP to artifact store"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
           path: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
@@ -626,7 +626,7 @@ jobs:
         run: cmake --build --preset linux-debug --target test
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' && matrix.qt_version == '6' }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: contour-ubuntu2204-tests
           path: |
@@ -732,7 +732,7 @@ jobs:
         run: cmake --build --preset linux-debug --target test
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' && matrix.qt_version == '6' }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: contour-ubuntu2204-tests
           path: |
@@ -749,7 +749,7 @@ jobs:
     name: "Packaging for AppImage"
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -809,7 +809,7 @@ jobs:
       - name: "Testing AppImage"
         run: ./contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage version
       - name: "Uploading AppImage"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
           path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
@@ -898,7 +898,7 @@ jobs:
           mv -v "./build/linux-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
                 "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
       - name: "Uploading artifact .deb package"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
           path: |
@@ -918,7 +918,7 @@ jobs:
     needs: [ubuntu_2204_cc_matrix]
     steps:
       - name: "download artifact"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: contour-ubuntu2204-tests
       - name: "update APT database"
@@ -963,7 +963,7 @@ jobs:
     needs: [ubuntu_2204_cc_matrix]
     steps:
       - name: "download artifact"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: contour-ubuntu2204-tests
       - name: "update APT database"
@@ -1067,7 +1067,7 @@ jobs:
     - name: "Install notcurses"
       run: cmake --build notcurses/build --config Release --target install/strip
     - name: "Uploading artifact"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: "notcurses-install-${{ matrix.os_version }}"
         path: ~/opt/notcurses
@@ -1101,7 +1101,7 @@ jobs:
       run: ./scripts/ci-set-vars.sh
       env:
         REPOSITORY: ${{ github.event.repository.name }}
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
     - name: "install dependencies"
@@ -1129,7 +1129,7 @@ jobs:
               "quick-exit-dumps/${{ matrix.name }}" \
               true
     - name: "Save dump"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: quick-exit-contour-dump
         path: quick-exit-dumps
@@ -1219,10 +1219,10 @@ jobs:
       run: ./scripts/ci-set-vars.sh
       env:
         REPOSITORY: ${{ github.event.repository.name }}
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: "notcurses-install-24.04"
         path: ~/opt/notcurses
@@ -1262,7 +1262,7 @@ jobs:
               ~/opt/notcurses/bin/notcurses-demo \
                   -p ~/opt/notcurses/share/notcurses ${{ matrix.id }}
     - name: "Save dump"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: notcurses-contour-dump
         path: notcurses-demo-dumps
@@ -1302,7 +1302,7 @@ jobs:
       run: ./scripts/ci-set-vars.sh
       env:
         REPOSITORY: ${{ github.event.repository.name }}
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
     - name: "Check install package"
@@ -1315,7 +1315,7 @@ jobs:
     name: Check Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: "update APT database"
         run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars.sh and check-release.sh
@@ -1360,11 +1360,11 @@ jobs:
 
       # {{{ fetch release artifacts
       - name: "fetch artifact: Ubuntu 20.04"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu20.04-amd64.deb
       - name: "fetch artifact: Ubuntu 22.04"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb
       - name: "fetch artifact: Ubuntu 24.04"
@@ -1372,23 +1372,23 @@ jobs:
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
       - name: "fetch artifact: Fedora 39"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc39.x86_64.rpm"
       - name: "fetch artifact: ArchLinux"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "contour-x86_64.pkg.tar.zst"
       - name: "fetch artifact: MacOS"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-osx.dmg"
       - name: "fetch artifact: Windows (MSI)"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
       - name: "fetch artifact: Windows (ZIP)"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
       # }}}
