@@ -539,8 +539,24 @@ void Terminal::updateIndicatorStatusLine()
 {
     Require(_activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
 
-    auto const colors =
-        _focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
+    auto const colors = [&]() {
+        if (!_focused)
+        {
+            return colorPalette().indicatorStatusLineInactive;
+        }
+        else
+        {
+            switch (_inputHandler.mode())
+            {
+                case ViMode::Insert: return colorPalette().indicatorStatusLineInsertMode;
+                case ViMode::Normal: return colorPalette().indicatorStatusLineNormalMode;
+                case ViMode::Visual:
+                case ViMode::VisualLine:
+                case ViMode::VisualBlock: return colorPalette().indicatorStatusLineVisualMode;
+            }
+        }
+        crispy::unreachable();
+    }();
 
     auto const backupForeground = _colorPalette.defaultForeground;
     auto const backupBackground = _colorPalette.defaultBackground;

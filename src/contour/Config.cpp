@@ -514,16 +514,38 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
 
     loadWithLog("cursor", where.cursor);
     loadWithLog("vi_mode_highlight", where.yankHighlight);
-    loadWithLog("vi_mode_cursosrline", where.indicatorStatusLine);
+    loadWithLog("vi_mode_cursosrline", where.normalModeCursorline);
     loadWithLog("selection", where.selection);
     loadWithLog("search_highlight", where.searchHighlight);
     loadWithLog("search_highlight_focused", where.searchHighlightFocused);
     loadWithLog("word_highlight_current", where.wordHighlightCurrent);
     loadWithLog("word_highlight_other", where.wordHighlight);
-    loadWithLog("indicator_statusline", where.indicatorStatusLine);
-    loadWithLog("indicator_statusline_inactive", where.indicatorStatusLineInactive);
     loadWithLog("input_method_editor", where.inputMethodEditor);
 
+    if (child["indicator_statusline"])
+    {
+        logger()("*** loading indicator_statusline");
+        if (child["indicator_statusline"]["default"])
+        {
+            logger()("*** loading default indicator_statusline");
+            vtbackend::RGBColorPair defaultIndicatorStatusLine;
+            loadFromEntry(child["indicator_statusline"], "default", defaultIndicatorStatusLine);
+            where.indicatorStatusLineInactive = defaultIndicatorStatusLine;
+            where.indicatorStatusLineNormalMode = defaultIndicatorStatusLine;
+            where.indicatorStatusLineVisualMode = defaultIndicatorStatusLine;
+        }
+        for (auto const& [name, defaultColor]:
+             { pair { "inactive", &where.indicatorStatusLineInactive },
+               pair { "normal_mode", &where.indicatorStatusLineNormalMode },
+               pair { "visual_mode", &where.indicatorStatusLineVisualMode } })
+        {
+            if (child["indicator_statusline"][name])
+            {
+                logger()("*** loading {} indicator_statusline", name);
+                loadFromEntry(child["indicator_statusline"], name, defaultColor);
+            }
+        }
+    }
     logger()("*** loading pallete");
     loadFromEntry(child, "", where.palette);
 }
@@ -1255,12 +1277,12 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                 {
                     if (tryAddKey(where, *mode, *mods, mapping["key"], *action))
                     {
-                        logger()(
-                            "Adding input mapping: mods: {:<20} modifiers: {:<20} key: {:<20} action: {:<20}",
-                            *mods,
-                            *mode,
-                            mapping["key"].as<std::string>(),
-                            *action);
+                        logger()("Adding input mapping: mods: {:<20} modifiers: {:<20} key: {:<20} "
+                                 "action: {:<20}",
+                                 *mods,
+                                 *mode,
+                                 mapping["key"].as<std::string>(),
+                                 *action);
                     }
                     else if (tryAddMouse(where.mouseMappings, *mode, *mods, mapping["mouse"], *action))
                     {
@@ -2139,10 +2161,8 @@ std::string createString(Config const& c)
                                    entry.wordHighlight.backgroundAlpha);
 
                     processWithDoc(documentation::IndicatorStatusLine,
-                                   entry.indicatorStatusLine.foreground,
-                                   entry.indicatorStatusLine.background);
-
-                    processWithDoc(documentation::IndicatorStatusLineInactive,
+                                   entry.indicatorStatusLineInsertMode.foreground,
+                                   entry.indicatorStatusLineInsertMode.background,
                                    entry.indicatorStatusLineInactive.foreground,
                                    entry.indicatorStatusLineInactive.background);
 
