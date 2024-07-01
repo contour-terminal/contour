@@ -816,13 +816,19 @@ constexpr StringLiteral ExperimentalFeatures {
     "{comment}     feature_xyz: true\n"
 };
 
-constexpr StringLiteral DefaultColors { "{comment} Default colors\n"
-                                        "default:\n"
-                                        "    {comment} Default background color (this can be made "
-                                        "transparent, see above).\n"
-                                        "    background: {}\n"
-                                        "    {comment} Default foreground text color.\n"
-                                        "    foreground: {}\n" };
+constexpr StringLiteral DefaultColors {
+    "{comment} Default colors\n"
+    "default:\n"
+    "    {comment} Default background color (this can be made "
+    "transparent, see above).\n"
+    "    background: {}\n"
+    "    {comment} Default foreground text color.\n"
+    "    foreground: {}\n"
+    "    {comment} Default foreground text color when bold(/bright) mode is on.\n"
+    "    bright_foreground: {}\n"
+    "    {comment} Default foreground text color when dim mode is on.\n"
+    "    dimmed_foreground: {}\n"
+};
 
 constexpr StringLiteral HyperlinkDecoration {
     "\n"
