@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <ostream>
+#include <string>
 #include <variant>
 
 #include <boxed-cpp/boxed.hpp>
@@ -17,6 +18,16 @@
 
 namespace vtbackend
 {
+
+struct FontDef
+{
+    double size;
+    std::string regular;
+    std::string bold;
+    std::string italic;
+    std::string boldItalic;
+    std::string emoji;
+};
 
 using LineCount = vtpty::LineCount;
 using ColumnCount = vtpty::ColumnCount;
