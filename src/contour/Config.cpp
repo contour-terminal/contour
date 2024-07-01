@@ -457,7 +457,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
     if (!child) // can not load directly from config file
     {
-
         logger()(
             "color paletter not found inside config file, checking colorschemes directory for {}.yml file",
             entry);
@@ -491,6 +490,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
         logger()("*** loading default colors");
         loadFromEntry(child["default"], "background", where.defaultBackground);
         loadFromEntry(child["default"], "foreground", where.defaultForeground);
+        loadFromEntry(child["default"], "bright_foreground", where.defaultForegroundBright);
+        loadFromEntry(child["default"], "dimmed_foreground", where.defaultForegroundDimmed);
     }
 
     if (child["background_image"] && child["background_image"]["path"]) // ensure that path exist
@@ -2081,8 +2082,11 @@ std::string createString(Config const& c)
                                 fmt::arg("comment", "#")));
                 {
                     const auto _ = typename Writer::Offset {};
-                    processWithDoc(
-                        documentation::DefaultColors, entry.defaultBackground, entry.defaultForeground);
+                    processWithDoc(documentation::DefaultColors,
+                                   entry.defaultBackground,
+                                   entry.defaultForeground,
+                                   entry.defaultForegroundBright,
+                                   entry.defaultForegroundDimmed);
 
                     // processWithDoc("# Background image support.\n"
                     //                "background_image:\n"
