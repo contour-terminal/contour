@@ -66,6 +66,15 @@ namespace
         {
             for (auto const& env: newValues)
             {
+                if (env.first == "TERM")
+                {
+                    // Do not pass TERM to child process, as it might cause problems with some applications
+                    // (e.g. git diff) We are currently only using ConPTY here which does not require TERM to
+                    // be set.
+                    errorLog()("Ignoring TERM environment variable for child process.");
+                    continue;
+                }
+
                 if (auto len = GetEnvironmentVariable(env.first.c_str(), nullptr, 0); len != 0)
                 {
                     vector<char> buf;
