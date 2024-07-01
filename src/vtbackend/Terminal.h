@@ -8,7 +8,6 @@
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/InputHandler.h>
 #include <vtbackend/RenderBuffer.h>
-#include <vtbackend/ScreenEvents.h>
 #include <vtbackend/Selector.h>
 #include <vtbackend/Sequence.h>
 #include <vtbackend/SequenceBuilder.h>

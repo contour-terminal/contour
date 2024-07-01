@@ -1381,7 +1381,7 @@ string Terminal::extractLastMarkRange() const
     return text;
 }
 
-// {{{ ScreenEvents overrides
+// {{{ screen events
 void Terminal::requestCaptureBuffer(LineCount lines, bool logical)
 {
     _eventListener.requestCaptureBuffer(lines, logical);

@@ -9,7 +9,6 @@
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
 #include <vtbackend/ScreenBase.h>
-#include <vtbackend/ScreenEvents.h>
 #include <vtbackend/VTType.h>
 #include <vtbackend/cell/CellConcept.h>
 

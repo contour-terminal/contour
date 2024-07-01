@@ -2897,7 +2897,12 @@ namespace impl
                 auto const italic = string(param(3));
                 auto const boldItalic = string(param(4));
                 auto const emoji = string(param(5));
-                terminal.setFontDef(FontDef { size, regular, bold, italic, boldItalic, emoji });
+                terminal.setFontDef({ .size = size,
+                                      .regular = regular,
+                                      .bold = bold,
+                                      .italic = italic,
+                                      .boldItalic = boldItalic,
+                                      .emoji = emoji });
             }
             return ApplyResult::Ok;
         }
