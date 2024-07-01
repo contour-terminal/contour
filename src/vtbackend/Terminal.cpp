@@ -2053,7 +2053,7 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
     _viCommands.cursorPosition.line -= n;
 
     // Adjust viewport accordingly to make it fixed at the scroll-offset as if nothing has happened.
-    if (viewport().scrolled())
+    if (viewport().scrolled() || _inputHandler.mode() == ViMode::Normal)
         viewport().scrollUp(n);
 
     if (!_selection)
