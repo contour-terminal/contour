@@ -142,6 +142,7 @@
           <li>Fixes status line crush (#1511)</li>
           <li>Fixes application window icon on (KDE) Wayland</li>
           <li>Improves handling of constant bell sound spawning</li>
+          <li>Fixes yW (yank WORD) not working properly in normal mode (#1448)</li>
         </ul>
       </description>
     </release>
