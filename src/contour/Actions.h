@@ -49,7 +49,7 @@ struct OpenConfiguration{};
 struct OpenFileManager{};
 struct OpenSelection{};
 struct PasteClipboard{ bool strip = false; };
-struct PasteSelection{};
+struct PasteSelection{ bool evaluateInShell = false;};
 struct Quit{};
 struct ReloadConfig{ std::optional<std::string> profileName; };
 struct ResetConfig{};
@@ -182,7 +182,10 @@ namespace documentation
         "Pastes clipboard to standard input. Pass boolean parameter 'strip' to indicate whether or not to "
         "strip repetitive whitespaces down to one and newlines to whitespaces."
     };
-    constexpr inline std::string_view PasteSelection { "Pastes current selection to standard input." };
+    constexpr inline std::string_view PasteSelection { "Pastes current selection to standard input."
+                                                       "Option `evaluate_in_shell` specify if pasted text "
+                                                       "must be appended with linefeed and used as an input "
+                                                       "for the running shell" };
     constexpr inline std::string_view Quit { "Quits the application." };
     constexpr inline std::string_view ReloadConfig { "Forces a configuration reload." };
     constexpr inline std::string_view ResetConfig {
