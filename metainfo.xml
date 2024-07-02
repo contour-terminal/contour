@@ -126,6 +126,7 @@
           <li>Add key bindings disabled indicator for status line (#783)</li>
           <li>When switching to normal mode screen will stay in same position (#808)</li>
           <li>Add customizable per-input-mode default text/background coloring for indicator statusline (#1528)</li>
+          <li>Add option PasteSelection to paste text as a shell input (#1549)</li>
           <li>Update of contour.desktop file (#1423)</li>
           <li>Changed configuration entry values for `font_locator` down to `native` and `mock` only (#1538).</li>
           <li>Do not export the `TERM` environment variable on Windows OS (when using ConPTY).</li>
