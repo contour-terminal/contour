@@ -140,7 +140,8 @@ class shaper
                        gsl::span<unsigned> clusters,
                        unicode::Script script,
                        unicode::PresentationStyle presentation,
-                       shape_result& result) = 0;
+                       shape_result& result,
+                       bool useFontFallback) = 0;
 
     [[nodiscard]] virtual std::optional<glyph_position> shape(font_key font, char32_t codepoint) = 0;
 

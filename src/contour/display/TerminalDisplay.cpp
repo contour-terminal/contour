@@ -299,7 +299,8 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
                                             newSession->config().textureAtlasTileCount.value(),
                                             newSession->config().textureAtlasDirectMapping.value(),
                                             newSession->profile().hyperlinkDecorationNormal.value(),
-                                            newSession->profile().hyperlinkDecorationHover.value()
+                                            newSession->profile().hyperlinkDecorationHover.value(),
+                                            newSession->profile().fonts.value().useFontFallback
                                             // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
         );
 

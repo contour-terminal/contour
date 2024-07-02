@@ -272,7 +272,8 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                            text::shaper& textShaper,
                            FontDescriptions& fontDescriptions,
                            FontKeys const& fontKeys,
-                           TextRendererEvents& eventHandler):
+                           TextRendererEvents& eventHandler,
+                           bool useFallbackForFonts):
     Renderable { gridMetrics },
     _textClusterGrouper { *this },
     _textRendererEvents { eventHandler },
@@ -282,7 +283,8 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                                                    crispy::lru_capacity { TextShapingCacheSize },
                                                    "Text shaping cache") },
     _textShaper { textShaper },
-    _boxDrawingRenderer { gridMetrics }
+    _boxDrawingRenderer { gridMetrics },
+    _useFallbackForFonts { useFallbackForFonts }
 {
 }
 
@@ -873,7 +875,8 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
                       clusters,
                       script,            // get<unicode::Script>(run.properties),
                       presentationStyle, // get<unicode::PresentationStyle>(run.properties),
-                      glyphPosition);
+                      glyphPosition,
+                      _useFallbackForFonts);
 
     if (rasterizerLog && !glyphPosition.empty())
     {

@@ -36,6 +36,7 @@ struct FontDescriptions
     TextShapingEngine textShapingEngine = TextShapingEngine::OpenShaper;
     FontLocatorEngine fontLocator = FontLocatorEngine::Native;
     bool builtinBoxDrawing = true;
+    bool useFontFallback = false;
 };
 
 inline bool operator==(FontDescriptions const& a, FontDescriptions const& b) noexcept

@@ -114,7 +114,8 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
                    crispy::lru_capacity atlasTileCount,
                    bool atlasDirectMapping,
                    Decorator hyperlinkNormal,
-                   Decorator hyperlinkHover):
+                   Decorator hyperlinkHover,
+                   bool useFallbackForFonts):
     _atlasHashtableSlotCount { crispy::nextPowerOfTwo(atlasHashtableSlotCount.value) },
     _atlasTileCount {
         std::max(atlasTileCount.value, static_cast<uint32_t>(pageSize.area() * 3))
@@ -132,7 +133,9 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _colorPalette { colorPalette },
     _backgroundRenderer { _gridMetrics, colorPalette.defaultBackground },
     _imageRenderer { _gridMetrics, cellSize() },
-    _textRenderer { _gridMetrics, *_textShaper, _fontDescriptions, _fonts, _imageRenderer },
+    _textRenderer {
+        _gridMetrics, *_textShaper, _fontDescriptions, _fonts, _imageRenderer, useFallbackForFonts
+    },
     _decorationRenderer { _gridMetrics, hyperlinkNormal, hyperlinkHover },
     _cursorRenderer { _gridMetrics, vtbackend::CursorShape::Block }
 {

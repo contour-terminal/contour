@@ -58,7 +58,8 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                  text::shaper& textShaper,
                  FontDescriptions& fontDescriptions,
                  FontKeys const& fontKeys,
-                 TextRendererEvents& eventHandler);
+                 TextRendererEvents& eventHandler,
+                 bool useFallbackForFonts);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void setTextureAtlas(TextureAtlas& atlas) override;
@@ -179,6 +180,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     // sub-renderer
     //
     BoxDrawingRenderer _boxDrawingRenderer;
+    bool _useFallbackForFonts { true };
 };
 
 } // namespace vtrasterizer

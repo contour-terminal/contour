@@ -36,7 +36,8 @@ class open_shaper: public shaper
                gsl::span<unsigned> clusters,
                unicode::Script script,
                unicode::PresentationStyle presentation,
-               shape_result& result) override;
+               shape_result& result,
+               bool useFontFallback) override;
 
     [[nodiscard]] std::optional<glyph_position> shape(font_key font, char32_t codepoint) override;
 

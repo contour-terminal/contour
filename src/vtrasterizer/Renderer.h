@@ -60,7 +60,8 @@ class Renderer
              crispy::lru_capacity atlasTileCount,
              bool atlasDirectMapping,
              Decorator hyperlinkNormal,
-             Decorator hyperlinkHover);
+             Decorator hyperlinkHover,
+             bool useFallbackForFonts);
 
     [[nodiscard]] ImageSize cellSize() const noexcept { return _gridMetrics.cellSize; }
 
