@@ -1126,12 +1126,15 @@ bool TerminalSession::operator()(actions::PasteClipboard paste)
     return true;
 }
 
-bool TerminalSession::operator()(actions::PasteSelection)
+bool TerminalSession::operator()(actions::PasteSelection paste)
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = normalize_crlf(clipboard->text(QClipboard::Selection));
-        terminal().sendPaste(string_view { text });
+        if (paste.evaluateInShell)
+            terminal().sendRawInput(string_view { text + "\n" });
+        else
+            terminal().sendPaste(string_view { text });
     }
 
     return true;
