@@ -651,7 +651,8 @@ void open_shaper::shape(font_key font,
                         gsl::span<unsigned> clusters,
                         unicode::Script script,
                         unicode::PresentationStyle presentation,
-                        shape_result& result)
+                        shape_result& result,
+                        bool useFontFallback)
 {
     assert(clusters.size() == codepoints.size());
     textShapingLog()("Shaping using font key: {}, text: \"{}\"", font, unicode::convert_to<char>(codepoints));
@@ -677,8 +678,14 @@ void open_shaper::shape(font_key font,
         logMessage.append("Using font: key={}, path=\"{}\"\n", font, identifierOf(fontInfo.primary));
     }
 
-    if (_d->tryShapeWithFallback(
-            font, fontInfo, hbBuf, hbFont, script, presentation, codepoints, clusters, result))
+    auto shapingFunction = [&](auto&&... args) {
+        if (useFontFallback)
+            return _d->tryShapeWithFallback(args...);
+        else
+            return tryShape(args...);
+    };
+
+    if (shapingFunction(font, fontInfo, hbBuf, hbFont, script, presentation, codepoints, clusters, result))
         return;
 
     textShapingLog()("Shaping failed.");
@@ -708,15 +715,15 @@ void open_shaper::shape(font_key font,
 
     // shape last cluster
     auto const end = clusters.size();
-    _d->tryShapeWithFallback(font,
-                             fontInfo,
-                             hbBuf,
-                             hbFont,
-                             script,
-                             presentation,
-                             codepoints.substr(start, end - start),
-                             clusters.subspan(start, end - start),
-                             result);
+    shapingFunction(font,
+                    fontInfo,
+                    hbBuf,
+                    hbFont,
+                    script,
+                    presentation,
+                    codepoints.substr(start, end - start),
+                    clusters.subspan(start, end - start),
+                    result);
 
     // last resort
     replaceMissingGlyphs(fontInfo.ftFace.get(), result);

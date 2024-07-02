@@ -1018,6 +1018,7 @@ struct YAMLConfigWriter: Writer
                       v.fontLocator,
                       v.textShapingEngine,
                       v.builtinBoxDrawing,
+                      v.useFontFallback,
                       v.renderMode,
                       "true",
                       v.regular.familyName,

@@ -1164,6 +1164,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         loadFromEntry(child, "locator", where.fontLocator);
         loadFromEntry(child, "text_shaping.engine", where.textShapingEngine);
         loadFromEntry(child, "builtin_box_drawing", where.builtinBoxDrawing);
+        loadFromEntry(child, "use_font_fallback", where.useFontFallback);
         loadFromEntry(child, "render_mode", where.renderMode);
         loadFromEntry(child, "regular", where.regular);
 
