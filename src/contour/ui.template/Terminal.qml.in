@@ -185,7 +185,7 @@ ContourTerminal
 
     function playBell(volume) {
         if (bellSoundEffect.playbackState === MediaPlayer.PlayingState)
-            bellSoundEffect.stop();
+           return;
 
         if (bellSoundEffect.audioOutput)
             // Qt 6 solution to set the volume
