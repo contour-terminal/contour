@@ -50,4 +50,3 @@ echo "RELEASENAME_SUFFIX=${SUFFIX}" >> "$GITHUB_OUTPUT"
 
 echo "${RELEASEBODY}" >release-body.md
 echo "${RELEASEBODY}"
-

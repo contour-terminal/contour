@@ -4,4 +4,3 @@ if(LIBTERMINAL_TESTING)
         target_link_libraries(watch-mouse-events fmt::fmt-header-only vtbackend)
     endif()
 endif()
-

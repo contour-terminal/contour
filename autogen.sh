@@ -67,4 +67,3 @@ exec cmake "${ROOTDIR}" \
            ${EXTRA_CMAKE_FLAGS} \
            -B "${BUILD_DIR}" \
            -GNinja
-

@@ -6,4 +6,3 @@
 /.github/codechecker/               @whisperity
 /.github/workflows/*codechecker*    @whisperity
 cmake/                              @data-man
-
