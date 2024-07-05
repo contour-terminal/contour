@@ -125,9 +125,24 @@ namespace text
             (CFArrayRef) NSLocale.preferredLanguages
         );
 
-        if (cascadeList) {
+        if(std::holds_alternative<font_fallback_none>(description.fontFallback))
+            locatorLog()("Skipping fallback fonts as font fallback is set to none");
+        else if (cascadeList) {
             for (CFIndex i = 0; i < CFArrayGetCount(cascadeList); i++) {
                 const auto* fallbackFont = (CTFontDescriptorRef) CFArrayGetValueAtIndex(cascadeList, i);
+
+                const auto* fallbackFontName = (NSString*) CTFontDescriptorCopyAttribute(fallbackFont, kCTFontFamilyNameAttribute);
+
+                if(const auto* list = std::get_if<font_fallback_list>(&description.fontFallback) )
+                {
+                    locatorLog()("Checking if {} is in the list of allowed fallback fonts\n", std::string([fallbackFontName UTF8String]));
+                    if( std::find(list->fallbackFonts.begin(), list->fallbackFonts.end(), std::string([fallbackFontName UTF8String])) == list->fallbackFonts.end())
+                    {
+                        locatorLog()("Skipping fallback font {} as it is not in the list of allowed fallback fonts", std::string([fallbackFontName UTF8String]));
+                        continue;
+                    }
+                }
+
                 if (fallbackFont) {
                     CTFontRef fallbackFontRef = CTFontCreateWithFontDescriptor(fallbackFont, 0.0, nullptr);
                     if (fallbackFontRef) {

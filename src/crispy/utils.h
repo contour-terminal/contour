@@ -565,4 +565,13 @@ inline bool beginsWith(std::basic_string_view<T> text, std::basic_string_view<T>
 
 std::string threadName();
 
+template <class... Ts>
+struct overloaded: Ts...
+{
+    using Ts::operator()...;
+};
+
+template <class... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+
 } // namespace crispy

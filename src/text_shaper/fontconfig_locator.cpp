@@ -3,12 +3,15 @@
 #include <text_shaper/fontconfig_locator.h>
 
 #include <crispy/assert.h>
+#include <crispy/utils.h>
 
+#include <range/v3/view/drop.hpp>
 #include <range/v3/view/iota.hpp>
 
 #include <fontconfig/fontconfig.h>
 
 #include <string_view>
+#include <variant>
 
 using std::nullopt;
 using std::optional;
@@ -214,23 +217,10 @@ font_source_list fontconfig_locator::locate(font_description const& description)
     };
 #endif
 
-    for (int i = 0; i < fs->nfont; ++i)
-    {
-        FcPattern* font = fs->fonts[i];
-
+    auto addFont = [&](auto const& font) {
         FcChar8* file = nullptr;
         if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch)
-            continue;
-
-#if defined(FC_COLOR) // Not available on macOS?
-// FcBool color = FcFalse;
-// FcPatternGetInteger(font, FC_COLOR, 0, &color);
-// if (color && !color)
-// {
-//     locatorLog()("Skipping font (contains color). {}", (char const*) file);
-//     continue;
-// }
-#endif
+            return;
 
         int spacing = -1;
         FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
@@ -246,7 +236,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
                              (char const*) (file),
                              fcSpacingStr(spacing),
                              fcSpacingStr(FC_DUAL));
-                continue;
+                return;
             }
         }
 
@@ -270,7 +260,48 @@ font_source_list fontconfig_locator::locate(font_description const& description)
                      slant.has_value() ? fmt::format("{}", *slant) : "NONE",
                      spacing,
                      (char const*) file);
-    }
+    };
+
+    // First font is the primary font that is best matching for description.family, we always
+    // include that one.on.
+    addFont(fs->fonts[0]);
+
+    std::visit(crispy::overloaded {
+                   [](font_fallback_none) {},
+                   [&](font_fallback_list const& list) {
+                       // find font in the fallback list and add it
+                       for (auto&& fallbackFont: list.fallbackFonts)
+                       {
+                           for (auto i: ranges::views::ints(1, fs->nfont))
+                           {
+                               FcPattern* font = fs->fonts[i];
+
+                               FcChar8* family = nullptr;
+                               FcPatternGetString(font, FC_FAMILY, 0, &family);
+
+                               // remove spaces from the fonts names
+                               auto fallbackFontNoSpaces = fallbackFont;
+                               fallbackFontNoSpaces.erase(
+                                   std::remove(fallbackFontNoSpaces.begin(), fallbackFontNoSpaces.end(), ' '),
+                                   fallbackFontNoSpaces.end());
+                               std::string familyNoSpaces = (char const*) family;
+                               familyNoSpaces.erase(
+                                   std::remove(familyNoSpaces.begin(), familyNoSpaces.end(), ' '),
+                                   familyNoSpaces.end());
+                               if (fallbackFontNoSpaces == familyNoSpaces)
+                               {
+                                   addFont(font);
+                                   break;
+                               }
+                           }
+                       }
+                   },
+                   [&](std::monostate) {
+                       for (auto i: ranges::views::ints(1, fs->nfont))
+                           addFont(fs->fonts[i]);
+                   },
+               },
+               description.fontFallback);
 
 #if defined(_WIN32)
     #define FONTDIR "C:\\Windows\\Fonts\\"
