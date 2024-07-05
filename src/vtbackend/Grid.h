@@ -145,7 +145,8 @@ struct LogicalLine
 
     // Searches from left to right, taking into account line wrapping
     [[nodiscard]] std::optional<vtbackend::CellLocation> search(std::u32string_view searchText,
-                                                                ColumnOffset startPosition) const
+                                                                ColumnOffset startPosition,
+                                                                bool isCaseSensitive) const
     {
         auto const lineLength = unbox<size_t>(lines.front().get().size());
         auto i = top;
@@ -156,13 +157,13 @@ struct LogicalLine
                 std::u32string_view const textOnThisLine(searchText.data(),
                                                          lineLength - unbox<size_t>(startPosition));
                 // Find how much of searchText is on this line
-                auto const result = searchPartialMatch(textOnThisLine, line->get());
+                auto const result = searchPartialMatch(textOnThisLine, line->get(), isCaseSensitive);
                 if (result != 0)
                 {
                     // Match the remaining text
                     std::u32string_view const remainingTextToMatch(searchText.data() + result,
                                                                    searchText.size() - result);
-                    if (matchTextAt(remainingTextToMatch, ColumnOffset(0), line + 1))
+                    if (matchTextAt(remainingTextToMatch, ColumnOffset(0), line + 1, isCaseSensitive))
                         return CellLocation { i, ColumnOffset(static_cast<int>(lineLength - result)) };
                 }
                 startPosition = ColumnOffset(0);
@@ -172,14 +173,16 @@ struct LogicalLine
         }
         for (auto line = lines.begin(); line != lines.end(); ++line)
         {
-            auto result = line->get().search(searchText, startPosition);
+            auto result = line->get().search(searchText, startPosition, isCaseSensitive);
             if (result.has_value())
             {
                 if (result->partialMatchLength == 0)
                     return CellLocation { i, result->column };
                 auto remainingText = searchText;
                 remainingText.remove_prefix(result->partialMatchLength);
-                if (line + 1 != lines.end() && (line + 1)->get().matchTextAt(remainingText, ColumnOffset(0)))
+                if (line + 1 != lines.end()
+                    && (line + 1)->get().matchTextAtWithSensetivityMode(
+                        remainingText, ColumnOffset(0), isCaseSensitive))
                     return CellLocation { i,
                                           ColumnOffset::cast_from(
                                               static_cast<int>(unbox<size_t>(line->get().size())
@@ -193,7 +196,8 @@ struct LogicalLine
 
     // Searches from right to left, taking into account line wrapping
     [[nodiscard]] std::optional<vtbackend::CellLocation> searchReverse(std::u32string_view searchText,
-                                                                       ColumnOffset startPosition) const
+                                                                       ColumnOffset startPosition,
+                                                                       bool isCaseSensitive) const
     {
         auto i = bottom;
         auto const lineLength = unbox<size_t>(lines.front().get().size());
@@ -204,7 +208,7 @@ struct LogicalLine
                 std::u32string_view const textOnThisLine(searchText.data() + searchText.size()
                                                              - unbox<size_t>(startPosition),
                                                          unbox<size_t>(startPosition));
-                auto const result = searchPartialMatchReverse(textOnThisLine, line->get());
+                auto const result = searchPartialMatchReverse(textOnThisLine, line->get(), isCaseSensitive);
                 if (result != 0)
                 {
                     std::u32string_view remainingText(searchText.data(), searchText.size() - result);
@@ -226,7 +230,7 @@ struct LogicalLine
                     long const startLine = static_cast<long>(std::ceil(
                         static_cast<double>(remainingText.size()) / static_cast<double>(lineLength)));
 
-                    if (matchTextAtReverse(remainingText, startCol, line + startLine))
+                    if (matchTextAtReverse(remainingText, startCol, line + startLine, isCaseSensitive))
                         return CellLocation { LineOffset::cast_from(i.value - startLine), startCol };
                 }
                 startPosition = ColumnOffset::cast_from(lineLength - 1);
@@ -237,7 +241,7 @@ struct LogicalLine
         auto const lastColumn = ColumnOffset::cast_from(lineLength);
         for (auto line = lines.rbegin(); line != lines.rend(); ++line)
         {
-            auto result = line->get().searchReverse(searchText, startPosition);
+            auto result = line->get().searchReverse(searchText, startPosition, isCaseSensitive);
             if (result.has_value())
             {
                 if (result->partialMatchLength == 0)
@@ -245,8 +249,8 @@ struct LogicalLine
                 auto remainingText = searchText;
                 remainingText.remove_suffix(result->partialMatchLength);
                 if (line + 1 != lines.rend()
-                    && (line + 1)->get().matchTextAt(remainingText,
-                                                     lastColumn - static_cast<int>(remainingText.size())))
+                    && (line + 1)->get().matchTextAtWithSensetivityMode(
+                        remainingText, lastColumn - static_cast<int>(remainingText.size()), isCaseSensitive))
                     return CellLocation { i - 1, lastColumn - static_cast<int>(remainingText.size()) };
             }
             startPosition = lastColumn - 1;
@@ -258,12 +262,16 @@ struct LogicalLine
   private:
     // Finds the maximum number of charecters of searchText that can be matched from right end of line
     [[nodiscard]] size_t searchPartialMatch(std::u32string_view searchText,
-                                            const Line<Cell>& line) const noexcept
+                                            const Line<Cell>& line,
+                                            bool isCaseSensitive) const noexcept
     {
         auto const lineLength = unbox<size_t>(line.size());
         while (!searchText.empty())
         {
-            if (line.matchTextAt(searchText, ColumnOffset(static_cast<int>(lineLength - searchText.size()))))
+            if (line.matchTextAtWithSensetivityMode(
+                    searchText,
+                    ColumnOffset(static_cast<int>(lineLength - searchText.size())),
+                    isCaseSensitive))
                 return searchText.size();
             searchText.remove_suffix(1);
         }
@@ -272,11 +280,12 @@ struct LogicalLine
 
     // Finds the maximum number of charecters of searchText that can be matched from left end of line
     [[nodiscard]] size_t searchPartialMatchReverse(std::u32string_view searchText,
-                                                   const Line<Cell>& line) const noexcept
+                                                   const Line<Cell>& line,
+                                                   bool isCaseSensitive) const noexcept
     {
         while (!searchText.empty())
         {
-            if (line.matchTextAt(searchText, ColumnOffset(0)))
+            if (line.matchTextAtWithSensetivityMode(searchText, ColumnOffset(0), isCaseSensitive))
                 return searchText.size();
             searchText.remove_prefix(1);
         }
@@ -309,12 +318,13 @@ struct LogicalLine
     template <typename Itr>
     [[nodiscard]] bool matchTextAt(std::u32string_view searchText,
                                    ColumnOffset startCol,
-                                   Itr startLine) const noexcept
+                                   Itr startLine,
+                                   bool isCaseSensitive) const noexcept
     {
         auto segments = segmentSearchText(searchText, startCol);
         for (auto segment: segments)
         {
-            if (!startLine->get().matchTextAt(segment, startCol))
+            if (!startLine->get().matchTextAtWithSensetivityMode(segment, startCol, isCaseSensitive))
                 return false;
             ++startLine;
         }
@@ -325,12 +335,13 @@ struct LogicalLine
     template <typename Itr>
     [[nodiscard]] bool matchTextAtReverse(std::u32string_view searchText,
                                           ColumnOffset startCol,
-                                          Itr startLine) const noexcept
+                                          Itr startLine,
+                                          bool isCaseSensitive) const noexcept
     {
         auto segments = segmentSearchText(searchText, startCol);
         for (auto i: segments)
         {
-            if (!startLine->get().matchTextAt(i, startCol))
+            if (!startLine->get().matchTextAtWithSensetivityMode(i, startCol, isCaseSensitive))
                 return false;
             startCol = ColumnOffset::cast_from(0);
             --startLine;

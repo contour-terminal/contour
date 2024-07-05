@@ -297,11 +297,15 @@ class Line
 
     void setBuffer(Storage buffer) noexcept { _storage = std::move(buffer); }
 
-    // Tests if the given text can be matched in this line at the exact given start column.
-    [[nodiscard]] bool matchTextAt(std::u32string_view text, ColumnOffset startColumn) const noexcept
+    // Tests if the given text can be matched in this line at the exact given start column, in sensetive
+    // or insensitive mode.
+    [[nodiscard]] bool matchTextAtWithSensetivityMode(std::u32string_view text,
+                                                      ColumnOffset startColumn,
+                                                      bool isCaseSensitive) const noexcept
     {
         if (isTrivialBuffer())
         {
+            assert(false);
             auto const u8Text = unicode::convert_to<char>(text);
             TrivialBuffer const& buffer = trivialBuffer();
             if (!buffer.usedColumns)
@@ -309,8 +313,10 @@ class Line
             auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
             if (text.size() > static_cast<size_t>(column.value - buffer.usedColumns.value))
                 return false;
-            auto const resultIndex = buffer.text.view()
-                                         .substr(unbox<size_t>(column))
+
+            auto bufferCopyText = std::string(buffer.text.view());
+            std::transform(bufferCopyText.begin(), bufferCopyText.end(), bufferCopyText.begin(), ::tolower);
+            auto const resultIndex = bufferCopyText.substr(unbox<size_t>(column))
                                          .find(std::string_view(u8Text), unbox<size_t>(column));
             return resultIndex == 0;
         }
@@ -323,7 +329,7 @@ class Line
             size_t i = 0;
             while (i < text.size())
             {
-                if (!CellUtil::beginsWith(text.substr(i), cells[baseColumn + i]))
+                if (!CellUtil::beginsWith(text.substr(i), cells[baseColumn + i], isCaseSensitive))
                     return false;
                 ++i;
             }
@@ -336,8 +342,14 @@ class Line
     // match is found at the right end of line it returns startColumn as it is and the partialMatchLength
     // is set equal to match found at the left end of line.
     [[nodiscard]] std::optional<SearchResult> search(std::u32string_view text,
-                                                     ColumnOffset startColumn) const noexcept
+                                                     ColumnOffset startColumn,
+                                                     bool isCaseSensitive) const noexcept
     {
+
+        auto matchTextAt = [&](auto text, auto baseColumn) {
+            return matchTextAtWithSensetivityMode(text, baseColumn, isCaseSensitive);
+        };
+
         if (isTrivialBuffer())
         {
             auto const u8Text = unicode::convert_to<char>(text);
@@ -381,8 +393,14 @@ class Line
     // match is found at the left end of line it returns startColumn as it is and the partialMatchLength
     // is set equal to match found at the left end of line.
     [[nodiscard]] std::optional<SearchResult> searchReverse(std::u32string_view text,
-                                                            ColumnOffset startColumn) const noexcept
+                                                            ColumnOffset startColumn,
+                                                            bool isCaseSensitive) const noexcept
     {
+
+        auto matchTextAt = [&](auto text, auto baseColumn) {
+            return matchTextAtWithSensetivityMode(text, baseColumn, isCaseSensitive);
+        };
+
         if (isTrivialBuffer())
         {
             auto const u8Text = unicode::convert_to<char>(text);

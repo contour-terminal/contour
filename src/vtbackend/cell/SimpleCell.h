@@ -263,15 +263,4 @@ inline void SimpleCell::setHyperlink(HyperlinkId hyperlink) noexcept
 
 // }}}
 
-// {{{ Optimized version for helpers from CellUtil
-namespace CellUtil
-{
-    inline bool beginsWith(std::u32string_view text, SimpleCell const& cell) noexcept
-    {
-        assert(!text.empty());
-        return text == cell.codepoints();
-    }
-} // namespace CellUtil
-// }}}
-
 } // namespace vtbackend

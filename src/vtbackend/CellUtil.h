@@ -6,6 +6,8 @@
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/cell/CellConcept.h>
 
+#include <crispy/times.h>
+
 #include <libunicode/width.h>
 
 namespace vtbackend::CellUtil
@@ -111,19 +113,44 @@ template <CellConcept Cell>
     return newWidth - cell.width();
 }
 
-template <CellConcept Cell>
-[[nodiscard]] inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept
+template <typename Cell>
+    requires(std::same_as<Cell, std::basic_string_view<char32_t>> || CellConcept<Cell>)
+[[nodiscard]] inline bool beginsWith(std::u32string_view text,
+                                     Cell const& cell,
+                                     bool isCaseSensitive) noexcept
 {
     assert(!text.empty());
 
-    if (cell.codepointCount() == 0)
+    auto size = [&]() {
+        if constexpr (CellConcept<Cell>)
+            return cell.codepointCount();
+        else
+            return cell.size();
+    }();
+
+    auto compare = [&](size_t i) {
+        if constexpr (CellConcept<Cell>)
+        {
+            if (isCaseSensitive)
+                return cell.codepoint(i) == text[i];
+            return static_cast<char32_t>(std::tolower(cell.codepoint(i))) == text[i];
+        }
+        else
+        {
+            if (isCaseSensitive)
+                return cell[i] == text[i];
+            return static_cast<char32_t>(std::tolower(cell[i])) == text[i];
+        }
+    };
+
+    if (size == 0)
         return false;
 
-    if (text.size() < cell.codepointCount())
+    if (text.size() < size)
         return false;
 
-    for (size_t i = 0; i < cell.codepointCount(); ++i)
-        if (cell.codepoint(i) != text[i])
+    for (const auto i: crispy::times(size))
+        if (!compare(i))
             return false;
 
     return true;
