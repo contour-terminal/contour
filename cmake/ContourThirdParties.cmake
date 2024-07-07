@@ -127,7 +127,7 @@ if(COMMAND ContourThirdParties_Embed_boxed_cpp)
     endif()
     set(THIRDPARTY_BUILTIN_boxed_cpp "embedded")
 else()
-    HandleThirdparty(boxed_cpp "gh:contour-terminal/boxed-cpp#v${BOXED_CPP_MINIMAL_VERSION}")
+    HandleThirdparty(boxed-cpp "gh:contour-terminal/boxed-cpp#v${BOXED_CPP_MINIMAL_VERSION}")
 endif()
 
 
