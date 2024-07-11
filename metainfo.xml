@@ -127,6 +127,7 @@
           <li>Add support for highlighting matches of the currently selected text area (beyond double click)</li>
           <li>When switching to normal mode screen will stay in same position (#808)</li>
           <li>Add customizable per-input-mode default text/background coloring for indicator statusline (#1528)</li>
+          <li>Add case-insensitive smart search (#1410)</li>
           <li>Update of contour.desktop file (#1423)</li>
           <li>Changed configuration entry values for `font_locator` down to `native` and `mock` only (#1538).</li>
           <li>Do not export the `TERM` environment variable on Windows OS (when using ConPTY).</li>
