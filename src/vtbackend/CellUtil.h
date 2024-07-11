@@ -10,6 +10,8 @@
 
 #include <libunicode/width.h>
 
+#include <ranges>
+
 namespace vtbackend::CellUtil
 {
 
@@ -114,45 +116,32 @@ template <CellConcept Cell>
 }
 
 template <typename Cell>
-    requires(std::same_as<Cell, std::basic_string_view<char32_t>> || CellConcept<Cell>)
+    requires(std::same_as<Cell, std::u32string_view> || CellConcept<Cell>)
 [[nodiscard]] inline bool beginsWith(std::u32string_view text,
                                      Cell const& cell,
                                      bool isCaseSensitive) noexcept
 {
     assert(!text.empty());
 
-    auto size = [&]() {
-        if constexpr (CellConcept<Cell>)
-            return cell.codepointCount();
-        else
-            return cell.size();
-    }();
+    auto const cellCodepointCount = cell.size();
 
-    auto compare = [&](size_t i) {
-        if constexpr (CellConcept<Cell>)
-        {
-            if (isCaseSensitive)
-                return cell.codepoint(i) == text[i];
-            return static_cast<char32_t>(std::tolower(cell.codepoint(i))) == text[i];
-        }
-        else
-        {
-            if (isCaseSensitive)
-                return cell[i] == text[i];
-            return static_cast<char32_t>(std::tolower(cell[i])) == text[i];
-        }
+    if (cellCodepointCount == 0)
+        return false;
+
+    if (text.size() < cellCodepointCount)
+        return false;
+
+    auto const testMatchAt = [&](size_t i) {
+        if (isCaseSensitive)
+            return cell[i] == text[i];
+        return static_cast<char32_t>(std::tolower(cell[i])) == text[i];
     };
 
-    if (size == 0)
-        return false;
-
-    if (text.size() < size)
-        return false;
-
-    for (const auto i: crispy::times(size))
-        if (!compare(i))
+    // TODO: Should use this line instead - but that breaks on Ubuntu 22.04 with Clang 15
+    // return std::ranges::all_of(crispy::times(cellCodepointCount), testMatchAt);
+    for (auto const i: crispy::times(cellCodepointCount))
+        if (!testMatchAt(i))
             return false;
-
     return true;
 }
 
