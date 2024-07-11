@@ -2173,16 +2173,6 @@ optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation sear
     return searchReverse(searchPosition);
 }
 
-optional<CellLocation> Terminal::search(std::u32string text,
-                                        CellLocation searchPosition,
-                                        bool initiatedByDoubleClick)
-{
-    if (!setNewSearchTerm(std::move(text), initiatedByDoubleClick))
-        return searchPosition;
-
-    return search(searchPosition);
-}
-
 optional<CellLocation> Terminal::search(CellLocation searchPosition)
 {
     auto const searchText = u32string_view(_search.pattern);
