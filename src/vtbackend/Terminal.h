@@ -661,6 +661,8 @@ class Terminal
     Selection* selector() noexcept { return _selection.get(); }
     std::chrono::milliseconds highlightTimeout() const noexcept { return _settings.highlightTimeout; }
 
+    void updateSelectionMatches();
+
     template <typename RenderTarget>
     void renderSelection(RenderTarget renderTarget) const
     {
@@ -863,9 +865,6 @@ class Terminal
     [[nodiscard]] std::optional<CellLocation> searchReverse(CellLocation searchPosition);
 
     // Searches from current position the next item downwards.
-    [[nodiscard]] std::optional<CellLocation> search(std::u32string text,
-                                                     CellLocation searchPosition,
-                                                     bool initiatedByDoubleClick = false);
     [[nodiscard]] std::optional<CellLocation> search(CellLocation searchPosition);
 
     [[nodiscard]] std::optional<CellLocation> searchNextMatch(CellLocation cursorPosition);
