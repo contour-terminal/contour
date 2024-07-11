@@ -46,6 +46,10 @@ concept CellConcept = requires(T t, T const& u) {
     { u.codepoint(size_t {}) } noexcept -> std::same_as<char32_t>;
     { u.codepointCount() } noexcept -> std::same_as<size_t>;
 
+    // std::u32string_view-like access
+    { u[size_t {}] } noexcept -> std::same_as<char32_t>;
+    { u.size() } noexcept -> std::same_as<size_t>;
+
     t.setCharacter(char32_t {});
     { t.appendCharacter(char32_t {}) } -> std::same_as<int>;
 

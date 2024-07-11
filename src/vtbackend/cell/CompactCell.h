@@ -94,6 +94,9 @@ class CRISPY_PACKED CompactCell
     [[nodiscard]] char32_t codepoint(size_t i) const noexcept;
     [[nodiscard]] std::size_t codepointCount() const noexcept;
 
+    [[nodiscard]] char32_t operator[](size_t i) const noexcept { return codepoint(i); }
+    [[nodiscard]] size_t size() const noexcept { return codepointCount(); }
+
     [[nodiscard]] constexpr uint8_t width() const noexcept;
     void setWidth(uint8_t width) noexcept;
 
