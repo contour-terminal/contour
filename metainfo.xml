@@ -124,6 +124,7 @@
           <li>Add config entry to configure behaviour on exit from search mode</li>
           <li>Add handling of different input commands (#629)</li>
           <li>Add key bindings disabled indicator for status line (#783)</li>
+          <li>Add support for highlighting matches of the currently selected text area (beyond double click)</li>
           <li>When switching to normal mode screen will stay in same position (#808)</li>
           <li>Add customizable per-input-mode default text/background coloring for indicator statusline (#1528)</li>
           <li>Update of contour.desktop file (#1423)</li>

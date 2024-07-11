@@ -661,6 +661,8 @@ class Terminal
     Selection* selector() noexcept { return _selection.get(); }
     std::chrono::milliseconds highlightTimeout() const noexcept { return _settings.highlightTimeout; }
 
+    void updateSelectionMatches();
+
     template <typename RenderTarget>
     void renderSelection(RenderTarget renderTarget) const
     {
