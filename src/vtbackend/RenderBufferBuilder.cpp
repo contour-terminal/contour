@@ -401,9 +401,9 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
     if (search.pattern.empty())
         return;
 
-    auto searchText = u32string_view(search.pattern.data() + _searchPatternOffset,
-                                     search.pattern.size() - _searchPatternOffset);
-    auto isCaseSensitive =
+    auto const searchText = u32string_view(search.pattern.data() + _searchPatternOffset,
+                                           search.pattern.size() - _searchPatternOffset);
+    auto const isCaseSensitive =
         std::any_of(searchText.begin(), searchText.end(), [](auto ch) { return std::isupper(ch); });
 
     auto const isFullMatch = [&]() -> bool {
