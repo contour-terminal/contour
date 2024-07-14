@@ -929,7 +929,8 @@ struct std::hash<vtbackend::Function>
 template <>
 struct fmt::formatter<vtbackend::FunctionCategory>: fmt::formatter<std::string_view>
 {
-    auto format(const vtbackend::FunctionCategory value, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::FunctionCategory value,
+                format_context& ctx) const -> format_context::iterator
     {
         using vtbackend::FunctionCategory;
         string_view name;
@@ -963,7 +964,7 @@ struct fmt::formatter<vtbackend::FunctionCategory>: fmt::formatter<std::string_v
 template <>
 struct fmt::formatter<vtbackend::Function>: fmt::formatter<std::string>
 {
-    auto format(const vtbackend::Function f, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::Function f, format_context& ctx) const -> format_context::iterator
     {
         std::string value;
         switch (f.category)
@@ -1013,7 +1014,7 @@ struct fmt::formatter<vtbackend::Function>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<vtbackend::FunctionSelector>: fmt::formatter<std::string>
 {
-    auto format(const vtbackend::FunctionSelector f, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::FunctionSelector f, format_context& ctx) const -> format_context::iterator
     {
         std::string value;
         // clang-format off

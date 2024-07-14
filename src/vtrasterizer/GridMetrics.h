@@ -97,7 +97,8 @@ struct GridMetrics
 template <>
 struct fmt::formatter<vtrasterizer::GridMetrics>: formatter<std::string>
 {
-    auto format(vtrasterizer::GridMetrics const& v, fmt::format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::GridMetrics const& v,
+                fmt::format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format(

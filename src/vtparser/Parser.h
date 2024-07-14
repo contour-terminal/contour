@@ -468,7 +468,7 @@ struct numeric_limits<vtparser::Action>
 template <>
 struct fmt::formatter<vtparser::State>: formatter<std::string_view>
 {
-    auto format(vtparser::State state, format_context& ctx) -> format_context::iterator
+    auto format(vtparser::State state, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string_view>::format(vtparser::to_string(state), ctx);
     }
@@ -477,7 +477,7 @@ struct fmt::formatter<vtparser::State>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtparser::ActionClass>: formatter<std::string_view>
 {
-    auto format(vtparser::ActionClass value, format_context& ctx) -> format_context::iterator
+    auto format(vtparser::ActionClass value, format_context& ctx) const -> format_context::iterator
     {
         auto constexpr Mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
         return formatter<std::string_view>::format(Mappings.at(static_cast<unsigned>(value)), ctx);
@@ -487,7 +487,7 @@ struct fmt::formatter<vtparser::ActionClass>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtparser::Action>: formatter<std::string_view>
 {
-    auto format(vtparser::Action value, format_context& ctx) -> format_context::iterator
+    auto format(vtparser::Action value, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string_view>::format(vtparser::to_string(value), ctx);
     }

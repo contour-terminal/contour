@@ -159,7 +159,7 @@ class shaper
 template <>
 struct fmt::formatter<text::bitmap_format>: fmt::formatter<std::string_view>
 {
-    auto format(text::bitmap_format value, format_context& ctx) -> format_context::iterator
+    auto format(text::bitmap_format value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -175,7 +175,7 @@ struct fmt::formatter<text::bitmap_format>: fmt::formatter<std::string_view>
 template <>
 struct fmt::formatter<text::glyph_position>: fmt::formatter<std::string>
 {
-    auto format(text::glyph_position const& gpos, format_context& ctx) -> format_context::iterator
+    auto format(text::glyph_position const& gpos, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("({}+{}+{}|{}+{})",
                                                           gpos.glyph.index.value,
@@ -190,7 +190,7 @@ struct fmt::formatter<text::glyph_position>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::rasterized_glyph>: fmt::formatter<std::string>
 {
-    auto format(text::rasterized_glyph const& glyph, format_context& ctx) -> format_context::iterator
+    auto format(text::rasterized_glyph const& glyph, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("rasterized_glyph({}, {}+{}, {})",
                                                           glyph.index.value,

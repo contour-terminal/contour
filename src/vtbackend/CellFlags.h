@@ -42,7 +42,7 @@ using CellFlags = crispy::flags<CellFlag>;
 template <>
 struct fmt::formatter<vtbackend::CellFlag>: fmt::formatter<std::string_view>
 {
-    auto format(const vtbackend::CellFlag value, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::CellFlag value, format_context& ctx) const -> format_context::iterator
     {
         string_view s;
 

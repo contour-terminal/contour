@@ -484,7 +484,7 @@ inline bool beginsWith(std::u32string_view text, CompactCell const& cell) noexce
 template <>
 struct fmt::formatter<vtbackend::CompactCell>: fmt::formatter<std::string>
 {
-    auto format(vtbackend::CompactCell const& cell, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::CompactCell const& cell, format_context& ctx) const -> format_context::iterator
     {
         std::string codepoints;
         for (auto const i: crispy::times(cell.codepointCount()))

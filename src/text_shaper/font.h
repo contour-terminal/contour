@@ -331,7 +331,7 @@ struct hash<text::font_description>
 template <>
 struct fmt::formatter<text::DPI>: fmt::formatter<std::string>
 {
-    auto format(text::DPI dpi, format_context& ctx) -> format_context::iterator
+    auto format(text::DPI dpi, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}x{}", dpi.x, dpi.y), ctx);
     }
@@ -340,7 +340,7 @@ struct fmt::formatter<text::DPI>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::font_weight>: formatter<string_view>
 {
-    auto format(text::font_weight value, format_context& ctx) -> format_context::iterator
+    auto format(text::font_weight value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -365,7 +365,7 @@ struct fmt::formatter<text::font_weight>: formatter<string_view>
 template <>
 struct fmt::formatter<text::font_slant>: formatter<string_view>
 {
-    auto format(text::font_slant value, format_context& ctx) -> format_context::iterator
+    auto format(text::font_slant value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -381,7 +381,7 @@ struct fmt::formatter<text::font_slant>: formatter<string_view>
 template <>
 struct fmt::formatter<text::font_spacing>: formatter<string_view>
 {
-    auto format(text::font_spacing value, format_context& ctx) -> format_context::iterator
+    auto format(text::font_spacing value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -396,7 +396,7 @@ struct fmt::formatter<text::font_spacing>: formatter<string_view>
 template <>
 struct fmt::formatter<text::font_description>: fmt::formatter<std::string>
 {
-    auto format(text::font_description const& desc, format_context& ctx) -> format_context::iterator
+    auto format(text::font_description const& desc, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format("(family={} weight={} slant={} spacing={}, strict_spacing={})",
@@ -412,7 +412,7 @@ struct fmt::formatter<text::font_description>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::font_metrics>: fmt::formatter<std::string>
 {
-    auto format(text::font_metrics const& metrics, format_context& ctx) -> format_context::iterator
+    auto format(text::font_metrics const& metrics, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("({}, {}, {}, {}, {}, {})",
                                                           metrics.lineHeight,
@@ -428,7 +428,7 @@ struct fmt::formatter<text::font_metrics>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::font_size>: fmt::formatter<std::string>
 {
-    auto format(text::font_size size, format_context& ctx) -> format_context::iterator
+    auto format(text::font_size size, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}pt", size.pt), ctx);
     }
@@ -437,7 +437,7 @@ struct fmt::formatter<text::font_size>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::font_key>: fmt::formatter<std::string>
 {
-    auto format(text::font_key key, format_context& ctx) -> format_context::iterator
+    auto format(text::font_key key, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}", key.value), ctx);
     }
@@ -446,7 +446,7 @@ struct fmt::formatter<text::font_key>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::glyph_index>: fmt::formatter<std::string>
 {
-    auto format(text::glyph_index value, format_context& ctx) -> format_context::iterator
+    auto format(text::glyph_index value, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}", value.value), ctx);
     }
@@ -455,7 +455,7 @@ struct fmt::formatter<text::glyph_index>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::glyph_key>: fmt::formatter<std::string>
 {
-    auto format(text::glyph_key const& key, format_context& ctx) -> format_context::iterator
+    auto format(text::glyph_key const& key, format_context& ctx) const -> format_context::iterator
     {
 #if defined(GLYPH_KEY_DEBUG)
         return formatter<std::string>::format(
@@ -475,7 +475,7 @@ struct fmt::formatter<text::glyph_key>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::font_feature>: fmt::formatter<std::string>
 {
-    auto format(text::font_feature value, format_context& ctx) -> format_context::iterator
+    auto format(text::font_feature value, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}{}{}{}{}",
                                                           value.enabled ? '+' : '-',
@@ -490,7 +490,7 @@ struct fmt::formatter<text::font_feature>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::render_mode>: fmt::formatter<std::string_view>
 {
-    auto format(text::render_mode value, format_context& ctx) -> format_context::iterator
+    auto format(text::render_mode value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)

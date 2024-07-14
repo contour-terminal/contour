@@ -268,7 +268,7 @@ class ViInputHandler: public InputHandler
 template <>
 struct fmt::formatter<vtbackend::TextObjectScope>: formatter<std::string_view>
 {
-    auto format(vtbackend::TextObjectScope scope, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::TextObjectScope scope, format_context& ctx) const -> format_context::iterator
     {
         using TextObjectScope = vtbackend::TextObjectScope;
         string_view name;
@@ -284,7 +284,7 @@ struct fmt::formatter<vtbackend::TextObjectScope>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::TextObject>: formatter<std::string_view>
 {
-    auto format(vtbackend::TextObject textObject, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::TextObject textObject, format_context& ctx) const -> format_context::iterator
     {
         using TextObject = vtbackend::TextObject;
         string_view name;
@@ -309,7 +309,7 @@ struct fmt::formatter<vtbackend::TextObject>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::ViOperator>: formatter<std::string_view>
 {
-    auto format(vtbackend::ViOperator op, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ViOperator op, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         using vtbackend::ViOperator;
@@ -329,7 +329,7 @@ struct fmt::formatter<vtbackend::ViOperator>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::ViMotion>: formatter<std::string_view>
 {
-    auto format(vtbackend::ViMotion motion, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ViMotion motion, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         using vtbackend::ViMotion;

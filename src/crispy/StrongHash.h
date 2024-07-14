@@ -308,7 +308,7 @@ struct fmt::formatter<crispy::strong_hash>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(crispy::strong_hash const& hash, FormatContext& ctx)
+    auto format(crispy::strong_hash const& hash, FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(), "{}", to_structured_string(hash));
     }

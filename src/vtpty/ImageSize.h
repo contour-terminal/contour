@@ -91,7 +91,7 @@ constexpr ImageSize max(ImageSize a, ImageSize b) noexcept
 template <>
 struct fmt::formatter<vtpty::ImageSize>: fmt::formatter<std::string>
 {
-    auto format(vtpty::ImageSize value, format_context& ctx) -> format_context::iterator
+    auto format(vtpty::ImageSize value, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}x{}", value.width, value.height), ctx);
     }

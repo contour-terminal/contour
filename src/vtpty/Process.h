@@ -112,7 +112,8 @@ class [[nodiscard]] Process: public Pty
 template <>
 struct fmt::formatter<vtpty::Process::ExitStatus>: fmt::formatter<std::string>
 {
-    auto format(vtpty::Process::ExitStatus const& status, format_context& ctx) -> format_context::iterator
+    auto format(vtpty::Process::ExitStatus const& status,
+                format_context& ctx) const -> format_context::iterator
     {
         auto const text =
             std::visit(overloaded { [&](vtpty::Process::NormalExit exit) {

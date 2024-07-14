@@ -913,7 +913,8 @@ template <typename RendererT>
 template <>
 struct fmt::formatter<vtbackend::Margin::Horizontal>: fmt::formatter<std::string>
 {
-    auto format(const vtbackend::Margin::Horizontal range, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::Margin::Horizontal range,
+                format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}..{}", range.from, range.to), ctx);
     }
@@ -922,7 +923,8 @@ struct fmt::formatter<vtbackend::Margin::Horizontal>: fmt::formatter<std::string
 template <>
 struct fmt::formatter<vtbackend::Margin::Vertical>: fmt::formatter<std::string>
 {
-    auto format(const vtbackend::Margin::Vertical range, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::Margin::Vertical range,
+                format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}..{}", range.from, range.to), ctx);
     }
