@@ -103,7 +103,7 @@ template <>
 struct fmt::formatter<TextClusterGroup>: formatter<std::string>
 {
     template <typename FormatContext>
-    auto format(TextClusterGroup const& group, FormatContext& ctx)
+    auto format(TextClusterGroup const& group, FormatContext& ctx) const
     {
         return formatter<std::string>::format(
             fmt::format("TextClusterGroup {{ codepoints: \"{}\", @{}, clusters={}, style: {}, color: {} }}",
@@ -120,7 +120,7 @@ template <>
 struct fmt::formatter<BoxDrawingCell>: formatter<std::string>
 {
     template <typename FormatContext>
-    auto format(BoxDrawingCell const& cell, FormatContext& ctx)
+    auto format(BoxDrawingCell const& cell, FormatContext& ctx) const
     {
         return formatter<std::string>::format(
             fmt::format("BoxDrawingCell {{ position: {}, codepoint: U+{:04X}, color: {} }}",
@@ -135,7 +135,7 @@ template <>
 struct fmt::formatter<Event>: formatter<std::string>
 {
     template <typename FormatContext>
-    auto format(Event const& event, FormatContext& ctx)
+    auto format(Event const& event, FormatContext& ctx) const
     {
         if (std::holds_alternative<TextClusterGroup>(event))
             return formatter<std::string>::format(fmt::format("{}", std::get<TextClusterGroup>(event)), ctx);

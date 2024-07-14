@@ -42,7 +42,7 @@ struct lru_hashtable_stats
 template <>
 struct fmt::formatter<crispy::lru_hashtable_stats>: fmt::formatter<std::string>
 {
-    auto format(crispy::lru_hashtable_stats stats, format_context& ctx) -> format_context::iterator
+    auto format(crispy::lru_hashtable_stats stats, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format(

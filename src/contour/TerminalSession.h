@@ -485,7 +485,7 @@ struct formatter<contour::GuardedRole>
     }
 
     template <typename FormatContext>
-    auto format(contour::GuardedRole value, FormatContext& ctx)
+    auto format(contour::GuardedRole value, FormatContext& ctx) const
     {
         switch (value)
         {

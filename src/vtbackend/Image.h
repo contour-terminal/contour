@@ -262,7 +262,7 @@ class ImagePool
 template <>
 struct fmt::formatter<vtbackend::ImageFormat>: formatter<std::string_view>
 {
-    auto format(vtbackend::ImageFormat value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ImageFormat value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -277,7 +277,7 @@ struct fmt::formatter<vtbackend::ImageFormat>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::ImageStats>: formatter<std::string>
 {
-    auto format(vtbackend::ImageStats stats, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ImageStats stats, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format(
@@ -290,7 +290,7 @@ template <>
 struct fmt::formatter<std::shared_ptr<vtbackend::Image const>>: fmt::formatter<std::string>
 {
     auto format(std::shared_ptr<vtbackend::Image const> const& image,
-                format_context& ctx) -> format_context::iterator
+                format_context& ctx) const -> format_context::iterator
     {
         std::string text;
         if (!image)
@@ -310,7 +310,7 @@ struct fmt::formatter<std::shared_ptr<vtbackend::Image const>>: fmt::formatter<s
 template <>
 struct fmt::formatter<vtbackend::ImageResize>: formatter<std::string_view>
 {
-    auto format(vtbackend::ImageResize value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ImageResize value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -327,7 +327,7 @@ struct fmt::formatter<vtbackend::ImageResize>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::ImageAlignment>: formatter<std::string_view>
 {
-    auto format(vtbackend::ImageAlignment value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ImageAlignment value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -349,7 +349,8 @@ struct fmt::formatter<vtbackend::ImageAlignment>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::RasterizedImage>: formatter<std::string>
 {
-    auto format(vtbackend::RasterizedImage const& image, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::RasterizedImage const& image,
+                format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("RasterizedImage<{}, {}, {}, {}, {}>",
                                                           image.weak_from_this().use_count(),
@@ -364,7 +365,8 @@ struct fmt::formatter<vtbackend::RasterizedImage>: formatter<std::string>
 template <>
 struct fmt::formatter<vtbackend::ImageFragment>: fmt::formatter<std::string>
 {
-    auto format(const vtbackend::ImageFragment& fragment, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::ImageFragment& fragment,
+                format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format("ImageFragment<offset={}, {}>", fragment.offset(), fragment.rasterizedImage()), ctx);

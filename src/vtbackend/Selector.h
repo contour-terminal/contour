@@ -186,7 +186,7 @@ template <>
 struct fmt::formatter<vtbackend::Selection::State>: formatter<std::string_view>
 {
     using State = vtbackend::Selection::State;
-    auto format(State state, format_context& ctx) -> format_context::iterator
+    auto format(State state, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (state)
@@ -202,7 +202,7 @@ struct fmt::formatter<vtbackend::Selection::State>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::Selection>: formatter<std::string>
 {
-    auto format(const vtbackend::Selection& selector, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::Selection& selector, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format(

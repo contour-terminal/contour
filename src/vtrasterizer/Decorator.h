@@ -82,7 +82,7 @@ struct std::numeric_limits<vtrasterizer::Decorator>
 template <>
 struct fmt::formatter<vtrasterizer::Decorator>: formatter<std::string_view>
 {
-    auto format(vtrasterizer::Decorator value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::Decorator value, format_context& ctx) const -> format_context::iterator
     {
         auto constexpr Mappings = std::array {
             "underline", "double-underline", "curly-underline", "dotted-underline", "dashed-underline",
