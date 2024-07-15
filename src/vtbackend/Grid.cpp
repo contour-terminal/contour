@@ -889,6 +889,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
                 }
                 else
                 {
+                    line.setWrappable(true);
                     previousFlags = line.inheritableFlags();
                 }
 
