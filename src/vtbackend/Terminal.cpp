@@ -1317,8 +1317,7 @@ namespace
         void operator()(CellLocation pos, Cell const& cell)
         {
             auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
-            bool const touchesRightPage = term->isSelected({ pos.line, rightPage });
-            if (isNewLine && (!term->isLineWrapped(pos.line) || !touchesRightPage))
+            if (isNewLine && (!term->isLineWrapped(pos.line)))
             {
                 // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
                 trimSpaceRight(currentLine);
