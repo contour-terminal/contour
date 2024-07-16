@@ -169,7 +169,7 @@ class SshSession final: public Pty
 template <>
 struct fmt::formatter<vtpty::SshSession::State>: fmt::formatter<std::string_view>
 {
-    auto format(vtpty::SshSession::State const& state, format_context& ctx) -> format_context::iterator
+    auto format(vtpty::SshSession::State const& state, format_context& ctx) const -> format_context::iterator
     {
         std::string_view name;
         // clang-format off
@@ -206,7 +206,8 @@ struct fmt::formatter<vtpty::SshSession::State>: fmt::formatter<std::string_view
 template <>
 struct fmt::formatter<vtpty::SshSession::ExitStatus>: fmt::formatter<std::string>
 {
-    auto format(vtpty::SshSession::ExitStatus const& status, format_context& ctx) -> format_context::iterator
+    auto format(vtpty::SshSession::ExitStatus const& status,
+                format_context& ctx) const -> format_context::iterator
     {
         return std::visit(overloaded { [&](vtpty::SshSession::NormalExit exit) {
                                           return fmt::formatter<std::string>::format(

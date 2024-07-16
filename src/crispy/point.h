@@ -89,7 +89,7 @@ constexpr inline bool operator!=(point const& a, point const& b) noexcept
 template <>
 struct fmt::formatter<crispy::point>: formatter<std::string>
 {
-    auto format(crispy::point coord, format_context& ctx) -> format_context::iterator
+    auto format(crispy::point coord, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("({}, {})", coord.x, coord.y), ctx);
     }

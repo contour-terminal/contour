@@ -45,6 +45,9 @@ class SimpleCell
     [[nodiscard]] char32_t codepoint(size_t index) const noexcept;
     [[nodiscard]] size_t codepointCount() const noexcept;
 
+    [[nodiscard]] char32_t operator[](size_t i) const noexcept { return codepoint(i); }
+    [[nodiscard]] size_t size() const noexcept { return codepointCount(); }
+
     void setCharacter(char32_t codepoint);
     int appendCharacter(char32_t codepoint);
 
@@ -261,17 +264,6 @@ inline void SimpleCell::setHyperlink(HyperlinkId hyperlink) noexcept
     _hyperlink = hyperlink;
 }
 
-// }}}
-
-// {{{ Optimized version for helpers from CellUtil
-namespace CellUtil
-{
-    inline bool beginsWith(std::u32string_view text, SimpleCell const& cell) noexcept
-    {
-        assert(!text.empty());
-        return text == cell.codepoints();
-    }
-} // namespace CellUtil
 // }}}
 
 } // namespace vtbackend

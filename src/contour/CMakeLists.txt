@@ -206,13 +206,14 @@ if(FREEBSD)
     target_link_directories(contour PUBLIC "/usr/local/lib")
 endif()
 
-if(TARGET yaml-cpp::yaml-cpp)
+if (TARGET yaml-cpp::yaml-cpp)
     set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
 else()
     set(YAML_CPP_LIBRARIES yaml-cpp)
 endif()
 
 target_link_libraries(contour
+    PRIVATE
     ContourTerminalDisplay
     crispy::core
     vtbackend
@@ -227,6 +228,7 @@ if(CONTOUR_FRONTEND_GUI)
     endif()
     if(CONTOUR_QT_VERSION EQUAL "6")
         target_link_libraries(contour
+            PRIVATE
             Qt6::Core
             Qt6::Core5Compat
             Qt6::Multimedia
@@ -236,13 +238,15 @@ if(CONTOUR_FRONTEND_GUI)
             Qt6::QuickControls2
             Qt6::Widgets
         )
+
         if(OPENBSD)
-            target_link_libraries(contour X11::xcb X11::xcb_cursor)
+            target_link_libraries(contour PRIVATE X11::xcb X11::xcb_cursor)
         elseif(NOT(WIN32) AND NOT(APPLE))
-            target_link_libraries(contour xcb)
+            target_link_libraries(contour PRIVATE xcb)
         endif()
     else()
         target_link_libraries(contour
+            PRIVATE
             Qt5::Core
             Qt5::Gui
             Qt5::Multimedia
@@ -250,10 +254,13 @@ if(CONTOUR_FRONTEND_GUI)
             Qt5::Widgets
         )
         if(OPENBSD)
-            target_link_libraries(contour Qt5::X11Extras X11::xcb)
+            target_link_libraries(contour PRIVATE Qt5::X11Extras X11::xcb)
         elseif(NOT(WIN32) AND NOT(APPLE))
-            target_link_libraries(contour Qt5::X11Extras xcb)
+            target_link_libraries(contour PRIVATE Qt5::X11Extras xcb)
         endif()
+    endif()
+    if(CONTOUR_BUILD_STATIC)
+        qt_import_qml_plugins(contour)
     endif()
 endif()
 # }}}

@@ -4,7 +4,6 @@
 #include <contour/Config.h>
 
 #include <vtbackend/InputGenerator.h>
-#include <vtbackend/ScreenEvents.h>
 
 #include <vtrasterizer/GridMetrics.h>
 

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <ostream>
+#include <string>
 #include <variant>
 
 #include <boxed-cpp/boxed.hpp>
@@ -17,6 +18,16 @@
 
 namespace vtbackend
 {
+
+struct FontDef
+{
+    double size;
+    std::string regular;
+    std::string bold;
+    std::string italic;
+    std::string boldItalic;
+    std::string emoji;
+};
 
 using LineCount = vtpty::LineCount;
 using ColumnCount = vtpty::ColumnCount;
@@ -877,7 +888,7 @@ struct numeric_limits<vtbackend::CursorShape>
 template <>
 struct fmt::formatter<vtbackend::CursorShape>: formatter<std::string_view>
 {
-    auto format(vtbackend::CursorShape value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::CursorShape value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -894,7 +905,7 @@ struct fmt::formatter<vtbackend::CursorShape>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::CellLocation>: formatter<std::string>
 {
-    auto format(vtbackend::CellLocation coord, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::CellLocation coord, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("({}, {})", coord.line, coord.column), ctx);
     }
@@ -903,7 +914,7 @@ struct fmt::formatter<vtbackend::CellLocation>: formatter<std::string>
 template <>
 struct fmt::formatter<vtbackend::PageSize>: formatter<std::string>
 {
-    auto format(vtbackend::PageSize value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::PageSize value, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}x{}", value.columns, value.lines), ctx);
     }
@@ -912,7 +923,7 @@ struct fmt::formatter<vtbackend::PageSize>: formatter<std::string>
 template <>
 struct fmt::formatter<vtbackend::GridSize>: formatter<std::string>
 {
-    auto format(vtbackend::GridSize value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::GridSize value, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}x{}", value.columns, value.lines), ctx);
     }
@@ -921,7 +932,7 @@ struct fmt::formatter<vtbackend::GridSize>: formatter<std::string>
 template <>
 struct fmt::formatter<vtbackend::ScreenType>: formatter<std::string_view>
 {
-    auto format(const vtbackend::ScreenType value, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::ScreenType value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -936,7 +947,7 @@ struct fmt::formatter<vtbackend::ScreenType>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::PixelCoordinate>: formatter<std::string>
 {
-    auto format(const vtbackend::PixelCoordinate coord, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::PixelCoordinate coord, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}:{}", coord.x.value, coord.y.value), ctx);
     }
@@ -945,7 +956,7 @@ struct fmt::formatter<vtbackend::PixelCoordinate>: formatter<std::string>
 template <>
 struct fmt::formatter<vtbackend::ViMode>: formatter<std::string_view>
 {
-    auto format(vtbackend::ViMode mode, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ViMode mode, format_context& ctx) const -> format_context::iterator
     {
         using vtbackend::ViMode;
         string_view name;

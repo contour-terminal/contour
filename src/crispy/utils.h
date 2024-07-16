@@ -550,19 +550,6 @@ constexpr void ignore_unused(Ts... /*values*/) noexcept
 {
 }
 
-template <typename T>
-inline bool beginsWith(std::basic_string_view<T> text, std::basic_string_view<T> subtext) noexcept
-{
-    if (text.size() < subtext.size())
-        return false;
-
-    for (size_t i = 0; i < subtext.size(); ++i)
-        if (text[i] != subtext[i])
-            return false;
-
-    return true;
-}
-
 std::string threadName();
 
 } // namespace crispy

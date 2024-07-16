@@ -44,7 +44,7 @@ string to_string(Color color)
                 default: return "?";
             }
         case Type::RGB:
-            return fmt::format("#{:02X}{:02X}{:02X}", color.rgb().red, color.rgb().green, color.rgb().blue);
+            return fmt::format("'#{:02X}{:02X}{:02X}'", color.rgb().red, color.rgb().green, color.rgb().blue);
         case Type::Undefined: break;
     }
     return "?";
@@ -121,12 +121,12 @@ RGBAColor& RGBAColor::operator=(string const& hexCode)
 
 string to_string(RGBColor c)
 {
-    return fmt::format("#{:02X}{:02X}{:02X}", c.red, c.green, c.blue);
+    return fmt::format("'#{:02X}{:02X}{:02X}'", c.red, c.green, c.blue);
 }
 
 string to_string(RGBAColor c)
 {
-    return fmt::format("#{:02X}{:02X}{:02X}{:02X}", c.red(), c.green(), c.blue(), c.alpha());
+    return fmt::format("'#{:02X}{:02X}{:02X}{:02X}'", c.red(), c.green(), c.blue(), c.alpha());
 }
 
 optional<RGBColor> parseColor(string_view const& value)

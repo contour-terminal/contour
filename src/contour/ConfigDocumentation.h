@@ -228,9 +228,7 @@ constexpr StringLiteral Fonts {
     "    {comment} This is implicitly also responsible for font fallback\n"
     "    {comment} Possible values are:\n"
     "    {comment} - native          : automatically choose the best available on the current platform\n"
-    "    {comment} - fontconfig      : uses fontconfig to select fonts\n"
-    "    {comment} - CoreText        : uses OS/X CoreText to select fonts.\n"
-    "    {comment} - DirectWrite     : selects DirectWrite engine (Windows only)\n"
+    "    {comment} - mock            : mock font locator engine (not recommended for general use)\n"
     "    locator: {}\n"
     "\n"
     "    {comment} Text shaping related settings\n"
@@ -701,6 +699,8 @@ constexpr StringLiteral InputMappings {
     "marks "
     "into clipboard.\n"
     "{comment} - CopySelection     Copies the current selection into the clipboard buffer.\n"
+    "{comment} - CreateSelection   Creates selection with custom delimiters configured via `delimiters` "
+    "member.\n"
     "{comment} - DecreaseFontSize  Decreases the font size by 1 pixel.\n"
     "{comment} - DecreaseOpacity   Decreases the default-background opacity by 5%.\n"
     "{comment} - FocusNextSearchMatch     Focuses the next search match (if any).\n"
@@ -816,13 +816,19 @@ constexpr StringLiteral ExperimentalFeatures {
     "{comment}     feature_xyz: true\n"
 };
 
-constexpr StringLiteral DefaultColors { "{comment} Default colors\n"
-                                        "default:\n"
-                                        "    {comment} Default background color (this can be made "
-                                        "transparent, see above).\n"
-                                        "    background: {}\n"
-                                        "    {comment} Default foreground text color.\n"
-                                        "    foreground: {}\n" };
+constexpr StringLiteral DefaultColors {
+    "{comment} Default colors\n"
+    "default:\n"
+    "    {comment} Default background color (this can be made "
+    "transparent, see above).\n"
+    "    background: {}\n"
+    "    {comment} Default foreground text color.\n"
+    "    foreground: {}\n"
+    "    {comment} Default foreground text color when bold(/bright) mode is on.\n"
+    "    bright_foreground: {}\n"
+    "    {comment} Default foreground text color when dim mode is on.\n"
+    "    dimmed_foreground: {}\n"
+};
 
 constexpr StringLiteral HyperlinkDecoration {
     "\n"
@@ -945,19 +951,16 @@ constexpr StringLiteral WordHighlight {
 constexpr StringLiteral IndicatorStatusLine {
     "\n"
     "{comment} Defines the colors to be used for the Indicator status line.\n"
-    "{comment} Values must be in RGB form.\n"
+    "{comment} Configuration consist of different sections: default, inactive, insert_mode, normal_mode, "
+    "visual_mode.\n"
+    "{comment} Each section customize status line colors for corresponding mode.\n"
     "indicator_statusline:\n"
-    "    foreground: {}\n"
-    "    background: {}\n"
-};
-
-constexpr StringLiteral IndicatorStatusLineInactive {
-    "\n"
-    "{comment} Alternate colors to be used for the indicator status line when\n"
-    "{comment} this terminal is currently not in focus.\n"
-    "indicator_statusline_inactive:\n"
-    "    foreground: {}\n"
-    "    background: {}\n"
+    "    default:\n"
+    "        foreground: {}\n"
+    "        background: {}\n"
+    "    inactive:\n"
+    "        foreground: {}\n"
+    "        background: {}\n"
 };
 
 constexpr StringLiteral InputMethodEditor { "\n"

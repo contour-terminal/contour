@@ -258,28 +258,10 @@ text::font_locator& createFontLocator(FontLocatorEngine engine)
     switch (engine)
     {
         case FontLocatorEngine::Mock: return text::font_locator_provider::get().mock();
-        case FontLocatorEngine::DWrite:
-#if defined(_WIN32)
-            return text::font_locator_provider::get().directwrite();
-#else
-            locatorLog()("Font locator DirectWrite not supported on this platform.");
-#endif
-            break;
-        case FontLocatorEngine::CoreText:
-#if defined(__APPLE__)
-            return text::font_locator_provider::get().coretext();
-#else
-            locatorLog()("Font locator CoreText not supported on this platform.");
-#endif
-            break;
-
-        case FontLocatorEngine::FontConfig:
-            // default case below
-            break;
+        default: return text::font_locator_provider::get().native();
     }
 
-    locatorLog()("Using font locator: fontconfig.");
-    return text::font_locator_provider::get().fontconfig();
+    crispy::unreachable();
 }
 
 // TODO: What's a good value here? Or do we want to make that configurable,

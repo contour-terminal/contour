@@ -38,7 +38,7 @@
 #include <pwd.h>
 #include <unistd.h>
 
-#if defined(__linux__) && !defined(FLATPAK)
+#if defined(__linux__) && defined(UTEMPTER)
     #include <utempter.h>
 #endif
 
@@ -85,7 +85,7 @@ namespace
         return { PtyMasterHandle::cast_from(masterFd), PtySlaveHandle::cast_from(slaveFd) };
     }
 
-#if defined(__linux__) && !defined(FLATPAK)
+#if defined(__linux__) && defined(UTEMPTER)
     char const* hostnameForUtmp()
     {
         for (auto const* env: { "DISPLAY", "WAYLAND_DISPLAY" })
@@ -223,7 +223,7 @@ void UnixPty::start()
     _readSelector.want_read(_masterFd);
     _readSelector.want_read(_stdoutFastPipe.reader());
 
-#if defined(__linux__) && !defined(FLATPAK)
+#if defined(__linux__) && defined(UTEMPTER)
     utempter_add_record(_masterFd, hostnameForUtmp());
 #endif
 }

@@ -121,7 +121,7 @@ using file_descriptor = native_handle<int, -1>;
 template <>
 struct fmt::formatter<HANDLE>: fmt::formatter<std::string>
 {
-    auto format(HANDLE value, format_context& ctx) -> format_context::iterator
+    auto format(HANDLE value, format_context& ctx) const -> format_context::iterator
     {
         auto str = fmt::format("0x{:X}", (unsigned long long) (value));
         return fmt::formatter<std::string>::format(str, ctx);
@@ -132,7 +132,7 @@ struct fmt::formatter<HANDLE>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<crispy::file_descriptor>: fmt::formatter<crispy::file_descriptor::native_handle_type>
 {
-    auto format(crispy::file_descriptor const& fd, format_context& ctx) -> format_context::iterator
+    auto format(crispy::file_descriptor const& fd, format_context& ctx) const -> format_context::iterator
     {
         return fmt::formatter<crispy::file_descriptor::native_handle_type>::format(fd.get(), ctx);
     }

@@ -110,7 +110,7 @@ constexpr bool operator!=(MatchModes a, MatchModes b) noexcept
 template <>
 struct fmt::formatter<vtbackend::MatchModes>: formatter<std::string>
 {
-    auto format(vtbackend::MatchModes m, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::MatchModes m, format_context& ctx) const -> format_context::iterator
     {
         std::string s;
         auto const advance = [&](vtbackend::MatchModes::Flag cond, std::string_view text) {

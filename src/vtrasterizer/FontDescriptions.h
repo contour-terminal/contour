@@ -16,10 +16,8 @@ enum class TextShapingEngine : uint8_t
 
 enum class FontLocatorEngine : uint8_t
 {
-    Mock,       //!< mock font locator API
-    FontConfig, //!< platform independant font locator API
-    DWrite,     //!< native platform support: Windows
-    CoreText,   //!< native font locator on macOS
+    Mock,   //!< mock font locator API
+    Native, //!< native platform support
 };
 
 using DPI = text::DPI;
@@ -36,7 +34,7 @@ struct FontDescriptions
     text::font_description emoji;
     text::render_mode renderMode;
     TextShapingEngine textShapingEngine = TextShapingEngine::OpenShaper;
-    FontLocatorEngine fontLocator = FontLocatorEngine::FontConfig;
+    FontLocatorEngine fontLocator = FontLocatorEngine::Native;
     bool builtinBoxDrawing = true;
 };
 
@@ -83,7 +81,7 @@ constexpr bool operator<(TextStyle a, TextStyle b) noexcept
 template <>
 struct fmt::formatter<vtrasterizer::TextStyle>: fmt::formatter<std::string_view>
 {
-    auto format(vtrasterizer::TextStyle value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::TextStyle value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -101,14 +99,12 @@ struct fmt::formatter<vtrasterizer::TextStyle>: fmt::formatter<std::string_view>
 template <>
 struct fmt::formatter<vtrasterizer::FontLocatorEngine>: fmt::formatter<std::string_view>
 {
-    auto format(vtrasterizer::FontLocatorEngine value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::FontLocatorEngine value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case vtrasterizer::FontLocatorEngine::CoreText: name = "CoreText"; break;
-            case vtrasterizer::FontLocatorEngine::DWrite: name = "DirectWrite"; break;
-            case vtrasterizer::FontLocatorEngine::FontConfig: name = "Fontconfig"; break;
+            case vtrasterizer::FontLocatorEngine::Native: name = "Native"; break;
             case vtrasterizer::FontLocatorEngine::Mock: name = "Mock"; break;
         }
         return formatter<string_view>::format(name, ctx);
@@ -118,7 +114,7 @@ struct fmt::formatter<vtrasterizer::FontLocatorEngine>: fmt::formatter<std::stri
 template <>
 struct fmt::formatter<vtrasterizer::TextShapingEngine>: fmt::formatter<std::string_view>
 {
-    auto format(vtrasterizer::TextShapingEngine value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::TextShapingEngine value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -134,7 +130,8 @@ struct fmt::formatter<vtrasterizer::TextShapingEngine>: fmt::formatter<std::stri
 template <>
 struct fmt::formatter<vtrasterizer::FontDescriptions>: fmt::formatter<std::string>
 {
-    auto format(vtrasterizer::FontDescriptions const& fd, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::FontDescriptions const& fd,
+                format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("({}, {}, {}, {}, {}, {}, {}, {})",
                                                           fd.size,

@@ -221,7 +221,7 @@ int app::run(int argc, char const* argv[])
         _flags = std::move(flagsOpt.value());
 
         // std::cout << fmt::format("Flags: {}\n", parameters().values.size());
-        // for (auto const & [k, v] : parameters().values)
+        // for (auto const& [k, v]: parameters().values)
         //     std::cout << fmt::format(" - {}: {}\n", k, v);
 
         for (auto const& [name, handler]: _handlers)

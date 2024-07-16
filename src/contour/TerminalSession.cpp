@@ -1244,7 +1244,7 @@ bool TerminalSession::operator()(actions::ScrollUp)
 
 bool TerminalSession::operator()(actions::SearchReverse)
 {
-    _terminal.inputHandler().startSearchExternally();
+    terminal().inputHandler().startSearchExternally();
 
     return true;
 }
@@ -1262,6 +1262,15 @@ bool TerminalSession::operator()(actions::ToggleAllKeyMaps)
 {
     _allowKeyMappings = !_allowKeyMappings;
     inputLog()("{} key mappings.", _allowKeyMappings ? "Enabling" : "Disabling");
+
+    if (!_allowKeyMappings)
+    {
+        terminal().setStatusLineDefinition(
+            parseStatusLineDefinition("{}", "{Text:text=key bindings disabled,Left= « ,Right= » }", "{}"));
+        terminal().setStatusDisplay(StatusDisplayType::Indicator);
+    }
+    else
+        terminal().resetStatusLineDefinition();
     return true;
 }
 

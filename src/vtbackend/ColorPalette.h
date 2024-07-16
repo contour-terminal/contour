@@ -126,8 +126,10 @@ struct ColorPalette
     CellRGBColorAndAlphaPair normalModeCursorline = { 0xFFFFFF_rgb, 0.2f, 0x808080_rgb, 0.4f };
     // clang-format on
 
-    RGBColorPair indicatorStatusLine = { 0xFFFFFF_rgb, 0x0270c0_rgb };
     RGBColorPair indicatorStatusLineInactive = { 0xFFFFFF_rgb, 0x0270c0_rgb };
+    RGBColorPair indicatorStatusLineInsertMode = { 0xFFFFFF_rgb, 0x0270c0_rgb };
+    RGBColorPair indicatorStatusLineNormalMode = { 0xFFFFFF_rgb, 0x0270c0_rgb };
+    RGBColorPair indicatorStatusLineVisualMode = { 0xFFFFFF_rgb, 0x0270c0_rgb };
 };
 
 enum class ColorTarget : uint8_t
@@ -151,7 +153,7 @@ RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target
 template <>
 struct fmt::formatter<vtbackend::ColorPreference>: fmt::formatter<std::string_view>
 {
-    auto format(vtbackend::ColorPreference value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ColorPreference value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -166,7 +168,7 @@ struct fmt::formatter<vtbackend::ColorPreference>: fmt::formatter<std::string_vi
 template <>
 struct fmt::formatter<vtbackend::ColorMode>: fmt::formatter<std::string_view>
 {
-    auto format(vtbackend::ColorMode value, fmt::format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ColorMode value, fmt::format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -182,7 +184,7 @@ struct fmt::formatter<vtbackend::ColorMode>: fmt::formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::ColorTarget>: fmt::formatter<std::string_view>
 {
-    auto format(vtbackend::ColorTarget value, fmt::format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ColorTarget value, fmt::format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)

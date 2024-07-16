@@ -40,7 +40,7 @@ jobs:
     name: "Check CI scripts"
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: "Checking for common errors in build, deployment, and CI."
       run: ./scripts/check-common.sh
 
@@ -48,7 +48,7 @@ jobs:
     name: "Check PR-TODOs"
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: "Checking for open PR-related TODO items"
       run: ./scripts/check-pr-todos.sh
 
@@ -56,7 +56,7 @@ jobs:
     name: "Check C++ style"
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Install clang
       run: |
         wget https://apt.llvm.org/llvm.sh
@@ -109,7 +109,7 @@ jobs:
     name: "Check links"
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Run linksafe
         uses: Yaraslaut/linksafe@main
         with: # comma seperated lists
@@ -130,7 +130,7 @@ jobs:
     name: "Check editorconfig"
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: editorconfig-checker/action-editorconfig-checker@main
       - run: editorconfig-checker
   # }}}
@@ -146,7 +146,7 @@ jobs:
     name: "Archlinux ${{ matrix.arch }}"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
         with:
@@ -184,10 +184,50 @@ jobs:
           docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/contour.pkg.tar.zst contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst
           docker container rm contour-${{ steps.tags.outputs.ARCH }}
       - name: "Uploading Archlinux .pkg.tar.zst package"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
           path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
+          if-no-files-found: error
+          retention-days: 1
+  # }}}
+  # {{{ StaticBuild
+  staticBuild:
+    #if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
+    name: "Static build"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: all
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          version: latest
+      - name: "update APT database"
+        run: sudo apt -q update
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: Build release
+        shell: bash
+        run: |
+          docker buildx build  \
+          --tag static_contour \
+          --progress=plain \
+          -f .github/static/DockerUbuntu \
+          --load \
+          .
+          docker create --name contour_static static_contour
+          docker cp contour_static:/contour/build/src/contour/contour contour
+          docker container rm contour_static
+      - name: "Uploading static executable"
+        uses: actions/upload-artifact@v3
+        with:
+          name: "contour"
+          path: "contour"
           if-no-files-found: error
           retention-days: 1
   # }}}
@@ -204,7 +244,7 @@ jobs:
     name: "Fedora ${{ matrix.os_version }} ${{ matrix.arch }}"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v2
@@ -274,7 +314,7 @@ jobs:
           docker container rm contour-${{ steps.tags.outputs.ARCH }}
           echo "pwd: `pwd`" && ls -hla
       - name: "Uploading Fedora RPM package"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
           path: |
@@ -293,7 +333,7 @@ jobs:
     #   MYTOKEN: "value1"
     #   MYTOKEN2: "value2"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Test in FreeBSD
         id: test
         uses: vmactions/freebsd-vm@v1
@@ -359,7 +399,7 @@ jobs:
     name: "macOS"
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: set variables
         id: set_vars
         run: |
@@ -464,7 +504,7 @@ jobs:
     name: "Windows"
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.3
       - name: setup environment
@@ -488,10 +528,12 @@ jobs:
         uses: lukka/run-vcpkg@v11.1
         id: runvcpkg
         with:
-          vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
+          vcpkgDirectory: ${{ runner.workspace }}/vcpkg
           vcpkgGitCommitId: 80403036a665cb8fcc1a1b3e17593d20b03b2489
       - name: "Generate build files"
         run: cmake --preset windows-cl-release
+        env:
+          VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
       - name: "Build"
         run: cmake --build --preset windows-cl-release
       - name: "Test"
@@ -510,14 +552,14 @@ jobs:
       - name: "Inspect again"
         run: Get-ChildItem
       - name: "Uploading MSI to artifact store"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           path: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading ZIP to artifact store"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
           path: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
@@ -542,7 +584,7 @@ jobs:
     outputs:
       id: "${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -620,7 +662,7 @@ jobs:
         run: cmake --build --preset linux-debug --target test
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' && matrix.qt_version == '6' }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: contour-ubuntu2204-tests
           path: |
@@ -650,7 +692,7 @@ jobs:
     outputs:
       id: "${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -726,7 +768,7 @@ jobs:
         run: cmake --build --preset linux-debug --target test
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' && matrix.qt_version == '6' }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: contour-ubuntu2204-tests
           path: |
@@ -743,7 +785,7 @@ jobs:
     name: "Packaging for AppImage"
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -803,7 +845,7 @@ jobs:
       - name: "Testing AppImage"
         run: ./contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage version
       - name: "Uploading AppImage"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
           path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
@@ -820,7 +862,7 @@ jobs:
     runs-on: ubuntu-${{ matrix.os_version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: "update APT database"
         run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars
@@ -892,7 +934,7 @@ jobs:
           mv -v "./build/linux-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
                 "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
       - name: "Uploading artifact .deb package"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
           path: |
@@ -912,7 +954,7 @@ jobs:
     needs: [ubuntu_2204_cc_matrix]
     steps:
       - name: "download artifact"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: contour-ubuntu2204-tests
       - name: "update APT database"
@@ -957,7 +999,7 @@ jobs:
     needs: [ubuntu_2204_cc_matrix]
     steps:
       - name: "download artifact"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: contour-ubuntu2204-tests
       - name: "update APT database"
@@ -1061,7 +1103,7 @@ jobs:
     - name: "Install notcurses"
       run: cmake --build notcurses/build --config Release --target install/strip
     - name: "Uploading artifact"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: "notcurses-install-${{ matrix.os_version }}"
         path: ~/opt/notcurses
@@ -1085,7 +1127,7 @@ jobs:
       # Valgrind is much more precise, but 10x slower.
       CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: "update APT database"
       run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
@@ -1095,7 +1137,7 @@ jobs:
       run: ./scripts/ci-set-vars.sh
       env:
         REPOSITORY: ${{ github.event.repository.name }}
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
     - name: "install dependencies"
@@ -1123,7 +1165,7 @@ jobs:
               "quick-exit-dumps/${{ matrix.name }}" \
               true
     - name: "Save dump"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: quick-exit-contour-dump
         path: quick-exit-dumps
@@ -1203,7 +1245,7 @@ jobs:
       # Valgrind is much more precise, but 10x slower.
       CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: "update APT database"
       run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
@@ -1213,10 +1255,10 @@ jobs:
       run: ./scripts/ci-set-vars.sh
       env:
         REPOSITORY: ${{ github.event.repository.name }}
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: "notcurses-install-24.04"
         path: ~/opt/notcurses
@@ -1256,7 +1298,7 @@ jobs:
               ~/opt/notcurses/bin/notcurses-demo \
                   -p ~/opt/notcurses/share/notcurses ${{ matrix.id }}
     - name: "Save dump"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: notcurses-contour-dump
         path: notcurses-demo-dumps
@@ -1286,7 +1328,7 @@ jobs:
     runs-on: ubuntu-${{ matrix.os_version}}
     needs: [package_for_Ubuntu]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: "update APT database"
       run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
@@ -1296,7 +1338,7 @@ jobs:
       run: ./scripts/ci-set-vars.sh
       env:
         REPOSITORY: ${{ github.event.repository.name }}
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
     - name: "Check install package"
@@ -1309,7 +1351,7 @@ jobs:
     name: Check Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: "update APT database"
         run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars.sh and check-release.sh
@@ -1341,7 +1383,7 @@ jobs:
       contents: write
       discussions: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: "update APT database"
         run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars
@@ -1354,11 +1396,11 @@ jobs:
 
       # {{{ fetch release artifacts
       - name: "fetch artifact: Ubuntu 20.04"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu20.04-amd64.deb
       - name: "fetch artifact: Ubuntu 22.04"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb
       - name: "fetch artifact: Ubuntu 24.04"
@@ -1366,23 +1408,23 @@ jobs:
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
       - name: "fetch artifact: Fedora 39"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc39.x86_64.rpm"
       - name: "fetch artifact: ArchLinux"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "contour-x86_64.pkg.tar.zst"
       - name: "fetch artifact: MacOS"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-osx.dmg"
       - name: "fetch artifact: Windows (MSI)"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
       - name: "fetch artifact: Windows (ZIP)"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
       # }}}

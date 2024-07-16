@@ -76,7 +76,7 @@ class font_locator
 template <>
 struct fmt::formatter<text::font_path>: fmt::formatter<std::string>
 {
-    auto format(text::font_path spec, format_context& ctx) -> format_context::iterator
+    auto format(text::font_path spec, format_context& ctx) const -> format_context::iterator
     {
         auto weightMod = spec.weight ? fmt::format(" {}", spec.weight.value()) : "";
         auto slantMod = spec.slant ? fmt::format(" {}", spec.slant.value()) : "";
@@ -88,7 +88,7 @@ struct fmt::formatter<text::font_path>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::font_memory_ref>: fmt::formatter<std::string>
 {
-    auto format(text::font_memory_ref ref, format_context& ctx) -> format_context::iterator
+    auto format(text::font_memory_ref ref, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("in-memory: {}", ref.identifier), ctx);
     }
@@ -97,7 +97,7 @@ struct fmt::formatter<text::font_memory_ref>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<text::font_source>: fmt::formatter<std::string>
 {
-    auto format(text::font_source source, format_context& ctx) -> format_context::iterator
+    auto format(text::font_source source, format_context& ctx) const -> format_context::iterator
     {
         std::string text;
         if (std::holds_alternative<text::font_path>(source))

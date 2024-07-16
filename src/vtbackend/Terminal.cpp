@@ -539,8 +539,24 @@ void Terminal::updateIndicatorStatusLine()
 {
     Require(_activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
 
-    auto const colors =
-        _focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
+    auto const colors = [&]() {
+        if (!_focused)
+        {
+            return colorPalette().indicatorStatusLineInactive;
+        }
+        else
+        {
+            switch (_inputHandler.mode())
+            {
+                case ViMode::Insert: return colorPalette().indicatorStatusLineInsertMode;
+                case ViMode::Normal: return colorPalette().indicatorStatusLineNormalMode;
+                case ViMode::Visual:
+                case ViMode::VisualLine:
+                case ViMode::VisualBlock: return colorPalette().indicatorStatusLineVisualMode;
+            }
+        }
+        crispy::unreachable();
+    }();
 
     auto const backupForeground = _colorPalette.defaultForeground;
     auto const backupBackground = _colorPalette.defaultBackground;
@@ -669,14 +685,34 @@ void Terminal::triggerWordWiseSelection(CellLocation startPos, TheSelectionHelpe
     setSelector(std::make_unique<WordWiseSelection>(selectionHelper, startPos, selectionUpdatedHelper()));
 
     if (_selection->extend(startPos))
-        onSelectionUpdated();
-
-    if (_settings.visualizeSelectedWord)
     {
-        auto const text = extractSelectionText();
-        auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
-        setNewSearchTerm(text32, true);
+        updateSelectionMatches();
+        onSelectionUpdated();
     }
+}
+
+void Terminal::updateSelectionMatches()
+{
+    if (!_settings.visualizeSelectedWord)
+        return;
+
+    auto const text = extractSelectionText();
+    auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
+    setNewSearchTerm(text32, true);
+}
+
+void Terminal::setStatusLineDefinition(StatusLineDefinition&& definition)
+{
+    _indicatorStatusLineDefinition = std::move(definition);
+    updateIndicatorStatusLine();
+}
+
+void Terminal::resetStatusLineDefinition()
+{
+    _indicatorStatusLineDefinition = parseStatusLineDefinition(_settings.indicatorStatusLine.left,
+                                                               _settings.indicatorStatusLine.middle,
+                                                               _settings.indicatorStatusLine.right);
+    updateIndicatorStatusLine();
 }
 
 bool Terminal::handleMouseSelection(Modifiers modifiers)
@@ -865,7 +901,10 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
             if (_inputHandler.mode() != ViMode::Insert)
                 _inputHandler.setMode(selector()->viMode());
             if (selector()->extend(relativePos))
+            {
+                updateSelectionMatches();
                 breakLoopAndRefreshRenderBuffer();
+            }
         }
     }
 }
@@ -1351,7 +1390,7 @@ string Terminal::extractLastMarkRange() const
     return text;
 }
 
-// {{{ ScreenEvents overrides
+// {{{ screen events
 void Terminal::requestCaptureBuffer(LineCount lines, bool logical)
 {
     _eventListener.requestCaptureBuffer(lines, logical);
@@ -2023,7 +2062,7 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
     _viCommands.cursorPosition.line -= n;
 
     // Adjust viewport accordingly to make it fixed at the scroll-offset as if nothing has happened.
-    if (viewport().scrolled())
+    if (viewport().scrolled() || _inputHandler.mode() == ViMode::Normal)
         viewport().scrollUp(n);
 
     if (!_selection)
@@ -2141,16 +2180,6 @@ optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation sear
         return searchPosition;
 
     return searchReverse(searchPosition);
-}
-
-optional<CellLocation> Terminal::search(std::u32string text,
-                                        CellLocation searchPosition,
-                                        bool initiatedByDoubleClick)
-{
-    if (!setNewSearchTerm(std::move(text), initiatedByDoubleClick))
-        return searchPosition;
-
-    return search(searchPosition);
 }
 
 optional<CellLocation> Terminal::search(CellLocation searchPosition)

@@ -457,7 +457,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
     if (!child) // can not load directly from config file
     {
-
         logger()(
             "color paletter not found inside config file, checking colorschemes directory for {}.yml file",
             entry);
@@ -491,6 +490,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
         logger()("*** loading default colors");
         loadFromEntry(child["default"], "background", where.defaultBackground);
         loadFromEntry(child["default"], "foreground", where.defaultForeground);
+        loadFromEntry(child["default"], "bright_foreground", where.defaultForegroundBright);
+        loadFromEntry(child["default"], "dimmed_foreground", where.defaultForegroundDimmed);
     }
 
     if (child["background_image"] && child["background_image"]["path"]) // ensure that path exist
@@ -514,16 +515,38 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
 
     loadWithLog("cursor", where.cursor);
     loadWithLog("vi_mode_highlight", where.yankHighlight);
-    loadWithLog("vi_mode_cursosrline", where.indicatorStatusLine);
+    loadWithLog("vi_mode_cursosrline", where.normalModeCursorline);
     loadWithLog("selection", where.selection);
     loadWithLog("search_highlight", where.searchHighlight);
     loadWithLog("search_highlight_focused", where.searchHighlightFocused);
     loadWithLog("word_highlight_current", where.wordHighlightCurrent);
     loadWithLog("word_highlight_other", where.wordHighlight);
-    loadWithLog("indicator_statusline", where.indicatorStatusLine);
-    loadWithLog("indicator_statusline_inactive", where.indicatorStatusLineInactive);
     loadWithLog("input_method_editor", where.inputMethodEditor);
 
+    if (child["indicator_statusline"])
+    {
+        logger()("*** loading indicator_statusline");
+        if (child["indicator_statusline"]["default"])
+        {
+            logger()("*** loading default indicator_statusline");
+            vtbackend::RGBColorPair defaultIndicatorStatusLine;
+            loadFromEntry(child["indicator_statusline"], "default", defaultIndicatorStatusLine);
+            where.indicatorStatusLineInactive = defaultIndicatorStatusLine;
+            where.indicatorStatusLineNormalMode = defaultIndicatorStatusLine;
+            where.indicatorStatusLineVisualMode = defaultIndicatorStatusLine;
+        }
+        for (auto const& [name, defaultColor]:
+             { pair { "inactive", &where.indicatorStatusLineInactive },
+               pair { "normal_mode", &where.indicatorStatusLineNormalMode },
+               pair { "visual_mode", &where.indicatorStatusLineVisualMode } })
+        {
+            if (child["indicator_statusline"][name])
+            {
+                logger()("*** loading {} indicator_statusline", name);
+                loadFromEntry(child["indicator_statusline"], name, *defaultColor);
+            }
+        }
+    }
     logger()("*** loading pallete");
     loadFromEntry(child, "", where.palette);
 }
@@ -1072,23 +1095,18 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      vtrasterizer::FontLocatorEngine& where)
 {
-    auto constexpr NativeFontLocator =
-#if defined(_WIN32)
-        vtrasterizer::FontLocatorEngine::DWrite;
-#elif defined(__APPLE__)
-        vtrasterizer::FontLocatorEngine::CoreText;
-#else
-        vtrasterizer::FontLocatorEngine::FontConfig;
-#endif
+    auto constexpr NativeFontLocator = vtrasterizer::FontLocatorEngine::Native;
     auto parseModifierKey = [&](std::string const& key) -> std::optional<vtrasterizer::FontLocatorEngine> {
         auto const literal = crispy::toLower(key);
         logger()("Loading entry: {}, value {}", entry, literal);
-        if (literal == "fontconfig")
-            return vtrasterizer::FontLocatorEngine::FontConfig;
-        if (literal == "coretext")
-            return vtrasterizer::FontLocatorEngine::CoreText;
-        if (literal == "dwrite" || literal == "directwrite")
-            return vtrasterizer::FontLocatorEngine::DWrite;
+        for (auto const& deprecated: { "fontconfig", "coretext", "dwrite", "directwrite" })
+        {
+            if (literal == deprecated)
+            {
+                errorLog()("Setting font locator to \"{}\" is deprecated. Use \"native\".", literal);
+                return NativeFontLocator;
+            }
+        }
         if (literal == "native")
             return NativeFontLocator;
         if (literal == "mock")
@@ -1260,12 +1278,12 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                 {
                     if (tryAddKey(where, *mode, *mods, mapping["key"], *action))
                     {
-                        logger()(
-                            "Adding input mapping: mods: {:<20} modifiers: {:<20} key: {:<20} action: {:<20}",
-                            *mods,
-                            *mode,
-                            mapping["key"].as<std::string>(),
-                            *action);
+                        logger()("Adding input mapping: mods: {:<20} modifiers: {:<20} key: {:<20} "
+                                 "action: {:<20}",
+                                 *mods,
+                                 *mode,
+                                 mapping["key"].as<std::string>(),
+                                 *action);
                     }
                     else if (tryAddMouse(where.mouseMappings, *mode, *mods, mapping["mouse"], *action))
                     {
@@ -1937,7 +1955,7 @@ std::string createString(Config const& c)
                 process(entry.copyLastMarkRangeOffset);
                 processWithDoc(documentation::InitialWorkingDirectory, [&entry = entry]() {
                     auto fromConfig = entry.shell.value().workingDirectory.string();
-                    if (fromConfig.empty())
+                    if (fromConfig.empty() || fromConfig == homeResolvedPath("~", Process::homeDirectory()))
                         return std::string { "\"~\"" };
                     return fromConfig;
                 }());
@@ -2064,8 +2082,11 @@ std::string createString(Config const& c)
                                 fmt::arg("comment", "#")));
                 {
                     const auto _ = typename Writer::Offset {};
-                    processWithDoc(
-                        documentation::DefaultColors, entry.defaultBackground, entry.defaultForeground);
+                    processWithDoc(documentation::DefaultColors,
+                                   entry.defaultBackground,
+                                   entry.defaultForeground,
+                                   entry.defaultForegroundBright,
+                                   entry.defaultForegroundDimmed);
 
                     // processWithDoc("# Background image support.\n"
                     //                "background_image:\n"
@@ -2144,10 +2165,8 @@ std::string createString(Config const& c)
                                    entry.wordHighlight.backgroundAlpha);
 
                     processWithDoc(documentation::IndicatorStatusLine,
-                                   entry.indicatorStatusLine.foreground,
-                                   entry.indicatorStatusLine.background);
-
-                    processWithDoc(documentation::IndicatorStatusLineInactive,
+                                   entry.indicatorStatusLineInsertMode.foreground,
+                                   entry.indicatorStatusLineInsertMode.background,
                                    entry.indicatorStatusLineInactive.foreground,
                                    entry.indicatorStatusLineInactive.background);
 

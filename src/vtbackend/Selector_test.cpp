@@ -79,7 +79,6 @@ TextSelection(Screen<T> const&) -> TextSelection<T>;
 // NOLINTBEGIN(misc-const-correctness)
 TEST_CASE("Selector.Linear", "[selector]")
 {
-    auto screenEvents = ScreenEvents {};
     auto term = MockTerm(PageSize { LineCount(3), ColumnCount(11) }, LineCount(5));
     auto& screen = term.terminal.primaryScreen();
     auto selectionHelper = TestSelectionHelper(screen);

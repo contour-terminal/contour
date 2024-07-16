@@ -141,4 +141,3 @@ target_link_libraries(crispy_test fmt::fmt-header-only range-v3::range-v3 Catch2
     add_test(crispy_test ./crispy_test)
 endif()
 message(STATUS "[crispy] Compile unit tests: ${CRISPY_TESTING}")
-

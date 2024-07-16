@@ -684,7 +684,7 @@ void TextureAtlas<Metadata>::inspect(std::ostream& output) const
 template <>
 struct fmt::formatter<vtrasterizer::atlas::Format>: formatter<std::string_view>
 {
-    auto format(vtrasterizer::atlas::Format value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::atlas::Format value, format_context& ctx) const -> format_context::iterator
     {
         std::string_view name;
         switch (value)
@@ -700,7 +700,8 @@ struct fmt::formatter<vtrasterizer::atlas::Format>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtrasterizer::atlas::TileLocation>: fmt::formatter<std::string>
 {
-    auto format(vtrasterizer::atlas::TileLocation value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::atlas::TileLocation value,
+                format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("Tile {}x+{}y", value.x.value, value.y.value), ctx);
     }
@@ -709,7 +710,8 @@ struct fmt::formatter<vtrasterizer::atlas::TileLocation>: fmt::formatter<std::st
 template <>
 struct fmt::formatter<vtrasterizer::atlas::RenderTile>: fmt::formatter<std::string>
 {
-    auto format(vtrasterizer::atlas::RenderTile const& value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::atlas::RenderTile const& value,
+                format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format("RenderTile({}x + {}y, {})", value.x.value, value.y.value, value.tileLocation), ctx);
@@ -720,7 +722,7 @@ template <>
 struct fmt::formatter<vtrasterizer::atlas::AtlasProperties>: fmt::formatter<std::string>
 {
     auto format(vtrasterizer::atlas::AtlasProperties const& value,
-                format_context& ctx) -> format_context::iterator
+                format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("tile size {}, format {}, direct-mapped {}",
                                                           value.tileSize,

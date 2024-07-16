@@ -20,7 +20,7 @@
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_SYSTEM_VERSION": "10",
                 "CMAKE_VERBOSE_MAKEFILE": "ON",
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/../vcpkg/scripts/buildsystems/vcpkg.cmake"
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
             }
         },
         { "name": "windows-cl-debug", "inherits": ["windows-common", "debug"], "displayName": "Windows (MSVC) Debug", "description": "Using MSVC compiler (64-bit)" },

@@ -161,6 +161,7 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.generate.integration", bind(&ContourApp::integrationAction, this));
     link("contour.info.vt", bind(&ContourApp::infoVT, this));
     link("contour.documentation.vt", bind(&ContourApp::documentationVT, this));
+    link("contour.documentation.keys", bind(&ContourApp::documentationKeyMapping, this));
 }
 
 template <typename Callback>
@@ -215,6 +216,33 @@ int ContourApp::documentationVT()
         }
         fmt::format_to(back, "\n");
     }
+
+    std::cout << info;
+    return EXIT_SUCCESS;
+}
+
+int ContourApp::documentationKeyMapping()
+{
+    std::string info;
+    auto back = std::back_inserter(info);
+    fmt::format_to(back, "{}\n\n", "List of supported actions for key mappings.");
+
+    fmt::format_to(back, "| Action | Description |\n");
+    fmt::format_to(back, "|--------|-------------|\n");
+    for (auto const& [action, description]: contour::actions::getDocumentation())
+    {
+        fmt::format_to(back, "| `{:<20}` | {:} |\n", action, description);
+    }
+
+    fmt::format_to(back, "\n");
+    fmt::format_to(back, "Example of entries inside config file\n");
+    fmt::format_to(back, "``` yaml\n");
+    for (auto const& [action, description]: contour::actions::getDocumentation())
+    {
+        fmt::format_to(back, " - {{ mods: [Control], key: Enter, action: {:} }}\n", action);
+    }
+    fmt::format_to(back, "```\n");
+    fmt::format_to(back, "\n");
 
     std::cout << info;
     return EXIT_SUCCESS;
@@ -363,6 +391,7 @@ crispy::cli::command ContourApp::parameterDefinition() const
                            CLI::option_list {},
                            CLI::command_list {
                                CLI::command { "vt", "VT sequence reference documentation" },
+                               CLI::command { "keys", "List of configurable actions for key binding" },
                            } },
             CLI::command {
                 "generate",
@@ -373,7 +402,8 @@ crispy::cli::command ContourApp::parameterDefinition() const
                                    "Dumps VT parser's state machine in dot-file format to stdout." },
                     CLI::command {
                         "terminfo",
-                        "Generates the terminfo source file that will reflect the features of this version "
+                        "Generates the terminfo source file that will reflect the features of "
+                        "this version "
                         "of contour. Using - as value will write to stdout instead.",
                         {
                             CLI::option { "to",
@@ -437,14 +467,15 @@ crispy::cli::command ContourApp::parameterDefinition() const
                 "set",
                 "Sets various aspects of the connected terminal.",
                 CLI::option_list {},
-                CLI::command_list { CLI::command {
-                    "profile",
-                    "Changes the terminal profile of the currently attached terminal to the given value.",
-                    CLI::option_list {
-                        CLI::option { "to",
-                                      CLI::value { ""s },
-                                      "Profile name to activate in the currently connected terminal.",
-                                      "NAME" } } } } } }
+                CLI::command_list {
+                    CLI::command { "profile",
+                                   "Changes the terminal profile of the currently attached terminal to the "
+                                   "given value.",
+                                   CLI::option_list { CLI::option {
+                                       "to",
+                                       CLI::value { ""s },
+                                       "Profile name to activate in the currently connected terminal.",
+                                       "NAME" } } } } } }
     };
 }
 

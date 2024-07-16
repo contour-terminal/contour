@@ -9,7 +9,6 @@
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
 #include <vtbackend/ScreenBase.h>
-#include <vtbackend/ScreenEvents.h>
 #include <vtbackend/VTType.h>
 #include <vtbackend/cell/CellConcept.h>
 
@@ -680,7 +679,7 @@ template <>
 struct fmt::formatter<vtbackend::RequestStatusString>: formatter<std::string_view>
 {
     auto format(vtbackend::RequestStatusString value,
-                format_context& ctx) noexcept -> format_context::iterator
+                format_context& ctx) const noexcept -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -710,7 +709,7 @@ struct fmt::formatter<vtbackend::Sequence>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(vtbackend::Sequence const& seq, FormatContext& ctx)
+    auto format(vtbackend::Sequence const& seq, FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(), "{}", seq.text());
     }

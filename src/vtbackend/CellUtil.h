@@ -6,7 +6,11 @@
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/cell/CellConcept.h>
 
+#include <crispy/times.h>
+
 #include <libunicode/width.h>
+
+#include <ranges>
 
 namespace vtbackend::CellUtil
 {
@@ -111,21 +115,33 @@ template <CellConcept Cell>
     return newWidth - cell.width();
 }
 
-template <CellConcept Cell>
-[[nodiscard]] inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept
+template <typename Cell>
+    requires(std::same_as<Cell, std::u32string_view> || CellConcept<Cell>)
+[[nodiscard]] inline bool beginsWith(std::u32string_view text,
+                                     Cell const& cell,
+                                     bool isCaseSensitive) noexcept
 {
     assert(!text.empty());
 
-    if (cell.codepointCount() == 0)
+    auto const cellCodepointCount = cell.size();
+
+    if (cellCodepointCount == 0)
         return false;
 
-    if (text.size() < cell.codepointCount())
+    if (text.size() < cellCodepointCount)
         return false;
 
-    for (size_t i = 0; i < cell.codepointCount(); ++i)
-        if (cell.codepoint(i) != text[i])
+    auto const testMatchAt = [&](size_t i) {
+        if (isCaseSensitive)
+            return cell[i] == text[i];
+        return static_cast<char32_t>(std::tolower(cell[i])) == text[i];
+    };
+
+    // TODO: Should use this line instead - but that breaks on Ubuntu 22.04 with Clang 15
+    // return std::ranges::all_of(crispy::times(cellCodepointCount), testMatchAt);
+    for (auto const i: crispy::times(cellCodepointCount))
+        if (!testMatchAt(i))
             return false;
-
     return true;
 }
 

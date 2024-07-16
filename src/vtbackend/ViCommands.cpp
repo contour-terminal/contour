@@ -239,7 +239,6 @@ void ViCommands::modeChanged(ViMode mode)
             _terminal->viewport().forceScrollToBottom();
             _terminal->clearSearch();
             _terminal->popStatusDisplay();
-            _terminal->screenUpdated();
             break;
         case ViMode::Normal:
             _lastCursorShape = _terminal->cursorShape();
@@ -251,7 +250,6 @@ void ViCommands::modeChanged(ViMode mode)
             if (_terminal->selectionAvailable())
                 _terminal->clearSelection();
             _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
-            _terminal->screenUpdated();
             break;
         case ViMode::Visual:
             _terminal->setSelector(make_unique<LinearSelection>(
@@ -264,17 +262,16 @@ void ViCommands::modeChanged(ViMode mode)
                 _terminal->selectionHelper(), selectFrom, _terminal->selectionUpdatedHelper()));
             (void) _terminal->selector()->extend(cursorPosition);
             _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
-            _terminal->screenUpdated();
             break;
         case ViMode::VisualBlock:
             _terminal->setSelector(make_unique<RectangularSelection>(
                 _terminal->selectionHelper(), selectFrom, _terminal->selectionUpdatedHelper()));
             (void) _terminal->selector()->extend(cursorPosition);
             _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
-            _terminal->screenUpdated();
             break;
     }
 
+    _terminal->screenUpdated();
     _terminal->inputModeChanged(mode);
 }
 
@@ -323,7 +320,9 @@ void ViCommands::executeYank(ViMotion motion, unsigned count)
         }
         default: {
             auto const [from, to] = translateToCellRange(motion, count);
-            executeYank(from, to);
+            // motion is inclusive but for yank we want to exclude the last cell which is the first cell of
+            // the next word
+            executeYank(from, { to.line, to.column - 1 });
         }
         break;
     }
@@ -982,6 +981,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                 prev = current;
                 current.column++;
             }
+
             return current;
         }
         case ViMotion::BigWordEndForward: // E

@@ -83,13 +83,13 @@ jobs:
           # store-password: ${{ secrets.CODECHECKER_PASSWORD }}
 
       - name: "Upload HTML reports"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-${{ steps.codechecker.outputs.codechecker-version }}+${{ steps.codechecker.outputs.codechecker-hash }}-llvm-${{ steps.codechecker.outputs.llvm-version }}-results"
           path: "${{ steps.codechecker.outputs.result-html-dir }}"
           if-no-files-found: error
       - name: "Upload analysis failure reproducers"
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-${{ steps.codechecker.outputs.codechecker-version }}+${{ steps.codechecker.outputs.codechecker-hash }}-llvm-${{ steps.codechecker.outputs.llvm-version }}-failure-zips"
           path: "${{ steps.codechecker.outputs.analyze-output }}/failed"

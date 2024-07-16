@@ -1,0 +1,22 @@
+ARG VERSION="20.04"
+FROM yaraslaut/static_qt:$VERSION
+#FROM qt_static:$VERSION
+ARG ARCH="x86_64"
+
+RUN apt-get install -y xutils-dev pkg-config binutils gettext autoconf libtool make git
+
+WORKDIR /
+COPY . /contour
+RUN LD_LIBRARY_PATH=/usr/local/lib CC=clang CXX=clang++ sh /contour/scripts/install-static.sh
+
+WORKDIR /contour
+RUN LD_LIBRARY_PATH=/usr/local/lib cmake -S . -B build -G Ninja \
+    -D CONTOUR_BUILD_STATIC=ON \
+    -D CONTOUR_USE_CPM=ON \
+    -D CONTOUR_WITH_UTEMPTER=OFF \
+    -D CMAKE_CXX_COMPILER=clang++-18 \
+    -D CMAKE_C_COMPILER=clang-18 \
+    -D CMAKE_CXX_FLAGS="-I/contour/build/_deps/yaml-cpp-src/include" \
+    -D CMAKE_PREFIX_PATH=/usr/local/Qt-6.7.1/lib/cmake
+RUN cmake --build build --verbose
+RUN ldd ./build/src/contour/contour

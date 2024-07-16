@@ -12,9 +12,11 @@
 #include <crispy/utils.h>
 
 #include <QtCore/QProcess>
+#include <QtQml/qqmlextensionplugin.h>
 #if !defined(__APPLE__) && !defined(_WIN32)
     #include <QtDBus/QDBusConnection>
 #endif
+#include <QtCore/QtPlugin>
 #include <QtDBus/QtDBus>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QStyleHints>
@@ -269,7 +271,27 @@ bool ContourGuiApp::loadConfig(string const& target)
         }
         else
         {
-            shell.program = flags.verbatim.front();
+            auto frontCommand = flags.verbatim.front();
+
+            // check if this is a file
+            if (fs::exists(frontCommand) && fs::is_regular_file(frontCommand))
+            {
+                // check if this is an executable file
+                if ((fs::status(frontCommand).permissions() & fs::perms::owner_exec) != fs::perms::none)
+                    shell.program = frontCommand;
+                else // find a path to file and open shell in this path
+                    shell.workingDirectory = fs::path(frontCommand).parent_path();
+            }
+            else if (fs::exists(frontCommand) && fs::is_directory(frontCommand))
+            {
+                shell.workingDirectory = fs::path(frontCommand);
+            }
+            else
+            {
+                errorLog()("Do not know what to do with `{}` will use it as a program", frontCommand);
+                shell.program = frontCommand;
+            }
+
             for (size_t i = 1; i < flags.verbatim.size(); ++i)
                 shell.arguments.emplace_back(flags.verbatim.at(i));
         }

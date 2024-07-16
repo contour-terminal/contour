@@ -286,7 +286,7 @@ const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDesc
     .emoji = text::font_description { .familyName = { "emoji" } },
     .renderMode = text::render_mode::gray,
     .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
-    .fontLocator = vtrasterizer::FontLocatorEngine::FontConfig,
+    .fontLocator = vtrasterizer::FontLocatorEngine::Native,
     .builtinBoxDrawing = true,
 };
 
@@ -1140,7 +1140,7 @@ std::string defaultConfigFilePath();
 template <>
 struct fmt::formatter<contour::config::Permission>: formatter<std::string_view>
 {
-    auto format(contour::config::Permission value, format_context& ctx)
+    auto format(contour::config::Permission value, format_context& ctx) const
     {
         string_view name;
         switch (value)
@@ -1156,7 +1156,7 @@ struct fmt::formatter<contour::config::Permission>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::Opacity>: formatter<float>
 {
-    auto format(vtbackend::Opacity value, format_context& ctx)
+    auto format(vtbackend::Opacity value, format_context& ctx) const
     {
         return formatter<float>::format(static_cast<float>(value) / std::numeric_limits<uint8_t>::max(), ctx);
     }
@@ -1165,7 +1165,7 @@ struct fmt::formatter<vtbackend::Opacity>: formatter<float>
 template <>
 struct fmt::formatter<crispy::strong_hashtable_size>: formatter<uint>
 {
-    auto format(crispy::strong_hashtable_size value, format_context& ctx)
+    auto format(crispy::strong_hashtable_size value, format_context& ctx) const
     {
         return formatter<uint>::format(value.value, ctx);
     }
@@ -1174,7 +1174,7 @@ struct fmt::formatter<crispy::strong_hashtable_size>: formatter<uint>
 template <>
 struct fmt::formatter<vtbackend::StatusDisplayPosition>: formatter<std::string_view>
 {
-    auto format(vtbackend::StatusDisplayPosition value, format_context& ctx)
+    auto format(vtbackend::StatusDisplayPosition value, format_context& ctx) const
     {
         string_view name;
         switch (value)
@@ -1189,7 +1189,7 @@ struct fmt::formatter<vtbackend::StatusDisplayPosition>: formatter<std::string_v
 template <>
 struct fmt::formatter<vtbackend::BackgroundImage>: formatter<std::string_view>
 {
-    auto format(vtbackend::BackgroundImage value, format_context& ctx)
+    auto format(vtbackend::BackgroundImage value, format_context& ctx) const
     {
         if (auto* loc = std::get_if<std::filesystem::path>(&value.location))
             return formatter<string_view>::format(loc->string(), ctx);
@@ -1200,7 +1200,7 @@ struct fmt::formatter<vtbackend::BackgroundImage>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::StatusDisplayType>: formatter<std::string_view>
 {
-    auto format(vtbackend::StatusDisplayType value, format_context& ctx)
+    auto format(vtbackend::StatusDisplayType value, format_context& ctx) const
     {
         string_view name;
         switch (value)
@@ -1216,7 +1216,7 @@ struct fmt::formatter<vtbackend::StatusDisplayType>: formatter<std::string_view>
 template <>
 struct fmt::formatter<crispy::lru_capacity>: formatter<uint>
 {
-    auto format(crispy::lru_capacity value, format_context& ctx)
+    auto format(crispy::lru_capacity value, format_context& ctx) const
     {
         return formatter<uint>::format(value.value, ctx);
     }
@@ -1225,7 +1225,7 @@ struct fmt::formatter<crispy::lru_capacity>: formatter<uint>
 template <>
 struct fmt::formatter<std::set<std::basic_string<char>>>: formatter<std::string_view>
 {
-    auto format(std::set<std::basic_string<char>> value, format_context& ctx)
+    auto format(std::set<std::basic_string<char>> value, format_context& ctx) const
     {
         auto result = std::string {};
         result.append(value | ranges::views::join(", ") | ranges::to<std::string>);
@@ -1236,7 +1236,7 @@ struct fmt::formatter<std::set<std::basic_string<char>>>: formatter<std::string_
 template <>
 struct fmt::formatter<contour::config::SelectionAction>: formatter<std::string_view>
 {
-    auto format(contour::config::SelectionAction value, format_context& ctx)
+    auto format(contour::config::SelectionAction value, format_context& ctx) const
     {
         std::string_view name;
         switch (value)
@@ -1254,7 +1254,7 @@ struct fmt::formatter<contour::config::SelectionAction>: formatter<std::string_v
 template <>
 struct fmt::formatter<contour::config::ScrollBarPosition>: formatter<std::string_view>
 {
-    auto format(contour::config::ScrollBarPosition value, format_context& ctx)
+    auto format(contour::config::ScrollBarPosition value, format_context& ctx) const
     {
         std::string_view name;
         switch (value)
@@ -1270,7 +1270,7 @@ struct fmt::formatter<contour::config::ScrollBarPosition>: formatter<std::string
 template <>
 struct fmt::formatter<contour::config::RenderingBackend>: formatter<std::string_view>
 {
-    auto format(contour::config::RenderingBackend const& val, fmt::format_context& ctx)
+    auto format(contour::config::RenderingBackend const& val, fmt::format_context& ctx) const
     {
         std::string_view name;
         switch (val)
@@ -1287,7 +1287,7 @@ template <>
 struct fmt::formatter<contour::config::WindowMargins>: public fmt::formatter<std::string>
 {
     using WindowMargins = contour::config::WindowMargins;
-    auto format(WindowMargins margins, format_context& ctx) -> format_context::iterator
+    auto format(WindowMargins margins, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}x+{}y", margins.horizontal, margins.vertical),
                                               ctx);
@@ -1297,7 +1297,7 @@ struct fmt::formatter<contour::config::WindowMargins>: public fmt::formatter<std
 template <typename T, contour::config::documentation::StringLiteral D>
 struct fmt::formatter<contour::config::ConfigEntry<T, D>>
 {
-    auto format(contour::config::ConfigEntry<T, D> const& c, fmt::format_context& ctx)
+    auto format(contour::config::ConfigEntry<T, D> const& c, fmt::format_context& ctx) const
     {
         return fmt::format_to(ctx.out(), "{}", c.value());
     }

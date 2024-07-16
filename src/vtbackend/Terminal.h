@@ -8,7 +8,6 @@
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/InputHandler.h>
 #include <vtbackend/RenderBuffer.h>
-#include <vtbackend/ScreenEvents.h>
 #include <vtbackend/Selector.h>
 #include <vtbackend/Sequence.h>
 #include <vtbackend/SequenceBuilder.h>
@@ -662,6 +661,8 @@ class Terminal
     Selection* selector() noexcept { return _selection.get(); }
     std::chrono::milliseconds highlightTimeout() const noexcept { return _settings.highlightTimeout; }
 
+    void updateSelectionMatches();
+
     template <typename RenderTarget>
     void renderSelection(RenderTarget renderTarget) const
     {
@@ -864,9 +865,6 @@ class Terminal
     [[nodiscard]] std::optional<CellLocation> searchReverse(CellLocation searchPosition);
 
     // Searches from current position the next item downwards.
-    [[nodiscard]] std::optional<CellLocation> search(std::u32string text,
-                                                     CellLocation searchPosition,
-                                                     bool initiatedByDoubleClick = false);
     [[nodiscard]] std::optional<CellLocation> search(CellLocation searchPosition);
 
     [[nodiscard]] std::optional<CellLocation> searchNextMatch(CellLocation cursorPosition);
@@ -954,6 +952,9 @@ class Terminal
     // }}}
 
     void triggerWordWiseSelectionWithCustomDelimiters(std::string const& delimiters);
+
+    void setStatusLineDefinition(StatusLineDefinition&& definition);
+    void resetStatusLineDefinition();
 
   private:
     void mainLoop();
@@ -1199,7 +1200,7 @@ template <>
 struct fmt::formatter<vtbackend::TraceHandler::PendingSequence>: fmt::formatter<std::string>
 {
     auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence,
-                format_context& ctx) -> format_context::iterator
+                format_context& ctx) const -> format_context::iterator
     {
         std::string value;
         if (auto const* p = std::get_if<vtbackend::Sequence>(&pendingSequence))
@@ -1218,7 +1219,7 @@ struct fmt::formatter<vtbackend::TraceHandler::PendingSequence>: fmt::formatter<
 template <>
 struct fmt::formatter<vtbackend::AnsiMode>: fmt::formatter<std::string>
 {
-    auto format(vtbackend::AnsiMode mode, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::AnsiMode mode, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(mode), ctx);
     }
@@ -1227,7 +1228,7 @@ struct fmt::formatter<vtbackend::AnsiMode>: fmt::formatter<std::string>
 template <>
 struct fmt::formatter<vtbackend::DECMode>: fmt::formatter<std::string>
 {
-    auto format(vtbackend::DECMode mode, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::DECMode mode, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(mode), ctx);
     }
@@ -1237,7 +1238,7 @@ template <>
 struct fmt::formatter<vtbackend::DynamicColorName>: formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(vtbackend::DynamicColorName value, FormatContext& ctx)
+    auto format(vtbackend::DynamicColorName value, FormatContext& ctx) const
     {
         using vtbackend::DynamicColorName;
         string_view name;
@@ -1258,7 +1259,7 @@ struct fmt::formatter<vtbackend::DynamicColorName>: formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::ExecutionMode>: formatter<std::string_view>
 {
-    auto format(vtbackend::ExecutionMode value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ExecutionMode value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
