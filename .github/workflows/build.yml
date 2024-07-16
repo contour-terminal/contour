@@ -352,7 +352,7 @@ jobs:
             freebsd-version
             ./scripts/install-deps.sh
             mkdir build
-            cmake -S . -B build
+            cmake -S . -B build -DCONTOUR_TESTING=ON
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test

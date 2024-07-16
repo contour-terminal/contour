@@ -39,7 +39,7 @@
       for everyday use. It is aiming for power users with a modern feature mindset.
     </p>
     <ul>
-      <li>Available on all 4 major platforms, Linux, macOS, FreeBSD, Windows.</li>
+      <li>Available on all major platforms, Linux, macOS, FreeBSD, OpenBSD, Windows.</li>
       <li>GPU-accelerated rendering.</li>
       <li>Font ligatures support (such as in Fira Code).</li>
       <li>Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)</li>
@@ -128,6 +128,7 @@
           <li>When switching to normal mode screen will stay in same position (#808)</li>
           <li>Add customizable per-input-mode default text/background coloring for indicator statusline (#1528)</li>
           <li>Add case-insensitive smart search (#1410)</li>
+          <li>Add OpenBSD support</li>
           <li>Update of contour.desktop file (#1423)</li>
           <li>Changed configuration entry values for `font_locator` down to `native` and `mock` only (#1538).</li>
           <li>Do not export the `TERM` environment variable on Windows OS (when using ConPTY).</li>

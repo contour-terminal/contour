@@ -13,7 +13,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 
 ## Features
 
-- ✅ Available on all 4 major platforms, Linux, macOS, FreeBSD, Windows.
+- ✅ Available on all major platforms, Linux, macOS, FreeBSD, OpenBSD, Windows.
 - ✅ GPU-accelerated rendering.
 - ✅ Font ligatures support (such as in Fira Code).
 - ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)
@@ -70,7 +70,7 @@ Click the following button to install Contour from the Flathub store.
 
 ## Requirements
 
-- **operating system**: A *recent* operating system (macOS 12, Windows 10+, an up-to-date Linux, or FreeBSD)
+- **operating system**: A *recent* operating system (macOS 12, Windows 10+, an up-to-date Linux, FreeBSD or OpenBSD)
 - **GPU**: driver must support at least OpenGL 3.3 hardware accelerated or as software rasterizer.
 - **CPU**: x86-64 AMD or Intel with AES-NI instruction set or ARMv8 with crypto extensions.
 
@@ -89,7 +89,7 @@ by default contour will be compiled with Qt 6, to change Qt version use
 `QTVER=5 ./scripts/install-deps.sh` to fetch dependencies and cmake flag
 `-D CONTOUR_QT_VERSION=5`.
 
-### UNIX-like systems (Linux, FreeBSD, macOS)
+### UNIX-like systems (Linux, FreeBSD, OpenBSD, macOS)
 
 #### Prerequisites
 
@@ -102,7 +102,7 @@ can be insalled via the system package manager.
 
 #### Compile
 
-You can use cmake presets to compile contour. The full list of available presets can be seen using `cmake --list-presets`. To compile release build for linux or MacOs use `linux-release` or `macos-release` accordingly. FreeBSD users can use `linux-release` or configure cmake manually.
+You can use cmake presets to compile contour. The full list of available presets can be seen using `cmake --list-presets`. To compile release build for linux or MacOs use `linux-release` or `macos-release` accordingly. FreeBSD and OpenBSD users can use `linux-release` or configure cmake manually.
 
 ```sh
 cmake --preset linux-release
