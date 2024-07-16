@@ -134,6 +134,7 @@
           <li>Do not export the `TERM` environment variable on Windows OS (when using ConPTY).</li>
           <li>Fixes resize of trivial line (#916)</li>
           <li>Fixes copying of wrapped line</li>
+          <li>Fixes deletion of spaces on resize </li>
           <li>Fixes forwarding of input while in normal mode (#1468)</li>
           <li>Fixes OSC-8 link id collision (#1499)</li>
           <li>Fixed overlap of glyphs for long codepoints (#1349)</li>

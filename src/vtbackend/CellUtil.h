@@ -93,7 +93,7 @@ template <CellConcept Cell>
 template <CellConcept Cell>
 [[nodiscard]] inline bool empty(Cell const& cell) noexcept
 {
-    return (cell.codepointCount() == 0 || cell.codepoint(0) == 0x20) && !cell.imageFragment();
+    return (cell.codepointCount() == 0) && !cell.imageFragment();
 }
 
 template <CellConcept Cell>
