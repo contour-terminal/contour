@@ -15,7 +15,7 @@ endif()
 if(APPLE)
     list(APPEND text_shaper_SRC coretext_locator.h coretext_locator.mm)
 endif()
-if("${CMAKE_SYSTEM}" MATCHES "Linux" OR "${CMAKE_SYSTEM}" MATCHES "FreeBSD")
+if("${CMAKE_SYSTEM}" MATCHES "Linux" OR "${CMAKE_SYSTEM}" MATCHES "FreeBSD" OR "${CMAKE_SYSTEM}" MATCHES "OpenBSD")
     list(APPEND text_shaper_SRC fontconfig_locator.cpp fontconfig_locator.h)
 endif()
 
