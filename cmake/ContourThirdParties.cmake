@@ -54,7 +54,7 @@ message(STATUS "================================================================
 message(STATUS "    Contour ThirdParties: ${ContourThirdParties}")
 
 set(LIBUNICODE_MINIMAL_VERSION "0.4.0")
-set(BOXED_CPP_MINIMAL_VERSION "1.2.2")
+set(BOXED_CPP_MINIMAL_VERSION "1.4.2")
 set(TERMBENCH_PRO_COMMIT_HASH "96c6bb7897af4110d1b99a93b982f8ec10e71183")
 set(FMT_VERSION "10.0.0")
 set(CATCH_VERSION "3.4.0")
