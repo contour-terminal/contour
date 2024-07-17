@@ -193,7 +193,7 @@ jobs:
   # }}}
   # {{{ StaticBuild
   staticBuild:
-    #if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
+    if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
     name: "Static build"
     runs-on: ubuntu-latest
     steps:
@@ -236,7 +236,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: [39]
+        os_version: [40]
         arch:
           [
             "linux/amd64 x86_64"
@@ -350,8 +350,7 @@ jobs:
             whoami
             env
             freebsd-version
-            ./scripts/install-deps.sh
-            mkdir build
+            SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
             cmake -S . -B build -DCONTOUR_TESTING=ON
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
@@ -362,6 +361,7 @@ jobs:
   # }}}
   # {{{ OpenBSD
   openbsd:
+    if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
     runs-on: ubuntu-latest
     name: OpenBSD 7.5
     # env:
@@ -411,6 +411,7 @@ jobs:
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: Install the Apple certificate and provisioning profile
+        if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
@@ -1056,7 +1057,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ['20.04', '22.04', '24.04']
+        os_version: ['24.04']
     runs-on: ubuntu-${{ matrix.os_version }}
     steps:
     - name: "update APT database"
