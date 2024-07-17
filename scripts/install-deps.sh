@@ -110,7 +110,7 @@ fetch_and_unpack_termbenchpro()
 
 fetch_and_unpack_boxed()
 {
-    local boxed_cpp_version="1.2.2"
+    local boxed_cpp_version="1.4.2"
     fetch_and_unpack \
         boxed-cpp-$boxed_cpp_version \
         boxed-cpp-$boxed_cpp_version.tar.gz \

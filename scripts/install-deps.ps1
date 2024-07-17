@@ -26,9 +26,9 @@ $ThirdParties =
         Macro   = "termbench_pro"
     }
     [ThirdParty]@{
-        Folder  = "boxed-cpp-1.2.2";
-        Archive = "boxed-cpp-1.2.2.zip";
-        URI     = "https://github.com/contour-terminal/boxed-cpp/archive/refs/tags/v1.2.2.zip";
+        Folder  = "boxed-cpp-1.4.2";
+        Archive = "boxed-cpp-1.4.2.zip";
+        URI     = "https://github.com/contour-terminal/boxed-cpp/archive/refs/tags/v1.4.2.zip";
         Macro   = "boxed_cpp"
     }
 )
