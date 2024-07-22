@@ -321,9 +321,7 @@ vector<string> Process::loginShell(bool escapeSandbox)
     {
 #if defined(__APPLE__)
         crispy::ignore_unused(escapeSandbox);
-        auto shell = string(pw->pw_shell);
-        auto index = shell.rfind('/');
-        return { "/bin/bash", "-c", fmt::format("exec -a -{} {}", shell.substr(index + 1, 5), pw->pw_shell) };
+        return { pw->pw_shell };
 #else
         if (isFlatpak() && escapeSandbox)
         {
