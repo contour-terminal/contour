@@ -255,29 +255,35 @@ struct Bell
     float volume = 1.0f;
 };
 
+#if defined(__APPLE__)
+inline auto defaultFamilyName = "Monaco";
+#else
+inline auto defaultFamilyName = "monospace";
+#endif
+
 const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDescriptions {
     .dpiScale = 1.0,
     .dpi = { 0, 0 },
     .size = { 12 },
-    .regular = text::font_description { .familyName = { "monospace" },
+    .regular = text::font_description { .familyName = { defaultFamilyName },
                                         .weight = text::font_weight::normal,
                                         .slant = text::font_slant::normal,
                                         .spacing = text::font_spacing::proportional,
                                         .strictSpacing = false,
                                         .features = {} },
-    .bold = text::font_description { .familyName = { "monospace" },
+    .bold = text::font_description { .familyName = { defaultFamilyName },
                                      .weight = text::font_weight::bold,
                                      .slant = text::font_slant::normal,
                                      .spacing = text::font_spacing::proportional,
                                      .strictSpacing = false,
                                      .features = {} },
-    .italic = text::font_description { .familyName = { "monospace" },
+    .italic = text::font_description { .familyName = { defaultFamilyName },
                                        .weight = text::font_weight::normal,
                                        .slant = text::font_slant::italic,
                                        .spacing = text::font_spacing::proportional,
                                        .strictSpacing = false,
                                        .features = {} },
-    .boldItalic = text::font_description { .familyName = { "monospace" },
+    .boldItalic = text::font_description { .familyName = { defaultFamilyName },
                                            .weight = text::font_weight::bold,
                                            .slant = text::font_slant::italic,
                                            .spacing = text::font_spacing::proportional,
@@ -327,7 +333,7 @@ struct TerminalProfile
         vtbackend::LineCount(3)
     };
     ConfigEntry<ScrollBarPosition, documentation::ScrollbarPosition> scrollbarPosition {
-        ScrollBarPosition::Right
+        ScrollBarPosition::Hidden
     };
     ConfigEntry<vtbackend::StatusDisplayPosition, documentation::StatusDisplayPosition>
         statusDisplayPosition { vtbackend::StatusDisplayPosition::Bottom };
