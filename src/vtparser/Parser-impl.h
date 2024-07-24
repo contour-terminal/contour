@@ -329,13 +329,18 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
     while (input != end)
     {
         assert(input < end);
-        fmt::print("VTParser: Processing {}..{}: U+{:X}\n", (void*) input, (void*) end, (unsigned) *input);
+        vtTraceParserLog()("VTParser: Processing {}..{} ({}): U+{:X}\n",
+                           (void*) input,
+                           (void*) end,
+                           std::distance(input, end),
+                           // name of character
+                           static_cast<unsigned char>(*input));
         auto const [processKind, processedByteCount] = parseBulkText(input, end);
         // TODO(pr) what if parseBulkText() knows we've hit the end already? then we should break out of the
         // loop right away
-        fmt::print("VTParser: Processed {} bytes. Kind {}\n",
-                   static_cast<size_t>(processedByteCount),
-                   processKind == ProcessKind::ContinueBulk ? "ContinueBulk" : "FallbackToFSM");
+        vtTraceParserLog()("VTParser: Processed {} bytes. Kind {}\n",
+                           static_cast<size_t>(processedByteCount),
+                           processKind == ProcessKind::ContinueBulk ? "ContinueBulk" : "FallbackToFSM");
         switch (processKind)
         {
             case ProcessKind::ContinueBulk:
@@ -346,7 +351,12 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
             case ProcessKind::FallbackToFSM:
                 input += processedByteCount;
                 if (input != end)
-                    processOnceViaStateMachine(static_cast<uint8_t>(*input++));
+                {
+                    // TODO(pr) [libunicode] fix zero side Parser.simple_ut8
+                    auto const ch = static_cast<uint8_t>(*input++);
+                    if (ch != 0)
+                        processOnceViaStateMachine(ch);
+                }
                 break;
         }
     }
@@ -367,14 +377,17 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
         handle(ActionClass::Enter, Table.entryEvents[static_cast<size_t>(t)], ch);
     }
     else if (Action const a = Table.events[s][ch]; a != Action::Undefined)
+    {
+        vtTraceParserLog()("VTParser: Handling action {} for state/input pair.\n", a);
         handle(ActionClass::Event, a, ch);
+    }
     else
         _eventListener.error("Parser error: Unknown action for state/input pair.");
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
--> std::tuple<ProcessKind, size_t>
+    -> std::tuple<ProcessKind, size_t>
 {
     auto const* input = begin;
     if (_state != State::Ground)
@@ -384,23 +397,23 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     if (!maxCharCount)
         return { ProcessKind::FallbackToFSM, 0 };
 
-    auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
+    auto const chunk = std::string_view(input, end);
 
-    if (_graphemeLineSegmenter.next() == begin)
-    {
-        std::cout << "     expand_buffer_by(" << chunk.size() << ")\n";
-        _graphemeLineSegmenter.expand_buffer_by(chunk.size());
-    }
-    else
-    {
-        std::cout << "     reset()\n";
-        _graphemeLineSegmenter.reset(chunk);
-    }
     // TODO(pr) What if the last call to parseBulkText was only a partial read, and we have
     //          more text to read? Then we should not just call reset() but expand_buffer_by().
+    _graphemeLineSegmenter.reset(chunk);
 
     unicode::grapheme_segmentation_result const result = _graphemeLineSegmenter.process(maxCharCount);
-    std::cout << "     result: " << result << '\n';
+    vtTraceParserLog()(
+        "result: [text: \"{}\", width: {}, stop: {}]", result.text, result.width, [](auto val) {
+            switch (val)
+            {
+                case unicode::StopCondition::UnexpectedInput: return "UnexpectedInput";
+                case unicode::StopCondition::EndOfWidth: return "EndOfWidth";
+                case unicode::StopCondition::EndOfInput: return "EndOfInput";
+            }
+            return "Unknown";
+        }(result.stop_condition));
 
     // We do not test on cellCount>0 because the scan could contain only a ZWJ (zero width
     // joiner), and that would be misleading.
@@ -423,9 +436,12 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     {
         if (byteCount > 0)
         {
-            auto const text = std::string_view{ subStart, byteCount };
+            auto const text = std::string_view { subStart, byteCount };
             if (vtTraceParserLog)
-                vtTraceParserLog()("Printing fast-scanned text \"{}\" with {} cells.", text, cellCount);
+                vtTraceParserLog()("Printing fast-scanned text \"{}\" with {} cells and size {}. ",
+                                   text,
+                                   cellCount,
+                                   text.size());
             _eventListener.print(text, cellCount);
         }
 
@@ -434,26 +450,39 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
         // the FSM for the `(TEXT LF+)+`-case.
         //
         // As of bench-headless, the performance incrrease is about 50x.
-        if (input + byteCount != end && *input == '\n')
+        // We need to ensure that there is input beyond the current chunk.
+        if (byteCount != static_cast<size_t>(std::distance(input, end)))
         {
-            auto x = makeParseBulkResult(input, maxCharCount, unicode::StopCondition::EndOfInput, result.width, 1);
-            _eventListener.execute('\n');
-            return x;
-        }
-        else if ((input + byteCount + 1) != end && input[byteCount] == '\r' && input[byteCount + 1] == '\n')
-        {
-            // TODO: should have flushed first
-            auto x = makeParseBulkResult(input, maxCharCount, unicode::StopCondition::EndOfInput, result.width, 2);
-            _eventListener.execute('\r');
-            _eventListener.execute('\n');
-            return x;
+            if (*input == '\n')
+            {
+                auto x = makeParseBulkResult(
+                    input, maxCharCount, unicode::StopCondition::EndOfInput, result.width, 1);
+                _eventListener.execute('\n');
+                return x;
+            }
+            else if ((input + byteCount + 1) != end && input[byteCount] == '\r'
+                     && input[byteCount + 1] == '\n')
+            {
+                // TODO: should have flushed first
+                auto x = makeParseBulkResult(
+                    input, maxCharCount, unicode::StopCondition::EndOfInput, result.width, 2);
+                _eventListener.execute('\r');
+                _eventListener.execute('\n');
+                return x;
+            }
         }
     }
+
     return makeParseBulkResult(input, maxCharCount, result.stop_condition, result.width, 0);
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
-auto Parser<EventListener, TraceStateChanges>::makeParseBulkResult(char const* input, unsigned maxCharCount, unicode::StopCondition resultStopCondition, unsigned resultWidth, unsigned e) noexcept -> std::tuple<ProcessKind, size_t>
+auto Parser<EventListener, TraceStateChanges>::makeParseBulkResult(char const* input,
+                                                                   unsigned maxCharCount,
+                                                                   unicode::StopCondition resultStopCondition,
+                                                                   unsigned resultWidth,
+                                                                   unsigned e) noexcept
+    -> std::tuple<ProcessKind, size_t>
 {
     assert(input <= _graphemeLineSegmenter.next());
     auto const count = static_cast<size_t>(std::distance(input, _graphemeLineSegmenter.next()));
