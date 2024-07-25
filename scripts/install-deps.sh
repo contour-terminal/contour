@@ -121,7 +121,7 @@ fetch_and_unpack_boxed()
 fetch_and_unpack_libunicode()
 {
     if test x$LIBUNICODE_SRC_DIR = x; then
-        local libunicode_git_sha="23d7b30166a914b10526bb8fe7a469a9610c07dc"
+        local libunicode_git_sha="dabfea48f7fd2a8bf6ae19e37581de5c127c607f"
         fetch_and_unpack \
             libunicode-$libunicode_git_sha \
             libunicode-$libunicode_git_sha.tar.gz \

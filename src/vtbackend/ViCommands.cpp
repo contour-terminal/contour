@@ -114,7 +114,7 @@ namespace
             return terminal.alternateScreen().grid().rightMostNonEmptyAt(lineOffset);
     }
 
-    constexpr std::optional<std::pair<char, bool>> matchingPairOfChar(char32_t input) noexcept
+    constexpr std::optional<std::pair<char32_t, bool>> matchingPairOfChar(char32_t input) noexcept
     {
         auto constexpr Pairs = std::array {
             std::pair { U'(', U')' },

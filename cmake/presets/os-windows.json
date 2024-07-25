@@ -5,9 +5,9 @@
         {
             "name": "windows-common",
             "inherits": "contour-common",
+            "generator": "Visual Studio 17 2022",
             "displayName": "Windows - common settings",
             "hidden": true,
-            "toolset": "host=x64",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "condition": {
                 "type": "equals",

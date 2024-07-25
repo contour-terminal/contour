@@ -32,6 +32,9 @@ class app
     [[nodiscard]] std::string const& appVersion() const noexcept { return _appVersion; }
     [[nodiscard]] std::filesystem::path const& localStateDir() const noexcept { return _localStateDir; }
 
+    static void basicSetup() noexcept;
+    static void enableVTProcessing() noexcept;
+    static void enableUtf8Output() noexcept;
     static void customizeLogStoreOutput();
 
   protected:

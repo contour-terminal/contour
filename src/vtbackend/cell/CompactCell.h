@@ -17,6 +17,7 @@
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -316,7 +317,7 @@ inline void CompactCell::setCharacter(char32_t codepoint) noexcept
         _extra->imageFragment = {};
     }
     if (codepoint)
-        setWidth(static_cast<uint8_t>(std::max(unicode::width(codepoint), 1)));
+        setWidth(static_cast<uint8_t>(std::max(unicode::width(codepoint), 1u)));
     else
         setWidth(1);
 }
@@ -324,6 +325,7 @@ inline void CompactCell::setCharacter(char32_t codepoint) noexcept
 inline int CompactCell::appendCharacter(char32_t codepoint) noexcept
 {
     assert(codepoint != 0);
+    assert(_codepoint != 0);
 
     CellExtra& ext = extra();
     if (ext.codepoints.size() < MaxCodepoints - 1)

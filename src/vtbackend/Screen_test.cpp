@@ -552,9 +552,17 @@ TEST_CASE("AppendChar.emoji_1", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    mock.writeToScreen(U"\U0001F600");
+    mock.writeToScreen("\xf0\x9f\x98\x80"); // U+1F600
 
-    auto const& c1 = screen.at(LineOffset(0), ColumnOffset(0));
+    Line<CompactCell> const& line = screen.grid().lineAt(LineOffset(0));
+    CHECK(line.isTrivialBuffer());
+    TrivialLineBuffer const& trivialBuffer = line.trivialBuffer();
+    CHECK(trivialBuffer.usedColumns == ColumnCount(2));
+    CHECK(trivialBuffer.text.view() == "\xf0\x9f\x98\x80");
+
+    Line<CompactCell>::InflatedBuffer const& inflated = line.inflatedBuffer();
+    CompactCell const& c1 = inflated.at(0);
+    // auto const& c1 = screen.at(LineOffset(0), ColumnOffset(0));
     CHECK(c1.codepoints() == U"\U0001F600");
     CHECK(c1.width() == 2);
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });

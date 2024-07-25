@@ -140,18 +140,6 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     signal(SIGABRT, segvHandler);
 #endif
 
-#if defined(_WIN32)
-    // Enable VT output processing on Conhost.
-    HANDLE stdoutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD savedModes {}; // NOTE: Is it required to restore that upon process exit?
-    if (GetConsoleMode(stdoutHandle, &savedModes) != FALSE)
-    {
-        DWORD modes = savedModes;
-        modes |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-        SetConsoleMode(stdoutHandle, modes);
-    }
-#endif
-
     link("contour.capture", bind(&ContourApp::captureAction, this));
     link("contour.list-debug-tags", bind(&ContourApp::listDebugTagsAction, this));
     link("contour.set.profile", bind(&ContourApp::profileAction, this));

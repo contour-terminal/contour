@@ -2,6 +2,8 @@
 #pragma once
 #include <vtparser/Parser.h>
 
+#include <crispy/assert.h>
+
 #include <libunicode/utf8.h>
 
 #include <array>
@@ -326,7 +328,19 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
 
     while (input != end)
     {
+        assert(input < end);
+        vtTraceParserLog()("VTParser: Processing {}..{} ({}): U+{:X}\n",
+                           (void*) input,
+                           (void*) end,
+                           std::distance(input, end),
+                           // name of character
+                           static_cast<unsigned char>(*input));
         auto const [processKind, processedByteCount] = parseBulkText(input, end);
+        // TODO(pr) what if parseBulkText() knows we've hit the end already? then we should break out of the
+        // loop right away
+        vtTraceParserLog()("VTParser: Processed {} bytes. Kind {}\n",
+                           static_cast<size_t>(processedByteCount),
+                           processKind == ProcessKind::ContinueBulk ? "ContinueBulk" : "FallbackToFSM");
         switch (processKind)
         {
             case ProcessKind::ContinueBulk:
@@ -335,7 +349,14 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
                 break;
                 // clang-format on
             case ProcessKind::FallbackToFSM:
-                processOnceViaStateMachine(static_cast<uint8_t>(*input++));
+                input += processedByteCount;
+                if (input != end)
+                {
+                    // TODO(pr) [libunicode] fix zero side Parser.simple_ut8
+                    auto const ch = static_cast<uint8_t>(*input++);
+                    if (ch != 0)
+                        processOnceViaStateMachine(ch);
+                }
                 break;
         }
     }
@@ -356,7 +377,10 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
         handle(ActionClass::Enter, Table.entryEvents[static_cast<size_t>(t)], ch);
     }
     else if (Action const a = Table.events[s][ch]; a != Action::Undefined)
+    {
+        vtTraceParserLog()("VTParser: Handling action {} for state/input pair.\n", a);
         handle(ActionClass::Event, a, ch);
+    }
     else
         _eventListener.error("Parser error: Unknown action for state/input pair.");
 }
@@ -373,48 +397,127 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     if (!maxCharCount)
         return { ProcessKind::FallbackToFSM, 0 };
 
-    _scanState.next = nullptr;
-    auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
-    auto const [cellCount, subStart, subEnd] = unicode::scan_text(_scanState, chunk, maxCharCount);
+    auto const chunk = std::string_view(input, end);
 
-    if (_scanState.next == input)
-        return { ProcessKind::FallbackToFSM, 0 };
+    // TODO(pr) What if the last call to parseBulkText was only a partial read, and we have
+    //          more text to read? Then we should not just call reset() but expand_buffer_by().
+    _graphemeLineSegmenter.reset(chunk);
+
+    unicode::grapheme_segmentation_result const result = _graphemeLineSegmenter.process(maxCharCount);
+    vtTraceParserLog()(
+        "result: [text: \"{}\", width: {}, stop: {}]", result.text, result.width, [](auto val) {
+            switch (val)
+            {
+                case unicode::StopCondition::UnexpectedInput: return "UnexpectedInput";
+                case unicode::StopCondition::EndOfWidth: return "EndOfWidth";
+                case unicode::StopCondition::EndOfInput: return "EndOfInput";
+            }
+            return "Unknown";
+        }(result.stop_condition));
 
     // We do not test on cellCount>0 because the scan could contain only a ZWJ (zero width
     // joiner), and that would be misleading.
 
-    assert(subStart <= subEnd);
-    auto const byteCount = static_cast<size_t>(std::distance(subStart, subEnd));
-    if (byteCount == 0)
-        return { ProcessKind::FallbackToFSM, 0 };
+    auto const cellCount = result.width;
+    auto const* subStart = result.text.data();
+    auto const* subEnd = subStart + result.text.size();
 
+    assert(subStart <= subEnd);
     assert(cellCount <= maxCharCount);
     assert(subEnd <= chunk.data() + chunk.size());
-    assert(_scanState.next <= chunk.data() + chunk.size());
+    assert(_graphemeLineSegmenter.next() <= chunk.data() + chunk.size());
 
-    auto const text = std::string_view { subStart, byteCount };
-    if (_scanState.utf8.expectedLength == 0)
+    auto const byteCount = static_cast<size_t>(std::distance(subStart, subEnd));
+    assert(byteCount == result.text.size());
+    // if (byteCount == 0)
+    //     return { ProcessKind::FallbackToFSM, 0 };
+
+    if (!_graphemeLineSegmenter.is_utf8_byte_pending())
     {
-        if (!text.empty())
+        if (byteCount > 0)
+        {
+            auto const text = std::string_view { subStart, byteCount };
+            if (vtTraceParserLog)
+                vtTraceParserLog()("Printing fast-scanned text \"{}\" with {} cells and size {}. ",
+                                   text,
+                                   cellCount,
+                                   text.size());
             _eventListener.print(text, cellCount);
+        }
 
         // This optimization is for the `cat`-people.
         // It further optimizes the throughput performance by bypassing
         // the FSM for the `(TEXT LF+)+`-case.
         //
         // As of bench-headless, the performance incrrease is about 50x.
-        if (input != end && *input == '\n')
-            _eventListener.execute(*input++);
+        // We need to ensure that there is input beyond the current chunk.
+        if (byteCount != static_cast<size_t>(std::distance(input, end)))
+        {
+            if (*input == '\n')
+            {
+                auto x = makeParseBulkResult(
+                    input, maxCharCount, unicode::StopCondition::EndOfInput, result.width, 1);
+                _eventListener.execute('\n');
+                return x;
+            }
+            else if ((input + byteCount + 1) != end && input[byteCount] == '\r'
+                     && input[byteCount + 1] == '\n')
+            {
+                // TODO: should have flushed first
+                auto x = makeParseBulkResult(
+                    input, maxCharCount, unicode::StopCondition::EndOfInput, result.width, 2);
+                _eventListener.execute('\r');
+                _eventListener.execute('\n');
+                return x;
+            }
+        }
     }
 
-    auto const count = static_cast<size_t>(std::distance(input, _scanState.next));
-    return { ProcessKind::ContinueBulk, count };
+    return makeParseBulkResult(input, maxCharCount, result.stop_condition, result.width, 0);
+}
+
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
+auto Parser<EventListener, TraceStateChanges>::makeParseBulkResult(char const* input,
+                                                                   unsigned maxCharCount,
+                                                                   unicode::StopCondition resultStopCondition,
+                                                                   unsigned resultWidth,
+                                                                   unsigned e) noexcept
+    -> std::tuple<ProcessKind, size_t>
+{
+    assert(input <= _graphemeLineSegmenter.next());
+    auto const count = static_cast<size_t>(std::distance(input, _graphemeLineSegmenter.next()));
+
+    switch (resultStopCondition)
+    {
+        case unicode::StopCondition::UnexpectedInput: //
+            return { ProcessKind::FallbackToFSM, count + e };
+        case unicode::StopCondition::EndOfWidth: //
+            return { ProcessKind::FallbackToFSM, count + e };
+        case unicode::StopCondition::EndOfInput:
+            if (!_graphemeLineSegmenter.is_utf8_byte_pending())
+            {
+                unicode::grapheme_segmentation_result const flushResult =
+                    _graphemeLineSegmenter.flush(maxCharCount - resultWidth);
+                std::cout << "flushResult: " << flushResult << '\n';
+                if (!flushResult.text.empty())
+                {
+                    auto const text = std::string_view { flushResult.text.data(), flushResult.text.size() };
+                    if (vtTraceParserLog)
+                        vtTraceParserLog()(
+                            "Printing flushed text \"{}\" with {} cells.", text, flushResult.width);
+                    _eventListener.print(text, flushResult.width);
+                }
+            }
+            return { ProcessKind::ContinueBulk, count + e };
+    }
+    crispy::unreachable();
+    std::abort();
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
 {
-    unicode::ConvertResult const r = unicode::from_utf8(_scanState.utf8, (uint8_t) ch);
+    unicode::ConvertResult const r = _graphemeLineSegmenter.process_single_byte(static_cast<uint8_t>(ch));
     if (std::holds_alternative<unicode::Incomplete>(r))
         return;
 
@@ -422,7 +525,7 @@ void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
     auto const codepoint = std::holds_alternative<unicode::Success>(r) ? std::get<unicode::Success>(r).value
                                                                        : ReplacementCharacter;
     _eventListener.print(codepoint);
-    _scanState.lastCodepointHint = codepoint;
+    _graphemeLineSegmenter.reset_last_codepoint_hint(codepoint);
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
@@ -433,9 +536,12 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
     (void) actionClass;
     auto const ch = static_cast<char>(codepoint);
 
+    if (vtTraceParserLog)
+        vtTraceParserLog()("Parser.handle: {} {} {:X}", actionClass, action, (unsigned) ch);
+
     switch (action)
     {
-        case Action::GroundStart: _scanState.lastCodepointHint = 0; break;
+        case Action::GroundStart: _graphemeLineSegmenter.reset_last_codepoint_hint(); break;
         case Action::Clear: _eventListener.clear(); break;
         case Action::CollectLeader: _eventListener.collectLeader(ch); break;
         case Action::Collect: _eventListener.collect(ch); break;
