@@ -132,6 +132,7 @@
           <li>Update of contour.desktop file (#1423)</li>
           <li>Changed configuration entry values for `font_locator` down to `native` and `mock` only (#1538).</li>
           <li>Do not export the `TERM` environment variable on Windows OS (when using ConPTY).</li>
+          <li>Fixes line corruption after resize (#883)</li>
           <li>Fixes resize of trivial line (#916)</li>
           <li>Fixes copying of wrapped line</li>
           <li>Fixes deletion of spaces on resize </li>
