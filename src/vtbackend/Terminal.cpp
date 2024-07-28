@@ -685,14 +685,20 @@ void Terminal::triggerWordWiseSelection(CellLocation startPos, TheSelectionHelpe
     setSelector(std::make_unique<WordWiseSelection>(selectionHelper, startPos, selectionUpdatedHelper()));
 
     if (_selection->extend(startPos))
-        onSelectionUpdated();
-
-    if (_settings.visualizeSelectedWord)
     {
-        auto const text = extractSelectionText();
-        auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
-        setNewSearchTerm(text32, true);
+        updateSelectionMatches();
+        onSelectionUpdated();
     }
+}
+
+void Terminal::updateSelectionMatches()
+{
+    if (!_settings.visualizeSelectedWord)
+        return;
+
+    auto const text = extractSelectionText();
+    auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
+    setNewSearchTerm(text32, true);
 }
 
 void Terminal::setStatusLineDefinition(StatusLineDefinition&& definition)
@@ -895,7 +901,10 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
             if (_inputHandler.mode() != ViMode::Insert)
                 _inputHandler.setMode(selector()->viMode());
             if (selector()->extend(relativePos))
+            {
+                updateSelectionMatches();
                 breakLoopAndRefreshRenderBuffer();
+            }
         }
     }
 }
@@ -1308,8 +1317,7 @@ namespace
         void operator()(CellLocation pos, Cell const& cell)
         {
             auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
-            bool const touchesRightPage = term->isSelected({ pos.line, rightPage });
-            if (isNewLine && (!term->isLineWrapped(pos.line) || !touchesRightPage))
+            if (isNewLine && (!term->isLineWrapped(pos.line)))
             {
                 // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
                 trimSpaceRight(currentLine);
@@ -2171,16 +2179,6 @@ optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation sear
         return searchPosition;
 
     return searchReverse(searchPosition);
-}
-
-optional<CellLocation> Terminal::search(std::u32string text,
-                                        CellLocation searchPosition,
-                                        bool initiatedByDoubleClick)
-{
-    if (!setNewSearchTerm(std::move(text), initiatedByDoubleClick))
-        return searchPosition;
-
-    return search(searchPosition);
 }
 
 optional<CellLocation> Terminal::search(CellLocation searchPosition)

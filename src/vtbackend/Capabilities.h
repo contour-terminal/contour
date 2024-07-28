@@ -107,7 +107,7 @@ class StaticDatabase: public Database
 template <>
 struct fmt::formatter<vtbackend::capabilities::Code>: fmt::formatter<std::string>
 {
-    auto format(vtbackend::capabilities::Code value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::capabilities::Code value, format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(value.hex(), ctx);
     }

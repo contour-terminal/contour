@@ -221,7 +221,8 @@ inline Renderable::TextureAtlas::TileCreateData Renderable::createTileData(atlas
 template <>
 struct fmt::formatter<vtrasterizer::RenderTileAttributes>: fmt::formatter<std::string>
 {
-    auto format(vtrasterizer::RenderTileAttributes value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::RenderTileAttributes value,
+                format_context& ctx) const -> format_context::iterator
     {
         return fmt::formatter<std::string>::format(
             fmt::format("tile +{}x +{}y", value.x.value, value.y.value), ctx);
@@ -233,7 +234,7 @@ struct fmt::formatter<vtrasterizer::atlas::TileAttributes<vtrasterizer::RenderTi
     fmt::formatter<std::string>
 {
     auto format(vtrasterizer::atlas::TileAttributes<vtrasterizer::RenderTileAttributes> const& value,
-                format_context& ctx) -> format_context::iterator
+                format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format("(location {}; bitmap {}; {})", value.location, value.bitmapSize, value.metadata),

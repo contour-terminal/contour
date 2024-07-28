@@ -56,14 +56,11 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount newColumnCoun
                 buffer.erase(reflowStart, buffer.end());
                 assert(size() == newColumnCount);
 #if 0
-                if (removedColumns.size() > 0 &&
-                        std::any_of(removedColumns.begin(), removedColumns.end(),
-                            [](Cell const& x)
-                            {
-                                if (!x.empty())
-                                    fmt::print("non-empty cell in reflow: {}\n", x.toUtf8());
-                                return !x.empty();
-                            }))
+                if (removedColumns.size() > 0 && std::ranges::any_of(removedColumns, [](Cell const& x) {
+                        if (!x.empty())
+                            fmt::print("non-empty cell in reflow: {}\n", x.toUtf8());
+                        return !x.empty();
+                    }))
                     printf("Wrapping around\n");
 #endif
                 return removedColumns;

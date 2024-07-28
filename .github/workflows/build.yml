@@ -193,7 +193,7 @@ jobs:
   # }}}
   # {{{ StaticBuild
   staticBuild:
-    #if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
+    if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
     name: "Static build"
     runs-on: ubuntu-latest
     steps:
@@ -236,7 +236,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: [39]
+        os_version: [40]
         arch:
           [
             "linux/amd64 x86_64"
@@ -350,9 +350,43 @@ jobs:
             whoami
             env
             freebsd-version
-            QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+            SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+            cmake -S . -B build -DCONTOUR_TESTING=ON
+            cmake --build build/ -j2
+            ./build/src/crispy/crispy_test
+            ./build/src/vtparser/vtparser_test
+            ./build/src/vtbackend/vtbackend_test
+            ./build/src/vtrasterizer/vtrasterizer_test
+            rm -rf _deps build
+  # }}}
+  # {{{ OpenBSD
+  openbsd:
+    if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
+    runs-on: ubuntu-latest
+    name: OpenBSD 7.5
+    # env:
+    #   MYTOKEN: "value1"
+    #   MYTOKEN2: "value2"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test in OpenBSD
+        id: test
+        uses: vmactions/openbsd-vm@v1
+        timeout-minutes: 60
+        with:
+          envs: 'MYTOKEN MYTOKEN2'
+          usesh: true
+          copyback: false
+          prepare: pkg_add -DI wget
+          run: |
+            set -ex
+            pwd
+            ls -lah
+            whoami
+            env
+            ./scripts/install-deps.sh
             mkdir build
-            cmake -DCMAKE_BUILD_TYPE=Debug -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -DCONTOUR_QT_VERSION=6 -S . -B build
+            cmake -S . -B build -D CMAKE_CXX_FLAGS=-I/home/runner/work/contour/contour/_deps/sources/yaml-cpp-0.8.0/include -D CONTOUR_TESTING=ON
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
@@ -377,6 +411,7 @@ jobs:
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: Install the Apple certificate and provisioning profile
+        if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
@@ -1022,7 +1057,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ['20.04', '22.04', '24.04']
+        os_version: ['24.04']
     runs-on: ubuntu-${{ matrix.os_version }}
     steps:
     - name: "update APT database"

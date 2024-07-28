@@ -302,14 +302,14 @@ inline auto getDocumentation()
 } // namespace contour::actions
 
 // {{{ fmtlib custom formatters
-#define DECLARE_ACTION_FMT(T)                                                                    \
-    template <>                                                                                  \
-    struct fmt::formatter<contour::actions::T>: fmt::formatter<std::string_view>                 \
-    {                                                                                            \
-        auto format(contour::actions::T const&, format_context& ctx) -> format_context::iterator \
-        {                                                                                        \
-            return formatter<string_view>::format(#T, ctx);                                      \
-        }                                                                                        \
+#define DECLARE_ACTION_FMT(T)                                                                          \
+    template <>                                                                                        \
+    struct fmt::formatter<contour::actions::T>: fmt::formatter<std::string_view>                       \
+    {                                                                                                  \
+        auto format(contour::actions::T const&, format_context& ctx) const -> format_context::iterator \
+        {                                                                                              \
+            return formatter<string_view>::format(#T, ctx);                                            \
+        }                                                                                              \
     };
 
 // {{{ declare
@@ -374,7 +374,8 @@ DECLARE_ACTION_FMT(WriteScreen)
 template <>
 struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
 {
-    auto format(contour::actions::Action const& _action, format_context& ctx) -> format_context::iterator
+    auto format(contour::actions::Action const& _action,
+                format_context& ctx) const -> format_context::iterator
     {
         std::string name = "Unknown action";
         // {{{ handle
@@ -450,7 +451,7 @@ struct fmt::formatter<contour::actions::CopyFormat>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(contour::actions::CopyFormat value, FormatContext& ctx)
+    auto format(contour::actions::CopyFormat value, FormatContext& ctx) const
     {
         switch (value)
         {

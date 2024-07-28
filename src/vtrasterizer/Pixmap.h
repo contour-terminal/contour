@@ -302,7 +302,7 @@ Pixmap& Pixmap::segment_bar(int which, More... more)
 template <>
 struct fmt::formatter<vtrasterizer::Arc>: fmt::formatter<string_view>
 {
-    auto format(vtrasterizer::Arc value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::Arc value, format_context& ctx) const -> format_context::iterator
     {
         using vtrasterizer::Arc;
         string_view name;

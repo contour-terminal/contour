@@ -153,7 +153,7 @@ RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target
 template <>
 struct fmt::formatter<vtbackend::ColorPreference>: fmt::formatter<std::string_view>
 {
-    auto format(vtbackend::ColorPreference value, format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ColorPreference value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -168,7 +168,7 @@ struct fmt::formatter<vtbackend::ColorPreference>: fmt::formatter<std::string_vi
 template <>
 struct fmt::formatter<vtbackend::ColorMode>: fmt::formatter<std::string_view>
 {
-    auto format(vtbackend::ColorMode value, fmt::format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ColorMode value, fmt::format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -184,7 +184,7 @@ struct fmt::formatter<vtbackend::ColorMode>: fmt::formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::ColorTarget>: fmt::formatter<std::string_view>
 {
-    auto format(vtbackend::ColorTarget value, fmt::format_context& ctx) -> format_context::iterator
+    auto format(vtbackend::ColorTarget value, fmt::format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)

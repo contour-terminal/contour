@@ -668,8 +668,15 @@ inline void Screen<Cell>::scrollUp(LineCount n, Margin margin)
 template <CellConcept Cell>
 inline bool Screen<Cell>::isContiguousToCurrentLine(std::string_view continuationChars) const noexcept
 {
+#if defined(_MSC_VER)
+    return false;
+#else
+    // MSVC does not like comparison of this iterator, most likely bug on msvc side since they are of the same
+    // type can be checked with std::equality_comparable_with<std::string_view::iterator,
+    // decltype(line.trivialBuffer().text.view())::iterator>
     auto const& line = currentLine();
     return line.isTrivialBuffer() && line.trivialBuffer().text.view().end() == continuationChars.begin();
+#endif
 }
 
 } // namespace vtbackend
@@ -679,7 +686,7 @@ template <>
 struct fmt::formatter<vtbackend::RequestStatusString>: formatter<std::string_view>
 {
     auto format(vtbackend::RequestStatusString value,
-                format_context& ctx) noexcept -> format_context::iterator
+                format_context& ctx) const noexcept -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -709,7 +716,7 @@ struct fmt::formatter<vtbackend::Sequence>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(vtbackend::Sequence const& seq, FormatContext& ctx)
+    auto format(vtbackend::Sequence const& seq, FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(), "{}", seq.text());
     }

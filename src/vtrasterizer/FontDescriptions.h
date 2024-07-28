@@ -81,7 +81,7 @@ constexpr bool operator<(TextStyle a, TextStyle b) noexcept
 template <>
 struct fmt::formatter<vtrasterizer::TextStyle>: fmt::formatter<std::string_view>
 {
-    auto format(vtrasterizer::TextStyle value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::TextStyle value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -99,7 +99,7 @@ struct fmt::formatter<vtrasterizer::TextStyle>: fmt::formatter<std::string_view>
 template <>
 struct fmt::formatter<vtrasterizer::FontLocatorEngine>: fmt::formatter<std::string_view>
 {
-    auto format(vtrasterizer::FontLocatorEngine value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::FontLocatorEngine value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -114,7 +114,7 @@ struct fmt::formatter<vtrasterizer::FontLocatorEngine>: fmt::formatter<std::stri
 template <>
 struct fmt::formatter<vtrasterizer::TextShapingEngine>: fmt::formatter<std::string_view>
 {
-    auto format(vtrasterizer::TextShapingEngine value, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::TextShapingEngine value, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (value)
@@ -130,7 +130,8 @@ struct fmt::formatter<vtrasterizer::TextShapingEngine>: fmt::formatter<std::stri
 template <>
 struct fmt::formatter<vtrasterizer::FontDescriptions>: fmt::formatter<std::string>
 {
-    auto format(vtrasterizer::FontDescriptions const& fd, format_context& ctx) -> format_context::iterator
+    auto format(vtrasterizer::FontDescriptions const& fd,
+                format_context& ctx) const -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("({}, {}, {}, {}, {}, {}, {}, {})",
                                                           fd.size,

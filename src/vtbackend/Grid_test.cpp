@@ -899,5 +899,43 @@ TEST_CASE("Grid resize", "[grid]")
     REQUIRE(grid.lineAt(LineOffset(1)).isTrivialBuffer());
 }
 
+TEST_CASE("Grid resize with wrap and spaces", "[grid]")
+{
+    auto width = ColumnCount(7);
+    auto grid = Grid<Cell>(PageSize { LineCount(3), width }, true, LineCount(0));
+
+    auto text = "a a a a"sv;
+    auto pool = crispy::buffer_object_pool<char>(unbox(width) * 8);
+    auto bufferObject = pool.allocateBufferObject();
+    bufferObject->writeAtEnd(text);
+    auto const bufferFragment = bufferObject->ref(0, unbox(width));
+    auto const sgr = GraphicsAttributes {};
+    auto const trivial = TrivialLineBuffer { width, sgr, sgr, HyperlinkId {}, width, bufferFragment };
+    auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
+    grid.lineAt(LineOffset(0)) = lineTrivial;
+
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(6) }, CellLocation {}, false);
+    REQUIRE(grid.lineText(LineOffset(-1)) == "a a a ");
+    REQUIRE(grid.lineText(LineOffset(0)) == "a     ");
+    REQUIRE(grid.lineText(LineOffset(1)) == "      ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(7) }, CellLocation {}, false);
+    REQUIRE(grid.lineText(LineOffset(0)) == "a a a a");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, false);
+    REQUIRE(grid.lineText(LineOffset(-1)) == "a a a");
+    REQUIRE(grid.lineText(LineOffset(0)) == " a   ");
+    REQUIRE(grid.lineText(LineOffset(1)) == "     ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(4) }, CellLocation {}, false);
+    REQUIRE(grid.lineText(LineOffset(-1)) == "a a ");
+    REQUIRE(grid.lineText(LineOffset(0)) == "a a ");
+    REQUIRE(grid.lineText(LineOffset(1)) == "    ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(3) }, CellLocation {}, false);
+    REQUIRE(grid.lineText(LineOffset(-2)) == "a a");
+    REQUIRE(grid.lineText(LineOffset(-1)) == " a ");
+    REQUIRE(grid.lineText(LineOffset(0)) == "a  ");
+    REQUIRE(grid.lineText(LineOffset(1)) == "   ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(7) }, CellLocation {}, false);
+    REQUIRE(grid.lineText(LineOffset(0)) == "a a a a");
+}
+
 // }}}
 // NOLINTEND(misc-const-correctness)

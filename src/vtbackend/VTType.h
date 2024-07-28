@@ -82,7 +82,7 @@ std::string to_params(DeviceAttributes v);
 template <>
 struct fmt::formatter<vtbackend::VTType>: fmt::formatter<std::string_view>
 {
-    auto format(const vtbackend::VTType id, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::VTType id, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (id)
@@ -104,7 +104,7 @@ struct fmt::formatter<vtbackend::VTType>: fmt::formatter<std::string_view>
 template <>
 struct fmt::formatter<vtbackend::VTExtension>: fmt::formatter<std::string_view>
 {
-    auto format(const vtbackend::VTExtension id, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::VTExtension id, format_context& ctx) const -> format_context::iterator
     {
         string_view name;
         switch (id)

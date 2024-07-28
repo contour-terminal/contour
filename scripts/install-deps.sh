@@ -110,7 +110,7 @@ fetch_and_unpack_termbenchpro()
 
 fetch_and_unpack_boxed()
 {
-    local boxed_cpp_version="1.2.2"
+    local boxed_cpp_version="1.4.2"
     fetch_and_unpack \
         boxed-cpp-$boxed_cpp_version \
         boxed-cpp-$boxed_cpp_version.tar.gz \
@@ -357,6 +357,34 @@ install_deps_FreeBSD()
     "
 }
 
+
+install_deps_OpenBSD()
+{
+
+    fetch_and_unpack_Catch2
+    fetch_and_unpack_fmtlib
+    fetch_and_unpack_gsl
+    fetch_and_unpack_yaml_cpp
+    fetch_and_unpack_range
+    fetch_and_unpack_libunicode
+    fetch_and_unpack_libutempter
+    [ x$PREPARE_ONLY_EMBEDS = xON ] && return
+
+    su root -c "pkg_add -DI \
+        cmake \
+        harfbuzz \
+        libssh2 \
+        ninja \
+        pkgconf \
+        qt6-qt5compa \
+        qt6 \
+        qt6-qtdeclarative \
+        qt6-qtmultimedia \
+        qt6-qttools \
+        xcb
+    "
+}
+
 install_deps_arch()
 {
     fetch_and_unpack_libunicode
@@ -572,6 +600,9 @@ main()
             ;;
         FreeBSD|freebsd)
             install_deps_FreeBSD
+            ;;
+        OpenBSD|openbsd)
+            install_deps_OpenBSD
             ;;
         *)
             fetch_and_unpack_Catch2

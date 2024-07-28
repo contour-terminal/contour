@@ -3863,18 +3863,22 @@ optional<CellLocation> Screen<Cell>::search(std::u32string_view searchText, Cell
 {
     // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
 
+    auto const isCaseSensitive =
+        std::any_of(searchText.begin(), searchText.end(), [](auto ch) { return std::isupper(ch); });
+
     if (searchText.empty())
         return nullopt;
 
     // First try match at start location.
-    if (_grid.lineAt(startPosition.line).matchTextAt(searchText, startPosition.column))
+    if (_grid.lineAt(startPosition.line)
+            .matchTextAtWithSensetivityMode(searchText, startPosition.column, isCaseSensitive))
         return startPosition;
 
     // Search reverse until found or exhausted.
-    auto lines = _grid.logicalLinesFrom(startPosition.line);
+    auto const lines = _grid.logicalLinesFrom(startPosition.line);
     for (auto const& line: lines)
     {
-        auto const result = line.search(searchText, startPosition.column);
+        auto const result = line.search(searchText, startPosition.column, isCaseSensitive);
         if (result.has_value())
             return result; // new match found
         startPosition.column = ColumnOffset(0);
@@ -3886,19 +3890,22 @@ template <CellConcept Cell>
 optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchText, CellLocation startPosition)
 {
     // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
+    auto const isCaseSensitive =
+        std::any_of(searchText.begin(), searchText.end(), [](auto ch) { return std::isupper(ch); });
 
     if (searchText.empty())
         return nullopt;
 
     // First try match at start location.
-    if (_grid.lineAt(startPosition.line).matchTextAt(searchText, startPosition.column))
+    if (_grid.lineAt(startPosition.line)
+            .matchTextAtWithSensetivityMode(searchText, startPosition.column, isCaseSensitive))
         return startPosition;
 
     // Search reverse until found or exhausted.
-    auto lines = _grid.logicalLinesReverseFrom(startPosition.line);
+    auto const lines = _grid.logicalLinesReverseFrom(startPosition.line);
     for (auto const& line: lines)
     {
-        auto const result = line.searchReverse(searchText, startPosition.column);
+        auto const result = line.searchReverse(searchText, startPosition.column, isCaseSensitive);
         if (result.has_value())
             return result; // new match found
         startPosition.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;

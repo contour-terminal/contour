@@ -424,4 +424,54 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
     CHECK(mock.terminal.extractSelectionText().empty());
 }
 
+TEST_CASE("Terminal.TextSelection_wrapped_line", "[terminal]")
+{
+    // Create empty TE
+    auto mock = MockTerm { ColumnCount(5), LineCount(2) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal.tick(ClockBase);
+    mock.terminal.ensureFreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock).empty());
+
+    // write one line with 10 a
+    mock.writeToScreen(std::string(10, 'a'));
+
+    mock.terminal.tick(ClockBase + chrono::seconds(1));
+    mock.terminal.ensureFreshRenderBuffer();
+    CHECK("aaaaa\naaaaa" == trimmedTextScreenshot(mock));
+
+    // Perform selection
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+
+    mock.terminal.tick(1s);
+    auto const appHandledMouse =
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+
+    REQUIRE(appHandledMouse == Handled { false });
+
+    CHECK(mock.terminal.selector()->state() == Selection::State::Waiting);
+
+    CHECK(mock.terminal.extractSelectionText().empty());
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    CHECK(mock.terminal.extractSelectionText() == "aaaaaa");
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    CHECK(mock.terminal.extractSelectionText() == "aaaaaa");
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    CHECK(mock.terminal.extractSelectionText().empty());
+}
+
 // NOLINTEND(misc-const-correctness)

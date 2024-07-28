@@ -39,7 +39,7 @@
       for everyday use. It is aiming for power users with a modern feature mindset.
     </p>
     <ul>
-      <li>Available on all 4 major platforms, Linux, macOS, FreeBSD, Windows.</li>
+      <li>Available on all major platforms, Linux, macOS, FreeBSD, OpenBSD, Windows.</li>
       <li>GPU-accelerated rendering.</li>
       <li>Font ligatures support (such as in Fira Code).</li>
       <li>Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)</li>
@@ -124,12 +124,19 @@
           <li>Add config entry to configure behaviour on exit from search mode</li>
           <li>Add handling of different input commands (#629)</li>
           <li>Add key bindings disabled indicator for status line (#783)</li>
+          <li>Add support for highlighting matches of the currently selected text area (beyond double click)</li>
           <li>When switching to normal mode screen will stay in same position (#808)</li>
           <li>Add customizable per-input-mode default text/background coloring for indicator statusline (#1528)</li>
           <li>Add option PasteSelection to paste text as a shell input (#1549)</li>
+          <li>Add case-insensitive smart search (#1410)</li>
+          <li>Add OpenBSD support</li>
           <li>Update of contour.desktop file (#1423)</li>
           <li>Changed configuration entry values for `font_locator` down to `native` and `mock` only (#1538).</li>
           <li>Do not export the `TERM` environment variable on Windows OS (when using ConPTY).</li>
+          <li>Fixes line corruption after resize (#883)</li>
+          <li>Fixes resize of trivial line (#916)</li>
+          <li>Fixes copying of wrapped line</li>
+          <li>Fixes deletion of spaces on resize </li>
           <li>Fixes forwarding of input while in normal mode (#1468)</li>
           <li>Fixes OSC-8 link id collision (#1499)</li>
           <li>Fixed overlap of glyphs for long codepoints (#1349)</li>

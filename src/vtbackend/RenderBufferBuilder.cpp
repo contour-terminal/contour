@@ -401,19 +401,13 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
     if (search.pattern.empty())
         return;
 
+    auto const searchText = u32string_view(search.pattern.data() + _searchPatternOffset,
+                                           search.pattern.size() - _searchPatternOffset);
+    auto const isCaseSensitive =
+        std::any_of(searchText.begin(), searchText.end(), [](auto ch) { return std::isupper(ch); });
+
     auto const isFullMatch = [&]() -> bool {
-        if constexpr (std::is_same_v<Cell, T>)
-        {
-            return !CellUtil::beginsWith(u32string_view(search.pattern.data() + _searchPatternOffset,
-                                                        search.pattern.size() - _searchPatternOffset),
-                                         cellText);
-        }
-        else
-        {
-            return crispy::beginsWith(u32string_view(search.pattern.data() + _searchPatternOffset,
-                                                     search.pattern.size() - _searchPatternOffset),
-                                      cellText);
-        }
+        return !CellUtil::beginsWith(searchText, cellText, isCaseSensitive);
     }();
 
     if (isFullMatch)

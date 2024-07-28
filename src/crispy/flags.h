@@ -144,7 +144,7 @@ class flags
 template <typename Enum>
 struct fmt::formatter<crispy::flags<Enum>>: public fmt::formatter<std::string>
 {
-    auto format(crispy::flags<Enum> const& flags, format_context& ctx) -> format_context::iterator
+    auto format(crispy::flags<Enum> const& flags, format_context& ctx) const -> format_context::iterator
     {
         std::string result;
         for (auto i = 0u; i < sizeof(Enum) * 8; ++i)
