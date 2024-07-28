@@ -127,6 +127,7 @@
           <li>Add support for highlighting matches of the currently selected text area (beyond double click)</li>
           <li>When switching to normal mode screen will stay in same position (#808)</li>
           <li>Add customizable per-input-mode default text/background coloring for indicator statusline (#1528)</li>
+          <li>Add option PasteSelection to paste text as a shell input (#1549)</li>
           <li>Add case-insensitive smart search (#1410)</li>
           <li>Add OpenBSD support</li>
           <li>Update of contour.desktop file (#1423)</li>

@@ -1713,6 +1713,14 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             }
         }
 
+        if (holds_alternative<actions::PasteSelection>(action))
+        {
+            if (auto eval = node["evaluate_in_shell"]; eval && eval.IsScalar())
+            {
+                return actions::PasteSelection { eval.as<bool>() };
+            }
+        }
+
         if (holds_alternative<actions::WriteScreen>(action))
         {
             if (auto chars = node["chars"]; chars.IsScalar())
