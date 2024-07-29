@@ -152,6 +152,7 @@
           <li>Fixes missing keymapping for numpad (#1325)</li>
           <li>Improves handling of constant bell sound spawning</li>
           <li>Fixes yW (yank WORD) not working properly in normal mode (#1448)</li>
+          <li>Fixes key mapping Shift+Tab (#1578)</li>
         </ul>
       </description>
     </release>
