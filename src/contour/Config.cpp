@@ -311,7 +311,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("on_mouse_select", c.onMouseSelection);
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
         loadFromEntry("images", c.maxImageSize);
-        loadFromEntry("profiles", c.profiles);
+        loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
         loadFromEntry("input_mapping", c.inputMappings);
     }
