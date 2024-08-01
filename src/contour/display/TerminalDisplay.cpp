@@ -264,9 +264,6 @@ TerminalDisplay::~TerminalDisplay()
 
 void TerminalDisplay::setSession(TerminalSession* newSession)
 {
-    if (_session)
-        return;
-
     // This will print the same pointer address for `this` but a new one for newSession (model data).
     displayLog()("Assigning session to terminal widget({} <- {}): shell={}, terminalSize={}, fontSize={}, "
                  "contentScale={}",

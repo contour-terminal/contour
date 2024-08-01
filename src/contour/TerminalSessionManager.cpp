@@ -51,6 +51,7 @@ TerminalSession* TerminalSessionManager::createSession()
     // sessions. This will work around it, by explicitly claiming ownership of the object.
     QQmlEngine::setObjectOwnership(session, QQmlEngine::CppOwnership);
 
+    _activeSession = session;
     return session;
 }
 
