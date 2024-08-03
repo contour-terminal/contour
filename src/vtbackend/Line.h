@@ -465,7 +465,7 @@ inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::inflatedBuffer() c
 template <>
 struct fmt::formatter<vtbackend::LineFlags>: formatter<std::string>
 {
-    auto format(const vtbackend::LineFlags flags, format_context& ctx) -> format_context::iterator
+    auto format(const vtbackend::LineFlags flags, format_context& ctx) const -> format_context::iterator
     {
         static const std::array<std::pair<vtbackend::LineFlags, std::string_view>, 3> nameMap = {
             std::pair { vtbackend::LineFlag::Wrappable, std::string_view("Wrappable") },
