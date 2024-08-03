@@ -1051,66 +1051,6 @@ jobs:
         with:
           name: contour-ubuntu2204-tests
   # }}}
-  # {{{ Build notcurses
-  build_notcurses:
-    name: "Build notcurses"
-    strategy:
-      fail-fast: false
-      matrix:
-        os_version: ['24.04']
-    runs-on: ubuntu-${{ matrix.os_version }}
-    steps:
-    - name: "update APT database"
-      run: sudo apt -q update
-    - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt install -y \
-                    build-essential \
-                    cmake \
-                    doctest-dev \
-                    ffmpeg \
-                    libavcodec-dev \
-                    libavdevice-dev \
-                    libavformat-dev \
-                    libavutil-dev \
-                    libdeflate-dev \
-                    libncurses-dev \
-                    libqrcodegen-dev \
-                    libswscale-dev \
-                    libunistring-dev \
-                    xvfb
-    - name: "git clone"
-      run: git clone https://github.com/dankamongmen/notcurses.git
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1.2
-      with:
-        key: ccache-ubuntu_2204-notcurses
-        max-size: 256M
-    - name: "configure cmake"
-      run: |
-        cmake -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX=~/opt/notcurses \
-              -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-              -DUSE_CPP=OFF \
-              -DUSE_DEFLATE=OFF \
-              -DUSE_MULTIMEDIA=ffmpeg \
-              -DUSE_PANDOC=OFF \
-              -DUSE_STATIC=ON \
-              -S notcurses \
-              -B notcurses/build
-    - name: "Build notcurses"
-      run: cmake --build notcurses/build/ -- -j3
-    - name: "Install notcurses"
-      run: cmake --build notcurses/build --config Release --target install/strip
-    - name: "Uploading artifact"
-      uses: actions/upload-artifact@v4
-      with:
-        name: "notcurses-install-${{ matrix.os_version }}"
-        path: ~/opt/notcurses
-        if-no-files-found: error
-        retention-days: 1
-  # }}}
   # {{{ GUI: test: contour quick shell exit
   test_quick_exit:
     name: "GUI: Quick Shell Exit"
@@ -1180,62 +1120,18 @@ jobs:
   test_notcurses:
     name: "GUI: notcurses-demo ${{ matrix.name }}"
     runs-on: ubuntu-24.04
-    needs: [package_for_Ubuntu, build_notcurses]
+    needs: [package_for_Ubuntu]
     strategy:
       fail-fast: false
       matrix:
         include: # {{{ (name, id) tuples
           # ixetunchmdbkywjgarvlsfqzo
-          - name: 'aanimate'
-            id: 'a'
-          - name: 'box'
-            id: 'b'
-          - name: 'chunli'
-            id: 'c'
-          - name: 'dragon'
-            id: 'd'
-          - name: 'eagle'
-            id: 'e'
-          - name: 'fission'
-            id: 'f'
-          - name: 'grid'
-            id: 'g'
-          - name: 'highcon'
-            id: 'h'
-          - name: 'intro'
-            id: 'i'
-          - name: 'jungle'
-            id: 'j'
-          - name: 'keller'
-            id: 'k'
-          - name: 'luigi'
-            id: 'l'
-          - name: 'mojibake'
-            id: 'm'
-          - name: 'normal'
-            id: 'n'
-          - name: 'outro'
-            id: 'o'
-          - name: 'qrcode'
-            id: 'q'
-          - name: 'reel'
-            id: 'r'
-          - name: 'sliders'
-            id: 's'
-          - name: 'trans'
-            id: 't'
-          - name: 'uniblock'
-            id: 'u'
-          - name: 'view'
-            id: 'v'
-          - name: 'whiteout'
-            id: 'w'
-          - name: 'xray'
-            id: 'x'
-          - name: 'yield'
-            id: 'y'
-          - name: 'zoo'
-            id: 'z'
+          - name: 'aanimate-box-chunli-dragon-eagle-fission-grid-highcon'
+            id: 'abcdefgh'
+          - name: 'intro-junle-keller-luigi-mojibake-normal-outro-qrcode'
+            id: 'ijklmnoq'
+          - name: 'reel-sliders-trans-uniblock-view-whiteout-xray-yield-zoo'
+            id: 'rstuvwxyz'
           # }}}
     env:
       LD_LIBRARY_PATH: /home/runner/opt/notcurses/lib
@@ -1259,20 +1155,28 @@ jobs:
     - uses: actions/download-artifact@v4
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
-    - uses: actions/download-artifact@v4
-      with:
-        name: "notcurses-install-24.04"
-        path: ~/opt/notcurses
-    - name: "fix executable bits"
-      run: |
-        chmod 0755 ~/opt/notcurses/bin/*
-        chmod 0755 ~/opt/*/lib/*
-        ls -hlR ~/opt/
     - name: "install dependencies"
       run: ./scripts/ci/notcurses-install-deps.sh
+    - name: "git clone"
+      run: git clone https://github.com/dankamongmen/notcurses.git
+    - name: "configure cmake"
+      run: |
+        cmake -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=~/opt/notcurses \
+              -DUSE_CPP=OFF \
+              -DUSE_DEFLATE=OFF \
+              -DUSE_MULTIMEDIA=ffmpeg \
+              -DUSE_PANDOC=OFF \
+              -DUSE_STATIC=ON \
+              -S notcurses \
+              -B notcurses/build
+    - name: "Build notcurses"
+      run: cmake --build notcurses/build/ -- -j3
+    - name: "Install notcurses"
+      run: cmake --install notcurses/build
     - name: "Run notcurses-demo -h"
       timeout-minutes: 1
-      run: ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
+      run: LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib" ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
     - name: "install contour"
       run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
     - name: "contour executable test"
@@ -1293,7 +1197,6 @@ jobs:
       timeout-minutes: 5
       id: Xvfb-contour-notcurses
       run: |
-        # export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib"
         ./scripts/ci/Xvfb-contour-run.sh \
               "notcurses-demo-dumps/${{ matrix.name }}" \
               ~/opt/notcurses/bin/notcurses-demo \
