@@ -47,7 +47,7 @@ ApplicationWindow
         }
         onCurrentIndexChanged: {
             print("currentIndex changed to", currentIndex)
-            terminalSessions.addSession()
+            terminalSessions.setSession(currentIndex)
         }
     }
 
