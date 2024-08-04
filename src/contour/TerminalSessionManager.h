@@ -28,13 +28,21 @@ class TerminalSessionManager: public QAbstractListModel
 
     Q_INVOKABLE contour::TerminalSession* createSession();
 
-    Q_INVOKABLE void addSession()
+    Q_INVOKABLE void setSession(size_t index)
     {
         _activeSession->detachDisplay(*display);
-        auto* session = createSession();
-        _activeSession = session;
-        display->setSession(session);
+        if (index + 1 < _sessions.size())
+        {
+            _activeSession = _sessions[index];
+        }
+        else
+        {
+            auto* session = createSession();
+            _activeSession = session;
+        }
+        display->setSession(_activeSession);
     }
+
     void removeSession(TerminalSession&);
 
     Q_INVOKABLE [[nodiscard]] QVariant data(const QModelIndex& index,
@@ -45,7 +53,6 @@ class TerminalSessionManager: public QAbstractListModel
 
     void updateColorPreference(vtbackend::ColorPreference const& preference);
     display::TerminalDisplay* display = nullptr;
-
     TerminalSession* getSession() { return _sessions[0]; }
 
   private:
