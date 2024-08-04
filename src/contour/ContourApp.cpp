@@ -385,6 +385,7 @@ crispy::cli::command ContourApp::parameterDefinition() const
                 CLI::option_list {},
                 CLI::command_list {
                     CLI::command { "vt", "Prints general information about supported VT sequences." },
+                    CLI::command { "config", "Prints missing entries from user config file." },
                 } },
             CLI::command { "documentation",
                            "Generate documentation for web page",

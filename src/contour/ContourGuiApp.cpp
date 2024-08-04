@@ -55,6 +55,7 @@ ContourGuiApp::ContourGuiApp(): _sessionManager(*this)
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
+    link("contour.info.config", bind(&ContourGuiApp::checkConfig, this));
 }
 
 int ContourGuiApp::run(int argc, char const* argv[])
@@ -209,6 +210,20 @@ QUrl ContourGuiApp::resolveResource(std::string_view path)
 #endif
 
     return QUrl("qrc:/contour/" + QString::fromLatin1(path.data(), static_cast<int>(path.size())));
+}
+
+int ContourGuiApp::checkConfig()
+{
+    auto const& flags = parameters();
+    auto const configPath = QString::fromStdString(flags.get<string>("contour.terminal.config"));
+
+    _config = configPath.isEmpty() ? contour::config::loadConfig()
+                                   : contour::config::loadConfigFromFile(configPath.toStdString());
+
+    contour::config::compareEntries(
+        _config, logstore::category("", "Console Logger", logstore::category::state::Enabled));
+
+    return EXIT_SUCCESS;
 }
 
 bool ContourGuiApp::loadConfig(string const& target)

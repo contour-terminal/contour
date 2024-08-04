@@ -130,7 +130,7 @@ namespace detail
             return *this;
         }
 
-        constexpr times_2d_iterator<I, T1, T2>& operator++(int) noexcept { return *++this; }
+        constexpr times_2d_iterator<I, T1, T2>& operator++(int) noexcept { return ++*this; }
 
         constexpr bool operator==(times_2d_iterator<I, T1, T2> const& other) const noexcept
         {
