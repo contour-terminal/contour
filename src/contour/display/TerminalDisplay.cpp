@@ -264,6 +264,10 @@ TerminalDisplay::~TerminalDisplay()
 
 void TerminalDisplay::setSession(TerminalSession* newSession)
 {
+    fmt::print("TerminalDisplay::setSession: {} -> {}\n", (void*) _session, (void*) newSession);
+    if (_session == newSession)
+        return;
+
     // This will print the same pointer address for `this` but a new one for newSession (model data).
     displayLog()("Assigning session to terminal widget({} <- {}): shell={}, terminalSize={}, fontSize={}, "
                  "contentScale={}",
@@ -304,6 +308,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     updateMinimumSize();
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
+    createRenderer();
 
     emit sessionChanged(newSession);
 }
@@ -527,6 +532,13 @@ void TerminalDisplay::onBeforeSynchronize()
     }
     window()->setScreen(screenToUse);
 
+    if (_sessionChanged)
+    {
+        fmt::print("Creating renderer due to session change.\n");
+        _sessionChanged = false;
+        createRenderer();
+    }
+
     if (!_renderTarget)
     {
         // This is the first call, so create the renderer (on demand) now.
@@ -554,7 +566,7 @@ void TerminalDisplay::onBeforeSynchronize()
 
 void TerminalDisplay::createRenderer()
 {
-    Require(!_renderTarget);
+    // Require(!_renderTarget);
     Require(_session);
     Require(_renderer);
     Require(window());
