@@ -531,6 +531,11 @@ jobs:
         with:
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg
           vcpkgGitCommitId: 80403036a665cb8fcc1a1b3e17593d20b03b2489
+
+      - name: "Install cmake"
+        uses: lukka/get-cmake@v3.29.0
+      - name: "Check cmake version"
+        run: cmake --version
       - name: "Generate build files"
         run: cmake --preset windows-cl-release
         env:
