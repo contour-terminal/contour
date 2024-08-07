@@ -242,5 +242,6 @@ ContourTerminal
         vt.requestPermissionForFontChange.connect(requestFontChangeDialog.open);
         vt.requestPermissionForBufferCapture.connect(requestBufferCaptureDialog.open);
         vt.requestPermissionForShowHostWritableStatusLine.connect(requestShowHostWritableStatusLine.open);
+        forceActiveFocus();
     }
 }

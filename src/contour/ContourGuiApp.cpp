@@ -553,6 +553,7 @@ void ContourGuiApp::ensureTermInfoFile()
 void ContourGuiApp::newWindow()
 {
     _qmlEngine->load(resolveResource("ui/main.qml"));
+    _sessionManager.display = _sessionManager.getSession()->display();
 }
 
 void ContourGuiApp::showNotification(std::string_view title, std::string_view content)

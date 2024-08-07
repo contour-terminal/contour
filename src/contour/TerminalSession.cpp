@@ -269,9 +269,13 @@ void TerminalSession::scheduleRedraw()
 void TerminalSession::start()
 {
     sessionLog()("Starting terminal session.");
-    _terminal.device().start();
-    _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
-    _exitWatcherThread->start(QThread::LowPriority);
+    // ensure that we start only once
+    if (!_screenUpdateThread)
+    {
+        _terminal.device().start();
+        _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
+        _exitWatcherThread->start(QThread::LowPriority);
+    }
 }
 
 void TerminalSession::mainLoop()
