@@ -1134,6 +1134,7 @@ std::optional<std::string> readConfigFile(std::string const& filename);
 void loadConfigFromFile(Config& config, std::filesystem::path const& fileName);
 Config loadConfigFromFile(std::filesystem::path const& fileName);
 Config loadConfig();
+void compareEntries(Config& config, auto const& output);
 
 std::string defaultConfigString();
 std::error_code createDefaultConfig(std::filesystem::path const& path);

@@ -80,6 +80,7 @@ class ContourGuiApp: public QObject, public ContourApp
     bool loadConfig(std::string const& target);
     int terminalGuiAction();
     int fontConfigAction();
+    int checkConfig();
 
     config::Config _config;
     TerminalSessionManager _sessionManager;

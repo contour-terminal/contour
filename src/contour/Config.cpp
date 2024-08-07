@@ -46,6 +46,7 @@ using vtbackend::LineCount;
 using vtbackend::PageSize;
 
 using contour::actions::Action;
+using std::string;
 
 using UsedKeys = set<string>;
 
@@ -189,9 +190,6 @@ std::string defaultConfigString()
     const Config config {};
     auto configString = createString(config);
 
-    auto logger = configLog;
-    logger()(configString);
-
     return configString;
 }
 
@@ -229,6 +227,38 @@ Config loadConfigFromFile(fs::path const& fileName)
     return config;
 }
 
+void compareEntries(Config& config, auto const& output)
+{
+    // compare entries in config and default config and log differences
+    auto defaultConfig = YAML::Load(defaultConfigString());
+    auto userConfig = YAML::LoadFile(config.configFile.string());
+
+    std::vector<std::string> existingEntries;
+    std::vector<std::string> userEntries;
+    auto collectEntries = [&](auto self, YAML::Node const& node, auto& where, std::string const& root) {
+        if (node.IsScalar())
+        {
+            // delete . in the end of the string
+            where.push_back(root.substr(0, root.size() - 1));
+            return;
+        }
+        if (node.IsMap())
+            for (auto const& entry: node)
+                self(self, entry.second, where, root + entry.first.as<std::string>() + ".");
+    };
+
+    collectEntries(collectEntries, defaultConfig, existingEntries, "");
+    collectEntries(collectEntries, userConfig, userEntries, "");
+
+    for (auto const& entry: existingEntries)
+    {
+        if (std::find(userEntries.begin(), userEntries.end(), entry) == userEntries.end())
+        {
+            output()("[diff] Entry {} is missing in user config file\n", entry);
+        }
+    }
+}
+
 /**
  * @return success or failure of loading the config file.
  */
@@ -239,8 +269,9 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     config.configFile = fileName;
     createFileIfNotExists(config.configFile);
 
-    auto yamlVisitor = YAMLConfigReader(config.configFile.string(), configLog);
+    auto yamlVisitor = YAMLConfigReader(config.configFile.string(), logger);
     yamlVisitor.load(config);
+    compareEntries(config, logger);
 }
 
 optional<std::string> readConfigFile(std::string const& filename)
@@ -2099,140 +2130,129 @@ std::string createString(Config const& c)
         for (auto&& [name, entry]: c.colorschemes.value())
         {
             doc.append(fmt::format("    {}: \n", name));
-
             {
                 const auto _ = typename Writer::Offset {};
-                doc.append(
-                    fmt::format(fmt::runtime(Writer::addOffset("{comment} Default colors\n"
-                                                               "default:\n",
-                                                               Writer::Offset::levels * Writer::OneOffset)),
-                                fmt::arg("comment", "#")));
-                {
-                    const auto _ = typename Writer::Offset {};
-                    processWithDoc(documentation::DefaultColors,
-                                   entry.defaultBackground,
-                                   entry.defaultForeground,
-                                   entry.defaultForegroundBright,
-                                   entry.defaultForegroundDimmed);
+                processWithDoc(documentation::DefaultColors,
+                               entry.defaultBackground,
+                               entry.defaultForeground,
+                               entry.defaultForegroundBright,
+                               entry.defaultForegroundDimmed);
 
-                    // processWithDoc("# Background image support.\n"
-                    //                "background_image:\n"
-                    //                "    # Full path to the image to use as background.\n"
-                    //                "    #\n"
-                    //                "    # Default: empty string (disabled)\n"
-                    //                "    # path: '/Users/trapni/Pictures/bg.png'\n"
-                    //                "\n"
-                    //                "    # Image opacity to be applied to make the image not look to
-                    //                intense\n" "    # and not get too distracted by the background
-                    //                image.\n" "    opacity: {}\n"
-                    //                "\n"
-                    //                "    # Optionally blurs background image to make it less
-                    //                distracting\n" "    # and keep the focus on the actual terminal
-                    //                contents.\n" "    #\n" "    blur: {}\n",
-                    //                entry.backgroundImage->opacity,
-                    //                entry.backgroundImage->blur);
+                // processWithDoc("# Background image support.\n"
+                //                "background_image:\n"
+                //                "    # Full path to the image to use as background.\n"
+                //                "    #\n"
+                //                "    # Default: empty string (disabled)\n"
+                //                "    # path: '/Users/trapni/Pictures/bg.png'\n"
+                //                "\n"
+                //                "    # Image opacity to be applied to make the image not look to
+                //                intense\n" "    # and not get too distracted by the background
+                //                image.\n" "    opacity: {}\n"
+                //                "\n"
+                //                "    # Optionally blurs background image to make it less
+                //                distracting\n" "    # and keep the focus on the actual terminal
+                //                contents.\n" "    #\n" "    blur: {}\n",
+                //                entry.backgroundImage->opacity,
+                //                entry.backgroundImage->blur);
 
-                    // processWithDoc("# Mandates the color of the cursor and potentially overridden
-                    // text.\n"
-                    //                "#\n"
-                    //                "# The color can be specified in RGB as usual, plus\n"
-                    //                "# - CellForeground: Selects the cell's foreground color.\n"
-                    //                "# - CellBackground: Selects the cell's background color.\n"
-                    //                "cursor:\n"
-                    //                "    # Specifies the color to be used for the actual cursor
-                    //                shape.\n" "    #\n" "    default: {}\n" "    # Specifies the
-                    //                color to be used for the characters that would\n" "    # be
-                    //                covered otherwise.\n" "    #\n" "    text: {}\n",
-                    //                entry.cursor.color, entry.cursor.textOverrideColor);
+                // processWithDoc("# Mandates the color of the cursor and potentially overridden
+                // text.\n"
+                //                "#\n"
+                //                "# The color can be specified in RGB as usual, plus\n"
+                //                "# - CellForeground: Selects the cell's foreground color.\n"
+                //                "# - CellBackground: Selects the cell's background color.\n"
+                //                "cursor:\n"
+                //                "    # Specifies the color to be used for the actual cursor
+                //                shape.\n" "    #\n" "    default: {}\n" "    # Specifies the
+                //                color to be used for the characters that would\n" "    # be
+                //                covered otherwise.\n" "    #\n" "    text: {}\n",
+                //                entry.cursor.color, entry.cursor.textOverrideColor);
 
-                    processWithDoc(documentation::HyperlinkDecoration,
-                                   entry.hyperlinkDecoration.normal,
-                                   entry.hyperlinkDecoration.hover);
+                processWithDoc(documentation::HyperlinkDecoration,
+                               entry.hyperlinkDecoration.normal,
+                               entry.hyperlinkDecoration.hover);
 
-                    processWithDoc(documentation::YankHighlight,
-                                   entry.yankHighlight.foreground,
-                                   entry.yankHighlight.foregroundAlpha,
-                                   entry.yankHighlight.background,
-                                   entry.yankHighlight.backgroundAlpha);
+                processWithDoc(documentation::YankHighlight,
+                               entry.yankHighlight.foreground,
+                               entry.yankHighlight.foregroundAlpha,
+                               entry.yankHighlight.background,
+                               entry.yankHighlight.backgroundAlpha);
 
-                    processWithDoc(documentation::NormalModeCursorline,
-                                   entry.normalModeCursorline.foreground,
-                                   entry.normalModeCursorline.foregroundAlpha,
-                                   entry.normalModeCursorline.background,
-                                   entry.normalModeCursorline.backgroundAlpha);
+                processWithDoc(documentation::NormalModeCursorline,
+                               entry.normalModeCursorline.foreground,
+                               entry.normalModeCursorline.foregroundAlpha,
+                               entry.normalModeCursorline.background,
+                               entry.normalModeCursorline.backgroundAlpha);
 
-                    processWithDoc(documentation::Selection,
-                                   entry.selection.foreground,
-                                   entry.selection.foregroundAlpha,
-                                   entry.selection.background,
-                                   entry.selection.backgroundAlpha);
+                processWithDoc(documentation::Selection,
+                               entry.selection.foreground,
+                               entry.selection.foregroundAlpha,
+                               entry.selection.background,
+                               entry.selection.backgroundAlpha);
 
-                    processWithDoc(documentation::SearchHighlight,
-                                   entry.searchHighlight.foreground,
-                                   entry.searchHighlight.foregroundAlpha,
-                                   entry.searchHighlight.background,
-                                   entry.searchHighlight.backgroundAlpha);
+                processWithDoc(documentation::SearchHighlight,
+                               entry.searchHighlight.foreground,
+                               entry.searchHighlight.foregroundAlpha,
+                               entry.searchHighlight.background,
+                               entry.searchHighlight.backgroundAlpha);
 
-                    processWithDoc(documentation::SearchHighlihtFocused,
-                                   entry.searchHighlightFocused.foreground,
-                                   entry.searchHighlightFocused.foregroundAlpha,
-                                   entry.searchHighlightFocused.background,
-                                   entry.searchHighlightFocused.backgroundAlpha);
+                processWithDoc(documentation::SearchHighlihtFocused,
+                               entry.searchHighlightFocused.foreground,
+                               entry.searchHighlightFocused.foregroundAlpha,
+                               entry.searchHighlightFocused.background,
+                               entry.searchHighlightFocused.backgroundAlpha);
 
-                    processWithDoc(documentation::WordHighlightCurrent,
-                                   entry.wordHighlightCurrent.foreground,
-                                   entry.wordHighlightCurrent.foregroundAlpha,
-                                   entry.wordHighlightCurrent.background,
-                                   entry.wordHighlightCurrent.backgroundAlpha);
+                processWithDoc(documentation::WordHighlightCurrent,
+                               entry.wordHighlightCurrent.foreground,
+                               entry.wordHighlightCurrent.foregroundAlpha,
+                               entry.wordHighlightCurrent.background,
+                               entry.wordHighlightCurrent.backgroundAlpha);
 
-                    processWithDoc(documentation::WordHighlight,
-                                   entry.wordHighlight.foreground,
-                                   entry.wordHighlight.foregroundAlpha,
-                                   entry.wordHighlight.background,
-                                   entry.wordHighlight.backgroundAlpha);
+                processWithDoc(documentation::WordHighlight,
+                               entry.wordHighlight.foreground,
+                               entry.wordHighlight.foregroundAlpha,
+                               entry.wordHighlight.background,
+                               entry.wordHighlight.backgroundAlpha);
 
-                    processWithDoc(documentation::IndicatorStatusLine,
-                                   entry.indicatorStatusLineInsertMode.foreground,
-                                   entry.indicatorStatusLineInsertMode.background,
-                                   entry.indicatorStatusLineInactive.foreground,
-                                   entry.indicatorStatusLineInactive.background);
+                processWithDoc(documentation::IndicatorStatusLine,
+                               entry.indicatorStatusLineInsertMode.foreground,
+                               entry.indicatorStatusLineInsertMode.background,
+                               entry.indicatorStatusLineInactive.foreground,
+                               entry.indicatorStatusLineInactive.background);
 
-                    processWithDoc(documentation::InputMethodEditor,
-                                   entry.inputMethodEditor.foreground,
-                                   entry.inputMethodEditor.background);
+                processWithDoc(documentation::InputMethodEditor,
+                               entry.inputMethodEditor.foreground,
+                               entry.inputMethodEditor.background);
 
-                    processWithDoc(documentation::NormalColors,
-                                   entry.normalColor(0),
-                                   entry.normalColor(1),
-                                   entry.normalColor(2),
-                                   entry.normalColor(3),
-                                   entry.normalColor(4),
-                                   entry.normalColor(5),
-                                   entry.normalColor(6),
-                                   entry.normalColor(7));
+                processWithDoc(documentation::NormalColors,
+                               entry.normalColor(0),
+                               entry.normalColor(1),
+                               entry.normalColor(2),
+                               entry.normalColor(3),
+                               entry.normalColor(4),
+                               entry.normalColor(5),
+                               entry.normalColor(6),
+                               entry.normalColor(7));
 
-                    processWithDoc(documentation::BrightColors,
-                                   entry.brightColor(0),
-                                   entry.brightColor(1),
-                                   entry.brightColor(2),
-                                   entry.brightColor(3),
-                                   entry.brightColor(4),
-                                   entry.brightColor(5),
-                                   entry.brightColor(6),
-                                   entry.brightColor(7));
+                processWithDoc(documentation::BrightColors,
+                               entry.brightColor(0),
+                               entry.brightColor(1),
+                               entry.brightColor(2),
+                               entry.brightColor(3),
+                               entry.brightColor(4),
+                               entry.brightColor(5),
+                               entry.brightColor(6),
+                               entry.brightColor(7));
 
-                    processWithDoc(documentation::DimColors,
-                                   entry.dimColor(0),
-                                   entry.dimColor(1),
-                                   entry.dimColor(2),
-                                   entry.dimColor(3),
-                                   entry.dimColor(4),
-                                   entry.dimColor(5),
-                                   entry.dimColor(6),
-                                   entry.dimColor(7));
-                }
-
-                doc.append(Writer::addOffset("", Writer::Offset::levels * Writer::OneOffset));
+                processWithDoc(documentation::DimColors,
+                               entry.dimColor(0),
+                               entry.dimColor(1),
+                               entry.dimColor(2),
+                               entry.dimColor(3),
+                               entry.dimColor(4),
+                               entry.dimColor(5),
+                               entry.dimColor(6),
+                               entry.dimColor(7));
             }
         }
     });
