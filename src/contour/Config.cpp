@@ -1469,9 +1469,9 @@ std::optional<std::variant<vtbackend::Key, char32_t>> YAMLConfigReader::parseKey
                      std::pair { "SLASH"sv, '/' },         std::pair { "SUBTRACT"sv, '-' },
                      std::pair { "SPACE"sv, ' ' } };
 
-    auto const lowerName = crispy::toUpper(name);
+    auto const upperName = crispy::toUpper(name);
     for (auto const& mapping: NamedChars)
-        if (lowerName == mapping.first)
+        if (upperName == mapping.first)
             return static_cast<char32_t>(mapping.second);
 
     return std::nullopt;

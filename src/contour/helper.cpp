@@ -383,7 +383,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
     if (key == Qt::Key_Backtab)
     {
-        session.sendCharEvent(U'\t', physicalKey, modifiers.with(Modifier::Shift), eventType, now);
+        session.sendKeyEvent(Key::Tab, modifiers.with(Modifier::Shift), eventType, now);
         event->accept();
         return true;
     }
