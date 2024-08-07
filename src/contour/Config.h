@@ -741,7 +741,6 @@ struct YAMLConfigReader
     template <typename T, documentation::StringLiteral D>
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ConfigEntry<T, D>& where)
     {
-        logger()("Loading entry: {}", entry);
         try
         {
             loadFromEntry(node, entry, where.value());
@@ -752,10 +751,10 @@ struct YAMLConfigReader
         }
     }
 
-    template <typename T, documentation::StringLiteral D>
-    void loadFromEntry(std::string const& entry, ConfigEntry<T, D>& where)
+    template <typename T, documentation::StringLiteral D, typename... Args>
+    void loadFromEntry(std::string const& entry, ConfigEntry<T, D>& where, Args&&... args)
     {
-        loadFromEntry(doc, entry, where.value());
+        loadFromEntry(doc, entry, where.value(), std::forward<Args>(args)...);
     }
 
     template <typename T>
@@ -777,7 +776,28 @@ struct YAMLConfigReader
         logger()("Loading entry: {}, value {}", entry, where.template as<V>());
     }
 
-    // Used for terminal profile and color scheme loading
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       std::unordered_map<std::string, TerminalProfile>& where,
+                       std::string const& defaultProfileName)
+    {
+        if (auto const child = node[entry]; child && child.IsMap())
+        {
+            logger()("Loading default profile: {}", defaultProfileName);
+            loadFromEntry(child, defaultProfileName, where[defaultProfileName]);
+            for (auto entry: child)
+            {
+                auto const name = entry.first.as<std::string>();
+                if (name == defaultProfileName)
+                    continue;
+                logger()("Loading map with entry: {}", name);
+                where[name] = where[defaultProfileName]; // inherit from default
+                loadFromEntry(child, entry.first.as<std::string>(), where[name]);
+            }
+        }
+    }
+
+    // Used for color scheme loading
     template <typename T>
     void loadFromEntry(YAML::Node const& node,
                        std::string const& entry,
