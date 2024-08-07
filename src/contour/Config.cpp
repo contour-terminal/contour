@@ -2,6 +2,8 @@
 #include <contour/Actions.h>
 #include <contour/Config.h>
 
+#include <text_shaper/font.h>
+
 #include <crispy/StrongHash.h>
 #include <crispy/escape.h>
 
@@ -1054,6 +1056,23 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             loadFromEntry(child, "weight", where.weight);
             loadFromEntry(child, "slant", where.slant);
             loadFromEntry(child, "features", where.features);
+
+            if (child["fallback"])
+            {
+                if (child["fallback"].IsScalar() && (child["fallback"].as<std::string>() == "none"))
+                {
+                    where.fontFallback = text::font_fallback_none {};
+                }
+                else if (child["fallback"].IsSequence())
+                {
+                    where.fontFallback = text::font_fallback_list {};
+                    auto& list = std::get<text::font_fallback_list>(where.fontFallback);
+                    for (auto&& fallback: child["fallback"])
+                    {
+                        list.fallbackFonts.emplace_back(fallback.as<std::string>());
+                    }
+                }
+            }
         }
         else // entries like emoji: "emoji"
         {

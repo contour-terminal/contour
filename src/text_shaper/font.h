@@ -22,6 +22,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace text
@@ -164,6 +165,14 @@ struct font_feature
     font_feature& operator=(font_feature&&) = default;
 };
 
+struct font_fallback_none
+{
+};
+struct font_fallback_list
+{
+    std::vector<std::string> fallbackFonts;
+};
+
 struct font_description
 {
     std::string familyName { "regular" };
@@ -177,6 +186,9 @@ struct font_description
     bool strictSpacing = false; // TODO Default value used in config.h while loading fonts
 
     std::vector<font_feature> features {};
+
+    // std::monostate for the case when no fallback is defined.
+    std::variant<std::monostate, font_fallback_none, font_fallback_list> fontFallback { std::monostate {} };
 
     // returns "familyName [weight] [slant]"
     [[nodiscard]] std::string toPattern() const;

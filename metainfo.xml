@@ -122,6 +122,7 @@
           <li>Add shell integration for bash shell.</li>
           <li>Add better bell sound (#1378)</li>
           <li>Add config entry to configure behaviour on exit from search mode</li>
+          <li>Add config entry to configure font fallback (#225)</li>
           <li>Add handling of different input commands (#629)</li>
           <li>Add key bindings disabled indicator for status line (#783)</li>
           <li>Add support for highlighting matches of the currently selected text area (beyond double click)</li>
