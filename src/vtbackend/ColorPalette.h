@@ -132,6 +132,8 @@ struct ColorPalette
     RGBColorPair indicatorStatusLineVisualMode = { 0xFFFFFF_rgb, 0x0270c0_rgb };
 };
 
+bool defaultColorPalettes(std::string const& colorPaletteName, ColorPalette& palette) noexcept;
+
 enum class ColorTarget : uint8_t
 {
     Foreground,

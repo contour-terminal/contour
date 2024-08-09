@@ -334,6 +334,9 @@ constexpr StringLiteral DrawBoldTextWithBrightColors {
 
 constexpr StringLiteral Colors {
     "{comment} Specifies a colorscheme to use (alternatively the colors can be inlined).\n"
+    "{comment} Or choose from existing default palettes:\n"
+    "{comment} contour, monokai, one-dark, one-light, gruvbox-light, gruvbox-dark,\n"
+    "{comment} solarized-light, solarized-dark, papercolor-light, papercolor-dark.\n"
     "{comment}\n"
     "{comment} This can be either the name to a single colorscheme to always use,\n"
     "{comment} or a map with two keys (dark and light) to determine the color scheme to use for each.\n"

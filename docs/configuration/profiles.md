@@ -414,7 +414,9 @@ profiles:
 
 
 ### `colors`
-section in the configuration file allows you to specify the colorscheme to use for the terminal.
+section in the configuration file allows you to specify the colorscheme to use for the terminal. You can use one of the predefined color palettes as a setting for colors entry. 
+List of predefined colorschemes: `contour`(default colors), `monokai`, `one-light`, `one-dark`, `gruvbox-light`, `gruvbox-dark`, `solarized-light`, `solarized-dark`, `papercolor-light`, `papercolor-dark`.
+
 ``` yaml
 profiles:
   profile_name:
