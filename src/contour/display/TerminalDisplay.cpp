@@ -291,16 +291,18 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar.value());
 
-    _renderer =
-        make_unique<vtrasterizer::Renderer>(newSession->profile().terminalSize.value(),
-                                            sanitizeFontDescription(profile().fonts.value(), fontDPI()),
-                                            _session->terminal().colorPalette(),
-                                            newSession->config().textureAtlasHashtableSlots.value(),
-                                            newSession->config().textureAtlasTileCount.value(),
-                                            newSession->config().textureAtlasDirectMapping.value(),
-                                            newSession->profile().hyperlinkDecorationNormal.value(),
-                                            newSession->profile().hyperlinkDecorationHover.value()
-                                            // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
+    //  Display can change sessions, we should not create a new renderer here if we already have one.
+    if (!_renderer)
+        _renderer = make_unique<vtrasterizer::Renderer>(
+            newSession->profile().terminalSize.value(),
+            sanitizeFontDescription(profile().fonts.value(), fontDPI()),
+            _session->terminal().colorPalette(),
+            newSession->config().textureAtlasHashtableSlots.value(),
+            newSession->config().textureAtlasTileCount.value(),
+            newSession->config().textureAtlasDirectMapping.value(),
+            newSession->profile().hyperlinkDecorationNormal.value(),
+            newSession->profile().hyperlinkDecorationHover.value()
+            // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
         );
 
     applyFontDPI();
@@ -308,7 +310,6 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     updateMinimumSize();
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
-    createRenderer();
 
     emit sessionChanged(newSession);
 }
