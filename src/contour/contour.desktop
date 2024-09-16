@@ -2,6 +2,7 @@
 Type=Application
 TryExec=contour
 Exec=contour
+X-ExecArgs=execute
 Icon=org.contourterminal.Contour
 Terminal=false
 Categories=Qt;System;TerminalEmulator;

@@ -132,6 +132,7 @@
           <li>Add case-insensitive smart search (#1410)</li>
           <li>Add OpenBSD support</li>
           <li>Add new CLI command: `contour info config` to list missing entries from config file (#1125).</li>
+          <li>Add xdg-terminal-exec support (#1570).</li>
           <li>Update of contour.desktop file (#1423)</li>
           <li>Changed configuration entry values for `font_locator` down to `native` and `mock` only (#1538).</li>
           <li>Do not export the `TERM` environment variable on Windows OS (when using ConPTY).</li>
