@@ -108,7 +108,7 @@ template <CellConcept Cell>
         {
             case 0xFE0E: return 1;
             case 0xFE0F: return 2;
-            default: return unicode::width(codepoint);
+            default: return static_cast<int>(unicode::width(codepoint));
         }
     }();
 

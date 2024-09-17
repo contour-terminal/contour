@@ -316,7 +316,7 @@ inline void CompactCell::setCharacter(char32_t codepoint) noexcept
         _extra->imageFragment = {};
     }
     if (codepoint)
-        setWidth(static_cast<uint8_t>(std::max(unicode::width(codepoint), 1)));
+        setWidth(std::max<uint8_t>(unicode::width(codepoint), 1));
     else
         setWidth(1);
 }
