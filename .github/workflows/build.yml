@@ -1336,6 +1336,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
+      - name: "fetch artifact: AppImage"
+        uses: actions/download-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}.AppImage"
       # }}}
 
       - name: "inspect"
