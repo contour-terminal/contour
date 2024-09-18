@@ -1316,10 +1316,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
-      - name: "fetch artifact: Fedora 39"
+      - name: "fetch artifact: Fedora 40"
         uses: actions/download-artifact@v4
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc39.x86_64.rpm"
+          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc40.x86_64.rpm"
       - name: "fetch artifact: ArchLinux"
         uses: actions/download-artifact@v4
         with:
