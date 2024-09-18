@@ -351,7 +351,7 @@ jobs:
             env
             freebsd-version
             SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
-            cmake -S . -B build -DCONTOUR_TESTING=ON
+            cmake -S . -B build -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
@@ -386,7 +386,7 @@ jobs:
             env
             ./scripts/install-deps.sh
             mkdir build
-            cmake -S . -B build -D CMAKE_CXX_FLAGS=-I/home/runner/work/contour/contour/_deps/sources/yaml-cpp-0.8.0/include -D CONTOUR_TESTING=ON
+            cmake -S . -B build -D CMAKE_CXX_FLAGS=-I/home/runner/work/contour/contour/_deps/sources/yaml-cpp-0.8.0/include -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
