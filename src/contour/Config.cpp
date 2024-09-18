@@ -2,6 +2,8 @@
 #include <contour/Actions.h>
 #include <contour/Config.h>
 
+#include <vtbackend/ColorPalette.h>
+
 #include <text_shaper/font.h>
 
 #include <crispy/StrongHash.h>
@@ -487,6 +489,12 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 {
     logger()("color palette loading {}", entry);
     auto child = node[entry];
+
+    if (vtbackend::defaultColorPalettes(entry, where))
+    {
+        logger()("Loaded predefined color palette {}", entry);
+        return;
+    }
 
     if (!child) // can not load directly from config file
     {
