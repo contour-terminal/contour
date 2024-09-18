@@ -182,7 +182,7 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
                                      input.hyperlink);
                 --gapPending;
             }
-            auto const charWidth = unicode::width(nextChar);
+            auto const charWidth = static_cast<int>(unicode::width(nextChar));
             columns.emplace_back(Cell {});
             columns.back().setHyperlink(input.hyperlink);
             columns.back().write(input.textAttributes, nextChar, static_cast<uint8_t>(charWidth));
