@@ -351,7 +351,7 @@ jobs:
             env
             freebsd-version
             SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
-            cmake -S . -B build -DCONTOUR_TESTING=ON
+            cmake -S . -B build -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
@@ -386,7 +386,7 @@ jobs:
             env
             ./scripts/install-deps.sh
             mkdir build
-            cmake -S . -B build -D CMAKE_CXX_FLAGS=-I/home/runner/work/contour/contour/_deps/sources/yaml-cpp-0.8.0/include -D CONTOUR_TESTING=ON
+            cmake -S . -B build -D CMAKE_CXX_FLAGS=-I/home/runner/work/contour/contour/_deps/sources/yaml-cpp-0.8.0/include -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
@@ -1316,10 +1316,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
-      - name: "fetch artifact: Fedora 39"
+      - name: "fetch artifact: Fedora 40"
         uses: actions/download-artifact@v4
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc39.x86_64.rpm"
+          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc40.x86_64.rpm"
       - name: "fetch artifact: ArchLinux"
         uses: actions/download-artifact@v4
         with:
@@ -1336,6 +1336,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
+      - name: "fetch artifact: AppImage"
+        uses: actions/download-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}.AppImage"
       # }}}
 
       - name: "inspect"
