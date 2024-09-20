@@ -23,4 +23,4 @@ RUN sudo wget https://github.com/AppImage/AppImageKit/releases/download/continuo
 RUN sudo chmod +x /usr/local/bin/appimagetool
 RUN sudo sudo pip3 install appimage-builder
 
-RUN appimage-builder
+RUN appimage-builder --recipe $PWD/.github/appimage/AppImageBuilder.yml

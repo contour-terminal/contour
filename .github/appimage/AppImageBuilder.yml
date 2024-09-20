@@ -1,6 +1,7 @@
 # appimage-builder recipe see https://appimage-builder.readthedocs.io for details
 version: 1
 script:
+  - which mksquashfs || apt install squashfs-tools # see https://github.com/AppImageCrafters/appimage-builder/issues/271
   - mkdir -p ./AppDir/usr/share
   - cp -r ./AppDir/share/icons ./AppDir/usr/share
 
@@ -54,6 +55,7 @@ AppDir:
     - libutempter-dev:amd64
     - libssh2-1:amd64
     - libx11-xcb1:amd64
+    - gstreamer1.0-plugins-base
 
   files:
     include:
