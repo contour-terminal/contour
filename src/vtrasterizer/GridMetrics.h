@@ -6,7 +6,7 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 
-#include <fmt/format.h>
+#include <format>
 
 namespace vtrasterizer
 {
@@ -95,13 +95,12 @@ struct GridMetrics
 } // namespace vtrasterizer
 
 template <>
-struct fmt::formatter<vtrasterizer::GridMetrics>: formatter<std::string>
+struct std::formatter<vtrasterizer::GridMetrics>: formatter<std::string>
 {
-    auto format(vtrasterizer::GridMetrics const& v,
-                fmt::format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::GridMetrics const& v, auto& ctx) const
     {
         return formatter<std::string>::format(
-            fmt::format(
+            std::format(
                 "(pageSize={}, cellSize={}, baseline={}, underline={}@{}, margin=(left={}, bottom={}))",
                 v.pageSize,
                 v.cellSize,

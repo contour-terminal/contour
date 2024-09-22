@@ -204,7 +204,7 @@ inline std::string to_string(strong_hash const& hash)
 {
     uint32_t u32[4];
     std::memcpy(u32, &hash, sizeof(hash));
-    return fmt::format("{:04X}{:04X}{:04X}{:04X}", u32[0], u32[1], u32[2], u32[3]);
+    return std::format("{:04X}{:04X}{:04X}{:04X}", u32[0], u32[1], u32[2], u32[3]);
 }
 
 inline std::string to_structured_string(strong_hash const& hash)
@@ -218,7 +218,7 @@ inline std::string to_structured_string(strong_hash const& hash)
         if (!s.empty())
             s += '.';
         if (u32[i] != 0)
-            s += fmt::format("{:X}", u32[i]);
+            s += std::format("{:X}", u32[i]);
     }
     return s;
 }
@@ -300,7 +300,7 @@ struct strong_hasher<std::basic_string_view<U>>
 } // namespace crispy
 
 template <>
-struct fmt::formatter<crispy::strong_hash>
+struct std::formatter<crispy::strong_hash>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -310,6 +310,6 @@ struct fmt::formatter<crispy::strong_hash>
     template <typename FormatContext>
     auto format(crispy::strong_hash const& hash, FormatContext& ctx) const
     {
-        return fmt::format_to(ctx.out(), "{}", to_structured_string(hash));
+        return std::format_to(ctx.out(), "{}", to_structured_string(hash));
     }
 };

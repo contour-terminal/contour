@@ -219,25 +219,24 @@ inline Renderable::TextureAtlas::TileCreateData Renderable::createTileData(atlas
 
 // {{{ fmt
 template <>
-struct fmt::formatter<vtrasterizer::RenderTileAttributes>: fmt::formatter<std::string>
+struct std::formatter<vtrasterizer::RenderTileAttributes>: std::formatter<std::string>
 {
-    auto format(vtrasterizer::RenderTileAttributes value,
-                format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::RenderTileAttributes value, auto& ctx) const
     {
-        return fmt::formatter<std::string>::format(
-            fmt::format("tile +{}x +{}y", value.x.value, value.y.value), ctx);
+        return std::formatter<std::string>::format(
+            std::format("tile +{}x +{}y", value.x.value, value.y.value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtrasterizer::atlas::TileAttributes<vtrasterizer::RenderTileAttributes>>:
-    fmt::formatter<std::string>
+struct std::formatter<vtrasterizer::atlas::TileAttributes<vtrasterizer::RenderTileAttributes>>:
+    std::formatter<std::string>
 {
     auto format(vtrasterizer::atlas::TileAttributes<vtrasterizer::RenderTileAttributes> const& value,
-                format_context& ctx) const -> format_context::iterator
+                auto& ctx) const
     {
         return formatter<std::string>::format(
-            fmt::format("(location {}; bitmap {}; {})", value.location, value.bitmapSize, value.metadata),
+            std::format("(location {}; bitmap {}; {})", value.location, value.bitmapSize, value.metadata),
             ctx);
     }
 };

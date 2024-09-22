@@ -8,9 +8,8 @@
 
 #include <libunicode/convert.h>
 
-#include <fmt/format.h>
-
 #include <array>
+#include <format>
 #include <iterator>
 #include <string_view>
 #include <unordered_map>
@@ -26,17 +25,17 @@ namespace vtbackend
 
 string to_string(Modifiers modifiers)
 {
-    return fmt::format("{}", modifiers);
+    return std::format("{}", modifiers);
 }
 
 string to_string(Key key)
 {
-    return fmt::format("{}", key);
+    return std::format("{}", key);
 }
 
 string to_string(MouseButton button)
 {
-    return fmt::format("{}", button);
+    return std::format("{}", button);
 }
 
 // {{{ StandardKeyboardInputGenerator
@@ -279,7 +278,7 @@ std::string ExtendedKeyboardInputGenerator::encodeModifiers(Modifiers modifiers,
                                                             KeyboardEventType eventType) const
 {
     if (enabled(KeyboardEventFlag::ReportEventTypes))
-        return fmt::format("{}:{}", modifiers.value(), encodeEventType(eventType));
+        return std::format("{}:{}", modifiers.value(), encodeEventType(eventType));
 
     if (modifiers.value() != 0)
         return std::to_string(1 + modifiers.value());
@@ -293,7 +292,7 @@ std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
 {
     // The codepoint is always the lower-case form
     // TODO: use libunicode for down-shifting
-    auto unshiftedKey = ch < 0x80 ? fmt::format("{}", std::tolower(static_cast<char>(ch))) : ""s;
+    auto unshiftedKey = ch < 0x80 ? std::format("{}", std::tolower(static_cast<char>(ch))) : ""s;
 
     auto result = std::move(unshiftedKey);
 
@@ -496,9 +495,9 @@ bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
 
     auto const [code, function] = mapKey(key);
     auto const encodedModifiers = encodeModifiers(modifiers, eventType);
-    auto controlSequence = fmt::format("\033[{}", code);
+    auto controlSequence = std::format("\033[{}", code);
     if (!encodedModifiers.empty())
-        controlSequence += fmt::format(";{}", encodedModifiers);
+        controlSequence += std::format(";{}", encodedModifiers);
     controlSequence += function;
     append(controlSequence);
 
@@ -719,7 +718,7 @@ bool InputGenerator::generateMouse(MouseEventType eventType,
     if (!_mouseProtocol.has_value())
         return false;
 
-    // std::cout << fmt::format("generateMouse({}/{}): button:{}, modifier:{}, at:{}, type:{}\n",
+    // std::cout << std::format("generateMouse({}/{}): button:{}, modifier:{}, at:{}, type:{}\n",
     //                          _mouseTransport, *_mouseProtocol,
     //                          button, modifier, pos, eventType);
 

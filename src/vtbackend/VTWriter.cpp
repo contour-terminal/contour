@@ -68,11 +68,11 @@ string VTWriter::sgrFlush(vector<unsigned> const& sgr)
                          end(sgr),
                          string {},
                          [](auto a, auto b) {
-                             return a.empty() ? fmt::format("{}", b) : fmt::format("{};{}", a, b);
+                             return a.empty() ? std::format("{}", b) : std::format("{};{}", a, b);
                          })
             : string();
 
-    return fmt::format("\033[{}m", params);
+    return std::format("\033[{}m", params);
 }
 
 void VTWriter::sgrAddExplicit(unsigned n)

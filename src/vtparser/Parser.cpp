@@ -2,10 +2,9 @@
 #include <vtparser/Parser.h>
 #include <vtparser/ParserEvents.h>
 
-#include <fmt/format.h>
-
 #include <range/v3/view/enumerate.hpp>
 
+#include <format>
 #include <map>
 #include <ostream>
 
@@ -30,7 +29,7 @@ void parserTableDot(std::ostream& os) // {{{
             auto const ch = static_cast<uint8_t>(i);
             if (targetState != State::Undefined)
             {
-                // os << fmt::format("({}, 0x{:0X}) -> {}\n", static_cast<State>(sourceState), ch,
+                // os << std::format("({}, 0x{:0X}) -> {}\n", static_cast<State>(sourceState), ch,
                 //  targetState);
                 auto const t = Transition { static_cast<State>(sourceState), targetState };
                 if (!transitions[t].empty() && ch == transitions[t].back().last + 1)
@@ -59,18 +58,18 @@ void parserTableDot(std::ostream& os) // {{{
             continue;
 
         auto const targetStateName = targetState == State::Ground && targetState != sourceState
-                                         ? fmt::format("{}_{}", targetState, ++groundCount)
-                                         : fmt::format("{}", targetState);
+                                         ? std::format("{}_{}", targetState, ++groundCount)
+                                         : std::format("{}", targetState);
 
         // if (isReachableFromAnywhere(targetState))
-        //     os << fmt::format("  {} [style=dashed, style=\"rounded, filled\", fillcolor=yellow];\n",
+        //     os << std::format("  {} [style=dashed, style=\"rounded, filled\", fillcolor=yellow];\n",
         //     sourceStateName);
 
         if (targetState == State::Ground && sourceState != State::Ground)
-            os << fmt::format("  \"{}\" [style=\"dashed, filled\", fillcolor=gray, label=\"ground\"];\n",
+            os << std::format("  \"{}\" [style=\"dashed, filled\", fillcolor=gray, label=\"ground\"];\n",
                               targetStateName);
 
-        os << fmt::format(R"(  "{}" -> "{}" )", sourceState, targetStateName);
+        os << std::format(R"(  "{}" -> "{}" )", sourceState, targetStateName);
         os << "[";
         os << "label=\"";
         for (auto const&& [rangeCount, u]: enumerate(t.second))
@@ -82,9 +81,9 @@ void parserTableDot(std::ostream& os) // {{{
                     os << "\\n";
             }
             if (u.first == u.last)
-                os << fmt::format("{:02X}", u.first);
+                os << std::format("{:02X}", u.first);
             else
-                os << fmt::format("{:02X}-{:02X}", u.first, u.last);
+                os << std::format("{:02X}-{:02X}", u.first, u.last);
         }
         os << "\"";
         os << "]";
@@ -94,12 +93,12 @@ void parserTableDot(std::ostream& os) // {{{
     // equal ranks
     os << "  { rank=same; ";
     for (auto const state: { State::CSI_Entry, State::DCS_Entry, State::OSC_String })
-        os << fmt::format(R"("{}"; )", state);
+        os << std::format(R"("{}"; )", state);
     os << "};\n";
 
     os << "  { rank=same; ";
     for (auto const state: { State::CSI_Param, State::DCS_Param, State::OSC_String })
-        os << fmt::format(R"("{}"; )", state);
+        os << std::format(R"("{}"; )", state);
     os << "};\n";
 
     os << "}\n";

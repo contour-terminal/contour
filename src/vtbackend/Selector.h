@@ -8,8 +8,7 @@
 #include <crispy/times.h>
 #include <crispy/utils.h>
 
-#include <fmt/format.h>
-
+#include <format>
 #include <functional>
 #include <utility>
 #include <vector>
@@ -183,10 +182,10 @@ void renderSelection(Selection const& selection, Renderer&& render)
 
 // {{{ fmtlib custom formatter support
 template <>
-struct fmt::formatter<vtbackend::Selection::State>: formatter<std::string_view>
+struct std::formatter<vtbackend::Selection::State>: formatter<std::string_view>
 {
     using State = vtbackend::Selection::State;
-    auto format(State state, format_context& ctx) const -> format_context::iterator
+    auto format(State state, auto& ctx) const
     {
         string_view name;
         switch (state)
@@ -200,12 +199,12 @@ struct fmt::formatter<vtbackend::Selection::State>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::Selection>: formatter<std::string>
+struct std::formatter<vtbackend::Selection>: formatter<std::string>
 {
-    auto format(const vtbackend::Selection& selector, format_context& ctx) const -> format_context::iterator
+    auto format(const vtbackend::Selection& selector, auto& ctx) const
     {
         return formatter<std::string>::format(
-            fmt::format(
+            std::format(
                 "{}({} from {} to {})",
                 [](auto const* selector) -> std::string_view {
                     if (dynamic_cast<vtbackend::WordWiseSelection const*>(selector))

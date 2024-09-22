@@ -15,9 +15,6 @@
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
-#include <fmt/chrono.h>
-#include <fmt/format.h>
-
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QFileSystemWatcher>
@@ -37,7 +34,9 @@
 #include <QtQml/QQmlContext>
 #include <QtQuick/QQuickWindow>
 
+#include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <string_view>
 #include <tuple>
@@ -116,7 +115,7 @@ namespace
     #if defined(GL_DEBUG_SOURCE_OTHER_ARB)
                 case GL_DEBUG_SOURCE_OTHER_ARB: return "other"s;
     #endif
-                default: return fmt::format("{}", _severity);
+                default: return std::format("{}", _severity);
             }
         }();
         string const typeName = [&]() {
@@ -140,7 +139,7 @@ namespace
     #if defined(GL_DEBUG_TYPE_OTHER)
                 case GL_DEBUG_TYPE_OTHER: return "other"s;
     #endif
-                default: return fmt::format("{}", _severity);
+                default: return std::format("{}", _severity);
             }
         }();
         string const debugSeverity = [&]() {
@@ -158,7 +157,7 @@ namespace
     #if defined(GL_DEBUG_SEVERITY_NOTIFICATION)
                 case GL_DEBUG_SEVERITY_NOTIFICATION: return "notification"s;
     #endif
-                default: return fmt::format("{}", _severity);
+                default: return std::format("{}", _severity);
             }
         }();
         auto const tag = []([[maybe_unused]] GLint _type) {
@@ -197,7 +196,7 @@ namespace
 
     std::string unhandledExceptionMessage(std::string_view const& where, exception const& e)
     {
-        return fmt::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
+        return std::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
     }
 
     void reportUnhandledException(std::string_view const& where, exception const& e)
@@ -274,8 +273,8 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
                  (void const*) this,
                  (void const*) newSession,
                  newSession->profile().ssh.value().hostname.empty()
-                     ? fmt::format("program={}", newSession->profile().shell.value().program)
-                     : fmt::format("{}@{}:{}",
+                     ? std::format("program={}", newSession->profile().shell.value().program)
+                     : std::format("{}@{}:{}",
                                    newSession->profile().ssh.value().username,
                                    newSession->profile().ssh.value().hostname,
                                    newSession->profile().ssh.value().port),
@@ -891,9 +890,9 @@ bool TerminalDisplay::event(QEvent* event)
     }
     catch (std::exception const& e)
     {
-        fmt::print("Unhandled exception for event {}: {}\n",
-                   (unsigned) event->type(),
-                   QMetaEnum::fromType<QEvent::Type>().valueToKey(event->type()));
+        std::cout << std::format("Unhandled exception for event {}: {}\n",
+                                 (unsigned) event->type(),
+                                 QMetaEnum::fromType<QEvent::Type>().valueToKey(event->type()));
         reportUnhandledException(__PRETTY_FUNCTION__, e);
         return false;
     }
@@ -1085,7 +1084,7 @@ void TerminalDisplay::doDumpStateInternal()
 
     // clang-format off
     auto const targetBaseDir = _session->app().dumpStateAtExit().value_or(crispy::app::instance()->localStateDir() / "dump");
-    auto const workDirName = fs::path(fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", chrono::system_clock::now()));
+    auto const workDirName = fs::path(std::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", chrono::system_clock::now()));
     auto const targetDir = targetBaseDir / workDirName;
     auto const latestDirName = fs::path("latest");
     // clang-format on

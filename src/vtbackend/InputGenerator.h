@@ -9,8 +9,7 @@
 
 #include <libunicode/convert.h>
 
-#include <fmt/format.h>
-
+#include <format>
 #include <optional>
 #include <set>
 #include <string>
@@ -286,9 +285,9 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     void append(std::string_view sequence) { _pendingSequence += sequence; }
 
     template <typename... Args>
-    void append(fmt::format_string<Args...> const& text, Args... args)
+    void append(std::string_view const& text, Args... args)
     {
-        append(fmt::vformat(text, fmt::make_format_args(args...)));
+        append(std::vformat(text, std::make_format_args(args...)));
     }
 
     KeyMode _cursorKeysMode = KeyMode::Normal;
@@ -552,9 +551,9 @@ inline std::string to_string(InputGenerator::MouseEventType value)
 // {{{ fmtlib custom formatter support
 
 template <>
-struct fmt::formatter<vtbackend::KeyboardEventType>: formatter<std::string_view>
+struct std::formatter<vtbackend::KeyboardEventType>: formatter<std::string_view>
 {
-    auto format(vtbackend::KeyboardEventType value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::KeyboardEventType value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -568,9 +567,9 @@ struct fmt::formatter<vtbackend::KeyboardEventType>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::KeyboardEventFlag>: formatter<std::string_view>
+struct std::formatter<vtbackend::KeyboardEventFlag>: formatter<std::string_view>
 {
-    auto format(vtbackend::KeyboardEventFlag value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::KeyboardEventFlag value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -589,9 +588,9 @@ struct fmt::formatter<vtbackend::KeyboardEventFlag>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::MouseProtocol>: formatter<std::string_view>
+struct std::formatter<vtbackend::MouseProtocol>: formatter<std::string_view>
 {
-    auto format(vtbackend::MouseProtocol value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::MouseProtocol value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -607,9 +606,9 @@ struct fmt::formatter<vtbackend::MouseProtocol>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::Modifier>: formatter<std::string_view>
+struct std::formatter<vtbackend::Modifier>: formatter<std::string_view>
 {
-    auto format(vtbackend::Modifier value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::Modifier value, auto& ctx) const
     {
         std::string_view name;
         switch (value)
@@ -629,10 +628,9 @@ struct fmt::formatter<vtbackend::Modifier>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::InputGenerator::MouseWheelMode>: formatter<std::string_view>
+struct std::formatter<vtbackend::InputGenerator::MouseWheelMode>: formatter<std::string_view>
 {
-    auto format(vtbackend::InputGenerator::MouseWheelMode value,
-                format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::InputGenerator::MouseWheelMode value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -650,9 +648,9 @@ struct fmt::formatter<vtbackend::InputGenerator::MouseWheelMode>: formatter<std:
 };
 
 template <>
-struct fmt::formatter<vtbackend::KeyMode>: public formatter<std::string_view>
+struct std::formatter<vtbackend::KeyMode>: public formatter<std::string_view>
 {
-    auto format(vtbackend::KeyMode value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::KeyMode value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -665,9 +663,9 @@ struct fmt::formatter<vtbackend::KeyMode>: public formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::MouseButton>: formatter<std::string_view>
+struct std::formatter<vtbackend::MouseButton>: formatter<std::string_view>
 {
-    auto format(vtbackend::MouseButton value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::MouseButton value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -686,9 +684,9 @@ struct fmt::formatter<vtbackend::MouseButton>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::MouseTransport>: formatter<std::string_view>
+struct std::formatter<vtbackend::MouseTransport>: formatter<std::string_view>
 {
-    auto format(vtbackend::MouseTransport value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::MouseTransport value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -704,9 +702,9 @@ struct fmt::formatter<vtbackend::MouseTransport>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::Key>: formatter<std::string_view>
+struct std::formatter<vtbackend::Key>: formatter<std::string_view>
 {
-    auto format(vtbackend::Key value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::Key value, auto& ctx) const
     {
         string_view name;
         switch (value)

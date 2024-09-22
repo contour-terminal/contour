@@ -6,12 +6,11 @@
 
 #include <crispy/StrongHash.h>
 
-#include <fmt/format.h>
-
 #include <array>
 #include <cassert>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <variant>
 
 namespace vtbackend
@@ -153,9 +152,9 @@ RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target
 
 // {{{ fmtlib custom formatter support
 template <>
-struct fmt::formatter<vtbackend::ColorPreference>: fmt::formatter<std::string_view>
+struct std::formatter<vtbackend::ColorPreference>: std::formatter<std::string_view>
 {
-    auto format(vtbackend::ColorPreference value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::ColorPreference value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -168,9 +167,9 @@ struct fmt::formatter<vtbackend::ColorPreference>: fmt::formatter<std::string_vi
 };
 
 template <>
-struct fmt::formatter<vtbackend::ColorMode>: fmt::formatter<std::string_view>
+struct std::formatter<vtbackend::ColorMode>: std::formatter<std::string_view>
 {
-    auto format(vtbackend::ColorMode value, fmt::format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::ColorMode value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -184,9 +183,9 @@ struct fmt::formatter<vtbackend::ColorMode>: fmt::formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::ColorTarget>: fmt::formatter<std::string_view>
+struct std::formatter<vtbackend::ColorTarget>: std::formatter<std::string_view>
 {
-    auto format(vtbackend::ColorTarget value, fmt::format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::ColorTarget value, auto& ctx) const
     {
         string_view name;
         switch (value)

@@ -107,7 +107,7 @@
     <release version="0.5.1" urgency="medium" type="development">
       <description>
         <ul>
-
+          <li>Port to C++20's `std::format()` (#1598)</li>
         </ul>
       </description>
     </release>

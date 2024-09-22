@@ -6,8 +6,7 @@
 
 #include <libunicode/ucd.h>
 
-#include <fmt/format.h>
-
+#include <format>
 #include <memory>
 
 namespace vtbackend

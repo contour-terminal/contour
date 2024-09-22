@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <fmt/format.h>
-
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -20,7 +19,7 @@ struct Code
 
     [[nodiscard]] std::string hex() const
     {
-        return fmt::format("{:02X}{:02X}", unsigned((code >> 8) & 0xFF), unsigned(code & 0xFF));
+        return std::format("{:02X}{:02X}", unsigned((code >> 8) & 0xFF), unsigned(code & 0xFF));
     }
 
     constexpr Code() noexcept = default;
@@ -105,9 +104,9 @@ class StaticDatabase: public Database
 } // namespace vtbackend::capabilities
 
 template <>
-struct fmt::formatter<vtbackend::capabilities::Code>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::capabilities::Code>: std::formatter<std::string>
 {
-    auto format(vtbackend::capabilities::Code value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::capabilities::Code value, auto& ctx) const
     {
         return formatter<std::string>::format(value.hex(), ctx);
     }

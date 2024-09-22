@@ -108,12 +108,8 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
     auto const left = 3;
     auto const bottom = 4;
     auto const right = 5;
-    mock.writeToScreen(fmt::format("\033[{top};{left};{bottom};{right};{sgr}$r",
-                                   fmt::arg("top", top),
-                                   fmt::arg("left", left),
-                                   fmt::arg("bottom", bottom),
-                                   fmt::arg("right", right),
-                                   fmt::arg("sgr", "1;38:2::171:178:191;4")));
+    mock.writeToScreen(
+        std::format("\033[{};{};{};{};{}$r", top, left, bottom, right, "1;38:2::171:178:191;4"));
 
     mock.terminal.tick(ClockBase + chrono::seconds(2));
     mock.terminal.ensureFreshRenderBuffer();
@@ -128,8 +124,8 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
             // clang-format off
             auto const& someCell = mock.terminal.primaryScreen().at(LineOffset(line - 1), ColumnOffset(column - 1));
             auto const rgb = someCell.foregroundColor().rgb();
-            auto const colorDec = fmt::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
-            INFO(fmt::format("at line {} column {}, flags {}", line, column, someCell.flags()));
+            auto const colorDec = std::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
+            INFO(std::format("at line {} column {}, flags {}", line, column, someCell.flags()));
             CHECK(colorDec == "171/178/191");
             CHECK(someCell.isFlagEnabled(vtbackend::CellFlag::Bold));
             CHECK(someCell.isFlagEnabled(vtbackend::CellFlag::Underline));
@@ -154,8 +150,8 @@ TEST_CASE("Terminal.CaptureScreenBuffer")
     // fill screen buffer (5 lines into history + full 5 lines page buffer)
     for (int i = 1; i <= 10; ++i)
     {
-        mock.writeToScreen(fmt::format("\r\n{}", i));
-        logScreenText(mock.terminal, fmt::format("write i {}", i));
+        mock.writeToScreen(std::format("\r\n{}", i));
+        logScreenText(mock.terminal, std::format("write i {}", i));
     }
 
     mock.terminal.tick(ClockBase + chrono::seconds(1));
@@ -164,7 +160,7 @@ TEST_CASE("Terminal.CaptureScreenBuffer")
     REQUIRE("6\n7\n8\n9\n10" == actualScreen1);
     logScreenText(mock.terminal, "fini");
 
-    mock.writeToScreen(fmt::format("\033[>{};{}t", NoLogicalLines, NumberOfLinesToCapture));
+    mock.writeToScreen(std::format("\033[>{};{}t", NoLogicalLines, NumberOfLinesToCapture));
     mock.terminal.flushInput();
     logScreenText(mock.terminal, "after flush");
 

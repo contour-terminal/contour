@@ -1,11 +1,10 @@
 #include <crispy/StackTrace.h>
 #include <crispy/utils.h>
 
-#include <fmt/format.h>
-
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <format>
 #include <optional>
 #include <regex>
 
@@ -209,11 +208,11 @@ vector<string> stack_trace::symbols() const
 #if defined(CONTOUR_STACKTRACE_ADDR2LINE)
         auto debugInfo = getDebugInfoForFrame(frame);
         if (!debugInfo)
-            output.emplace_back(fmt::format("{}", frame));
+            output.emplace_back(std::format("{}", frame));
         else
             output.emplace_back(debugInfo->text);
 #else
-        output.emplace_back(fmt::format("{}", frame));
+        output.emplace_back(std::format("{}", frame));
 #endif
     }
     return output;

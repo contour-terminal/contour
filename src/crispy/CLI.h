@@ -3,9 +3,8 @@
 
 #include <crispy/utils.h>
 
-#include <fmt/format.h>
-
 #include <algorithm>
+#include <format>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -226,24 +225,24 @@ namespace about
 
 // {{{ type formatters
 template <>
-struct fmt::formatter<crispy::cli::value>
+struct std::formatter<crispy::cli::value>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(crispy::cli::value const& value, format_context& ctx) -> format_context::iterator
+    auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    auto format(crispy::cli::value const& value, auto& ctx) const
     {
         if (std::holds_alternative<bool>(value))
-            return fmt::format_to(ctx.out(), "{}", std::get<bool>(value));
+            return std::format_to(ctx.out(), "{}", std::get<bool>(value));
         else if (std::holds_alternative<int>(value))
-            return fmt::format_to(ctx.out(), "{}", std::get<int>(value));
+            return std::format_to(ctx.out(), "{}", std::get<int>(value));
         else if (std::holds_alternative<unsigned>(value))
-            return fmt::format_to(ctx.out(), "{}", std::get<unsigned>(value));
+            return std::format_to(ctx.out(), "{}", std::get<unsigned>(value));
         else if (std::holds_alternative<double>(value))
-            return fmt::format_to(ctx.out(), "{}", std::get<double>(value));
+            return std::format_to(ctx.out(), "{}", std::get<double>(value));
         else if (std::holds_alternative<std::string>(value))
-            return fmt::format_to(ctx.out(), "{}", std::get<std::string>(value));
+            return std::format_to(ctx.out(), "{}", std::get<std::string>(value));
         else
-            return fmt::format_to(ctx.out(), "?");
-        // return fmt::format_to(ctx.out(), "{}..{}", range.from, range.to);
+            return std::format_to(ctx.out(), "?");
+        // return std::format_to(ctx.out(), "{}..{}", range.from, range.to);
     }
 };
 // }}} namespace fmt

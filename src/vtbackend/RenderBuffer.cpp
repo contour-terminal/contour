@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/RenderBuffer.h>
 
-#include <fmt/format.h>
-
+#include <format>
 #include <mutex>
 
 namespace vtbackend

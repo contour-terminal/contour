@@ -101,13 +101,13 @@ template <typename T>
 template <typename T>
 void logScreenTextAlways(Screen<T> const& screen, std::string const& headline = "")
 {
-    fmt::print("{}: ZI={} cursor={} HM={}..{}\n",
-               headline.empty() ? "screen dump" : headline,
-               screen.grid().zero_index(),
-               screen.realCursorPosition(),
-               screen.margin().horizontal.from,
-               screen.margin().horizontal.to);
-    fmt::print("{}\n", dumpGrid(screen.grid()));
+    std::cout << std::format("{}: ZI={} cursor={} HM={}..{}\n",
+                             headline.empty() ? "screen dump" : headline,
+                             screen.grid().zero_index(),
+                             screen.realCursorPosition(),
+                             screen.margin().horizontal.from,
+                             screen.margin().horizontal.to);
+    std::cout << std::format("{}\n", dumpGrid(screen.grid()));
 }
 
 template <typename T>
@@ -125,7 +125,7 @@ void logScreenText(Screen<T> const& screen, std::string const& headline = "")
         UNSCOPED_INFO(headline + ":");
 
     for (auto const line: ::ranges::views::iota(0, *screen.pageSize().lines))
-        UNSCOPED_INFO(fmt::format("[{}] \"{}\"", line, screen.grid().lineText(LineOffset::cast_from(line))));
+        UNSCOPED_INFO(std::format("[{}] \"{}\"", line, screen.grid().lineText(LineOffset::cast_from(line))));
 }
 
 inline void logScreenText(vtbackend::Terminal const& terminal, std::string const& headline = "")

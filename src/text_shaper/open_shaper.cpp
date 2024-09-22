@@ -92,7 +92,7 @@ struct hash<FontInfo>
     {
         auto fnv = crispy::fnv<char>();
         return size_t(
-            fnv(fnv(fd.path), to_string(fd.size.pt), fmt::format("{}", fd.weight))); // SSO should kick in.
+            fnv(fnv(fd.path), to_string(fd.size.pt), std::format("{}", fd.weight))); // SSO should kick in.
     }
 };
 } // namespace std

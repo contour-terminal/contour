@@ -4,12 +4,11 @@
 #include <crispy/algorithm.h>
 #include <crispy/utils.h>
 
-#include <fmt/format.h>
-
 #include <gsl/pointers>
 
 #include <algorithm>
 #include <cassert>
+#include <format>
 #include <functional>
 #include <iostream>
 #include <iterator>
@@ -93,10 +92,10 @@ class message_builder
         return *this;
     }
 
-    template <typename... T>
-    message_builder& append(fmt::format_string<T...> fmt, T const&... args)
+    template <typename... Ts>
+    message_builder& append(std::string_view fmt, Ts const&... args)
     {
-        _buffer += fmt::vformat(fmt, fmt::make_format_args(args...));
+        _buffer += std::vformat(fmt, std::make_format_args(args...));
         return *this;
     }
 
@@ -105,10 +104,11 @@ class message_builder
         _buffer += msg;
         return *this;
     }
+
     template <typename... Ts>
     message_builder& operator()(std::string_view fmt, Ts const&... args)
     {
-        _buffer += fmt::vformat(fmt, fmt::make_format_args(args...));
+        _buffer += std::vformat(fmt, std::make_format_args(args...));
         return *this;
     }
 
@@ -330,7 +330,7 @@ inline category::~category()
 
 inline std::string category::defaultFormatter(message_builder const& message)
 {
-    return fmt::format("[{}:{}:{}]: {}\n",
+    return std::format("[{}:{}:{}]: {}\n",
                        message.get_category().name(),
                        message.location().file_name(),
                        message.location().line(),

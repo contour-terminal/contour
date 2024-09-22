@@ -71,7 +71,7 @@ ShaderConfig builtinShaderConfig(ShaderClass shaderClass)
             sharedDefinesFile.open(QFile::ReadOnly);
             Require(sharedDefinesFile.isOpen());
             auto const sharedDefines = sharedDefinesFile.readAll().toStdString() + "\n#line 1\n";
-            auto const versionHeader = fmt::format("#version {}\n", useOpenGLES() ? "300 es" : "330");
+            auto const versionHeader = std::format("#version {}\n", useOpenGLES() ? "300 es" : "330");
 
             auto const shaderFilePath = ":/contour/display/shaders/" + filename;
 

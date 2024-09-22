@@ -8,9 +8,8 @@
 
 #include <vtpty/UnixUtils.h>
 
-#include <fmt/format.h>
-
 #include <csignal>
+#include <format>
 #include <iostream>
 
 #if defined(__APPLE__)
@@ -188,7 +187,7 @@ struct MouseTracker final: public BasicParserEvents
         checkPassiveMouseTrackingSupport();
         while (_running)
         {
-            writeToTTY(fmt::format("\rMouse position {}:{}, 0x{:X}, {} ({})\033[K",
+            writeToTTY(std::format("\rMouse position {}:{}, 0x{:X}, {} ({})\033[K",
                                    line,
                                    column,
                                    mouseButton,
@@ -214,7 +213,7 @@ struct MouseTracker final: public BasicParserEvents
             }
         }();
 
-        return fmt::format("{}; {} .. {}", mode, selection.from, selection.to);
+        return std::format("{}; {} .. {}", mode, selection.from, selection.to);
     }
 
     void checkPassiveMouseTrackingSupport()
@@ -225,7 +224,7 @@ struct MouseTracker final: public BasicParserEvents
 
         auto const state = _decrpm.value().second;
         auto const supported = state == 1 || state == 2;
-        fmt::print("Passive mouse tracking: {}\n", supported ? "supported" : "not supported");
+        std::cout << std::format("Passive mouse tracking: {}\n", supported ? "supported" : "not supported");
     }
 
     void writeToTTY(string_view s) noexcept { ::write(STDOUT_FILENO, s.data(), s.size()); }

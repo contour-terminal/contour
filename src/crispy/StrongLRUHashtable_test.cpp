@@ -406,7 +406,7 @@ TEST_CASE("strong_lru_hashtable.peek", "")
 
     for (int i = 1; i <= 4; ++i)
     {
-        INFO(fmt::format("i: {}", i));
+        INFO(std::format("i: {}", i));
         REQUIRE(cache.peek(h(1)) == 2);
         REQUIRE(joinHumanReadable(cache.hashes()) == sh(4, 3, 2, 1));
     }

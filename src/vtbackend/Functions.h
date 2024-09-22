@@ -7,12 +7,11 @@
 #include <crispy/escape.h>
 #include <crispy/sort.h>
 
-#include <fmt/format.h>
-
 #include <gsl/pointers>
 #include <gsl/span>
 
 #include <array>
+#include <format>
 #include <optional>
 #include <string>
 
@@ -203,7 +202,7 @@ struct Function
         if constexpr (sizeof...(Args) > 0)
         {
             result.reserve(sizeof...(Args) * 4);
-            ((result += fmt::format("{};", std::forward<Args>(parameters))), ...);
+            ((result += std::format("{};", std::forward<Args>(parameters))), ...);
             result.pop_back(); // remove trailing ';'
         }
         if (intermediate)
@@ -927,10 +926,9 @@ struct std::hash<vtbackend::Function>
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<vtbackend::FunctionCategory>: fmt::formatter<std::string_view>
+struct std::formatter<vtbackend::FunctionCategory>: std::formatter<std::string_view>
 {
-    auto format(const vtbackend::FunctionCategory value,
-                format_context& ctx) const -> format_context::iterator
+    auto format(const vtbackend::FunctionCategory value, auto& ctx) const
     {
         using vtbackend::FunctionCategory;
         string_view name;
@@ -962,43 +960,43 @@ struct fmt::formatter<vtbackend::FunctionCategory>: fmt::formatter<std::string_v
 };
 
 template <>
-struct fmt::formatter<vtbackend::Function>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::Function>: std::formatter<std::string>
 {
-    auto format(const vtbackend::Function f, format_context& ctx) const -> format_context::iterator
+    auto format(const vtbackend::Function f, auto& ctx) const
     {
         std::string value;
         switch (f.category)
         {
             case vtbackend::FunctionCategory::C0:
-                value = fmt::format("{}", crispy::escape(static_cast<uint8_t>(f.finalSymbol)));
+                value = std::format("{}", crispy::escape(static_cast<uint8_t>(f.finalSymbol)));
                 break;
             case vtbackend::FunctionCategory::ESC:
-                value = fmt::format("{} {} {}",
+                value = std::format("{} {} {}",
                                     f.category,
                                     f.intermediate ? f.intermediate : ' ',
                                     f.finalSymbol ? f.finalSymbol : ' ');
                 break;
             case vtbackend::FunctionCategory::OSC:
-                value = fmt::format("{} {}", f.category, f.maximumParameters);
+                value = std::format("{} {}", f.category, f.maximumParameters);
                 break;
             case vtbackend::FunctionCategory::DCS:
             case vtbackend::FunctionCategory::CSI:
                 if (f.minimumParameters == f.maximumParameters)
-                    value = fmt::format("{} {} {}    {} {}",
+                    value = std::format("{} {} {}    {} {}",
                                         f.category,
                                         f.leader ? f.leader : ' ',
                                         f.minimumParameters,
                                         f.intermediate ? f.intermediate : ' ',
                                         f.finalSymbol);
                 else if (f.maximumParameters == vtbackend::ArgsMax)
-                    value = fmt::format("{} {} {}..  {} {}",
+                    value = std::format("{} {} {}..  {} {}",
                                         f.category,
                                         f.leader ? f.leader : ' ',
                                         f.minimumParameters,
                                         f.intermediate ? f.intermediate : ' ',
                                         f.finalSymbol);
                 else
-                    value = fmt::format("{} {} {}..{} {} {}",
+                    value = std::format("{} {} {}..{} {} {}",
                                         f.category,
                                         f.leader ? f.leader : ' ',
                                         f.minimumParameters,
@@ -1012,19 +1010,19 @@ struct fmt::formatter<vtbackend::Function>: fmt::formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<vtbackend::FunctionSelector>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::FunctionSelector>: std::formatter<std::string>
 {
-    auto format(const vtbackend::FunctionSelector f, format_context& ctx) const -> format_context::iterator
+    auto format(const vtbackend::FunctionSelector f, auto& ctx) const
     {
         std::string value;
         // clang-format off
         switch (f.category)
         {
             case vtbackend::FunctionCategory::OSC:
-                value = fmt::format("{} {}", f.category, f.argc);
+                value = std::format("{} {}", f.category, f.argc);
                 break;
             default:
-                value = fmt::format("{} {} {} {} {}",
+                value = std::format("{} {} {} {} {}",
                                     f.category,
                                     f.leader ? f.leader : ' ',
                                     f.argc,

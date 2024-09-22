@@ -718,14 +718,14 @@ TEST_CASE("Linefeed", "[screen]")
     SECTION("with scroll-up")
     {
         INFO("init:");
-        INFO(fmt::format("  line 1: '{}'", screen.grid().lineText(LineOffset(0))));
-        INFO(fmt::format("  line 2: '{}'", screen.grid().lineText(LineOffset(1))));
+        INFO(std::format("  line 1: '{}'", screen.grid().lineText(LineOffset(0))));
+        INFO(std::format("  line 2: '{}'", screen.grid().lineText(LineOffset(1))));
 
         mock.writeToScreen("1\r\n2");
 
         INFO("after writing '1\\n2':");
-        INFO(fmt::format("  line 1: '{}'", screen.grid().lineText(LineOffset(0))));
-        INFO(fmt::format("  line 2: '{}'", screen.grid().lineText(LineOffset(1))));
+        INFO(std::format("  line 1: '{}'", screen.grid().lineText(LineOffset(0))));
+        INFO(std::format("  line 2: '{}'", screen.grid().lineText(LineOffset(1))));
 
         REQUIRE("1 " == screen.grid().lineText(LineOffset(0)));
         REQUIRE("2 " == screen.grid().lineText(LineOffset(1)));
@@ -733,8 +733,8 @@ TEST_CASE("Linefeed", "[screen]")
         mock.writeToScreen("\r\n3"); // line 3
 
         INFO("After writing '\\n3':");
-        INFO(fmt::format("  line 1: '{}'", screen.grid().lineText(LineOffset(0))));
-        INFO(fmt::format("  line 2: '{}'", screen.grid().lineText(LineOffset(1))));
+        INFO(std::format("  line 1: '{}'", screen.grid().lineText(LineOffset(0))));
+        INFO(std::format("  line 2: '{}'", screen.grid().lineText(LineOffset(1))));
 
         REQUIRE("2 " == screen.grid().lineText(LineOffset(0)));
         REQUIRE("3 " == screen.grid().lineText(LineOffset(1)));
@@ -1158,14 +1158,13 @@ TEST_CASE("DECSEL-0", "[screen]")
     // Erasing from the cursor position forwards to the end of the current line.
     for (auto const param: { "0"sv, ""sv })
     {
-        INFO(fmt::format("param: \"{}\"", param));
+        INFO(std::format("param: \"{}\"", param));
         auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
         auto& screen = mock.terminal.primaryScreen();
-        mock.writeToScreen(
-            fmt::format("AB{on}CDE{off}F", fmt::arg("on", "\033[1\"q"), fmt::arg("off", "\033[2\"q")));
+        mock.writeToScreen(std::format("AB{}CDE{}F", "\033[1\"q", "\033[2\"q"));
         REQUIRE("ABCDEF" == screen.grid().lineText(LineOffset(0)));
         mock.writeToScreen("\033[1;2H");
-        mock.writeToScreen(fmt::format("\033[?{}K", param));
+        mock.writeToScreen(std::format("\033[?{}K", param));
         REQUIRE("A CDE " == screen.grid().lineText(LineOffset(0)));
     }
 }
@@ -1175,8 +1174,7 @@ TEST_CASE("DECSEL-1", "[screen]")
     // Erasing from the cursor position backwards to the beginning of the current line.
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
     auto& screen = mock.terminal.primaryScreen();
-    mock.writeToScreen(
-        fmt::format("A{on}BCD{off}EF", fmt::arg("on", "\033[1\"q"), fmt::arg("off", "\033[2\"q")));
+    mock.writeToScreen(std::format("A{}BCD{}EF", "\033[1\"q", "\033[2\"q"));
     REQUIRE("ABCDEF" == screen.grid().lineText(LineOffset(0)));
 
     mock.writeToScreen("\033[1;5H");
@@ -1191,15 +1189,13 @@ TEST_CASE("DECSEL-2", "[screen]")
     mock.writeToScreen("ABCD");
     REQUIRE("ABCD" == screen.grid().lineText(LineOffset(0)));
 
-    mock.writeToScreen(
-        fmt::format("\ra{on}bc{off}d\r", fmt::arg("on", "\033[1\"q"), fmt::arg("off", "\033[2\"q")));
+    mock.writeToScreen(std::format("\ra{}bc{}d\r", "\033[1\"q", "\033[2\"q"));
     REQUIRE("abcd" == screen.grid().lineText(LineOffset(0)));
 
     mock.writeToScreen("\033[?2K");
     REQUIRE(" bc " == screen.grid().lineText(LineOffset(0)));
 
-    mock.writeToScreen(fmt::format(
-        "\r{on}A{off}BC{on}D", fmt::arg("on", "\033[1\"q"), fmt::arg("off", "\033[2\"q"))); // DECSCA 2
+    mock.writeToScreen(std::format("\r{0}A{1}BC{0}D", "\033[1\"q", "\033[2\"q")); // DECSCA 2
     REQUIRE("ABCD" == screen.grid().lineText(LineOffset(0)));
     mock.writeToScreen("\033[?2K");
     REQUIRE("A  D" == screen.grid().lineText(LineOffset(0)));
@@ -1214,16 +1210,16 @@ TEST_CASE("DECSED-0", "[screen]")
         auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
         auto& screen = mock.terminal.primaryScreen();
 
-        mock.writeToScreen(fmt::format("{on}A{off}B{on}C{off}\r\n"
-                                       "D{on}E{off}F\r\n"
-                                       "{on}G{off}H{on}I{off}",
-                                       fmt::arg("on", "\033[1\"q"),
-                                       fmt::arg("off", "\033[2\"q")));
+        mock.writeToScreen(std::format("{0}A{1}B{0}C{1}\r\n"
+                                       "D{0}E{1}F\r\n"
+                                       "{0}G{1}H{0}I{1}",
+                                       "\033[1\"q",
+                                       "\033[2\"q"));
 
         REQUIRE(e(mainPageText(screen)) == "ABC\\nDEF\\nGHI\\n");
 
         mock.writeToScreen("\033[2;2H");
-        mock.writeToScreen(fmt::format("\033[?{}J", param));
+        mock.writeToScreen(std::format("\033[?{}J", param));
         REQUIRE(e(mainPageText(screen)) == "ABC\\nDE \\nG I\\n");
     }
 }
@@ -1233,11 +1229,11 @@ TEST_CASE("DECSED-1", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    mock.writeToScreen(fmt::format("{on}A{off}B{on}C{off}\r\n"
-                                   "D{on}E{off}F\r\n"
-                                   "{on}G{off}H{on}I{off}",
-                                   fmt::arg("on", "\033[1\"q"),
-                                   fmt::arg("off", "\033[2\"q")));
+    mock.writeToScreen(std::format("{0}A{1}B{0}C{1}\r\n"
+                                   "D{0}E{1}F\r\n"
+                                   "{0}G{1}H{0}I{1}",
+                                   "\033[1\"q",
+                                   "\033[2\"q"));
 
     REQUIRE(e(mainPageText(screen)) == "ABC\\nDEF\\nGHI\\n");
 
@@ -1251,11 +1247,11 @@ TEST_CASE("DECSED-2", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    mock.writeToScreen(fmt::format("{on}A{off}B{on}C{off}\r\n"
-                                   "D{on}E{off}F\r\n"
-                                   "{on}G{off}H{on}I{off}",
-                                   fmt::arg("on", "\033[1\"q"),
-                                   fmt::arg("off", "\033[2\"q")));
+    mock.writeToScreen(std::format("{0}A{1}B{0}C{1}\r\n"
+                                   "D{0}E{1}F\r\n"
+                                   "{0}G{1}H{0}I{1}",
+                                   "\033[1\"q",
+                                   "\033[2\"q"));
 
     REQUIRE(e(mainPageText(screen)) == "ABC\\nDEF\\nGHI\\n");
 
@@ -1271,11 +1267,11 @@ TEST_CASE("DECSERA-all-defaults", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    mock.writeToScreen(fmt::format("{on}A{off}B{on}C{off}\r\n"
-                                   "D{on}E{off}F\r\n"
-                                   "{on}G{off}H{on}I{off}",
-                                   fmt::arg("on", "\033[1\"q"),
-                                   fmt::arg("off", "\033[2\"q")));
+    mock.writeToScreen(std::format("{0}A{1}B{0}C{1}\r\n"
+                                   "D{0}E{1}F\r\n"
+                                   "{0}G{1}H{0}I{1}",
+                                   "\033[1\"q",
+                                   "\033[2\"q"));
 
     REQUIRE(e(mainPageText(screen)) == "ABC\\nDEF\\nGHI\\n");
 
@@ -1288,11 +1284,11 @@ TEST_CASE("DECSERA", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    mock.writeToScreen(fmt::format("{on}A{off}B{on}C{off}\r\n"
-                                   "D{on}E{off}F\r\n"
-                                   "{on}G{off}H{on}I{off}",
-                                   fmt::arg("on", "\033[1\"q"),
-                                   fmt::arg("off", "\033[2\"q")));
+    mock.writeToScreen(std::format("{0}A{1}B{0}C{1}\r\n"
+                                   "D{0}E{1}F\r\n"
+                                   "{0}G{1}H{0}I{1}",
+                                   "\033[1\"q",
+                                   "\033[2\"q"));
 
     REQUIRE(e(mainPageText(screen)) == "ABC\\nDEF\\nGHI\\n");
 
@@ -2563,7 +2559,7 @@ TEST_CASE("RequestMode", "[screen]")
         mock.terminal.setMode(AnsiMode::Insert, true); // IRM
         screen.requestAnsiMode((unsigned) AnsiMode::Insert);
         REQUIRE(e(mock.terminal.peekInput())
-                == e(fmt::format("\033[{};1$y", toAnsiModeNum(AnsiMode::Insert))));
+                == e(std::format("\033[{};1$y", toAnsiModeNum(AnsiMode::Insert))));
     }
 
     SECTION("ANSI modes: disabled")
@@ -2571,7 +2567,7 @@ TEST_CASE("RequestMode", "[screen]")
         mock.terminal.setMode(AnsiMode::Insert, false); // IRM
         screen.requestAnsiMode((unsigned) AnsiMode::Insert);
         REQUIRE(e(mock.terminal.peekInput())
-                == e(fmt::format("\033[{};2$y", toAnsiModeNum(AnsiMode::Insert))));
+                == e(std::format("\033[{};2$y", toAnsiModeNum(AnsiMode::Insert))));
     }
 
     SECTION("ANSI modes: unknown")
@@ -2579,7 +2575,7 @@ TEST_CASE("RequestMode", "[screen]")
         auto const m = static_cast<AnsiMode>(1234);
         mock.terminal.setMode(m, true); // DECOM
         screen.requestAnsiMode((unsigned) m);
-        REQUIRE(e(mock.terminal.peekInput()) == e(fmt::format("\033[{};0$y", toAnsiModeNum(m))));
+        REQUIRE(e(mock.terminal.peekInput()) == e(std::format("\033[{};0$y", toAnsiModeNum(m))));
     }
 
     SECTION("DEC modes: enabled")
@@ -2587,7 +2583,7 @@ TEST_CASE("RequestMode", "[screen]")
         mock.terminal.setMode(DECMode::Origin, true); // DECOM
         screen.requestDECMode((int) DECMode::Origin);
         REQUIRE(e(mock.terminal.peekInput())
-                == e(fmt::format("\033[?{};1$y", toDECModeNum(DECMode::Origin))));
+                == e(std::format("\033[?{};1$y", toDECModeNum(DECMode::Origin))));
     }
 
     SECTION("DEC modes: disabled")
@@ -2595,7 +2591,7 @@ TEST_CASE("RequestMode", "[screen]")
         mock.terminal.setMode(DECMode::Origin, false); // DECOM
         screen.requestDECMode((int) DECMode::Origin);
         REQUIRE(e(mock.terminal.peekInput())
-                == e(fmt::format("\033[?{};2$y", toDECModeNum(DECMode::Origin))));
+                == e(std::format("\033[?{};2$y", toDECModeNum(DECMode::Origin))));
     }
 
     SECTION("DEC modes: unknown")
@@ -2603,7 +2599,7 @@ TEST_CASE("RequestMode", "[screen]")
         auto const m = static_cast<DECMode>(1234);
         mock.terminal.setMode(m, true); // DECOM
         screen.requestDECMode(static_cast<unsigned>(m));
-        REQUIRE(e(mock.terminal.peekInput()) == e(fmt::format("\033[?{};0$y", toDECModeNum(m))));
+        REQUIRE(e(mock.terminal.peekInput()) == e(std::format("\033[?{};0$y", toDECModeNum(m))));
     }
 }
 
@@ -2957,12 +2953,12 @@ TEST_CASE("searchReverse", "[screen]")
     auto& screen = mock.terminal.primaryScreen();
     auto const cursorPosition = screen.cursor().position;
 
-    INFO(fmt::format("cursor pos {}", cursorPosition));
+    INFO(std::format("cursor pos {}", cursorPosition));
 
     // for (bool const inflate: { false, true })
     for (bool const inflate: { true })
     {
-        INFO(fmt::format("Perform tests via {}", inflate ? "inflated buffer" : "trivial buffer"));
+        INFO(std::format("Perform tests via {}", inflate ? "inflated buffer" : "trivial buffer"));
         if (inflate)
             for (auto lineOffset = LineOffset(-3); lineOffset < LineOffset(3); ++lineOffset)
                 (void) screen.grid().lineAt(lineOffset).inflatedBuffer();
@@ -3277,9 +3273,9 @@ TEST_CASE("OSC.4")
 TEST_CASE("XTGETTCAP")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto const queryStr = fmt::format("\033P+q{:02X}{:02X}{:02X}\033\\", 'R', 'G', 'B');
+    auto const queryStr = std::format("\033P+q{:02X}{:02X}{:02X}\033\\", 'R', 'G', 'B');
     mock.writeToScreen(queryStr);
-    INFO(fmt::format("Reply data: {}", mock.terminal.peekInput()));
+    INFO(std::format("Reply data: {}", mock.terminal.peekInput()));
     // "\033P1+r8/8/8\033\\"
     // TODO: CHECK(...)
 }
@@ -3449,7 +3445,7 @@ TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
     // copy up by one line (4 to 3), 2 lines
     // copy left by one column (3 to 2), 2 columns
 
-    auto const deccraSeq = fmt::format(
+    auto const deccraSeq = std::format(
         "\033[{};{};{};{};{};{};{};{}$v", STop, SLeft, SBottom, SRightt, Page, TTop, TLeftt, Page);
     mock.writeToScreen(deccraSeq);
 
@@ -3480,7 +3476,7 @@ TEST_CASE("DECCRA.Right.intersecting", "[screen]")
     auto constexpr SBottomRight = CellLocation { LineOffset(3), ColumnOffset(3) };
     auto constexpr TTopLeft = CellLocation { LineOffset(1), ColumnOffset(2) };
 
-    auto const deccraSeq = fmt::format("\033[{};{};{};{};{};{};{};{}$v",
+    auto const deccraSeq = std::format("\033[{};{};{};{};{};{};{};{}$v",
                                        STopLeft.line + 1,
                                        STopLeft.column + 1,
                                        SBottomRight.line + 1,
@@ -3518,7 +3514,7 @@ TEST_CASE("DECCRA.Left.intersecting", "[screen]")
     auto constexpr SBottomRight = CellLocation { LineOffset(2), ColumnOffset(5) };
     auto constexpr TTopLeft = CellLocation { LineOffset(1), ColumnOffset(2) };
 
-    auto const deccraSeq = fmt::format("\033[{};{};{};{};{};{};{};{}$v",
+    auto const deccraSeq = std::format("\033[{};{};{};{};{};{};{};{}$v",
                                        STopLeft.line + 1,
                                        STopLeft.column + 1,
                                        SBottomRight.line + 1,
@@ -3594,10 +3590,10 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
 
     for (auto line = LineOffset(-1); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
     {
-        INFO(fmt::format("line {}", line));
+        INFO(std::format("line {}", line));
         for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
         {
-            INFO(fmt::format("column {}", column));
+            INFO(std::format("column {}", column));
             auto const& cell = mock.terminal.primaryScreen().at(line, column);
             if (line <= LineOffset(9) && column <= ColumnOffset(9))
             {
@@ -3705,7 +3701,7 @@ TEST_CASE("LS1 and LS0", "[screen]")
         mock.writeToScreen(text);
         mock.terminal.tick(1s);
         mock.terminal.ensureFreshRenderBuffer();
-        logScreenText(mock.terminal.primaryScreen(), fmt::format("writeTickAndRender: {}", e(text)));
+        logScreenText(mock.terminal.primaryScreen(), std::format("writeTickAndRender: {}", e(text)));
     };
 
     REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetTable::G0, CharsetId::USASCII));

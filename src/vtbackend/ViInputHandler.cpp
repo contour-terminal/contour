@@ -179,18 +179,18 @@ void ViInputHandler::registerAllCommands()
 
         // operate on the full line, with yy or oo.
         registerCommand(ModeSelect::Normal,
-                        fmt::format("{}{}", key, key),
+                        std::format("{}{}", key, key),
                         [this, op]() { _executor->execute(op, ViMotion::FullLine, count()); });
 
         for (auto && [motionChars, motion]: MotionMappings)
         {
             // Passing motion as motion=motion (new variable) is yet another workaround for Clang 15 (Ubuntu) this time.
             registerCommand(ModeSelect::Normal,
-                            fmt::format("{}{}", key, motionChars),
+                            std::format("{}{}", key, motionChars),
                             [this, op, motion=motion]() { _executor->execute(op, motion, count()); });
         }
 
-        auto const s3 = [key](char ch) { return fmt::format("{}{}.", key, ch); };
+        auto const s3 = [key](char ch) { return std::format("{}{}.", key, ch); };
         registerCommand(ModeSelect::Normal, s3('t'), [this, op]() { _executor->execute(op, ViMotion::TillBeforeCharRight, count(), _lastChar); });
         registerCommand(ModeSelect::Normal, s3('T'), [this, op]() { _executor->execute(op, ViMotion::TillAfterCharLeft, count(), _lastChar); });
         registerCommand(ModeSelect::Normal, s3('f'), [this, op]() { _executor->execute(op, ViMotion::ToCharRight, count(), _lastChar); });
@@ -203,10 +203,10 @@ void ViInputHandler::registerAllCommands()
         for (auto const& [objectChar, obj]: TextObjectMappings)
         {
             registerCommand(ModeSelect::Normal,
-                            fmt::format("y{}{}", scopeChar, objectChar),
+                            std::format("y{}{}", scopeChar, objectChar),
                             [this, scope = scope, obj = obj]() { _executor->yank(scope, obj); });
             registerCommand(ModeSelect::Normal,
-                            fmt::format("o{}{}", scopeChar, objectChar),
+                            std::format("o{}{}", scopeChar, objectChar),
                             [this, scope = scope, obj = obj]() { _executor->open(scope, obj); });
         }
     }
@@ -226,7 +226,7 @@ void ViInputHandler::registerAllCommands()
     for (auto const& [scopeChar, scope]: ScopeMappings)
         for (auto const& [objectChar, obj]: TextObjectMappings)
             registerCommand(ModeSelect::Visual,
-                            fmt::format("{}{}", scopeChar, objectChar),
+                            std::format("{}{}", scopeChar, objectChar),
                             [this, scope = scope, obj = obj]() { _executor->select(scope, obj); });
 }
 
@@ -286,7 +286,7 @@ void ViInputHandler::handlePendingInput()
     auto const mappingResult = mapping.search(_pendingInput, TrieMapAllowWildcardDot);
     if (std::holds_alternative<crispy::exact_match<CommandHandler>>(mappingResult))
     {
-        inputLog()("Executing handler for: {}{}", _count ? fmt::format("{} ", _count) : "", _pendingInput);
+        inputLog()("Executing handler for: {}{}", _count ? std::format("{} ", _count) : "", _pendingInput);
         _lastChar =
             unicode::convert_to<char32_t>(std::string_view(_pendingInput.data(), _pendingInput.size()))
                 .back();

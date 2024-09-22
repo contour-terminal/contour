@@ -5,14 +5,13 @@
 
 #include <crispy/logstore.h>
 
-#include <fmt/format.h>
-
 #include <range/v3/view/filter.hpp>
 #include <range/v3/view/iota.hpp>
 #include <range/v3/view/zip.hpp>
 
 #include <array>
 #include <cstdint>
+#include <format>
 
 using namespace std::string_view_literals;
 
@@ -130,7 +129,7 @@ namespace detail
             auto const w = unbox(imageSize.width);
             auto const h = unbox(imageSize.height);
 
-            // fmt::print("{}.drawArc: size={}\n", arc, imageSize);
+            // std::cout << std::format("{}.drawArc: size={}\n", arc, imageSize);
             auto const putpixel = [&](int x, int y, uint8_t alpha = 0xFFu) {
                 auto const fy = clamp((unsigned) y, 0u, h - 1);
                 auto const fx = clamp((unsigned) x, 0u, w - 1);
@@ -871,7 +870,7 @@ namespace detail
             auto const x1 = x0 + 1;
             auto const y1 = y0 + 1;
 
-            // fmt::print("- block sextant pos {}: x={} y={} x0={} y0={} x1={} y1={}\n",
+            // std::cout << std::format("- block sextant pos {}: x={} y={} x0={} y0={} x1={} y1={}\n",
             //            position, x, y, x0, y0, x1, y1);
 
             fillBlock(image, size, { x0 / 2_th, y0 / 3_th }, { x1 / 2_th, y1 / 3_th }, [](int, int) {

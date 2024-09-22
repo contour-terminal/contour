@@ -349,7 +349,7 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
 
     if (auto const t = Table.transitions[s][static_cast<uint8_t>(ch)]; t != State::Undefined)
     {
-        // fmt::print("VTParser: Transitioning from {} to {}", _state, t);
+        // std::cout << std::format("VTParser: Transitioning from {} to {}", _state, t);
         handle(ActionClass::Leave, Table.exitEvents[s], ch);
         handle(ActionClass::Transition, Table.events[s][static_cast<size_t>(ch)], ch);
         _state = t;

@@ -64,7 +64,7 @@ class SequenceParameters
 
     [[nodiscard]] std::string subParameterBitString() const
     {
-        return fmt::format("{:016b}: ", _subParameterTest);
+        return std::format("{:016b}: ", _subParameterTest);
     }
 
     [[nodiscard]] constexpr gsl::span<std::uint16_t> range() noexcept

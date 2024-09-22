@@ -166,7 +166,7 @@ TEST_CASE("InputGenerator.Modifier+ArrowKeys", "[terminal,input]")
     {
         auto input = InputGenerator {};
         input.generate(mapping.key, mapping.modifiers, KeyboardEventType::Press);
-        INFO(fmt::format("Testing {}+{} => {}", mapping.modifiers, mapping.key, escape(mapping.expected)));
+        INFO(std::format("Testing {}+{} => {}", mapping.modifiers, mapping.key, escape(mapping.expected)));
         REQUIRE(escape(input.peek()) == escape(mapping.expected));
     }
 }
@@ -175,7 +175,7 @@ TEST_CASE("InputGenerator.all(Ctrl + A..Z)", "[terminal,input]")
 {
     for (char ch = 'A'; ch <= 'Z'; ++ch)
     {
-        INFO(fmt::format("Testing Ctrl+{}", ch));
+        INFO(std::format("Testing Ctrl+{}", ch));
         auto input = InputGenerator {};
         input.generate(static_cast<char32_t>(ch), Modifier::Control, KeyboardEventType::Press);
         auto const c0 = string(1, static_cast<char>(ch - 'A' + 1));

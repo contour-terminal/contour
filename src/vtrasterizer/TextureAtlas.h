@@ -8,9 +8,8 @@
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/assert.h>
 
-#include <fmt/format.h>
-
 #include <cstdint>
+#include <format>
 #include <variant> // monostate
 #include <vector>
 
@@ -371,7 +370,7 @@ struct DirectMappingAllocator
 
         uint32_t const baseIndex = currentlyAllocatedCount;
         currentlyAllocatedCount += count;
-        // fmt::print("DirectMappingAllocator.allocate: {} .. {} (#{})\n",
+        // std::cout << std::format("DirectMappingAllocator.allocate: {} .. {} (#{})\n",
         //            baseIndex, baseIndex + count - 1, count);
         return DirectMapping<Metadata> { baseIndex, count };
     }
@@ -462,7 +461,7 @@ inline vtbackend::ImageSize computeAtlasSize(AtlasProperties const& atlasPropert
         squareEdgeCount * unbox(atlasProperties.tileSize.height))));
     // clang-format on
 
-    // fmt::print("computeAtlasSize: tiles {}+{}={} -> texture size {}x{} (tile size {})\n",
+    // std::cout << std::format("computeAtlasSize: tiles {}+{}={} -> texture size {}x{} (tile size {})\n",
     //            atlasProperties.tileCount,
     //            atlasProperties.directMappingCount,
     //            totalTileCount,
@@ -503,7 +502,7 @@ TextureAtlas<Metadata>::TextureAtlas(AtlasBackend& backend, AtlasProperties atla
     Require(_atlasProperties.tileCount.value <= _tileCache->capacity());
     Require(_atlasProperties.directMappingCount + _atlasProperties.tileCount.value <= _tilesInX * _tilesInY);
 
-    // fmt::print("TextureAtlas: tiles {}x{} (locations: {} >= {}) texture {}; props {}\n",
+    // std::cout << std::format("TextureAtlas: tiles {}x{} (locations: {} >= {}) texture {}; props {}\n",
     //            _tilesInX,
     //            _tilesInY,
     //            _tileLocations.size(),
@@ -667,11 +666,11 @@ void TextureAtlas<Metadata>::setDirectMapping(uint32_t tileIndex, TileCreateData
 template <typename Metadata>
 void TextureAtlas<Metadata>::inspect(std::ostream& output) const
 {
-    output << fmt::format("TextureAtlas\n");
-    output << fmt::format("------------------------\n");
-    output << fmt::format("atlas size     : {}\n", _atlasSize);
-    output << fmt::format("tile size      : {}\n", _atlasProperties.tileSize);
-    output << fmt::format("direct mapped  : {}\n", _atlasProperties.directMappingCount);
+    output << std::format("TextureAtlas\n");
+    output << std::format("------------------------\n");
+    output << std::format("atlas size     : {}\n", _atlasSize);
+    output << std::format("tile size      : {}\n", _atlasProperties.tileSize);
+    output << std::format("direct mapped  : {}\n", _atlasProperties.directMappingCount);
     output << '\n';
     _tileCache->inspect(output);
 }
@@ -682,9 +681,9 @@ void TextureAtlas<Metadata>::inspect(std::ostream& output) const
 
 // {{{ fmt support
 template <>
-struct fmt::formatter<vtrasterizer::atlas::Format>: formatter<std::string_view>
+struct std::formatter<vtrasterizer::atlas::Format>: formatter<std::string_view>
 {
-    auto format(vtrasterizer::atlas::Format value, format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::atlas::Format value, auto& ctx) const
     {
         std::string_view name;
         switch (value)
@@ -698,33 +697,30 @@ struct fmt::formatter<vtrasterizer::atlas::Format>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtrasterizer::atlas::TileLocation>: fmt::formatter<std::string>
+struct std::formatter<vtrasterizer::atlas::TileLocation>: std::formatter<std::string>
 {
-    auto format(vtrasterizer::atlas::TileLocation value,
-                format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::atlas::TileLocation value, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("Tile {}x+{}y", value.x.value, value.y.value), ctx);
+        return formatter<std::string>::format(std::format("Tile {}x+{}y", value.x.value, value.y.value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtrasterizer::atlas::RenderTile>: fmt::formatter<std::string>
+struct std::formatter<vtrasterizer::atlas::RenderTile>: std::formatter<std::string>
 {
-    auto format(vtrasterizer::atlas::RenderTile const& value,
-                format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::atlas::RenderTile const& value, auto& ctx) const
     {
         return formatter<std::string>::format(
-            fmt::format("RenderTile({}x + {}y, {})", value.x.value, value.y.value, value.tileLocation), ctx);
+            std::format("RenderTile({}x + {}y, {})", value.x.value, value.y.value, value.tileLocation), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtrasterizer::atlas::AtlasProperties>: fmt::formatter<std::string>
+struct std::formatter<vtrasterizer::atlas::AtlasProperties>: std::formatter<std::string>
 {
-    auto format(vtrasterizer::atlas::AtlasProperties const& value,
-                format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::atlas::AtlasProperties const& value, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("tile size {}, format {}, direct-mapped {}",
+        return formatter<std::string>::format(std::format("tile size {}, format {}, direct-mapped {}",
                                                           value.tileSize,
                                                           value.format,
                                                           value.directMappingCount),

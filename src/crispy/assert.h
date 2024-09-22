@@ -3,10 +3,10 @@
 
 #include <crispy/logstore.h>
 
-#include <fmt/format.h>
-
 #include <exception>
+#include <format>
 #include <functional>
+#include <iostream>
 #include <string_view>
 
 namespace crispy
@@ -64,7 +64,7 @@ namespace detail
             if (fail_handler())
                 fail_handler()(text, message, file, line);
             else
-                fmt::print("[{}:{}] {} {}\n", file, line, message, text);
+                std::cerr << std::format("[{}:{}] {} {}\n", file, line, message, text);
         }
         catch (...) // NOLINT(bugprone-empty-catch)
         {
@@ -85,9 +85,9 @@ inline void set_fail_handler(fail_handler_t handler)
 /// This method prints an error message and then terminates the program.
 [[noreturn]] inline void todo(std::string_view message = {})
 {
-    fmt::print("TODO: We have reached some code that is missing an implementation.\n");
+    std::cerr << std::format("TODO: We have reached some code that is missing an implementation.\n");
     if (!message.empty())
-        fmt::print("{}\n", message);
+        std::cerr << std::format("{}\n", message);
     std::abort();
 }
 

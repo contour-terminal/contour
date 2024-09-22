@@ -6,9 +6,8 @@
 #include <crispy/BufferObject.h>
 #include <crispy/overloaded.h>
 
-#include <fmt/format.h>
-
 #include <filesystem>
+#include <format>
 #include <map>
 #include <memory>
 #include <optional>
@@ -110,27 +109,26 @@ class [[nodiscard]] Process: public Pty
 } // namespace vtpty
 
 template <>
-struct fmt::formatter<vtpty::Process::ExitStatus>: fmt::formatter<std::string>
+struct std::formatter<vtpty::Process::ExitStatus>: std::formatter<std::string>
 {
-    auto format(vtpty::Process::ExitStatus const& status,
-                format_context& ctx) const -> format_context::iterator
+    auto format(vtpty::Process::ExitStatus const& status, auto& ctx) const
     {
         auto const text =
             std::visit(overloaded { [&](vtpty::Process::NormalExit exit) {
-                                       return fmt::format("{} (normal exit)", exit.exitCode);
+                                       return std::format("{} (normal exit)", exit.exitCode);
                                    },
                                     [&](vtpty::Process::SignalExit exit) {
                                         char buf[256];
 #if defined(_WIN32)
                                         strerror_s(buf, sizeof(buf), errno);
-                                        return fmt::format("{} (signal number {})", buf, exit.signum);
+                                        return std::format("{} (signal number {})", buf, exit.signum);
 #else
-                                        return fmt::format("{} (signal number {})",
+                                        return std::format("{} (signal number {})",
                                                            strerror_r(errno, buf, sizeof(buf)),
                                                            exit.signum);
 #endif
                                     } },
                        status);
-        return fmt::formatter<std::string>::format(text, ctx);
+        return std::formatter<std::string>::format(text, ctx);
     }
 };

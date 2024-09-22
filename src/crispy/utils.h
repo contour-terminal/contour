@@ -3,13 +3,12 @@
 #include <crispy/defines.h>
 #include <crispy/escape.h>
 
-#include <fmt/format.h>
-
 #include <range/v3/view/iota.hpp>
 #include <range/v3/view/transform.hpp>
 
 #include <algorithm>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <mutex>
@@ -99,7 +98,7 @@ std::string joinHumanReadable(std::vector<T> const& list, std::string_view sep =
     {
         if (i != 0)
             result << sep;
-        result << fmt::format("{}", T(list[i]));
+        result << std::format("{}", T(list[i]));
     }
     return result.str();
 }
@@ -112,7 +111,7 @@ std::string joinHumanReadableQuoted(std::vector<T> const& list, U sep = ", ")
     {
         if (i != 0)
             result << sep;
-        result << '"' << crispy::escape(fmt::format("{}", list[i])) << '"';
+        result << '"' << crispy::escape(std::format("{}", list[i])) << '"';
     }
     return result.str();
 }
@@ -366,7 +365,7 @@ std::basic_string<T> toHexString(std::basic_string_view<T> input)
     std::basic_string<T> output;
 
     for (T const ch: input)
-        output += fmt::format("{:02X}", static_cast<unsigned>(ch));
+        output += std::format("{:02X}", static_cast<unsigned>(ch));
 
     return output;
 }
@@ -531,18 +530,18 @@ constexpr T nextPowerOfTwo(T v) noexcept
 inline std::string humanReadableBytes(uint64_t bytes)
 {
     if (bytes <= 1024)
-        return fmt::format("{} bytes", unsigned(bytes));
+        return std::format("{} bytes", unsigned(bytes));
 
     auto const kb = static_cast<long double>(bytes) / 1024.0;
     if (kb <= 1024.0)
-        return fmt::format("{:.03} KB", kb);
+        return std::format("{:.03} KB", kb);
 
     auto const mb = kb / 1024.0;
     if (mb <= 1024.0)
-        return fmt::format("{:.03} MB", mb);
+        return std::format("{:.03} MB", mb);
 
     auto const gb = mb / 1024.0;
-    return fmt::format("{:.03} GB", gb);
+    return std::format("{:.03} GB", gb);
 }
 
 template <typename... Ts>

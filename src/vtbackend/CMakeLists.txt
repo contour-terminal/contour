@@ -97,7 +97,6 @@ target_link_libraries(vtbackend PUBLIC
     Microsoft.GSL::GSL
     Threads::Threads
     crispy::core
-    fmt::fmt-header-only
     range-v3::range-v3
     unicode::unicode
     vtparser
@@ -132,7 +131,7 @@ if(LIBTERMINAL_TESTING)
         SixelParser_test.cpp
         ViCommands_test.cpp
     )
-    target_link_libraries(vtbackend_test fmt::fmt-header-only Catch2::Catch2WithMain vtbackend)
+    target_link_libraries(vtbackend_test Catch2::Catch2WithMain vtbackend)
     add_test(vtbackend_test ./vtbackend_test)
 
     if (LIBTERMINAL_BUILD_BENCH_HEADLESS)
@@ -146,7 +145,6 @@ if(LIBTERMINAL_TESTING)
         )
 
         target_link_libraries(bench-headless
-            fmt::fmt-header-only
             termbench::termbench
             vtbackend
         )

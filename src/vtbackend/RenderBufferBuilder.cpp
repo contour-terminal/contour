@@ -323,7 +323,7 @@ template <CellConcept Cell>
 void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset)
 {
     // if (lineBuffer.text.size())
-    //     fmt::print("Rendering trivial line {:2} 0..{}/{} ({} bytes): \"{}\"\n",
+    //     std::cout << std::format("Rendering trivial line {:2} 0..{}/{} ({} bytes): \"{}\"\n",
     //                lineOffset.value,
     //                lineBuffer.usedColumns,
     //                lineBuffer.displayWidth,
@@ -515,7 +515,7 @@ ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPositio
                                                 textAttributes.foregroundColor,
                                                 textAttributes.backgroundColor);
         auto const width = graphemeClusterWidth(graphemeCluster);
-        // fmt::print(" start {}, count {}, bytes {}, grapheme cluster \"{}\"\n",
+        // std::cout << std::format(" start {}, count {}, bytes {}, grapheme cluster \"{}\"\n",
         //            columnOffset,
         //            width,
         //            unicode::convert_to<char>(u32string_view(graphemeCluster)).size(),

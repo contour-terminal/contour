@@ -100,7 +100,7 @@ TEST_CASE("Line.inflate", "[Line]")
     for (size_t i = 0; i < inflated.size(); ++i)
     {
         auto const& cell = inflated[i];
-        INFO(fmt::format("column {} codepoint {}", i, (char) cell.codepoint(0)));
+        INFO(std::format("column {} codepoint {}", i, (char) cell.codepoint(0)));
         CHECK(cell.foregroundColor() == sgr.foregroundColor);
         CHECK(cell.backgroundColor() == sgr.backgroundColor);
         CHECK(cell.underlineColor() == sgr.underlineColor);
@@ -136,7 +136,7 @@ TEST_CASE("Line.inflate.Unicode", "[Line]")
     for (size_t i = 0, k = 0; i < inflated.size();)
     {
         auto const& cell = inflated[i];
-        INFO(fmt::format("column {}, k {}, codepoint U+{:X}", i, k, (unsigned) cell.codepoint(0)));
+        INFO(std::format("column {}, k {}, codepoint U+{:X}", i, k, (unsigned) cell.codepoint(0)));
         REQUIRE(cell.codepointCount() == 1);
         REQUIRE(cell.codepoint(0) == TestTextUtf32[k]);
         REQUIRE(cell.foregroundColor() == sgr.foregroundColor);
@@ -144,7 +144,7 @@ TEST_CASE("Line.inflate.Unicode", "[Line]")
         REQUIRE(cell.underlineColor() == sgr.underlineColor);
         for (int n = 1; n < cell.width(); ++n)
         {
-            INFO(fmt::format("column.sub: {}\n", n));
+            INFO(std::format("column.sub: {}\n", n));
             auto const& fillCell = inflated.at(i + static_cast<size_t>(n));
             REQUIRE(fillCell.codepointCount() == 0);
             REQUIRE(fillCell.foregroundColor() == sgr.foregroundColor);

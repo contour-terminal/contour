@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <fmt/format.h>
-
 #include <array>
+#include <cstdint>
 
 namespace vtbackend
 {
 
 using CharsetMap = std::array<char32_t, 127>;
 
-enum class CharsetId : uint8_t
+enum class CharsetId : std::uint8_t
 {
     Special, // Special Character and Line Drawing Set
 
@@ -27,7 +26,7 @@ enum class CharsetId : uint8_t
     USASCII
 };
 
-enum class CharsetTable : uint8_t
+enum class CharsetTable : std::uint8_t
 {
     G0 = 0,
     G1 = 1,
@@ -75,7 +74,7 @@ class CharsetMapping
 
     [[nodiscard]] char32_t map(CharsetTable table, char code) const noexcept
     {
-        return (*_tables[static_cast<size_t>(table)])[static_cast<uint8_t>(code)];
+        return (*_tables[static_cast<std::size_t>(table)])[static_cast<std::uint8_t>(code)];
     }
 
     constexpr void singleShift(CharsetTable table) noexcept { _tableForNextGraphic = table; }
@@ -88,7 +87,7 @@ class CharsetMapping
 
     [[nodiscard]] bool isSelected(CharsetTable table, CharsetId id) const noexcept
     {
-        return _tables[static_cast<size_t>(table)] == charsetMap(id);
+        return _tables[static_cast<std::size_t>(table)] == charsetMap(id);
     }
 
     [[nodiscard]] bool isSelected(CharsetId id) const noexcept
@@ -99,7 +98,7 @@ class CharsetMapping
     // Selects a given designated character set into the table G0, G1, G2, or G3.
     void select(CharsetTable table, CharsetId id) noexcept
     {
-        _tables[static_cast<size_t>(table)] = charsetMap(id);
+        _tables[static_cast<std::size_t>(table)] = charsetMap(id);
     }
 
   private:

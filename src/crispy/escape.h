@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <fmt/format.h>
-
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <format>
 #include <iterator>
 #include <numeric>
 #include <string>
@@ -31,11 +31,11 @@ inline std::string escape(uint8_t ch, numeric_escape numericEscape = numeric_esc
         case '"': return "\\\"";
         default:
             if (0x20 <= ch && ch < 0x7E)
-                return fmt::format("{}", static_cast<char>(ch));
+                return std::format("{}", static_cast<char>(ch));
             else if (numericEscape == numeric_escape::Hex)
-                return fmt::format("\\x{:02x}", static_cast<uint8_t>(ch) & 0xFF);
+                return std::format("\\x{:02x}", static_cast<uint8_t>(ch) & 0xFF);
             else
-                return fmt::format("\\{:03o}", static_cast<uint8_t>(ch) & 0xFF);
+                return std::format("\\{:03o}", static_cast<uint8_t>(ch) & 0xFF);
     }
 }
 
@@ -62,7 +62,7 @@ inline std::string escapeMarkdown(T begin, T end)
     auto escapeMarkdown = [](uint8_t ch) -> std::string {
         if (ch == '`')
             return "``` ";
-        return fmt::format("{}", static_cast<char>(ch));
+        return std::format("{}", static_cast<char>(ch));
     };
     auto result = std::string {};
     for (T cur = begin; cur != end; ++cur)

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cmath>
+#include <format>
 
 #include <boxed-cpp/boxed.hpp>
 
@@ -89,10 +90,11 @@ constexpr ImageSize max(ImageSize a, ImageSize b) noexcept
 } // namespace vtpty
 
 template <>
-struct fmt::formatter<vtpty::ImageSize>: fmt::formatter<std::string>
+struct std::formatter<vtpty::ImageSize>: std::formatter<std::string>
 {
-    auto format(vtpty::ImageSize value, format_context& ctx) const -> format_context::iterator
+    auto format(vtpty::ImageSize value, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("{}x{}", value.width, value.height), ctx);
+        return formatter<std::string>::format(std::format("{}x{}", value.width.value, value.height.value),
+                                              ctx);
     }
 };

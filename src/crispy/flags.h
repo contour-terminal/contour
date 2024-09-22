@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <fmt/format.h>
+#include <format>
 
 namespace crispy
 {
@@ -142,9 +142,9 @@ class flags
 } // namespace crispy
 
 template <typename Enum>
-struct fmt::formatter<crispy::flags<Enum>>: public fmt::formatter<std::string>
+struct std::formatter<crispy::flags<Enum>>: public std::formatter<std::string>
 {
-    auto format(crispy::flags<Enum> const& flags, format_context& ctx) const -> format_context::iterator
+    auto format(crispy::flags<Enum> const& flags, auto& ctx) const
     {
         std::string result;
         for (auto i = 0u; i < sizeof(Enum) * 8; ++i)
@@ -154,7 +154,7 @@ struct fmt::formatter<crispy::flags<Enum>>: public fmt::formatter<std::string>
                 continue;
 
             // We assume that only valid enum values resulting into non-empty strings.
-            auto const element = fmt::format("{}", flag);
+            auto const element = std::format("{}", flag);
             if (element.empty())
                 continue;
 

@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/LRUCache.h>
 
-#include <fmt/format.h>
-
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
 #include <functional>
 #include <iostream>
 
@@ -16,10 +15,10 @@ using namespace std::string_view_literals;
 // {
 //     std::ostream& out = std::cout;
 //
-//     out << fmt::format("lru_cache({}/{}): {}\n", cache.size(), cache.capacity(), header);
+//     out << std::format("lru_cache({}/{}): {}\n", cache.size(), cache.capacity(), header);
 //     for (typename crispy::lru_cache<A, B>::Item const& item: cache)
 //     {
-//         out << fmt::format("{}: {}\n", item.key, item.value);
+//         out << std::format("{}: {}\n", item.key, item.value);
 //     }
 //     out << "\n";
 // }
@@ -33,7 +32,7 @@ static std::string join(std::vector<T> const& list, std::string_view delimiter =
         if (i)
             s += delimiter;
         auto val = list[i];
-        s += fmt::format("{}", val);
+        s += std::format("{}", val);
     }
     return s;
 }

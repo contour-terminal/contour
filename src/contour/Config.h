@@ -33,8 +33,6 @@
 #include <crispy/size.h>
 #include <crispy/utils.h>
 
-#include <fmt/core.h>
-
 #include <yaml-cpp/emitter.h>
 #include <yaml-cpp/node/detail/iterator_fwd.h>
 #include <yaml-cpp/ostream_wrapper.h>
@@ -49,6 +47,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -99,6 +98,11 @@ struct InputMappings
 
 namespace helper
 {
+    inline std::string replaceCommentPlaceholder(std::string const& docString)
+    {
+        return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "#");
+    }
+
     inline bool testMatchMode(uint8_t actualModeFlags,
                               vtbackend::MatchModes expected,
                               vtbackend::MatchModes::Flag testFlag)
@@ -936,13 +940,14 @@ struct Writer
     template <typename T>
     auto format(T v)
     {
-        return fmt::format("{}", v);
+        return std::format("{}", v);
     }
 
     template <typename... T>
     [[nodiscard]] std::string format(std::string_view doc, T... args)
     {
-        return fmt::format(fmt::runtime(doc), format(args)..., fmt::arg("comment", "#"));
+        return std::vformat(helper::replaceCommentPlaceholder(std::string(doc)),
+                            std::make_format_args(args...));
     }
 };
 
@@ -1009,7 +1014,7 @@ struct YAMLConfigWriter: Writer
     {
 
         auto result = std::string { "[" };
-        result.append(v | ranges::views::transform([](auto f) { return fmt::format("{}", f); })
+        result.append(v | ranges::views::transform([](auto f) { return std::format("{}", f); })
                       | ranges::views::join(", ") | ranges::to<std::string>);
         result.append("]");
         return result;
@@ -1025,7 +1030,7 @@ struct YAMLConfigWriter: Writer
                 continue;
 
             // We assume that only valid enum values resulting into non-empty strings.
-            auto const element = fmt::format("{}", flag);
+            auto const element = std::format("{}", flag);
             if (element.empty())
                 continue;
 
@@ -1075,12 +1080,12 @@ struct YAMLConfigWriter: Writer
     [[nodiscard]] std::string static format(vtbackend::CellRGBColor const& v)
     {
         if (std::holds_alternative<vtbackend::RGBColor>(v))
-            return fmt::format("'{}'", v);
+            return std::format("'{}'", v);
 
-        return fmt::format("{}", v);
+        return std::format("{}", v);
     }
 
-    [[nodiscard]] std::string static format(vtbackend::RGBColor const& v) { return fmt::format("'{}'", v); }
+    [[nodiscard]] std::string static format(vtbackend::RGBColor const& v) { return std::format("'{}'", v); }
 
     [[nodiscard]] std::string format(std::string_view doc, vtbackend::MaxHistoryLineCount v)
     {
@@ -1106,13 +1111,12 @@ struct YAMLConfigWriter: Writer
             return format(doc, simple->colorScheme);
         else if (auto* dual = get_if<DualColorConfig>(&v))
         {
-            return format(doc,
-                          fmt::format(fmt::runtime("\n"
-                                                   "    light: {}\n"
-                                                   "    dark: {}\n"
-                                                   "\n"),
-                                      dual->colorSchemeLight,
-                                      dual->colorSchemeDark));
+            auto const formattedValue = std::format("\n"
+                                                    "    light: {}\n"
+                                                    "    dark: {}\n",
+                                                    dual->colorSchemeLight,
+                                                    dual->colorSchemeDark);
+            return format(doc, formattedValue);
         }
 
         return format(doc, "BAD");
@@ -1165,9 +1169,9 @@ std::string defaultConfigFilePath();
 // {{{ fmtlib custom formatter support
 
 template <>
-struct fmt::formatter<contour::config::Permission>: formatter<std::string_view>
+struct std::formatter<contour::config::Permission>: formatter<std::string_view>
 {
-    auto format(contour::config::Permission value, format_context& ctx) const
+    auto format(contour::config::Permission value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -1181,27 +1185,27 @@ struct fmt::formatter<contour::config::Permission>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::Opacity>: formatter<float>
+struct std::formatter<vtbackend::Opacity>: formatter<float>
 {
-    auto format(vtbackend::Opacity value, format_context& ctx) const
+    auto format(vtbackend::Opacity value, auto& ctx) const
     {
         return formatter<float>::format(static_cast<float>(value) / std::numeric_limits<uint8_t>::max(), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<crispy::strong_hashtable_size>: formatter<uint>
+struct std::formatter<crispy::strong_hashtable_size>: formatter<uint>
 {
-    auto format(crispy::strong_hashtable_size value, format_context& ctx) const
+    auto format(crispy::strong_hashtable_size value, auto& ctx) const
     {
         return formatter<uint>::format(value.value, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtbackend::StatusDisplayPosition>: formatter<std::string_view>
+struct std::formatter<vtbackend::StatusDisplayPosition>: formatter<std::string_view>
 {
-    auto format(vtbackend::StatusDisplayPosition value, format_context& ctx) const
+    auto format(vtbackend::StatusDisplayPosition value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -1214,9 +1218,9 @@ struct fmt::formatter<vtbackend::StatusDisplayPosition>: formatter<std::string_v
 };
 
 template <>
-struct fmt::formatter<vtbackend::BackgroundImage>: formatter<std::string_view>
+struct std::formatter<vtbackend::BackgroundImage>: formatter<std::string_view>
 {
-    auto format(vtbackend::BackgroundImage value, format_context& ctx) const
+    auto format(vtbackend::BackgroundImage value, auto& ctx) const
     {
         if (auto* loc = std::get_if<std::filesystem::path>(&value.location))
             return formatter<string_view>::format(loc->string(), ctx);
@@ -1225,9 +1229,9 @@ struct fmt::formatter<vtbackend::BackgroundImage>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::StatusDisplayType>: formatter<std::string_view>
+struct std::formatter<vtbackend::StatusDisplayType>: formatter<std::string_view>
 {
-    auto format(vtbackend::StatusDisplayType value, format_context& ctx) const
+    auto format(vtbackend::StatusDisplayType value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -1241,29 +1245,29 @@ struct fmt::formatter<vtbackend::StatusDisplayType>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<crispy::lru_capacity>: formatter<uint>
+struct std::formatter<crispy::lru_capacity>: formatter<uint>
 {
-    auto format(crispy::lru_capacity value, format_context& ctx) const
+    auto format(crispy::lru_capacity value, auto& ctx) const
     {
         return formatter<uint>::format(value.value, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<std::set<std::basic_string<char>>>: formatter<std::string_view>
+struct std::formatter<std::set<std::basic_string<char>>>: formatter<std::string_view>
 {
-    auto format(std::set<std::basic_string<char>> value, format_context& ctx) const
+    auto format(std::set<std::basic_string<char>> value, auto& ctx) const
     {
         auto result = std::string {};
-        result.append(value | ranges::views::join(", ") | ranges::to<std::string>);
+        result.append(value | ::ranges::views::join(", ") | ::ranges::to<std::string>);
         return formatter<std::string_view>::format(result, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<contour::config::SelectionAction>: formatter<std::string_view>
+struct std::formatter<contour::config::SelectionAction>: formatter<std::string_view>
 {
-    auto format(contour::config::SelectionAction value, format_context& ctx) const
+    auto format(contour::config::SelectionAction value, auto& ctx) const
     {
         std::string_view name;
         switch (value)
@@ -1279,9 +1283,9 @@ struct fmt::formatter<contour::config::SelectionAction>: formatter<std::string_v
 };
 
 template <>
-struct fmt::formatter<contour::config::ScrollBarPosition>: formatter<std::string_view>
+struct std::formatter<contour::config::ScrollBarPosition>: formatter<std::string_view>
 {
-    auto format(contour::config::ScrollBarPosition value, format_context& ctx) const
+    auto format(contour::config::ScrollBarPosition value, auto& ctx) const
     {
         std::string_view name;
         switch (value)
@@ -1295,9 +1299,9 @@ struct fmt::formatter<contour::config::ScrollBarPosition>: formatter<std::string
 };
 
 template <>
-struct fmt::formatter<contour::config::RenderingBackend>: formatter<std::string_view>
+struct std::formatter<contour::config::RenderingBackend>: formatter<std::string_view>
 {
-    auto format(contour::config::RenderingBackend const& val, fmt::format_context& ctx) const
+    auto format(contour::config::RenderingBackend const& val, auto& ctx) const
     {
         std::string_view name;
         switch (val)
@@ -1311,22 +1315,22 @@ struct fmt::formatter<contour::config::RenderingBackend>: formatter<std::string_
 };
 
 template <>
-struct fmt::formatter<contour::config::WindowMargins>: public fmt::formatter<std::string>
+struct std::formatter<contour::config::WindowMargins>: public std::formatter<std::string>
 {
     using WindowMargins = contour::config::WindowMargins;
-    auto format(WindowMargins margins, format_context& ctx) const -> format_context::iterator
+    auto format(WindowMargins margins, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("{}x+{}y", margins.horizontal, margins.vertical),
+        return formatter<std::string>::format(std::format("{}x+{}y", margins.horizontal, margins.vertical),
                                               ctx);
     }
 };
 
 template <typename T, contour::config::documentation::StringLiteral D>
-struct fmt::formatter<contour::config::ConfigEntry<T, D>>
+struct std::formatter<contour::config::ConfigEntry<T, D>>
 {
-    auto format(contour::config::ConfigEntry<T, D> const& c, fmt::format_context& ctx) const
+    auto format(contour::config::ConfigEntry<T, D> const& c, auto& ctx) const
     {
-        return fmt::format_to(ctx.out(), "{}", c.value());
+        return std::format_to(ctx.out(), "{}", c.value());
     }
 };
 // }}}

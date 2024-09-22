@@ -1,8 +1,8 @@
 #include <crispy/interpolated_string.h>
 
-#include <fmt/format.h>
-
 #include <catch2/catch_test_macros.hpp>
+
+#include <format>
 
 TEST_CASE("interpolated_string.parse_interpolation")
 {

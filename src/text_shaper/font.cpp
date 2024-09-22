@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <text_shaper/font.h>
 
-#include <fmt/format.h>
+#include <format>
 
 using std::string;
 using std::string_view;
@@ -13,10 +13,10 @@ string font_description::toPattern() const
 {
     string m;
     if (weight != font_weight::normal)
-        m = fmt::format(" {}", weight);
+        m = std::format(" {}", weight);
     if (slant != font_slant::normal)
-        m = fmt::format(" {}", slant);
-    return fmt::format("{}{}", familyName, m);
+        m = std::format(" {}", slant);
+    return std::format("{}{}", familyName, m);
 }
 
 font_description font_description::parse(string_view pattern)

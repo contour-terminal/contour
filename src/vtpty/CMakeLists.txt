@@ -13,7 +13,7 @@ if(EXISTS "/.flatpak-info")
     set(CONTOUR_WITH_UTEMPTER OFF)
 endif()
 
-set(vtpty_LIBRARIES crispy::core fmt::fmt-header-only Microsoft.GSL::GSL)
+set(vtpty_LIBRARIES crispy::core Microsoft.GSL::GSL)
 
 set(vtpty_SOURCES
     MockPty.cpp

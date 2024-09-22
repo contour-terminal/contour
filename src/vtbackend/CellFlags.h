@@ -3,9 +3,8 @@
 
 #include <crispy/flags.h>
 
-#include <fmt/format.h>
-
 #include <cstdint>
+#include <format>
 
 namespace vtbackend
 {
@@ -40,9 +39,9 @@ using CellFlags = crispy::flags<CellFlag>;
 
 // {{{
 template <>
-struct fmt::formatter<vtbackend::CellFlag>: fmt::formatter<std::string_view>
+struct std::formatter<vtbackend::CellFlag>: std::formatter<std::string_view>
 {
-    auto format(const vtbackend::CellFlag value, format_context& ctx) const -> format_context::iterator
+    auto format(const vtbackend::CellFlag value, auto& ctx) const
     {
         string_view s;
 
