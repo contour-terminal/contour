@@ -77,6 +77,7 @@ struct TraceLeave{};
 struct TraceStep{};
 struct ViNormalMode{};
 struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
+struct CreateNewTab{};
 // CloseTab
 // FocusNextTab
 // FocusPreviousTab
@@ -131,7 +132,8 @@ using Action = std::variant<CancelSelection,
                             TraceLeave,
                             TraceStep,
                             ViNormalMode,
-                            WriteScreen>;
+                            WriteScreen,
+                            CreateNewTab>;
 
 std::optional<Action> fromString(std::string const& name);
 
@@ -241,6 +243,7 @@ namespace documentation
     constexpr inline std::string_view WriteScreen {
         "Writes VT sequence in `chars` member to the screen (bypassing the application)."
     };
+    constexpr inline std::string_view CreateNewTab { "Creates a new tab in the terminal emulator." };
 } // namespace documentation
 
 inline auto getDocumentation()
@@ -295,6 +298,7 @@ inline auto getDocumentation()
         std::tuple { Action { TraceStep {} }, documentation::TraceStep },
         std::tuple { Action { ViNormalMode {} }, documentation::ViNormalMode },
         std::tuple { Action { WriteScreen {} }, documentation::WriteScreen },
+        std::tuple { Action { CreateNewTab {} }, documentation::CreateNewTab },
     };
 }
 
@@ -361,6 +365,7 @@ DECLARE_ACTION_FMT(TraceLeave)
 DECLARE_ACTION_FMT(TraceStep)
 DECLARE_ACTION_FMT(ViNormalMode)
 DECLARE_ACTION_FMT(WriteScreen)
+DECLARE_ACTION_FMT(CreateNewTab)
 // }}}
 #undef DECLARE_ACTION_FMT
 
@@ -424,6 +429,7 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(TraceLeave);
         HANDLE_ACTION(TraceStep);
         HANDLE_ACTION(ViNormalMode);
+        HANDLE_ACTION(CreateNewTab);
         if (std::holds_alternative<contour::actions::WriteScreen>(_action))
         {
             const auto writeScreenAction = std::get<contour::actions::WriteScreen>(_action);

@@ -353,6 +353,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::TraceStep);
     bool operator()(actions::ViNormalMode);
     bool operator()(actions::WriteScreen const& event);
+    bool operator()(actions::CreateNewTab);
 
     void scheduleRedraw();
 
@@ -395,6 +396,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void requestPermissionForShowHostWritableStatusLine();
     void showNotification(QString const& title, QString const& content);
     void fontSizeChanged();
+    void createNewTab();
 
   public slots:
     void onConfigReload();

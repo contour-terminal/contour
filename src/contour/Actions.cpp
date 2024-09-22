@@ -77,6 +77,7 @@ optional<Action> fromString(string const& name)
         mapAction<actions::TraceStep>("TraceStep"),
         mapAction<actions::ViNormalMode>("ViNormalMode"),
         mapAction<actions::WriteScreen>("WriteScreen"),
+        mapAction<actions::CreateNewTab>("CreateNewTab"),
     };
 
     auto const lowerCaseName = toLower(name);

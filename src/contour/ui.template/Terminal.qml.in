@@ -205,6 +205,11 @@ ContourTerminal
         sizeWidgetText.font.pointSize = vtWidget.session.fontSize
     }
 
+
+    function onCreateNewTab() {
+        vtWidget.session = terminalSessions.createSession();
+    }
+
     onSessionChanged: (s) => {
         let vt = vtWidget.session;
 
@@ -213,6 +218,9 @@ ContourTerminal
 
         // Connect alert control of the window
         vt.onAlert.connect(doAlert);
+
+        // Connect to the function to handle the creation of new tab.
+        vt.createNewTab.connect(onCreateNewTab);
 
         // Link showNotification signal.
         vt.onShowNotification.connect(vtWidget.showNotification);

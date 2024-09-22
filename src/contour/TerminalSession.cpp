@@ -1358,6 +1358,13 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
     terminal().writeToScreen(event.chars);
     return true;
 }
+
+bool TerminalSession::operator()(actions::CreateNewTab)
+{
+    emit createNewTab();
+    return true;
+}
+
 // }}}
 // {{{ implementation helpers
 void TerminalSession::setDefaultCursor()
