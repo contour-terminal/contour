@@ -22,6 +22,8 @@ AppDir:
         key_url: 'http://keyserver.ubuntu.com/pks/lookup?op=get&search=0x871920D1991BC93C'
 
     include:
+    - glibc-source:amd64
+    - glibc-tools:amd64
     - libbz2-1.0:amd64
     - libc-bin
     - libcap2:amd64
@@ -55,7 +57,14 @@ AppDir:
     - libutempter-dev:amd64
     - libssh2-1:amd64
     - libx11-xcb1:amd64
+    - libxcb1
+    - libxcb-render-util0
+    - libxcb-sync1
+    - libxcb-xinerama0
+    - libxcb-xkb1
+    - libxcursor1
     - gstreamer1.0-plugins-base
+    - gstreamer1.0-plugins-good
 
   files:
     include:
