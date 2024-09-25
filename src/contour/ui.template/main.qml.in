@@ -36,21 +36,6 @@ ApplicationWindow
         onOpacityChanged: appWindow.applyOpacity()
     }
 
-    TabBar {
-        id: bar
-        width: parent.width
-        TabButton {
-            text: qsTr("1")
-        }
-        TabButton {
-            text: qsTr("2")
-        }
-        onCurrentIndexChanged: {
-            print("currentIndex changed to", currentIndex)
-            terminalSessions.setSession(currentIndex)
-        }
-    }
-
     onWidthChanged : function() {
         vtui.width = width
         vtui.session.adaptToWidgetSize()

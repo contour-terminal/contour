@@ -1365,6 +1365,24 @@ bool TerminalSession::operator()(actions::CreateNewTab)
     return true;
 }
 
+bool TerminalSession::operator()(actions::CloseTab)
+{
+    emit closeTab();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::PreviousTab)
+{
+    std::cout << " TerminalSession::PreviousTab\n";
+    emit previousTab();
+    return true;
+}
+bool TerminalSession::operator()(actions::NextTab)
+{
+    emit nextTab();
+    return true;
+}
+
 // }}}
 // {{{ implementation helpers
 void TerminalSession::setDefaultCursor()

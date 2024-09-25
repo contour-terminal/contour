@@ -7,6 +7,7 @@
 #include <QtCore/QAbstractListModel>
 #include <QtQml/QQmlEngine>
 
+#include <chrono>
 #include <vector>
 
 namespace contour
@@ -27,21 +28,11 @@ class TerminalSessionManager: public QAbstractListModel
     TerminalSessionManager(ContourGuiApp& app);
 
     Q_INVOKABLE contour::TerminalSession* createSession();
+    Q_INVOKABLE void addSession();
 
-    Q_INVOKABLE void setSession(size_t index)
-    {
-        _activeSession->detachDisplay(*display);
-        if (index + 1 < _sessions.size())
-        {
-            _activeSession = _sessions[index];
-        }
-        else
-        {
-            auto* session = createSession();
-            _activeSession = session;
-        }
-        display->setSession(_activeSession);
-    }
+    Q_INVOKABLE void previousTab();
+    Q_INVOKABLE void nextTab();
+    Q_INVOKABLE void setSession(size_t index);
 
     void removeSession(TerminalSession&);
 
@@ -62,6 +53,8 @@ class TerminalSessionManager: public QAbstractListModel
     std::chrono::seconds _earlyExitThreshold;
     TerminalSession* _activeSession = nullptr;
     std::vector<TerminalSession*> _sessions;
+    std::chrono::time_point<std::chrono::steady_clock> _lastTabSwitch;
+    std::chrono::milliseconds _timeBetweenTabSwitches { 200 };
 };
 
 } // namespace contour

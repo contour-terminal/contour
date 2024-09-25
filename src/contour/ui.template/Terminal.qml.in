@@ -16,6 +16,12 @@ ContourTerminal
 
     session: terminalSessions.createSession()
 
+    signal previousTab
+    signal nextTab
+    signal closeTab
+
+    onPreviousTab: terminalSessions.previousTab()
+    onNextTab: terminalSessions.nextTab()
 
     Rectangle {
         id : backgroundColor
@@ -205,10 +211,16 @@ ContourTerminal
         sizeWidgetText.font.pointSize = vtWidget.session.fontSize
     }
 
-
     function onCreateNewTab() {
-        vtWidget.session = terminalSessions.createSession();
+        terminalSessions.addSession();
     }
+
+    function delay(duration) { // In milliseconds
+    var timeStart = new Date().getTime();
+        while (new Date().getTime() - timeStart < duration) {
+    }
+    }
+
 
     onSessionChanged: (s) => {
         let vt = vtWidget.session;
@@ -218,9 +230,6 @@ ContourTerminal
 
         // Connect alert control of the window
         vt.onAlert.connect(doAlert);
-
-        // Connect to the function to handle the creation of new tab.
-        vt.createNewTab.connect(onCreateNewTab);
 
         // Link showNotification signal.
         vt.onShowNotification.connect(vtWidget.showNotification);
@@ -251,5 +260,11 @@ ContourTerminal
         vt.requestPermissionForBufferCapture.connect(requestBufferCaptureDialog.open);
         vt.requestPermissionForShowHostWritableStatusLine.connect(requestShowHostWritableStatusLine.open);
         forceActiveFocus();
+
+        // TAB handling
+        vt.createNewTab.connect(onCreateNewTab);
+        vt.closeTab.connect(closeTab);
+        vt.previousTab.connect(previousTab);
+        vt.nextTab.connect(nextTab);
     }
 }

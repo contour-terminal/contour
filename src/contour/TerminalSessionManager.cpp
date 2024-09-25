@@ -55,6 +55,69 @@ TerminalSession* TerminalSessionManager::createSession()
     return session;
 }
 
+void TerminalSessionManager::setSession(size_t index)
+{
+
+    // QML for some reason sends multiple switch requests in a row, so we need to ignore them.
+    auto now = std::chrono::steady_clock::now();
+    if (now - _lastTabSwitch < _timeBetweenTabSwitches)
+    {
+        std::cout << "Ignoring switch request due to too frequent switch requests." << std::endl;
+        return;
+    }
+    _lastTabSwitch = now;
+
+    std::cout << "Switching to session " << index << std::endl;
+    _activeSession->detachDisplay(*display);
+    if (index + 1 < _sessions.size())
+    {
+        _activeSession = _sessions[index];
+    }
+    else
+    {
+        auto* session = createSession();
+        _activeSession = session;
+    }
+    display->setSession(_activeSession);
+}
+
+void TerminalSessionManager::addSession()
+{
+    setSession(_sessions.size());
+}
+
+void TerminalSessionManager::previousTab()
+{
+    auto currentSessionIndex = [](auto const& sessions, auto const& activeSession) {
+        auto i = std::find_if(sessions.begin(), sessions.end(), [&](auto p) { return p == activeSession; });
+        return i != sessions.end() ? i - sessions.begin() : -1;
+    }(_sessions, _activeSession);
+    std::cout << "PREVIOUS: ";
+    std::cout << "currentSessionIndex: " << currentSessionIndex << ", _sessions.size(): " << _sessions.size()
+              << std::endl;
+
+    if (currentSessionIndex > 0)
+    {
+        setSession(currentSessionIndex - 1);
+    }
+}
+
+void TerminalSessionManager::nextTab()
+{
+    auto currentSessionIndex = [](auto const& sessions, auto const& activeSession) {
+        auto i = std::find_if(sessions.begin(), sessions.end(), [&](auto p) { return p == activeSession; });
+        return i != sessions.end() ? i - sessions.begin() : -1;
+    }(_sessions, _activeSession);
+
+    std::cout << "NEXT TAB: ";
+    std::cout << "currentSessionIndex: " << currentSessionIndex << ", _sessions.size(): " << _sessions.size()
+              << std::endl;
+    if (currentSessionIndex + 1 < _sessions.size())
+    {
+        setSession(currentSessionIndex + 1);
+    }
+}
+
 void TerminalSessionManager::removeSession(TerminalSession& thatSession)
 {
     _app.onExit(thatSession); // TODO: the logic behind that impl could probably be moved here.
