@@ -84,7 +84,7 @@ class TerminalDisplay: public QQuickItem
 
     [[nodiscard]] bool hasSession() const noexcept { return _session != nullptr; }
 
-    // NB: Use TerminalSession.attachDisplay, that one is calling this here.
+    // NB: Use TerminalSession.attachDisplay, that one is calling this here. TODO(PR) ?
     void setSession(TerminalSession* newSession);
 
     [[nodiscard]] TerminalSession& session() noexcept
@@ -205,17 +205,7 @@ class TerminalDisplay: public QQuickItem
         return unbox(terminal().currentScreen().historyLineCount());
     }
 
-  private:
-    // helper methods
-    //
-    void doDumpStateInternal();
-    void createRenderer();
-    [[nodiscard]] QMatrix4x4 createModelMatrix() const;
-    void configureScreenHooks();
-    void watchKdeDpiSetting();
-    [[nodiscard]] float uptime() const noexcept;
-
-    [[nodiscard]] vtbackend::PageSize calculatePageSize() const
+        [[nodiscard]] vtbackend::PageSize calculatePageSize() const
     {
         assert(_renderer);
         assert(_session);
@@ -228,6 +218,16 @@ class TerminalDisplay: public QQuickItem
             _renderer->gridMetrics().cellSize,
             applyContentScale(_session->profile().margins.value(), _session->contentScale()));
     }
+
+  private:
+    // helper methods
+    //
+    void doDumpStateInternal();
+    void createRenderer();
+    [[nodiscard]] QMatrix4x4 createModelMatrix() const;
+    void configureScreenHooks();
+    void watchKdeDpiSetting();
+    [[nodiscard]] float uptime() const noexcept;
 
     void updateMinimumSize();
     void updateImplicitSize();

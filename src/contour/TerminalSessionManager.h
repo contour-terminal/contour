@@ -54,7 +54,7 @@ class TerminalSessionManager: public QAbstractListModel
     TerminalSession* _activeSession = nullptr;
     std::vector<TerminalSession*> _sessions;
     std::chrono::time_point<std::chrono::steady_clock> _lastTabSwitch;
-    std::chrono::milliseconds _timeBetweenTabSwitches { 200 };
+    std::chrono::milliseconds _timeBetweenTabSwitches { 300 };
 };
 
 } // namespace contour

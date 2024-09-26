@@ -68,17 +68,37 @@ void TerminalSessionManager::setSession(size_t index)
     _lastTabSwitch = now;
 
     std::cout << "Switching to session " << index << std::endl;
+
+    auto imageSize = display->pixelSize();
+    auto pageSize = display->calculatePageSize();
     _activeSession->detachDisplay(*display);
-    if (index + 1 < _sessions.size())
+    if (index < _sessions.size())
     {
+        _sessions[index]->terminal().resizeScreen(pageSize);
         _activeSession = _sessions[index];
     }
     else
     {
         auto* session = createSession();
+        session->terminal().resizeScreen(pageSize);
         _activeSession = session;
     }
     display->setSession(_activeSession);
+    display->resizeWindow(imageSize.width, imageSize.height);
+
+    _activeSession->terminal().setGuiTabInfoForStatusLine([&]() {
+        std::string tabInfo;
+        for (size_t i = 0; i < _sessions.size(); ++i)
+        {
+            if (i == index)
+                tabInfo += "[";
+            tabInfo += std::to_string(i + 1);
+            if (i == index)
+                tabInfo += "]";
+            tabInfo += " ";
+        }
+        return tabInfo;
+    }());
 }
 
 void TerminalSessionManager::addSession()
@@ -112,7 +132,7 @@ void TerminalSessionManager::nextTab()
     std::cout << "NEXT TAB: ";
     std::cout << "currentSessionIndex: " << currentSessionIndex << ", _sessions.size(): " << _sessions.size()
               << std::endl;
-    if (currentSessionIndex + 1 < _sessions.size())
+    if (currentSessionIndex < _sessions.size() - 1)
     {
         setSession(currentSessionIndex + 1);
     }
