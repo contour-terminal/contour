@@ -3,8 +3,11 @@
 
 #include <contour/Config.h>
 #include <contour/ContourApp.h>
-#include <contour/TerminalSessionManager.h>
+#include <contour/TerminalSession.h>
 #include <contour/helper.h>
+
+#include <vtbackend/Terminal.h>
+#include <vtbackend/TerminalManager.h>
 
 #include <vtpty/Process.h>
 #include <vtpty/SshSession.h>
@@ -23,8 +26,6 @@ namespace config
 {
     struct Config;
 }
-
-class TerminalSession;
 
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp: public QObject, public ContourApp
@@ -64,8 +65,6 @@ class ContourGuiApp: public QObject, public ContourApp
 
     [[nodiscard]] bool liveConfig() const noexcept { return _config.live.value(); }
 
-    TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
-
     [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;
 
     [[nodiscard]] std::string programPath() const { return _argv[0]; }
@@ -75,6 +74,8 @@ class ContourGuiApp: public QObject, public ContourApp
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
   private:
+    std::unique_ptr<vtpty::Pty> createPty();
+
     static void ensureTermInfoFile();
     void setupQCoreApplication();
     bool loadConfig(std::string const& target);
@@ -83,7 +84,8 @@ class ContourGuiApp: public QObject, public ContourApp
     int checkConfig();
 
     config::Config _config;
-    TerminalSessionManager _sessionManager;
+    TerminalSession _terminalSession;            // GUI session, sitting on top of Terminal/TerminalManager
+    vtbackend::TerminalManager _terminalManager; // Represents one or more terminal instances (tabbed, etc.)
 
     int _argc = 0;
     char const** _argv = nullptr;

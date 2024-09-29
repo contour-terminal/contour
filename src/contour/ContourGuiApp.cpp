@@ -4,6 +4,9 @@
 #include <contour/display/TerminalDisplay.h>
 
 #include <vtpty/Process.h>
+#if defined(VTPTY_LIBSSH2)
+    #include <vtpty/SshSession.h>
+#endif
 
 #include <text_shaper/font_locator.h>
 
@@ -51,11 +54,86 @@ namespace CLI = crispy::cli;
 namespace contour
 {
 
-ContourGuiApp::ContourGuiApp(): _sessionManager(*this)
+namespace
+{
+    vtbackend::ColorPalette const* preferredColorPalette(config::ColorConfig const& config,
+                                                         vtbackend::ColorPreference preference)
+    {
+        if (auto const* dualColorConfig = std::get_if<config::DualColorConfig>(&config))
+        {
+            switch (preference)
+            {
+                case vtbackend::ColorPreference::Dark: return &dualColorConfig->darkMode;
+                case vtbackend::ColorPreference::Light: return &dualColorConfig->lightMode;
+            }
+        }
+        else if (auto const* simpleColorConfig = std::get_if<config::SimpleColorConfig>(&config))
+            return &simpleColorConfig->colors;
+
+        errorLog()("preferredColorPalette: Unknown color config type.");
+        return nullptr;
+    }
+
+    vtbackend::Settings createSettingsFromConfig(config::Config const& config,
+                                                 config::TerminalProfile const& profile,
+                                                 vtbackend::ColorPreference colorPreference)
+    {
+        auto settings = vtbackend::Settings {};
+
+        settings.pageSize = profile.terminalSize.value();
+        settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
+        settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
+        settings.maxHistoryLineCount = profile.maxHistoryLineCount.value();
+        settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset.value();
+        settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
+        settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
+        settings.cursorDisplay = profile.modeInsert.value().cursor.cursorDisplay;
+        settings.smoothLineScrolling = profile.smoothLineScrolling.value();
+        settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
+        settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
+        settings.maxImageSize = config.maxImageSize.value();
+        settings.maxImageRegisterCount = config.maxImageColorRegisters.value();
+        settings.statusDisplayType = profile.initialStatusDisplayType.value();
+        settings.statusDisplayPosition = profile.statusDisplayPosition.value();
+        settings.indicatorStatusLine.left = profile.indicatorStatusLineLeft.value();
+        settings.indicatorStatusLine.middle = profile.indicatorStatusLineMiddle.value();
+        settings.indicatorStatusLine.right = profile.indicatorStatusLineRight.value();
+        settings.syncWindowTitleWithHostWritableStatusDisplay =
+            profile.syncWindowTitleWithHostWritableStatusDisplay.value();
+        if (auto const* p = preferredColorPalette(profile.colors.value(), colorPreference))
+            settings.colorPalette = *p;
+        settings.primaryScreen.allowReflowOnResize = config.reflowOnResize.value();
+        settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord.value();
+        settings.highlightTimeout = profile.highlightTimeout.value();
+        settings.frozenModes = profile.frozenModes.value();
+
+        return settings;
+    }
+
+} // namespace
+
+ContourGuiApp::ContourGuiApp():
+    _terminalSession(*this),
+    _terminalManager(std::bind(&ContourGuiApp::createPty, this), _terminalSession)
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
     link("contour.info.config", bind(&ContourGuiApp::checkConfig, this));
+
+    if (auto const* profile = _config.profile(profileName()); profile)
+        _terminalManager.createTab(createPty(),
+                                   createSettingsFromConfig(_config, *profile, _colorPreference));
+}
+
+std::unique_ptr<vtpty::Pty> ContourGuiApp::createPty()
+{
+    auto const& profile = config().profile(profileName());
+#if defined(VTPTY_LIBSSH2)
+    if (!profile->ssh.value().hostname.empty())
+        return make_unique<vtpty::SshSession>(profile->ssh.value());
+#endif
+    return make_unique<vtpty::Process>(profile->shell.value(),
+                                       vtpty::createPty(profile->terminalSize.value(), std::nullopt));
 }
 
 int ContourGuiApp::run(int argc, char const* argv[])
@@ -419,7 +497,7 @@ int ContourGuiApp::terminalGuiAction()
 
         _colorPreference = newValue;
         displayLog()("Color preference changed to {} mode\n", _colorPreference);
-        sessionsManager().updateColorPreference(_colorPreference);
+        _terminalSession.updateColorPreference(_colorPreference);
     });
 #endif
 
@@ -439,14 +517,12 @@ int ContourGuiApp::terminalGuiAction()
     // clang-format off
     qmlRegisterType<display::TerminalDisplay>("Contour.Terminal", 1, 0, "ContourTerminal");
     qmlRegisterUncreatableType<TerminalSession>("Contour.Terminal", 1, 0, "TerminalSession", "Use factory.");
-    qmlRegisterUncreatableType<TerminalSessionManager>("Contour.Terminal", 1, 0, "TerminalSessionManager", "Do not use me directly.");
     qRegisterMetaType<TerminalSession*>("TerminalSession*");
     // clang-format on
 
     _qmlEngine = make_unique<QQmlApplicationEngine>();
 
     QQmlContext* context = _qmlEngine->rootContext();
-    context->setContextProperty("terminalSessions", &_sessionManager);
 
     // auto const HTS = "\033H";
     // auto const TBC = "\033[g";
@@ -553,7 +629,6 @@ void ContourGuiApp::ensureTermInfoFile()
 void ContourGuiApp::newWindow()
 {
     _qmlEngine->load(resolveResource("ui/main.qml"));
-    _sessionManager.display = _sessionManager.getSession()->display();
 }
 
 void ContourGuiApp::showNotification(std::string_view title, std::string_view content)

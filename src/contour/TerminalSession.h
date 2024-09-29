@@ -7,6 +7,7 @@
 #include <contour/helper.h>
 
 #include <vtbackend/Terminal.h>
+#include <vtbackend/TerminalManager.h>
 
 #include <vtrasterizer/Renderer.h>
 
@@ -19,7 +20,6 @@
 
 #include <cstdint>
 #include <format>
-#include <thread>
 
 #include <qcolor.h>
 
@@ -50,7 +50,7 @@ enum class GuardedRole : uint8_t
 using PermissionCache = std::map<GuardedRole, bool>;
 
 /**
- * Manages a single terminal session (Client, Terminal, Display)
+ * Manages a single terminal session (Client, Terminal/TerminalManager, Display)
  *
  * This class is designed to be working in:
  * - graphical displays (OpenGL, software rasterized)
@@ -113,7 +113,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     QString pathToBackground() const
     {
         if (const auto& p =
-                std::get_if<std::filesystem::path>(&(_terminal.colorPalette().backgroundImage->location)))
+                std::get_if<std::filesystem::path>(&(terminal().colorPalette().backgroundImage->location)))
         {
             return QString("file:") + QString(p->string().c_str());
         }
@@ -123,22 +123,22 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     QColor getBackgroundColor() const noexcept
     {
         auto color = terminal().isModeEnabled(vtbackend::DECMode::ReverseVideo)
-                         ? _terminal.colorPalette().defaultForeground
-                         : _terminal.colorPalette().defaultBackground;
+                         ? terminal().colorPalette().defaultForeground
+                         : terminal().colorPalette().defaultBackground;
         auto alpha = static_cast<uint8_t>(_profile.backgroundOpacity.value());
         return QColor(color.red, color.green, color.blue, alpha);
     }
     float getOpacityBackground() const noexcept
     {
-        if (_terminal.colorPalette().backgroundImage.get())
+        if (terminal().colorPalette().backgroundImage.get())
         {
-            return _terminal.colorPalette().backgroundImage->opacity;
+            return terminal().colorPalette().backgroundImage->opacity;
         }
         return 0.0;
     }
     bool getIsImageBackground() const noexcept
     {
-        if (_terminal.colorPalette().backgroundImage)
+        if (terminal().colorPalette().backgroundImage)
         {
             return true;
         }
@@ -149,7 +149,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         if (getIsImageBackground())
         {
-            return _terminal.colorPalette().backgroundImage->blur;
+            return terminal().colorPalette().backgroundImage->blur;
         }
         return false;
     }
@@ -182,13 +182,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     QString title() const;
     void setTitle(QString const& value) { terminal().setWindowTitle(value.toStdString()); }
 
-    int pageLineCount() const noexcept { return unbox(_terminal.pageSize().lines); }
+    int pageLineCount() const noexcept { return unbox(terminal().pageSize().lines); }
 
-    int pageColumnsCount() const noexcept { return unbox(_terminal.pageSize().columns); }
+    int pageColumnsCount() const noexcept { return unbox(terminal().pageSize().columns); }
 
     bool showResizeIndicator() const noexcept { return _config.profile().sizeIndicatorOnResize.value(); }
 
-    int historyLineCount() const noexcept { return unbox(_terminal.currentScreen().historyLineCount()); }
+    int historyLineCount() const noexcept { return unbox(terminal().currentScreen().historyLineCount()); }
 
     int scrollOffset() const noexcept { return unbox(terminal().viewport().scrollOffset()); }
     void setScrollOffset(int value)
@@ -214,13 +214,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
      * @param pty a PTY object (can be process, networked, mockup, ...)
      * @param display fronend display to render the terminal.
      */
-    TerminalSession(std::unique_ptr<vtpty::Pty> pty, ContourGuiApp& app);
+    explicit TerminalSession(ContourGuiApp& app);
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
-
-    /// Starts the VT background thread.
-    void start();
 
     /// Initiates termination of this session, regardless of the underlying terminal state.
     void terminate();
@@ -231,9 +228,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     double contentScale() const noexcept { return _contentScale; }
     void setContentScale(double value) noexcept { _contentScale = value; }
 
-    vtpty::Pty& pty() noexcept { return _terminal.device(); }
-    vtbackend::Terminal& terminal() noexcept { return _terminal; }
-    vtbackend::Terminal const& terminal() const noexcept { return _terminal; }
+    vtbackend::Terminal& terminal() noexcept { return _terminalManager.getActiveTerminal(); }
+    vtbackend::Terminal const& terminal() const noexcept { return _terminalManager.getActiveTerminal(); }
     vtbackend::ScreenType currentScreenType() const noexcept { return _currentScreenType; }
 
     display::TerminalDisplay* display() noexcept { return _display; }
@@ -415,6 +411,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
   private:
     // helpers
+    std::unique_ptr<vtpty::Pty> createPty();
     bool reloadConfig(config::Config newConfig, std::string const& profileName);
     int executeAllActions(std::vector<actions::Action> const& actions);
     bool executeAction(actions::Action const& action);
@@ -429,7 +426,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void configureCursor(config::CursorConfig const& cursorConfig);
     uint8_t matchModeFlags() const;
     void flushInput();
-    void mainLoop();
 
     // private data
     //
@@ -445,15 +441,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     int _accumulatedScrollX;
     int _accumulatedScrollY;
 
-    vtbackend::Terminal _terminal;
+    vtbackend::TerminalManager _terminalManager;
     bool _terminatedAndWaitingForKeyPress = false;
     display::TerminalDisplay* _display = nullptr;
 
     std::unique_ptr<QFileSystemWatcher> _configFileChangeWatcher;
 
     bool _terminating = false;
-    std::thread::id _mainLoopThreadID {};
-    std::unique_ptr<std::thread> _screenUpdateThread;
 
     // state vars
     //
@@ -473,7 +467,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::optional<CaptureBufferRequest> _pendingBufferCapture;
     std::optional<vtbackend::FontDef> _pendingFontChange;
     PermissionCache _rememberedPermissions;
-    std::unique_ptr<QThread> _exitWatcherThread;
 
     std::atomic<bool> _onClosedHandled = false;
     std::mutex _onClosedMutex;

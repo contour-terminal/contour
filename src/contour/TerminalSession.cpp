@@ -69,15 +69,6 @@ namespace
         return std::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
     }
 
-    void setThreadName(char const* name)
-    {
-#if defined(__APPLE__)
-        pthread_setname_np(name);
-#elif !defined(_WIN32)
-        pthread_setname_np(pthread_self(), name);
-#endif
-    }
-
     ColorPalette const* preferredColorPalette(config::ColorConfig const& config,
                                               vtbackend::ColorPreference preference)
     {
@@ -123,42 +114,6 @@ namespace
         return output;
     }
 
-    vtbackend::Settings createSettingsFromConfig(config::Config const& config,
-                                                 config::TerminalProfile const& profile,
-                                                 ColorPreference colorPreference)
-    {
-        auto settings = vtbackend::Settings {};
-
-        settings.pageSize = profile.terminalSize.value();
-        settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
-        settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
-        settings.maxHistoryLineCount = profile.maxHistoryLineCount.value();
-        settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset.value();
-        settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
-        settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
-        settings.cursorDisplay = profile.modeInsert.value().cursor.cursorDisplay;
-        settings.smoothLineScrolling = profile.smoothLineScrolling.value();
-        settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
-        settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
-        settings.maxImageSize = config.maxImageSize.value();
-        settings.maxImageRegisterCount = config.maxImageColorRegisters.value();
-        settings.statusDisplayType = profile.initialStatusDisplayType.value();
-        settings.statusDisplayPosition = profile.statusDisplayPosition.value();
-        settings.indicatorStatusLine.left = profile.indicatorStatusLineLeft.value();
-        settings.indicatorStatusLine.middle = profile.indicatorStatusLineMiddle.value();
-        settings.indicatorStatusLine.right = profile.indicatorStatusLineRight.value();
-        settings.syncWindowTitleWithHostWritableStatusDisplay =
-            profile.syncWindowTitleWithHostWritableStatusDisplay.value();
-        if (auto const* p = preferredColorPalette(profile.colors.value(), colorPreference))
-            settings.colorPalette = *p;
-        settings.primaryScreen.allowReflowOnResize = config.reflowOnResize.value();
-        settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord.value();
-        settings.highlightTimeout = profile.highlightTimeout.value();
-        settings.frozenModes = profile.frozenModes.value();
-
-        return settings;
-    }
-
     int createSessionId()
     {
         static int nextSessionId = 1;
@@ -184,7 +139,7 @@ namespace
 
 } // namespace
 
-TerminalSession::TerminalSession(unique_ptr<vtpty::Pty> pty, ContourGuiApp& app):
+TerminalSession::TerminalSession(ContourGuiApp& app):
     _id { createSessionId() },
     _startTime { steady_clock::now() },
     _config { app.config() },
@@ -194,11 +149,7 @@ TerminalSession::TerminalSession(unique_ptr<vtpty::Pty> pty, ContourGuiApp& app)
     _currentColorPreference { app.colorPreference() },
     _accumulatedScrollX { 0 },
     _accumulatedScrollY { 0 },
-    _terminal { *this,
-                std::move(pty),
-                createSettingsFromConfig(_config, _profile, _currentColorPreference),
-                std::chrono::steady_clock::now() },
-    _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) }
+    _terminalManager { std::bind(&TerminalSession::createPty, this), *this }
 {
     if (app.liveConfig())
     {
@@ -219,11 +170,18 @@ TerminalSession::~TerminalSession()
 {
     sessionLog()("Destroying terminal session.");
     _terminating = true;
-    _terminal.device().wakeupReader();
-    if (_exitWatcherThread->isRunning())
-        _exitWatcherThread->terminate();
-    if (_screenUpdateThread)
-        _screenUpdateThread->join();
+    _terminalManager.terminate();
+}
+
+std::unique_ptr<vtpty::Pty> TerminalSession::createPty()
+{
+    auto const& profile = config().profile(_app.profileName());
+#if defined(VTPTY_LIBSSH2)
+    if (!profile->ssh.value().hostname.empty())
+        return make_unique<vtpty::SshSession>(profile->ssh.value());
+#endif
+    return make_unique<vtpty::Process>(profile->shell.value(),
+                                       vtpty::createPty(profile->terminalSize.value(), std::nullopt));
 }
 
 void TerminalSession::detachDisplay(display::TerminalDisplay& display)
@@ -243,13 +201,13 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 
     {
         // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
-        auto const pixels = _display->cellSize() * _terminal.pageSize();
+        auto const pixels = _display->cellSize() * terminal().pageSize();
         // auto const pixels =
-        //     ImageSize { _display->cellSize().width * boxed_cast<Width>(_terminal.pageSize().columns),
-        //                 _display->cellSize().height * boxed_cast<Height>(_terminal.pageSize().lines) };
-        auto const l = scoped_lock { _terminal };
-        _terminal.resizeScreen(_terminal.pageSize(), pixels);
-        _terminal.setRefreshRate(_display->refreshRate());
+        //     ImageSize { _display->cellSize().width * boxed_cast<Width>(terminal().pageSize().columns),
+        //                 _display->cellSize().height * boxed_cast<Height>(terminal().pageSize().lines) };
+        auto const l = scoped_lock { terminal() };
+        terminal().resizeScreen(terminal().pageSize(), pixels);
+        terminal().setRefreshRate(_display->refreshRate());
     }
 
     {
@@ -261,42 +219,9 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 
 void TerminalSession::scheduleRedraw()
 {
-    _terminal.markScreenDirty();
+    terminal().markScreenDirty();
     if (_display)
         _display->scheduleRedraw();
-}
-
-void TerminalSession::start()
-{
-    sessionLog()("Starting terminal session.");
-    // ensure that we start only once
-    if (!_screenUpdateThread)
-    {
-        _terminal.device().start();
-        _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
-        _exitWatcherThread->start(QThread::LowPriority);
-    }
-}
-
-void TerminalSession::mainLoop()
-{
-    setThreadName("Terminal.Loop");
-
-    _mainLoopThreadID = this_thread::get_id();
-
-    sessionLog()("Starting main loop with thread id {}", [&]() {
-        stringstream sstr;
-        sstr << _mainLoopThreadID;
-        return sstr.str();
-    }());
-
-    while (!_terminating)
-    {
-        if (!_terminal.processInputOnce())
-            break;
-    }
-
-    sessionLog()("Event loop terminating (PTY {}).", _terminal.device().isClosed() ? "closed" : "open");
 }
 
 void TerminalSession::terminate()
@@ -339,9 +264,9 @@ void TerminalSession::screenUpdated()
     if (terminal().hasInput())
         _display->post(bind(&TerminalSession::flushInput, this));
 
-    if (_lastHistoryLineCount != _terminal.currentScreen().historyLineCount())
+    if (_lastHistoryLineCount != terminal().currentScreen().historyLineCount())
     {
-        _lastHistoryLineCount = _terminal.currentScreen().historyLineCount();
+        _lastHistoryLineCount = terminal().currentScreen().historyLineCount();
         emit historyLineCountChanged(unbox(_lastHistoryLineCount));
     }
 
@@ -419,9 +344,11 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
         return;
 
     _currentColorPreference = preference;
+
     if (auto const* colorPalette = preferredColorPalette(_profile.colors.value(), preference))
     {
-        _terminal.resetColorPalette(*colorPalette);
+        for (auto&& [terminal, _]: _terminalManager)
+            terminal.resetColorPalette(*colorPalette);
 
         emit backgroundColorChanged();
     }
@@ -453,7 +380,7 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
     if (!allow)
         return;
 
-    _terminal.primaryScreen().captureBuffer(capture.lines, capture.logical);
+    terminal().primaryScreen().captureBuffer(capture.lines, capture.logical);
 
     displayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
     flushInput();
@@ -476,10 +403,10 @@ void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remembe
     if (!allow)
         return;
 
-    _terminal.setStatusDisplay(vtbackend::StatusDisplayType::HostWritable);
+    terminal().setStatusDisplay(vtbackend::StatusDisplayType::HostWritable);
     displayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
     flushInput();
-    _terminal.setSyncWindowTitleWithHostWritableStatusDisplay(false);
+    terminal().setSyncWindowTitleWithHostWritableStatusDisplay(false);
 }
 
 vtbackend::FontDef TerminalSession::getFontDef()
@@ -563,7 +490,7 @@ void TerminalSession::inspect()
         _display->inspect();
 
     // Deferred termination? Then close display now.
-    if (_terminal.device().isClosed() && !_app.dumpStateAtExit().has_value())
+    if (terminal().device().isClosed() && !_app.dumpStateAtExit().has_value())
     {
         sessionLog()("Terminal device is closed. Closing display.");
         _display->closeDisplay();
@@ -581,13 +508,13 @@ void TerminalSession::onClosed()
     auto const _ = std::scoped_lock { _onClosedMutex };
     sessionLog()("Terminal device closed (thread {})", crispy::threadName());
 
-    if (!_terminal.device().isClosed())
-        _terminal.device().close();
+    if (!terminal().device().isClosed())
+        terminal().device().close();
 
     auto const now = steady_clock::now();
     auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
 
-    if (auto* localProcess = dynamic_cast<vtpty::Process*>(&_terminal.device()))
+    if (auto* localProcess = dynamic_cast<vtpty::Process*>(&terminal().device()))
     {
         auto const exitStatus = localProcess->checkStatus();
         if (exitStatus)
@@ -597,7 +524,7 @@ void TerminalSession::onClosed()
             sessionLog()("Process terminated after {} seconds.", diff.count());
     }
 #if defined(VTPTY_LIBSSH2)
-    else if (auto* sshSession = dynamic_cast<vtpty::SshSession*>(&_terminal.device()))
+    else if (auto* sshSession = dynamic_cast<vtpty::SshSession*>(&terminal().device()))
     {
         auto const exitStatus = sshSession->exitStatus();
         if (exitStatus)
@@ -614,14 +541,14 @@ void TerminalSession::onClosed()
 
     if (diff < _app.earlyExitThreshold())
     {
-        // auto const w = _terminal.pageSize().columns.as<int>();
+        // auto const w = terminal().pageSize().columns.as<int>();
         auto constexpr SGR = "\033[1;38:2::255:255:255m\033[48:2::255:0:0m"sv;
         auto constexpr EL = "\033[K"sv;
         auto constexpr TextLines = array<string_view, 2> { "Shell terminated too quickly.",
                                                            "The window will not be closed automatically." };
         for (auto const text: TextLines)
-            _terminal.writeToScreen(std::format("\r\n{}{}{}", SGR, EL, text));
-        _terminal.writeToScreen("\r\n");
+            terminal().writeToScreen(std::format("\r\n{}{}{}", SGR, EL, text));
+        terminal().writeToScreen("\r\n");
         _terminatedAndWaitingForKeyPress = true;
         return;
     }
@@ -820,7 +747,7 @@ void TerminalSession::sendCharEvent(
         // find if action exist for the given key, and ignore if editing search prompt
         if (auto const* actions =
                 config::apply(_config.inputMappings.value().charMappings, value, modifiers, matchModeFlags());
-            actions && !_terminal.inputHandler().isEditingSearch())
+            actions && !terminal().inputHandler().isEditingSearch())
         {
             executeAllActions(*actions);
             return;
@@ -838,8 +765,8 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
 
     terminal().tick(steady_clock::now());
 
-    if (crispy::locked(_terminal, [&]() {
-            return _terminal.sendMousePressEvent(modifiers, button, pixelPosition, uiHandledHint);
+    if (crispy::locked(terminal(), [&]() {
+            return terminal().sendMousePressEvent(modifiers, button, pixelPosition, uiHandledHint);
         }))
         return;
 
@@ -865,8 +792,8 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     terminal().tick(steady_clock::now());
 
     auto constexpr UiHandledHint = false;
-    crispy::locked(_terminal,
-                   [&]() { _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint); });
+    crispy::locked(terminal(),
+                   [&]() { terminal().sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint); });
 
     if (pos != _currentMousePosition)
     {
@@ -885,9 +812,9 @@ void TerminalSession::sendMouseReleaseEvent(Modifiers modifiers,
 {
     terminal().tick(steady_clock::now());
 
-    crispy::locked(_terminal, [&]() {
+    crispy::locked(terminal(), [&]() {
         auto const uiHandledHint = false;
-        _terminal.sendMouseReleaseEvent(modifiers, button, pixelPosition, uiHandledHint);
+        terminal().sendMouseReleaseEvent(modifiers, button, pixelPosition, uiHandledHint);
     });
     scheduleRedraw();
 }
@@ -921,7 +848,7 @@ void TerminalSession::updateHighlights()
 
 void TerminalSession::onHighlightUpdate()
 {
-    _terminal.resetHighlight();
+    terminal().resetHighlight();
 }
 
 void TerminalSession::playSound(vtbackend::Sequence::Parameters const& params)
@@ -940,7 +867,7 @@ void TerminalSession::cursorPositionChanged()
 // {{{ Actions
 bool TerminalSession::operator()(actions::CancelSelection)
 {
-    _terminal.clearSelection();
+    terminal().clearSelection();
     return true;
 }
 
@@ -958,13 +885,13 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
 {
     sessionLog()("Clearing history and perform terminal hard reset");
 
-    _terminal.hardReset();
+    terminal().hardReset();
     return true;
 }
 
 bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
 {
-    crispy::locked(_terminal, [&]() { copyToClipboard(terminal().extractLastMarkRange()); });
+    crispy::locked(terminal(), [&]() { copyToClipboard(terminal().extractLastMarkRange()); });
     return true;
 }
 
@@ -975,7 +902,7 @@ bool TerminalSession::operator()(actions::CopySelection copySelection)
     {
         case actions::CopyFormat::Text:
             // Copy the selection in pure text, plus whitespaces and newline.
-            crispy::locked(_terminal, [&]() { copyToClipboard(terminal().extractSelectionText()); });
+            crispy::locked(terminal(), [&]() { copyToClipboard(terminal().extractSelectionText()); });
             break;
         case actions::CopyFormat::HTML:
             // TODO: This requires walking through each selected cell and construct HTML+CSS for it.
@@ -991,13 +918,13 @@ bool TerminalSession::operator()(actions::CopySelection copySelection)
 
 bool TerminalSession::operator()(actions::CreateDebugDump)
 {
-    _terminal.inspect();
+    terminal().inspect();
     return true;
 }
 
 bool TerminalSession::operator()(actions::CreateSelection const& customSelector)
 {
-    _terminal.triggerWordWiseSelectionWithCustomDelimiters(customSelector.delimiters);
+    terminal().triggerWordWiseSelectionWithCustomDelimiters(customSelector.delimiters);
     return true;
 }
 
@@ -1031,22 +958,22 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 
 bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 {
-    auto const nextPosition = _terminal.searchNextMatch(_terminal.normalModeCursorPosition());
+    auto const nextPosition = terminal().searchNextMatch(terminal().normalModeCursorPosition());
     if (!nextPosition)
         return false;
-    _terminal.moveNormalModeCursorTo(nextPosition.value());
-    _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
+    terminal().moveNormalModeCursorTo(nextPosition.value());
+    terminal().viewport().makeVisibleWithinSafeArea(nextPosition->line);
     // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToNextMatch not work?
     return true;
 }
 
 bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
 {
-    auto const nextPosition = _terminal.searchPrevMatch(_terminal.normalModeCursorPosition());
+    auto const nextPosition = terminal().searchPrevMatch(terminal().normalModeCursorPosition());
     if (!nextPosition)
         return false;
-    _terminal.moveNormalModeCursorTo(nextPosition.value());
-    _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
+    terminal().moveNormalModeCursorTo(nextPosition.value());
+    terminal().viewport().makeVisibleWithinSafeArea(nextPosition->line);
     // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToPreviousMatch not work?
     return true;
 }
@@ -1097,7 +1024,7 @@ bool TerminalSession::operator()(actions::NewTerminal const& action)
 
 bool TerminalSession::operator()(actions::NoSearchHighlight)
 {
-    _terminal.clearSearch();
+    terminal().clearSearch();
     return true;
 }
 
@@ -1121,7 +1048,7 @@ bool TerminalSession::operator()(actions::OpenFileManager)
 
 bool TerminalSession::operator()(actions::OpenSelection)
 {
-    crispy::locked(_terminal, [&]() {
+    crispy::locked(terminal(), [&]() {
         QDesktopServices::openUrl(QUrl(QString::fromUtf8(terminal().extractSelectionText().c_str())));
     });
     return true;
@@ -1296,7 +1223,7 @@ bool TerminalSession::operator()(actions::ToggleInputProtection)
 
 bool TerminalSession::operator()(actions::ToggleStatusLine)
 {
-    auto const l = scoped_lock { _terminal };
+    auto const l = scoped_lock { terminal() };
     if (terminal().statusDisplayType() != StatusDisplayType::Indicator)
         terminal().setStatusDisplay(StatusDisplayType::Indicator);
     else
@@ -1321,25 +1248,25 @@ bool TerminalSession::operator()(actions::ToggleTitleBar)
 // {{{ Trace debug mode
 bool TerminalSession::operator()(actions::TraceBreakAtEmptyQueue)
 {
-    _terminal.setExecutionMode(ExecutionMode::BreakAtEmptyQueue);
+    terminal().setExecutionMode(ExecutionMode::BreakAtEmptyQueue);
     return true;
 }
 
 bool TerminalSession::operator()(actions::TraceEnter)
 {
-    _terminal.setExecutionMode(ExecutionMode::Waiting);
+    terminal().setExecutionMode(ExecutionMode::Waiting);
     return true;
 }
 
 bool TerminalSession::operator()(actions::TraceLeave)
 {
-    _terminal.setExecutionMode(ExecutionMode::Normal);
+    terminal().setExecutionMode(ExecutionMode::Normal);
     return true;
 }
 
 bool TerminalSession::operator()(actions::TraceStep)
 {
-    _terminal.setExecutionMode(ExecutionMode::SingleStep);
+    terminal().setExecutionMode(ExecutionMode::SingleStep);
     return true;
 }
 // }}}
@@ -1399,7 +1326,7 @@ void TerminalSession::setDefaultCursor()
         return;
 
     using Type = vtbackend::ScreenType;
-    switch (_terminal.screenType())
+    switch (terminal().screenType())
     {
         case Type::Primary: _display->setMouseCursorShape(MouseCursorShape::IBeam); break;
         case Type::Alternate: _display->setMouseCursorShape(MouseCursorShape::Arrow); break;
@@ -1465,11 +1392,11 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
 {
     auto const wd = [this]() -> string {
 #if !defined(_WIN32)
-        if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
+        if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&terminal().device()))
             return ptyProcess->workingDirectory();
 #else
-        auto const _l = scoped_lock { _terminal };
-        return _terminal.currentWorkingDirectory();
+        auto const _l = scoped_lock { terminal() };
+        return terminal().currentWorkingDirectory();
 #endif
         return "."s;
     }();
@@ -1505,21 +1432,21 @@ void TerminalSession::activateProfile(string const& newProfileName)
 
 void TerminalSession::configureTerminal()
 {
-    auto const l = scoped_lock { _terminal };
+    auto const l = scoped_lock { terminal() };
     sessionLog()("Configuring terminal.");
 
-    _terminal.setWordDelimiters(_config.wordDelimiters.value());
-    _terminal.setExtendedWordDelimiters(_config.extendedWordDelimiters.value());
-    _terminal.setMouseProtocolBypassModifiers(_config.bypassMouseProtocolModifiers.value());
-    _terminal.setMouseBlockSelectionModifiers(_config.mouseBlockSelectionModifiers.value());
-    _terminal.setLastMarkRangeOffset(_profile.copyLastMarkRangeOffset.value());
+    terminal().setWordDelimiters(_config.wordDelimiters.value());
+    terminal().setExtendedWordDelimiters(_config.extendedWordDelimiters.value());
+    terminal().setMouseProtocolBypassModifiers(_config.bypassMouseProtocolModifiers.value());
+    terminal().setMouseBlockSelectionModifiers(_config.mouseBlockSelectionModifiers.value());
+    terminal().setLastMarkRangeOffset(_profile.copyLastMarkRangeOffset.value());
 
     sessionLog()("Setting terminal ID to {}.", _profile.terminalId.value());
-    _terminal.setTerminalId(_profile.terminalId.value());
-    _terminal.setMaxSixelColorRegisters(_config.maxImageColorRegisters.value());
-    _terminal.setMaxImageSize(_config.maxImageSize.value());
-    _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.sixelScrolling.value());
-    _terminal.setStatusDisplay(_profile.initialStatusDisplayType.value());
+    terminal().setTerminalId(_profile.terminalId.value());
+    terminal().setMaxSixelColorRegisters(_config.maxImageColorRegisters.value());
+    terminal().setMaxImageSize(_config.maxImageSize.value());
+    terminal().setMode(vtbackend::DECMode::NoSixelScrolling, !_config.sixelScrolling.value());
+    terminal().setStatusDisplay(_profile.initialStatusDisplayType.value());
     sessionLog()(
         "maxImageSize={}, sixelScrolling={}", _config.maxImageSize.value(), _config.sixelScrolling.value());
 
@@ -1529,17 +1456,17 @@ void TerminalSession::configureTerminal()
 
     configureCursor(_profile.modeInsert.value().cursor);
     updateColorPreference(_app.colorPreference());
-    _terminal.setMaxHistoryLineCount(_profile.maxHistoryLineCount.value());
-    _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
-    _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
-    _terminal.inputHandler().setSearchModeSwitch(_profile.searchModeSwitch.value());
+    terminal().setMaxHistoryLineCount(_profile.maxHistoryLineCount.value());
+    terminal().setHighlightTimeout(_profile.highlightTimeout.value());
+    terminal().viewport().setScrollOff(_profile.modalCursorScrollOff.value());
+    terminal().inputHandler().setSearchModeSwitch(_profile.searchModeSwitch.value());
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)
 {
-    _terminal.setCursorBlinkingInterval(cursorConfig.cursorBlinkInterval);
-    _terminal.setCursorDisplay(cursorConfig.cursorDisplay);
-    _terminal.setCursorShape(cursorConfig.cursorShape);
+    terminal().setCursorBlinkingInterval(cursorConfig.cursorBlinkInterval);
+    terminal().setCursorDisplay(cursorConfig.cursorDisplay);
+    terminal().setCursorShape(cursorConfig.cursorShape);
 
     // Force a redraw of the screen
     // to ensure the correct cursor shape is displayed.
@@ -1559,7 +1486,7 @@ void TerminalSession::configureDisplay()
         auto const qActualScreenSize = _display->window()->screen()->size() * dpr;
         auto const actualScreenSize = ImageSize { Width::cast_from(qActualScreenSize.width()),
                                                   Height::cast_from(qActualScreenSize.height()) };
-        _terminal.setMaxImageSize(actualScreenSize, actualScreenSize);
+        terminal().setMaxImageSize(actualScreenSize, actualScreenSize);
     }
 
     if (_profile.maximized.value())
@@ -1570,39 +1497,39 @@ void TerminalSession::configureDisplay()
     if (_profile.fullscreen.value() != _display->isFullScreen())
         _display->toggleFullScreen();
 
-    _terminal.setRefreshRate(_display->refreshRate());
+    terminal().setRefreshRate(_display->refreshRate());
     _display->setFonts(_profile.fonts.value());
     adaptToWidgetSize();
 
     _display->setHyperlinkDecoration(_profile.hyperlinkDecorationNormal.value(),
                                      _profile.hyperlinkDecorationHover.value());
 
-    setWindowTitle(_terminal.windowTitle());
+    setWindowTitle(terminal().windowTitle());
 }
 
 uint8_t TerminalSession::matchModeFlags() const
 {
     uint8_t flags = 0;
 
-    if (_terminal.isAlternateScreen())
+    if (terminal().isAlternateScreen())
         flags |= static_cast<uint8_t>(MatchModes::Flag::AlternateScreen);
 
-    if (_terminal.applicationCursorKeys())
+    if (terminal().applicationCursorKeys())
         flags |= static_cast<uint8_t>(MatchModes::Flag::AppCursor);
 
-    if (_terminal.applicationKeypad())
+    if (terminal().applicationKeypad())
         flags |= static_cast<uint8_t>(MatchModes::Flag::AppKeypad);
 
-    if (_terminal.selectionAvailable())
+    if (terminal().selectionAvailable())
         flags |= static_cast<uint8_t>(MatchModes::Flag::Select);
 
-    if (_terminal.inputHandler().mode() == ViMode::Insert)
+    if (terminal().inputHandler().mode() == ViMode::Insert)
         flags |= static_cast<uint8_t>(MatchModes::Flag::Insert);
 
-    if (!_terminal.search().pattern.empty())
+    if (!terminal().search().pattern.empty())
         flags |= static_cast<uint8_t>(MatchModes::Flag::Search);
 
-    if (_terminal.executionMode() != ExecutionMode::Normal)
+    if (terminal().executionMode() != ExecutionMode::Normal)
         flags |= static_cast<uint8_t>(MatchModes::Flag::Trace);
 
     return flags;

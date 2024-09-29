@@ -40,6 +40,7 @@ set(vtbackend_HEADERS
     SixelParser.h
     StatusLineBuilder.h
     Terminal.h
+    TerminalManager.h
     VTType.h
     VTWriter.h
     Viewport.h
@@ -70,6 +71,7 @@ set(vtbackend_SOURCES
     SixelParser.cpp
     StatusLineBuilder.cpp
     Terminal.cpp
+    TerminalManager.cpp
     VTType.cpp
     VTWriter.cpp
     Viewport.cpp

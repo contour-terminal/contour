@@ -287,8 +287,6 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     QObject::connect(newSession, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
 
-    _session->start();
-
     window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar.value());
 
     //  Display can change sessions, we should not create a new renderer here if we already have one.
@@ -891,7 +889,8 @@ bool TerminalDisplay::event(QEvent* event)
         if (event->type() == QEvent::Close)
         {
             assert(_session);
-            _session->pty().close();
+            if (_session)
+                _session->terminate();
             emit terminated();
         }
 

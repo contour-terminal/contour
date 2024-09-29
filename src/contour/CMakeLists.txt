@@ -55,7 +55,6 @@ if(CONTOUR_FRONTEND_GUI)
         ContourApp.h
         ContourGuiApp.h
         TerminalSession.h
-        TerminalSessionManager.h
         helper.h
     )
     list(APPEND _source_files
@@ -66,7 +65,6 @@ if(CONTOUR_FRONTEND_GUI)
         ContourApp.cpp
         ContourGuiApp.cpp
         TerminalSession.cpp
-        TerminalSessionManager.cpp
         helper.cpp
     )
 endif()
