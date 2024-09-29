@@ -16,12 +16,13 @@ ContourTerminal
 
     session: terminalSessions.createSession()
 
-    signal previousTab
-    signal nextTab
+    signal switchToTab(int index)
+    signal switchToTabLeft
+    signal switchToTabRight
     signal closeTab
 
-    onPreviousTab: terminalSessions.previousTab()
-    onNextTab: terminalSessions.nextTab()
+    onSwitchToTabLeft: terminalSessions.switchToTabLeft()
+    onSwitchToTabRight: terminalSessions.switchToTabRight()
     onCloseTab: terminalSessions.closeTab()
 
     Rectangle {
@@ -268,7 +269,8 @@ ContourTerminal
         // TAB handling
         vt.createNewTab.connect(onCreateNewTab);
         vt.closeTab.connect(closeTab);
-        vt.previousTab.connect(previousTab);
-        vt.nextTab.connect(nextTab);
+        vt.switchToTab.connect(switchToTab);
+        vt.switchToTabLeft.connect(switchToTabLeft);
+        vt.switchToTabRight.connect(switchToTabRight);
     }
 }

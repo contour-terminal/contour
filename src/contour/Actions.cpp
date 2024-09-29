@@ -79,8 +79,9 @@ optional<Action> fromString(string const& name)
         mapAction<actions::WriteScreen>("WriteScreen"),
         mapAction<actions::CreateNewTab>("CreateNewTab"),
         mapAction<actions::CloseTab>("CloseTab"),
-        mapAction<actions::PreviousTab>("PreviousTab"),
-        mapAction<actions::NextTab>("NextTab"),
+        mapAction<actions::SwitchToTab>("SwitchToTab"),
+        mapAction<actions::SwitchToTabLeft>("SwitchToTabLeft"),
+        mapAction<actions::SwitchToTabRight>("SwitchToTabRight"),
     };
 
     auto const lowerCaseName = toLower(name);

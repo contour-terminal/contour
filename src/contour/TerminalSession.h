@@ -355,8 +355,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::WriteScreen const& event);
     bool operator()(actions::CreateNewTab);
     bool operator()(actions::CloseTab);
-    bool operator()(actions::PreviousTab);
-    bool operator()(actions::NextTab);
+    bool operator()(actions::SwitchToTab const& event);
+    bool operator()(actions::SwitchToTabLeft);
+    bool operator()(actions::SwitchToTabRight);
 
     void scheduleRedraw();
 
@@ -403,8 +404,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // Tab handling signals
     void createNewTab();
     void closeTab();
-    void previousTab();
-    void nextTab();
+    void switchToTabLeft();
+    void switchToTabRight();
+    void switchToTab(int position);
 
   public slots:
     void onConfigReload();

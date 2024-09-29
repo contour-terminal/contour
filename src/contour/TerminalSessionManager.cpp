@@ -88,7 +88,7 @@ void TerminalSessionManager::addSession()
     setSession(_sessions.size());
 }
 
-void TerminalSessionManager::previousTab()
+void TerminalSessionManager::switchToTabLeft()
 {
     const auto currentSessionIndex = getCurrentSessionIndex();
     managerLog()(std::format("PREVIOUS TAB: currentSessionIndex: {}, _sessions.size(): {}",
@@ -101,13 +101,24 @@ void TerminalSessionManager::previousTab()
     }
 }
 
-void TerminalSessionManager::nextTab()
+void TerminalSessionManager::switchToTab(int position)
+{
+    managerLog()(std::format(
+        "switchToTab from {} to {} (out of {})", getCurrentSessionIndex(), position - 1, _sessions.size()));
+
+    if (1 <= position && position <= static_cast<int>(_sessions.size()))
+    {
+        setSession(position - 1);
+    }
+}
+
+void TerminalSessionManager::switchToTabRight()
 {
     const auto currentSessionIndex = getCurrentSessionIndex();
 
     managerLog()(std::format(
         "NEXT TAB: currentSessionIndex: {}, _sessions.size(): {}", currentSessionIndex, _sessions.size()));
-    if (currentSessionIndex < _sessions.size() - 1)
+    if (std::cmp_less(currentSessionIndex, _sessions.size() - 1))
     {
         setSession(currentSessionIndex + 1);
     }
@@ -141,7 +152,7 @@ void TerminalSessionManager::closeTab()
         // TODO: This is a bit hacky.
         _lastTabChange = std::chrono::steady_clock::now() - std::chrono::seconds(1);
 
-        if (currentSessionIndex <= _sessions.size() - 1)
+        if (std::cmp_less_equal(currentSessionIndex, _sessions.size() - 1))
         {
             setSession(currentSessionIndex + 1);
         }

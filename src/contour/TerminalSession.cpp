@@ -1371,15 +1371,23 @@ bool TerminalSession::operator()(actions::CloseTab)
     return true;
 }
 
-bool TerminalSession::operator()(actions::PreviousTab)
+bool TerminalSession::operator()(actions::SwitchToTab const& event)
 {
-    std::cout << " TerminalSession::PreviousTab\n";
-    emit previousTab();
+    std::cout << std::format(" TerminalSession::SwitchToTab {}\n", event.position);
+    emit switchToTab(event.position);
     return true;
 }
-bool TerminalSession::operator()(actions::NextTab)
+
+bool TerminalSession::operator()(actions::SwitchToTabLeft)
 {
-    emit nextTab();
+    std::cout << " TerminalSession::SwitchToTabLeft\n";
+    emit switchToTabLeft();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SwitchToTabRight)
+{
+    emit switchToTabRight();
     return true;
 }
 

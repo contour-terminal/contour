@@ -30,8 +30,9 @@ class TerminalSessionManager: public QAbstractListModel
     Q_INVOKABLE contour::TerminalSession* createSession();
     Q_INVOKABLE void addSession();
 
-    Q_INVOKABLE void previousTab();
-    Q_INVOKABLE void nextTab();
+    Q_INVOKABLE void switchToTabLeft();
+    Q_INVOKABLE void switchToTabRight();
+    Q_INVOKABLE void switchToTab(int position);
     Q_INVOKABLE void closeTab();
     Q_INVOKABLE void setSession(size_t index);
 
@@ -65,10 +66,10 @@ class TerminalSessionManager: public QAbstractListModel
             std::string tabInfo;
             for (size_t i = 0; i < _sessions.size(); ++i)
             {
-                if (i == currentSessionIndex)
+                if (std::cmp_equal(i, currentSessionIndex))
                     tabInfo += "[";
                 tabInfo += std::to_string(i + 1);
-                if (i == currentSessionIndex)
+                if (std::cmp_equal(i, currentSessionIndex))
                     tabInfo += "]";
                 tabInfo += " ";
             }
