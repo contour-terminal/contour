@@ -4,14 +4,13 @@
 #include <libunicode/convert.h>
 #include <libunicode/scan.h>
 
-#include <fmt/core.h>
-
 #include <gsl/span>
 #include <gsl/span_ext>
 
 #include <array>
 #include <concepts>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <limits>
 #include <string>
@@ -466,18 +465,18 @@ struct numeric_limits<vtparser::Action>
 
 // {{{ fmtlib custom formatter specializations
 template <>
-struct fmt::formatter<vtparser::State>: formatter<std::string_view>
+struct std::formatter<vtparser::State>: formatter<std::string_view>
 {
-    auto format(vtparser::State state, format_context& ctx) const -> format_context::iterator
+    auto format(vtparser::State state, auto& ctx) const
     {
         return formatter<std::string_view>::format(vtparser::to_string(state), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtparser::ActionClass>: formatter<std::string_view>
+struct std::formatter<vtparser::ActionClass>: formatter<std::string_view>
 {
-    auto format(vtparser::ActionClass value, format_context& ctx) const -> format_context::iterator
+    auto format(vtparser::ActionClass value, auto& ctx) const
     {
         auto constexpr Mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
         return formatter<std::string_view>::format(Mappings.at(static_cast<unsigned>(value)), ctx);
@@ -485,9 +484,9 @@ struct fmt::formatter<vtparser::ActionClass>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtparser::Action>: formatter<std::string_view>
+struct std::formatter<vtparser::Action>: formatter<std::string_view>
 {
-    auto format(vtparser::Action value, format_context& ctx) const -> format_context::iterator
+    auto format(vtparser::Action value, auto& ctx) const
     {
         return formatter<std::string_view>::format(vtparser::to_string(value), ctx);
     }

@@ -4,7 +4,7 @@
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/MatchModes.h>
 
-#include <fmt/format.h>
+#include <format>
 
 namespace vtbackend
 {
@@ -58,12 +58,11 @@ bool operator<(InputBinding<I, O> const& a, InputBinding<I, O> const& b) noexcep
 } // namespace vtbackend
 
 template <typename I, typename O>
-struct fmt::formatter<vtbackend::InputBinding<I, O>>
+struct std::formatter<vtbackend::InputBinding<I, O>>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(vtbackend::InputBinding<I, O> const& binding,
-                       format_context& ctx) -> format_context::iterator
+    auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    auto format(vtbackend::InputBinding<I, O> const& binding, auto& ctx) const
     {
-        return fmt::format_to(ctx.out(), "{} {} {}", binding.modes, binding.modifiers, binding.input);
+        return std::format_to(ctx.out(), "{} {} {}", binding.modes, binding.modifiers, binding.input);
     }
 };

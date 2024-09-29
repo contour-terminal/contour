@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Functions.h>
 
-#include <fmt/format.h>
-
+#include <format>
 #include <string_view>
 
 using namespace vtbackend;
@@ -19,41 +18,41 @@ int main()
                                              pair { Category::OSC, "Operating System Commands"sv },
                                              pair { Category::DCS, "Device Control Sequences"sv } })
     {
-        fmt::print("## {} - {}\n\n", category, headline);
+        std::cout << std::format("## {} - {}\n\n", category, headline);
         for (auto const& fn: vtbackend::allFunctions())
         {
             std::string markdown;
 
-            markdown += fmt::format("## {} - {}\n\n", fn.documentation.mnemonic, fn.documentation.comment);
+            markdown += std::format("## {} - {}\n\n", fn.documentation.mnemonic, fn.documentation.comment);
 
-            markdown += fmt::format("### Conformance Level\n\n");
+            markdown += std::format("### Conformance Level\n\n");
             if (fn.extension != VTExtension::None)
-                markdown += fmt::format("{} extension\n\n", fn.extension);
+                markdown += std::format("{} extension\n\n", fn.extension);
             else
-                markdown += fmt::format("{}\n\n", fn.conformanceLevel);
+                markdown += std::format("{}\n\n", fn.conformanceLevel);
 
-            markdown += fmt::format("### Syntax\n\n```\n");
+            markdown += std::format("### Syntax\n\n```\n");
             if (!fn.documentation.parameters.empty())
-                markdown += fmt::format("{}{} {}{} {}\n",
+                markdown += std::format("{}{} {}{} {}\n",
                                         fn.category,
-                                        fn.leader ? fmt::format(" {}", fn.leader) : "",
+                                        fn.leader ? std::format(" {}", fn.leader) : "",
                                         fn.documentation.parameters,
-                                        fn.intermediate ? fmt::format(" {}", fn.intermediate) : "",
+                                        fn.intermediate ? std::format(" {}", fn.intermediate) : "",
                                         fn.finalSymbol);
             else
-                markdown += fmt::format("{}\n", fn);
-            markdown += fmt::format("```\n\n");
+                markdown += std::format("{}\n", fn);
+            markdown += std::format("```\n\n");
 
             if (!fn.documentation.description.empty())
-                markdown += fmt::format("### Description\n\n{}\n\n", fn.documentation.description);
+                markdown += std::format("### Description\n\n{}\n\n", fn.documentation.description);
 
             if (!fn.documentation.notes.empty())
-                markdown += fmt::format("### Notes\n\n{}\n\n", fn.documentation.notes);
+                markdown += std::format("### Notes\n\n{}\n\n", fn.documentation.notes);
 
             if (!fn.documentation.examples.empty())
-                markdown += fmt::format("### Examples\n\n```\n{}\n```\n\n", fn.documentation.examples);
+                markdown += std::format("### Examples\n\n```\n{}\n```\n\n", fn.documentation.examples);
 
-            fmt::print("{}", markdown);
+            std::cout << std::format("{}", markdown);
         }
     }
     return EXIT_SUCCESS;

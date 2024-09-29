@@ -240,13 +240,12 @@ void strong_lru_cache<Key, Value, Hasher>::inspect(std::ostream& output) const
 
 // {{{ fmt
 template <typename K, typename V>
-struct fmt::formatter<crispy::detail::lru_cache_entry<K, V>>
+struct std::formatter<crispy::detail::lru_cache_entry<K, V>>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(crispy::detail::lru_cache_entry<K, V> const& entry,
-                       format_context& ctx) -> format_context::iterator
+    auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    auto format(crispy::detail::lru_cache_entry<K, V> const& entry, auto& ctx) const
     {
-        return fmt::format_to(ctx.out(), "{}: {}", entry.key, entry.value);
+        return std::format_to(ctx.out(), "{}: {}", entry.key, entry.value);
     }
 };
 // }}}

@@ -36,7 +36,7 @@ namespace
             case FC_DUAL: return "dual";
             case FC_MONO: return "mono";
             case FC_CHARCELL: return "charcell";
-            default: return fmt::format("({})", value);
+            default: return std::format("({})", value);
         }
     }
 
@@ -256,8 +256,8 @@ font_source_list fontconfig_locator::locate(font_description const& description)
         locatorLog()("Font {} (ttc index {}, weight {}, slant {}, spacing {}) in chain: {}",
                      output.size(),
                      ttcIndex,
-                     weight.has_value() ? fmt::format("{}", *weight) : "NONE",
-                     slant.has_value() ? fmt::format("{}", *slant) : "NONE",
+                     weight.has_value() ? std::format("{}", *weight) : "NONE",
+                     slant.has_value() ? std::format("{}", *slant) : "NONE",
                      spacing,
                      (char const*) file);
     };

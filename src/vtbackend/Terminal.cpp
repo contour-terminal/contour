@@ -19,14 +19,13 @@
 
 #include <libunicode/convert.h>
 
-#include <fmt/chrono.h>
-
 #include <gsl/pointers>
 
 #include <sys/types.h>
 
 #include <chrono>
 #include <cstdlib>
+#include <format>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -2383,7 +2382,7 @@ void Terminal::pushColorPalette(size_t slot)
 void Terminal::reportColorPaletteStack()
 {
     // XTREPORTCOLORS
-    reply(fmt::format("\033[{};{}#Q", _savedColorPalettes.size(), _lastSavedColorPalette));
+    reply(std::format("\033[{};{}#Q", _savedColorPalettes.size(), _lastSavedColorPalette));
 }
 
 void Terminal::popColorPalette(size_t slot)
@@ -2451,22 +2450,22 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
     if (auto const* seq = std::get_if<Sequence>(&pendingSequence))
     {
         if (auto const* functionDefinition = seq->functionDefinition(_terminal->activeSequences()))
-            fmt::print("\t{:<20} ; {:<18} ; {}\n",
-                       seq->text(),
-                       functionDefinition->documentation.mnemonic,
-                       functionDefinition->documentation.comment);
+            std::cout << std::format("\t{:<20} ; {:<18} ; {}\n",
+                                     seq->text(),
+                                     functionDefinition->documentation.mnemonic,
+                                     functionDefinition->documentation.comment);
         else
-            fmt::print("\t{:<20}\n", seq->text());
+            std::cout << std::format("\t{:<20}\n", seq->text());
         _terminal->activeDisplay().processSequence(*seq);
     }
     else if (auto const* codepoint = std::get_if<char32_t>(&pendingSequence))
     {
-        fmt::print("\t'{}'\n", unicode::convert_to<char>(*codepoint));
+        std::cout << std::format("\t'{}'\n", unicode::convert_to<char>(*codepoint));
         _terminal->activeDisplay().writeText(*codepoint);
     }
     else if (auto const* codepoints = std::get_if<CodepointSequence>(&pendingSequence))
     {
-        fmt::print("\t\"{}\"   ; {} cells\n", codepoints->text, codepoints->cellCount);
+        std::cout << std::format("\t\"{}\"   ; {} cells\n", codepoints->text, codepoints->cellCount);
         _terminal->activeDisplay().writeText(codepoints->text, codepoints->cellCount);
     }
 }
@@ -2483,7 +2482,7 @@ std::string to_string(AnsiMode mode)
         case AnsiMode::AutomaticNewLine: return "AutomaticNewLine";
     }
 
-    return fmt::format("({})", static_cast<unsigned>(mode));
+    return std::format("({})", static_cast<unsigned>(mode));
 }
 
 std::string to_string(DECMode mode)
@@ -2530,7 +2529,7 @@ std::string to_string(DECMode mode)
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
     }
-    return fmt::format("({})", static_cast<unsigned>(mode));
+    return std::format("({})", static_cast<unsigned>(mode));
 }
 
 } // namespace vtbackend

@@ -12,12 +12,11 @@
 #include <libunicode/emoji_segmenter.h>
 #include <libunicode/ucd.h>
 
-#include <fmt/format.h>
-
 #include <gsl/span>
 #include <gsl/span_ext>
 
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <optional>
 #include <string>
@@ -157,9 +156,9 @@ class shaper
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<text::bitmap_format>: fmt::formatter<std::string_view>
+struct std::formatter<text::bitmap_format>: std::formatter<std::string_view>
 {
-    auto format(text::bitmap_format value, format_context& ctx) const -> format_context::iterator
+    auto format(text::bitmap_format value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -173,11 +172,11 @@ struct fmt::formatter<text::bitmap_format>: fmt::formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<text::glyph_position>: fmt::formatter<std::string>
+struct std::formatter<text::glyph_position>: std::formatter<std::string>
 {
-    auto format(text::glyph_position const& gpos, format_context& ctx) const -> format_context::iterator
+    auto format(text::glyph_position const& gpos, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("({}+{}+{}|{}+{})",
+        return formatter<std::string>::format(std::format("({}+{}+{}|{}+{})",
                                                           gpos.glyph.index.value,
                                                           gpos.offset.x,
                                                           gpos.offset.y,
@@ -188,11 +187,11 @@ struct fmt::formatter<text::glyph_position>: fmt::formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<text::rasterized_glyph>: fmt::formatter<std::string>
+struct std::formatter<text::rasterized_glyph>: std::formatter<std::string>
 {
-    auto format(text::rasterized_glyph const& glyph, format_context& ctx) const -> format_context::iterator
+    auto format(text::rasterized_glyph const& glyph, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("rasterized_glyph({}, {}+{}, {})",
+        return formatter<std::string>::format(std::format("rasterized_glyph({}, {}+{}, {})",
                                                           glyph.index.value,
                                                           glyph.bitmapSize,
                                                           glyph.position,

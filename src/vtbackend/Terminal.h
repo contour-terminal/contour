@@ -29,8 +29,6 @@
 #include <crispy/assert.h>
 #include <crispy/defines.h>
 
-#include <fmt/format.h>
-
 #include <gsl/pointers>
 
 #include <atomic>
@@ -38,6 +36,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <format>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -768,12 +767,12 @@ class Terminal
     void reply(std::string_view text);
 
     template <typename... Ts>
-    void reply(fmt::format_string<Ts...> message, Ts const&... args)
+    void reply(std::string_view message, Ts const&... args)
     {
 #if defined(__APPLE__) || defined(_MSC_VER)
-        reply(fmt::vformat(message, fmt::make_format_args(args...)));
+        reply(std::vformat(message, std::make_format_args(args...)));
 #else
-        reply(fmt::vformat(message, fmt::make_format_args(args...)));
+        reply(std::vformat(message, std::make_format_args(args...)));
 #endif
     }
 
@@ -1197,18 +1196,17 @@ class Terminal
 
 // {{{ fmt formatter specializations
 template <>
-struct fmt::formatter<vtbackend::TraceHandler::PendingSequence>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::TraceHandler::PendingSequence>: std::formatter<std::string>
 {
-    auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence,
-                format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence, auto& ctx) const
     {
         std::string value;
         if (auto const* p = std::get_if<vtbackend::Sequence>(&pendingSequence))
-            value = fmt::format("{}", p->text());
+            value = std::format("{}", p->text());
         else if (auto const* p = std::get_if<vtbackend::TraceHandler::CodepointSequence>(&pendingSequence))
-            value = fmt::format("\"{}\"", crispy::escape(p->text));
+            value = std::format("\"{}\"", crispy::escape(p->text));
         else if (auto const* p = std::get_if<char32_t>(&pendingSequence))
-            value = fmt::format("'{}'", unicode::convert_to<char>(*p));
+            value = std::format("'{}'", unicode::convert_to<char>(*p));
         else
             crispy::unreachable();
 
@@ -1217,25 +1215,25 @@ struct fmt::formatter<vtbackend::TraceHandler::PendingSequence>: fmt::formatter<
 };
 
 template <>
-struct fmt::formatter<vtbackend::AnsiMode>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::AnsiMode>: std::formatter<std::string>
 {
-    auto format(vtbackend::AnsiMode mode, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::AnsiMode mode, auto& ctx) const
     {
         return formatter<std::string>::format(to_string(mode), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtbackend::DECMode>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::DECMode>: std::formatter<std::string>
 {
-    auto format(vtbackend::DECMode mode, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::DECMode mode, auto& ctx) const
     {
         return formatter<std::string>::format(to_string(mode), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtbackend::DynamicColorName>: formatter<std::string_view>
+struct std::formatter<vtbackend::DynamicColorName>: formatter<std::string_view>
 {
     template <typename FormatContext>
     auto format(vtbackend::DynamicColorName value, FormatContext& ctx) const
@@ -1257,9 +1255,9 @@ struct fmt::formatter<vtbackend::DynamicColorName>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::ExecutionMode>: formatter<std::string_view>
+struct std::formatter<vtbackend::ExecutionMode>: formatter<std::string_view>
 {
-    auto format(vtbackend::ExecutionMode value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::ExecutionMode value, auto& ctx) const
     {
         string_view name;
         switch (value)

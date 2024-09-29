@@ -12,14 +12,13 @@
 
 #include <crispy/point.h>
 
-#include <fmt/format.h>
-
 #include <QtCore/QAbstractItemModel>
 #include <QtCore/QFileSystemWatcher>
 #include <QtCore/QThread>
 #include <QtQml/QJSValue>
 
 #include <cstdint>
+#include <format>
 #include <thread>
 
 #include <qcolor.h>
@@ -472,31 +471,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
 Q_DECLARE_INTERFACE(contour::TerminalSession, "org.contour.TerminalSession")
 
-namespace fmt
-{
-
 template <>
-struct formatter<contour::GuardedRole>
+struct std::formatter<contour::GuardedRole>: std::formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
     template <typename FormatContext>
     auto format(contour::GuardedRole value, FormatContext& ctx) const
     {
+        std::string_view output;
+        // clang-format off
         switch (value)
         {
-                // clang-format off
-            case contour::GuardedRole::ChangeFont: return fmt::format_to(ctx.out(), "Change Font");
-            case contour::GuardedRole::CaptureBuffer: return fmt::format_to(ctx.out(), "Capture Buffer");
-            case contour::GuardedRole::ShowHostWritableStatusLine:  return fmt::format_to(ctx.out(), "show Host Writable Statusline");
-                // clang-format on
+            case contour::GuardedRole::ChangeFont: output = "Change Font"; break;
+            case contour::GuardedRole::CaptureBuffer: output = "Capture Buffer"; break;
+            case contour::GuardedRole::ShowHostWritableStatusLine:  output = "show Host Writable Statusline"; break;
         }
-        crispy::unreachable();
+        // clang-format on
+        return formatter<string_view>::format(output, ctx);
     }
 };
-
-} // namespace fmt

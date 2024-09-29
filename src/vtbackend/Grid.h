@@ -911,22 +911,20 @@ template <typename RendererT>
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<vtbackend::Margin::Horizontal>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::Margin::Horizontal>: std::formatter<std::string>
 {
-    auto format(const vtbackend::Margin::Horizontal range,
-                format_context& ctx) const -> format_context::iterator
+    auto format(const vtbackend::Margin::Horizontal range, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("{}..{}", range.from, range.to), ctx);
+        return formatter<std::string>::format(std::format("{}..{}", range.from, range.to), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtbackend::Margin::Vertical>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::Margin::Vertical>: std::formatter<std::string>
 {
-    auto format(const vtbackend::Margin::Vertical range,
-                format_context& ctx) const -> format_context::iterator
+    auto format(const vtbackend::Margin::Vertical range, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("{}..{}", range.from, range.to), ctx);
+        return formatter<std::string>::format(std::format("{}..{}", range.from, range.to), ctx);
     }
 };
 

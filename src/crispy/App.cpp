@@ -3,13 +3,13 @@
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
-#include <fmt/chrono.h>
-
 #include <range/v3/view/enumerate.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <filesystem>
+#include <format>
 #include <iomanip>
 #include <numeric>
 #include <optional>
@@ -199,7 +199,7 @@ int app::licenseAction()
 
 int app::versionAction()
 {
-    std::cout << fmt::format("{} {}\n\n", _appTitle, _appVersion);
+    std::cout << std::format("{} {}\n\n", _appTitle, _appVersion);
     return EXIT_SUCCESS;
 }
 
@@ -220,9 +220,9 @@ int app::run(int argc, char const* argv[])
         }
         _flags = std::move(flagsOpt.value());
 
-        // std::cout << fmt::format("Flags: {}\n", parameters().values.size());
+        // std::cout << std::format("Flags: {}\n", parameters().values.size());
         // for (auto const& [k, v]: parameters().values)
-        //     std::cout << fmt::format(" - {}: {}\n", k, v);
+        //     std::cout << std::format(" - {}: {}\n", k, v);
 
         for (auto const& [name, handler]: _handlers)
             if (parameters().get<bool>(name))
@@ -233,7 +233,7 @@ int app::run(int argc, char const* argv[])
     }
     catch (exception const& e)
     {
-        std::cerr << fmt::format("Unhandled error caught. {}", e.what()) << '\n';
+        std::cerr << std::format("Unhandled error caught. {}", e.what()) << '\n';
         return EXIT_FAILURE;
     }
 }
@@ -259,8 +259,8 @@ void app::customizeLogStoreOutput()
             const auto* const tagStart = "\033[1m";
             auto const colorIndex =
                 Colors.at(std::hash<string_view> {}(msg.get_category().name()) % Colors.size());
-            auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
-            auto const resetSGR = fmt::format("\033[m");
+            auto const msgStart = std::format("\033[38;5;{}m", colorIndex);
+            auto const resetSGR = std::format("\033[m");
             return { tagStart, msgStart, resetSGR };
         }();
 
@@ -281,11 +281,14 @@ void app::customizeLogStoreOutput()
             {
                 // clang-format off
                 auto const now = chrono::system_clock::now();
-                auto const micros =
-                    duration_cast<chrono::microseconds>(now.time_since_epoch()).count() % 1'000'000;
+                std::time_t const nowTimeT = std::chrono::system_clock::to_time_t(now);
+                std::tm const* tm = std::localtime(&nowTimeT);
+                std::stringstream dateTimeStrStream;
+                dateTimeStrStream << std::put_time(tm, "%Y-%m-%d %H:%M:%S");
+                auto const micros = duration_cast<chrono::microseconds>(now.time_since_epoch()).count() % 1'000'000;
                 result += sgrTag;
-                result += fmt::format("[{:%Y-%m-%d %H:%M:%S}.{:06}] [{}]",
-                                      chrono::system_clock::now(),
+                result += std::format("[{}.{:06}] [{}]",
+                                      dateTimeStrStream.str(),
                                       micros,
                                       msg.get_category().name());
                 result += sgrReset;
@@ -321,7 +324,7 @@ void app::customizeLogStoreOutput()
             else
             {
                 result += sgrTag;
-                result += fmt::format("[{}] ", "error");
+                result += std::format("[{}] ", "error");
                 result += sgrReset;
             }
 

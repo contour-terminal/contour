@@ -17,10 +17,9 @@
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/size.h>
 
-#include <fmt/format.h>
-
 #include <gsl/pointers>
 
+#include <format>
 #include <memory>
 #include <vector>
 

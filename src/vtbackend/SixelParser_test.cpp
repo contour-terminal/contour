@@ -69,7 +69,7 @@ TEST_CASE("SixelParser.ground_111111", "[sixel]")
         {
             auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
             auto const pinned = x == 0 && y >= 0 && y <= 5;
-            INFO(fmt::format("x={}, y={}, {}", x, y, pinned ? "pinned" : ""));
+            INFO(std::format("x={}, y={}, {}", x, y, pinned ? "pinned" : ""));
             if (pinned)
                 CHECK(actualColor.rgb() == PinColor);
             else
@@ -98,7 +98,7 @@ TEST_CASE("SixelParser.ground_000001", "[sixel]")
     {
         for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
-            INFO(fmt::format("x={}, y={}", x, y));
+            INFO(std::format("x={}, y={}", x, y));
             auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
             auto const pinned = x == 0 && y == 0;
             if (pinned)
@@ -129,7 +129,7 @@ TEST_CASE("SixelParser.ground_010101", "[sixel]")
     {
         for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
-            INFO(fmt::format("x={}, y={}", x, y));
+            INFO(std::format("x={}, y={}", x, y));
             auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
             auto const pinned = x == 0 && (y < 6 && y % 2 == 0);
             if (pinned)
@@ -160,7 +160,7 @@ TEST_CASE("SixelParser.ground_101010", "[sixel]")
     {
         for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
-            INFO(fmt::format("x={}, y={}", x, y));
+            INFO(std::format("x={}, y={}", x, y));
             auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
             auto const pinned = x == 0 && (y < 6 && y % 2 != 0);
             if (pinned)
@@ -269,7 +269,7 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
         auto const& expectedColor =
             x < 5 && y < 6 ? PinColors.at(static_cast<size_t>(x ? x : 4)) : DefaultColor;
         auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
-        // INFO(fmt::format("at {}, expect {}, actual {}",
+        // INFO(std::format("at {}, expect {}, actual {}",
         //                  CellLocation { LineOffset(y), ColumnOffset(x) },
         //                  expectedColor,
         //                  actualColor));

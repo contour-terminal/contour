@@ -2,9 +2,8 @@
 
 #include <crispy/point.h>
 
-#include <fmt/format.h>
-
 #include <cmath>
+#include <format>
 #include <utility>
 
 namespace crispy
@@ -113,11 +112,11 @@ constexpr size operator/(size a, size b) noexcept
 } // end namespace crispy
 
 template <>
-struct fmt::formatter<crispy::size>
+struct std::formatter<crispy::size>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(const crispy::size& value, format_context& ctx) -> format_context::iterator
+    auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    auto format(const crispy::size& value, auto& ctx) const
     {
-        return fmt::format_to(ctx.out(), "{}x{}", value.width, value.height);
+        return std::format_to(ctx.out(), "{}x{}", value.width, value.height);
     }
 };

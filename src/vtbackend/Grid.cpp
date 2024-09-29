@@ -5,9 +5,8 @@
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
 
-#include <fmt/format.h>
-
 #include <algorithm>
+#include <format>
 #include <iostream>
 
 using std::max;
@@ -750,13 +749,13 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
             for (int i = -*historyLineCount(); i < *_pageSize.lines; ++i)
             {
                 auto& line = _lines[i];
-                // logLogicalLine(line.flags(), fmt::format("Line[{:>2}]: next line: \"{}\"", i,
+                // logLogicalLine(line.flags(), std::format("Line[{:>2}]: next line: \"{}\"", i,
                 // line.toUtf8()));
                 Require(line.size() >= _pageSize.columns);
 
                 if (line.wrapped())
                 {
-                    // logLogicalLine(line.flags(), fmt::format(" - appending: \"{}\"",
+                    // logLogicalLine(line.flags(), std::format(" - appending: \"{}\"",
                     // line.toUtf8Trimmed()));
                     appendToLogicalLine(line.trim_blank_right());
                 }
@@ -993,7 +992,7 @@ void Grid<Cell>::appendNewLines(LineCount count, GraphicsAttributes attr)
 template <CellConcept Cell>
 std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid)
 {
-    os << fmt::format(
+    os << std::format(
         "main page lines: scrollback cur {} max {}, main page lines {}, used lines {}, zero index {}\n",
         grid.historyLineCount(),
         grid.maxHistoryLineCount(),
@@ -1006,7 +1005,7 @@ std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid)
     {
         vtbackend::Line<Cell> const& lineAttribs = grid.lineAt(LineOffset(lineOffset));
 
-        os << fmt::format("[{:>2}] \"{}\" | {}\n",
+        os << std::format("[{:>2}] \"{}\" | {}\n",
                           lineOffset,
                           grid.lineText(LineOffset::cast_from(lineOffset)),
                           lineAttribs.flags());

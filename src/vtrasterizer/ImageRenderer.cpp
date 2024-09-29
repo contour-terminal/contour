@@ -36,7 +36,7 @@ void ImageRenderer::setCellSize(ImageSize cellSize)
 
 void ImageRenderer::renderImage(crispy::point pos, vtbackend::ImageFragment const& fragment)
 {
-    // std::cout << fmt::format("ImageRenderer.renderImage: {}\n", fragment);
+    // std::cout << std::format("ImageRenderer.renderImage: {}\n", fragment);
 
     AtlasTileAttributes const* tileAttributes = getOrCreateCachedTileAttributes(fragment);
     if (!tileAttributes)

@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/result.h>
 
-#include <fmt/format.h>
-
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
 #include <type_traits>
 
 using crispy::failure;

@@ -186,15 +186,15 @@ std::string SshHostConfig::toString() const
         }
     };
     if (!username.empty())
-        result += fmt::format("{}@", username);
+        result += std::format("{}@", username);
     if (!hostname.empty())
     {
         if (port)
         {
             if (hostname.find(':') != std::string::npos)
-                result += fmt::format("[{}]:{}"sv, hostname, port);
+                result += std::format("[{}]:{}"sv, hostname, port);
             else
-                result += fmt::format("{}:{}"sv, hostname, port);
+                result += std::format("{}:{}"sv, hostname, port);
         }
         else
             result += hostname;
@@ -203,15 +203,15 @@ std::string SshHostConfig::toString() const
         result += "*:" + std::to_string(port);
 
     if (!privateKeyFile.empty())
-        add(fmt::format("private key: {}", privateKeyFile.string()));
+        add(std::format("private key: {}", privateKeyFile.string()));
 
     if (!publicKeyFile.empty())
-        add(fmt::format("public key: {}", privateKeyFile.string()));
+        add(std::format("public key: {}", privateKeyFile.string()));
 
     if (!knownHostsFile.empty())
-        add(fmt::format("known hosts: {}", knownHostsFile.string()));
+        add(std::format("known hosts: {}", knownHostsFile.string()));
 
-    add(fmt::format("ForwardAgent: {}", forwardAgent ? "Yes" : "No"));
+    add(std::format("ForwardAgent: {}", forwardAgent ? "Yes" : "No"));
 
     return result;
 }
@@ -222,20 +222,20 @@ std::string SshHostConfig::toConfigString(std::string const& host) const
     auto const prefix = host.empty() ? ""sv : "  "sv;
 
     if (!host.empty())
-        result += fmt::format("Host {}\n", host);
+        result += std::format("Host {}\n", host);
 
     if (!hostname.empty())
-        result += fmt::format("{}HostName {}\n", prefix, hostname);
+        result += std::format("{}HostName {}\n", prefix, hostname);
     if (port != 22)
-        result += fmt::format("{}Port {}\n", prefix, port);
+        result += std::format("{}Port {}\n", prefix, port);
     if (!username.empty())
-        result += fmt::format("{}User {}\n", prefix, username);
+        result += std::format("{}User {}\n", prefix, username);
     if (!privateKeyFile.empty())
-        result += fmt::format("{}IdentityFile {}\n", prefix, privateKeyFile.string());
+        result += std::format("{}IdentityFile {}\n", prefix, privateKeyFile.string());
     if (!knownHostsFile.empty())
-        result += fmt::format("{}KnownHostsFile {}\n", prefix, knownHostsFile.string());
-    result += fmt::format("{}ForwardAgent {}\n", prefix, forwardAgent);
-    result += fmt::format("\n");
+        result += std::format("{}KnownHostsFile {}\n", prefix, knownHostsFile.string());
+    result += std::format("{}ForwardAgent {}\n", prefix, forwardAgent);
+    result += std::format("\n");
     return result;
 }
 
@@ -450,7 +450,7 @@ void SshSession::processState()
             }
             case State::AuthenticatePasswordStart: {
                 setState(State::AuthenticatePasswordWaitForInput);
-                injectRead(fmt::format("\U0001F511 Username: {}\r\n", _config.username));
+                injectRead(std::format("\U0001F511 Username: {}\r\n", _config.username));
                 injectRead("\U0001F511 Password: ");
                 [[fallthrough]];
             }
@@ -901,7 +901,7 @@ void SshSession::injectRead(std::string_view buf)
 
 void SshSession::logInject(std::string_view message) const
 {
-    const_cast<SshSession*>(this)->injectRead(fmt::format("\U0001F511 \033[1;33m{}\033[m\r\n", message));
+    const_cast<SshSession*>(this)->injectRead(std::format("\U0001F511 \033[1;33m{}\033[m\r\n", message));
 }
 
 void SshSession::logInfo(std::string_view message) const
@@ -977,7 +977,7 @@ bool SshSession::connect(std::string_view host, int port)
             if (::connect(_p->sshSocket, addrEntry->ai_addr, addrEntry->ai_addrlen) == 0)
             {
                 auto const addrAndPort =
-                    port == 22 ? std::string(addrStr) : fmt::format("{}:{}", addrStr, port);
+                    port == 22 ? std::string(addrStr) : std::format("{}:{}", addrStr, port);
                 if (host != addrStr)
                     logInfoWithInject("Connected to {} ({})", host, addrAndPort);
                 else
@@ -1073,7 +1073,7 @@ bool SshSession::verifyHostKey()
         case LIBSSH2_KNOWNHOST_CHECK_NOTFOUND: {
             // TODO: Ask user whether to add host key to known_hosts file
             auto const comment =
-                fmt::format("{}@{}:{} (added by Contour)", _config.username, _config.hostname, _config.port);
+                std::format("{}@{}:{} (added by Contour)", _config.username, _config.hostname, _config.port);
             auto const typeMask = LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType;
             libssh2_knownhost_addc(knownHosts,
                                    _config.hostname.c_str(),
@@ -1147,21 +1147,23 @@ int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
     if (dir & LIBSSH2_SESSION_BLOCK_INBOUND)
     {
         readfd = &fd;
-        fmt::print("({}) SshSession: waiting for socket to become readable\n", crispy::threadName());
+        std::cout << std::format("({}) SshSession: waiting for socket to become readable\n",
+                                 crispy::threadName());
     }
 
     if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND)
     {
         writefd = &fd;
-        fmt::print("({}) SshSession: waiting for socket to become readable\n", crispy::threadName());
+        std::cout << std::format("({}) SshSession: waiting for socket to become readable\n",
+                                 crispy::threadName());
     }
 
     auto const rc = ::select((int) (_p->sshSocket + 1), readfd, writefd, nullptr, timeout ? &tv : nullptr);
-    fmt::print("({}) SshSession: select() returned {}{}{}\n",
-               crispy::threadName(),
-               rc,
-               readfd && FD_ISSET(_p->sshSocket, readfd) ? " [readable]" : "",
-               writefd && FD_ISSET(_p->sshSocket, writefd) ? " [writable]" : "");
+    std::cout << std::format("({}) SshSession: select() returned {}{}{}\n",
+                             crispy::threadName(),
+                             rc,
+                             readfd && FD_ISSET(_p->sshSocket, readfd) ? " [readable]" : "",
+                             writefd && FD_ISSET(_p->sshSocket, writefd) ? " [writable]" : "");
     return rc;
 #else
     crispy::ignore_unused(timeout);

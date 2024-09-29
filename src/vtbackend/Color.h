@@ -3,11 +3,10 @@
 
 #include <crispy/defines.h>
 
-#include <fmt/format.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -401,37 +400,36 @@ std::optional<RGBColor> parseColor(std::string_view const& value);
 
 // {{{ fmtlib custom formatter
 template <>
-struct fmt::formatter<vtbackend::Color>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::Color>: std::formatter<std::string>
 {
-    auto format(vtbackend::Color value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::Color value, auto& ctx) const
     {
         return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtbackend::RGBColor>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::RGBColor>: std::formatter<std::string>
 {
-    auto format(vtbackend::RGBColor value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::RGBColor value, auto& ctx) const
     {
         return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtbackend::RGBAColor>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::RGBAColor>: std::formatter<std::string>
 {
-    template <typename FormatContext>
-    auto format(vtbackend::RGBAColor value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::RGBAColor value, auto& ctx) const
     {
         return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtbackend::CellRGBColor>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::CellRGBColor>: std::formatter<std::string>
 {
-    auto format(vtbackend::CellRGBColor value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::CellRGBColor value, auto& ctx) const
     {
         if (std::holds_alternative<vtbackend::CellForegroundColor>(value))
             return formatter<std::string>::format("CellForeground", ctx);
@@ -443,11 +441,11 @@ struct fmt::formatter<vtbackend::CellRGBColor>: fmt::formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<vtbackend::RGBColorPair>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::RGBColorPair>: std::formatter<std::string>
 {
-    auto format(vtbackend::RGBColorPair value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::RGBColorPair value, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("{}/{}", value.foreground, value.background), ctx);
+        return formatter<std::string>::format(std::format("{}/{}", value.foreground, value.background), ctx);
     }
 };
 // }}}

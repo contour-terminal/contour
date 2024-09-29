@@ -79,9 +79,9 @@ constexpr bool operator<(TextStyle a, TextStyle b) noexcept
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<vtrasterizer::TextStyle>: fmt::formatter<std::string_view>
+struct std::formatter<vtrasterizer::TextStyle>: std::formatter<std::string_view>
 {
-    auto format(vtrasterizer::TextStyle value, format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::TextStyle value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -97,9 +97,9 @@ struct fmt::formatter<vtrasterizer::TextStyle>: fmt::formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtrasterizer::FontLocatorEngine>: fmt::formatter<std::string_view>
+struct std::formatter<vtrasterizer::FontLocatorEngine>: std::formatter<std::string_view>
 {
-    auto format(vtrasterizer::FontLocatorEngine value, format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::FontLocatorEngine value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -112,9 +112,9 @@ struct fmt::formatter<vtrasterizer::FontLocatorEngine>: fmt::formatter<std::stri
 };
 
 template <>
-struct fmt::formatter<vtrasterizer::TextShapingEngine>: fmt::formatter<std::string_view>
+struct std::formatter<vtrasterizer::TextShapingEngine>: std::formatter<std::string_view>
 {
-    auto format(vtrasterizer::TextShapingEngine value, format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::TextShapingEngine value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -128,12 +128,11 @@ struct fmt::formatter<vtrasterizer::TextShapingEngine>: fmt::formatter<std::stri
 };
 
 template <>
-struct fmt::formatter<vtrasterizer::FontDescriptions>: fmt::formatter<std::string>
+struct std::formatter<vtrasterizer::FontDescriptions>: std::formatter<std::string>
 {
-    auto format(vtrasterizer::FontDescriptions const& fd,
-                format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::FontDescriptions const& fd, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("({}, {}, {}, {}, {}, {}, {}, {})",
+        return formatter<std::string>::format(std::format("({}, {}, {}, {}, {}, {}, {}, {})",
                                                           fd.size,
                                                           fd.dpi,
                                                           fd.dpiScale,

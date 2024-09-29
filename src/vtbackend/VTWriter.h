@@ -8,8 +8,7 @@
 
 #include <libunicode/convert.h>
 
-#include <fmt/format.h>
-
+#include <format>
 #include <functional>
 #include <ostream>
 #include <sstream>
@@ -37,7 +36,7 @@ class VTWriter
     void write(Line<Cell> const& line);
 
     template <typename... T>
-    void write(fmt::format_string<T...> fmt, T const&... args);
+    void write(std::format_string<T...> fmt, T const&... args);
     void write(std::string_view s);
     void write(char32_t v);
 
@@ -73,12 +72,12 @@ class VTWriter
 };
 
 template <typename... Ts>
-inline void VTWriter::write(fmt::format_string<Ts...> fmt, Ts const&... args)
+inline void VTWriter::write(std::format_string<Ts...> fmt, Ts const&... args)
 {
 #if defined(__APPLE__)
-    write(fmt::vformat(fmt, fmt::make_format_args(args...)));
+    write(std::vformat(fmt, std::make_format_args(args...)));
 #else
-    write(fmt::vformat(fmt, fmt::make_format_args(std::forward<Ts>(args)...)));
+    write(std::vformat(fmt, std::make_format_args(std::forward<Ts>(args)...)));
 #endif
 }
 

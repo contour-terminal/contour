@@ -6,7 +6,7 @@ ErrorCount=0
 
 ## libunicode version match
 
-LIBUNICODE_SHA_PS=$(awk 'match ($0, /"libunicode-[0-9a-f]+"/) { print(substr($0, RSTART+12, RLENGTH-12-1)); }' scripts/install-deps.ps1)
+LIBUNICODE_SHA_PS=$(awk 'match ($0, /libunicode_git_sha="[0-9a-f]+/) { print(substr($0, RSTART+20, RLENGTH-20)); }' scripts/install-deps.ps1)
 LIBUNICODE_SHA_SH=$(awk 'match ($0, /libunicode_git_sha="[0-9a-f]+/) { print(substr($0, RSTART+20, RLENGTH-20)); }' scripts/install-deps.sh)
 
 if [[ "${LIBUNICODE_SHA_SH}" != "${LIBUNICODE_SHA_PS}" ]]; then

@@ -13,14 +13,12 @@
 #include <crispy/StackTrace.h>
 #include <crispy/utils.h>
 
-#include <fmt/chrono.h>
-#include <fmt/format.h>
-
 #include <QtCore/QFile>
 
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -81,7 +79,7 @@ namespace
         crashLogger(sstr);
         string const crashLog = sstr.str();
 
-        auto const logFileName = fmt::format(
+        auto const logFileName = std::format(
             "contour-crash-{:%Y-%m-%d-%H-%M-%S}-pid-{}.log", std::chrono::system_clock::now(), getpid());
         if (chdir(crashLogDir.c_str()) < 0)
             perror("chdir");
@@ -187,8 +185,8 @@ int ContourApp::documentationVT()
 
     std::string info;
     auto back = std::back_inserter(info);
-    fmt::format_to(back, "# {}\n", "VT sequences");
-    fmt::format_to(back, "{}\n\n", "List of VT sequences supported by Contour Terminal Emulator.");
+    std::format_to(back, "# {}\n", "VT sequences");
+    std::format_to(back, "{}\n\n", "List of VT sequences supported by Contour Terminal Emulator.");
     for (auto const& [category, headline]: { std::pair { category::C0, "Control Codes"sv },
                                              std::pair { category::ESC, "Escape Sequences"sv },
                                              std::pair { category::CSI, "Control Sequences"sv },
@@ -196,10 +194,10 @@ int ContourApp::documentationVT()
                                              std::pair { category::DCS, "Device Control Sequences"sv } })
     {
 
-        fmt::format_to(back, "## {}\n\n", headline);
+        std::format_to(back, "## {}\n\n", headline);
 
-        fmt::format_to(back, "| Sequence | Code | Description |\n");
-        fmt::format_to(back, "|----------|------|-------------|\n");
+        std::format_to(back, "| Sequence | Code | Description |\n");
+        std::format_to(back, "|----------|------|-------------|\n");
         for (auto const& fn: vtbackend::allFunctions())
         {
             if (fn.category != category)
@@ -208,13 +206,13 @@ int ContourApp::documentationVT()
             // This could be much more improved in good looking and informationally.
             // We can also print short/longer description, minimum required VT level,
             // colored output for easier reading, and maybe more.
-            fmt::format_to(back,
+            std::format_to(back,
                            "| `{:}` | {:} | {:} |\n",
-                           crispy::escapeMarkdown(fmt::format("{}", fn)),
+                           crispy::escapeMarkdown(std::format("{}", fn)),
                            fn.documentation.mnemonic,
                            fn.documentation.comment);
         }
-        fmt::format_to(back, "\n");
+        std::format_to(back, "\n");
     }
 
     std::cout << info;
@@ -225,24 +223,24 @@ int ContourApp::documentationKeyMapping()
 {
     std::string info;
     auto back = std::back_inserter(info);
-    fmt::format_to(back, "{}\n\n", "List of supported actions for key mappings.");
+    std::format_to(back, "{}\n\n", "List of supported actions for key mappings.");
 
-    fmt::format_to(back, "| Action | Description |\n");
-    fmt::format_to(back, "|--------|-------------|\n");
+    std::format_to(back, "| Action | Description |\n");
+    std::format_to(back, "|--------|-------------|\n");
     for (auto const& [action, description]: contour::actions::getDocumentation())
     {
-        fmt::format_to(back, "| `{:<20}` | {:} |\n", action, description);
+        std::format_to(back, "| `{:<20}` | {:} |\n", action, description);
     }
 
-    fmt::format_to(back, "\n");
-    fmt::format_to(back, "Example of entries inside config file\n");
-    fmt::format_to(back, "``` yaml\n");
+    std::format_to(back, "\n");
+    std::format_to(back, "Example of entries inside config file\n");
+    std::format_to(back, "``` yaml\n");
     for (auto const& [action, description]: contour::actions::getDocumentation())
     {
-        fmt::format_to(back, " - {{ mods: [Control], key: Enter, action: {:} }}\n", action);
+        std::format_to(back, " - {{ mods: [Control], key: Enter, action: {:} }}\n", action);
     }
-    fmt::format_to(back, "```\n");
-    fmt::format_to(back, "\n");
+    std::format_to(back, "```\n");
+    std::format_to(back, "\n");
 
     std::cout << info;
     return EXIT_SUCCESS;
@@ -261,27 +259,27 @@ int ContourApp::infoVT()
                                              pair { category::OSC, "Operating System Commands"sv },
                                              pair { category::DCS, "Device Control Sequences"sv } })
     {
-        fmt::print("{}\n", headline);
-        fmt::print("{}\n\n", string(headline.size(), '='));
+        std::cout << std::format("{}\n", headline);
+        std::cout << std::format("{}\n\n", string(headline.size(), '='));
 
         for (auto const& fn: vtbackend::allFunctions())
         {
             if (fn.category != category)
                 continue;
 
-            auto const level = fn.extension == VTExtension::None ? fmt::format("{}", fn.conformanceLevel)
-                                                                 : fmt::format("{}", fn.extension);
+            auto const level = fn.extension == VTExtension::None ? std::format("{}", fn.conformanceLevel)
+                                                                 : std::format("{}", fn.extension);
 
             // This could be much more improved in good looking and informationally.
             // We can also print short/longer description, minimum required VT level,
             // colored output for easier reading, and maybe more.
-            fmt::print("{:<20} {:<15} {} ({})\n",
-                       fn.documentation.mnemonic,
-                       fmt::format("{}", fn),
-                       fn.documentation.comment,
-                       level);
+            std::cout << std::format("{:<20} {:<15} {} ({})\n",
+                                     fn.documentation.mnemonic,
+                                     std::format("{}", fn),
+                                     fn.documentation.comment,
+                                     level);
         }
-        fmt::print("\n");
+        std::cout << std::format("\n");
     }
 
     return EXIT_SUCCESS;
@@ -302,7 +300,7 @@ int ContourApp::integrationAction()
             file.setFileName(":/contour/shell-integration/shell-integration.bash");
         else
         {
-            std::cerr << fmt::format("Cannot generate shell integration for an unsupported shell, {}.\n",
+            std::cerr << std::format("Cannot generate shell integration for an unsupported shell, {}.\n",
                                      shell);
             return EXIT_FAILURE;
         }
@@ -362,7 +360,7 @@ int ContourApp::profileAction()
 {
     auto const profileName = parameters().get<string>("contour.set.profile.to");
     // TODO: guard `profileName` value against invalid input.
-    cout << fmt::format("\033P$p{}\033\\", profileName);
+    cout << std::format("\033P$p{}\033\\", profileName);
     return EXIT_SUCCESS;
 }
 

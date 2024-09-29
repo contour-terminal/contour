@@ -3,8 +3,7 @@
 
 #include <crispy/assert.h>
 
-#include <fmt/format.h>
-
+#include <format>
 #include <optional>
 #include <string>
 #include <variant>
@@ -302,14 +301,14 @@ inline auto getDocumentation()
 } // namespace contour::actions
 
 // {{{ fmtlib custom formatters
-#define DECLARE_ACTION_FMT(T)                                                                          \
-    template <>                                                                                        \
-    struct fmt::formatter<contour::actions::T>: fmt::formatter<std::string_view>                       \
-    {                                                                                                  \
-        auto format(contour::actions::T const&, format_context& ctx) const -> format_context::iterator \
-        {                                                                                              \
-            return formatter<string_view>::format(#T, ctx);                                            \
-        }                                                                                              \
+#define DECLARE_ACTION_FMT(T)                                                    \
+    template <>                                                                  \
+    struct std::formatter<contour::actions::T>: std::formatter<std::string_view> \
+    {                                                                            \
+        auto format(contour::actions::T const&, auto& ctx) const                 \
+        {                                                                        \
+            return formatter<string_view>::format(#T, ctx);                      \
+        }                                                                        \
     };
 
 // {{{ declare
@@ -368,14 +367,13 @@ DECLARE_ACTION_FMT(WriteScreen)
 #define HANDLE_ACTION(T)                                                  \
     if (std::holds_alternative<contour::actions::T>(_action))             \
     {                                                                     \
-        name = fmt::format("{}", std::get<contour::actions::T>(_action)); \
+        name = std::format("{}", std::get<contour::actions::T>(_action)); \
     }
 
 template <>
-struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
+struct std::formatter<contour::actions::Action>: std::formatter<std::string>
 {
-    auto format(contour::actions::Action const& _action,
-                format_context& ctx) const -> format_context::iterator
+    auto format(contour::actions::Action const& _action, auto& ctx) const
     {
         std::string name = "Unknown action";
         // {{{ handle
@@ -429,38 +427,33 @@ struct fmt::formatter<contour::actions::Action>: fmt::formatter<std::string>
         if (std::holds_alternative<contour::actions::WriteScreen>(_action))
         {
             const auto writeScreenAction = std::get<contour::actions::WriteScreen>(_action);
-            name = fmt::format("{}, chars: '{}'", writeScreenAction, writeScreenAction.chars);
+            name = std::format("{}, chars: '{}'", writeScreenAction, writeScreenAction.chars);
         }
         if (std::holds_alternative<contour::actions::CreateSelection>(_action))
         {
             const auto createSelectionAction = std::get<contour::actions::CreateSelection>(_action);
             name =
-                fmt::format("{}, delimiters: '{}'", createSelectionAction, createSelectionAction.delimiters);
+                std::format("{}, delimiters: '{}'", createSelectionAction, createSelectionAction.delimiters);
         }
         // }}}
-        return formatter<string_view>::format(name, ctx);
+        return formatter<string>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<contour::actions::CopyFormat>
+struct std::formatter<contour::actions::CopyFormat>: std::formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(contour::actions::CopyFormat value, auto& ctx) const
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(contour::actions::CopyFormat value, FormatContext& ctx) const
-    {
+        string_view output;
         switch (value)
         {
-            case contour::actions::CopyFormat::Text: return fmt::format_to(ctx.out(), "Text");
-            case contour::actions::CopyFormat::HTML: return fmt::format_to(ctx.out(), "HTML");
-            case contour::actions::CopyFormat::PNG: return fmt::format_to(ctx.out(), "PNG");
-            case contour::actions::CopyFormat::VT: return fmt::format_to(ctx.out(), "VT");
+            case contour::actions::CopyFormat::Text: output = "Text"; break;
+            case contour::actions::CopyFormat::HTML: output = "HTML"; break;
+            case contour::actions::CopyFormat::PNG: output = "PNG"; break;
+            case contour::actions::CopyFormat::VT: output = "VT"; break;
         }
-        crispy::unreachable();
+        return formatter<string_view>::format(output, ctx);
     }
 };
 

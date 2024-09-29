@@ -141,9 +141,6 @@ Making use of reserved glyph slots
 #include <libunicode/convert.h>
 #include <libunicode/utf8_grapheme_segmenter.h>
 
-#include <fmt/core.h>
-#include <fmt/ostream.h>
-
 #include <range/v3/algorithm/copy.hpp>
 #include <range/v3/view/enumerate.hpp>
 
@@ -408,7 +405,7 @@ Renderable::AtlasTileAttributes const* TextRenderer::ensureRasterizedIfDirectMap
     restrictToTileSize(*tileCreateData);
     Require(tileCreateData->bitmapSize.width <= textureAtlas().tileSize().width);
 
-    // fmt::print("Initialize direct mapping {} ({}) for {}; {}; {}\n",
+    // std::cout << std::format("Initialize direct mapping {} ({}) for {}; {}; {}\n",
     //            tileIndex,
     //            tileLocation,
     //            glyph,
@@ -442,7 +439,7 @@ void TextRenderer::renderLine(vtbackend::RenderLine const& renderLine)
 
 void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
 {
-    // fmt::print("renderCell: {} {} {} {} {}\n",
+    // std::cout << std::format("renderCell: {} {} {} {} {}\n",
     //            cell.position,
     //            unicode::convert_to<char>(u32string_view(cell.codepoints)),
     //            _forceUpdateInitialPenPosition ? "forcedRestart" : "-",
@@ -490,7 +487,7 @@ point TextRenderer::applyGlyphPositionToPen(point pen,
                                            //- tileAttributes.bitmapSize.height.as<int>() // -> bitmap height
         ;
 
-    // fmt::print("pen! {} <- {}, gpos {}, glyph offset {}x+{}y, glyph height {} ({})\n",
+    // std::cout << std::format("pen! {} <- {}, gpos {}, glyph offset {}x+{}y, glyph height {} ({})\n",
     //            Point { x, y },
     //            pen,
     //            gpos,

@@ -13,6 +13,7 @@
                 "rhs": "Darwin"
             },
             "cacheVariables": {
+                "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF",
                 "CODE_SIGN_CERTIFICATE_ID": "Developer ID Application: Christian Parpart (6T525MU9UR)",
                 "CMAKE_PREFIX_PATH": "/opt/homebrew/opt/qt"
             }

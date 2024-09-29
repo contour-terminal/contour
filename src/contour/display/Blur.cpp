@@ -26,7 +26,7 @@ namespace
     {
         displayLog()("Blur: Loading shader source {}", shaderFilePath.toStdString());
         auto const versionHeader =
-            QString::fromStdString(fmt::format("#version {}\n", useOpenGLES() ? "300 es" : "330"));
+            QString::fromStdString(std::format("#version {}\n", useOpenGLES() ? "300 es" : "330"));
 
         QFile file(shaderFilePath);
         file.open(QFile::ReadOnly);

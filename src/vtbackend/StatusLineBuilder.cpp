@@ -8,14 +8,13 @@
 
 #include <libunicode/convert.h>
 
-#include <fmt/chrono.h>
-#include <fmt/format.h>
-
 #include <range/v3/range/conversion.hpp>
 #include <range/v3/view/join.hpp>
 #include <range/v3/view/transform.hpp>
 
+#include <chrono>
 #include <cstdio>
+#include <format>
 
 using namespace std::string_view_literals;
 
@@ -198,13 +197,13 @@ struct VTSerializer
             return;
 
         if (styles.foregroundColor)
-            result += fmt::format("\033[38:2:{}:{}:{}m",
+            result += std::format("\033[38:2:{}:{}:{}m",
                                   styles.foregroundColor->red,
                                   styles.foregroundColor->green,
                                   styles.foregroundColor->blue);
 
         if (styles.backgroundColor)
-            result += fmt::format("\033[48:2:{}:{}:{}m",
+            result += std::format("\033[48:2:{}:{}:{}m",
                                   styles.backgroundColor->red,
                                   styles.backgroundColor->green,
                                   styles.backgroundColor->blue);
@@ -277,7 +276,7 @@ struct VTSerializer
     {
         auto const currentMousePosition = vt.currentMousePosition();
         auto const cellFlags = vt.currentScreen().cellFlagsAt(currentMousePosition);
-        return fmt::format("{}", cellFlags);
+        return std::format("{}", cellFlags);
     }
 
     std::string visit(StatusLineDefinitions::CellTextUtf32 const&)
@@ -290,7 +289,7 @@ struct VTSerializer
         auto const cellText32 = unicode::convert_to<char32_t>(std::string_view(cellText));
 
         return ranges::views::transform(
-                   cellText32, [](char32_t ch) { return fmt::format("U+{:04X}", static_cast<uint32_t>(ch)); })
+                   cellText32, [](char32_t ch) { return std::format("U+{:04X}", static_cast<uint32_t>(ch)); })
                | ranges::views::join(" ") | ranges::to<std::string>;
     }
 
@@ -305,7 +304,17 @@ struct VTSerializer
     std::string visit(StatusLineDefinitions::Clock const&)
     {
         crispy::ignore_unused(this);
-        return fmt::format("{:%H:%M}", fmt::localtime(std::time(nullptr)));
+
+        // TODO: Find a more convinient way; The following is printing the time in UTC,
+        //       but we need it in local time.
+        // return std::format("{:%H:%M}", std::chrono::system_clock::now());
+
+        auto now = std::chrono::system_clock::now();
+        std::time_t const nowTimeT = std::chrono::system_clock::to_time_t(now);
+        std::tm const* tm = std::localtime(&nowTimeT);
+        std::stringstream out;
+        out << std::put_time(tm, "%H:%M");
+        return out.str();
     }
 
     std::string visit(StatusLineDefinitions::HistoryLineCount const&)
@@ -317,19 +326,19 @@ struct VTSerializer
         {
             auto const pct =
                 double(vt.viewport().scrollOffset()) / double(vt.primaryScreen().historyLineCount());
-            return fmt::format("{}/{} {:3}%",
+            return std::format("{}/{} {:3}%",
                                vt.viewport().scrollOffset(),
                                vt.primaryScreen().historyLineCount(),
                                int(pct * 100));
         }
         else
-            return fmt::format("{}", vt.primaryScreen().historyLineCount());
+            return std::format("{}", vt.primaryScreen().historyLineCount());
     }
 
     std::string visit(StatusLineDefinitions::Hyperlink const&)
     {
         if (auto const hyperlink = vt.currentScreen().hyperlinkAt(vt.currentMousePosition()))
-            return fmt::format("{}", hyperlink->uri);
+            return std::format("{}", hyperlink->uri);
 
         return {};
     }
@@ -354,7 +363,7 @@ struct VTSerializer
         result += "TRACING";
 
         if (!vt.traceHandler().pendingSequences().empty())
-            result += fmt::format(" (#{}): {}",
+            result += std::format(" (#{}): {}",
                                   vt.traceHandler().pendingSequences().size(),
                                   vt.traceHandler().pendingSequences().front());
         return result;
@@ -371,7 +380,7 @@ struct VTSerializer
     std::string visit(StatusLineDefinitions::SearchPrompt const&)
     {
         if (vt.inputHandler().isEditingSearch())
-            return fmt::format("Search: {}█",
+            return std::format("Search: {}█",
                                unicode::convert_to<char>(std::u32string_view(vt.search().pattern)));
 
         return {};
@@ -406,7 +415,7 @@ struct VTSerializer
         return item.text;
     }
 
-    std::string visit(StatusLineDefinitions::VTType const&) { return fmt::format("{}", vt.terminalId()); }
+    std::string visit(StatusLineDefinitions::VTType const&) { return std::format("{}", vt.terminalId()); }
     // }}}
 };
 

@@ -3,8 +3,7 @@
 
 #include <crispy/assert.h>
 
-#include <fmt/format.h>
-
+#include <format>
 #include <string>
 
 namespace vtbackend
@@ -80,9 +79,9 @@ std::string to_params(DeviceAttributes v);
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<vtbackend::VTType>: fmt::formatter<std::string_view>
+struct std::formatter<vtbackend::VTType>: std::formatter<std::string_view>
 {
-    auto format(const vtbackend::VTType id, format_context& ctx) const -> format_context::iterator
+    auto format(const vtbackend::VTType id, auto& ctx) const
     {
         string_view name;
         switch (id)
@@ -102,9 +101,9 @@ struct fmt::formatter<vtbackend::VTType>: fmt::formatter<std::string_view>
     }
 };
 template <>
-struct fmt::formatter<vtbackend::VTExtension>: fmt::formatter<std::string_view>
+struct std::formatter<vtbackend::VTExtension>: std::formatter<std::string_view>
 {
-    auto format(const vtbackend::VTExtension id, format_context& ctx) const -> format_context::iterator
+    auto format(const vtbackend::VTExtension id, auto& ctx) const
     {
         string_view name;
         switch (id)

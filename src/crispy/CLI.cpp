@@ -162,7 +162,7 @@ namespace // {{{ helper
         if (context.pos >= context.args.size())
             throw parser_error("Not enough arguments specified.");
 
-        CLI_DEBUG(fmt::format("Consuming token '{}'", currentToken(context)));
+        CLI_DEBUG(std::format("Consuming token '{}'", currentToken(context)));
         return context.args.at(context.pos++);
     }
 
@@ -329,7 +329,7 @@ namespace // {{{ helper
 
     void setOption(parse_context& context, string const& key, value value)
     {
-        CLI_DEBUG(fmt::format("setOption({}): {}", key, value));
+        CLI_DEBUG(std::format("setOption({}): {}", key, value));
         context.output.values[key] = std::move(value);
     }
 
@@ -369,7 +369,7 @@ namespace // {{{ helper
         for (command const& command: context.currentCommand.back()->children)
             if (command.select == command_select::Implicit)
             {
-                CLI_DEBUG(fmt::format("Select implicit command {}.", command.name));
+                CLI_DEBUG(std::format("Select implicit command {}.", command.name));
                 return &command;
             }
 
@@ -410,19 +410,19 @@ namespace // {{{ helper
 
         if (command const* subcmd = tryLookupCommand(context))
         {
-            CLI_DEBUG(fmt::format("parseCommand: found sub command: {}", subcmd->name));
+            CLI_DEBUG(std::format("parseCommand: found sub command: {}", subcmd->name));
             consumeToken(context); // Name was already ensured to be right (or is assumed to be right).
             parseCommand(*subcmd, context);
         }
         else if (command const* subcmd = tryImplicitCommand(context))
         {
-            CLI_DEBUG(fmt::format("parseCommand: found implicit sub command: {}", subcmd->name));
+            CLI_DEBUG(std::format("parseCommand: found implicit sub command: {}", subcmd->name));
             // DO not consume token
             parseCommand(*subcmd, context);
         }
         else if (com.verbatim.has_value())
         {
-            CLI_DEBUG(fmt::format("parseCommand: going verbatim."));
+            CLI_DEBUG(std::format("parseCommand: going verbatim."));
             if (hasTokensAvailable(context))
             {
                 if (currentToken(context) == "--")
@@ -452,20 +452,20 @@ namespace // {{{ helper
 
     void validate(command const& com, parse_context& context, string const& keyPrefix)
     {
-        auto const key = keyPrefix.empty() ? string(com.name) : fmt::format("{}.{}", keyPrefix, com.name);
+        auto const key = keyPrefix.empty() ? string(com.name) : std::format("{}.{}", keyPrefix, com.name);
 
         // Ensure all required fields are provided for those commands that have been provided.
         for (option const& option: com.options)
         {
-            auto const optionKey = fmt::format("{}.{}", key, option.name.longName);
+            auto const optionKey = std::format("{}.{}", key, option.name.longName);
             // NOLINTNEXTLINE(readability-container-contains)
             if (option.presence == presence::Required && !context.output.values.count(optionKey))
-                throw invalid_argument(fmt::format("Missing option: {}", optionKey));
+                throw invalid_argument(std::format("Missing option: {}", optionKey));
         }
 
         for (command const& subcmd: com.children)
         {
-            auto const commandKey = fmt::format("{}.{}", key, subcmd.name);
+            auto const commandKey = std::format("{}.{}", key, subcmd.name);
             if (context.output.get<bool>(commandKey))
                 validate(subcmd, context, key);
         }
@@ -501,9 +501,9 @@ optional<flag_store> parse(command const& command, string_view_list const& args)
         return nullopt;
 
     // auto const& flags = context.output;
-    // std::cout << fmt::format("Flags: {}\n", flags.values.size());
+    // std::cout << std::format("Flags: {}\n", flags.values.size());
     // for (auto const & [k, v] : flags.values)
-    //     std::cout << fmt::format(" - {}: {}\n", k, v);
+    //     std::cout << std::format(" - {}: {}\n", k, v);
 
     validate(command, context, "");
 
@@ -550,7 +550,7 @@ namespace // {{{ helpers
             }();
 
             if (!style.hyperlink)
-                return fmt::format("{}{}{}", pre, text, post);
+                return std::format("{}{}{}", pre, text, post);
 
             string output;
             size_t a = 0;
@@ -816,9 +816,6 @@ namespace // {{{ helpers
                               help_element::HelpText);
 
                 // {{{ append default value, if any
-                // NB: It seems like fmt::format is having problems with
-                //     formatting std::variant<>'s on some systems.'
-                // auto const defaultValueStr = fmt::format("{}", option.value);
                 auto const defaultValueStr = [&]() -> string {
                     if (holds_alternative<bool>(option.v))
                         return get<bool>(option.v) ? "true" : "false";

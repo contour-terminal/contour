@@ -256,10 +256,10 @@ bool ContourGuiApp::loadConfig(string const& target)
                        end(_config.profiles.value()),
                        ""s,
                        [](string const& acc, auto const& profile) -> string {
-                           return acc.empty() ? profile.first : fmt::format("{}, {}", acc, profile.first);
+                           return acc.empty() ? profile.first : std::format("{}, {}", acc, profile.first);
                        });
         configLogger(
-            fmt::format("No profile with name '{}' found. Available profiles: {}", profileName(), s));
+            std::format("No profile with name '{}' found. Available profiles: {}", profileName(), s));
     }
 
     if (auto const wd = flags.get<string>("contour.terminal.working-directory"); !wd.empty())
@@ -329,11 +329,11 @@ int ContourGuiApp::fontConfigAction()
     text::font_locator& fontLocator = createFontLocator(fonts.fontLocator);
     text::font_source_list const fontSources = fontLocator.locate(fontDescription);
 
-    fmt::print("Matching fonts using  : {}\n", fonts.fontLocator);
-    fmt::print("Font description      : {}\n", fontDescription);
-    fmt::print("Number of fonts found : {}\n", fontSources.size());
+    std::cout << std::format("Matching fonts using  : {}\n", fonts.fontLocator);
+    std::cout << std::format("Font description      : {}\n", fontDescription);
+    std::cout << std::format("Number of fonts found : {}\n", fontSources.size());
     for (text::font_source const& fontSource: fontSources)
-        fmt::print("  {}\n", fontSource);
+        std::cout << std::format("  {}\n", fontSource);
 
     return EXIT_SUCCESS;
 }

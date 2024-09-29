@@ -81,15 +81,6 @@ fetch_and_unpack_Catch2()
         https://github.com/catchorg/Catch2/archive/refs/tags/v3.4.0.tar.gz
 }
 
-fetch_and_unpack_fmtlib()
-{
-    fmtlib_version="10.0.0"
-    fetch_and_unpack \
-        fmt-$fmtlib_version \
-        fmtlib-$fmtlib_version.tar.gz \
-        https://github.com/fmtlib/fmt/archive/refs/tags/$fmtlib_version.tar.gz
-}
-
 fetch_and_unpack_gsl()
 {
     fetch_and_unpack \
@@ -100,7 +91,7 @@ fetch_and_unpack_gsl()
 
 fetch_and_unpack_termbenchpro()
 {
-    local termbench_pro_git_sha="7f86c882b2dab88a0cceeffd7e3848f55fa5f6f2"
+    local termbench_pro_git_sha="f6c37988e6481b48a8b8acaf1575495e018e9747"
     fetch_and_unpack \
         termbench-pro-$termbench_pro_git_sha \
         termbench-pro-$termbench_pro_git_sha.tar.gz \
@@ -110,7 +101,7 @@ fetch_and_unpack_termbenchpro()
 
 fetch_and_unpack_boxed()
 {
-    local boxed_cpp_version="1.4.2"
+    local boxed_cpp_version="1.4.3"
     fetch_and_unpack \
         boxed-cpp-$boxed_cpp_version \
         boxed-cpp-$boxed_cpp_version.tar.gz \
@@ -121,7 +112,7 @@ fetch_and_unpack_boxed()
 fetch_and_unpack_libunicode()
 {
     if test x$LIBUNICODE_SRC_DIR = x; then
-        local libunicode_git_sha="28aacf5191450775f1f336aba1d6b65673b0ba9f"
+        local libunicode_git_sha="6f8e210d1e50fc0db5c977ca9fd58555d23010ac"
         fetch_and_unpack \
             libunicode-$libunicode_git_sha \
             libunicode-$libunicode_git_sha.tar.gz \
@@ -223,7 +214,6 @@ install_deps_popos()
 
     fetch_and_unpack_libunicode
     fetch_and_unpack_gsl
-    fetch_and_unpack_fmtlib
     fetch_and_unpack_range
     fetch_and_unpack_Catch2
 
@@ -312,7 +302,6 @@ install_deps_ubuntu()
         "20.04" | "22.04" | "23.04")
             # Older Ubuntu's don't have a recent enough fmt / range-v3, so supply it.
             fetch_and_unpack_range
-            fetch_and_unpack_fmtlib
             fetch_and_unpack_Catch2
             ;;
         *)
@@ -328,7 +317,6 @@ install_deps_ubuntu()
 
 install_deps_FreeBSD()
 {
-    fetch_and_unpack_fmtlib
     fetch_and_unpack_libunicode
     fetch_and_unpack_Catch2
 
@@ -362,7 +350,6 @@ install_deps_OpenBSD()
 {
 
     fetch_and_unpack_Catch2
-    fetch_and_unpack_fmtlib
     fetch_and_unpack_gsl
     fetch_and_unpack_yaml_cpp
     fetch_and_unpack_range
@@ -388,7 +375,6 @@ install_deps_OpenBSD()
 install_deps_arch()
 {
     fetch_and_unpack_libunicode
-    fetch_and_unpack_fmtlib
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     packages="
@@ -432,7 +418,6 @@ install_deps_suse()
 {
     fetch_and_unpack_libunicode
     fetch_and_unpack_gsl
-    fetch_and_unpack_fmtlib
 
     echo "SuSE: PREPARE_ONLY_EMBEDS=$PREPARE_ONLY_EMBEDS"
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
@@ -505,12 +490,6 @@ install_deps_fedora()
 
     fetch_and_unpack_libunicode
     fetch_and_unpack_gsl
-
-    if test "$os_version" -ge 39; then
-        packages="$packages fmt-devel"
-    else
-        fetch_and_unpack_fmtlib
-    fi
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
@@ -593,7 +572,6 @@ main()
             ;;
         debian)
             install_deps_ubuntu
-            fetch_and_unpack_fmtlib
             ;;
         Darwin)
             install_deps_darwin
@@ -606,7 +584,6 @@ main()
             ;;
         *)
             fetch_and_unpack_Catch2
-            fetch_and_unpack_fmtlib
             fetch_and_unpack_gsl
             fetch_and_unpack_yaml_cpp
             fetch_and_unpack_range

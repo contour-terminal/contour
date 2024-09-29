@@ -65,7 +65,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos) const
         min(unbox<int>(_image->height()) - unbox(pixelOffset.line), unbox<int>(_cellSize.height));
 
     // auto const availableSize = Size{availableWidth, availableHeight};
-    // std::cout << fmt::format(
+    // std::cout << std::format(
     //     "RasterizedImage.fragment({}): pixelOffset={}, cellSize={}/{}\n",
     //     pos,
     //     pixelOffset,
@@ -76,7 +76,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos) const
     // auto const fitsWidth = pixelOffset.column + _cellSize.width < _image.get().width();
     // auto const fitsHeight = pixelOffset.line + _cellSize.height < _image.get().height();
     // if (!fitsWidth || !fitsHeight)
-    //     std::cout << fmt::format("ImageFragment: out of bounds{}{} ({}x{}); {}\n",
+    //     std::cout << std::format("ImageFragment: out of bounds{}{} ({}x{}); {}\n",
     //             fitsWidth ? "" : " (width)",
     //             fitsHeight ? "" : " (height)",
     //             availableWidth,
@@ -161,7 +161,7 @@ void ImagePool::clear()
 void ImagePool::inspect(ostream& os) const
 {
     os << "Image pool:\n";
-    os << fmt::format("global image stats: {}\n", ImageStats::get());
+    os << std::format("global image stats: {}\n", ImageStats::get());
     _imageNameToImageCache.inspect(os);
 }
 

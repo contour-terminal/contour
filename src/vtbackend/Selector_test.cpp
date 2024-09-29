@@ -46,13 +46,13 @@ namespace
 template <typename T>
 [[maybe_unused]] void logScreenTextAlways(Screen<T> const& screen, string const& headline = "")
 {
-    fmt::print("{}: ZI={} cursor={} HM={}..{}\n",
-               headline.empty() ? "screen dump"s : headline,
-               screen.grid().zero_index(),
-               screen.realCursorPosition(),
-               screen.margin().horizontal.from,
-               screen.margin().horizontal.to);
-    fmt::print("{}\n", dumpGrid(screen.grid()));
+    std::cout << std::format("{}: ZI={} cursor={} HM={}..{}\n",
+                             headline.empty() ? "screen dump"s : headline,
+                             screen.grid().zero_index(),
+                             screen.realCursorPosition(),
+                             screen.margin().horizontal.from,
+                             screen.margin().horizontal.to);
+    std::cout << std::format("{}\n", dumpGrid(screen.grid()));
 }
 
 template <typename T>

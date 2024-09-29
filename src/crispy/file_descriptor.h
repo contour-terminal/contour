@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <fmt/format.h>
-
+#include <format>
 #include <system_error>
 
 #if defined(_WIN32)
@@ -119,21 +118,21 @@ using file_descriptor = native_handle<int, -1>;
 
 #if defined(_WIN32)
 template <>
-struct fmt::formatter<HANDLE>: fmt::formatter<std::string>
+struct std::formatter<HANDLE>: std::formatter<std::string>
 {
-    auto format(HANDLE value, format_context& ctx) const -> format_context::iterator
+    auto format(HANDLE value, auto& ctx) const
     {
-        auto str = fmt::format("0x{:X}", (unsigned long long) (value));
-        return fmt::formatter<std::string>::format(str, ctx);
+        auto str = std::format("0x{:X}", (unsigned long long) (value));
+        return std::formatter<std::string>::format(str, ctx);
     }
 };
 #endif
 
 template <>
-struct fmt::formatter<crispy::file_descriptor>: fmt::formatter<crispy::file_descriptor::native_handle_type>
+struct std::formatter<crispy::file_descriptor>: std::formatter<crispy::file_descriptor::native_handle_type>
 {
-    auto format(crispy::file_descriptor const& fd, format_context& ctx) const -> format_context::iterator
+    auto format(crispy::file_descriptor const& fd, auto& ctx) const
     {
-        return fmt::formatter<crispy::file_descriptor::native_handle_type>::format(fd.get(), ctx);
+        return std::formatter<crispy::file_descriptor::native_handle_type>::format(fd.get(), ctx);
     }
 };

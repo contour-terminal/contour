@@ -266,9 +266,9 @@ class ViInputHandler: public InputHandler
 
 // {{{ fmtlib custom formatters
 template <>
-struct fmt::formatter<vtbackend::TextObjectScope>: formatter<std::string_view>
+struct std::formatter<vtbackend::TextObjectScope>: formatter<std::string_view>
 {
-    auto format(vtbackend::TextObjectScope scope, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::TextObjectScope scope, auto& ctx) const
     {
         using TextObjectScope = vtbackend::TextObjectScope;
         string_view name;
@@ -282,9 +282,9 @@ struct fmt::formatter<vtbackend::TextObjectScope>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::TextObject>: formatter<std::string_view>
+struct std::formatter<vtbackend::TextObject>: formatter<std::string_view>
 {
-    auto format(vtbackend::TextObject textObject, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::TextObject textObject, auto& ctx) const
     {
         using TextObject = vtbackend::TextObject;
         string_view name;
@@ -307,9 +307,9 @@ struct fmt::formatter<vtbackend::TextObject>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::ViOperator>: formatter<std::string_view>
+struct std::formatter<vtbackend::ViOperator>: formatter<std::string_view>
 {
-    auto format(vtbackend::ViOperator op, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::ViOperator op, auto& ctx) const
     {
         string_view name;
         using vtbackend::ViOperator;
@@ -327,9 +327,9 @@ struct fmt::formatter<vtbackend::ViOperator>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::ViMotion>: formatter<std::string_view>
+struct std::formatter<vtbackend::ViMotion>: formatter<std::string_view>
 {
-    auto format(vtbackend::ViMotion motion, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::ViMotion motion, auto& ctx) const
     {
         string_view name;
         using vtbackend::ViMotion;

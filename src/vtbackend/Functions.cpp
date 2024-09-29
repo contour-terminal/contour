@@ -8,10 +8,9 @@
 #include <crispy/times.h>
 #include <crispy/utils.h>
 
-#include <fmt/format.h>
-
 #include <algorithm>
 #include <array>
+#include <format>
 #include <numeric>
 #include <sstream>
 #include <string>
@@ -41,7 +40,7 @@ Function const* select(FunctionSelector const& selector,
         auto const i = (a + b) / 2;
         auto const& fui = availableDefinitions[i];
         auto const rel = compare(selector, fui);
-        // std::cout << fmt::format(" - a:{:>2} b:{:>2} i:{} rel:{} I: {}\n", a, b, i, rel < 0 ? '<' : rel > 0
+        // std::cout << std::format(" - a:{:>2} b:{:>2} i:{} rel:{} I: {}\n", a, b, i, rel < 0 ? '<' : rel > 0
         // ? '>' : '=', I);
         if (rel > 0)
             a = i + 1;

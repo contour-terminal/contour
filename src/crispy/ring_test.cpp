@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/ring.h>
 
-#include <fmt/format.h>
-
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <format>
+#include <iostream>
 
 using crispy::fixed_size_ring;
 using crispy::ring;
@@ -16,14 +16,14 @@ namespace
 template <typename T>
 [[maybe_unused]] void dump(ring<T> const& r)
 {
-    fmt::print("ring(@{}): {{", r.zero_index());
+    std::cout << std::format("ring(@{}): {{", r.zero_index());
     for (size_t i = 0; i < r.size(); ++i)
     {
         if (i)
-            fmt::print(", ");
-        fmt::print("{}", r[i]);
+            std::cout << std::format(", ");
+        std::cout << std::format("{}", r[i]);
     }
-    fmt::print("}}\n");
+    std::cout << std::format("}}\n");
 }
 } // namespace
 

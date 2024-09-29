@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <fmt/format.h>
-
 #include <cstdint>
+#include <format>
 
 namespace vtbackend
 {
@@ -108,9 +107,9 @@ constexpr bool operator!=(MatchModes a, MatchModes b) noexcept
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<vtbackend::MatchModes>: formatter<std::string>
+struct std::formatter<vtbackend::MatchModes>: formatter<std::string>
 {
-    auto format(vtbackend::MatchModes m, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::MatchModes m, auto& ctx) const
     {
         std::string s;
         auto const advance = [&](vtbackend::MatchModes::Flag cond, std::string_view text) {

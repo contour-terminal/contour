@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Functions.h>
 
-#include <fmt/format.h>
-
 #include <catch2/catch_test_macros.hpp>
+
+#include <format>
 
 namespace vtbackend
 {
 // purely for proper diagnostic printing in Catch2
 inline std::ostream& operator<<(std::ostream& os, Function const& f)
 {
-    return os << fmt::format("{}", f);
+    return os << std::format("{}", f);
 }
 } // namespace vtbackend
 

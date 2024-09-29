@@ -6,14 +6,13 @@
 #include <crispy/assert.h>
 #include <crispy/overloaded.h>
 
-#include <fmt/format.h>
-
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <mutex>
 #include <numeric>
@@ -212,7 +211,7 @@ void Process::start()
             char buf[1024];
             size_t len = 0;
             if (getenv_s(&len, buf, sizeof(buf), "PATH") == 0)
-                env[name] = fmt::format("{};{}", value, buf);
+                env[name] = std::format("{};{}", value, buf);
         }
     }
     auto const envScope = InheritingEnvBlock { env };

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <fmt/format.h>
-
 #include <array>
+#include <format>
 #include <limits>
 #include <optional>
 #include <string>
@@ -80,9 +79,9 @@ struct std::numeric_limits<vtrasterizer::Decorator>
 };
 
 template <>
-struct fmt::formatter<vtrasterizer::Decorator>: formatter<std::string_view>
+struct std::formatter<vtrasterizer::Decorator>: formatter<std::string_view>
 {
-    auto format(vtrasterizer::Decorator value, format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::Decorator value, auto& ctx) const
     {
         auto constexpr Mappings = std::array {
             "underline", "double-underline", "curly-underline", "dotted-underline", "dashed-underline",

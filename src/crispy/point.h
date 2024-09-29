@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <fmt/format.h>
-
+#include <format>
 #include <ostream>
 
 namespace crispy
@@ -87,10 +86,10 @@ constexpr inline bool operator!=(point const& a, point const& b) noexcept
 } // namespace crispy
 
 template <>
-struct fmt::formatter<crispy::point>: formatter<std::string>
+struct std::formatter<crispy::point>: formatter<std::string>
 {
-    auto format(crispy::point coord, format_context& ctx) const -> format_context::iterator
+    auto format(crispy::point coord, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("({}, {})", coord.x, coord.y), ctx);
+        return formatter<std::string>::format(std::format("({}, {})", coord.x, coord.y), ctx);
     }
 };

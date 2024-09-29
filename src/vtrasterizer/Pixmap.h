@@ -7,12 +7,11 @@
 
 #include <crispy/point.h>
 
-#include <fmt/format.h>
-
 #include <range/v3/view/iota.hpp>
 
 #include <algorithm>
 #include <cstdint>
+#include <format>
 #include <functional>
 
 namespace vtrasterizer
@@ -300,9 +299,9 @@ Pixmap& Pixmap::segment_bar(int which, More... more)
 } // end namespace vtrasterizer
 
 template <>
-struct fmt::formatter<vtrasterizer::Arc>: fmt::formatter<string_view>
+struct std::formatter<vtrasterizer::Arc>: std::formatter<string_view>
 {
-    auto format(vtrasterizer::Arc value, format_context& ctx) const -> format_context::iterator
+    auto format(vtrasterizer::Arc value, auto& ctx) const
     {
         using vtrasterizer::Arc;
         string_view name;

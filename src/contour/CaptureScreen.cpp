@@ -8,9 +8,8 @@
 
 #include <crispy/utils.h>
 
-#include <fmt/format.h>
-
 #include <cstdlib>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -301,7 +300,7 @@ bool captureScreen(CaptureSettings const& settings)
     auto const [numColumns, numLines] = screenSizeOpt.value();
 
     if (settings.verbosityLevel > 0)
-        cerr << fmt::format("Screen size: {}x{}. Capturing lines {} ({}) to file {}.\r\n",
+        cerr << std::format("Screen size: {}x{}. Capturing lines {} ({}) to file {}.\r\n",
                             numColumns,
                             numLines,
                             settings.logicalLines ? "logical" : "physical",
@@ -318,7 +317,7 @@ bool captureScreen(CaptureSettings const& settings)
         output = *customOutput;
     }
 
-    if (tty.write(fmt::format("\033[>{};{}t", settings.logicalLines ? '1' : '0', settings.lineCount)) < 0)
+    if (tty.write(std::format("\033[>{};{}t", settings.logicalLines ? '1' : '0', settings.lineCount)) < 0)
     {
         cerr << "Could not request screen capture.\r\n";
         return false;

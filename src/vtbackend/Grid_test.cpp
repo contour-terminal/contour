@@ -5,9 +5,9 @@
 
 #include <crispy/BufferObject.h>
 
-#include <fmt/format.h>
-
 #include <catch2/catch_test_macros.hpp>
+
+#include <format>
 
 using namespace vtbackend;
 using namespace std::string_literals;
@@ -22,7 +22,7 @@ namespace
 {
 void logGridText(Grid<Cell> const& grid, string const& headline = "")
 {
-    UNSCOPED_INFO(fmt::format("Grid.dump(hist {}, max hist {}, size {}, ZI {}): {}",
+    UNSCOPED_INFO(std::format("Grid.dump(hist {}, max hist {}, size {}, ZI {}): {}",
                               grid.historyLineCount(),
                               grid.maxHistoryLineCount(),
                               grid.pageSize(),
@@ -32,7 +32,7 @@ void logGridText(Grid<Cell> const& grid, string const& headline = "")
     for (int line = -grid.historyLineCount().as<int>(); line < grid.pageSize().lines.as<int>(); ++line)
     {
         UNSCOPED_INFO(
-            fmt::format("{:>2}: \"{}\" {}\n",
+            std::format("{:>2}: \"{}\" {}\n",
                         line,
                         grid.lineText(LineOffset::cast_from(line - grid.historyLineCount().as<int>())),
                         grid.lineAt(LineOffset::cast_from(line)).flags()));
@@ -41,13 +41,13 @@ void logGridText(Grid<Cell> const& grid, string const& headline = "")
 
 [[maybe_unused]] void logGridTextAlways(Grid<Cell> const& grid, string const& headline = "")
 {
-    fmt::print("Grid.dump(hist {}, max hist {}, size {}, ZI {}): {}\n",
-               grid.historyLineCount(),
-               grid.maxHistoryLineCount(),
-               grid.pageSize(),
-               grid.zero_index(),
-               headline);
-    fmt::print("{}\n", dumpGrid(grid));
+    std::cout << std::format("Grid.dump(hist {}, max hist {}, size {}, ZI {}): {}\n",
+                             grid.historyLineCount(),
+                             grid.maxHistoryLineCount(),
+                             grid.pageSize(),
+                             grid.zero_index(),
+                             headline);
+    std::cout << std::format("{}\n", dumpGrid(grid));
 }
 
 Grid<Cell> setupGrid(PageSize pageSize,
@@ -68,7 +68,7 @@ Grid<Cell> setupGrid(PageSize pageSize,
         grid.setLineText(LineOffset::cast_from(cursor - 1), line);
 
         logGridText(grid,
-                    fmt::format("setup grid at {}x{}x{}: line {}",
+                    std::format("setup grid at {}x{}x{}: line {}",
                                 pageSize.columns,
                                 pageSize.lines,
                                 maxHistoryLineCount,
@@ -76,7 +76,7 @@ Grid<Cell> setupGrid(PageSize pageSize,
     }
 
     logGridText(grid,
-                fmt::format("setup grid at {}x{}x{}",
+                std::format("setup grid at {}x{}x{}",
                             grid.pageSize().columns,
                             grid.pageSize().lines,
                             grid.maxHistoryLineCount()));
@@ -529,7 +529,7 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
     CHECK(grid.lineText(LineOffset(0)) == "abcd");
     CHECK(grid.lineText(LineOffset(1)) == "e   ");
 
-    // fmt::print("Starting logicalLines test\n");
+    // std::cout << std::format("Starting logicalLines test\n");
     auto ll = grid.logicalLines();
     auto li = ll.begin();
     auto le = ll.end();
@@ -540,7 +540,7 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
     CHECK(li == le);
 
     // 3x2
-    fmt::print("Starting resize to 3x2\n");
+    std::cout << std::format("Starting resize to 3x2\n");
     (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation { {}, {} }, false);
     logGridText(grid, "after resize 3x2");
 

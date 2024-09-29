@@ -6,14 +6,13 @@
 #include <crispy/overloaded.h>
 #include <crispy/utils.h>
 
-#include <fmt/format.h>
-
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -171,21 +170,21 @@ void Process::start()
                 realArgs.emplace_back("--host");
                 realArgs.emplace_back("--watch-bus");
                 realArgs.emplace_back(
-                    fmt::format("--env=TERMINFO={}", terminfoBaseDirectory.generic_string()));
+                    std::format("--env=TERMINFO={}", terminfoBaseDirectory.generic_string()));
                 if (stdoutFastPipe)
                 {
-                    realArgs.emplace_back(fmt::format("--forward-fd={}", StdoutFastPipeFdStr));
+                    realArgs.emplace_back(std::format("--forward-fd={}", StdoutFastPipeFdStr));
                     realArgs.emplace_back(
-                        fmt::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFdStr));
+                        std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFdStr));
                 }
                 if (!_d->cwd.empty())
-                    realArgs.emplace_back(fmt::format("--directory={}", _d->cwd.generic_string()));
-                realArgs.emplace_back(fmt::format("--env=TERM={}", "contour"));
+                    realArgs.emplace_back(std::format("--directory={}", _d->cwd.generic_string()));
+                realArgs.emplace_back(std::format("--env=TERM={}", "contour"));
                 for (auto&& [name, value]: _d->env)
-                    realArgs.emplace_back(fmt::format("--env={}={}", name, value));
+                    realArgs.emplace_back(std::format("--env={}={}", name, value));
                 if (stdoutFastPipe)
                     realArgs.emplace_back(
-                        fmt::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
+                        std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
                 realArgs.push_back(_d->path);
                 for (auto const& arg: _d->args)
                     realArgs.push_back(arg);
@@ -326,7 +325,7 @@ vector<string> Process::loginShell(bool escapeSandbox)
         if (isFlatpak() && escapeSandbox)
         {
             char buf[1024];
-            auto const cmd = fmt::format("flatpak-spawn --host getent passwd {}", pw->pw_name);
+            auto const cmd = std::format("flatpak-spawn --host getent passwd {}", pw->pw_name);
             FILE* fp = popen(cmd.c_str(), "r");
             auto fpCloser = crispy::finally { [fp]() {
                 pclose(fp);
@@ -374,7 +373,7 @@ string Process::workingDirectory() const
 #if defined(__linux__)
     try
     {
-        auto const path = fs::path { fmt::format("/proc/{}/cwd", _d->pid) };
+        auto const path = fs::path { std::format("/proc/{}/cwd", _d->pid) };
         auto const cwd = fs::read_symlink(path);
         return cwd.string();
     }

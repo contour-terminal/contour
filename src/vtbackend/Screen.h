@@ -22,12 +22,11 @@
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/width.h>
 
-#include <fmt/format.h>
-
 #include <gsl/pointers>
 
 #include <algorithm>
 #include <atomic>
+#include <format>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -110,7 +109,7 @@ inline std::string setDynamicColorValue(
     auto const r = static_cast<unsigned>(static_cast<float>(color.red) / 255.0f * 0xFFFF);
     auto const g = static_cast<unsigned>(static_cast<float>(color.green) / 255.0f * 0xFFFF);
     auto const b = static_cast<unsigned>(static_cast<float>(color.blue) / 255.0f * 0xFFFF);
-    return fmt::format("rgb:{:04X}/{:04X}/{:04X}", r, g, b);
+    return std::format("rgb:{:04X}/{:04X}/{:04X}", r, g, b);
 }
 
 enum class ApplyResult : uint8_t
@@ -598,9 +597,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void reply(std::string_view text);
 
     template <typename... Ts>
-    void reply(fmt::format_string<Ts...> message, Ts const&... args)
+    void reply(std::string_view message, Ts const&... args)
     {
-        reply(fmt::vformat(message, fmt::make_format_args(args...)));
+        reply(std::vformat(message, std::make_format_args(args...)));
     }
 
   private:
@@ -683,10 +682,9 @@ inline bool Screen<Cell>::isContiguousToCurrentLine(std::string_view continuatio
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<vtbackend::RequestStatusString>: formatter<std::string_view>
+struct std::formatter<vtbackend::RequestStatusString>: formatter<std::string_view>
 {
-    auto format(vtbackend::RequestStatusString value,
-                format_context& ctx) const noexcept -> format_context::iterator
+    auto format(vtbackend::RequestStatusString value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -708,7 +706,7 @@ struct fmt::formatter<vtbackend::RequestStatusString>: formatter<std::string_vie
 };
 
 template <>
-struct fmt::formatter<vtbackend::Sequence>
+struct std::formatter<vtbackend::Sequence>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -718,7 +716,7 @@ struct fmt::formatter<vtbackend::Sequence>
     template <typename FormatContext>
     auto format(vtbackend::Sequence const& seq, FormatContext& ctx) const
     {
-        return fmt::format_to(ctx.out(), "{}", seq.text());
+        return std::format_to(ctx.out(), "{}", seq.text());
     }
 };
 // }}}

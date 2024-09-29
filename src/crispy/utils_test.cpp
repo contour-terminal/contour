@@ -120,7 +120,7 @@ TEST_CASE("fromHexString")
 
 struct variable_collector
 {
-    auto operator()(string_view name) const { return fmt::format("({})", name); }
+    auto operator()(string_view name) const { return std::format("({})", name); }
 };
 
 TEST_CASE("replaceVariables")

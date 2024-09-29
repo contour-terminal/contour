@@ -3,11 +3,10 @@
 
 #include <text_shaper/font.h>
 
-#include <fmt/format.h>
-
 #include <gsl/span>
 #include <gsl/span_ext>
 
+#include <format>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -74,36 +73,36 @@ class font_locator
 } // namespace text
 
 template <>
-struct fmt::formatter<text::font_path>: fmt::formatter<std::string>
+struct std::formatter<text::font_path>: std::formatter<std::string>
 {
-    auto format(text::font_path spec, format_context& ctx) const -> format_context::iterator
+    auto format(text::font_path spec, auto& ctx) const
     {
-        auto weightMod = spec.weight ? fmt::format(" {}", spec.weight.value()) : "";
-        auto slantMod = spec.slant ? fmt::format(" {}", spec.slant.value()) : "";
-        return formatter<std::string>::format(fmt::format("path {}{}{}", spec.value, weightMod, slantMod),
+        auto weightMod = spec.weight ? std::format(" {}", spec.weight.value()) : "";
+        auto slantMod = spec.slant ? std::format(" {}", spec.slant.value()) : "";
+        return formatter<std::string>::format(std::format("path {}{}{}", spec.value, weightMod, slantMod),
                                               ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::font_memory_ref>: fmt::formatter<std::string>
+struct std::formatter<text::font_memory_ref>: std::formatter<std::string>
 {
-    auto format(text::font_memory_ref ref, format_context& ctx) const -> format_context::iterator
+    auto format(text::font_memory_ref ref, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("in-memory: {}", ref.identifier), ctx);
+        return formatter<std::string>::format(std::format("in-memory: {}", ref.identifier), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<text::font_source>: fmt::formatter<std::string>
+struct std::formatter<text::font_source>: std::formatter<std::string>
 {
-    auto format(text::font_source source, format_context& ctx) const -> format_context::iterator
+    auto format(text::font_source source, auto& ctx) const
     {
         std::string text;
         if (std::holds_alternative<text::font_path>(source))
-            text = fmt::format("{}", std::get<text::font_path>(source));
+            text = std::format("{}", std::get<text::font_path>(source));
         else if (std::holds_alternative<text::font_memory_ref>(source))
-            text = fmt::format("{}", std::get<text::font_memory_ref>(source));
+            text = std::format("{}", std::get<text::font_memory_ref>(source));
         return formatter<std::string>::format(text, ctx);
     }
 };

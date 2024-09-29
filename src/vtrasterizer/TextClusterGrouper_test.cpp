@@ -8,14 +8,16 @@
 
 #include <libunicode/convert.h>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <range/v3/to_container.hpp>
+#include <range/v3/view/join.hpp>
+#include <range/v3/view/transform.hpp>
 
 #include <gsl/span>
 #include <gsl/span_ext>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
 #include <string_view>
 #include <variant>
 
@@ -98,18 +100,20 @@ struct FrameWriter
 
 } // namespace
 
-// {{{ fmt::formatter for cuswtom times
+// {{{ std::formatter for cuswtom times
 template <>
-struct fmt::formatter<TextClusterGroup>: formatter<std::string>
+struct std::formatter<TextClusterGroup>: formatter<std::string>
 {
     template <typename FormatContext>
     auto format(TextClusterGroup const& group, FormatContext& ctx) const
     {
         return formatter<std::string>::format(
-            fmt::format("TextClusterGroup {{ codepoints: \"{}\", @{}, clusters={}, style: {}, color: {} }}",
+            std::format("TextClusterGroup {{ codepoints: \"{}\", @{}, clusters={}, style: {}, color: {} }}",
                         crispy::escape(unicode::convert_to<char>(std::u32string_view(group.codepoints))),
                         group.initialPenPosition,
-                        group.clusters,
+                        group.clusters
+                            | ::ranges::views::transform([](int cluster) { return std::to_string(cluster); })
+                            | ::ranges::views::join(", ") | ::ranges::to<std::string>(),
                         group.style,
                         group.color),
             ctx);
@@ -117,13 +121,13 @@ struct fmt::formatter<TextClusterGroup>: formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<BoxDrawingCell>: formatter<std::string>
+struct std::formatter<BoxDrawingCell>: formatter<std::string>
 {
     template <typename FormatContext>
     auto format(BoxDrawingCell const& cell, FormatContext& ctx) const
     {
         return formatter<std::string>::format(
-            fmt::format("BoxDrawingCell {{ position: {}, codepoint: U+{:04X}, color: {} }}",
+            std::format("BoxDrawingCell {{ position: {}, codepoint: U+{:04X}, color: {} }}",
                         cell.position,
                         (unsigned) cell.codepoint,
                         cell.foregroundColor),
@@ -132,15 +136,15 @@ struct fmt::formatter<BoxDrawingCell>: formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<Event>: formatter<std::string>
+struct std::formatter<Event>: formatter<std::string>
 {
     template <typename FormatContext>
     auto format(Event const& event, FormatContext& ctx) const
     {
         if (std::holds_alternative<TextClusterGroup>(event))
-            return formatter<std::string>::format(fmt::format("{}", std::get<TextClusterGroup>(event)), ctx);
+            return formatter<std::string>::format(std::format("{}", std::get<TextClusterGroup>(event)), ctx);
         else
-            return formatter<std::string>::format(fmt::format("{}", std::get<BoxDrawingCell>(event)), ctx);
+            return formatter<std::string>::format(std::format("{}", std::get<BoxDrawingCell>(event)), ctx);
     }
 };
 // }}}
@@ -183,7 +187,7 @@ ostream& operator<<(std::ostream& os, u32string_view text)
 
 ostream& operator<<(std::ostream& os, TextClusterGroup const& group)
 {
-    return os << fmt::format("{}", group);
+    return os << std::format("{}", group);
 }
 } // namespace std
 // }}}

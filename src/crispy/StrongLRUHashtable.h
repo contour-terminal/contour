@@ -40,12 +40,12 @@ struct lru_hashtable_stats
 
 // {{{ fmt
 template <>
-struct fmt::formatter<crispy::lru_hashtable_stats>: fmt::formatter<std::string>
+struct std::formatter<crispy::lru_hashtable_stats>: std::formatter<std::string>
 {
-    auto format(crispy::lru_hashtable_stats stats, format_context& ctx) const -> format_context::iterator
+    auto format(crispy::lru_hashtable_stats stats, auto& ctx) const
     {
         return formatter<std::string>::format(
-            fmt::format(
+            std::format(
                 "{} hits, {} misses, {} evictions, {:.3}% hit rate",
                 stats.hits,
                 stats.misses,
@@ -673,12 +673,12 @@ void strong_lru_hashtable<Value>::inspect(std::ostream& output) const
     while (entryIndex != 0)
     {
         entry const& entry = _entries[entryIndex];
-        // output << fmt::format("  entry[{:03}]   : LRU: {} <- -> {}, alt: {}; := {}\n",
+        // output << std::format("  entry[{:03}]   : LRU: {} <- -> {}, alt: {}; := {}\n",
         //                       entryIndex,
         //                       entry.prevInLRU,
         //                       entry.nextInLRU,
         //                       entry.nextWithSameHash,
-        //                       entry.value.has_value() ? fmt::format("{}", entry.value.value()) :
+        //                       entry.value.has_value() ? std::format("{}", entry.value.value()) :
         //                       "nullopt");
         if (entry.nextWithSameHash)
             ++hashSlotCollisions;
@@ -692,24 +692,24 @@ void strong_lru_hashtable<Value>::inspect(std::ostream& output) const
         if (dr >= 99.99)
             return "100%";
         else
-            return fmt::format("{:.02}%", dr);
+            return std::format("{:.02}%", dr);
     };
 
-    output << fmt::format("=============================================================\n", _name);
-    output << fmt::format("Hashtale: {}\n", _name);
-    output << fmt::format("-------------------------------------------------------------\n", _name);
-    output << fmt::format("hashslot collisions : {} ({})\n",
+    output << std::format("=============================================================\n", _name);
+    output << std::format("Hashtale: {}\n", _name);
+    output << std::format("-------------------------------------------------------------\n", _name);
+    output << std::format("hashslot collisions : {} ({})\n",
                           hashSlotCollisions,
                           humanReadableUtiliation(hashSlotCollisions, _hashCount.value));
-    output << fmt::format("stats               : {}\n", _stats);
-    output << fmt::format("hash table capacity : {} ({} utilization)\n",
+    output << std::format("stats               : {}\n", _stats);
+    output << std::format("hash table capacity : {} ({} utilization)\n",
                           _hashCount.value,
                           humanReadableUtiliation(_size, _hashCount.value));
-    output << fmt::format("entry count         : {}\n", _size);
-    output << fmt::format("entry capacity      : {} ({} utilization)\n",
+    output << std::format("entry count         : {}\n", _size);
+    output << std::format("entry capacity      : {} ({} utilization)\n",
                           _capacity.value,
                           humanReadableUtiliation(_size, _capacity.value));
-    output << fmt::format("-------------------------------------------------------------\n", _name);
+    output << std::format("-------------------------------------------------------------\n", _name);
 }
 
 // {{{ helpers

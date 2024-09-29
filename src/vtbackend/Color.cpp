@@ -14,7 +14,7 @@ string to_string(Color color)
     using Type = ColorType;
     switch (color.type())
     {
-        case Type::Indexed: return fmt::format("{}", color.index());
+        case Type::Indexed: return std::format("{}", color.index());
         case Type::Bright:
             switch (color.index())
             {
@@ -44,7 +44,7 @@ string to_string(Color color)
                 default: return "?";
             }
         case Type::RGB:
-            return fmt::format("'#{:02X}{:02X}{:02X}'", color.rgb().red, color.rgb().green, color.rgb().blue);
+            return std::format("'#{:02X}{:02X}{:02X}'", color.rgb().red, color.rgb().green, color.rgb().blue);
         case Type::Undefined: break;
     }
     return "?";
@@ -64,7 +64,7 @@ string to_string(IndexedColor color)
         case IndexedColor::White: return "white";
         case IndexedColor::Default: return "DEFAULT";
     }
-    return fmt::format("IndexedColor:{}", static_cast<unsigned>(color));
+    return std::format("IndexedColor:{}", static_cast<unsigned>(color));
 }
 
 string to_string(BrightColor color)
@@ -80,7 +80,7 @@ string to_string(BrightColor color)
         case BrightColor::Cyan: return "bright-cyan";
         case BrightColor::White: return "bright-white";
     }
-    return fmt::format("BrightColor:{}", static_cast<unsigned>(color));
+    return std::format("BrightColor:{}", static_cast<unsigned>(color));
 }
 
 RGBColor::RGBColor(std::string const& hexCode): RGBColor()
@@ -121,12 +121,12 @@ RGBAColor& RGBAColor::operator=(string const& hexCode)
 
 string to_string(RGBColor c)
 {
-    return fmt::format("'#{:02X}{:02X}{:02X}'", c.red, c.green, c.blue);
+    return std::format("'#{:02X}{:02X}{:02X}'", c.red, c.green, c.blue);
 }
 
 string to_string(RGBAColor c)
 {
-    return fmt::format("'#{:02X}{:02X}{:02X}{:02X}'", c.red(), c.green(), c.blue(), c.alpha());
+    return std::format("'#{:02X}{:02X}{:02X}{:02X}'", c.red(), c.green(), c.blue(), c.alpha());
 }
 
 optional<RGBColor> parseColor(string_view const& value)

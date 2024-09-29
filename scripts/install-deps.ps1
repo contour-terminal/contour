@@ -10,25 +10,27 @@ class ThirdParty {
     [string] $Macro
 }
 
+$libunicode_git_sha="6f8e210d1e50fc0db5c977ca9fd58555d23010ac"
+
 # Take care, order matters, at least as much as dependencies are of concern.
 $ThirdParties =
 @(
     [ThirdParty]@{
-        Folder  = "libunicode-28aacf5191450775f1f336aba1d6b65673b0ba9f";
-        Archive = "libunicode-28aacf5191450775f1f336aba1d6b65673b0ba9f.zip";
-        URI     = "https://github.com/contour-terminal/libunicode/archive/28aacf5191450775f1f336aba1d6b65673b0ba9f.zip";
+        Folder  = "libunicode-${libunicode_git_sha}";
+        Archive = "libunicode-${libunicode_git_sha}.zip";
+        URI     = "https://github.com/contour-terminal/libunicode/archive/${libunicode_git_sha}.zip";
         Macro   = "libunicode"
     };
     [ThirdParty]@{
-        Folder  = "termbench-pro-7f86c882b2dab88a0cceeffd7e3848f55fa5f6f2";
-        Archive = "termbench-pro-7f86c882b2dab88a0cceeffd7e3848f55fa5f6f2.zip";
-        URI     = "https://github.com/contour-terminal/termbench-pro/archive/7f86c882b2dab88a0cceeffd7e3848f55fa5f6f2.zip";
+        Folder  = "termbench-pro-f6c37988e6481b48a8b8acaf1575495e018e9747";
+        Archive = "termbench-pro-f6c37988e6481b48a8b8acaf1575495e018e9747.zip";
+        URI     = "https://github.com/contour-terminal/termbench-pro/archive/f6c37988e6481b48a8b8acaf1575495e018e9747.zip";
         Macro   = "termbench_pro"
     }
     [ThirdParty]@{
-        Folder  = "boxed-cpp-1.4.2";
-        Archive = "boxed-cpp-1.4.2.zip";
-        URI     = "https://github.com/contour-terminal/boxed-cpp/archive/refs/tags/v1.4.2.zip";
+        Folder  = "boxed-cpp-1.4.3";
+        Archive = "boxed-cpp-1.4.3.zip";
+        URI     = "https://github.com/contour-terminal/boxed-cpp/archive/refs/tags/v1.4.3.zip";
         Macro   = "boxed_cpp"
     }
 )

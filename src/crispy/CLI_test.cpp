@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/CLI.h>
 
-#include <fmt/format.h>
-
 #include <catch2/catch_test_macros.hpp>
+
+#include <format>
 
 // TODO API / impl:
 //

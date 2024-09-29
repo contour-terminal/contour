@@ -7,9 +7,8 @@
 #include <crispy/StrongHash.h>
 #include <crispy/StrongLRUCache.h>
 
-#include <fmt/format.h>
-
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -260,9 +259,9 @@ class ImagePool
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<vtbackend::ImageFormat>: formatter<std::string_view>
+struct std::formatter<vtbackend::ImageFormat>: formatter<std::string_view>
 {
-    auto format(vtbackend::ImageFormat value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::ImageFormat value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -275,22 +274,21 @@ struct fmt::formatter<vtbackend::ImageFormat>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::ImageStats>: formatter<std::string>
+struct std::formatter<vtbackend::ImageStats>: formatter<std::string>
 {
-    auto format(vtbackend::ImageStats stats, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::ImageStats stats, auto& ctx) const
     {
         return formatter<std::string>::format(
-            fmt::format(
+            std::format(
                 "{} instances, {} raster, {} fragments", stats.instances, stats.rasterized, stats.fragments),
             ctx);
     }
 };
 
 template <>
-struct fmt::formatter<std::shared_ptr<vtbackend::Image const>>: fmt::formatter<std::string>
+struct std::formatter<std::shared_ptr<vtbackend::Image const>>: std::formatter<std::string>
 {
-    auto format(std::shared_ptr<vtbackend::Image const> const& image,
-                format_context& ctx) const -> format_context::iterator
+    auto format(std::shared_ptr<vtbackend::Image const> const& image, auto& ctx) const
     {
         std::string text;
         if (!image)
@@ -298,19 +296,20 @@ struct fmt::formatter<std::shared_ptr<vtbackend::Image const>>: fmt::formatter<s
         else
         {
             vtbackend::Image const& imageRef = *image;
-            text = fmt::format("Image<#{}, {}, size={}>",
+            text = std::format("Image<#{}, {}, size={}x{}>",
                                imageRef.weak_from_this().use_count(),
                                imageRef.id(),
-                               imageRef.size());
+                               imageRef.size().width.value,
+                               imageRef.size().height.value);
         }
         return formatter<std::string>::format(text, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtbackend::ImageResize>: formatter<std::string_view>
+struct std::formatter<vtbackend::ImageResize>: formatter<std::string_view>
 {
-    auto format(vtbackend::ImageResize value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::ImageResize value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -325,9 +324,9 @@ struct fmt::formatter<vtbackend::ImageResize>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::ImageAlignment>: formatter<std::string_view>
+struct std::formatter<vtbackend::ImageAlignment>: formatter<std::string_view>
 {
-    auto format(vtbackend::ImageAlignment value, format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::ImageAlignment value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -347,29 +346,31 @@ struct fmt::formatter<vtbackend::ImageAlignment>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<vtbackend::RasterizedImage>: formatter<std::string>
+struct std::formatter<vtbackend::RasterizedImage>: formatter<std::string>
 {
-    auto format(vtbackend::RasterizedImage const& image,
-                format_context& ctx) const -> format_context::iterator
+    auto format(vtbackend::RasterizedImage const& image, auto& ctx) const
     {
-        return formatter<std::string>::format(fmt::format("RasterizedImage<{}, {}, {}, {}, {}>",
+        return formatter<std::string>::format(std::format("RasterizedImage<{}, {}, {}, {}, {}>",
                                                           image.weak_from_this().use_count(),
                                                           image.cellSpan(),
                                                           image.resizePolicy(),
                                                           image.alignmentPolicy(),
-                                                          image.imagePointer()),
+                                                          image.imagePointer()->id().value),
                                               ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtbackend::ImageFragment>: fmt::formatter<std::string>
+struct std::formatter<vtbackend::ImageFragment>: std::formatter<std::string>
 {
-    auto format(const vtbackend::ImageFragment& fragment,
-                format_context& ctx) const -> format_context::iterator
+    auto format(const vtbackend::ImageFragment& fragment, auto& ctx) const
     {
         return formatter<std::string>::format(
-            fmt::format("ImageFragment<offset={}, {}>", fragment.offset(), fragment.rasterizedImage()), ctx);
+            std::format("ImageFragment<offset={}, {}>",
+                        fragment.offset().line.value,
+                        fragment.offset().column.value,
+                        fragment.rasterizedImage().imagePointer()->id().value),
+            ctx);
     }
 };
 // }}}

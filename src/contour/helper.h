@@ -318,10 +318,10 @@ struct RenderStateManager
 } // namespace contour
 
 template <>
-struct fmt::formatter<contour::RenderState>: public fmt::formatter<std::string>
+struct std::formatter<contour::RenderState>: std::formatter<string_view>
 {
     using State = contour::RenderState;
-    static auto format(State state, format_context& ctx) -> format_context::iterator
+    auto format(State state, auto& ctx) const
     {
         string_view name;
         switch (state)
@@ -331,6 +331,6 @@ struct fmt::formatter<contour::RenderState>: public fmt::formatter<std::string>
             case State::DirtyIdle: name = "dirty-idle"; break;
             case State::DirtyPainting: name = "dirty-painting"; break;
         }
-        return fmt::formatter<string_view> {}.format(name, ctx);
+        return std::formatter<string_view>::format(name, ctx);
     }
 };

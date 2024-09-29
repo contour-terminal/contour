@@ -13,8 +13,7 @@
 #include <crispy/CLI.h>
 #include <crispy/utils.h>
 
-#include <fmt/format.h>
-
+#include <format>
 #include <iostream>
 #include <optional>
 #include <thread>
@@ -22,8 +21,6 @@
 #include <libtermbench/termbench.h>
 
 using namespace std;
-
-using namespace contour;
 
 namespace
 {
@@ -62,17 +59,16 @@ int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
         options.sgr = true;
     }
 
-    auto const titleText = fmt::format("Running benchmark: {} (test size: {} MB)", title, options.testSizeMB);
+    auto const titleText = std::format("Running benchmark: {} (test size: {} MB)", title, options.testSizeMB);
 
     cout << titleText << '\n' << string(titleText.size(), '=') << '\n';
 
-    auto tbp = contour::termbench::Benchmark { std::forward<Writer>(writer),
-                                               options.testSizeMB,
-                                               80,
-                                               24,
-                                               [&](contour::termbench::Test const& test) {
-                                                   cout << fmt::format("Running test {} ...\n", test.name);
-                                               } };
+    auto tbp = termbench::Benchmark { std::forward<Writer>(writer),
+                                      options.testSizeMB,
+                                      termbench::TerminalSize { 80, 24 },
+                                      [&](termbench::Test const& test) {
+                                          cout << std::format("Running test {} ...\n", test.name);
+                                      } };
 
     if (options.manyLines)
         tbp.add(termbench::tests::many_lines());
@@ -166,17 +162,17 @@ class ContourHeadlessBench: public crispy::app
     static int showMetaInfo()
     {
         // Show any interesting meta information.
-        fmt::print("SimpleCell  : {} bytes\n", sizeof(vtbackend::SimpleCell));
-        fmt::print("CompactCell : {} bytes\n", sizeof(vtbackend::CompactCell));
-        fmt::print("CellExtra   : {} bytes\n", sizeof(vtbackend::CellExtra));
-        fmt::print("CellFlags   : {} bytes\n", sizeof(vtbackend::CellFlags));
-        fmt::print("Color       : {} bytes\n", sizeof(vtbackend::Color));
+        std::cout << std::format("SimpleCell  : {} bytes\n", sizeof(vtbackend::SimpleCell));
+        std::cout << std::format("CompactCell : {} bytes\n", sizeof(vtbackend::CompactCell));
+        std::cout << std::format("CellExtra   : {} bytes\n", sizeof(vtbackend::CellExtra));
+        std::cout << std::format("CellFlags   : {} bytes\n", sizeof(vtbackend::CellFlags));
+        std::cout << std::format("Color       : {} bytes\n", sizeof(vtbackend::Color));
         return EXIT_SUCCESS;
     }
 
     BenchOptions benchOptionsFor(string_view kind)
     {
-        auto const prefix = fmt::format("bench-headless.{}.", kind);
+        auto const prefix = std::format("bench-headless.{}.", kind);
         auto opts = BenchOptions {};
         opts.testSizeMB = parameters().uint(prefix + "size");
         opts.manyLines = parameters().boolean(prefix + "cat");
@@ -210,7 +206,7 @@ class ContourHeadlessBench: public crispy::app
             benchOptionsFor("grid"),
             "terminal with screen buffer");
         if (rv == EXIT_SUCCESS)
-            cout << fmt::format("{:>12}: {}\n\n", "history size", *vt.terminal.maxHistoryLineCount());
+            cout << std::format("{:>12}: {}\n\n", "history size", *vt.terminal.maxHistoryLineCount());
         return rv;
     }
 
@@ -261,7 +257,7 @@ class ContourHeadlessBench: public crispy::app
         } };
 
         // Perform benchmark
-        fmt::print("Running PTY benchmark ...\n");
+        std::cout << std::format("Running PTY benchmark ...\n");
         auto const startTime = steady_clock::now();
         auto stopTime = startTime;
         while (stopTime - startTime < benchTime)
@@ -280,21 +276,23 @@ class ContourHeadlessBench: public crispy::app
         auto const mbPerSecs =
             static_cast<long double>(bytesTransferred) / static_cast<long double>(secs.count());
 
-        fmt::print("\n");
-        fmt::print("PTY stdout throughput bandwidth test\n");
-        fmt::print("====================================\n\n");
-        fmt::print("Writes per loop        : {}\n", WritesPerLoop);
-        fmt::print("PTY write size         : {}\n", PtyWriteSize);
-        fmt::print("PTY read size          : {}\n", PtyReadSize);
-        fmt::print("Test time              : {}.{:03} seconds\n", msecs.count() / 1000, msecs.count() % 1000);
-        fmt::print("Data transferred       : {}\n", crispy::humanReadableBytes(bytesTransferred));
-        fmt::print("Reader loop iterations : {}\n", loopIterations);
-        fmt::print(
+        std::cout << std::format("\n");
+        std::cout << std::format("PTY stdout throughput bandwidth test\n");
+        std::cout << std::format("====================================\n\n");
+        std::cout << std::format("Writes per loop        : {}\n", WritesPerLoop);
+        std::cout << std::format("PTY write size         : {}\n", PtyWriteSize);
+        std::cout << std::format("PTY read size          : {}\n", PtyReadSize);
+        std::cout << std::format(
+            "Test time              : {}.{:03} seconds\n", msecs.count() / 1000, msecs.count() % 1000);
+        std::cout << std::format("Data transferred       : {}\n",
+                                 crispy::humanReadableBytes(bytesTransferred));
+        std::cout << std::format("Reader loop iterations : {}\n", loopIterations);
+        std::cout << std::format(
             "Average size per read  : {}\n",
             crispy::humanReadableBytes(static_cast<uint64_t>(static_cast<long double>(bytesTransferred)
                                                              / static_cast<long double>(loopIterations))));
-        fmt::print("Transfer speed         : {} per second\n",
-                   crispy::humanReadableBytes(static_cast<uint64_t>(mbPerSecs)));
+        std::cout << std::format("Transfer speed         : {} per second\n",
+                                 crispy::humanReadableBytes(static_cast<uint64_t>(mbPerSecs)));
 
         return EXIT_SUCCESS;
     }

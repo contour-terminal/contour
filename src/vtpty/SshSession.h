@@ -123,23 +123,23 @@ class SshSession final: public Pty
     void logInfoWithInject(std::string_view message) const;
 
     template <typename... Args>
-    void logInfoWithInject(fmt::format_string<Args...> fmt, Args&&... args) const
+    void logInfoWithInject(std::format_string<Args...> fmt, Args&&... args) const
     {
-        logInfoWithInject(fmt::format(fmt, std::forward<Args>(args)...));
+        logInfoWithInject(std::format(fmt, std::forward<Args>(args)...));
     }
 
     template <typename... Args>
-    void logInfo(fmt::format_string<Args...> fmt, Args&&... args) const
+    void logInfo(std::format_string<Args...> fmt, Args&&... args) const
     {
-        logInfo(fmt::format(fmt, std::forward<Args>(args)...));
+        logInfo(std::format(fmt, std::forward<Args>(args)...));
     }
 
     void logError(std::string_view message) const;
 
     template <typename... Args>
-    void logError(fmt::format_string<Args...> fmt, Args&&... args) const
+    void logError(std::format_string<Args...> fmt, Args&&... args) const
     {
-        logError(fmt::format(fmt, std::forward<Args>(args)...));
+        logError(std::format(fmt, std::forward<Args>(args)...));
     }
 
     SshHostConfig _config;
@@ -167,9 +167,9 @@ class SshSession final: public Pty
 } // namespace vtpty
 
 template <>
-struct fmt::formatter<vtpty::SshSession::State>: fmt::formatter<std::string_view>
+struct std::formatter<vtpty::SshSession::State>: std::formatter<std::string_view>
 {
-    auto format(vtpty::SshSession::State const& state, format_context& ctx) const -> format_context::iterator
+    auto format(vtpty::SshSession::State const& state, auto& ctx) const
     {
         std::string_view name;
         // clang-format off
@@ -199,23 +199,22 @@ struct fmt::formatter<vtpty::SshSession::State>: fmt::formatter<std::string_view
             case vtpty::SshSession::State::Closed: name = "Closed"; break;
         }
         // clang-format on
-        return fmt::formatter<std::string_view>::format(name, ctx);
+        return std::formatter<std::string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<vtpty::SshSession::ExitStatus>: fmt::formatter<std::string>
+struct std::formatter<vtpty::SshSession::ExitStatus>: std::formatter<std::string>
 {
-    auto format(vtpty::SshSession::ExitStatus const& status,
-                format_context& ctx) const -> format_context::iterator
+    auto format(vtpty::SshSession::ExitStatus const& status, auto& ctx) const
     {
         return std::visit(overloaded { [&](vtpty::SshSession::NormalExit exit) {
-                                          return fmt::formatter<std::string>::format(
-                                              fmt::format("{} (normal exit)", exit.exitCode), ctx);
+                                          return std::formatter<std::string>::format(
+                                              std::format("{} (normal exit)", exit.exitCode), ctx);
                                       },
                                        [&](vtpty::SshSession::SignalExit exit) {
-                                           return fmt::formatter<std::string>::format(
-                                               fmt::format("{} ({})", exit.signal, exit.errorMessage), ctx);
+                                           return std::formatter<std::string>::format(
+                                               std::format("{} ({})", exit.signal, exit.errorMessage), ctx);
                                        } },
                           status);
     }

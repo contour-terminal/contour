@@ -3,8 +3,6 @@
 
 #include <crispy/logstore.h>
 
-#include <fmt/format.h>
-
 #include <gsl/span>
 #include <gsl/span_ext>
 
@@ -12,6 +10,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <iterator>
 #include <list>
@@ -261,7 +260,7 @@ template <BufferObjectElementType T>
 gsl::span<T const> buffer_object<T>::writeAtEnd(gsl::span<T const> data) noexcept
 {
     assert(_hotEnd + data.size() <= _end);
-    memcpy(_hotEnd, data.data(), data.size());
+    std::memcpy(_hotEnd, data.data(), data.size());
     return gsl::span<T const> { _hotEnd, data.size() };
 }
 

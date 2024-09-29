@@ -308,7 +308,7 @@ void Screen<Cell>::verifyState() const
     [[maybe_unused]] auto const clampedCursorPos = clampToScreen(_cursor.position);
     if (_cursor.position != clampedCursorPos)
     {
-        fail(fmt::format("Cursor {} does not match clamp to screen {}.", _cursor.position, clampedCursorPos));
+        fail(std::format("Cursor {} does not match clamp to screen {}.", _cursor.position, clampedCursorPos));
         // FIXME: the above triggers on tmux vertical screen split (cursor.column off-by-one)
     }
 
@@ -2014,7 +2014,7 @@ void Screen<Cell>::requestStatusString(RequestStatusString value)
                 auto const c1TransmittionMode = ControlTransmissionMode::S7C1T;
                 auto const c1t = c1TransmittionMode == ControlTransmissionMode::S7C1T ? 1 : 0;
 
-                return fmt::format("{};{}\"p", level, c1t);
+                return std::format("{};{}\"p", level, c1t);
             }
             case RequestStatusString::DECSCUSR: // Set cursor style (DECSCUSR), VT520
             {
@@ -2029,28 +2029,28 @@ void Screen<Cell>::requestStatusString(RequestStatusString value)
                     }
                     return 1;
                 }();
-                return fmt::format("{} q", shape + blinkingOrSteady);
+                return std::format("{} q", shape + blinkingOrSteady);
             }
             case RequestStatusString::DECSLPP:
                 // Ps >= 2 4  -> Resize to Ps lines (DECSLPP), VT340 and VT420.
                 // xterm adapts this by resizing its window.
                 if (*pageSize().lines >= 24)
-                    return fmt::format("{}t", pageSize().lines);
+                    return std::format("{}t", pageSize().lines);
                 errorLog()("Requesting device status for {} not with line count < 24 is undefined.");
                 return nullopt;
             case RequestStatusString::DECSTBM:
-                return fmt::format("{};{}r", 1 + *margin().vertical.from, *margin().vertical.to);
+                return std::format("{};{}r", 1 + *margin().vertical.from, *margin().vertical.to);
             case RequestStatusString::DECSLRM:
-                return fmt::format("{};{}s", 1 + *margin().horizontal.from, *margin().horizontal.to);
+                return std::format("{};{}s", 1 + *margin().horizontal.from, *margin().horizontal.to);
             case RequestStatusString::DECSCPP:
                 // EXTENSION: Usually DECSCPP only knows about 80 and 132, but we take any.
-                return fmt::format("{}|$", pageSize().columns);
-            case RequestStatusString::DECSNLS: return fmt::format("{}*|", pageSize().lines);
+                return std::format("{}|$", pageSize().columns);
+            case RequestStatusString::DECSNLS: return std::format("{}*|", pageSize().lines);
             case RequestStatusString::SGR:
-                return fmt::format("0;{}m", vtSequenceParameterString(_cursor.graphicsRendition));
+                return std::format("0;{}m", vtSequenceParameterString(_cursor.graphicsRendition));
             case RequestStatusString::DECSCA: {
                 auto const isProtected = _cursor.graphicsRendition.flags & CellFlag::CharacterProtected;
-                return fmt::format("{}\"q", isProtected ? 1 : 2);
+                return std::format("{}\"q", isProtected ? 1 : 2);
             }
             case RequestStatusString::DECSASD:
                 switch (_terminal->activeStatusDisplay())
@@ -2107,7 +2107,7 @@ namespace
     {
         std::string output;
         for (char const ch: value)
-            output += fmt::format("{:02X}", unsigned(ch));
+            output += std::format("{:02X}", unsigned(ch));
         return output;
     }
 } // namespace
@@ -2119,7 +2119,7 @@ void Screen<Cell>::requestCapability(std::string_view name)
         reply("\033P1+r{}\033\\", toHexString(name));
     else if (auto const value = numericCapability(name); value != Database::Npos)
     {
-        auto hexValue = fmt::format("{:X}", value);
+        auto hexValue = std::format("{:X}", value);
         if (hexValue.size() % 2)
             hexValue.insert(hexValue.begin(), '0');
         reply("\033P1+r{}={}\033\\", toHexString(name), hexValue);
@@ -2137,7 +2137,7 @@ void Screen<Cell>::requestCapability(capabilities::Code code)
         reply("\033P1+r{}\033\\", code.hex());
     else if (auto const value = numericCapability(code); value >= 0)
     {
-        auto hexValue = fmt::format("{:X}", value);
+        auto hexValue = std::format("{:X}", value);
         if (hexValue.size() % 2)
             hexValue.insert(hexValue.begin(), '0');
         reply("\033P1+r{}={}\033\\", code.hex(), hexValue);
@@ -2217,7 +2217,7 @@ void Screen<Cell>::inspect(std::string const& message, std::ostream& os) const
     };
 
     auto const gridInfoLine = [&](Grid<Cell> const& grid) {
-        return fmt::format("main page lines: scrollback cur {} max {}, main page lines {}, used lines "
+        return std::format("main page lines: scrollback cur {} max {}, main page lines {}, used lines "
                            "{}, zero index {}\n",
                            grid.historyLineCount(),
                            grid.maxHistoryLineCount(),
@@ -2233,20 +2233,20 @@ void Screen<Cell>::inspect(std::string const& message, std::ostream& os) const
         hline();
     }
 
-    os << fmt::format("Rendered screen at the time of failure\n");
-    os << fmt::format("main page size       : {}\n", _settings->pageSize);
-    os << fmt::format("history line count   : {} (max {})\n",
+    os << std::format("Rendered screen at the time of failure\n");
+    os << std::format("main page size       : {}\n", _settings->pageSize);
+    os << std::format("history line count   : {} (max {})\n",
                       _terminal->primaryScreen().historyLineCount(),
                       _terminal->maxHistoryLineCount());
-    os << fmt::format("cursor position      : {}\n", _cursor.position);
-    os << fmt::format("vertical margins     : {}\n", margin().vertical);
-    os << fmt::format("horizontal margins   : {}\n", margin().horizontal);
+    os << std::format("cursor position      : {}\n", _cursor.position);
+    os << std::format("vertical margins     : {}\n", margin().vertical);
+    os << std::format("horizontal margins   : {}\n", margin().horizontal);
     os << gridInfoLine(grid());
 
     hline();
     os << screenshot([this](LineOffset lineNo) -> string {
         // auto const absoluteLine = _grid.toAbsoluteLine(lineNo);
-        return fmt::format("{} {:>4}: {}",
+        return std::format("{} {:>4}: {}",
                            _grid.lineAt(lineNo).isTrivialBuffer() ? "|" : ":",
                            lineNo.value,
                            _grid.lineAt(lineNo).flags());
@@ -3264,7 +3264,7 @@ void Screen<Cell>::processSequence(Sequence const& seq)
     }
 #endif
 
-    // std::cerr << fmt::format("\t{} \t; {}\n", seq,
+    // std::cerr << std::format("\t{} \t; {}\n", seq,
     //         seq.functionDefinition() ? seq.functionDefinition()->comment : ""sv);
 
     _terminal->incrementInstructionCounter();

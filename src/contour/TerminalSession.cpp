@@ -66,7 +66,7 @@ namespace
 {
     string unhandledExceptionMessage(string_view const& where, exception const& e)
     {
-        return fmt::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
+        return std::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
     }
 
     void setThreadName(char const* name)
@@ -616,7 +616,7 @@ void TerminalSession::onClosed()
         auto constexpr TextLines = array<string_view, 2> { "Shell terminated too quickly.",
                                                            "The window will not be closed automatically." };
         for (auto const text: TextLines)
-            _terminal.writeToScreen(fmt::format("\r\n{}{}{}", SGR, EL, text));
+            _terminal.writeToScreen(std::format("\r\n{}{}{}", SGR, EL, text));
         _terminal.writeToScreen("\r\n");
         _terminatedAndWaitingForKeyPress = true;
         return;
@@ -1597,7 +1597,7 @@ bool TerminalSession::reloadConfigWithProfile(string const& profileName)
 
     if (!newConfig.profile(profileName))
     {
-        errorLog()(fmt::format("Currently active profile with name '{}' gone.", profileName));
+        errorLog()(std::format("Currently active profile with name '{}' gone.", profileName));
         ++configFailures;
     }
 

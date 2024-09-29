@@ -3,9 +3,9 @@
 
 #include <crispy/assert.h>
 
-#include <fmt/format.h>
-
 #include <QtCore/QtGlobal>
+
+#include <format>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtGui/QSurfaceFormat>
