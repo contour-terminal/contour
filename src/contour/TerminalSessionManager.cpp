@@ -52,22 +52,16 @@ TerminalSession* TerminalSessionManager::createSession()
     QQmlEngine::setObjectOwnership(session, QQmlEngine::CppOwnership);
 
     _activeSession = session;
+    _lastTabChange = std::chrono::steady_clock::now();
     return session;
 }
 
 void TerminalSessionManager::setSession(size_t index)
 {
 
-    // QML for some reason sends multiple switch requests in a row, so we need to ignore them.
-    auto now = std::chrono::steady_clock::now();
-    if (now - _lastTabSwitch < _timeBetweenTabSwitches)
-    {
-        std::cout << "Ignoring switch request due to too frequent switch requests." << std::endl;
+    managerLog()(std::format("SET SESSION: index: {}, _sessions.size(): {}", index, _sessions.size()));
+    if (!isAllowedToChangeTabs())
         return;
-    }
-    _lastTabSwitch = now;
-
-    std::cout << "Switching to session " << index << std::endl;
 
     auto imageSize = display->pixelSize();
     auto pageSize = display->calculatePageSize();
@@ -85,20 +79,8 @@ void TerminalSessionManager::setSession(size_t index)
     }
     display->setSession(_activeSession);
     display->resizeWindow(imageSize.width, imageSize.height);
-
-    _activeSession->terminal().setGuiTabInfoForStatusLine([&]() {
-        std::string tabInfo;
-        for (size_t i = 0; i < _sessions.size(); ++i)
-        {
-            if (i == index)
-                tabInfo += "[";
-            tabInfo += std::to_string(i + 1);
-            if (i == index)
-                tabInfo += "]";
-            tabInfo += " ";
-        }
-        return tabInfo;
-    }());
+    updateStatusLine();
+    _lastTabChange = std::chrono::steady_clock::now();
 }
 
 void TerminalSessionManager::addSession()
@@ -108,13 +90,10 @@ void TerminalSessionManager::addSession()
 
 void TerminalSessionManager::previousTab()
 {
-    auto currentSessionIndex = [](auto const& sessions, auto const& activeSession) {
-        auto i = std::find_if(sessions.begin(), sessions.end(), [&](auto p) { return p == activeSession; });
-        return i != sessions.end() ? i - sessions.begin() : -1;
-    }(_sessions, _activeSession);
-    std::cout << "PREVIOUS: ";
-    std::cout << "currentSessionIndex: " << currentSessionIndex << ", _sessions.size(): " << _sessions.size()
-              << std::endl;
+    const auto currentSessionIndex = getCurrentSessionIndex();
+    managerLog()(std::format("PREVIOUS TAB: currentSessionIndex: {}, _sessions.size(): {}",
+                             currentSessionIndex,
+                             _sessions.size()));
 
     if (currentSessionIndex > 0)
     {
@@ -124,22 +103,63 @@ void TerminalSessionManager::previousTab()
 
 void TerminalSessionManager::nextTab()
 {
-    auto currentSessionIndex = [](auto const& sessions, auto const& activeSession) {
-        auto i = std::find_if(sessions.begin(), sessions.end(), [&](auto p) { return p == activeSession; });
-        return i != sessions.end() ? i - sessions.begin() : -1;
-    }(_sessions, _activeSession);
+    const auto currentSessionIndex = getCurrentSessionIndex();
 
-    std::cout << "NEXT TAB: ";
-    std::cout << "currentSessionIndex: " << currentSessionIndex << ", _sessions.size(): " << _sessions.size()
-              << std::endl;
+    managerLog()(std::format(
+        "NEXT TAB: currentSessionIndex: {}, _sessions.size(): {}", currentSessionIndex, _sessions.size()));
     if (currentSessionIndex < _sessions.size() - 1)
     {
         setSession(currentSessionIndex + 1);
     }
 }
 
+void TerminalSessionManager::closeTab()
+{
+    const auto currentSessionIndex = getCurrentSessionIndex();
+    managerLog()(std::format(
+        "CLOSE TAB: currentSessionIndex: {}, _sessions.size(): {}", currentSessionIndex, _sessions.size()));
+
+    // Session was removed outside of terminal session manager, we need to switch to another tab.
+    if (currentSessionIndex == -1 && !_sessions.empty())
+    {
+        // We need to switch to another tab, so we permit consequent tab changes.
+        // TODO: This is a bit hacky.
+        _lastTabChange = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+        setSession(0);
+        return;
+    }
+
+    if (_sessions.size() > 1)
+    {
+
+        if (!isAllowedToChangeTabs())
+            return;
+
+        removeSession(*_activeSession);
+
+        // We need to switch to another tab, so we permit consequent tab changes.
+        // TODO: This is a bit hacky.
+        _lastTabChange = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+
+        if (currentSessionIndex <= _sessions.size() - 1)
+        {
+            setSession(currentSessionIndex + 1);
+        }
+        else
+        {
+            setSession(currentSessionIndex - 1);
+        }
+    }
+}
+
 void TerminalSessionManager::removeSession(TerminalSession& thatSession)
 {
+    managerLog()(std::format(
+        "REMOVE SESSION: session: {}, _sessions.size(): {}", (void*) &thatSession, _sessions.size()));
+
+    if (!isAllowedToChangeTabs())
+        return;
+
     _app.onExit(thatSession); // TODO: the logic behind that impl could probably be moved here.
 
     auto i = std::find_if(_sessions.begin(), _sessions.end(), [&](auto p) { return p == &thatSession; });
@@ -148,6 +168,8 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
         _sessions.erase(i);
     }
 
+    updateStatusLine();
+    _lastTabChange = std::chrono::steady_clock::now();
     // Notify app if all sessions have been killed to trigger app termination.
 }
 

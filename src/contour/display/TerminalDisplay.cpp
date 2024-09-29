@@ -264,7 +264,7 @@ TerminalDisplay::~TerminalDisplay()
 
 void TerminalDisplay::setSession(TerminalSession* newSession)
 {
-    fmt::print("TerminalDisplay::setSession: {} -> {}\n", (void*) _session, (void*) newSession);
+    displayLog()("TerminalDisplay::setSession: {} -> {}\n", (void*) _session, (void*) newSession);
     if (_session == newSession)
         return;
 
@@ -535,7 +535,6 @@ void TerminalDisplay::onBeforeSynchronize()
 
     if (_sessionChanged)
     {
-        fmt::print("Creating renderer due to session change.\n");
         _sessionChanged = false;
         createRenderer();
     }
