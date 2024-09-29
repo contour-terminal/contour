@@ -681,65 +681,38 @@ jobs:
   # {{{ Linux AppImage (Using Ubuntu 24.04 as base).
   package_for_AppImage:
     name: "Packaging for AppImage"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
         with:
-          key: "ccache-ubuntu2404-AppImage"
-          max-size: 256M
-      - name: "Update apt database"
-        run: sudo apt-get update
+          platforms: all
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          version: latest
+      - name: update APT database
+        run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars
         run: sudo apt-get -qy install libxml2-utils
-      - name: Install LinuxDeploy
-        uses: miurahr/install-linuxdeploy-action@v1
-        with:
-          plugins: qt appimage
-      - name: "set environment variables"
+      - name: set environment variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-      - name: set QTVER
-        id: set_qtver
-        run: echo "QTVER=6" >> "$GITHUB_OUTPUT"
-      - name: "install dependencies"
-        run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
-      - name: "Post-fix embedded dependency permissions."
-        run: sudo find _deps/sources -exec chown $UID {} \;
-      - name: "create build directory"
-        run: mkdir build
-      - name: CMake version
-        run: cmake --version
-      - name: "cmake"
+      - name: build inside docker
         run: |
-          # TODO: turn on -Werror again, that requires some code changes.
-          CMAKE_CXX_STANDARD=20
-          EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=6"
-          BUILD_DIR="build" \
-            CMAKE_BUILD_TYPE=RelWithDebInfo \
-            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
-                               -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD \
-                               -DCMAKE_INSTALL_PREFIX="$(pwd)/AppDir" \
-                               -DCONTOUR_TESTING=ON \
-                               -DPEDANTIC_COMPILER_WERROR=OFF \
-                               " \
-            ./scripts/ci-prepare-contour.sh
-      - name: "build"
-        run: cmake --build --preset linux-release / -- -j3
-      - name: "tests"
-        run: cmake --build --preset linux-release --target test
-      - name: "install libfuse2 (Dependency of AppImage programs)"
-        run: sudo apt -qy install libfuse2
-      - name: "linuxdeploy: Creating AppImage"
-        run: |
-          set -ex
-          cmake --build --preset linux-release --target install
-          # NB: The appdir path must be given absolute rather than relative, as otherwise the qt plugin won't work.
-          QML_SOURCES_PATHS=./src/contour/ui QMAKE=qmake6 DEBUG=1 QT_SELECT=6 linuxdeploy-x86_64.AppImage --output=appimage --appdir AppDir -e ./AppDir/bin/contour --plugin qt  --icon-file=./AppDir/share/icons/hicolor/512x512/apps/org.contourterminal.Contour.png --desktop-file=./AppDir/share/applications/org.contourterminal.Contour.desktop
-          mv -v Contour-x86_64.AppImage contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage
+          docker buildx build --tag contour-appimage \
+          -f .github/appimage/Dockerfile --load .
+          docker create --name contour-appimage contour-appimage
+          docker cp contour-appimage:/contour/Contour-latest-x86_64.AppImage  contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage
+          docker container rm contour-appimage
+      - name: "set mode"
+        run: sudo chmod +x contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage
+      - name: "libfuse"
+        run: sudo apt-get -qy install libfuse2
       - name: "Testing AppImage"
         run: ./contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage version
       - name: "Uploading AppImage"

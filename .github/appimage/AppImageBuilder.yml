@@ -1,0 +1,100 @@
+# appimage-builder recipe see https://appimage-builder.readthedocs.io for details
+version: 1
+script:
+  - which mksquashfs || apt install squashfs-tools # see https://github.com/AppImageCrafters/appimage-builder/issues/271
+  - mkdir -p ./AppDir/usr/share
+  - cp -r ./AppDir/share/icons ./AppDir/usr/share
+
+
+AppDir:
+  path: ./AppDir
+  app_info:
+    id: org.contourterminal.Contour
+    name: Contour
+    icon: org.contourterminal.Contour.png
+    version: latest
+    exec: bin/contour
+    exec_args: $@
+  apt:
+    arch: amd64
+    sources:
+      - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse'
+        key_url: 'http://keyserver.ubuntu.com/pks/lookup?op=get&search=0x871920D1991BC93C'
+
+    include:
+    - glibc-source:amd64
+    - glibc-tools:amd64
+    - libbz2-1.0:amd64
+    - libc-bin
+    - libcap2:amd64
+    - libcom-err2:amd64
+    - libdbus-1-3:amd64
+    - libexpat1:amd64
+    - libgpg-error0:amd64
+    - libkeyutils1:amd64
+    - liblzma5:amd64
+    - libpcre3:amd64
+    - qt6-qpa-plugins:amd64
+    - zlib1g:amd64
+    - libgl1-mesa-dev:amd64
+    - libglvnd-dev:amd64
+    - libqt6core5compat6-dev:amd64
+    - libqt6opengl6-dev:amd64
+    - qml6-module-qt-labs-platform:amd64
+    - qml6-module-qtqml-workerscript:amd64
+    - qml6-module-qtquick-controls:amd64
+    - qml6-module-qtquick-layouts:amd64
+    - qml6-module-qtmultimedia:amd64
+    - qml6-module-qtquick-templates:amd64
+    - qml6-module-qtquick-window:amd64
+    - qml6-module-qt5compat-graphicaleffects:amd64
+    - qt6-base-dev:amd64
+    - qt6-base-dev-tools:amd64
+    - qt6-declarative-dev:amd64
+    - qt6-multimedia-dev:amd64
+    - qt6-qpa-plugins:amd64
+    - libyaml-cpp0.7:amd64
+    - libutempter-dev:amd64
+    - libssh2-1:amd64
+    - libx11-xcb1:amd64
+    - libxcb1
+    - libxcb-render-util0
+    - libxcb-sync1
+    - libxcb-xinerama0
+    - libxcb-xkb1
+    - libxcursor1
+    - gstreamer1.0-plugins-base
+    - gstreamer1.0-plugins-good
+
+  files:
+    include:
+    - /lib/x86_64-linux-gnu/libQt6Core5Compat.so.6
+    - /lib/x86_64-linux-gnu/libQt6Multimedia.so.6
+    - /lib/x86_64-linux-gnu/libQt6QuickControls2.so.6
+    - /lib/x86_64-linux-gnu/libQt6Widgets.so.6
+    - /usr/lib/x86_64-linux-gnu/qt6/plugins/platforms/../../../libQt6XcbQpa.so.6
+    exclude:
+    - usr/share/man
+    - usr/share/doc/*/README.*
+    - usr/share/doc/*/changelog.*
+    - usr/share/doc/*/NEWS.*
+    - usr/share/doc/*/TODO.*
+  test:
+    fedora-30:
+      image: appimagecrafters/tests-env:fedora-30
+      command: ./AppRun
+    debian-stable:
+      image: appimagecrafters/tests-env:debian-stable
+      command: ./AppRun
+    archlinux-latest:
+      image: appimagecrafters/tests-env:archlinux-latest
+      command: ./AppRun
+    centos-7:
+      image: appimagecrafters/tests-env:centos-7
+      command: ./AppRun
+    ubuntu-xenial:
+      image: appimagecrafters/tests-env:ubuntu-xenial
+      command: ./AppRun
+AppImage:
+  arch: x86_64
+  update-information: guess
