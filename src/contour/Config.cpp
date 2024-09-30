@@ -342,6 +342,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("renderer.tile_direct_mapping", c.textureAtlasDirectMapping);
         loadFromEntry("renderer.tile_hastable_slots", c.textureAtlasHashtableSlots);
         loadFromEntry("renderer.tile_cache_count", c.textureAtlasTileCount);
+        loadFromEntry("renderer.backend", c.renderingBackend);
         loadFromEntry("bypass_mouse_protocol_modifier", c.bypassMouseProtocolModifiers);
         loadFromEntry("on_mouse_select", c.onMouseSelection);
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
