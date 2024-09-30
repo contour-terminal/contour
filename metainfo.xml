@@ -104,7 +104,7 @@
 
     -->
 
-    <release version="0.5.1" urgency="medium" type="development">
+    <release version="0.5.1" urgency="medium" date="2024-09-30">
       <description>
         <ul>
           <li>Fixes vi-mode motions like `viW`, `yiW`, `oiW` as well as `B` and `W`</li>
