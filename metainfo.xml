@@ -107,6 +107,7 @@
     <release version="0.5.1" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes vi-mode motions like `viW`, `yiW`, `oiW` as well as `B` and `W`</li>
           <li>Port to C++20's `std::format()` (#1598)</li>
           <li>Enable support for Unicode version 16.0.0 (#1606)</li>
           <li>Drop support for Ubuntu 23.10 and older. In order to have less burdain of maintencne, we only support the latest LTS of Ubuntu, which currently is 24.04 (#1607)</li>
