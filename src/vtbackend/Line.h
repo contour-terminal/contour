@@ -215,7 +215,8 @@ class Line
             return unbox<size_t>(column) >= trivialBuffer().text.size()
                    || trivialBuffer().text[column.as<size_t>()] == 0x20;
         }
-        return inflatedBuffer().at(unbox<size_t>(column)).empty();
+        auto const& cell = inflatedBuffer().at(unbox<size_t>(column));
+        return cell.empty() || (cell.codepointCount() == 1 && cell.codepoint(0) == 0x20);
     }
 
     [[nodiscard]] uint8_t cellWidthAt(ColumnOffset column) const noexcept
