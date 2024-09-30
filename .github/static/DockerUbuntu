@@ -1,4 +1,4 @@
-ARG VERSION="20.04"
+ARG VERSION="24.04"
 FROM yaraslaut/static_qt:$VERSION
 #FROM qt_static:$VERSION
 ARG ARCH="x86_64"

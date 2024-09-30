@@ -2,8 +2,9 @@ To build static image we need to build qt static docker container and put it on 
 ```
 docker buildx build --tag qt_static:20.04 --build-arg VERSION=20.04 --build-arg ARCH=x86_64 --progress=plain -f .github/static/DockerQt --load .
 docker buildx build --tag qt_static:22.04 --build-arg VERSION=22.04 --progress=plain -f .github/static/DockerQt --load .
-docker tag qt_static:20.04 yaraslaut/static_qt:20.04
-docker push yaraslaut/static_qt:20.04
+docker buildx build --tag qt_static:24.04 --build-arg VERSION=24.04 --progress=plain -f .github/static/DockerQt --load .
+docker tag qt_static:24.04 yaraslaut/static_qt:24.04
+docker push yaraslaut/static_qt:24.04
 ```
 
 Then we can use it to build contour inside github actions with

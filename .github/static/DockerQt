@@ -1,21 +1,21 @@
-ARG VERSION="20.04"
+ARG VERSION="24.04"
 FROM ubuntu:$VERSION
 ARG ARCH="x86_64"
 
 RUN apt-get update
 RUN apt-get install -y lsb-release software-properties-common gnupg
-RUN apt-get install -y wget ninja-build ccache libstdc++-10-dev
+RUN apt-get install -y wget ninja-build ccache
 
 # QT DEPS
 RUN apt-get install -y libgl-dev libglu-dev  libx11-xcb-dev libxkbcommon-x11-dev libpcre2-dev libz-dev libfreetype6-dev libpng-dev libjpeg-dev libsqlite3-dev libharfbuzz-dev libb2-dev libdouble-conversion-dev libfontconfig1-dev
 RUN apt-get install -y "libxcb*-dev"
 
 WORKDIR /
-RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.29.4/cmake-3.29.4-linux-$ARCH.sh
+RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.30.4/cmake-3.30.4-linux-$ARCH.sh
 
 # cmake bin
-RUN sh /cmake-3.29.4-linux-$ARCH.sh --skip-license --prefix=/usr
-RUN rm /cmake-3.29.4-linux-$ARCH.sh
+RUN sh /cmake-3.30.4-linux-$ARCH.sh --skip-license --prefix=/usr
+RUN rm /cmake-3.30.4-linux-$ARCH.sh
 
 # Install compilers
 RUN wget -q https://apt.llvm.org/llvm.sh
