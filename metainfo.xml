@@ -108,6 +108,7 @@
       <description>
         <ul>
           <li>Port to C++20's `std::format()` (#1598)</li>
+          <li>Enable support for Unicode version 16.0.0 (#1606)</li>
         </ul>
       </description>
     </release>

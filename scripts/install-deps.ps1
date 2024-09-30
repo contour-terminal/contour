@@ -10,7 +10,7 @@ class ThirdParty {
     [string] $Macro
 }
 
-$libunicode_git_sha="6f8e210d1e50fc0db5c977ca9fd58555d23010ac"
+$libunicode_git_sha="817cb5900acdf6f60e2344a4c8f1f39262878a4b"
 
 # Take care, order matters, at least as much as dependencies are of concern.
 $ThirdParties =
