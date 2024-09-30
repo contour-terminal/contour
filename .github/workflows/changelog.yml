@@ -9,7 +9,7 @@ on:
 jobs:
   Check-Changelog:
     name: Check Changelog Action
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: tarides/changelog-check-action@v2
         name: Check changelog

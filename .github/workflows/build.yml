@@ -681,7 +681,7 @@ jobs:
   # {{{ Linux AppImage (Using Ubuntu 24.04 as base).
   package_for_AppImage:
     name: "Packaging for AppImage"
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Set up QEMU

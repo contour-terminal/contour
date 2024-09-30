@@ -17,9 +17,9 @@ AppDir:
     exec_args: $@
   apt:
     arch: amd64
+    allow_unauthenticated: true
     sources:
-      - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse'
-        key_url: 'http://keyserver.ubuntu.com/pks/lookup?op=get&search=0x871920D1991BC93C'
+      - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ noble main restricted universe multiverse'
 
     include:
     - glibc-source:amd64
@@ -53,7 +53,7 @@ AppDir:
     - qt6-declarative-dev:amd64
     - qt6-multimedia-dev:amd64
     - qt6-qpa-plugins:amd64
-    - libyaml-cpp0.7:amd64
+    - libyaml-cpp0.8:amd64
     - libutempter-dev:amd64
     - libssh2-1:amd64
     - libx11-xcb1:amd64
