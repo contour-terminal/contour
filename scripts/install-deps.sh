@@ -305,7 +305,7 @@ install_deps_ubuntu()
             fetch_and_unpack_Catch2
             ;;
         *)
-            packages="$packages libfmt-dev librange-v3-dev catch2"
+            packages="$packages librange-v3-dev catch2"
             ;;
     esac
 
@@ -322,7 +322,6 @@ install_deps_FreeBSD()
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
-    # NB: libfmt is available in pkg, but it's not version >= 9.0.0 (as of 2022-09-03).
     # NB: catch2 (as name "catch") is available in pkg, but it's not version >= 3.0.0.
     su root -c "pkg install $SYSDEP_ASSUME_YES \
         cmake \
