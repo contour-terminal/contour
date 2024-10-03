@@ -321,6 +321,7 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::ShowIndicatorOnResize> sizeIndicatorOnResize { true };
     ConfigEntry<bool, documentation::MouseHideWhileTyping> mouseHideWhileTyping { true };
     ConfigEntry<bool, documentation::SeachModeSwitch> searchModeSwitch { true };
+    ConfigEntry<bool, documentation::InsertAfterYank> insertAfterYank { false };
     ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
     ConfigEntry<WindowMargins, documentation::Margins> margins { { HorizontalMargin { 0u },

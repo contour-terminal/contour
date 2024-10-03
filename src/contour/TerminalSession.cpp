@@ -1531,6 +1531,7 @@ void TerminalSession::configureTerminal()
     _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
     _terminal.inputHandler().setSearchModeSwitch(_profile.searchModeSwitch.value());
+    _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)

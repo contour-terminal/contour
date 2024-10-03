@@ -411,6 +411,8 @@ void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count, char32_
                 _lastChar = lastChar;
             }
             executeYank(motion, count);
+            if (_terminal->settings().isInsertAfterYank)
+                _terminal->inputHandler().setMode(ViMode::Insert);
             break;
         case ViOperator::Paste:
             //.
