@@ -5,9 +5,10 @@
 #include <crispy/logstore.h>
 #include <crispy/times.h>
 
+#include <cmath>
+
 #include <qbuffer.h>
 #include <qthread.h>
-
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtMultimedia/QMediaDevices>
 #endif
