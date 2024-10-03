@@ -38,3 +38,8 @@ The sent out DSR looks equivalent to the already above mentioned.
 This notification is not just sent when dark/light mode has been changed
 by the operating system / desktop, but also if the user explicitly changed color scheme,
 e.g. by configuration.
+
+## Example source code
+
+Please have a look at our example C++ [source code](https://github.com/contour-terminal/contour/blob/master/examples/detect-dark-light-mode.cpp)
+in order to see how to implement this in your own application.
