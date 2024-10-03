@@ -120,6 +120,10 @@ namespace
 
         locations.emplace_back("/usr/share/terminfo");
 
+        // BSD locations
+        locations.emplace_back("/usr/local/share/terminfo");
+        locations.emplace_back("/usr/local/share/site-terminfo");
+
         return locations;
     }
 
