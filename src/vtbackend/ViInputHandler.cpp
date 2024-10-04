@@ -161,6 +161,7 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "a", [this]() { setMode(ViMode::Insert); });
     registerCommand(ModeSelect::Normal, "i", [this]() { setMode(ViMode::Insert); });
     registerCommand(ModeSelect::Normal, "<Insert>", [this]() { setMode(ViMode::Insert); });
+    registerCommand(ModeSelect::Normal, "<Escape>", [this]() { setMode(ViMode::Insert); });
     registerCommand(ModeSelect::Normal, "v", [this]() { toggleMode(ViMode::Visual); });
     registerCommand(ModeSelect::Normal, "V", [this]() { toggleMode(ViMode::VisualLine); });
     registerCommand(ModeSelect::Normal, "C-V", [this]() { toggleMode(ViMode::VisualBlock); });
@@ -385,7 +386,7 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
     if (modifiers.any())
         return Handled { true };
 
-    auto const keyMappings = std::array<std::pair<Key, std::string_view>, 10> { {
+    auto const keyMappings = std::vector<std::pair<Key, std::string_view>> { {
         { Key::DownArrow, "<Down>" },
         { Key::LeftArrow, "<Left>" },
         { Key::RightArrow, "<Right>" },
@@ -396,6 +397,7 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
         { Key::End, "<End>" },
         { Key::PageUp, "<PageUp>" },
         { Key::PageDown, "<PageDown>" },
+        { Key::Escape, "<Escape>" },
     } };
 
     for (auto const& [mappedKey, mappedText]: keyMappings)

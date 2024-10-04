@@ -115,6 +115,7 @@
       <description>
         <ul>
           <li>Add terminal tabs (#90)</li>
+          <li>Add binding to exit normal mode with `Esc` (#1604)</li>
           <li>Fixes vi-mode motions like `viW`, `yiW`, `oiW` as well as `B` and `W`</li>
           <li>Fixes rendered backend loading from config</li>
           <li>Enable support for Unicode version 16.0.0 (#1606)</li>
