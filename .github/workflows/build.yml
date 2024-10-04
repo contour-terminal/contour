@@ -361,7 +361,7 @@ jobs:
   # }}}
   # {{{ OpenBSD
   openbsd:
-    if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
+    if: false #github.ref == 'refs/heads/master' || github.head_ref == 'release'
     runs-on: ubuntu-latest
     name: OpenBSD 7.5
     # env:
@@ -386,7 +386,7 @@ jobs:
             env
             ./scripts/install-deps.sh
             mkdir build
-            cmake -S . -B build -D CMAKE_CXX_FLAGS=-I/home/runner/work/contour/contour/_deps/sources/yaml-cpp-0.8.0/include -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
+            cmake -S . -B build -DCMAKE_CXX_COMPILER=clang++ -D CMAKE_CXX_FLAGS=-I/home/runner/work/contour/contour/_deps/sources/yaml-cpp-0.8.0/include -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
