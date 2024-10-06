@@ -53,7 +53,6 @@ TerminalSession* TerminalSessionManager::createSession()
     // sessions. This will work around it, by explicitly claiming ownership of the object.
     QQmlEngine::setObjectOwnership(session, QQmlEngine::CppOwnership);
 
-    _activeSession = session;
     // we can close application right after session has been created
     _lastTabChange = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     return session;
@@ -71,14 +70,9 @@ void TerminalSessionManager::setSession(size_t index)
 
     _activeSession->detachDisplay(*display);
     if (index < _sessions.size())
-    {
         _activeSession = _sessions[index];
-    }
     else
-    {
-        createSession();
-        _activeSession->terminal().resizeScreen(totalPageSize, pixels);
-    }
+        _activeSession = createSession();
 
     display->setSession(_activeSession);
     _activeSession->terminal().resizeScreen(totalPageSize, pixels);
