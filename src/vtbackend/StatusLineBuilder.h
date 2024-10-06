@@ -38,6 +38,7 @@ namespace StatusLineDefinitions
     struct Text: Styles { std::string text; };
     struct TraceMode: Styles {};
     struct VTType: Styles {};
+    struct Tabs: Styles {};
 
     using Item = std::variant<
         CellSGR,
@@ -54,7 +55,8 @@ namespace StatusLineDefinitions
         Text,
         Title,
         TraceMode,
-        VTType
+        VTType,
+        Tabs
     >;
     // clang-format on
 } // namespace StatusLineDefinitions

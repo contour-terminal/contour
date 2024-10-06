@@ -34,7 +34,7 @@ auto inline const displayLog =
 auto inline const inputLog =
     logstore::category("gui.input", "Logs input driver details (e.g. GUI input events).");
 auto inline const sessionLog = logstore::category("gui.session", "VT terminal session logs");
-
+auto inline const managerLog = logstore::category("gui.session_manager", "Sessions manager logs");
 namespace detail
 {
     template <typename F>

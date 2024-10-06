@@ -16,6 +16,15 @@ ContourTerminal
 
     session: terminalSessions.createSession()
 
+    signal switchToTab(int index)
+    signal switchToTabLeft
+    signal switchToTabRight
+    signal closeTab
+
+    onSwitchToTabLeft: terminalSessions.switchToTabLeft()
+    onSwitchToTabRight: terminalSessions.switchToTabRight()
+    onCloseTab: terminalSessions.closeTab()
+    onSwitchToTab: (i) => terminalSessions.switchToTab(i)
 
     Rectangle {
         id : backgroundColor
@@ -180,7 +189,10 @@ ContourTerminal
 
     onTerminated: {
         console.log("Client process terminated. Closing the window.");
-        Window.window.close(); // https://stackoverflow.com/a/53829662/386670
+        if (terminalSessions.count == 0)
+            Window.window.close(); // https://stackoverflow.com/a/53829662/386670
+        else
+            terminalSessions.closeTab();
     }
 
     function playBell(volume) {
@@ -204,6 +216,17 @@ ContourTerminal
     function updateFontSize() {
         sizeWidgetText.font.pointSize = vtWidget.session.fontSize
     }
+
+    function onCreateNewTab() {
+        terminalSessions.addSession();
+    }
+
+    function delay(duration) { // In milliseconds
+    var timeStart = new Date().getTime();
+        while (new Date().getTime() - timeStart < duration) {
+    }
+    }
+
 
     onSessionChanged: (s) => {
         let vt = vtWidget.session;
@@ -242,5 +265,13 @@ ContourTerminal
         vt.requestPermissionForFontChange.connect(requestFontChangeDialog.open);
         vt.requestPermissionForBufferCapture.connect(requestBufferCaptureDialog.open);
         vt.requestPermissionForShowHostWritableStatusLine.connect(requestShowHostWritableStatusLine.open);
+        forceActiveFocus();
+
+        // TAB handling
+        vt.createNewTab.connect(onCreateNewTab);
+        vt.closeTab.connect(closeTab);
+        vt.switchToTab.connect(switchToTab);
+        vt.switchToTabLeft.connect(switchToTabLeft);
+        vt.switchToTabRight.connect(switchToTabRight);
     }
 }

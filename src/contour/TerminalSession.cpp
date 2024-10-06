@@ -269,9 +269,13 @@ void TerminalSession::scheduleRedraw()
 void TerminalSession::start()
 {
     sessionLog()("Starting terminal session.");
-    _terminal.device().start();
-    _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
-    _exitWatcherThread->start(QThread::LowPriority);
+    // ensure that we start only once
+    if (!_screenUpdateThread)
+    {
+        _terminal.device().start();
+        _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
+        _exitWatcherThread->start(QThread::LowPriority);
+    }
 }
 
 void TerminalSession::mainLoop()
@@ -1354,6 +1358,37 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
     terminal().writeToScreen(event.chars);
     return true;
 }
+
+bool TerminalSession::operator()(actions::CreateNewTab)
+{
+    emit createNewTab();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CloseTab)
+{
+    emit closeTab();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SwitchToTab const& event)
+{
+    emit switchToTab(event.position);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SwitchToTabLeft)
+{
+    emit switchToTabLeft();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SwitchToTabRight)
+{
+    emit switchToTabRight();
+    return true;
+}
+
 // }}}
 // {{{ implementation helpers
 void TerminalSession::setDefaultCursor()

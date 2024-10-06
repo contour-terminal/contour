@@ -18,6 +18,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 - ✅ Font ligatures support (such as in Fira Code).
 - ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)
 - ✅ Unicode: Grapheme cluster support
+- ✅ Terminal tabs
 - ✅ Bold and italic fonts
 - ✅ High-DPI support.
 - ✅ Vertical Line Markers (quickly jump to markers in your history!)

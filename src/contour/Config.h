@@ -348,7 +348,7 @@ struct TerminalProfile
         "{ProtectedMode:Bold,Left= │ }"
     };
     ConfigEntry<std::string, documentation::IndicatorStatusLineMiddle> indicatorStatusLineMiddle {
-        "{Title:Left= « ,Right= » }"
+        "{Tabs}{Title:Left= « ,Right= » }"
     };
     ConfigEntry<std::string, documentation::IndicatorStatusLineRight> indicatorStatusLineRight {
         "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}"
@@ -442,6 +442,14 @@ const InputMappings defaultInputMappings {
                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
                           .input = vtbackend::Key::F3,
                           .binding = { { actions::FocusPreviousSearchMatch {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::LeftArrow,
+                          .binding = { { actions::SwitchToTabLeft {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::RightArrow,
+                          .binding = { { actions::SwitchToTabRight {} } } },
         //     KeyInputMapping { .modes { vtbackend::MatchModes {} },
         //                       .modifiers { vtbackend::Modifiers {  vtbackend::Modifier {
         //                       vtbackend::Modifier::Shift }
@@ -497,6 +505,50 @@ const InputMappings defaultInputMappings {
                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
                            .input = '0',
                            .binding = { { actions::ResetFontSize {} } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'T',
+                           .binding = { { actions::CreateNewTab {} } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Alt },
+                           .input = '1',
+                           .binding = { { actions::SwitchToTab { .position = 1 } } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Alt },
+                           .input = '2',
+                           .binding = { { actions::SwitchToTab { .position = 2 } } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Alt },
+                           .input = '3',
+                           .binding = { { actions::SwitchToTab { .position = 3 } } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Alt },
+                           .input = '4',
+                           .binding = { { actions::SwitchToTab { .position = 4 } } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Alt },
+                           .input = '5',
+                           .binding = { { actions::SwitchToTab { .position = 5 } } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Alt },
+                           .input = '6',
+                           .binding = { { actions::SwitchToTab { .position = 6 } } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Alt },
+                           .input = '7',
+                           .binding = { { actions::SwitchToTab { .position = 7 } } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Alt },
+                           .input = '8',
+                           .binding = { { actions::SwitchToTab { .position = 8 } } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Alt },
+                           .input = '9',
+                           .binding = { { actions::SwitchToTab { .position = 9 } } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Alt },
+                           .input = '0',
+                           .binding = { { actions::SwitchToTab { .position = 10 } } } },
         CharInputMapping { .modes = []() -> vtbackend::MatchModes {
                               auto mods = vtbackend::MatchModes();
                               mods.enable(vtbackend::MatchModes::Select);

@@ -3,6 +3,8 @@
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
 
+#include <vtbackend/primitives.h>
+
 #include <vtpty/Process.h>
 #if defined(VTPTY_LIBSSH2)
     #include <vtpty/SshSession.h>
@@ -51,11 +53,127 @@ TerminalSession* TerminalSessionManager::createSession()
     // sessions. This will work around it, by explicitly claiming ownership of the object.
     QQmlEngine::setObjectOwnership(session, QQmlEngine::CppOwnership);
 
+    _activeSession = session;
+    // we can close application right after session has been created
+    _lastTabChange = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     return session;
+}
+
+void TerminalSessionManager::setSession(size_t index)
+{
+
+    managerLog()(std::format("SET SESSION: index: {}, _sessions.size(): {}", index, _sessions.size()));
+    if (!isAllowedToChangeTabs())
+        return;
+
+    auto const pixels = display->pixelSize();
+    auto const totalPageSize = display->calculatePageSize() + _activeSession->terminal().statusLineHeight();
+
+    _activeSession->detachDisplay(*display);
+    if (index < _sessions.size())
+    {
+        _activeSession = _sessions[index];
+    }
+    else
+    {
+        createSession();
+        _activeSession->terminal().resizeScreen(totalPageSize, pixels);
+    }
+
+    display->setSession(_activeSession);
+    _activeSession->terminal().resizeScreen(totalPageSize, pixels);
+    updateStatusLine();
+    _lastTabChange = std::chrono::steady_clock::now();
+}
+
+void TerminalSessionManager::addSession()
+{
+    setSession(_sessions.size());
+}
+
+void TerminalSessionManager::switchToTabLeft()
+{
+    const auto currentSessionIndex = getCurrentSessionIndex();
+    managerLog()(std::format("PREVIOUS TAB: currentSessionIndex: {}, _sessions.size(): {}",
+                             currentSessionIndex,
+                             _sessions.size()));
+
+    if (currentSessionIndex > 0)
+    {
+        setSession(currentSessionIndex - 1);
+    }
+}
+
+void TerminalSessionManager::switchToTab(int position)
+{
+    managerLog()(std::format(
+        "switchToTab from {} to {} (out of {})", getCurrentSessionIndex(), position - 1, _sessions.size()));
+
+    if (1 <= position && position <= static_cast<int>(_sessions.size()))
+    {
+        setSession(position - 1);
+    }
+}
+
+void TerminalSessionManager::switchToTabRight()
+{
+    const auto currentSessionIndex = getCurrentSessionIndex();
+
+    managerLog()(std::format(
+        "NEXT TAB: currentSessionIndex: {}, _sessions.size(): {}", currentSessionIndex, _sessions.size()));
+    if (std::cmp_less(currentSessionIndex, _sessions.size() - 1))
+    {
+        setSession(currentSessionIndex + 1);
+    }
+}
+
+void TerminalSessionManager::closeTab()
+{
+    const auto currentSessionIndex = getCurrentSessionIndex();
+    managerLog()(std::format(
+        "CLOSE TAB: currentSessionIndex: {}, _sessions.size(): {}", currentSessionIndex, _sessions.size()));
+
+    // Session was removed outside of terminal session manager, we need to switch to another tab.
+    if (currentSessionIndex == -1 && !_sessions.empty())
+    {
+        // We need to switch to another tab, so we permit consequent tab changes.
+        // TODO: This is a bit hacky.
+        _lastTabChange = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+        setSession(0);
+        return;
+    }
+
+    if (_sessions.size() > 1)
+    {
+
+        if (!isAllowedToChangeTabs())
+            return;
+
+        removeSession(*_activeSession);
+
+        // We need to switch to another tab, so we permit consequent tab changes.
+        // TODO: This is a bit hacky.
+        _lastTabChange = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+
+        if (std::cmp_less_equal(currentSessionIndex, _sessions.size() - 1))
+        {
+            setSession(currentSessionIndex + 1);
+        }
+        else
+        {
+            setSession(currentSessionIndex - 1);
+        }
+    }
 }
 
 void TerminalSessionManager::removeSession(TerminalSession& thatSession)
 {
+    managerLog()(std::format(
+        "REMOVE SESSION: session: {}, _sessions.size(): {}", (void*) &thatSession, _sessions.size()));
+
+    if (!isAllowedToChangeTabs())
+        return;
+
     _app.onExit(thatSession); // TODO: the logic behind that impl could probably be moved here.
 
     auto i = std::find_if(_sessions.begin(), _sessions.end(), [&](auto p) { return p == &thatSession; });
@@ -64,6 +182,8 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
         _sessions.erase(i);
     }
 
+    updateStatusLine();
+    _lastTabChange = std::chrono::steady_clock::now();
     // Notify app if all sessions have been killed to trigger app termination.
 }
 

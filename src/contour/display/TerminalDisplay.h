@@ -84,7 +84,7 @@ class TerminalDisplay: public QQuickItem
 
     [[nodiscard]] bool hasSession() const noexcept { return _session != nullptr; }
 
-    // NB: Use TerminalSession.attachDisplay, that one is calling this here.
+    // NB: Use TerminalSession.attachDisplay, that one is calling this here. TODO(PR) ?
     void setSession(TerminalSession* newSession);
 
     [[nodiscard]] TerminalSession& session() noexcept
@@ -205,6 +205,19 @@ class TerminalDisplay: public QQuickItem
         return unbox(terminal().currentScreen().historyLineCount());
     }
 
+    [[nodiscard]] vtbackend::PageSize calculatePageSize() const
+    {
+        assert(_renderer);
+        assert(_session);
+
+        // auto const availablePixels = gridMetrics().cellSize * _session->terminal().pageSize();
+        auto const availablePixels = pixelSize();
+        return pageSizeForPixels(
+            availablePixels,
+            _renderer->gridMetrics().cellSize,
+            applyContentScale(_session->profile().margins.value(), _session->contentScale()));
+    }
+
   private:
     // helper methods
     //
@@ -214,20 +227,6 @@ class TerminalDisplay: public QQuickItem
     void configureScreenHooks();
     void watchKdeDpiSetting();
     [[nodiscard]] float uptime() const noexcept;
-
-    [[nodiscard]] vtbackend::PageSize calculatePageSize() const
-    {
-        assert(_renderer);
-        assert(_session);
-
-        // auto const availablePixels = gridMetrics().cellSize * _session->terminal().pageSize();
-        auto const availablePixels = vtbackend::ImageSize { vtbackend::Width::cast_from(width()),
-                                                            vtbackend::Height::cast_from(height()) };
-        return pageSizeForPixels(
-            availablePixels,
-            _renderer->gridMetrics().cellSize,
-            applyContentScale(_session->profile().margins.value(), _session->contentScale()));
-    }
 
     void updateMinimumSize();
     void updateImplicitSize();
@@ -266,7 +265,7 @@ class TerminalDisplay: public QQuickItem
     bool _renderingPressure = false;
     display::OpenGLRenderer* _renderTarget = nullptr;
     bool _maximizedState = false;
-
+    bool _sessionChanged = false;
     // update() timer used to animate the blinking cursor.
     QTimer _updateTimer;
 
