@@ -61,6 +61,9 @@ class TerminalSessionManager: public QAbstractListModel
 
     void updateStatusLine()
     {
+        if (!_activeSession)
+            return;
+
         const auto currentSessionIndex = getCurrentSessionIndex();
         _activeSession->terminal().setGuiTabInfoForStatusLine([&]() {
             std::string tabInfo;
