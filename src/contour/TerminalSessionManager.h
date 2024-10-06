@@ -64,20 +64,20 @@ class TerminalSessionManager: public QAbstractListModel
         if (!_activeSession)
             return;
 
-        const auto currentSessionIndex = getCurrentSessionIndex();
-        _activeSession->terminal().setGuiTabInfoForStatusLine([&]() {
-            std::string tabInfo;
-            for (size_t i = 0; i < _sessions.size(); ++i)
-            {
-                if (std::cmp_equal(i, currentSessionIndex))
-                    tabInfo += "[";
-                tabInfo += std::to_string(i + 1);
-                if (std::cmp_equal(i, currentSessionIndex))
-                    tabInfo += "]";
-                tabInfo += " ";
-            }
-            return tabInfo;
-        }());
+        _activeSession->terminal().setGuiTabInfoForStatusLine(
+            [this, currentSessionIndex = getCurrentSessionIndex()]() {
+                std::string tabInfo;
+                for (size_t i = 0; i < _sessions.size(); ++i)
+                {
+                    if (std::cmp_equal(i, currentSessionIndex))
+                        tabInfo += "[";
+                    tabInfo += std::to_string(i + 1);
+                    if (std::cmp_equal(i, currentSessionIndex))
+                        tabInfo += "]";
+                    tabInfo += " ";
+                }
+                return tabInfo;
+            }());
     }
 
     bool isAllowedToChangeTabs()
