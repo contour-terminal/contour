@@ -28,6 +28,8 @@ jobs:
 
       - name: "update APT database"
         run: sudo apt -q update
+      - name: "Install GCC"
+        run: sudo apt -y install g++-14
       - name: "install dependencies"
         run: sudo env QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
