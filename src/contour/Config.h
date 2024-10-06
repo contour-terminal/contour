@@ -344,12 +344,13 @@ struct TerminalProfile
         statusDisplayPosition { vtbackend::StatusDisplayPosition::Bottom };
     ConfigEntry<std::string, documentation::IndicatorStatusLineLeft> indicatorStatusLineLeft {
         " {InputMode:Bold,Color=#FFFF00}"
+        "{Tabs:Left= │ }"
         "{SearchPrompt:Left= │ }"
         "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
         "{ProtectedMode:Bold,Left= │ }"
     };
     ConfigEntry<std::string, documentation::IndicatorStatusLineMiddle> indicatorStatusLineMiddle {
-        "{Tabs}{Title:Left= « ,Right= » }"
+        "{Title:Left= « ,Right= » }"
     };
     ConfigEntry<std::string, documentation::IndicatorStatusLineRight> indicatorStatusLineRight {
         "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}"
