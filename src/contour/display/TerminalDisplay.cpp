@@ -264,7 +264,8 @@ TerminalDisplay::~TerminalDisplay()
 
 void TerminalDisplay::setSession(TerminalSession* newSession)
 {
-    if (_session)
+    displayLog()("TerminalDisplay::setSession: {} -> {}\n", (void*) _session, (void*) newSession);
+    if (_session == newSession)
         return;
 
     // This will print the same pointer address for `this` but a new one for newSession (model data).
@@ -290,16 +291,18 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar.value());
 
-    _renderer =
-        make_unique<vtrasterizer::Renderer>(newSession->profile().terminalSize.value(),
-                                            sanitizeFontDescription(profile().fonts.value(), fontDPI()),
-                                            _session->terminal().colorPalette(),
-                                            newSession->config().textureAtlasHashtableSlots.value(),
-                                            newSession->config().textureAtlasTileCount.value(),
-                                            newSession->config().textureAtlasDirectMapping.value(),
-                                            newSession->profile().hyperlinkDecorationNormal.value(),
-                                            newSession->profile().hyperlinkDecorationHover.value()
-                                            // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
+    //  Display can change sessions, we should not create a new renderer here if we already have one.
+    if (!_renderer)
+        _renderer = make_unique<vtrasterizer::Renderer>(
+            newSession->profile().terminalSize.value(),
+            sanitizeFontDescription(profile().fonts.value(), fontDPI()),
+            _session->terminal().colorPalette(),
+            newSession->config().textureAtlasHashtableSlots.value(),
+            newSession->config().textureAtlasTileCount.value(),
+            newSession->config().textureAtlasDirectMapping.value(),
+            newSession->profile().hyperlinkDecorationNormal.value(),
+            newSession->profile().hyperlinkDecorationHover.value()
+            // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
         );
 
     applyFontDPI();
@@ -530,6 +533,12 @@ void TerminalDisplay::onBeforeSynchronize()
     }
     window()->setScreen(screenToUse);
 
+    if (_sessionChanged)
+    {
+        _sessionChanged = false;
+        createRenderer();
+    }
+
     if (!_renderTarget)
     {
         // This is the first call, so create the renderer (on demand) now.
@@ -557,7 +566,7 @@ void TerminalDisplay::onBeforeSynchronize()
 
 void TerminalDisplay::createRenderer()
 {
-    Require(!_renderTarget);
+    // Require(!_renderTarget);
     Require(_session);
     Require(_renderer);
     Require(window());

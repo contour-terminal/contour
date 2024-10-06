@@ -146,6 +146,9 @@ std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
     if (interpolation.name == "VTType")
         return StatusLineDefinitions::VTType { styles };
 
+    if (interpolation.name == "Tabs")
+        return StatusLineDefinitions::Tabs { styles };
+
     return std::nullopt;
 }
 
@@ -416,6 +419,11 @@ struct VTSerializer
     }
 
     std::string visit(StatusLineDefinitions::VTType const&) { return std::format("{}", vt.terminalId()); }
+
+    std::string visit(StatusLineDefinitions::Tabs const&)
+    {
+        return std::format("{}", vt.guiTabInfoForStatusLine());
+    }
     // }}}
 };
 

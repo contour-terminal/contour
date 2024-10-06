@@ -1731,6 +1731,16 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 return std::nullopt;
         }
 
+        if (holds_alternative<actions::SwitchToTab>(action))
+        {
+            if (auto position = node["position"]; position.IsScalar())
+            {
+                return actions::SwitchToTab { position.as<int>() };
+            }
+            else
+                return std::nullopt;
+        }
+
         if (holds_alternative<actions::NewTerminal>(action))
         {
             if (auto profile = node["profile"]; profile && profile.IsScalar())

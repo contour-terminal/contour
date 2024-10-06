@@ -77,10 +77,11 @@ struct TraceLeave{};
 struct TraceStep{};
 struct ViNormalMode{};
 struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
-// CloseTab
-// FocusNextTab
-// FocusPreviousTab
-// OpenTab
+struct CreateNewTab{};
+struct CloseTab{};
+struct SwitchToTab{ int position; };
+struct SwitchToTabLeft{};
+struct SwitchToTabRight{};
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -131,7 +132,12 @@ using Action = std::variant<CancelSelection,
                             TraceLeave,
                             TraceStep,
                             ViNormalMode,
-                            WriteScreen>;
+                            WriteScreen,
+                            CreateNewTab,
+                            CloseTab,
+                            SwitchToTab,
+                            SwitchToTabLeft,
+                            SwitchToTabRight>;
 
 std::optional<Action> fromString(std::string const& name);
 
@@ -241,6 +247,13 @@ namespace documentation
     constexpr inline std::string_view WriteScreen {
         "Writes VT sequence in `chars` member to the screen (bypassing the application)."
     };
+    constexpr inline std::string_view CreateNewTab { "Creates a new tab in the terminal emulator." };
+    constexpr inline std::string_view CloseTab { "Closes current tab." };
+    constexpr inline std::string_view SwitchToTab {
+        "Switch to absolute tab position (starting at number 1)"
+    };
+    constexpr inline std::string_view SwitchToTabLeft { "Switch to tab to the left" };
+    constexpr inline std::string_view SwitchToTabRight { "Switch to tab to the right" };
 } // namespace documentation
 
 inline auto getDocumentation()
@@ -295,6 +308,11 @@ inline auto getDocumentation()
         std::tuple { Action { TraceStep {} }, documentation::TraceStep },
         std::tuple { Action { ViNormalMode {} }, documentation::ViNormalMode },
         std::tuple { Action { WriteScreen {} }, documentation::WriteScreen },
+        std::tuple { Action { CreateNewTab {} }, documentation::CreateNewTab },
+        std::tuple { Action { CloseTab {} }, documentation::CloseTab },
+        std::tuple { Action { SwitchToTab {} }, documentation::SwitchToTab },
+        std::tuple { Action { SwitchToTabLeft {} }, documentation::SwitchToTabLeft },
+        std::tuple { Action { SwitchToTabRight {} }, documentation::SwitchToTabRight },
     };
 }
 
@@ -361,8 +379,21 @@ DECLARE_ACTION_FMT(TraceLeave)
 DECLARE_ACTION_FMT(TraceStep)
 DECLARE_ACTION_FMT(ViNormalMode)
 DECLARE_ACTION_FMT(WriteScreen)
+DECLARE_ACTION_FMT(CreateNewTab)
+DECLARE_ACTION_FMT(CloseTab)
+DECLARE_ACTION_FMT(SwitchToTabLeft)
+DECLARE_ACTION_FMT(SwitchToTabRight)
 // }}}
 #undef DECLARE_ACTION_FMT
+
+template <>
+struct std::formatter<contour::actions::SwitchToTab>: std::formatter<std::string>
+{
+    auto format(contour::actions::SwitchToTab const& value, auto& ctx) const
+    {
+        return formatter<string>::format(std::format("SwitchToTab {{ position: {} }}", value.position), ctx);
+    }
+};
 
 #define HANDLE_ACTION(T)                                                  \
     if (std::holds_alternative<contour::actions::T>(_action))             \
@@ -424,6 +455,15 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(TraceLeave);
         HANDLE_ACTION(TraceStep);
         HANDLE_ACTION(ViNormalMode);
+        HANDLE_ACTION(CreateNewTab);
+        HANDLE_ACTION(CloseTab);
+        HANDLE_ACTION(SwitchToTabLeft);
+        HANDLE_ACTION(SwitchToTabRight);
+        if (std::holds_alternative<contour::actions::SwitchToTab>(_action))
+        {
+            const auto action = std::get<contour::actions::SwitchToTab>(_action);
+            name = std::format("SwitchToTab, position: {}", action.position);
+        }
         if (std::holds_alternative<contour::actions::WriteScreen>(_action))
         {
             const auto writeScreenAction = std::get<contour::actions::WriteScreen>(_action);

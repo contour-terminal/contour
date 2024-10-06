@@ -955,6 +955,9 @@ class Terminal
     void setStatusLineDefinition(StatusLineDefinition&& definition);
     void resetStatusLineDefinition();
 
+    std::string_view guiTabInfoForStatusLine() const noexcept { return _guiTabInfoForStatusLine; }
+    void setGuiTabInfoForStatusLine(std::string_view value) { _guiTabInfoForStatusLine = value; }
+
   private:
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
@@ -1066,6 +1069,8 @@ class Terminal
     gsl::not_null<ScreenBase*> _currentScreen;
     Viewport _viewport;
     StatusLineDefinition _indicatorStatusLineDefinition;
+
+    std::string _guiTabInfoForStatusLine;
 
     // {{{ selection states
     std::unique_ptr<Selection> _selection;
