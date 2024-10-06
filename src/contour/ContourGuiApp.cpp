@@ -343,6 +343,10 @@ int ContourGuiApp::terminalGuiAction()
     if (!loadConfig("terminal"))
         return EXIT_FAILURE;
 
+#if defined(__APPLE__)
+    QGuiApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta, true);
+#endif
+
     switch (_config.renderingBackend.value())
     {
         case config::RenderingBackend::OpenGL:
