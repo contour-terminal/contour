@@ -23,13 +23,13 @@
 #include <QtQuick/QQuickItem>
 
 #include <QtQml>
-#include <atomic>
-#include <fstream>
+
+#if defined(CONTOUR_PERF_STATS)
+    #include <atomic>
+#endif
+
 #include <memory>
 #include <optional>
-#include <vector>
-
-#include <qqml.h>
 
 namespace contour::display
 {
@@ -124,8 +124,7 @@ class TerminalDisplay: public QQuickItem
     [[nodiscard]] vtbackend::ImageSize pixelSize() const;
     [[nodiscard]] vtbackend::ImageSize cellSize() const;
 
-    // general events
-    void adaptToWidgetSize();
+    void resizeTerminalToDisplaySize();
 
     // (user requested) actions
     vtbackend::FontDef getFontDef();
@@ -212,10 +211,9 @@ class TerminalDisplay: public QQuickItem
 
         // auto const availablePixels = gridMetrics().cellSize * _session->terminal().pageSize();
         auto const availablePixels = pixelSize();
-        return pageSizeForPixels(
-            availablePixels,
-            _renderer->gridMetrics().cellSize,
-            applyContentScale(_session->profile().margins.value(), _session->contentScale()));
+        return pageSizeForPixels(availablePixels,
+                                 _renderer->gridMetrics().cellSize,
+                                 applyContentScale(_session->profile().margins.value(), contentScale()));
     }
 
   private:
@@ -229,6 +227,11 @@ class TerminalDisplay: public QQuickItem
     [[nodiscard]] float uptime() const noexcept;
 
     void updateMinimumSize();
+
+    // Updates the recommended size in (virtual pixels) based on:
+    // - the grid cell size (based on the current font size and DPI),
+    // - configured window margins, and
+    // - the terminal's screen size.
     void updateImplicitSize();
 
     void statsSummary();

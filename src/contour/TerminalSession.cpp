@@ -235,20 +235,15 @@ void TerminalSession::detachDisplay(display::TerminalDisplay& display)
 
 void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 {
-    sessionLog()("Attaching display.");
-    // newDisplay.setSession(*this); // NB: we're being called by newDisplay!
-    _display = &newDisplay;
+    sessionLog()("Attaching session to display {}x{}.", newDisplay.width(), newDisplay.height());
 
-    setContentScale(newDisplay.contentScale());
+    // We're being called by newDisplay!
+    _display = &newDisplay;
 
     {
         // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
-        auto const pixels = _display->cellSize() * _terminal.pageSize();
-        // auto const pixels =
-        //     ImageSize { _display->cellSize().width * boxed_cast<Width>(_terminal.pageSize().columns),
-        //                 _display->cellSize().height * boxed_cast<Height>(_terminal.pageSize().lines) };
         auto const l = scoped_lock { _terminal };
-        _terminal.resizeScreen(_terminal.pageSize(), pixels);
+        _terminal.resizeScreen(_terminal.pageSize(), _display->pixelSize());
         _terminal.setRefreshRate(_display->refreshRate());
     }
 
@@ -268,10 +263,10 @@ void TerminalSession::scheduleRedraw()
 
 void TerminalSession::start()
 {
-    sessionLog()("Starting terminal session.");
     // ensure that we start only once
     if (!_screenUpdateThread)
     {
+        sessionLog()("Starting terminal session.");
         _terminal.device().start();
         _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
         _exitWatcherThread->start(QThread::LowPriority);
@@ -548,7 +543,7 @@ void TerminalSession::copyToClipboard(std::string_view data)
     if (!_display)
         return;
 
-    _display->post([this, data = string(data)]() { _display->copyToClipboard(data); });
+    _display->post([data = string(data)]() { display::TerminalDisplay::copyToClipboard(data); });
 }
 
 void TerminalSession::openDocument(std::string_view fileOrUrl)
@@ -705,10 +700,10 @@ void TerminalSession::requestWindowResize(LineCount lines, ColumnCount columns)
     _display->post([this, lines, columns]() { _display->resizeWindow(lines, columns); });
 }
 
-void TerminalSession::adaptToWidgetSize()
+void TerminalSession::resizeTerminalToDisplaySize()
 {
     if (_display)
-        _display->post([this]() { _display->adaptToWidgetSize(); });
+        _display->post([this]() { _display->resizeTerminalToDisplaySize(); });
 }
 
 void TerminalSession::requestWindowResize(Width width, Height height)
@@ -803,17 +798,18 @@ void TerminalSession::sendCharEvent(
                modifiers,
                crispy::escape(unicode::convert_to<char>(value)));
 
-    assert(_display != nullptr);
-
-    if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
+    if (_display)
     {
-        sessionLog()("Terminated and waiting for key press. Closing display.");
-        _display->closeDisplay();
-        return;
-    }
+        if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
+        {
+            sessionLog()("Terminated and waiting for key press. Closing display.");
+            _display->closeDisplay();
+            return;
+        }
 
-    if (_profile.mouseHideWhileTyping.value())
-        _display->setMouseCursorShape(MouseCursorShape::Hidden);
+        if (_profile.mouseHideWhileTyping.value())
+            _display->setMouseCursorShape(MouseCursorShape::Hidden);
+    }
 
     if (eventType != KeyboardEventType::Release)
     {
@@ -1498,7 +1494,6 @@ void TerminalSession::activateProfile(string const& newProfileName)
     _profileName = newProfileName;
     _profile = *newProfile;
     configureTerminal();
-    configureDisplay();
 }
 
 void TerminalSession::configureTerminal()
@@ -1571,7 +1566,7 @@ void TerminalSession::configureDisplay()
 
     _terminal.setRefreshRate(_display->refreshRate());
     _display->setFonts(_profile.fonts.value());
-    adaptToWidgetSize();
+    resizeTerminalToDisplaySize();
 
     _display->setHyperlinkDecoration(_profile.hyperlinkDecorationNormal.value(),
                                      _profile.hyperlinkDecorationHover.value());

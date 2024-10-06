@@ -65,14 +65,17 @@ void TerminalSessionManager::setSession(size_t index)
     if (!isAllowedToChangeTabs())
         return;
 
-    auto const pixels = display->pixelSize();
-    auto const totalPageSize = display->calculatePageSize() + _activeSession->terminal().statusLineHeight();
+    if (_activeSession)
+        _activeSession->detachDisplay(*display);
 
-    _activeSession->detachDisplay(*display);
     if (index < _sessions.size())
         _activeSession = _sessions[index];
     else
         _activeSession = createSession();
+
+    Require(display != nullptr);
+    auto const pixels = display->pixelSize();
+    auto const totalPageSize = display->calculatePageSize() + _activeSession->terminal().statusLineHeight();
 
     display->setSession(_activeSession);
     _activeSession->terminal().resizeScreen(totalPageSize, pixels);

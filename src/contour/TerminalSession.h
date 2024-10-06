@@ -228,9 +228,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
 
-    double contentScale() const noexcept { return _contentScale; }
-    void setContentScale(double value) noexcept { _contentScale = value; }
-
     vtpty::Pty& pty() noexcept { return _terminal.device(); }
     vtbackend::Terminal& terminal() noexcept { return _terminal; }
     vtbackend::Terminal const& terminal() const noexcept { return _terminal; }
@@ -245,7 +242,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_INVOKABLE void applyPendingFontChange(bool allow, bool remember);
     Q_INVOKABLE void executePendingBufferCapture(bool allow, bool remember);
     Q_INVOKABLE void executeShowHostWritableStatusLine(bool allow, bool remember);
-    Q_INVOKABLE void adaptToWidgetSize();
+    Q_INVOKABLE void resizeTerminalToDisplaySize();
 
     void updateColorPreference(vtbackend::ColorPreference preference);
 
@@ -438,7 +435,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     config::Config _config;
     std::string _profileName;
     config::TerminalProfile _profile;
-    double _contentScale = 1.0;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
 

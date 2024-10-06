@@ -110,6 +110,7 @@
           <li>Add terminal tabs (#90)</li>
           <li>Add binding to exit normal mode with `Esc` (#1604)</li>
           <li>Add config option to switch into insert mode after yank (#1604)</li>
+          <li>Improves window size/resize handling on HiDPI monitor settings (#1628)</li>
         </ul>
       </description>
     </release>

@@ -218,6 +218,19 @@ namespace
         return nullopt;
     }
 
+    QScreen* findScreenWithBiggestWidth(QScreen* startScreen)
+    {
+        auto* screenToUse = startScreen;
+        for (auto* screen: startScreen->virtualSiblings())
+        {
+            if (screen->size().width() > screenToUse->size().width())
+            {
+                screenToUse = screen;
+            }
+        }
+        return screenToUse;
+    }
+
 } // namespace
 // }}}
 
@@ -269,7 +282,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
         return;
 
     // This will print the same pointer address for `this` but a new one for newSession (model data).
-    displayLog()("Assigning session to terminal widget({} <- {}): shell={}, terminalSize={}, fontSize={}, "
+    displayLog()("Assigning session to display({} <- {}): shell={}, terminalSize={}, fontSize={}, "
                  "contentScale={}",
                  (void const*) this,
                  (void const*) newSession,
@@ -283,6 +296,11 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
                  newSession->profile().fonts.value().size,
                  contentScale());
 
+    if (_session)
+    {
+        QObject::disconnect(_session, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
+    }
+
     _session = newSession;
 
     QObject::connect(newSession, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
@@ -291,17 +309,16 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar.value());
 
-    //  Display can change sessions, we should not create a new renderer here if we already have one.
     if (!_renderer)
         _renderer = make_unique<vtrasterizer::Renderer>(
-            newSession->profile().terminalSize.value(),
+            _session->profile().terminalSize.value(),
             sanitizeFontDescription(profile().fonts.value(), fontDPI()),
             _session->terminal().colorPalette(),
-            newSession->config().textureAtlasHashtableSlots.value(),
-            newSession->config().textureAtlasTileCount.value(),
-            newSession->config().textureAtlasDirectMapping.value(),
-            newSession->profile().hyperlinkDecorationNormal.value(),
-            newSession->profile().hyperlinkDecorationHover.value()
+            _session->config().textureAtlasHashtableSlots.value(),
+            _session->config().textureAtlasTileCount.value(),
+            _session->config().textureAtlasDirectMapping.value(),
+            _session->profile().hyperlinkDecorationNormal.value(),
+            _session->profile().hyperlinkDecorationHover.value()
             // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
         );
 
@@ -327,13 +344,15 @@ void TerminalDisplay::sizeChanged()
     if (!_session || !_renderTarget)
         return;
 
-    displayLog()(
-        "size changed to: {}x{} (session {})", width(), height(), _session ? "available" : "not attached");
+    if (width() == 0.0 || height() == 0.0)
+        // This can happen when the window is minimized, or when the window is not yet fully initialized.
+        return;
 
-    auto const qtBaseDisplaySize =
-        vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
-    auto const actualPixelSize = qtBaseDisplaySize * contentScale();
-    displayLog()("Resizing view to {}x{} virtual ({} actual).", width(), height(), actualPixelSize);
+    displayLog()("Size changed to {}x{} virtual", width(), height());
+
+    auto const virtualSize = vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
+    auto const actualPixelSize = virtualSize * contentScale();
+    displayLog()("Resizing view to {} virtual ({} actual).", virtualSize, actualPixelSize);
     applyResize(actualPixelSize, *_session, *_renderer);
 }
 
@@ -427,7 +446,10 @@ void TerminalDisplay::applyFontDPI()
     if (newFontDPI == _lastFontDPI)
         return;
 
-    displayLog()("Applying DPI {}.", newFontDPI);
+    displayLog()("Applying DPI {} (via content scale {}, {}).",
+                 newFontDPI,
+                 contentScale(),
+                 window() ? "Window present" : "No window");
     _lastFontDPI = newFontDPI;
 
     // logDisplayInfo();
@@ -439,9 +461,7 @@ void TerminalDisplay::applyFontDPI()
 
     auto fd = _renderer->fontDescriptions();
     fd.dpi = newFontDPI;
-    _renderer->setFonts(fd);
-
-    _session->setContentScale(contentScale());
+    _renderer->setFonts(std::move(fd));
 
     if (!_renderTarget)
         return;
@@ -509,7 +529,7 @@ void TerminalDisplay::onDpiConfigChanged()
 
 void TerminalDisplay::onSceneGrapheInitialized()
 {
-    // displayLog()("onSceneGrapheInitialized");
+    displayLog()("onSceneGrapheInitialized ({}x{}, DPR {})", width(), height(), contentScale());
 
 #if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
     CHECKED_GL(glEnable(GL_DEBUG_OUTPUT));
@@ -522,16 +542,7 @@ void TerminalDisplay::onBeforeSynchronize()
     if (!_session)
         return;
 
-    // find screen with biggest width
-    auto* screenToUse = window()->screen();
-    for (auto* screen: window()->screen()->virtualSiblings())
-    {
-        if (screen->size().width() > screenToUse->size().width())
-        {
-            screenToUse = screen;
-        }
-    }
-    window()->setScreen(screenToUse);
+    window()->setScreen(findScreenWithBiggestWidth(window()->screen()));
 
     if (_sessionChanged)
     {
@@ -566,9 +577,9 @@ void TerminalDisplay::onBeforeSynchronize()
 
 void TerminalDisplay::createRenderer()
 {
-    // Require(!_renderTarget);
-    Require(_session);
+    Require(!_renderTarget);
     Require(_renderer);
+    Require(_session);
     Require(window());
 
     auto const textureTileSize = gridMetrics().cellSize;
@@ -631,16 +642,7 @@ void TerminalDisplay::createRenderer()
 
     _session->configureDisplay();
 
-    // {{{ Apply proper grid/pixel sizes to terminal
-    {
-        auto const qtBaseDisplaySize =
-            ImageSize { vtbackend::Width::cast_from(width()), vtbackend::Height::cast_from(height()) };
-
-        auto const actualDisplaySize = qtBaseDisplaySize * contentScale();
-
-        applyResize(actualDisplaySize, *_session, *_renderer);
-    }
-    // }}}
+    resizeTerminalToDisplaySize();
 
     displayLog()("Implicit size: {}x{}", implicitWidth(), implicitHeight());
 }
@@ -833,17 +835,20 @@ void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
 
 QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
 {
-    QPoint cursorPos = QPoint();
-    auto const dpr = contentScale();
-    if (terminal().isCursorInViewport())
-    {
-        auto const gridCursorPos = terminal().currentScreen().cursor().position;
-        cursorPos.setX(int(unbox<double>(gridCursorPos.column)
-                           * unbox<double>(_renderer->gridMetrics().cellSize.width)));
-        cursorPos.setY(
-            int(unbox<double>(gridCursorPos.line) * unbox<double>(_renderer->gridMetrics().cellSize.height)));
-        cursorPos /= dpr;
-    }
+    auto const getCursorPosition = [&]() -> QPoint {
+        QPoint cursorPos = QPoint();
+        if (terminal().isCursorInViewport())
+        {
+            auto const dpr = contentScale();
+            auto const gridCursorPos = terminal().currentScreen().cursor().position;
+            cursorPos.setX(int(unbox<double>(gridCursorPos.column)
+                               * unbox<double>(_renderer->gridMetrics().cellSize.width)));
+            cursorPos.setY(int(unbox<double>(gridCursorPos.line)
+                               * unbox<double>(_renderer->gridMetrics().cellSize.height)));
+            cursorPos /= dpr;
+        }
+        return cursorPos;
+    };
 
     switch (query)
     {
@@ -851,6 +856,8 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
             auto const& gridMetrics = _renderer->gridMetrics();
             auto theContentsRect = QRect(); // TODO: contentsRect();
             auto result = QRect();
+            auto const dpr = contentScale();
+            auto const cursorPos = getCursorPosition();
             result.setLeft(theContentsRect.left() + cursorPos.x());
             result.setTop(theContentsRect.top() + cursorPos.y());
             result.setWidth(int(unbox<double>(gridMetrics.cellSize.width)
@@ -860,13 +867,15 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
             break;
         }
         // TODO?: case Qt::ImCursorRectangle:
-        // case Qt::ImMicroFocus:
+        // case Qt::ImMicroFocus: {
+        //     auto const cursorPos = getCursorPosition();
         //     return imageToDisplay(QRect(cursorPos.x(), cursorPos.y(), 1, 1));
+        // }
         // case Qt::ImFont:
         //     return QFont("monospace", 10);
         case Qt::ImCursorPosition:
             // return the cursor position within the current line
-            return cursorPos.x();
+            return getCursorPosition().x();
         case Qt::ImSurroundingText:
             // return the text from the current line
             if (terminal().isCursorInViewport())
@@ -982,9 +991,23 @@ void TerminalDisplay::updateImplicitSize()
     assert(_session);
     assert(window());
 
-    auto const requiredSize = computeRequiredSize(_session->profile().margins.value(),
-                                                  _renderer->cellSize() * (1.0 / contentScale()),
-                                                  _session->terminal().totalPageSize());
+    auto const totalPageSize = _session->terminal().pageSize() + _session->terminal().statusLineHeight();
+    auto const dpr = contentScale(); // DPR = Device Pixel Ratio
+
+    auto const actualGridCellSize = _renderer->cellSize();
+    auto const actualToVirtualFactor = 1.0 / dpr;
+
+    auto const virtualMargins = _session->profile().margins.value();
+    auto const virtualCellSize = actualGridCellSize * actualToVirtualFactor;
+
+    auto const requiredSize = computeRequiredSize(virtualMargins, virtualCellSize, totalPageSize);
+
+    displayLog()("Implicit display size set to {} (margins: {}, cellSize: {}, contentScale: {}, pageSize: {}",
+                 requiredSize,
+                 virtualMargins,
+                 virtualCellSize,
+                 dpr,
+                 totalPageSize);
 
     setImplicitWidth(unbox<qreal>(requiredSize.width));
     setImplicitHeight(unbox<qreal>(requiredSize.height));
@@ -1166,15 +1189,15 @@ void TerminalDisplay::notify(std::string_view /*_title*/, std::string_view /*_bo
     // TODO: showNotification callback to Controller?
 }
 
-void TerminalDisplay::adaptToWidgetSize()
+void TerminalDisplay::resizeTerminalToDisplaySize()
 {
     // Resize widget (same pixels, but adjusted terminal rows/columns and margin)
     Require(_renderer != nullptr);
     Require(_session != nullptr);
 
-    auto const qtBaseDisplaySize =
+    auto const virtualDisplaySize =
         ImageSize { vtbackend::Width::cast_from(width()), vtbackend::Height::cast_from(height()) };
-    auto const actualDisplaySize = qtBaseDisplaySize * contentScale();
+    auto const actualDisplaySize = virtualDisplaySize * contentScale();
     applyResize(actualDisplaySize, *_session, *_renderer);
 }
 
@@ -1237,7 +1260,7 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
     if (!_renderer->setFontSize(newFontSize))
         return false;
 
-    adaptToWidgetSize();
+    resizeTerminalToDisplaySize();
     updateMinimumSize();
     // logDisplayInfo();
     return true;
