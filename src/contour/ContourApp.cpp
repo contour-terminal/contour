@@ -160,6 +160,8 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.info.vt", bind(&ContourApp::infoVT, this));
     link("contour.documentation.vt", bind(&ContourApp::documentationVT, this));
     link("contour.documentation.keys", bind(&ContourApp::documentationKeyMapping, this));
+    link("contour.documentation.configuration.global", bind(&ContourApp::documentationGlobalConfig, this));
+    link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
 }
 
 template <typename Callback>
@@ -242,6 +244,24 @@ int ContourApp::documentationKeyMapping()
     std::format_to(back, "```\n");
     std::format_to(back, "\n");
 
+    std::cout << info;
+    return EXIT_SUCCESS;
+}
+
+int ContourApp::documentationGlobalConfig()
+{
+    std::string info;
+    auto back = std::back_inserter(info);
+    std::format_to(back, "{}\n", contour::config::documentationGlobalConfig());
+    std::cout << info;
+    return EXIT_SUCCESS;
+}
+
+int ContourApp::documentationProfileConfig()
+{
+    std::string info;
+    auto back = std::back_inserter(info);
+    std::format_to(back, "{}\n", contour::config::documentationProfileConfig());
     std::cout << info;
     return EXIT_SUCCESS;
 }
@@ -385,13 +405,25 @@ crispy::cli::command ContourApp::parameterDefinition() const
                     CLI::command { "vt", "Prints general information about supported VT sequences." },
                     CLI::command { "config", "Prints missing entries from user config file." },
                 } },
-            CLI::command { "documentation",
-                           "Generate documentation for web page",
-                           CLI::option_list {},
-                           CLI::command_list {
-                               CLI::command { "vt", "VT sequence reference documentation" },
-                               CLI::command { "keys", "List of configurable actions for key binding" },
-                           } },
+            CLI::command {
+                "documentation",
+                "Generate documentation for web page",
+                CLI::option_list {},
+                CLI::command_list {
+                    CLI::command { "vt", "VT sequence reference documentation" },
+                    CLI::command { "keys", "List of configurable actions for key binding" },
+                    CLI::command {
+                        "configuration",
+                        "Create documentaion for configuration file",
+                        CLI::option_list {},
+                        CLI::command_list {
+                            CLI::command { "global",
+                                           "Create documentation entry for global part of the config file" },
+                            CLI::command { "profile",
+                                           "Create documentation entry for profile part of the config file" },
+                        } },
+                },
+            },
             CLI::command {
                 "generate",
                 "Generation utilities.",

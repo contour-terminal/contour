@@ -98,11 +98,6 @@ struct InputMappings
 
 namespace helper
 {
-    inline std::string replaceCommentPlaceholder(std::string const& docString)
-    {
-        return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "#");
-    }
-
     inline bool testMatchMode(uint8_t actualModeFlags,
                               vtbackend::MatchModes expected,
                               vtbackend::MatchModes::Flag testFlag)
@@ -998,47 +993,12 @@ struct Writer
         lambda();
     }
 
-    template <typename T>
-    auto format(T v)
-    {
-        return std::format("{}", v);
-    }
+    virtual inline std::string replaceCommentPlaceholder(std::string const& docString) = 0;
 
     template <typename... T>
     [[nodiscard]] std::string format(std::string_view doc, T... args)
     {
-        return std::vformat(helper::replaceCommentPlaceholder(std::string(doc)),
-                            std::make_format_args(args...));
-    }
-};
-
-template <typename T>
-std::string createString(Config const& c, T)
-{
-    return createString<T>(c);
-}
-
-struct YAMLConfigWriter: Writer
-{
-
-    static constexpr int OneOffset = 4;
-    using Writer::format;
-    std::string static addOffset(std::string_view doc, size_t off)
-    {
-        auto offset = std::string(off, ' ');
-        return std::regex_replace(std::string { doc }, std::regex(".+\n"), offset + "$&");
-    }
-
-    template <typename T>
-    std::string process(std::string_view doc, T val)
-    {
-        return format(addOffset(doc, Offset::levels * OneOffset), val);
-    }
-
-    template <typename... T>
-    std::string process(std::string_view doc, T... val)
-    {
-        return format(addOffset(doc, Offset::levels * OneOffset), val...);
+        return std::vformat(replaceCommentPlaceholder(std::string(doc)), std::make_format_args(args...));
     }
 
     [[nodiscard]] std::string format(KeyInputMapping v)
@@ -1172,11 +1132,11 @@ struct YAMLConfigWriter: Writer
             return format(doc, simple->colorScheme);
         else if (auto* dual = get_if<DualColorConfig>(&v))
         {
-            auto const formattedValue = std::format("\n"
-                                                    "    light: {}\n"
-                                                    "    dark: {}\n",
-                                                    dual->colorSchemeLight,
-                                                    dual->colorSchemeDark);
+            auto const formattedValue = format("\n"
+                                               "    light: {}\n"
+                                               "    dark: {}\n",
+                                               dual->colorSchemeLight,
+                                               dual->colorSchemeDark);
             return format(doc, formattedValue);
         }
 
@@ -1211,6 +1171,78 @@ struct YAMLConfigWriter: Writer
     }
 };
 
+template <typename T>
+std::string createString(Config const& c);
+
+template <typename T>
+std::string documentationGlobalConfig(Config const& c);
+
+template <typename T>
+std::string documentationProfileConfig(Config const& c);
+
+struct YAMLConfigWriter: Writer
+{
+
+    constexpr static std::string_view FormatTemplate = "{}";
+    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    {
+        return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "#");
+    }
+
+    static constexpr int OneOffset = 4;
+    using Writer::format;
+    std::string static addOffset(std::string_view doc, size_t off)
+    {
+        auto offset = std::string(off, ' ');
+        return std::regex_replace(std::string { doc }, std::regex(".+\n"), offset + "$&");
+    }
+
+    template <typename... T>
+    std::string process(std::string_view doc, T... val)
+    {
+        return format("{}", format(addOffset(doc, Offset::levels * OneOffset), val...));
+    }
+};
+
+struct DocumentationWriter: Writer
+{
+    constexpr static std::string_view FormatTemplate = "{}";
+    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    {
+        return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "");
+    }
+
+    static constexpr int OneOffset = 0;
+    std::string static addOffset(std::string_view doc, size_t off) { return std::string { doc }; }
+
+    using Writer::format;
+    template <typename... T>
+    std::string process(std::string_view doc, T... val)
+    {
+        return format("{}", format(doc, val...));
+    }
+};
+
+// Will ignore documentation
+struct PlainWriter: Writer
+{
+    constexpr static std::string_view FormatTemplate = "{}";
+    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    {
+        return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "");
+    }
+
+    static constexpr int OneOffset = 0;
+    std::string static addOffset(std::string_view doc, size_t off) { return std::string { doc }; }
+
+    using Writer::format;
+    template <typename... T>
+    std::string process(std::string_view doc, T... val)
+    {
+        return format("{}", format(val...));
+    }
+};
+
 std::filesystem::path configHome();
 std::filesystem::path configHome(std::string const& programName);
 
@@ -1224,6 +1256,9 @@ void compareEntries(Config& config, auto const& output);
 std::string defaultConfigString();
 std::error_code createDefaultConfig(std::filesystem::path const& path);
 std::string defaultConfigFilePath();
+
+std::string documentationGlobalConfig();
+std::string documentationProfileConfig();
 
 } // namespace contour::config
 
