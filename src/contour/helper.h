@@ -111,20 +111,10 @@ constexpr inline vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModi
         modifiers |= Modifier::Alt;
     if (qtModifiers & Qt::ShiftModifier)
         modifiers |= Modifier::Shift;
-#if defined(__APPLE__)
-    // XXX https://doc.qt.io/qt-5/qt.html#KeyboardModifier-enum
-    //     "Note: On macOS, the ControlModifier value corresponds to the Command keys on the keyboard,
-    //      and the MetaModifier value corresponds to the Control keys."
-    if (qtModifiers & Qt::MetaModifier)
-        modifiers |= Modifier::Control;
-    if (qtModifiers & Qt::ControlModifier)
-        modifiers |= Modifier::Super;
-#else
     if (qtModifiers & Qt::ControlModifier)
         modifiers |= Modifier::Control;
     if (qtModifiers & Qt::MetaModifier)
         modifiers |= Modifier::Super;
-#endif
 
 #if defined(_WIN32)
     // Deal with AltGr on Windows, which is seen by the app as Ctrl+Alt, because
