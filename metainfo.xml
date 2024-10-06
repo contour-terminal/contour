@@ -107,6 +107,9 @@
     <release version="0.5.2" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Add terminal tabs (#90)</li>
+          <li>Add binding to exit normal mode with `Esc` (#1604)</li>
+          <li>Add config option to switch into insert mode after yank (#1604)</li>
         </ul>
       </description>
     </release>
@@ -114,9 +117,6 @@
     <release version="0.5.1" urgency="medium" date="2024-09-30">
       <description>
         <ul>
-          <li>Add terminal tabs (#90)</li>
-          <li>Add binding to exit normal mode with `Esc` (#1604)</li>
-          <li>Add config option to switch into insert mode after yank (#1604)</li>
           <li>Fixes vi-mode motions like `viW`, `yiW`, `oiW` as well as `B` and `W`</li>
           <li>Fixes rendered backend loading from config</li>
           <li>Fixes mouse wheel scrolling on High-DPI screens feeling too slow</li>
