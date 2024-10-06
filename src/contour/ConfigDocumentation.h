@@ -125,6 +125,14 @@ constexpr StringLiteral SeachModeSwitch {
     "\n"
 };
 
+constexpr StringLiteral InsertAfterYank {
+    "{comment} Whether or not to switch from normal mode into insert after yank command. If this value is "
+    "set to true,\n"
+    "{comment} it will go to insert mode, otherwise it will stay in normal mode.\n"
+    "insert_after_yank: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral CopyLastMarkRangeOffset {
     "{comment} Advanced value that is useful when CopyPreviousMarkRange is used \n"
     "{comment} with multiline-prompts. This offset value is being added to the \n"

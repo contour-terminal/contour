@@ -401,6 +401,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "fullscreen", where.fullscreen);
         loadFromEntry(child, "maximized", where.maximized);
         loadFromEntry(child, "search_mode_switch", where.searchModeSwitch);
+        loadFromEntry(child, "insert_after_yank", where.insertAfterYank);
         loadFromEntry(child, "bell", where.bell);
         loadFromEntry(child, "wm_class", where.wmClass);
         loadFromEntry(child, "margins", where.margins);
@@ -2061,6 +2062,7 @@ std::string createString(Config const& c)
                 process(entry.fullscreen);
                 process(entry.maximized);
                 process(entry.searchModeSwitch);
+                process(entry.insertAfterYank);
                 process(entry.bell);
                 process(entry.wmClass);
                 process(entry.terminalId);
