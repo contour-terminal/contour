@@ -60,18 +60,23 @@ TerminalSession* TerminalSessionManager::createSession()
 
 void TerminalSessionManager::setSession(size_t index)
 {
-
+    Require(index <= _sessions.size());
     managerLog()(std::format("SET SESSION: index: {}, _sessions.size(): {}", index, _sessions.size()));
     if (!isAllowedToChangeTabs())
         return;
 
-    if (_activeSession)
-        _activeSession->detachDisplay(*display);
+    auto* oldSession = _activeSession;
 
     if (index < _sessions.size())
         _activeSession = _sessions[index];
     else
         _activeSession = createSession();
+
+    if (oldSession == _activeSession)
+        return;
+
+    if (oldSession)
+        oldSession->detachDisplay(*display);
 
     Require(display != nullptr);
     auto const pixels = display->pixelSize();
