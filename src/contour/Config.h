@@ -206,6 +206,13 @@ struct WindowMargins
     VerticalMargin vertical { 0 };
 };
 
+constexpr WindowMargins operator*(WindowMargins const& margin, double factor) noexcept
+{
+    return WindowMargins {
+        .horizontal = HorizontalMargin { static_cast<unsigned>(*margin.horizontal * factor) },
+    };
+}
+
 template <typename T, documentation::StringLiteral doc>
 struct ConfigEntry
 {

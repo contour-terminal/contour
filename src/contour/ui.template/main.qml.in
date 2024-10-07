@@ -38,13 +38,11 @@ ApplicationWindow
 
     onWidthChanged : function() {
         vtui.width = width
-        vtui.session.adaptToWidgetSize()
         vtui.updateSizeWidget()
     }
 
     onHeightChanged: function() {
         vtui.height = height
-        vtui.session.adaptToWidgetSize()
         vtui.updateSizeWidget()
     }
 

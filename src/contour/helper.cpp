@@ -57,7 +57,7 @@ namespace
     {
         auto const pageSize = session.terminal().totalPageSize();
         auto const cellSize = session.display()->cellSize();
-        auto const dpr = session.contentScale();
+        auto const dpr = session.display()->contentScale();
 
         auto const marginTop = static_cast<int>(unbox(session.profile().margins.value().vertical) * dpr);
         auto const marginLeft = static_cast<int>(unbox(session.profile().margins.value().horizontal) * dpr);
@@ -443,7 +443,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
         ((modifiers & Modifier::Alt) ? transposed(event->angleDelta()) : event->angleDelta()) / 8;
 
     auto const pixelPosition =
-        makeMousePixelPosition(event, session.profile().margins.value(), session.contentScale());
+        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale());
 
     if (!pixelDelta.isNull())
     {
@@ -468,7 +468,7 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
     session.sendMousePressEvent(
         makeModifiers(event->modifiers()),
         makeMouseButton(event->button()),
-        makeMousePixelPosition(event, session.profile().margins.value(), session.contentScale()));
+        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
     event->accept();
 }
 
@@ -477,7 +477,7 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
     session.sendMouseReleaseEvent(
         makeModifiers(event->modifiers()),
         makeMouseButton(event->button()),
-        makeMousePixelPosition(event, session.profile().margins.value(), session.contentScale()));
+        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
     event->accept();
 }
 
@@ -486,7 +486,7 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
     session.sendMouseMoveEvent(
         makeModifiers(event->modifiers()),
         makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
-        makeMousePixelPosition(event, session.profile().margins.value(), session.contentScale()));
+        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
     event->accept();
 }
 
@@ -500,7 +500,7 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
     session.sendMouseMoveEvent(
         makeModifiers(event->modifiers()),
         makeMouseCellLocation(position.x(), position.y(), session),
-        makeMousePixelPosition(event, session.profile().margins.value(), session.contentScale()));
+        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
     event->accept();
 }
 
@@ -612,21 +612,21 @@ void applyResize(vtbackend::ImageSize newPixelSize,
         return;
 
     auto const oldPageSize = session.terminal().pageSize();
-    auto const newPageSize =
-        pageSizeForPixels(newPixelSize,
-                          renderer.gridMetrics().cellSize,
-                          applyContentScale(session.profile().margins.value(), session.contentScale()));
+    auto const newPageSize = pageSizeForPixels(
+        newPixelSize,
+        renderer.gridMetrics().cellSize,
+        applyContentScale(session.profile().margins.value(), session.display()->contentScale()));
     vtbackend::Terminal& terminal = session.terminal();
     vtbackend::ImageSize const cellSize = renderer.gridMetrics().cellSize;
 
     if (renderer.hasRenderTarget())
         renderer.renderTarget().setRenderSize(newPixelSize);
     renderer.setPageSize(newPageSize);
-    renderer.setMargin(
-        computeMargin(renderer.gridMetrics().cellSize,
-                      newPageSize,
-                      newPixelSize,
-                      applyContentScale(session.profile().margins.value(), session.contentScale())));
+    renderer.setMargin(computeMargin(
+        renderer.gridMetrics().cellSize,
+        newPageSize,
+        newPixelSize,
+        applyContentScale(session.profile().margins.value(), session.display()->contentScale())));
 
     if (oldPageSize.lines != newPageSize.lines)
         emit session.lineCountChanged(newPageSize.lines.as<int>());

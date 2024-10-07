@@ -956,7 +956,7 @@ class Terminal
     void resetStatusLineDefinition();
 
     std::string_view guiTabInfoForStatusLine() const noexcept { return _guiTabInfoForStatusLine; }
-    void setGuiTabInfoForStatusLine(std::string_view value) { _guiTabInfoForStatusLine = value; }
+    void setGuiTabInfoForStatusLine(std::string value) { _guiTabInfoForStatusLine = std::move(value); }
 
   private:
     void mainLoop();
