@@ -436,8 +436,8 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     //       it will send horizontal wheel events instead of vertical ones. We need to compensate
     //       for that here.
 
-    auto const pixelDelta =
-        (modifiers & Modifier::Alt) ? transposed(event->pixelDelta()) : event->pixelDelta();
+    auto const scaledPixelDelta = session.display()->contentScale() * event->pixelDelta();
+    auto const pixelDelta = (modifiers & Modifier::Alt) ? transposed(scaledPixelDelta) : scaledPixelDelta;
 
     auto const numDegrees =
         ((modifiers & Modifier::Alt) ? transposed(event->angleDelta()) : event->angleDelta()) / 8;
