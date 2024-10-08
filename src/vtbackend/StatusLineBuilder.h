@@ -38,7 +38,12 @@ namespace StatusLineDefinitions
     struct Text: Styles { std::string text; };
     struct TraceMode: Styles {};
     struct VTType: Styles {};
-    struct Tabs: Styles {};
+
+    struct Tabs: Styles
+    {
+        std::optional<RGBColor> activeColor;
+        std::optional<RGBColor> activeBackground;
+    };
 
     using Item = std::variant<
         CellSGR,
