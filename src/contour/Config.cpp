@@ -190,7 +190,7 @@ fs::path configHome()
 
 std::string createString(Config const& c)
 {
-    return createString(c, YAMLConfigWriter());
+    return createString<YAMLConfigWriter>(c);
 }
 
 std::string defaultConfigString()
@@ -214,6 +214,16 @@ error_code createDefaultConfig(fs::path const& path)
     ofstream { path.string(), ios::binary | ios::trunc } << defaultConfigString();
 
     return error_code {};
+}
+
+std::string documentationGlobalConfig()
+{
+    return documentationGlobalConfig<DocumentationWriter>(Config {});
+}
+
+std::string documentationProfileConfig()
+{
+    return documentationProfileConfig<DocumentationWriter>(Config {});
 }
 
 std::string defaultConfigFilePath()
@@ -1968,7 +1978,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 
 template <typename Writer>
-std::string createString(Config const& c)
+std::string createForGlobal(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
@@ -1977,14 +1987,14 @@ std::string createString(Config const& c)
     };
 
     auto const processWithDoc = [&](auto&& docString, auto... val) {
-        doc.append(helper::replaceCommentPlaceholder(writer.process(docString.value, val...)));
+        doc.append(writer.replaceCommentPlaceholder(writer.process(docString.value, val...)));
     };
 
     auto const processWordDelimiters = [&]() {
         auto wordDelimiters = c.wordDelimiters.value();
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
-        doc.append(helper::replaceCommentPlaceholder(
+        doc.append(writer.replaceCommentPlaceholder(
             writer.process(documentation::WordDelimiters.value, wordDelimiters)));
     };
 
@@ -1992,7 +2002,7 @@ std::string createString(Config const& c)
         auto wordDelimiters = c.extendedWordDelimiters.value();
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
-        doc.append(helper::replaceCommentPlaceholder(
+        doc.append(writer.replaceCommentPlaceholder(
             writer.process(documentation::ExtendedWordDelimiters.value, wordDelimiters)));
     };
 
@@ -2037,8 +2047,24 @@ std::string createString(Config const& c)
         process(c.maxImageSize);
     });
 
+    return doc;
+}
+
+template <typename Writer>
+std::string createForProfile(Config const& c)
+{
+    auto doc = std::string {};
+    Writer writer;
+    auto const process = [&](auto v) {
+        doc.append(writer.process(v.documentation, v.value()));
+    };
+
+    auto const processWithDoc = [&](auto&& docString, auto... val) {
+        doc.append(writer.replaceCommentPlaceholder(writer.process(docString.value, val...)));
+    };
+
     // inside profiles:
-    doc.append(helper::replaceCommentPlaceholder(c.profiles.documentation));
+    doc.append(writer.replaceCommentPlaceholder(c.profiles.documentation));
     {
         const auto _ = typename Writer::Offset {};
         for (auto&& [name, entry]: c.profiles.value())
@@ -2165,8 +2191,23 @@ std::string createString(Config const& c)
             }
         };
     }
+    return doc;
+}
 
-    doc.append(helper::replaceCommentPlaceholder(c.colorschemes.documentation));
+template <typename Writer>
+std::string createForColorScheme(Config const& c)
+{
+    auto doc = std::string {};
+    Writer writer;
+    auto const process = [&](auto v) {
+        doc.append(writer.process(v.documentation, v.value()));
+    };
+
+    auto const processWithDoc = [&](auto&& docString, auto... val) {
+        doc.append(writer.replaceCommentPlaceholder(writer.process(docString.value, val...)));
+    };
+
+    doc.append(writer.replaceCommentPlaceholder(c.colorschemes.documentation));
     writer.scoped([&]() {
         for (auto&& [name, entry]: c.colorschemes.value())
         {
@@ -2298,7 +2339,16 @@ std::string createString(Config const& c)
         }
     });
 
-    doc.append(helper::replaceCommentPlaceholder(c.inputMappings.documentation));
+    return doc;
+}
+
+template <typename Writer>
+std::string createKeyMapping(Config const& c)
+{
+    auto doc = std::string {};
+    Writer writer;
+
+    doc.append(writer.replaceCommentPlaceholder(c.inputMappings.documentation));
     {
         const auto _ = typename Writer::Offset {};
         for (auto&& entry: c.inputMappings.value().keyMappings)
@@ -2310,7 +2360,27 @@ std::string createString(Config const& c)
         for (auto&& entry: c.inputMappings.value().mouseMappings)
             doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::levels * Writer::OneOffset));
     }
+
     return doc;
+}
+
+template <typename Writer>
+std::string documentationGlobalConfig(Config const& c)
+{
+    return createForGlobal<Writer>(c);
+}
+
+template <typename Writer>
+std::string documentationProfileConfig(Config const& c)
+{
+    return createForProfile<Writer>(c);
+}
+
+template <typename Writer>
+std::string createString(Config const& c)
+{
+    return createForGlobal<Writer>(c) + createForProfile<Writer>(c) + createForColorScheme<Writer>(c)
+           + createKeyMapping<Writer>(c);
 }
 
 } // namespace contour::config

@@ -13,6 +13,22 @@ struct StringLiteral
     char value[N]; // NOLINT
 };
 
+template<StringLiteral doc, StringLiteral entry_name>
+struct DocumentationEntry
+{
+    constexpr DocumentationEntry() = default;
+
+    constexpr auto operator()() const
+    {
+        return doc.value;
+    }
+
+    constexpr auto name() const
+    {
+        return entry_name.value;
+    }
+};
+
 constexpr StringLiteral Dummy { "{comment} fmt formatted doc {} \n" };
 
 constexpr StringLiteral Shell {
