@@ -207,6 +207,12 @@ class TraceHandler: public SequenceHandler
     PendingSequenceQueue _pendingSequences = {};
 };
 
+struct TabsInfo
+{
+    size_t tabCount = 1;
+    size_t activeTabPosition = 1;
+};
+
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
 ///
 /// With a terminal being attached to a Process, the terminal's screen
@@ -955,8 +961,8 @@ class Terminal
     void setStatusLineDefinition(StatusLineDefinition&& definition);
     void resetStatusLineDefinition();
 
-    std::string_view guiTabInfoForStatusLine() const noexcept { return _guiTabInfoForStatusLine; }
-    void setGuiTabInfoForStatusLine(std::string value) { _guiTabInfoForStatusLine = std::move(value); }
+    TabsInfo guiTabsInfoForStatusLine() const noexcept { return _guiTabInfoForStatusLine; }
+    void setGuiTabInfoForStatusLine(TabsInfo info) { _guiTabInfoForStatusLine = info; }
 
   private:
     void mainLoop();
@@ -1070,7 +1076,7 @@ class Terminal
     Viewport _viewport;
     StatusLineDefinition _indicatorStatusLineDefinition;
 
-    std::string _guiTabInfoForStatusLine;
+    TabsInfo _guiTabInfoForStatusLine;
 
     // {{{ selection states
     std::unique_ptr<Selection> _selection;

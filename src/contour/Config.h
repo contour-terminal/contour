@@ -351,7 +351,7 @@ struct TerminalProfile
         statusDisplayPosition { vtbackend::StatusDisplayPosition::Bottom };
     ConfigEntry<std::string, documentation::IndicatorStatusLineLeft> indicatorStatusLineLeft {
         " {InputMode:Bold,Color=#FFFF00}"
-        "{Tabs:Left= │ }"
+        "{Tabs:ActiveColor=#FFFF00,Left= │ }"
         "{SearchPrompt:Left= │ }"
         "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
         "{ProtectedMode:Bold,Left= │ }"

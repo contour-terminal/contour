@@ -73,3 +73,13 @@ These parameters apply to all variables above.
 
 The `Command` variable is the only one that requires a special attribute, `Program` whose value
 is the command to execute.
+
+### Tabs formatting extensions
+
+The `Tabs` key allows additional styling through the following attributes:
+
+Parameter                 | Description
+--------------------------|--------------------------------------------------------------------
+`ActiveColor`             | color of the active tab
+`ActiveBackground`        | background color of the active tab
+
