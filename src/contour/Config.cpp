@@ -1983,7 +1983,7 @@ std::string createForGlobal(Config const& c)
     auto doc = std::string {};
     Writer writer;
     auto const process = [&](auto v) {
-        doc.append(writer.process(v.documentation, v.value()));
+        doc.append(writer.process(v.documentation, v.entryName ,v.value()));
     };
 
     auto const processWithDoc = [&](auto&& docString, auto... val) {

@@ -208,12 +208,15 @@ constexpr WindowMargins operator*(WindowMargins const& margin, double factor) no
     };
 }
 
-template <typename T, documentation::StringLiteral doc>
+template <typename T,
+          documentation::StringLiteral doc,
+          documentation::StringLiteral name = documentation::StringLiteral { "" }>
 struct ConfigEntry
 {
     using value_type = T;
 
     std::string documentation = doc.value;
+    std::string entryName = name.value;
     constexpr ConfigEntry(): _value {} {}
     constexpr explicit ConfigEntry(T in): _value { std::move(in) } {}
 
@@ -703,7 +706,7 @@ const InputMappings defaultInputMappings {
 struct Config
 {
     std::filesystem::path configFile {};
-    ConfigEntry<bool, documentation::Live> live { false };
+    ConfigEntry<bool, documentation::Live, "live"> live { false };
     ConfigEntry<std::string, documentation::PlatformPlugin> platformPlugin { "auto" };
     ConfigEntry<RenderingBackend, documentation::RenderingBackend> renderingBackend {
         RenderingBackend::Default
@@ -811,8 +814,8 @@ struct YAMLConfigReader
         }
     }
 
-    template <typename T, documentation::StringLiteral D, typename... Args>
-    void loadFromEntry(std::string const& entry, ConfigEntry<T, D>& where, Args&&... args)
+    template <typename T, documentation::StringLiteral D, documentation::StringLiteral N, typename... Args>
+    void loadFromEntry(std::string const& entry, ConfigEntry<T, D, N>& where, Args&&... args)
     {
         loadFromEntry(doc, entry, where.value(), std::forward<Args>(args)...);
     }
@@ -1202,6 +1205,14 @@ struct YAMLConfigWriter: Writer
     {
         return format("{}", format(addOffset(doc, Offset::levels * OneOffset), val...));
     }
+
+    template <typename... T>
+    std::string process(std::string_view doc, std::string_view name, T... val)
+    {
+        return process(doc, val...); // TODO(PR)
+        // return format(
+        //     "{}", format(addOffset(format("{}{}:{{}}\n", doc, name), Offset::levels * OneOffset), val...));
+    }
 };
 
 struct DocumentationWriter: Writer
@@ -1219,7 +1230,30 @@ struct DocumentationWriter: Writer
     template <typename... T>
     std::string process(std::string_view doc, T... val)
     {
-        return format("{}", format(doc, val...));
+        return process(doc, std::string_view { "TODO(PR)" }, val...);
+    }
+
+    inline std::string removeNewLine(std::string const& docString)
+    {
+        return std::regex_replace(docString, std::regex { "\n" }, " ");
+    }
+
+    template <typename... T>
+    std::string process(std::string_view doc, std::string_view name, T... val)
+    {
+        return format("###`{}`\n"
+                      "{}\n"
+                      "``` yaml\n"
+                      "profiles:\n"
+                      "profile_name:\n"
+                      "{}: {}\n'"
+                      "```\n"
+                      "\n"
+                      "\n",
+                      name,
+                      replaceCommentPlaceholder(removeNewLine(std::string { doc })),
+                      name,
+                      format("{}", val...));
     }
 };
 
