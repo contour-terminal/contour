@@ -208,16 +208,20 @@ constexpr WindowMargins operator*(WindowMargins const& margin, double factor) no
     };
 }
 
-template <typename T,
-          documentation::StringLiteral doc,
-          documentation::StringLiteral name = documentation::StringLiteral { "" }>
+template <typename... T>
 struct ConfigEntry
+{
+};
+
+template <typename T, documentation::StringLiteral configDoc, documentation::StringLiteral webDoc>
+struct ConfigEntry<T, documentation::DocumentationEntry<configDoc, webDoc>>
 {
     using value_type = T;
 
-    std::string documentation = doc.value;
-    std::string entryName = name.value;
+    std::string documentation = configDoc.value;
+    std::string entryName = "unknown TODO(PR)";
     constexpr ConfigEntry(): _value {} {}
+
     constexpr explicit ConfigEntry(T in): _value { std::move(in) } {}
 
     template <typename F>
@@ -363,7 +367,7 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::SyncWindowTitleWithHostWritableStatusDisplay>
         syncWindowTitleWithHostWritableStatusDisplay { false };
     ConfigEntry<bool, documentation::HideScrollbarInAltScreen> hideScrollbarInAltScreen { true };
-    ConfigEntry<bool, documentation::Dummy> optionKeyAsAlt { false };
+    ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
     ConfigEntry<bool, documentation::AutoScrollOnUpdate> autoScrollOnUpdate { true };
     ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont };
     ConfigEntry<Permission, documentation::CaptureBuffer> captureBuffer { Permission::Ask };
@@ -397,10 +401,10 @@ struct TerminalProfile
     ConfigEntry<vtbackend::Opacity, documentation::BackgroundOpacity> backgroundOpacity { vtbackend::Opacity(
         0xFF) };
     ConfigEntry<bool, documentation::BackgroundBlur> backgroundBlur { false };
-    ConfigEntry<vtrasterizer::Decorator, "normal: {}\n"> hyperlinkDecorationNormal {
+    ConfigEntry<vtrasterizer::Decorator, documentation::HyperlinkDecoration> hyperlinkDecorationNormal {
         vtrasterizer::Decorator::DottedUnderline
     };
-    ConfigEntry<vtrasterizer::Decorator, "hover: {}\n"> hyperlinkDecorationHover {
+    ConfigEntry<vtrasterizer::Decorator, documentation::HyperlinkDecoration> hyperlinkDecorationHover {
         vtrasterizer::Decorator::Underline
     };
     ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };
@@ -706,7 +710,7 @@ const InputMappings defaultInputMappings {
 struct Config
 {
     std::filesystem::path configFile {};
-    ConfigEntry<bool, documentation::Live, "live"> live { false };
+    ConfigEntry<bool, documentation::Live> live { false };
     ConfigEntry<std::string, documentation::PlatformPlugin> platformPlugin { "auto" };
     ConfigEntry<RenderingBackend, documentation::RenderingBackend> renderingBackend {
         RenderingBackend::Default
@@ -723,7 +727,7 @@ struct Config
     ConfigEntry<std::unordered_map<std::string, TerminalProfile>, documentation::Profiles> profiles {
         { { "main", TerminalProfile {} } }
     };
-    ConfigEntry<std::string, "default_profile: {}\n"> defaultProfileName { "main" };
+    ConfigEntry<std::string, documentation::DefaultProfiles> defaultProfileName { "main" };
     ConfigEntry<std::string, documentation::WordDelimiters> wordDelimiters {
         " /\\()\"'-.,:;<>~!@#$%^&*+=[]{{}}~?|│"
     };
@@ -801,8 +805,10 @@ struct YAMLConfigReader
         }
     }
 
-    template <typename T, documentation::StringLiteral D>
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, ConfigEntry<T, D>& where)
+    template <typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       ConfigEntry<T, documentation::DocumentationEntry<ConfigDoc, WebDoc>>& where)
     {
         try
         {
@@ -814,8 +820,13 @@ struct YAMLConfigReader
         }
     }
 
-    template <typename T, documentation::StringLiteral D, documentation::StringLiteral N, typename... Args>
-    void loadFromEntry(std::string const& entry, ConfigEntry<T, D, N>& where, Args&&... args)
+    template <typename T,
+              documentation::StringLiteral ConfigDoc,
+              documentation::StringLiteral WebDoc,
+              typename... Args>
+    void loadFromEntry(std::string const& entry,
+                       ConfigEntry<T, documentation::DocumentationEntry<ConfigDoc, WebDoc>>& where,
+                       Args&&... args)
     {
         loadFromEntry(doc, entry, where.value(), std::forward<Args>(args)...);
     }
@@ -1203,15 +1214,14 @@ struct YAMLConfigWriter: Writer
     template <typename... T>
     std::string process(std::string_view doc, T... val)
     {
-        return format("{}", format(addOffset(doc, Offset::levels * OneOffset), val...));
+        return format(addOffset(replaceCommentPlaceholder(std::string { doc }), Offset::levels * OneOffset),
+                      val...);
     }
 
-    template <typename... T>
-    std::string process(std::string_view doc, std::string_view name, T... val)
+    template <documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
+    constexpr std::string_view whichDoc(documentation::DocumentationEntry<ConfigDoc, WebDoc>)
     {
-        return process(doc, val...); // TODO(PR)
-        // return format(
-        //     "{}", format(addOffset(format("{}{}:{{}}\n", doc, name), Offset::levels * OneOffset), val...));
+        return ConfigDoc.value;
     }
 };
 
@@ -1254,6 +1264,12 @@ struct DocumentationWriter: Writer
                       replaceCommentPlaceholder(removeNewLine(std::string { doc })),
                       name,
                       format("{}", val...));
+    }
+
+    template <documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
+    constexpr std::string_view whichDoc(documentation::DocumentationEntry<ConfigDoc, WebDoc>)
+    {
+        return WebDoc.value;
     }
 };
 
@@ -1455,10 +1471,16 @@ struct std::formatter<contour::config::WindowMargins>: public std::formatter<std
     }
 };
 
-template <typename T, contour::config::documentation::StringLiteral D>
-struct std::formatter<contour::config::ConfigEntry<T, D>>
+template <typename T,
+          contour::config::documentation::StringLiteral ConfigDoc,
+          contour::config::documentation::StringLiteral WebDoc>
+struct std::formatter<
+    contour::config::ConfigEntry<T, contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>>>
 {
-    auto format(contour::config::ConfigEntry<T, D> const& c, auto& ctx) const
+    auto format(contour::config::ConfigEntry<
+                    T,
+                    contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& c,
+                auto& ctx) const
     {
         return std::format_to(ctx.out(), "{}", c.value());
     }

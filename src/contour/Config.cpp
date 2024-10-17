@@ -1983,7 +1983,7 @@ std::string createForGlobal(Config const& c)
     auto doc = std::string {};
     Writer writer;
     auto const process = [&](auto v) {
-        doc.append(writer.process(v.documentation, v.entryName ,v.value()));
+        doc.append(writer.process(v.documentation, v.value()));
     };
 
     auto const processWithDoc = [&](auto&& docString, auto... val) {
@@ -1995,7 +1995,7 @@ std::string createForGlobal(Config const& c)
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
         doc.append(writer.replaceCommentPlaceholder(
-            writer.process(documentation::WordDelimiters.value, wordDelimiters)));
+            writer.process(documentation::WordDelimitersConfig.value, wordDelimiters))); // TODO(PR)
     };
 
     auto const processExtendedWordDelimiters = [&]() {
@@ -2003,12 +2003,12 @@ std::string createForGlobal(Config const& c)
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
         doc.append(writer.replaceCommentPlaceholder(
-            writer.process(documentation::ExtendedWordDelimiters.value, wordDelimiters)));
+            writer.process(documentation::ExtendedWordDelimitersConfig.value, wordDelimiters))); // TODO(PR)
     };
 
     if (c.platformPlugin.value().empty())
     {
-        processWithDoc(documentation::PlatformPlugin, std::string { "auto" });
+        processWithDoc(documentation::PlatformPluginConfig, std::string { "auto" });
     }
     else
     {
@@ -2060,7 +2060,7 @@ std::string createForProfile(Config const& c)
     };
 
     auto const processWithDoc = [&](auto&& docString, auto... val) {
-        doc.append(writer.replaceCommentPlaceholder(writer.process(docString.value, val...)));
+        doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
     };
 
     // inside profiles:
@@ -2075,9 +2075,9 @@ std::string createForProfile(Config const& c)
                 process(entry.shell);
                 process(entry.ssh);
 
-                processWithDoc(documentation::EscapeSandbox, entry.shell.value().escapeSandbox);
+                processWithDoc(documentation::EscapeSandbox {}, entry.shell.value().escapeSandbox);
                 process(entry.copyLastMarkRangeOffset);
-                processWithDoc(documentation::InitialWorkingDirectory, [&entry = entry]() {
+                processWithDoc(documentation::InitialWorkingDirectory {}, [&entry = entry]() {
                     auto fromConfig = entry.shell.value().workingDirectory.string();
                     if (fromConfig.empty() || fromConfig == homeResolvedPath("~", Process::homeDirectory()))
                         return std::string { "\"~\"" };
@@ -2092,7 +2092,7 @@ std::string createForProfile(Config const& c)
                 process(entry.bell);
                 process(entry.wmClass);
                 process(entry.terminalId);
-                processWithDoc(documentation::FrozenDecMode, 0);
+                processWithDoc(documentation::FrozenDecMode{}, 0);
                 process(entry.smoothLineScrolling);
                 process(entry.terminalSize);
 
@@ -2124,7 +2124,7 @@ std::string createForProfile(Config const& c)
 
                 //  permissions: section
                 processWithDoc(
-                    documentation::StringLiteral {
+                    documentation::DocumentationEntry< documentation::StringLiteral {
                         "\n"
                         "{comment} Some VT sequences should need access permissions.\n"
                         "{comment} \n"
@@ -2133,7 +2133,7 @@ std::string createForProfile(Config const& c)
                         "{comment}  - deny      Denies the given functionality\n"
                         "{comment}  - ask       Asks the user interactively via popup dialog for "
                         "permission of the given action.\n"
-                        "permissions:\n" },
+                        "permissions:\n" }, documentation::StringLiteral {""}> {},
                     0);
                 {
                     const auto _ = typename Writer::Offset {};
@@ -2185,8 +2185,8 @@ std::string createForProfile(Config const& c)
                                              Writer::Offset::levels * Writer::OneOffset));
                 {
                     const auto _ = typename Writer::Offset {};
-                    process(entry.hyperlinkDecorationNormal);
-                    process(entry.hyperlinkDecorationHover);
+                    // process(entry.hyperlinkDecorationNormal); // TODO(PR) make them together to use doc string from
+                    // process(entry.hyperlinkDecorationHover);  // TODO(PR) documentation::HyperlinkDecoration
                 }
             }
         };
@@ -2204,7 +2204,7 @@ std::string createForColorScheme(Config const& c)
     };
 
     auto const processWithDoc = [&](auto&& docString, auto... val) {
-        doc.append(writer.replaceCommentPlaceholder(writer.process(docString.value, val...)));
+        doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
     };
 
     doc.append(writer.replaceCommentPlaceholder(c.colorschemes.documentation));
@@ -2214,7 +2214,7 @@ std::string createForColorScheme(Config const& c)
             doc.append(std::format("    {}: \n", name));
             {
                 const auto _ = typename Writer::Offset {};
-                processWithDoc(documentation::DefaultColors,
+                processWithDoc(documentation::DefaultColors{},
                                entry.defaultBackground,
                                entry.defaultForeground,
                                entry.defaultForegroundBright,
@@ -2250,63 +2250,63 @@ std::string createForColorScheme(Config const& c)
                 //                covered otherwise.\n" "    #\n" "    text: {}\n",
                 //                entry.cursor.color, entry.cursor.textOverrideColor);
 
-                processWithDoc(documentation::HyperlinkDecoration,
+                processWithDoc(documentation::HyperlinkDecoration{},
                                entry.hyperlinkDecoration.normal,
                                entry.hyperlinkDecoration.hover);
 
-                processWithDoc(documentation::YankHighlight,
+                processWithDoc(documentation::YankHighlight{},
                                entry.yankHighlight.foreground,
                                entry.yankHighlight.foregroundAlpha,
                                entry.yankHighlight.background,
                                entry.yankHighlight.backgroundAlpha);
 
-                processWithDoc(documentation::NormalModeCursorline,
+                processWithDoc(documentation::NormalModeCursorline{},
                                entry.normalModeCursorline.foreground,
                                entry.normalModeCursorline.foregroundAlpha,
                                entry.normalModeCursorline.background,
                                entry.normalModeCursorline.backgroundAlpha);
 
-                processWithDoc(documentation::Selection,
+                processWithDoc(documentation::Selection{},
                                entry.selection.foreground,
                                entry.selection.foregroundAlpha,
                                entry.selection.background,
                                entry.selection.backgroundAlpha);
 
-                processWithDoc(documentation::SearchHighlight,
+                processWithDoc(documentation::SearchHighlight{},
                                entry.searchHighlight.foreground,
                                entry.searchHighlight.foregroundAlpha,
                                entry.searchHighlight.background,
                                entry.searchHighlight.backgroundAlpha);
 
-                processWithDoc(documentation::SearchHighlihtFocused,
+                processWithDoc(documentation::SearchHighlihtFocused{},
                                entry.searchHighlightFocused.foreground,
                                entry.searchHighlightFocused.foregroundAlpha,
                                entry.searchHighlightFocused.background,
                                entry.searchHighlightFocused.backgroundAlpha);
 
-                processWithDoc(documentation::WordHighlightCurrent,
+                processWithDoc(documentation::WordHighlightCurrent{},
                                entry.wordHighlightCurrent.foreground,
                                entry.wordHighlightCurrent.foregroundAlpha,
                                entry.wordHighlightCurrent.background,
                                entry.wordHighlightCurrent.backgroundAlpha);
 
-                processWithDoc(documentation::WordHighlight,
+                processWithDoc(documentation::WordHighlight{},
                                entry.wordHighlight.foreground,
                                entry.wordHighlight.foregroundAlpha,
                                entry.wordHighlight.background,
                                entry.wordHighlight.backgroundAlpha);
 
-                processWithDoc(documentation::IndicatorStatusLine,
+                processWithDoc(documentation::IndicatorStatusLine{},
                                entry.indicatorStatusLineInsertMode.foreground,
                                entry.indicatorStatusLineInsertMode.background,
                                entry.indicatorStatusLineInactive.foreground,
                                entry.indicatorStatusLineInactive.background);
 
-                processWithDoc(documentation::InputMethodEditor,
+                processWithDoc(documentation::InputMethodEditor{},
                                entry.inputMethodEditor.foreground,
                                entry.inputMethodEditor.background);
 
-                processWithDoc(documentation::NormalColors,
+                processWithDoc(documentation::NormalColors{},
                                entry.normalColor(0),
                                entry.normalColor(1),
                                entry.normalColor(2),
@@ -2316,7 +2316,7 @@ std::string createForColorScheme(Config const& c)
                                entry.normalColor(6),
                                entry.normalColor(7));
 
-                processWithDoc(documentation::BrightColors,
+                processWithDoc(documentation::BrightColors{},
                                entry.brightColor(0),
                                entry.brightColor(1),
                                entry.brightColor(2),
@@ -2326,7 +2326,7 @@ std::string createForColorScheme(Config const& c)
                                entry.brightColor(6),
                                entry.brightColor(7));
 
-                processWithDoc(documentation::DimColors,
+                processWithDoc(documentation::DimColors{},
                                entry.dimColor(0),
                                entry.dimColor(1),
                                entry.dimColor(2),

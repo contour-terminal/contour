@@ -28,7 +28,7 @@ class ContourApp: public crispy::app
     int documentationVT();
     int documentationKeyMapping();
     int documentationGlobalConfig();
-        int documentationProfileConfig();
+    int documentationProfileConfig();
 };
 
 } // namespace contour
