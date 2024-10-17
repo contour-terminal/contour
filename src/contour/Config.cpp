@@ -190,7 +190,7 @@ fs::path configHome()
 
 std::string createString(Config const& c)
 {
-    return createString(c, YAMLConfigWriter());
+    return createString<YAMLConfigWriter>(c);
 }
 
 std::string defaultConfigString()
@@ -214,6 +214,16 @@ error_code createDefaultConfig(fs::path const& path)
     ofstream { path.string(), ios::binary | ios::trunc } << defaultConfigString();
 
     return error_code {};
+}
+
+std::string documentationGlobalConfig()
+{
+    return documentationGlobalConfig<DocumentationWriter>(Config {});
+}
+
+std::string documentationProfileConfig()
+{
+    return documentationProfileConfig<DocumentationWriter>(Config {});
 }
 
 std::string defaultConfigFilePath()
@@ -1968,7 +1978,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 
 template <typename Writer>
-std::string createString(Config const& c)
+std::string createForGlobal(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
@@ -1977,28 +1987,28 @@ std::string createString(Config const& c)
     };
 
     auto const processWithDoc = [&](auto&& docString, auto... val) {
-        doc.append(helper::replaceCommentPlaceholder(writer.process(docString.value, val...)));
+        doc.append(writer.replaceCommentPlaceholder(writer.process(docString.value, val...)));
     };
 
     auto const processWordDelimiters = [&]() {
         auto wordDelimiters = c.wordDelimiters.value();
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
-        doc.append(helper::replaceCommentPlaceholder(
-            writer.process(documentation::WordDelimiters.value, wordDelimiters)));
+        doc.append(writer.replaceCommentPlaceholder(
+            writer.process(documentation::WordDelimitersConfig.value, wordDelimiters))); // TODO(PR)
     };
 
     auto const processExtendedWordDelimiters = [&]() {
         auto wordDelimiters = c.extendedWordDelimiters.value();
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
         wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
-        doc.append(helper::replaceCommentPlaceholder(
-            writer.process(documentation::ExtendedWordDelimiters.value, wordDelimiters)));
+        doc.append(writer.replaceCommentPlaceholder(
+            writer.process(documentation::ExtendedWordDelimitersConfig.value, wordDelimiters))); // TODO(PR)
     };
 
     if (c.platformPlugin.value().empty())
     {
-        processWithDoc(documentation::PlatformPlugin, std::string { "auto" });
+        processWithDoc(documentation::PlatformPluginConfig, std::string { "auto" });
     }
     else
     {
@@ -2037,8 +2047,24 @@ std::string createString(Config const& c)
         process(c.maxImageSize);
     });
 
+    return doc;
+}
+
+template <typename Writer>
+std::string createForProfile(Config const& c)
+{
+    auto doc = std::string {};
+    Writer writer;
+    auto const process = [&](auto v) {
+        doc.append(writer.process(v.documentation, v.value()));
+    };
+
+    auto const processWithDoc = [&](auto&& docString, auto... val) {
+        doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
+    };
+
     // inside profiles:
-    doc.append(helper::replaceCommentPlaceholder(c.profiles.documentation));
+    doc.append(writer.replaceCommentPlaceholder(c.profiles.documentation));
     {
         const auto _ = typename Writer::Offset {};
         for (auto&& [name, entry]: c.profiles.value())
@@ -2049,9 +2075,9 @@ std::string createString(Config const& c)
                 process(entry.shell);
                 process(entry.ssh);
 
-                processWithDoc(documentation::EscapeSandbox, entry.shell.value().escapeSandbox);
+                processWithDoc(documentation::EscapeSandbox {}, entry.shell.value().escapeSandbox);
                 process(entry.copyLastMarkRangeOffset);
-                processWithDoc(documentation::InitialWorkingDirectory, [&entry = entry]() {
+                processWithDoc(documentation::InitialWorkingDirectory {}, [&entry = entry]() {
                     auto fromConfig = entry.shell.value().workingDirectory.string();
                     if (fromConfig.empty() || fromConfig == homeResolvedPath("~", Process::homeDirectory()))
                         return std::string { "\"~\"" };
@@ -2066,7 +2092,7 @@ std::string createString(Config const& c)
                 process(entry.bell);
                 process(entry.wmClass);
                 process(entry.terminalId);
-                processWithDoc(documentation::FrozenDecMode, 0);
+                processWithDoc(documentation::FrozenDecMode{}, 0);
                 process(entry.smoothLineScrolling);
                 process(entry.terminalSize);
 
@@ -2098,7 +2124,7 @@ std::string createString(Config const& c)
 
                 //  permissions: section
                 processWithDoc(
-                    documentation::StringLiteral {
+                    documentation::DocumentationEntry< documentation::StringLiteral {
                         "\n"
                         "{comment} Some VT sequences should need access permissions.\n"
                         "{comment} \n"
@@ -2107,7 +2133,7 @@ std::string createString(Config const& c)
                         "{comment}  - deny      Denies the given functionality\n"
                         "{comment}  - ask       Asks the user interactively via popup dialog for "
                         "permission of the given action.\n"
-                        "permissions:\n" },
+                        "permissions:\n" }, documentation::StringLiteral {""}> {},
                     0);
                 {
                     const auto _ = typename Writer::Offset {};
@@ -2159,21 +2185,36 @@ std::string createString(Config const& c)
                                              Writer::Offset::levels * Writer::OneOffset));
                 {
                     const auto _ = typename Writer::Offset {};
-                    process(entry.hyperlinkDecorationNormal);
-                    process(entry.hyperlinkDecorationHover);
+                    // process(entry.hyperlinkDecorationNormal); // TODO(PR) make them together to use doc string from
+                    // process(entry.hyperlinkDecorationHover);  // TODO(PR) documentation::HyperlinkDecoration
                 }
             }
         };
     }
+    return doc;
+}
 
-    doc.append(helper::replaceCommentPlaceholder(c.colorschemes.documentation));
+template <typename Writer>
+std::string createForColorScheme(Config const& c)
+{
+    auto doc = std::string {};
+    Writer writer;
+    auto const process = [&](auto v) {
+        doc.append(writer.process(v.documentation, v.value()));
+    };
+
+    auto const processWithDoc = [&](auto&& docString, auto... val) {
+        doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
+    };
+
+    doc.append(writer.replaceCommentPlaceholder(c.colorschemes.documentation));
     writer.scoped([&]() {
         for (auto&& [name, entry]: c.colorschemes.value())
         {
             doc.append(std::format("    {}: \n", name));
             {
                 const auto _ = typename Writer::Offset {};
-                processWithDoc(documentation::DefaultColors,
+                processWithDoc(documentation::DefaultColors{},
                                entry.defaultBackground,
                                entry.defaultForeground,
                                entry.defaultForegroundBright,
@@ -2209,63 +2250,63 @@ std::string createString(Config const& c)
                 //                covered otherwise.\n" "    #\n" "    text: {}\n",
                 //                entry.cursor.color, entry.cursor.textOverrideColor);
 
-                processWithDoc(documentation::HyperlinkDecoration,
+                processWithDoc(documentation::HyperlinkDecoration{},
                                entry.hyperlinkDecoration.normal,
                                entry.hyperlinkDecoration.hover);
 
-                processWithDoc(documentation::YankHighlight,
+                processWithDoc(documentation::YankHighlight{},
                                entry.yankHighlight.foreground,
                                entry.yankHighlight.foregroundAlpha,
                                entry.yankHighlight.background,
                                entry.yankHighlight.backgroundAlpha);
 
-                processWithDoc(documentation::NormalModeCursorline,
+                processWithDoc(documentation::NormalModeCursorline{},
                                entry.normalModeCursorline.foreground,
                                entry.normalModeCursorline.foregroundAlpha,
                                entry.normalModeCursorline.background,
                                entry.normalModeCursorline.backgroundAlpha);
 
-                processWithDoc(documentation::Selection,
+                processWithDoc(documentation::Selection{},
                                entry.selection.foreground,
                                entry.selection.foregroundAlpha,
                                entry.selection.background,
                                entry.selection.backgroundAlpha);
 
-                processWithDoc(documentation::SearchHighlight,
+                processWithDoc(documentation::SearchHighlight{},
                                entry.searchHighlight.foreground,
                                entry.searchHighlight.foregroundAlpha,
                                entry.searchHighlight.background,
                                entry.searchHighlight.backgroundAlpha);
 
-                processWithDoc(documentation::SearchHighlihtFocused,
+                processWithDoc(documentation::SearchHighlihtFocused{},
                                entry.searchHighlightFocused.foreground,
                                entry.searchHighlightFocused.foregroundAlpha,
                                entry.searchHighlightFocused.background,
                                entry.searchHighlightFocused.backgroundAlpha);
 
-                processWithDoc(documentation::WordHighlightCurrent,
+                processWithDoc(documentation::WordHighlightCurrent{},
                                entry.wordHighlightCurrent.foreground,
                                entry.wordHighlightCurrent.foregroundAlpha,
                                entry.wordHighlightCurrent.background,
                                entry.wordHighlightCurrent.backgroundAlpha);
 
-                processWithDoc(documentation::WordHighlight,
+                processWithDoc(documentation::WordHighlight{},
                                entry.wordHighlight.foreground,
                                entry.wordHighlight.foregroundAlpha,
                                entry.wordHighlight.background,
                                entry.wordHighlight.backgroundAlpha);
 
-                processWithDoc(documentation::IndicatorStatusLine,
+                processWithDoc(documentation::IndicatorStatusLine{},
                                entry.indicatorStatusLineInsertMode.foreground,
                                entry.indicatorStatusLineInsertMode.background,
                                entry.indicatorStatusLineInactive.foreground,
                                entry.indicatorStatusLineInactive.background);
 
-                processWithDoc(documentation::InputMethodEditor,
+                processWithDoc(documentation::InputMethodEditor{},
                                entry.inputMethodEditor.foreground,
                                entry.inputMethodEditor.background);
 
-                processWithDoc(documentation::NormalColors,
+                processWithDoc(documentation::NormalColors{},
                                entry.normalColor(0),
                                entry.normalColor(1),
                                entry.normalColor(2),
@@ -2275,7 +2316,7 @@ std::string createString(Config const& c)
                                entry.normalColor(6),
                                entry.normalColor(7));
 
-                processWithDoc(documentation::BrightColors,
+                processWithDoc(documentation::BrightColors{},
                                entry.brightColor(0),
                                entry.brightColor(1),
                                entry.brightColor(2),
@@ -2285,7 +2326,7 @@ std::string createString(Config const& c)
                                entry.brightColor(6),
                                entry.brightColor(7));
 
-                processWithDoc(documentation::DimColors,
+                processWithDoc(documentation::DimColors{},
                                entry.dimColor(0),
                                entry.dimColor(1),
                                entry.dimColor(2),
@@ -2298,7 +2339,16 @@ std::string createString(Config const& c)
         }
     });
 
-    doc.append(helper::replaceCommentPlaceholder(c.inputMappings.documentation));
+    return doc;
+}
+
+template <typename Writer>
+std::string createKeyMapping(Config const& c)
+{
+    auto doc = std::string {};
+    Writer writer;
+
+    doc.append(writer.replaceCommentPlaceholder(c.inputMappings.documentation));
     {
         const auto _ = typename Writer::Offset {};
         for (auto&& entry: c.inputMappings.value().keyMappings)
@@ -2310,7 +2360,27 @@ std::string createString(Config const& c)
         for (auto&& entry: c.inputMappings.value().mouseMappings)
             doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::levels * Writer::OneOffset));
     }
+
     return doc;
+}
+
+template <typename Writer>
+std::string documentationGlobalConfig(Config const& c)
+{
+    return createForGlobal<Writer>(c);
+}
+
+template <typename Writer>
+std::string documentationProfileConfig(Config const& c)
+{
+    return createForProfile<Writer>(c);
+}
+
+template <typename Writer>
+std::string createString(Config const& c)
+{
+    return createForGlobal<Writer>(c) + createForProfile<Writer>(c) + createForColorScheme<Writer>(c)
+           + createKeyMapping<Writer>(c);
 }
 
 } // namespace contour::config

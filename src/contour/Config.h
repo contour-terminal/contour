@@ -98,11 +98,6 @@ struct InputMappings
 
 namespace helper
 {
-    inline std::string replaceCommentPlaceholder(std::string const& docString)
-    {
-        return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "#");
-    }
-
     inline bool testMatchMode(uint8_t actualModeFlags,
                               vtbackend::MatchModes expected,
                               vtbackend::MatchModes::Flag testFlag)
@@ -213,13 +208,20 @@ constexpr WindowMargins operator*(WindowMargins const& margin, double factor) no
     };
 }
 
-template <typename T, documentation::StringLiteral doc>
+template <typename... T>
 struct ConfigEntry
+{
+};
+
+template <typename T, documentation::StringLiteral configDoc, documentation::StringLiteral webDoc>
+struct ConfigEntry<T, documentation::DocumentationEntry<configDoc, webDoc>>
 {
     using value_type = T;
 
-    std::string documentation = doc.value;
+    std::string documentation = configDoc.value;
+    std::string entryName = "unknown TODO(PR)";
     constexpr ConfigEntry(): _value {} {}
+
     constexpr explicit ConfigEntry(T in): _value { std::move(in) } {}
 
     template <typename F>
@@ -365,7 +367,7 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::SyncWindowTitleWithHostWritableStatusDisplay>
         syncWindowTitleWithHostWritableStatusDisplay { false };
     ConfigEntry<bool, documentation::HideScrollbarInAltScreen> hideScrollbarInAltScreen { true };
-    ConfigEntry<bool, documentation::Dummy> optionKeyAsAlt { false };
+    ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
     ConfigEntry<bool, documentation::AutoScrollOnUpdate> autoScrollOnUpdate { true };
     ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont };
     ConfigEntry<Permission, documentation::CaptureBuffer> captureBuffer { Permission::Ask };
@@ -399,10 +401,10 @@ struct TerminalProfile
     ConfigEntry<vtbackend::Opacity, documentation::BackgroundOpacity> backgroundOpacity { vtbackend::Opacity(
         0xFF) };
     ConfigEntry<bool, documentation::BackgroundBlur> backgroundBlur { false };
-    ConfigEntry<vtrasterizer::Decorator, "normal: {}\n"> hyperlinkDecorationNormal {
+    ConfigEntry<vtrasterizer::Decorator, documentation::HyperlinkDecoration> hyperlinkDecorationNormal {
         vtrasterizer::Decorator::DottedUnderline
     };
-    ConfigEntry<vtrasterizer::Decorator, "hover: {}\n"> hyperlinkDecorationHover {
+    ConfigEntry<vtrasterizer::Decorator, documentation::HyperlinkDecoration> hyperlinkDecorationHover {
         vtrasterizer::Decorator::Underline
     };
     ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };
@@ -725,7 +727,7 @@ struct Config
     ConfigEntry<std::unordered_map<std::string, TerminalProfile>, documentation::Profiles> profiles {
         { { "main", TerminalProfile {} } }
     };
-    ConfigEntry<std::string, "default_profile: {}\n"> defaultProfileName { "main" };
+    ConfigEntry<std::string, documentation::DefaultProfiles> defaultProfileName { "main" };
     ConfigEntry<std::string, documentation::WordDelimiters> wordDelimiters {
         " /\\()\"'-.,:;<>~!@#$%^&*+=[]{{}}~?|│"
     };
@@ -803,8 +805,10 @@ struct YAMLConfigReader
         }
     }
 
-    template <typename T, documentation::StringLiteral D>
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, ConfigEntry<T, D>& where)
+    template <typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       ConfigEntry<T, documentation::DocumentationEntry<ConfigDoc, WebDoc>>& where)
     {
         try
         {
@@ -816,8 +820,13 @@ struct YAMLConfigReader
         }
     }
 
-    template <typename T, documentation::StringLiteral D, typename... Args>
-    void loadFromEntry(std::string const& entry, ConfigEntry<T, D>& where, Args&&... args)
+    template <typename T,
+              documentation::StringLiteral ConfigDoc,
+              documentation::StringLiteral WebDoc,
+              typename... Args>
+    void loadFromEntry(std::string const& entry,
+                       ConfigEntry<T, documentation::DocumentationEntry<ConfigDoc, WebDoc>>& where,
+                       Args&&... args)
     {
         loadFromEntry(doc, entry, where.value(), std::forward<Args>(args)...);
     }
@@ -998,47 +1007,12 @@ struct Writer
         lambda();
     }
 
-    template <typename T>
-    auto format(T v)
-    {
-        return std::format("{}", v);
-    }
+    virtual inline std::string replaceCommentPlaceholder(std::string const& docString) = 0;
 
     template <typename... T>
     [[nodiscard]] std::string format(std::string_view doc, T... args)
     {
-        return std::vformat(helper::replaceCommentPlaceholder(std::string(doc)),
-                            std::make_format_args(args...));
-    }
-};
-
-template <typename T>
-std::string createString(Config const& c, T)
-{
-    return createString<T>(c);
-}
-
-struct YAMLConfigWriter: Writer
-{
-
-    static constexpr int OneOffset = 4;
-    using Writer::format;
-    std::string static addOffset(std::string_view doc, size_t off)
-    {
-        auto offset = std::string(off, ' ');
-        return std::regex_replace(std::string { doc }, std::regex(".+\n"), offset + "$&");
-    }
-
-    template <typename T>
-    std::string process(std::string_view doc, T val)
-    {
-        return format(addOffset(doc, Offset::levels * OneOffset), val);
-    }
-
-    template <typename... T>
-    std::string process(std::string_view doc, T... val)
-    {
-        return format(addOffset(doc, Offset::levels * OneOffset), val...);
+        return std::vformat(replaceCommentPlaceholder(std::string(doc)), std::make_format_args(args...));
     }
 
     [[nodiscard]] std::string format(KeyInputMapping v)
@@ -1172,11 +1146,11 @@ struct YAMLConfigWriter: Writer
             return format(doc, simple->colorScheme);
         else if (auto* dual = get_if<DualColorConfig>(&v))
         {
-            auto const formattedValue = std::format("\n"
-                                                    "    light: {}\n"
-                                                    "    dark: {}\n",
-                                                    dual->colorSchemeLight,
-                                                    dual->colorSchemeDark);
+            auto const formattedValue = format("\n"
+                                               "    light: {}\n"
+                                               "    dark: {}\n",
+                                               dual->colorSchemeLight,
+                                               dual->colorSchemeDark);
             return format(doc, formattedValue);
         }
 
@@ -1211,6 +1185,114 @@ struct YAMLConfigWriter: Writer
     }
 };
 
+template <typename T>
+std::string createString(Config const& c);
+
+template <typename T>
+std::string documentationGlobalConfig(Config const& c);
+
+template <typename T>
+std::string documentationProfileConfig(Config const& c);
+
+struct YAMLConfigWriter: Writer
+{
+
+    constexpr static std::string_view FormatTemplate = "{}";
+    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    {
+        return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "#");
+    }
+
+    static constexpr int OneOffset = 4;
+    using Writer::format;
+    std::string static addOffset(std::string_view doc, size_t off)
+    {
+        auto offset = std::string(off, ' ');
+        return std::regex_replace(std::string { doc }, std::regex(".+\n"), offset + "$&");
+    }
+
+    template <typename... T>
+    std::string process(std::string_view doc, T... val)
+    {
+        return format(addOffset(replaceCommentPlaceholder(std::string { doc }), Offset::levels * OneOffset),
+                      val...);
+    }
+
+    template <documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
+    constexpr std::string_view whichDoc(documentation::DocumentationEntry<ConfigDoc, WebDoc>)
+    {
+        return ConfigDoc.value;
+    }
+};
+
+struct DocumentationWriter: Writer
+{
+    constexpr static std::string_view FormatTemplate = "{}";
+    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    {
+        return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "");
+    }
+
+    static constexpr int OneOffset = 0;
+    std::string static addOffset(std::string_view doc, size_t off) { return std::string { doc }; }
+
+    using Writer::format;
+    template <typename... T>
+    std::string process(std::string_view doc, T... val)
+    {
+        return process(doc, std::string_view { "TODO(PR)" }, val...);
+    }
+
+    inline std::string removeNewLine(std::string const& docString)
+    {
+        return std::regex_replace(docString, std::regex { "\n" }, " ");
+    }
+
+    template <typename... T>
+    std::string process(std::string_view doc, std::string_view name, T... val)
+    {
+        return format("###`{}`\n"
+                      "{}\n"
+                      "``` yaml\n"
+                      "profiles:\n"
+                      "profile_name:\n"
+                      "{}: {}\n'"
+                      "```\n"
+                      "\n"
+                      "\n",
+                      name,
+                      replaceCommentPlaceholder(removeNewLine(std::string { doc })),
+                      name,
+                      format("{}", val...));
+    }
+
+    template <documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
+    constexpr std::string_view whichDoc(documentation::DocumentationEntry<ConfigDoc, WebDoc>)
+    {
+        return WebDoc.value;
+    }
+};
+
+// Will ignore documentation
+struct PlainWriter: Writer
+{
+    constexpr static std::string_view FormatTemplate = "{}";
+    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    {
+        return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "");
+    }
+
+    static constexpr int OneOffset = 0;
+    std::string static addOffset(std::string_view doc, size_t off) { return std::string { doc }; }
+
+    using Writer::format;
+    template <typename... T>
+    std::string process(std::string_view doc, T... val)
+    {
+        return format("{}", format(val...));
+    }
+};
+
 std::filesystem::path configHome();
 std::filesystem::path configHome(std::string const& programName);
 
@@ -1224,6 +1306,9 @@ void compareEntries(Config& config, auto const& output);
 std::string defaultConfigString();
 std::error_code createDefaultConfig(std::filesystem::path const& path);
 std::string defaultConfigFilePath();
+
+std::string documentationGlobalConfig();
+std::string documentationProfileConfig();
 
 } // namespace contour::config
 
@@ -1386,10 +1471,16 @@ struct std::formatter<contour::config::WindowMargins>: public std::formatter<std
     }
 };
 
-template <typename T, contour::config::documentation::StringLiteral D>
-struct std::formatter<contour::config::ConfigEntry<T, D>>
+template <typename T,
+          contour::config::documentation::StringLiteral ConfigDoc,
+          contour::config::documentation::StringLiteral WebDoc>
+struct std::formatter<
+    contour::config::ConfigEntry<T, contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>>>
 {
-    auto format(contour::config::ConfigEntry<T, D> const& c, auto& ctx) const
+    auto format(contour::config::ConfigEntry<
+                    T,
+                    contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& c,
+                auto& ctx) const
     {
         return std::format_to(ctx.out(), "{}", c.value());
     }
