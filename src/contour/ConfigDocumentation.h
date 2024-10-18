@@ -13,9 +13,19 @@ struct StringLiteral
     char value[N]; // NOLINT
 };
 
+template <auto T>
+struct Wrap
+{
+};
+
+template <StringLiteral Config, StringLiteral Web>
+struct DocumentationEntry
+{
+};
+
 constexpr StringLiteral Dummy { "{comment} fmt formatted doc {} \n" };
 
-constexpr StringLiteral Shell {
+constexpr StringLiteral ShellConfig {
     "{comment} You can override the process to be started inside the terminal."
     "{comment} If nothing is specified, the users' default login shell will be used.\n"
     "{comment} But you may as well log in to a remote host.\n"
@@ -24,7 +34,7 @@ constexpr StringLiteral Shell {
     "\n"
 };
 
-constexpr StringLiteral InitialWorkingDirectory {
+constexpr StringLiteral InitialWorkingDirectoryConfig {
     "{comment} Sets initial working directory when spawning a new terminal.\n"
     "{comment} A leading ~ is expanded to the user's home directory.\n"
     "{comment} Default value is the user's home directory.\n"
@@ -32,7 +42,7 @@ constexpr StringLiteral InitialWorkingDirectory {
     "\n"
 };
 
-constexpr StringLiteral EscapeSandbox {
+constexpr StringLiteral EscapeSandboxConfig {
     "{comment} If this terminal is being executed from within Flatpak, enforces sandboxing\n"
     "{comment} then this boolean indicates whether or not that sandbox should be escaped or not.\n"
     "{comment}\n"
@@ -40,7 +50,7 @@ constexpr StringLiteral EscapeSandbox {
     "\n"
 };
 
-constexpr StringLiteral SshHostConfig {
+constexpr StringLiteral SshHostConfigConfig {
     "{comment} Builtin SSH-client configuration.\n"
     "{comment} Use this to directly connect to an SSH server.\n"
     "{comment} This will bypass the local PTY creation\n"
@@ -88,12 +98,12 @@ constexpr StringLiteral SshHostConfig {
     "\n"
 };
 
-constexpr StringLiteral Maximized { "{comment} When this profile is *activated*, this flag decides\n"
-                                    "{comment} whether or not to put the window into maximized mode.\n"
-                                    "maximized: {}"
-                                    "\n" };
+constexpr StringLiteral MaximizedConfig { "{comment} When this profile is *activated*, this flag decides\n"
+                                          "{comment} whether or not to put the window into maximized mode.\n"
+                                          "maximized: {}"
+                                          "\n" };
 
-constexpr StringLiteral Fullscreen {
+constexpr StringLiteral FullscreenConfig {
     "{comment} When this profile is being *activated*, this flag decides\n"
     "{comment} whether or not to put the terminal's screen into fullscreen mode.\n"
     "{comment} It is activated during startup as well as when switching from another profile to "
@@ -102,30 +112,30 @@ constexpr StringLiteral Fullscreen {
     "\n"
 };
 
-constexpr StringLiteral ShowTitleBar { "{comment} When this profile is *activated*, this flag decides\n"
-                                       "{comment} whether or not the title bar will be shown\n"
-                                       "show_title_bar: {}\n"
-                                       "\n" };
+constexpr StringLiteral ShowTitleBarConfig { "{comment} When this profile is *activated*, this flag decides\n"
+                                             "{comment} whether or not the title bar will be shown\n"
+                                             "show_title_bar: {}\n"
+                                             "\n" };
 
-constexpr StringLiteral ShowIndicatorOnResize {
+constexpr StringLiteral ShowIndicatorOnResizeConfig {
     "{comment} When this profile is *activated*, this flag decides\n"
     "{comment} whether or not the size indicator on resize will be shown.\n"
     "size_indicator_on_resize: {}\n"
     "\n"
 };
 
-constexpr StringLiteral MouseHideWhileTyping { "{comment} whether or not to hide mouse when typing\n"
-                                               "hide_while_typing: {}\n"
-                                               "\n" };
+constexpr StringLiteral MouseHideWhileTypingConfig { "{comment} whether or not to hide mouse when typing\n"
+                                                     "hide_while_typing: {}\n"
+                                                     "\n" };
 
-constexpr StringLiteral SeachModeSwitch {
+constexpr StringLiteral SeachModeSwitchConfig {
     "{comment} Whether or not to switch from search mode into insert on exit. If this value is set to true,\n"
     "{comment} it will go back to insert mode, otherwise it will go back to normal mode.\n"
     "search_mode_switch: {}\n"
     "\n"
 };
 
-constexpr StringLiteral InsertAfterYank {
+constexpr StringLiteral InsertAfterYankConfig {
     "{comment} Whether or not to switch from normal mode into insert after yank command. If this value is "
     "set to true,\n"
     "{comment} it will go to insert mode, otherwise it will stay in normal mode.\n"
@@ -133,7 +143,7 @@ constexpr StringLiteral InsertAfterYank {
     "\n"
 };
 
-constexpr StringLiteral CopyLastMarkRangeOffset {
+constexpr StringLiteral CopyLastMarkRangeOffsetConfig {
     "{comment} Advanced value that is useful when CopyPreviousMarkRange is used \n"
     "{comment} with multiline-prompts. This offset value is being added to the \n"
     "{comment} current cursor's line number minus 1 (i.e. the line above the current cursor). \n"
@@ -141,11 +151,11 @@ constexpr StringLiteral CopyLastMarkRangeOffset {
     "\n"
 };
 
-constexpr StringLiteral WMClass {
+constexpr StringLiteral WMClassConfig {
     "{comment} Defines the class part of the WM_CLASS property of the window.\n"
 };
 
-constexpr StringLiteral Margins {
+constexpr StringLiteral MarginsConfig {
     "{comment} Window margins\n"
     "{comment}\n"
     "{comment} The margin values are applied on both sides and are given in pixels\n"
@@ -158,74 +168,78 @@ constexpr StringLiteral Margins {
     "\n"
 };
 
-constexpr StringLiteral TerminalSize { "{comment}Determines the initial terminal size in  characters\n"
-                                       "terminal_size:\n"
-                                       "    columns: {} \n"
-                                       "    lines: {} \n"
-                                       "\n" };
+constexpr StringLiteral TerminalSizeConfig { "{comment}Determines the initial terminal size in  characters\n"
+                                             "terminal_size:\n"
+                                             "    columns: {} \n"
+                                             "    lines: {} \n"
+                                             "\n" };
 
-constexpr StringLiteral TerminalId { "{comment} Determines the terminal type that is being advertised.\n"
-                                     "{comment} Possible values are:\n"
-                                     "{comment}   - VT100\n"
-                                     "{comment}   - VT220\n"
-                                     "{comment}   - VT240\n"
-                                     "{comment}   - VT330\n"
-                                     "{comment}   - VT340\n"
-                                     "{comment}   - VT320\n"
-                                     "{comment}   - VT420\n"
-                                     "{comment}   - VT510\n"
-                                     "{comment}   - VT520\n"
-                                     "{comment}   - VT525\n"
-                                     "terminal_id: {}\n"
-                                     "\n" };
+constexpr StringLiteral TerminalIdConfig {
+    "{comment} Determines the terminal type that is being advertised.\n"
+    "{comment} Possible values are:\n"
+    "{comment}   - VT100\n"
+    "{comment}   - VT220\n"
+    "{comment}   - VT240\n"
+    "{comment}   - VT330\n"
+    "{comment}   - VT340\n"
+    "{comment}   - VT320\n"
+    "{comment}   - VT420\n"
+    "{comment}   - VT510\n"
+    "{comment}   - VT520\n"
+    "{comment}   - VT525\n"
+    "terminal_id: {}\n"
+    "\n"
+};
 
-constexpr StringLiteral MaxHistoryLineCount { "{comment} Number of lines to preserve (-1 for infinite).\n"
-                                              "limit: {}\n"
-                                              "\n" };
+constexpr StringLiteral MaxHistoryLineCountConfig {
+    "{comment} Number of lines to preserve (-1 for infinite).\n"
+    "limit: {}\n"
+    "\n"
+};
 
-constexpr StringLiteral HistoryScrollMultiplier {
+constexpr StringLiteral HistoryScrollMultiplierConfig {
     "{comment} Number of lines to scroll on ScrollUp & ScrollDown events.\n"
     "scroll_multiplier: {}\n"
     "\n"
 };
 
-constexpr StringLiteral ScrollbarPosition {
+constexpr StringLiteral ScrollbarPositionConfig {
     "{comment} scroll bar position: Left, Right, Hidden (ignore-case)\n"
     "position: {}\n"
     "\n"
 };
 
-constexpr StringLiteral StatusDisplayPosition {
+constexpr StringLiteral StatusDisplayPositionConfig {
     "{comment} Position to place the status line to, if it is to be shown.\n"
     "{comment} This can be either value `top` or value `bottom`.\n"
     "position: {}\n"
     "\n"
 };
 
-constexpr StringLiteral IndicatorStatusLineLeft { "left: \"{}\"\n" };
-constexpr StringLiteral IndicatorStatusLineMiddle { "middle: \"{}\"\n" };
-constexpr StringLiteral IndicatorStatusLineRight { "right: \"{}\"\n" };
+constexpr StringLiteral IndicatorStatusLineLeftConfig { "left: \"{}\"\n" };
+constexpr StringLiteral IndicatorStatusLineMiddleConfig { "middle: \"{}\"\n" };
+constexpr StringLiteral IndicatorStatusLineRightConfig { "right: \"{}\"\n" };
 
-constexpr StringLiteral SyncWindowTitleWithHostWritableStatusDisplay {
+constexpr StringLiteral SyncWindowTitleWithHostWritableStatusDisplayConfig {
     "{comment} Synchronize the window title with the Host Writable status_line if\n"
     "{comment} and only if the host writable status line was denied to be shown.\n"
     "sync_to_window_title: {}\n"
     "\n"
 };
 
-constexpr StringLiteral HideScrollbarInAltScreen {
+constexpr StringLiteral HideScrollbarInAltScreenConfig {
     "{comment} whether or not to hide the scrollbar when in alt-screen.\n"
     "hide_in_alt_screen: {}\n"
     "\n"
 };
 
-constexpr StringLiteral AutoScrollOnUpdate {
+constexpr StringLiteral AutoScrollOnUpdateConfig {
     "{comment} Boolean indicating whether or not to scroll down to the bottom on screen updates.\n"
     "auto_scroll_on_update: {}\n"
     "\n"
 };
 
-constexpr StringLiteral Fonts {
+constexpr StringLiteral FontsConfig {
     "{comment} Font related configuration (font face, styles, size, rendering mode).\n"
     "font:\n"
     "    {comment} Initial font size in pixels.\n"
@@ -315,24 +329,24 @@ constexpr StringLiteral Fonts {
     "\n"
 };
 
-constexpr StringLiteral CaptureBuffer {
+constexpr StringLiteral CaptureBufferConfig {
     "{comment} Allows capturing the screen buffer via `CSI > Pm ; Ps ; Pc ST`.\n"
     "{comment} The response can be read from stdin as sequence `OSC 314 ; <screen capture> ST`\n"
     "capture_buffer: {}\n"
     "\n"
 };
 
-constexpr StringLiteral ChangeFont { "{comment} Allows changing the font via `OSC 50 ; Pt ST`.\n"
-                                     "change_font: {}\n"
-                                     "\n" };
+constexpr StringLiteral ChangeFontConfig { "{comment} Allows changing the font via `OSC 50 ; Pt ST`.\n"
+                                           "change_font: {}\n"
+                                           "\n" };
 
-constexpr StringLiteral DisplayHostWritableStatusLine {
+constexpr StringLiteral DisplayHostWritableStatusLineConfig {
     "{comment} Allows displaying the \" Host Writable Statusline \" programmatically using `DECSSDT 2`.\n"
     "display_host_writable_statusline: {}\n"
     "\n"
 };
 
-constexpr StringLiteral DrawBoldTextWithBrightColors {
+constexpr StringLiteral DrawBoldTextWithBrightColorsConfig {
     "{comment} Indicates whether or not bold text should be rendered in bright colors,\n"
     "{comment} for indexed colors.\n"
     "{comment} If disabled, normal color will be used instead.\n"
@@ -340,7 +354,7 @@ constexpr StringLiteral DrawBoldTextWithBrightColors {
     "\n"
 };
 
-constexpr StringLiteral Colors {
+constexpr StringLiteral ColorsConfig {
     "{comment} Specifies a colorscheme to use (alternatively the colors can be inlined).\n"
     "{comment} Or choose from existing default palettes:\n"
     "{comment} contour, monokai, one-dark, one-light, gruvbox-light, gruvbox-dark,\n"
@@ -355,14 +369,14 @@ constexpr StringLiteral Colors {
     "colors: {}\n"
 };
 
-constexpr StringLiteral ModalCursorScrollOff {
+constexpr StringLiteral ModalCursorScrollOffConfig {
     "{comment} Configures a `scrolloff` for cursor movements in normal and visual (block) modes.\n"
     "{comment}\n"
     "vi_mode_scrolloff: {}\n"
     "\n"
 };
 
-constexpr StringLiteral ModeInsert {
+constexpr StringLiteral ModeInsertConfig {
     "{comment} Terminal cursor display configuration\n"
     "cursor:\n"
     "    {comment} Supported shapes are:\n"
@@ -379,37 +393,39 @@ constexpr StringLiteral ModeInsert {
     "\n"
 };
 
-constexpr StringLiteral ModeNormal { "{comment} vi-like normal-mode specific settings.\n"
-                                     "{comment} Note, currently only the cursor can be customized.\n"
-                                     "normal_mode:\n"
-                                     "    cursor:\n"
-                                     "        shape: {}\n"
-                                     "        blinking: {}\n"
-                                     "        blinking_interval: {}\n"
-                                     "\n" };
+constexpr StringLiteral ModeNormalConfig { "{comment} vi-like normal-mode specific settings.\n"
+                                           "{comment} Note, currently only the cursor can be customized.\n"
+                                           "normal_mode:\n"
+                                           "    cursor:\n"
+                                           "        shape: {}\n"
+                                           "        blinking: {}\n"
+                                           "        blinking_interval: {}\n"
+                                           "\n" };
 
-constexpr StringLiteral ModeVisual { "{comment} vi-like normal-mode specific settings.\n"
-                                     "{comment} Note, currently only the cursor can be customized.\n"
-                                     "visual_mode:\n"
-                                     "    cursor:\n"
-                                     "        shape: {}\n"
-                                     "        blinking: {}\n"
-                                     "        blinking_interval: {}\n"
-                                     "\n" };
+constexpr StringLiteral ModeVisualConfig { "{comment} vi-like normal-mode specific settings.\n"
+                                           "{comment} Note, currently only the cursor can be customized.\n"
+                                           "visual_mode:\n"
+                                           "    cursor:\n"
+                                           "        shape: {}\n"
+                                           "        blinking: {}\n"
+                                           "        blinking_interval: {}\n"
+                                           "\n" };
 
-constexpr StringLiteral SmoothLineScrolling { "{comment} Defines the number of milliseconds to wait before\n"
-                                              "{comment} actually executing the LF (linefeed) control code\n"
-                                              "{comment} in case DEC mode `DECSCLM` is enabled.\n"
-                                              "slow_scrolling_time: {}\n"
-                                              "\n" };
+constexpr StringLiteral SmoothLineScrollingConfig {
+    "{comment} Defines the number of milliseconds to wait before\n"
+    "{comment} actually executing the LF (linefeed) control code\n"
+    "{comment} in case DEC mode `DECSCLM` is enabled.\n"
+    "slow_scrolling_time: {}\n"
+    "\n"
+};
 
-constexpr StringLiteral HighlightTimeout {
+constexpr StringLiteral HighlightTimeoutConfig {
     "{comment} Time duration in milliseconds for which yank highlight is shown.\n"
     "vi_mode_highlight_timeout: {}\n"
     "\n"
 };
 
-constexpr StringLiteral HighlightDoubleClickerWord {
+constexpr StringLiteral HighlightDoubleClickerWordConfig {
     "{comment} If enabled, and you double-click on a word in the primary screen,\n"
     "{comment} all other words matching this word will be highlighted as well.\n"
     "{comment} So the double-clicked word will be selected as well as highlighted, along with\n"
@@ -423,7 +439,7 @@ constexpr StringLiteral HighlightDoubleClickerWord {
     "\n"
 };
 
-constexpr StringLiteral InitialStatusLine {
+constexpr StringLiteral InitialStatusLineConfig {
     "{comment} Either none or indicator.\n"
     "{comment} This only reflects the initial state of the status line, as it can\n"
     "{comment} be changed at any time during runtime by the user or by an application.\n"
@@ -431,21 +447,21 @@ constexpr StringLiteral InitialStatusLine {
     "\n"
 };
 
-constexpr StringLiteral BackgroundOpacity {
+constexpr StringLiteral BackgroundOpacityConfig {
     "{comment} Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully\n"
     "{comment} transparent. Only values between 0.0 and 1.0 are allowed.\n"
     "opacity: {}\n"
     "\n"
 };
 
-constexpr StringLiteral BackgroundBlur {
+constexpr StringLiteral BackgroundBlurConfig {
     "{comment} Some platforms can blur the transparent background (currently only Windows 10 is "
     "supported).\n"
     "blur: {}\n"
     "\n"
 };
 
-constexpr StringLiteral Bell {
+constexpr StringLiteral BellConfig {
     "\n"
     "bell:\n"
     "    {comment} There is no sound for BEL character if set to \"off\".\n"
@@ -465,7 +481,7 @@ constexpr StringLiteral Bell {
     "\n"
 };
 
-constexpr StringLiteral FrozenDecMode {
+constexpr StringLiteral FrozenDecModeConfig {
     "{comment} Defines a list of DEC modes to explicitly and permanently disable/enable support for.\n"
     "{comment}\n"
     "{comment} This is a developer-users-only option that may possibly help investigating problems.\n"
@@ -485,14 +501,14 @@ constexpr StringLiteral FrozenDecMode {
     "{comment}frozen_dec_modes:\n"
 };
 
-constexpr StringLiteral Live {
+constexpr StringLiteral LiveConfig {
     "{comment} Determines whether the instance is reloading the configuration files "
     "whenever it is changing or not. \n"
     "live_config: {} \n"
     "\n"
 };
 
-constexpr StringLiteral PlatformPlugin {
+constexpr StringLiteral PlatformPluginConfig {
     "{comment} Overrides the auto-detected platform plugin to be loaded. \n"
     "{comment} \n"
     "{comment} Possible (incomplete list of) values are:\n"
@@ -505,54 +521,46 @@ constexpr StringLiteral PlatformPlugin {
     "\n"
 };
 
-constexpr StringLiteral RenderingBackend {
-    "{comment} Backend to use for rendering the terminal onto the screen \n"
-    "{comment} Possible values are: \n"
-    "{comment} - default     Uses the default rendering option as decided by the terminal. \n"
-    "{comment} - software    Uses software-based rendering. \n"
-    "{comment} - OpenGL      Use (possibly) hardware accelerated OpenGL \n"
-    "backend: {} \n"
+constexpr StringLiteral RendererConfig {
+    "renderer:\n"
+    "    {comment} Backend to use for rendering the terminal onto the screen \n"
+    "    {comment} Possible values are: \n"
+    "    {comment} - default     Uses the default rendering option as decided by the terminal. \n"
+    "    {comment} - software    Uses software-based rendering. \n"
+    "    {comment} - OpenGL      Use (possibly) hardware accelerated OpenGL \n"
+    "    backend: {} \n"
+    "\n"
+    "    {comment} Enables/disables the use of direct-mapped texture atlas tiles for \n"
+    "    {comment} the most often used ones (US-ASCII, cursor shapes, underline styles) \n"
+    "    {comment} You most likely do not want to touch this. \n"
+    "    {comment} \n"
+    "    tile_direct_mapping: {} \n"
+    "\n"
+    "    {comment} Number of hashtable slots to map to the texture tiles. \n"
+    "    {comment} Larger values may increase performance, but too large may also decrease. \n"
+    "    {comment} This value is rounded up to a value equal to the power of two. \n"
+    "    {comment} \n"
+    "    tile_hashtable_slots: {} \n"
+    "\n"
+    "    {comment} Number of tiles that must fit at lest into the texture atlas. \n"
+    "    {comment} \n"
+    "    {comment} This does not include direct mapped tiles (US-ASCII glyphs, \n"
+    "    {comment} cursor shapes and decorations), if tile_direct_mapping is set to true). \n"
+    "    {comment} \n"
+    "    {comment} Value must be at least as large as grid cells available in the terminal view. \n"
+    "    {comment} This value is automatically adjusted if too small. \n"
+    "    {comment} \n"
+    "    tile_cache_count: {} \n"
     "\n"
 };
 
-constexpr StringLiteral TextureAtlasDirectMapping {
-    "{comment} Enables/disables the use of direct-mapped texture atlas tiles for \n"
-    "{comment} the most often used ones (US-ASCII, cursor shapes, underline styles) \n"
-    "{comment} You most likely do not want to touch this. \n"
-    "{comment} \n"
-    "tile_direct_mapping: {} \n"
-    "\n"
-};
+constexpr StringLiteral PTYReadBufferSizeConfig { "{comment} Default PTY read buffer size. \n"
+                                                  "{comment} \n"
+                                                  "{comment} This is an advance option. Use with care! \n"
+                                                  "read_buffer_size: {} \n"
+                                                  "\n" };
 
-constexpr StringLiteral TextureAtlasHashtableSlots {
-    "{comment} Number of hashtable slots to map to the texture tiles. \n"
-    "{comment} Larger values may increase performance, but too large may also decrease. \n"
-    "{comment} This value is rounded up to a value equal to the power of two. \n"
-    "{comment} \n"
-    "tile_hashtable_slots: {} \n"
-    "\n"
-};
-
-constexpr StringLiteral TextureAtlasTileCount {
-    "{comment} Number of tiles that must fit at lest into the texture atlas. \n"
-    "{comment} \n"
-    "{comment} This does not include direct mapped tiles (US-ASCII glyphs, \n"
-    "{comment} cursor shapes and decorations), if tile_direct_mapping is set to true). \n"
-    "{comment} \n"
-    "{comment} Value must be at least as large as grid cells available in the terminal view. \n"
-    "{comment} This value is automatically adjusted if too small. \n"
-    "{comment} \n"
-    "tile_cache_count: {} \n"
-    "\n"
-};
-
-constexpr StringLiteral PTYReadBufferSize { "{comment} Default PTY read buffer size. \n"
-                                            "{comment} \n"
-                                            "{comment} This is an advance option. Use with care! \n"
-                                            "read_buffer_size: {} \n"
-                                            "\n" };
-
-constexpr StringLiteral PTYBufferObjectSize {
+constexpr StringLiteral PTYBufferObjectSizeConfig {
     "{comment} Size in bytes per PTY Buffer Object. \n "
     "{comment} \n"
     "{comment} This is an advanced option of an internal storage. Only change with care! \n"
@@ -560,13 +568,13 @@ constexpr StringLiteral PTYBufferObjectSize {
     "\n"
 };
 
-constexpr StringLiteral ReflowOnResize {
+constexpr StringLiteral ReflowOnResizeConfig {
     "\n"
     "{comment} Whether or not to reflow the lines on terminal resize events. \n"
     "reflow_on_resize: {} \n"
 };
 
-constexpr StringLiteral ColorSchemes {
+constexpr StringLiteral ColorSchemesConfig {
     "{comment} Color Profiles\n"
     "{comment} --------------\n"
     "{comment}\n"
@@ -579,7 +587,7 @@ constexpr StringLiteral ColorSchemes {
     "color_schemes:\n"
 };
 
-constexpr StringLiteral Profiles {
+constexpr StringLiteral ProfilesConfig {
     "\n"
     "{comment} Terminal Profiles\n"
     "{comment} -----------------\n"
@@ -590,11 +598,11 @@ constexpr StringLiteral Profiles {
     "\n"
 };
 
-constexpr StringLiteral WordDelimiters { "{comment} Word delimiters when selecting word-wise. \n"
-                                         "word_delimiters: \"{}\" \n"
-                                         "\n" };
+constexpr StringLiteral WordDelimitersConfig { "{comment} Word delimiters when selecting word-wise. \n"
+                                               "word_delimiters: \"{}\" \n"
+                                               "\n" };
 
-constexpr StringLiteral ExtendedWordDelimiters {
+constexpr StringLiteral ExtendedWordDelimitersConfig {
     "{comment} Word delimiters for second selection when selecting word-wise. \n"
     "{comment} Setting allows you to set less strict boundaried between words, for example \n"
     "{comment} if you want to select whole ip address during selection set delimieters to \" \" (space) \n"
@@ -602,7 +610,7 @@ constexpr StringLiteral ExtendedWordDelimiters {
     "\n"
 };
 
-constexpr StringLiteral BypassMouseProtocolModifiers {
+constexpr StringLiteral BypassMouseProtocolModifiersConfig {
     "{comment} This keyboard modifier can be used to bypass the terminal's mouse protocol, \n"
     "{comment} which can be used to select screen content even if the an application \n"
     "{comment} mouse protocol has been activated (Default: Shift). \n"
@@ -612,7 +620,7 @@ constexpr StringLiteral BypassMouseProtocolModifiers {
     "\n"
 };
 
-constexpr StringLiteral OnMouseSelection {
+constexpr StringLiteral OnMouseSelectionConfig {
     "{comment} Selects an action to perform when a text selection has been made. \n"
     "{comment} \n"
     "{comment} Possible values are: \n"
@@ -626,7 +634,7 @@ constexpr StringLiteral OnMouseSelection {
     "\n"
 };
 
-constexpr StringLiteral MouseBlockSelectionModifiers {
+constexpr StringLiteral MouseBlockSelectionModifiersConfig {
     "{comment} Modifier to be pressed in order to initiate block-selection \n"
     "{comment} using the left mouse button. \n"
     "{comment} \n"
@@ -643,7 +651,7 @@ constexpr StringLiteral MouseBlockSelectionModifiers {
     "\n"
 };
 
-constexpr StringLiteral InputMappings {
+constexpr StringLiteral InputMappingsConfig {
     "{comment} Key Bindings\n"
     "{comment} ------------\n"
     "{comment}\n"
@@ -798,39 +806,36 @@ constexpr StringLiteral InputMappings {
     "input_mapping:\n"
 };
 
-constexpr StringLiteral SpawnNewProcess {
+constexpr StringLiteral SpawnNewProcessConfig {
     "\n"
     "{comment} Flag to determine whether to spawn new process or not when creating new terminal \n"
     "spawn_new_process: {} \n"
 };
 
 constexpr unsigned DefaultEarlyExitThreshold = 5u;
-constexpr StringLiteral EarlyExitThreshold { "\n"
-                                             "{comment} Time in seconds to check for early threshold \n"
-                                             "early_exit_threshold: {} \n" };
+constexpr StringLiteral EarlyExitThresholdConfig { "\n"
+                                                   "{comment} Time in seconds to check for early threshold \n"
+                                                   "early_exit_threshold: {} \n" };
 
-constexpr StringLiteral SixelScrolling { "{comment} Enable or disable sixel scrolling (SM/RM ?80 default) \n"
-                                         "sixel_scrolling: {} \n" };
-
-constexpr StringLiteral MaxImageSize {
+constexpr StringLiteral ImagesConfig {
+    "images:\n"
+    "    {comment} Enable or disable sixel scrolling (SM/RM ?80 default) \n"
+    "    sixel_scrolling: {} \n"
     "\n"
-    "{comment} maximum width in pixels of an image to be accepted (0 defaults to system screen pixel "
+    "    {comment} Configures the maximum number of color registers available when rendering Sixel "
+    "graphics. \n"
+    "    sixel_register_count: {} \n"
+    "\n"
+    "    {comment} maximum width in pixels of an image to be accepted (0 defaults to system screen pixel "
     "width) "
     "\n"
-    "max_width: {} \n"
-    "{comment} maximum height in pixels of an image to be accepted (0 defaults to system screen pixel "
+    "    max_width: {} \n"
+    "    {comment} maximum height in pixels of an image to be accepted (0 defaults to system screen pixel "
     "height) \n"
-    "max_height: {} \n"
+    "    max_height: {} \n"
 };
 
-constexpr StringLiteral MaxImageColorRegisters {
-    "\n"
-    "{comment} Configures the maximum number of color registers available when rendering Sixel "
-    "graphics. \n"
-    "sixel_register_count: {} \n"
-};
-
-constexpr StringLiteral ExperimentalFeatures {
+constexpr StringLiteral ExperimentalFeaturesConfig {
     "\n"
     "{comment} Section of experimental features.\n"
     "{comment} All experimental features are disabled by default and must be explicitly enabled here.\n"
@@ -840,7 +845,7 @@ constexpr StringLiteral ExperimentalFeatures {
     "{comment}     feature_xyz: true\n"
 };
 
-constexpr StringLiteral DefaultColors {
+constexpr StringLiteral DefaultColorsConfig {
     "{comment} Default colors\n"
     "default:\n"
     "    {comment} Default background color (this can be made "
@@ -854,7 +859,7 @@ constexpr StringLiteral DefaultColors {
     "    dimmed_foreground: {}\n"
 };
 
-constexpr StringLiteral HyperlinkDecoration {
+constexpr StringLiteral HyperlinkDecorationConfig {
     "\n"
     "{comment} color to pick for hyperlinks decoration, when hovering\n"
     "hyperlink_decoration:\n"
@@ -862,7 +867,7 @@ constexpr StringLiteral HyperlinkDecoration {
     "    hover: {}\n"
 };
 
-constexpr StringLiteral YankHighlight {
+constexpr StringLiteral YankHighlightConfig {
     "\n"
     "{comment} Color to pick for vi_mode highlights.\n"
     "{comment} The value format is equivalent to how selection colors and "
@@ -875,7 +880,7 @@ constexpr StringLiteral YankHighlight {
     "    background_alpha: {}\n"
 };
 
-constexpr StringLiteral NormalModeCursorline {
+constexpr StringLiteral NormalModeCursorlineConfig {
     "\n"
     "{comment} Color override for the current cursor's line when in vi_mode:\n"
     "{comment} The value format is equivalent to how selection colors and alpha "
@@ -891,7 +896,7 @@ constexpr StringLiteral NormalModeCursorline {
     "    background_alpha: {}\n"
 };
 
-constexpr StringLiteral Selection {
+constexpr StringLiteral SelectionConfig {
     "\n"
     "{comment} The text selection color can be customized here.\n"
     "{comment} Leaving a value empty will default to the inverse of the content's "
@@ -926,7 +931,7 @@ constexpr StringLiteral Selection {
     "    background_alpha: {}\n"
 };
 
-constexpr StringLiteral SearchHighlight {
+constexpr StringLiteral SearchHighlightConfig {
     "\n"
     "{comment} Search match highlighting. Similar to selection highlighting.\n"
     "search_highlight:\n"
@@ -936,7 +941,7 @@ constexpr StringLiteral SearchHighlight {
     "    background_alpha: {}\n"
 };
 
-constexpr StringLiteral SearchHighlihtFocused {
+constexpr StringLiteral SearchHighlihtFocusedConfig {
     "\n"
     "{comment} Search match highlighting (focused term). Similar to selection "
     "highlighting.\n"
@@ -947,7 +952,7 @@ constexpr StringLiteral SearchHighlihtFocused {
     "    background_alpha: {}\n"
 };
 
-constexpr StringLiteral WordHighlightCurrent {
+constexpr StringLiteral WordHighlightCurrentConfig {
     "\n"
     "{comment} Coloring for the word that is highlighted due to double-clicking it.\n"
     "{comment}\n"
@@ -959,7 +964,7 @@ constexpr StringLiteral WordHighlightCurrent {
     "    background_alpha: {}\n"
 };
 
-constexpr StringLiteral WordHighlight {
+constexpr StringLiteral WordHighlightConfig {
     "\n"
     "{comment} Coloring for the word that is highlighted due to double-clicking\n"
     "{comment} another word that matches this word.\n"
@@ -972,7 +977,7 @@ constexpr StringLiteral WordHighlight {
     "    background_alpha: {}\n"
 };
 
-constexpr StringLiteral IndicatorStatusLine {
+constexpr StringLiteral IndicatorStatusLineConfig {
     "\n"
     "{comment} Defines the colors to be used for the Indicator status line.\n"
     "{comment} Configuration consist of different sections: default, inactive, insert_mode, normal_mode, "
@@ -987,37 +992,37 @@ constexpr StringLiteral IndicatorStatusLine {
     "        background: {}\n"
 };
 
-constexpr StringLiteral InputMethodEditor { "\n"
-                                            "{comment} Colors for the IME (Input Method Editor) area.\n"
-                                            "input_method_editor:\n"
-                                            "    foreground: {}\n"
-                                            "    background: {}\n" };
+constexpr StringLiteral InputMethodEditorConfig { "\n"
+                                                  "{comment} Colors for the IME (Input Method Editor) area.\n"
+                                                  "input_method_editor:\n"
+                                                  "    foreground: {}\n"
+                                                  "    background: {}\n" };
 
-constexpr StringLiteral NormalColors { "\n"
-                                       "{comment} Normal colors\n"
-                                       "normal:\n"
-                                       "    black:   {}\n"
-                                       "    red:     {}\n"
-                                       "    green:   {}\n"
-                                       "    yellow:  {}\n"
-                                       "    blue:    {}\n"
-                                       "    magenta: {}\n"
-                                       "    cyan:    {}\n"
-                                       "    white:   {}\n" };
+constexpr StringLiteral NormalColorsConfig { "\n"
+                                             "{comment} Normal colors\n"
+                                             "normal:\n"
+                                             "    black:   {}\n"
+                                             "    red:     {}\n"
+                                             "    green:   {}\n"
+                                             "    yellow:  {}\n"
+                                             "    blue:    {}\n"
+                                             "    magenta: {}\n"
+                                             "    cyan:    {}\n"
+                                             "    white:   {}\n" };
 
-constexpr StringLiteral BrightColors { "\n"
-                                       "{comment} Bright colors\n"
-                                       "bright:\n"
-                                       "    black:   {}\n"
-                                       "    red:     {}\n"
-                                       "    green:   {}\n"
-                                       "    yellow:  {}\n"
-                                       "    blue:    {}\n"
-                                       "    magenta: {}\n"
-                                       "    cyan:    {}\n"
-                                       "    white:   {}\n" };
+constexpr StringLiteral BrightColorsConfig { "\n"
+                                             "{comment} Bright colors\n"
+                                             "bright:\n"
+                                             "    black:   {}\n"
+                                             "    red:     {}\n"
+                                             "    green:   {}\n"
+                                             "    yellow:  {}\n"
+                                             "    blue:    {}\n"
+                                             "    magenta: {}\n"
+                                             "    cyan:    {}\n"
+                                             "    white:   {}\n" };
 
-constexpr StringLiteral DimColors {
+constexpr StringLiteral DimColorsConfig {
     "\n"
     "{comment} Dim (faint) colors, if not set, they're automatically computed "
     "based on normal colors.\n"
@@ -1031,5 +1036,163 @@ constexpr StringLiteral DimColors {
     "{comment}     cyan:    {}\n"
     "{comment}     white:   {}\n"
 };
+
+constexpr StringLiteral PlatformPluginWeb {
+    "option allows you to override the auto-detected platform plugin to be loaded. You can specify values "
+    "like `auto`, `xcb`, `cocoa`, `direct2d`, or `winrt` to determine the platform plugin. The default value "
+    "is `auto`."
+};
+
+constexpr StringLiteral RendererWeb {
+    "section contains configuration options related to the VT Renderer, which is responsible for rendering "
+    "the terminal onto the screen. It includes the `backend` option to specify  the rendering backend, with "
+    "possible values of `default`, `software`, or `OpenGL`. The other options in this section control the "
+    "tile mapping and caching for performance optimization. "
+};
+
+constexpr StringLiteral WordDelimitersWeb {
+    "option defines the delimiters to be used when selecting words in the terminal. It is a string of "
+    "characters that act as delimiters."
+};
+
+constexpr StringLiteral ExtendedWordDelimitersWeb {
+    "option defines the delimiters to be used when selecting words in the second time. It is a string of "
+    "characters that act as delimiters. By default word delimiters are used."
+};
+
+constexpr StringLiteral PTYReadBufferSizeWeb {
+    "option specifies the default PTY read buffer size in bytes. It is an advanced option and should be used "
+    "with caution. The default value is `16384`."
+};
+
+constexpr StringLiteral PTYBufferObjectSizeWeb {
+    "option sets the size in bytes per PTY Buffer Object. It is an advanced option for internal storage and "
+    "should be changed carefully. The default value is `1048576`."
+};
+
+constexpr StringLiteral DefaultProfilesWeb {
+    "option determines the default profile to use in the terminal."
+};
+
+constexpr StringLiteral EarlyExitThresholdWeb {
+    "option determines the early threshold time. If contour atempts to close earlier than specified "
+    "threshold, additional message will be printed that contour terminated too early and additional key "
+    "press is required to close contour."
+};
+
+constexpr StringLiteral SpawnNewProcessWeb { "flag determines whether a new process should be spawned when "
+                                             "creating a new terminal. The default value is `false`." };
+
+constexpr StringLiteral ReflowOnResizeWeb {
+    "option controls whether or not the lines in the terminal should be reflowed when a resize event occurs. "
+    "The default value is `true`."
+};
+
+constexpr StringLiteral BypassMouseProtocolModifiersWeb {
+    "option specifies the keyboard modifier (e.g., Shift) that can be used to bypass the terminal's mouse "
+    "protocol and select screen content."
+};
+
+constexpr StringLiteral MouseBlockSelectionModifiersWeb {
+    "option determines the modifier (e.g., Control) that needs to be pressed to initiate block selection "
+    "using the left mouse button."
+};
+
+constexpr StringLiteral OnMouseSelectionWeb {
+    "option selects the action to perform when a text selection has been made. Possible values include "
+    "`None`, `CopyToClipboard`, and `CopyToSelectionClipboard`."
+};
+
+constexpr StringLiteral LiveWeb { "option determines whether the instance should reload the configuration "
+                                  "files whenever they change. The default value is `false`." };
+
+constexpr StringLiteral ImagesWeb {
+    "section contains configuration options related to inline images. It includes options like "
+    "`sixel_scrolling`, `sixel_register_count`, `max_width`, and `max_height` to control various aspects of "
+    "image rendering and limits."
+};
+
+using Shell = DocumentationEntry<ShellConfig, Dummy>;
+
+using InitialWorkingDirectory = DocumentationEntry<InitialWorkingDirectoryConfig, Dummy>;
+using EscapeSandbox = DocumentationEntry<EscapeSandboxConfig, Dummy>;
+using SshHostConfig = DocumentationEntry<SshHostConfigConfig, Dummy>;
+using Maximized = DocumentationEntry<MaximizedConfig, Dummy>;
+using Fullscreen = DocumentationEntry<FullscreenConfig, Dummy>;
+using ShowTitleBar = DocumentationEntry<ShowTitleBarConfig, Dummy>;
+using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, Dummy>;
+using MouseHideWhileTyping = DocumentationEntry<MouseHideWhileTypingConfig, Dummy>;
+using SeachModeSwitch = DocumentationEntry<SeachModeSwitchConfig, Dummy>;
+using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, Dummy>;
+using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, Dummy>;
+using WMClass = DocumentationEntry<WMClassConfig, Dummy>;
+using Margins = DocumentationEntry<MarginsConfig, Dummy>;
+using TerminalSize = DocumentationEntry<TerminalSizeConfig, Dummy>;
+using TerminalId = DocumentationEntry<TerminalIdConfig, Dummy>;
+using MaxHistoryLineCount = DocumentationEntry<MaxHistoryLineCountConfig, Dummy>;
+using HistoryScrollMultiplier = DocumentationEntry<HistoryScrollMultiplierConfig, Dummy>;
+using ScrollbarPosition = DocumentationEntry<ScrollbarPositionConfig, Dummy>;
+using StatusDisplayPosition = DocumentationEntry<StatusDisplayPositionConfig, Dummy>;
+using IndicatorStatusLineLeft = DocumentationEntry<IndicatorStatusLineLeftConfig, Dummy>;
+using IndicatorStatusLineMiddle = DocumentationEntry<IndicatorStatusLineMiddleConfig, Dummy>;
+using IndicatorStatusLineRight = DocumentationEntry<IndicatorStatusLineRightConfig, Dummy>;
+using SyncWindowTitleWithHostWritableStatusDisplay =
+    DocumentationEntry<SyncWindowTitleWithHostWritableStatusDisplayConfig, Dummy>;
+using HideScrollbarInAltScreen = DocumentationEntry<HideScrollbarInAltScreenConfig, Dummy>;
+using OptionKeyAsAlt = DocumentationEntry<Dummy, Dummy>;
+using AutoScrollOnUpdate = DocumentationEntry<AutoScrollOnUpdateConfig, Dummy>;
+using Fonts = DocumentationEntry<FontsConfig, Dummy>;
+using CaptureBuffer = DocumentationEntry<CaptureBufferConfig, Dummy>;
+using ChangeFont = DocumentationEntry<ChangeFontConfig, Dummy>;
+using DisplayHostWritableStatusLine = DocumentationEntry<DisplayHostWritableStatusLineConfig, Dummy>;
+using DrawBoldTextWithBrightColors = DocumentationEntry<DrawBoldTextWithBrightColorsConfig, Dummy>;
+using Colors = DocumentationEntry<ColorsConfig, Dummy>;
+using ModalCursorScrollOff = DocumentationEntry<ModalCursorScrollOffConfig, Dummy>;
+using ModeInsert = DocumentationEntry<ModeInsertConfig, Dummy>;
+using ModeNormal = DocumentationEntry<ModeNormalConfig, Dummy>;
+using ModeVisual = DocumentationEntry<ModeVisualConfig, Dummy>;
+using SmoothLineScrolling = DocumentationEntry<SmoothLineScrollingConfig, Dummy>;
+using HighlightTimeout = DocumentationEntry<HighlightTimeoutConfig, Dummy>;
+using HighlightDoubleClickerWord = DocumentationEntry<HighlightDoubleClickerWordConfig, Dummy>;
+using InitialStatusLine = DocumentationEntry<InitialStatusLineConfig, Dummy>;
+using BackgroundOpacity = DocumentationEntry<BackgroundOpacityConfig, Dummy>;
+using BackgroundBlur = DocumentationEntry<BackgroundBlurConfig, Dummy>;
+using Bell = DocumentationEntry<BellConfig, Dummy>;
+using FrozenDecMode = DocumentationEntry<FrozenDecModeConfig, Dummy>;
+using Live = DocumentationEntry<LiveConfig, LiveWeb>;
+using PlatformPlugin = DocumentationEntry<PlatformPluginConfig, PlatformPluginWeb>;
+using Renderer = DocumentationEntry<RendererConfig, RendererWeb>;
+using PTYReadBufferSize = DocumentationEntry<PTYReadBufferSizeConfig, PTYReadBufferSizeWeb>;
+using PTYBufferObjectSize = DocumentationEntry<PTYBufferObjectSizeConfig, PTYBufferObjectSizeWeb>;
+using ReflowOnResize = DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWeb>;
+using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
+using Profiles = DocumentationEntry<ProfilesConfig, Dummy>;
+using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;
+using WordDelimiters = DocumentationEntry<WordDelimitersConfig, WordDelimitersWeb>;
+using ExtendedWordDelimiters = DocumentationEntry<ExtendedWordDelimitersConfig, ExtendedWordDelimitersWeb>;
+using BypassMouseProtocolModifiers =
+    DocumentationEntry<BypassMouseProtocolModifiersConfig, BypassMouseProtocolModifiersWeb>;
+using OnMouseSelection = DocumentationEntry<OnMouseSelectionConfig, OnMouseSelectionWeb>;
+using MouseBlockSelectionModifiers =
+    DocumentationEntry<MouseBlockSelectionModifiersConfig, MouseBlockSelectionModifiersWeb>;
+using InputMappings = DocumentationEntry<InputMappingsConfig, Dummy>;
+using SpawnNewProcess = DocumentationEntry<SpawnNewProcessConfig, SpawnNewProcessWeb>;
+using EarlyExitThreshold = DocumentationEntry<EarlyExitThresholdConfig, EarlyExitThresholdWeb>;
+using Images = DocumentationEntry<ImagesConfig, ImagesWeb>;
+using ExperimentalFeatures = DocumentationEntry<ExperimentalFeaturesConfig, StringLiteral { "" }>;
+using DefaultColors = DocumentationEntry<DefaultColorsConfig, Dummy>;
+using HyperlinkDecoration = DocumentationEntry<HyperlinkDecorationConfig, Dummy>;
+using YankHighlight = DocumentationEntry<YankHighlightConfig, Dummy>;
+using NormalModeCursorline = DocumentationEntry<NormalModeCursorlineConfig, Dummy>;
+using Selection = DocumentationEntry<SelectionConfig, Dummy>;
+using SearchHighlight = DocumentationEntry<SearchHighlightConfig, Dummy>;
+using SearchHighlihtFocused = DocumentationEntry<SearchHighlihtFocusedConfig, Dummy>;
+using WordHighlightCurrent = DocumentationEntry<WordHighlightCurrentConfig, Dummy>;
+using WordHighlight = DocumentationEntry<WordHighlightConfig, Dummy>;
+using IndicatorStatusLine = DocumentationEntry<IndicatorStatusLineConfig, Dummy>;
+using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
+using NormalColors = DocumentationEntry<NormalColorsConfig, Dummy>;
+using BrightColors = DocumentationEntry<BrightColorsConfig, Dummy>;
+using DimColors = DocumentationEntry<DimColorsConfig, Dummy>;
 
 } // namespace contour::config::documentation

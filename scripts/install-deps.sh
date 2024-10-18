@@ -129,12 +129,12 @@ fetch_and_unpack_libunicode()
 
 fetch_and_unpack_reflection_cpp()
 {
-    local reflection_cpp_git_sha="f820d2cb5383c835f43c730667a4a08506873f20"
+    local reflection_cpp_git_sha="02484cd9ec16d7efc252ab8fd1f85d7264192418"
     fetch_and_unpack \
         reflection-cpp-$reflection_cpp_git_sha \
         reflection-cpp-$reflection_cpp_git_sha.tar.gz \
         https://github.com/contour-terminal/reflection-cpp/archive/$reflection_cpp_git_sha.tar.gz \
-        reflection-cpp
+        reflection_cpp
 }
 
 fetch_and_unpack_yaml_cpp()
