@@ -127,6 +127,16 @@ fetch_and_unpack_libunicode()
     fi
 }
 
+fetch_and_unpack_reflection_cpp()
+{
+    local reflection_cpp_git_sha="f820d2cb5383c835f43c730667a4a08506873f20"
+    fetch_and_unpack \
+        reflection-cpp-$reflection_cpp_git_sha \
+        reflection-cpp-$reflection_cpp_git_sha.tar.gz \
+        https://github.com/contour-terminal/reflection-cpp/archive/$reflection_cpp_git_sha.tar.gz \
+        reflection-cpp
+}
+
 fetch_and_unpack_yaml_cpp()
 {
     fetch_and_unpack \
@@ -596,6 +606,7 @@ main()
 
     fetch_and_unpack_boxed
     fetch_and_unpack_termbenchpro
+    fetch_and_unpack_reflection_cpp
 }
 
 main $*
