@@ -213,8 +213,6 @@ else()
 endif()
 
 target_link_libraries(contour
-    PUBLIC
-    reflection-cpp::reflection-cpp
     PRIVATE
     ContourTerminalDisplay
     crispy::core

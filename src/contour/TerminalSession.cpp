@@ -140,8 +140,8 @@ namespace
         settings.smoothLineScrolling = profile.smoothLineScrolling.value();
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
-        settings.maxImageSize = config.maxImageSize.value();
-        settings.maxImageRegisterCount = config.maxImageColorRegisters.value();
+        settings.maxImageSize = config.images.value().maxImageSize;
+        settings.maxImageRegisterCount = config.images.value().maxImageColorRegisters;
         settings.statusDisplayType = profile.initialStatusDisplayType.value();
         settings.statusDisplayPosition = profile.statusDisplayPosition.value();
         settings.indicatorStatusLine.left = profile.indicatorStatusLineLeft.value();
@@ -1509,12 +1509,13 @@ void TerminalSession::configureTerminal()
 
     sessionLog()("Setting terminal ID to {}.", _profile.terminalId.value());
     _terminal.setTerminalId(_profile.terminalId.value());
-    _terminal.setMaxSixelColorRegisters(_config.maxImageColorRegisters.value());
-    _terminal.setMaxImageSize(_config.maxImageSize.value());
-    _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.sixelScrolling.value());
+    _terminal.setMaxSixelColorRegisters(_config.images.value().maxImageColorRegisters);
+    _terminal.setMaxImageSize(_config.images.value().maxImageSize);
+    _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.images.value().sixelScrolling);
     _terminal.setStatusDisplay(_profile.initialStatusDisplayType.value());
-    sessionLog()(
-        "maxImageSize={}, sixelScrolling={}", _config.maxImageSize.value(), _config.sixelScrolling.value());
+    sessionLog()("maxImageSize={}, sixelScrolling={}",
+                 _config.images.value().maxImageSize,
+                 _config.images.value().sixelScrolling);
 
     // XXX
     // if (!terminalView.renderer().renderTargetAvailable())

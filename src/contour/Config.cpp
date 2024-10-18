@@ -4,6 +4,8 @@
 
 #include <vtbackend/ColorPalette.h>
 
+#include <vtpty/ImageSize.h>
+
 #include <text_shaper/font.h>
 
 #include <crispy/StrongHash.h>
@@ -190,7 +192,7 @@ fs::path configHome()
 
 std::string createString(Config const& c)
 {
-    return createString(c, YAMLConfigWriter());
+    return createString<YAMLConfigWriter>(c);
 }
 
 std::string defaultConfigString()
@@ -214,6 +216,16 @@ error_code createDefaultConfig(fs::path const& path)
     ofstream { path.string(), ios::binary | ios::trunc } << defaultConfigString();
 
     return error_code {};
+}
+
+std::string documentationGlobalConfig()
+{
+    return documentationGlobalConfig<DocumentationWriter>(Config {});
+}
+
+std::string documentationProfileConfig()
+{
+    return documentationProfileConfig<DocumentationWriter>(Config {});
 }
 
 std::string defaultConfigFilePath()
@@ -332,25 +344,20 @@ void YAMLConfigReader::load(Config& c)
             c.platformPlugin = "";
         }
         loadFromEntry("default_profile", c.defaultProfileName);
+        loadFromEntry("renderer", c.renderer);
         loadFromEntry("word_delimiters", c.wordDelimiters);
         loadFromEntry("extended_word_delimiters", c.extendedWordDelimiters);
         loadFromEntry("read_buffer_size", c.ptyReadBufferSize);
         loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
-        loadFromEntry("images.sixel_register_count", c.maxImageColorRegisters);
+        loadFromEntry("images", c.images);
         loadFromEntry("live_config", c.live);
         loadFromEntry("early_exit_threshold", c.earlyExitThreshold);
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
-        loadFromEntry("images.sixe_scrolling", c.sixelScrolling);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("experimental", c.experimentalFeatures);
-        loadFromEntry("renderer.tile_direct_mapping", c.textureAtlasDirectMapping);
-        loadFromEntry("renderer.tile_hastable_slots", c.textureAtlasHashtableSlots);
-        loadFromEntry("renderer.tile_cache_count", c.textureAtlasTileCount);
-        loadFromEntry("renderer.backend", c.renderingBackend);
         loadFromEntry("bypass_mouse_protocol_modifier", c.bypassMouseProtocolModifiers);
         loadFromEntry("on_mouse_select", c.onMouseSelection);
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
-        loadFromEntry("images", c.maxImageSize);
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
         loadFromEntry("input_mapping", c.inputMappings);
@@ -1092,6 +1099,33 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         {
             where.familyName = child.as<std::string>();
         }
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "tile_direct_mapping", where.textureAtlasDirectMapping);
+        loadFromEntry(child, "tile_hashtable_slots", where.textureAtlasHashtableSlots);
+        loadFromEntry(child, "tile_cache_count", where.textureAtlasTileCount);
+        loadFromEntry(child, "backend", where.renderingBackend);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "sixel_scrolling", where.sixelScrolling);
+        loadFromEntry(child, "sixel_register_count", where.maxImageColorRegisters);
+        uint width = 0;
+        loadFromEntry(child, "max_width", width);
+        uint height = 0;
+        loadFromEntry(child, "max_height", height);
+        where.maxImageSize = { vtpty::Width { width }, vtpty::Height { height } };
     }
 }
 
@@ -1968,7 +2002,61 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 
 template <typename Writer>
-std::string createString(Config const& c)
+std::string createForGlobal(Config const& c)
+{
+    auto doc = std::string {};
+    Writer writer;
+
+    auto const escapeSequence = [&](std::string const& value) {
+        /* \ -> \\ */
+        /* " -> \" */
+        return std::regex_replace(
+            std::regex_replace(value, std::regex("\\\\"), "\\$&"), std::regex("\""), "\\$&");
+    };
+
+    auto const processConfigEntry =
+        [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
+            auto name,
+            contour::config::ConfigEntry<
+                T,
+                contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
+            doc.append(writer.process(writer.whichDoc(v), name, v.value()));
+        };
+
+    auto const processConfigEntryWithEscape =
+        [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
+            auto name,
+            contour::config::ConfigEntry<
+                std::string,
+                contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
+            doc.append(writer.process(writer.whichDoc(v), name, escapeSequence(v.value())));
+        };
+
+    auto completeOverload = crispy::overloaded {
+        processConfigEntry,
+        processConfigEntryWithEscape,
+        // Ignored entries
+        [&]([[maybe_unused]] auto name,
+            [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>,
+                                         documentation::ColorSchemes> const& v) {},
+        [&]([[maybe_unused]] auto name,
+            [[maybe_unused]] ConfigEntry<std::map<vtbackend::DECMode, bool>,
+                                         documentation::FrozenDecMode> const& v) {},
+        [&]([[maybe_unused]] auto name,
+            [[maybe_unused]] ConfigEntry<InputMappings, documentation::InputMappings> const& v) {},
+        [&]([[maybe_unused]] auto name,
+            [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, TerminalProfile>,
+                                         documentation::Profiles> const& v) {},
+        [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
+    };
+
+    Reflection::CallOnMembers(c, completeOverload);
+
+    return doc;
+}
+
+template <typename Writer>
+std::string createForProfile(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
@@ -1977,68 +2065,11 @@ std::string createString(Config const& c)
     };
 
     auto const processWithDoc = [&](auto&& docString, auto... val) {
-        doc.append(helper::replaceCommentPlaceholder(writer.process(docString.value, val...)));
+        doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
     };
-
-    auto const processWordDelimiters = [&]() {
-        auto wordDelimiters = c.wordDelimiters.value();
-        wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
-        wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
-        doc.append(helper::replaceCommentPlaceholder(
-            writer.process(documentation::WordDelimiters.value, wordDelimiters)));
-    };
-
-    auto const processExtendedWordDelimiters = [&]() {
-        auto wordDelimiters = c.extendedWordDelimiters.value();
-        wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\\\\"), "\\$&"); /* \ -> \\ */
-        wordDelimiters = std::regex_replace(wordDelimiters, std::regex("\""), "\\$&");   /* " -> \" */
-        doc.append(helper::replaceCommentPlaceholder(
-            writer.process(documentation::ExtendedWordDelimiters.value, wordDelimiters)));
-    };
-
-    if (c.platformPlugin.value().empty())
-    {
-        processWithDoc(documentation::PlatformPlugin, std::string { "auto" });
-    }
-    else
-    {
-        process(c.platformPlugin);
-    }
-
-    // inside renderer:
-    writer.scoped([&]() {
-        doc.append("renderer: \n");
-        process(c.renderingBackend);
-        process(c.textureAtlasHashtableSlots);
-        process(c.textureAtlasTileCount);
-        process(c.textureAtlasDirectMapping);
-    });
-
-    processWordDelimiters();
-    processExtendedWordDelimiters();
-    process(c.ptyReadBufferSize);
-    process(c.ptyBufferObjectSize);
-    process(c.defaultProfileName);
-    process(c.earlyExitThreshold);
-    process(c.spawnNewProcess);
-    process(c.reflowOnResize);
-    process(c.bypassMouseProtocolModifiers);
-    process(c.mouseBlockSelectionModifiers);
-    process(c.onMouseSelection);
-    process(c.live);
-    process(c.experimentalFeatures);
-
-    // inside images:
-    doc.append("\nimages: \n");
-
-    writer.scoped([&]() {
-        process(c.sixelScrolling);
-        process(c.maxImageColorRegisters);
-        process(c.maxImageSize);
-    });
 
     // inside profiles:
-    doc.append(helper::replaceCommentPlaceholder(c.profiles.documentation));
+    doc.append(writer.replaceCommentPlaceholder(c.profiles.documentation));
     {
         const auto _ = typename Writer::Offset {};
         for (auto&& [name, entry]: c.profiles.value())
@@ -2049,9 +2080,9 @@ std::string createString(Config const& c)
                 process(entry.shell);
                 process(entry.ssh);
 
-                processWithDoc(documentation::EscapeSandbox, entry.shell.value().escapeSandbox);
+                processWithDoc(documentation::EscapeSandbox {}, entry.shell.value().escapeSandbox);
                 process(entry.copyLastMarkRangeOffset);
-                processWithDoc(documentation::InitialWorkingDirectory, [&entry = entry]() {
+                processWithDoc(documentation::InitialWorkingDirectory {}, [&entry = entry]() {
                     auto fromConfig = entry.shell.value().workingDirectory.string();
                     if (fromConfig.empty() || fromConfig == homeResolvedPath("~", Process::homeDirectory()))
                         return std::string { "\"~\"" };
@@ -2066,7 +2097,7 @@ std::string createString(Config const& c)
                 process(entry.bell);
                 process(entry.wmClass);
                 process(entry.terminalId);
-                processWithDoc(documentation::FrozenDecMode, 0);
+                processWithDoc(documentation::FrozenDecMode {}, 0);
                 process(entry.smoothLineScrolling);
                 process(entry.terminalSize);
 
@@ -2098,16 +2129,18 @@ std::string createString(Config const& c)
 
                 //  permissions: section
                 processWithDoc(
-                    documentation::StringLiteral {
-                        "\n"
-                        "{comment} Some VT sequences should need access permissions.\n"
-                        "{comment} \n"
-                        "{comment}  These can be to:\n"
-                        "{comment}  - allow     Allows the given functionality\n"
-                        "{comment}  - deny      Denies the given functionality\n"
-                        "{comment}  - ask       Asks the user interactively via popup dialog for "
-                        "permission of the given action.\n"
-                        "permissions:\n" },
+                    documentation::DocumentationEntry<
+                        documentation::StringLiteral {
+                            "\n"
+                            "{comment} Some VT sequences should need access permissions.\n"
+                            "{comment} \n"
+                            "{comment}  These can be to:\n"
+                            "{comment}  - allow     Allows the given functionality\n"
+                            "{comment}  - deny      Denies the given functionality\n"
+                            "{comment}  - ask       Asks the user interactively via popup dialog for "
+                            "permission of the given action.\n"
+                            "permissions:\n" },
+                        documentation::StringLiteral { "" }> {},
                     0);
                 {
                     const auto _ = typename Writer::Offset {};
@@ -2159,21 +2192,34 @@ std::string createString(Config const& c)
                                              Writer::Offset::levels * Writer::OneOffset));
                 {
                     const auto _ = typename Writer::Offset {};
-                    process(entry.hyperlinkDecorationNormal);
-                    process(entry.hyperlinkDecorationHover);
+                    // process(entry.hyperlinkDecorationNormal); // TODO(PR) make them together to use doc
+                    // string from process(entry.hyperlinkDecorationHover);  // TODO(PR)
+                    // documentation::HyperlinkDecoration
                 }
             }
         };
     }
+    return doc;
+}
 
-    doc.append(helper::replaceCommentPlaceholder(c.colorschemes.documentation));
+template <typename Writer>
+std::string createForColorScheme(Config const& c)
+{
+    auto doc = std::string {};
+    Writer writer;
+
+    auto const processWithDoc = [&](auto&& docString, auto... val) {
+        doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
+    };
+
+    doc.append(writer.replaceCommentPlaceholder(c.colorschemes.documentation));
     writer.scoped([&]() {
         for (auto&& [name, entry]: c.colorschemes.value())
         {
             doc.append(std::format("    {}: \n", name));
             {
                 const auto _ = typename Writer::Offset {};
-                processWithDoc(documentation::DefaultColors,
+                processWithDoc(documentation::DefaultColors {},
                                entry.defaultBackground,
                                entry.defaultForeground,
                                entry.defaultForegroundBright,
@@ -2209,63 +2255,63 @@ std::string createString(Config const& c)
                 //                covered otherwise.\n" "    #\n" "    text: {}\n",
                 //                entry.cursor.color, entry.cursor.textOverrideColor);
 
-                processWithDoc(documentation::HyperlinkDecoration,
+                processWithDoc(documentation::HyperlinkDecoration {},
                                entry.hyperlinkDecoration.normal,
                                entry.hyperlinkDecoration.hover);
 
-                processWithDoc(documentation::YankHighlight,
+                processWithDoc(documentation::YankHighlight {},
                                entry.yankHighlight.foreground,
                                entry.yankHighlight.foregroundAlpha,
                                entry.yankHighlight.background,
                                entry.yankHighlight.backgroundAlpha);
 
-                processWithDoc(documentation::NormalModeCursorline,
+                processWithDoc(documentation::NormalModeCursorline {},
                                entry.normalModeCursorline.foreground,
                                entry.normalModeCursorline.foregroundAlpha,
                                entry.normalModeCursorline.background,
                                entry.normalModeCursorline.backgroundAlpha);
 
-                processWithDoc(documentation::Selection,
+                processWithDoc(documentation::Selection {},
                                entry.selection.foreground,
                                entry.selection.foregroundAlpha,
                                entry.selection.background,
                                entry.selection.backgroundAlpha);
 
-                processWithDoc(documentation::SearchHighlight,
+                processWithDoc(documentation::SearchHighlight {},
                                entry.searchHighlight.foreground,
                                entry.searchHighlight.foregroundAlpha,
                                entry.searchHighlight.background,
                                entry.searchHighlight.backgroundAlpha);
 
-                processWithDoc(documentation::SearchHighlihtFocused,
+                processWithDoc(documentation::SearchHighlihtFocused {},
                                entry.searchHighlightFocused.foreground,
                                entry.searchHighlightFocused.foregroundAlpha,
                                entry.searchHighlightFocused.background,
                                entry.searchHighlightFocused.backgroundAlpha);
 
-                processWithDoc(documentation::WordHighlightCurrent,
+                processWithDoc(documentation::WordHighlightCurrent {},
                                entry.wordHighlightCurrent.foreground,
                                entry.wordHighlightCurrent.foregroundAlpha,
                                entry.wordHighlightCurrent.background,
                                entry.wordHighlightCurrent.backgroundAlpha);
 
-                processWithDoc(documentation::WordHighlight,
+                processWithDoc(documentation::WordHighlight {},
                                entry.wordHighlight.foreground,
                                entry.wordHighlight.foregroundAlpha,
                                entry.wordHighlight.background,
                                entry.wordHighlight.backgroundAlpha);
 
-                processWithDoc(documentation::IndicatorStatusLine,
+                processWithDoc(documentation::IndicatorStatusLine {},
                                entry.indicatorStatusLineInsertMode.foreground,
                                entry.indicatorStatusLineInsertMode.background,
                                entry.indicatorStatusLineInactive.foreground,
                                entry.indicatorStatusLineInactive.background);
 
-                processWithDoc(documentation::InputMethodEditor,
+                processWithDoc(documentation::InputMethodEditor {},
                                entry.inputMethodEditor.foreground,
                                entry.inputMethodEditor.background);
 
-                processWithDoc(documentation::NormalColors,
+                processWithDoc(documentation::NormalColors {},
                                entry.normalColor(0),
                                entry.normalColor(1),
                                entry.normalColor(2),
@@ -2275,7 +2321,7 @@ std::string createString(Config const& c)
                                entry.normalColor(6),
                                entry.normalColor(7));
 
-                processWithDoc(documentation::BrightColors,
+                processWithDoc(documentation::BrightColors {},
                                entry.brightColor(0),
                                entry.brightColor(1),
                                entry.brightColor(2),
@@ -2285,7 +2331,7 @@ std::string createString(Config const& c)
                                entry.brightColor(6),
                                entry.brightColor(7));
 
-                processWithDoc(documentation::DimColors,
+                processWithDoc(documentation::DimColors {},
                                entry.dimColor(0),
                                entry.dimColor(1),
                                entry.dimColor(2),
@@ -2298,7 +2344,16 @@ std::string createString(Config const& c)
         }
     });
 
-    doc.append(helper::replaceCommentPlaceholder(c.inputMappings.documentation));
+    return doc;
+}
+
+template <typename Writer>
+std::string createKeyMapping(Config const& c)
+{
+    auto doc = std::string {};
+    Writer writer;
+
+    doc.append(writer.replaceCommentPlaceholder(c.inputMappings.documentation));
     {
         const auto _ = typename Writer::Offset {};
         for (auto&& entry: c.inputMappings.value().keyMappings)
@@ -2310,7 +2365,27 @@ std::string createString(Config const& c)
         for (auto&& entry: c.inputMappings.value().mouseMappings)
             doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::levels * Writer::OneOffset));
     }
+
     return doc;
+}
+
+template <typename Writer>
+std::string documentationGlobalConfig(Config const& c)
+{
+    return createForGlobal<Writer>(c);
+}
+
+template <typename Writer>
+std::string documentationProfileConfig(Config const& c)
+{
+    return createForProfile<Writer>(c);
+}
+
+template <typename Writer>
+std::string createString(Config const& c)
+{
+    return createForGlobal<Writer>(c) + createForProfile<Writer>(c) + createForColorScheme<Writer>(c)
+           + createKeyMapping<Writer>(c);
 }
 
 } // namespace contour::config
