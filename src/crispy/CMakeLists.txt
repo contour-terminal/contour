@@ -46,7 +46,7 @@ if(MSVC)
     target_compile_definitions(crispy-core PUBLIC NOMINMAX)
 endif()
 
-set(CRISPY_CORE_LIBS range-v3::range-v3 unicode::unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
+set(CRISPY_CORE_LIBS range-v3::range-v3 unicode::unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp reflection-cpp::reflection-cpp)
 
 # if compiler is not MSVC
 if(NOT MSVC)
