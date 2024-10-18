@@ -347,7 +347,7 @@ int ContourGuiApp::terminalGuiAction()
     QGuiApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta, true);
 #endif
 
-    switch (_config.renderingBackend.value())
+    switch (_config.renderer.value().renderingBackend)
     {
         case config::RenderingBackend::OpenGL:
             QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, false);

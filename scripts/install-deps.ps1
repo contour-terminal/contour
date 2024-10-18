@@ -11,10 +11,17 @@ class ThirdParty {
 }
 
 $libunicode_git_sha="817cb5900acdf6f60e2344a4c8f1f39262878a4b"
+$reflection_cpp_git_sha="02484cd9ec16d7efc252ab8fd1f85d7264192418"
 
 # Take care, order matters, at least as much as dependencies are of concern.
 $ThirdParties =
 @(
+    [ThirdParty]@{
+        Folder  = "reflection-cpp-${reflection_cpp_git_sha}";
+        Archive = "reflection-cpp-${reflection_cpp_git_sha}.zip";
+        URI     = "https://github.com/contour-terminal/reflection-cpp/archive/${reflection_cpp_git_sha}.zip";
+        Macro   = "reflection_cpp"
+    };
     [ThirdParty]@{
         Folder  = "libunicode-${libunicode_git_sha}";
         Archive = "libunicode-${libunicode_git_sha}.zip";
