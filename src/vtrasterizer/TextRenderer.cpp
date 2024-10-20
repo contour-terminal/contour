@@ -770,10 +770,11 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // or 0 if not overflowing.
     auto const yOverflow = max(0, yMax - _gridMetrics.cellSize.height.as<int>());
 
-    // {{{ crop underflow if yMin < 0
+    // {{{ crop underflow if yMin < 0 and yMax > 0
     // If the rasterized glyph is underflowing below the grid cell's minimum (0),
-    // then cut off at grid cell's bottom.
-    if (yMin < 0)
+    // and overlaps with grid cell, then cut off at grid cell's bottom.
+    // For underscore glyphs, ymin can be lower than 0 but ymax is zero, so we need to check for yMax > 0.
+    if (yMin < 0 && yMax > 0)
     {
         auto const rowCount = (unsigned) -yMin;
         Require(rowCount <= unbox(glyph.bitmapSize.height));
