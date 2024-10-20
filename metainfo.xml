@@ -107,6 +107,7 @@
     <release version="0.5.2" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Expose current profile's name through env var `CONTOUR_PROFILE` (#1637)</li>
           <li>Add terminal tabs (#90)</li>
           <li>Add binding to exit normal mode with `Esc` (#1604)</li>
           <li>Add config option to switch into insert mode after yank (#1604)</li>

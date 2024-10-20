@@ -370,6 +370,8 @@ int ContourGuiApp::terminalGuiAction()
     QCoreApplication::setApplicationName(appName);
     QCoreApplication::setOrganizationName("contour");
     QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
+    // Expose the profile name to the shell.
+    _config.profile(profileName())->shell.value().env["CONTOUR_PROFILE"] = profileName();
 
     vector<string> qtArgsStore;
     vector<char const*> qtArgsPtr;
