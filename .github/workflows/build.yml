@@ -503,6 +503,7 @@ jobs:
 
   macOSx86:
     runs-on: macos-latest-large
+    if: github.head_ref == 'release'
     steps:
       - uses: actions/checkout@v4
       - name: set variables
