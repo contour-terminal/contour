@@ -395,9 +395,8 @@ jobs:
             rm -rf _deps build
   # }}}
   # {{{ macOS
-  osx:
-    name: "macOS"
-    runs-on: macos-14
+  macOSArm:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: set variables
@@ -442,7 +441,7 @@ jobs:
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ccache-osx_qt${{ steps.set_vars.outputs.QTVER }}-r1
+          key: ccache-macosArm_qt${{ steps.set_vars.outputs.QTVER }}-r1
           max-size: 256M
       - name: "Install dependencies"
         # Sometimes, brew thinks it needs to install from source rather than binary.
@@ -491,13 +490,119 @@ jobs:
           # cmake --build build --target package-verbose
           # ls -hl build/
           # find build/src/contour/contour.app -print
-          BASENAME="contour-${{ steps.set_vars.outputs.version }}-osx"
+          BASENAME="contour-${{ steps.set_vars.outputs.version }}-macOS-arm"
           mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v4
         with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-osx.dmg"
-          path: "contour-${{ steps.set_vars.outputs.version }}-osx.dmg"
+          name: "contour-${{ steps.set_vars.outputs.version }}-macOS-arm.dmg"
+          path: "contour-${{ steps.set_vars.outputs.version }}-macOS-arm.dmg"
+          retention-days: 7
+
+
+
+  macOSx86:
+    runs-on: macos-latest-large
+    steps:
+      - uses: actions/checkout@v4
+      - name: set variables
+        id: set_vars
+        run: |
+          ./scripts/ci-set-vars.sh
+          echo QTVER=6 >> "$GITHUB_OUTPUT"
+          # Please read the following link on how to use MacOS code signing on Github CI:
+          # https://docs.github.com/en/actions/deployment/deploying-xcode-applications/installing-an-apple-certificate-on-macos-runners-for-xcode-development
+          echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: Install the Apple certificate and provisioning profile
+        if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # create variables
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          # import certificate and provisioning profile from secrets
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o $PP_PATH
+
+          # create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # import certificate to keychain
+          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          # apply provisioning profile
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-macOSx86_qt${{ steps.set_vars.outputs.QTVER }}-r1
+          max-size: 256M
+      - name: "Install dependencies"
+        # Sometimes, brew thinks it needs to install from source rather than binary.
+        # For Qt this may take ages (many many hours). Let's not waste our CPU credits here,
+        # and limit the run time.
+        timeout-minutes: 15
+        run: |
+          set -ex
+          #brew update
+
+          # Trying to work around some Github CI issues causing `brew install` to fail
+          brew uninstall aws-sam-cli azure-cli
+
+          QTVER=${{ steps.set_vars.outputs.QTVER }}
+          QTVER=${QTVER} ./scripts/install-deps.sh
+      - name: "Create build directory"
+        run: mkdir build
+      - name: "Generate build files"
+        run: |
+          QTVER=${{ steps.set_vars.outputs.QTVER }}
+          cmake . \
+                -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                -DCONTOUR_TESTING=ON \
+                -DCONTOUR_QT_VERSION=${QTVER} \
+                -DCMAKE_PREFIX_PATH$="$(brew --prefix qt@${QTVER})" \
+                -DMACDEPLOYQT_EXECUTABLE="$(brew --prefix qt${QTVER})/bin/macdeployqt" \
+                -DMACDEPLOYQT_QML_WORKAROUND=ON \
+                -DCODE_SIGN_CERTIFICATE_ID="${{ steps.set_vars.outputs.CODE_SIGN_CERTIFICATE_ID }}" \
+                -B build/
+      - name: "Build"
+        run: cmake --build build/
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: vtparser"
+        run: ./build/src/vtparser/vtparser_test
+      - name: "test: vtbackend"
+        run: ./build/src/vtbackend/vtbackend_test
+      - name: "test: vtrasterizer"
+        run: ./build/src/vtrasterizer/vtrasterizer_test
+      - name: "Create Package(s)"
+        run: |
+          set -ex
+          echo killing...; sudo pkill -9 XProtect >/dev/null || true; # see https://github.com/actions/runner-images/issues/7522
+          echo waiting...; while pgrep XProtect; do sleep 3; done;
+          cd build; cpack -G DragNDrop --verbose; cd -
+          # cmake --build build --target package-verbose
+          # ls -hl build/
+          # find build/src/contour/contour.app -print
+          BASENAME="contour-${{ steps.set_vars.outputs.version }}-macOS-x86
+          mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
+      - name: upload to artifact store (DMG)
+        uses: actions/upload-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-macOS-x86.dmg"
+          path: "contour-${{ steps.set_vars.outputs.version }}-macOS-x86.dmg"
           retention-days: 7
   # }}}
   # {{{ Windows
@@ -1118,7 +1223,8 @@ jobs:
       - archlinux
       - check_notcurses_test_matrix
       - fedora
-      - osx
+      - macOSx86
+      - macOSArm
       - package_for_Ubuntu
       - windows
     permissions:
@@ -1151,10 +1257,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: "contour-x86_64.pkg.tar.zst"
-      - name: "fetch artifact: MacOS"
+      - name: "fetch artifact: MacOS (ARM)"
         uses: actions/download-artifact@v4
         with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-osx.dmg"
+          name: "contour-${{ steps.set_vars.outputs.version }}-macOS-arm.dmg"
+      - name: "fetch artifact: MacOS (x86)"
+        uses: actions/download-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-macOS-x86.dmg"
       - name: "fetch artifact: Windows (MSI)"
         uses: actions/download-artifact@v4
         with:
