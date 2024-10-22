@@ -132,7 +132,7 @@ namespace
         settings.pageSize = profile.terminalSize.value();
         settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
         settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
-        settings.maxHistoryLineCount = profile.maxHistoryLineCount.value();
+        settings.maxHistoryLineCount = profile.history.value().maxHistoryLineCount;
         settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset.value();
         settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
         settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
@@ -142,13 +142,13 @@ namespace
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
         settings.maxImageSize = config.images.value().maxImageSize;
         settings.maxImageRegisterCount = config.images.value().maxImageColorRegisters;
-        settings.statusDisplayType = profile.initialStatusDisplayType.value();
-        settings.statusDisplayPosition = profile.statusDisplayPosition.value();
-        settings.indicatorStatusLine.left = profile.indicatorStatusLineLeft.value();
-        settings.indicatorStatusLine.middle = profile.indicatorStatusLineMiddle.value();
-        settings.indicatorStatusLine.right = profile.indicatorStatusLineRight.value();
+        settings.statusDisplayType = profile.statusLine.value().initialType;
+        settings.statusDisplayPosition = profile.statusLine.value().position;
+        settings.indicatorStatusLine.left = profile.statusLine.value().indicator.left;
+        settings.indicatorStatusLine.middle = profile.statusLine.value().indicator.middle;
+        settings.indicatorStatusLine.right = profile.statusLine.value().indicator.right;
         settings.syncWindowTitleWithHostWritableStatusDisplay =
-            profile.syncWindowTitleWithHostWritableStatusDisplay.value();
+            profile.statusLine.value().syncWindowTitleWithHostWritableStatusDisplay;
         if (auto const* p = preferredColorPalette(profile.colors.value(), colorPreference))
             settings.colorPalette = *p;
         settings.primaryScreen.allowReflowOnResize = config.reflowOnResize.value();
@@ -327,7 +327,7 @@ void TerminalSession::screenUpdated()
     if (!_display)
         return;
 
-    if (_profile.autoScrollOnUpdate.value() && terminal().viewport().scrolled()
+    if (_profile.history.value().autoScrollOnUpdate && terminal().viewport().scrolled()
         && terminal().inputHandler().mode() == ViMode::Insert)
         terminal().viewport().scrollToBottom();
 
@@ -458,7 +458,7 @@ void TerminalSession::requestShowHostWritableStatusLine()
 {
     if (_display)
         _display->post([this]() {
-            requestPermission(_profile.displayHostWritableStatusLine.value(),
+            requestPermission(_profile.permissions.value().displayHostWritableStatusLine,
                               GuardedRole::ShowHostWritableStatusLine);
         });
 }
@@ -489,7 +489,8 @@ void TerminalSession::setFontDef(vtbackend::FontDef const& fontDef)
 
     _pendingFontChange = fontDef;
 
-    _display->post([this]() { requestPermission(_profile.changeFont.value(), GuardedRole::ChangeFont); });
+    _display->post(
+        [this]() { requestPermission(_profile.permissions.value().changeFont, GuardedRole::ChangeFont); });
 }
 
 void TerminalSession::applyPendingFontChange(bool allow, bool remember)
@@ -775,7 +776,7 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
         return;
     }
 
-    if (_profile.mouseHideWhileTyping.value())
+    if (_profile.mouse.value().hideWhileTyping)
         _display->setMouseCursorShape(MouseCursorShape::Hidden);
 
     if (eventType != KeyboardEventType::Release)
@@ -807,7 +808,7 @@ void TerminalSession::sendCharEvent(
             return;
         }
 
-        if (_profile.mouseHideWhileTyping.value())
+        if (_profile.mouse.value().hideWhileTyping)
             _display->setMouseCursorShape(MouseCursorShape::Hidden);
     }
 
@@ -897,7 +898,7 @@ void TerminalSession::sendFocusInEvent()
     terminal().sendFocusInEvent();
 
     if (_display)
-        _display->setBlurBehind(_profile.backgroundBlur.value());
+        _display->setBlurBehind(_profile.background.value().blur);
 
     scheduleRedraw();
 }
@@ -1011,10 +1012,10 @@ bool TerminalSession::operator()(actions::DecreaseFontSize)
 
 bool TerminalSession::operator()(actions::DecreaseOpacity)
 {
-    if (static_cast<uint8_t>(_profile.backgroundOpacity.value()) == 0)
+    if (static_cast<uint8_t>(_profile.background.value().opacity) == 0)
         return true;
 
-    --_profile.backgroundOpacity.value();
+    --_profile.background.value().opacity;
 
     emit opacityChanged();
 
@@ -1072,9 +1073,9 @@ bool TerminalSession::operator()(actions::IncreaseFontSize)
 
 bool TerminalSession::operator()(actions::IncreaseOpacity)
 {
-    if (static_cast<uint8_t>(_profile.backgroundOpacity.value()) >= std::numeric_limits<uint8_t>::max())
+    if (static_cast<uint8_t>(_profile.background.value().opacity) >= std::numeric_limits<uint8_t>::max())
         return true;
-    ++_profile.backgroundOpacity.value();
+    ++_profile.background.value().opacity;
 
     emit opacityChanged();
 
@@ -1185,7 +1186,7 @@ bool TerminalSession::operator()(actions::ScreenshotVT)
 
 bool TerminalSession::operator()(actions::ScrollDown)
 {
-    terminal().viewport().scrollDown(_profile.historyScrollMultiplier.value());
+    terminal().viewport().scrollDown(_profile.history.value().historyScrollMultiplier);
     return true;
 }
 
@@ -1241,7 +1242,7 @@ bool TerminalSession::operator()(actions::ScrollToTop)
 
 bool TerminalSession::operator()(actions::ScrollUp)
 {
-    terminal().viewport().scrollUp(_profile.historyScrollMultiplier.value());
+    terminal().viewport().scrollUp(_profile.history.value().historyScrollMultiplier);
     return true;
 }
 
@@ -1512,7 +1513,7 @@ void TerminalSession::configureTerminal()
     _terminal.setMaxSixelColorRegisters(_config.images.value().maxImageColorRegisters);
     _terminal.setMaxImageSize(_config.images.value().maxImageSize);
     _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.images.value().sixelScrolling);
-    _terminal.setStatusDisplay(_profile.initialStatusDisplayType.value());
+    _terminal.setStatusDisplay(_profile.statusLine.value().initialType);
     sessionLog()("maxImageSize={}, sixelScrolling={}",
                  _config.images.value().maxImageSize,
                  _config.images.value().sixelScrolling);
@@ -1523,7 +1524,7 @@ void TerminalSession::configureTerminal()
 
     configureCursor(_profile.modeInsert.value().cursor);
     updateColorPreference(_app.colorPreference());
-    _terminal.setMaxHistoryLineCount(_profile.maxHistoryLineCount.value());
+    _terminal.setMaxHistoryLineCount(_profile.history.value().maxHistoryLineCount);
     _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
     _terminal.inputHandler().setSearchModeSwitch(_profile.searchModeSwitch.value());
@@ -1547,7 +1548,7 @@ void TerminalSession::configureDisplay()
         return;
 
     sessionLog()("Configuring display.");
-    _display->setBlurBehind(_profile.backgroundBlur.value());
+    _display->setBlurBehind(_profile.background.value().blur);
 
     {
         auto const dpr = _display->contentScale();
@@ -1569,8 +1570,8 @@ void TerminalSession::configureDisplay()
     _display->setFonts(_profile.fonts.value());
     resizeTerminalToDisplaySize();
 
-    _display->setHyperlinkDecoration(_profile.hyperlinkDecorationNormal.value(),
-                                     _profile.hyperlinkDecorationHover.value());
+    _display->setHyperlinkDecoration(_profile.hyperlinkDecoration.value().normal,
+                                     _profile.hyperlinkDecoration.value().hover);
 
     setWindowTitle(_terminal.windowTitle());
 }

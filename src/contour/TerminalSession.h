@@ -108,7 +108,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     int getFontSize() const noexcept { return static_cast<int>(_profile.fonts.value().size.pt); }
     float getOpacity() const noexcept
     {
-        return static_cast<float>(_profile.backgroundOpacity.value()) / std::numeric_limits<uint8_t>::max();
+        return static_cast<float>(_profile.background.value().opacity) / std::numeric_limits<uint8_t>::max();
     }
     QString pathToBackground() const
     {
@@ -125,7 +125,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         auto color = terminal().isModeEnabled(vtbackend::DECMode::ReverseVideo)
                          ? _terminal.colorPalette().defaultForeground
                          : _terminal.colorPalette().defaultBackground;
-        auto alpha = static_cast<uint8_t>(_profile.backgroundOpacity.value());
+        auto alpha = static_cast<uint8_t>(_profile.background.value().opacity);
         return QColor(color.red, color.green, color.blue, alpha);
     }
     float getOpacityBackground() const noexcept
@@ -156,16 +156,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     bool getIsScrollbarRight() const noexcept
     {
-        return profile().scrollbarPosition.value() == config::ScrollBarPosition::Right;
+        return profile().scrollbar.value().position == config::ScrollBarPosition::Right;
     }
 
     bool getIsScrollbarVisible() const noexcept
     {
-        if (profile().scrollbarPosition.value() == config::ScrollBarPosition::Hidden)
+        if (profile().scrollbar.value().position == config::ScrollBarPosition::Hidden)
             return false;
 
         if ((_currentScreenType == vtbackend::ScreenType::Alternate)
-            && profile().hideScrollbarInAltScreen.value())
+            && profile().scrollbar.value().hideScrollbarInAltScreen)
             return false;
 
         return true;

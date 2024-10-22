@@ -159,6 +159,62 @@ struct CursorConfig
     std::chrono::milliseconds cursorBlinkInterval;
 };
 
+struct HistoryConfig
+{
+    vtbackend::MaxHistoryLineCount maxHistoryLineCount { vtbackend::LineCount(1000) };
+    vtbackend::LineCount historyScrollMultiplier { vtbackend::LineCount(3) };
+    bool autoScrollOnUpdate { true };
+};
+
+struct ScrollBarConfig
+{
+    ScrollBarPosition position { ScrollBarPosition::Hidden };
+    bool hideScrollbarInAltScreen { true };
+};
+
+struct MouseConfig
+{
+    bool hideWhileTyping { true };
+};
+
+struct IndicatorConfig
+{
+    std::string left { " {InputMode:Bold,Color=#FFFF00}"
+                       "{Tabs:ActiveColor=#FFFF00,Left= │ }"
+                       "{SearchPrompt:Left= │ }"
+                       "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
+                       "{ProtectedMode:Bold,Left= │ }" };
+    std::string middle { "{Title:Left= « ,Right= » }" };
+    std::string right { "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}" };
+};
+
+struct StatusLineConfig
+{
+    vtbackend::StatusDisplayType initialType { vtbackend::StatusDisplayType::Indicator };
+    vtbackend::StatusDisplayPosition position { vtbackend::StatusDisplayPosition::Bottom };
+    bool syncWindowTitleWithHostWritableStatusDisplay { false };
+    IndicatorConfig indicator;
+};
+
+struct BackgroundConfig
+{
+    vtbackend::Opacity opacity { vtbackend::Opacity(0xFF) };
+    bool blur { false };
+};
+
+struct HyperlinkDecorationConfig
+{
+    vtrasterizer::Decorator normal { vtrasterizer::Decorator::DottedUnderline };
+    vtrasterizer::Decorator hover { vtrasterizer::Decorator::Underline };
+};
+
+struct PermissionsConfig
+{
+    Permission captureBuffer { Permission::Ask };
+    Permission changeFont { Permission::Ask };
+    Permission displayHostWritableStatusLine { Permission::Ask };
+};
+
 struct InputModeConfig
 {
     CursorConfig cursor;
@@ -340,62 +396,31 @@ struct TerminalProfile
         .env = {},
     } };
     ConfigEntry<vtpty::SshHostConfig, documentation::SshHostConfig> ssh {};
-    ConfigEntry<bool, documentation::Maximized> maximized { false };
-    ConfigEntry<bool, documentation::Fullscreen> fullscreen { false };
+    ConfigEntry<bool, documentation::EscapeSandbox> escapeSandbox { true };
+    ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
     ConfigEntry<bool, documentation::ShowTitleBar> showTitleBar { true };
     ConfigEntry<bool, documentation::ShowIndicatorOnResize> sizeIndicatorOnResize { true };
-    ConfigEntry<bool, documentation::MouseHideWhileTyping> mouseHideWhileTyping { true };
+    ConfigEntry<bool, documentation::Fullscreen> fullscreen { false };
+    ConfigEntry<bool, documentation::Maximized> maximized { false };
     ConfigEntry<bool, documentation::SeachModeSwitch> searchModeSwitch { true };
     ConfigEntry<bool, documentation::InsertAfterYank> insertAfterYank { false };
-    ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
-    ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
-    ConfigEntry<WindowMargins, documentation::Margins> margins { { HorizontalMargin { 0u },
-                                                                   VerticalMargin { 0u } } };
+    ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };
+    ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };
+    ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> frozenModes {};
+    ConfigEntry<std::chrono::milliseconds, documentation::SmoothLineScrolling> smoothLineScrolling { 100 };
     ConfigEntry<vtbackend::PageSize, documentation::TerminalSize> terminalSize { {
         vtbackend::LineCount(25),
         vtbackend::ColumnCount(80),
     } };
-    ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };
-    ConfigEntry<vtbackend::MaxHistoryLineCount, documentation::MaxHistoryLineCount> maxHistoryLineCount {
-        vtbackend::LineCount(1000)
-    };
-    ConfigEntry<vtbackend::LineCount, documentation::HistoryScrollMultiplier> historyScrollMultiplier {
-        vtbackend::LineCount(3)
-    };
-    ConfigEntry<ScrollBarPosition, documentation::ScrollbarPosition> scrollbarPosition {
-        ScrollBarPosition::Hidden
-    };
-    ConfigEntry<vtbackend::StatusDisplayPosition, documentation::StatusDisplayPosition>
-        statusDisplayPosition { vtbackend::StatusDisplayPosition::Bottom };
-    ConfigEntry<std::string, documentation::IndicatorStatusLineLeft> indicatorStatusLineLeft {
-        " {InputMode:Bold,Color=#FFFF00}"
-        "{Tabs:ActiveColor=#FFFF00,Left= │ }"
-        "{SearchPrompt:Left= │ }"
-        "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
-        "{ProtectedMode:Bold,Left= │ }"
-    };
-    ConfigEntry<std::string, documentation::IndicatorStatusLineMiddle> indicatorStatusLineMiddle {
-        "{Title:Left= « ,Right= » }"
-    };
-    ConfigEntry<std::string, documentation::IndicatorStatusLineRight> indicatorStatusLineRight {
-        "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}"
-    };
-    ConfigEntry<bool, documentation::SyncWindowTitleWithHostWritableStatusDisplay>
-        syncWindowTitleWithHostWritableStatusDisplay { false };
-    ConfigEntry<bool, documentation::HideScrollbarInAltScreen> hideScrollbarInAltScreen { true };
-    ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
-    ConfigEntry<bool, documentation::AutoScrollOnUpdate> autoScrollOnUpdate { true };
+    ConfigEntry<WindowMargins, documentation::Margins> margins { { HorizontalMargin { 0u },
+                                                                   VerticalMargin { 0u } } };
+    ConfigEntry<HistoryConfig, documentation::History> history {};
+    ConfigEntry<ScrollBarConfig, documentation::Scrollbar> scrollbar {};
+    ConfigEntry<MouseConfig, documentation::Mouse> mouse { true };
+    ConfigEntry<PermissionsConfig, documentation::Permissions> permissions {};
+    ConfigEntry<bool, documentation::HighlightDoubleClickerWord> highlightDoubleClickedWord { true };
     ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont };
-    ConfigEntry<Permission, documentation::CaptureBuffer> captureBuffer { Permission::Ask };
-    ConfigEntry<Permission, documentation::ChangeFont> changeFont { Permission::Ask };
-    ConfigEntry<Permission, documentation::DisplayHostWritableStatusLine> displayHostWritableStatusLine {
-        Permission::Ask
-    };
     ConfigEntry<bool, documentation::DrawBoldTextWithBrightColors> drawBoldTextWithBrightColors { false };
-    ConfigEntry<ColorConfig, documentation::Colors> colors { SimpleColorConfig {} };
-    ConfigEntry<vtbackend::LineCount, documentation::ModalCursorScrollOff> modalCursorScrollOff {
-        vtbackend::LineCount { 8 }
-    };
     ConfigEntry<InputModeConfig, documentation::ModeInsert> modeInsert { CursorConfig {
         vtbackend::CursorShape::Bar, vtbackend::CursorDisplay::Steady, std::chrono::milliseconds { 500 } } };
     ConfigEntry<InputModeConfig, documentation::ModeNormal> modeNormal {
@@ -408,23 +433,17 @@ struct TerminalProfile
                        vtbackend::CursorDisplay::Steady,
                        std::chrono::milliseconds { 500 } },
     };
-    ConfigEntry<std::chrono::milliseconds, documentation::SmoothLineScrolling> smoothLineScrolling { 100 };
     ConfigEntry<std::chrono::milliseconds, documentation::HighlightTimeout> highlightTimeout { 100 };
-    ConfigEntry<bool, documentation::HighlightDoubleClickerWord> highlightDoubleClickedWord { true };
-    ConfigEntry<vtbackend::StatusDisplayType, documentation::InitialStatusLine> initialStatusDisplayType {
-        vtbackend::StatusDisplayType::Indicator
+    ConfigEntry<vtbackend::LineCount, documentation::ModalCursorScrollOff> modalCursorScrollOff {
+        vtbackend::LineCount { 8 }
     };
-    ConfigEntry<vtbackend::Opacity, documentation::BackgroundOpacity> backgroundOpacity { vtbackend::Opacity(
-        0xFF) };
-    ConfigEntry<bool, documentation::BackgroundBlur> backgroundBlur { false };
-    ConfigEntry<vtrasterizer::Decorator, documentation::HyperlinkDecoration> hyperlinkDecorationNormal {
-        vtrasterizer::Decorator::DottedUnderline
-    };
-    ConfigEntry<vtrasterizer::Decorator, documentation::HyperlinkDecoration> hyperlinkDecorationHover {
-        vtrasterizer::Decorator::Underline
-    };
-    ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };
-    ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> frozenModes {};
+    ConfigEntry<StatusLineConfig, documentation::StatusLine> statusLine {};
+    ConfigEntry<BackgroundConfig, documentation::Background> background {};
+    ConfigEntry<ColorConfig, documentation::Colors> colors { SimpleColorConfig {} };
+    ConfigEntry<HyperlinkDecorationConfig, documentation::HyperlinkDecoration> hyperlinkDecoration {};
+
+    ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
+    ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 
 const InputMappings defaultInputMappings {
@@ -974,6 +993,15 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TerminalProfile& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, MouseConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, StatusLineConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, BackgroundConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, HyperlinkDecorationConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, PermissionsConfig& where);
+
+
     void defaultSettings(vtpty::Process::ExecInfo& shell);
     // clang-format on
 
@@ -1114,7 +1142,29 @@ struct Writer
         auto args = std::string { "[" };
         args.append(v.arguments | ranges::views::join(", ") | ranges::to<std::string>);
         args.append("]");
-        return format(doc, v.program, args);
+        return format(doc, v.program, args, [&]() -> std::string {
+            auto fromConfig = v.workingDirectory.string();
+            if (fromConfig.empty()
+                || fromConfig == crispy::homeResolvedPath("~", vtpty::Process::homeDirectory()))
+                return std::string { "\"~\"" };
+            return fromConfig;
+        }());
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, std::map<vtbackend::DECMode, bool> const& mods)
+    {
+        if (mods.empty())
+            return format(doc, std::string_view { "0" });
+
+        auto result = std::string { "[" };
+        for (auto const& [mode, value]: mods)
+        {
+            if (!result.empty())
+                result += ',';
+            result += std::format("{}", to_string(mode));
+        }
+        result += "]";
+        return format(doc, result);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, vtpty::SshHostConfig const& v)
@@ -1131,14 +1181,6 @@ struct Writer
     }
 
     [[nodiscard]] std::string static format(vtbackend::RGBColor const& v) { return std::format("'{}'", v); }
-
-    [[nodiscard]] std::string format(std::string_view doc, vtbackend::MaxHistoryLineCount v)
-    {
-        if (std::holds_alternative<vtbackend::Infinite>(v))
-            return format(doc, -1);
-        auto number = unbox(std::get<vtbackend::LineCount>(v));
-        return format(doc, number);
-    }
 
     [[nodiscard]] std::string format(std::string_view doc, vtbackend::ImageSize v)
     {
@@ -1190,6 +1232,56 @@ struct Writer
     [[nodiscard]] std::string format(std::string_view doc, WindowMargins& v)
     {
         return format(doc, v.horizontal, v.vertical);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, HistoryConfig& v)
+    {
+        return format(
+            doc,
+            [&]() {
+                if (std::holds_alternative<vtbackend::Infinite>(v.maxHistoryLineCount))
+                    return -1;
+                auto number = unbox(std::get<vtbackend::LineCount>(v.maxHistoryLineCount));
+                return number;
+            }(),
+            v.autoScrollOnUpdate,
+            v.historyScrollMultiplier);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, ScrollBarConfig& v)
+    {
+        return format(doc, v.position, v.hideScrollbarInAltScreen);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, MouseConfig& v)
+    {
+        return format(doc, v.hideWhileTyping);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, StatusLineConfig& v)
+    {
+        return format(doc,
+                      v.initialType,
+                      v.position,
+                      v.syncWindowTitleWithHostWritableStatusDisplay,
+                      v.indicator.left,
+                      v.indicator.middle,
+                      v.indicator.right);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, BackgroundConfig& v)
+    {
+        return format(doc, v.opacity, v.blur);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, HyperlinkDecorationConfig& v)
+    {
+        return format(doc, v.normal, v.hover);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, PermissionsConfig& v)
+    {
+        return format(doc, v.captureBuffer, v.changeFont, v.displayHostWritableStatusLine);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, InputModeConfig v)

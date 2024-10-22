@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <string_view>
+
+#include "contour/Config.h"
 namespace contour::config::documentation
 {
 
@@ -31,10 +33,6 @@ constexpr StringLiteral ShellConfig {
     "{comment} But you may as well log in to a remote host.\n"
     "shell: {}\n"
     "arguments: {}\n"
-    "\n"
-};
-
-constexpr StringLiteral InitialWorkingDirectoryConfig {
     "{comment} Sets initial working directory when spawning a new terminal.\n"
     "{comment} A leading ~ is expanded to the user's home directory.\n"
     "{comment} Default value is the user's home directory.\n"
@@ -124,9 +122,10 @@ constexpr StringLiteral ShowIndicatorOnResizeConfig {
     "\n"
 };
 
-constexpr StringLiteral MouseHideWhileTypingConfig { "{comment} whether or not to hide mouse when typing\n"
-                                                     "hide_while_typing: {}\n"
-                                                     "\n" };
+constexpr StringLiteral MouseConfig { "mouse:\n"
+                                      "    {comment} whether or not to hide mouse when typing\n"
+                                      "    hide_while_typing: {}\n"
+                                      "\n" };
 
 constexpr StringLiteral SeachModeSwitchConfig {
     "{comment} Whether or not to switch from search mode into insert on exit. If this value is set to true,\n"
@@ -203,34 +202,28 @@ constexpr StringLiteral HistoryScrollMultiplierConfig {
     "\n"
 };
 
-constexpr StringLiteral ScrollbarPositionConfig {
-    "{comment} scroll bar position: Left, Right, Hidden (ignore-case)\n"
-    "position: {}\n"
+constexpr StringLiteral HistoryConfig {
+
+    "history:\n"
+    "    {comment} Number of lines to preserve (-1 for infinite).\n"
+    "    limit: {}\n"
+    "    {comment} Boolean indicating whether or not to scroll down to the bottom on screen updates.\n"
+    "    auto_scroll_on_update: {}\n"
+    "    {comment} Number of lines to scroll on ScrollUp & ScrollDown events.\n"
+    "    scroll_multiplier: {}\n"
     "\n"
+
 };
 
-constexpr StringLiteral StatusDisplayPositionConfig {
-    "{comment} Position to place the status line to, if it is to be shown.\n"
-    "{comment} This can be either value `top` or value `bottom`.\n"
-    "position: {}\n"
-    "\n"
-};
+constexpr StringLiteral ScrollbarConfig {
 
-constexpr StringLiteral IndicatorStatusLineLeftConfig { "left: \"{}\"\n" };
-constexpr StringLiteral IndicatorStatusLineMiddleConfig { "middle: \"{}\"\n" };
-constexpr StringLiteral IndicatorStatusLineRightConfig { "right: \"{}\"\n" };
-
-constexpr StringLiteral SyncWindowTitleWithHostWritableStatusDisplayConfig {
-    "{comment} Synchronize the window title with the Host Writable status_line if\n"
-    "{comment} and only if the host writable status line was denied to be shown.\n"
-    "sync_to_window_title: {}\n"
+    "scrollbar:\n"
+    "    {comment} scroll bar position: Left, Right, Hidden (ignore-case)\n"
+    "    position: {}\n"
+    "    {comment} whether or not to hide the scrollbar when in alt-screen.\n"
+    "    hide_in_alt_screen: {}\n"
     "\n"
-};
 
-constexpr StringLiteral HideScrollbarInAltScreenConfig {
-    "{comment} whether or not to hide the scrollbar when in alt-screen.\n"
-    "hide_in_alt_screen: {}\n"
-    "\n"
 };
 
 constexpr StringLiteral AutoScrollOnUpdateConfig {
@@ -329,20 +322,24 @@ constexpr StringLiteral FontsConfig {
     "\n"
 };
 
-constexpr StringLiteral CaptureBufferConfig {
-    "{comment} Allows capturing the screen buffer via `CSI > Pm ; Ps ; Pc ST`.\n"
-    "{comment} The response can be read from stdin as sequence `OSC 314 ; <screen capture> ST`\n"
-    "capture_buffer: {}\n"
+constexpr StringLiteral PermissionsConfig {
+
     "\n"
-};
-
-constexpr StringLiteral ChangeFontConfig { "{comment} Allows changing the font via `OSC 50 ; Pt ST`.\n"
-                                           "change_font: {}\n"
-                                           "\n" };
-
-constexpr StringLiteral DisplayHostWritableStatusLineConfig {
-    "{comment} Allows displaying the \" Host Writable Statusline \" programmatically using `DECSSDT 2`.\n"
-    "display_host_writable_statusline: {}\n"
+    "{comment} Some VT sequences should need access permissions.\n"
+    "{comment} \n"
+    "{comment}  These can be to:\n"
+    "{comment}  - allow     Allows the given functionality\n"
+    "{comment}  - deny      Denies the given functionality\n"
+    "{comment}  - ask       Asks the user interactively via popup dialog for "
+    "permission of the given action.\n"
+    "permissions:\n"
+    "    {comment} Allows capturing the screen buffer via `CSI > Pm ; Ps ; Pc ST`.\n"
+    "    {comment} The response can be read from stdin as sequence `OSC 314 ; <screen capture> ST`\n"
+    "    capture_buffer: {}\n"
+    "    {comment} Allows changing the font via `OSC 50 ; Pt ST`.\n"
+    "    change_font: {}\n"
+    "    {comment} Allows displaying the \" Host Writable Statusline \" programmatically using `DECSSDT 2`.\n"
+    "    display_host_writable_statusline: {}\n"
     "\n"
 };
 
@@ -439,25 +436,33 @@ constexpr StringLiteral HighlightDoubleClickerWordConfig {
     "\n"
 };
 
-constexpr StringLiteral InitialStatusLineConfig {
-    "{comment} Either none or indicator.\n"
-    "{comment} This only reflects the initial state of the status line, as it can\n"
-    "{comment} be changed at any time during runtime by the user or by an application.\n"
-    "display: {}\n"
+constexpr StringLiteral StatusLineConfig {
+    "status_line:\n"
+    "    {comment} Either none or indicator.\n"
+    "    {comment} This only reflects the initial state of the status line, as it can\n"
+    "    {comment} be changed at any time during runtime by the user or by an application.\n"
+    "    display: {}\n"
+    "    {comment} Position to place the status line to, if it is to be shown.\n"
+    "    {comment} This can be either value `top` or value `bottom`.\n"
+    "    position: {}\n"
+    "    {comment} Synchronize the window title with the Host Writable status_line if\n"
+    "    {comment} and only if the host writable status line was denied to be shown.\n"
+    "    sync_to_window_title: {}\n"
+    "    indicator:\n"
+    "        left: \"{}\"\n"
+    "        middle: \"{}\"\n"
+    "        right: \"{}\"\n"
     "\n"
 };
 
-constexpr StringLiteral BackgroundOpacityConfig {
-    "{comment} Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully\n"
-    "{comment} transparent. Only values between 0.0 and 1.0 are allowed.\n"
-    "opacity: {}\n"
-    "\n"
-};
-
-constexpr StringLiteral BackgroundBlurConfig {
-    "{comment} Some platforms can blur the transparent background (currently only Windows 10 is "
-    "supported).\n"
-    "blur: {}\n"
+constexpr StringLiteral BackgroundConfig {
+    "background:\n"
+    "    {comment} Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully\n"
+    "    {comment} transparent. Only values between 0.0 and 1.0 are allowed.\n"
+    "    opacity: {}\n"
+    "    {comment} Some platforms can blur the transparent background (currently only Windows is "
+    "    supported).\n"
+    "    blur: {}\n"
     "\n"
 };
 
@@ -499,6 +504,7 @@ constexpr StringLiteral FrozenDecModeConfig {
     "{comment}\n"
     "{comment} Default: (empty object)\n"
     "{comment}frozen_dec_modes:\n"
+    "\n"
 };
 
 constexpr StringLiteral LiveConfig {
@@ -1114,14 +1120,13 @@ constexpr StringLiteral ImagesWeb {
 
 using Shell = DocumentationEntry<ShellConfig, Dummy>;
 
-using InitialWorkingDirectory = DocumentationEntry<InitialWorkingDirectoryConfig, Dummy>;
 using EscapeSandbox = DocumentationEntry<EscapeSandboxConfig, Dummy>;
 using SshHostConfig = DocumentationEntry<SshHostConfigConfig, Dummy>;
 using Maximized = DocumentationEntry<MaximizedConfig, Dummy>;
 using Fullscreen = DocumentationEntry<FullscreenConfig, Dummy>;
 using ShowTitleBar = DocumentationEntry<ShowTitleBarConfig, Dummy>;
 using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, Dummy>;
-using MouseHideWhileTyping = DocumentationEntry<MouseHideWhileTypingConfig, Dummy>;
+using Mouse = DocumentationEntry<MouseConfig, Dummy>;
 using SeachModeSwitch = DocumentationEntry<SeachModeSwitchConfig, Dummy>;
 using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, Dummy>;
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, Dummy>;
@@ -1130,21 +1135,13 @@ using Margins = DocumentationEntry<MarginsConfig, Dummy>;
 using TerminalSize = DocumentationEntry<TerminalSizeConfig, Dummy>;
 using TerminalId = DocumentationEntry<TerminalIdConfig, Dummy>;
 using MaxHistoryLineCount = DocumentationEntry<MaxHistoryLineCountConfig, Dummy>;
-using HistoryScrollMultiplier = DocumentationEntry<HistoryScrollMultiplierConfig, Dummy>;
-using ScrollbarPosition = DocumentationEntry<ScrollbarPositionConfig, Dummy>;
-using StatusDisplayPosition = DocumentationEntry<StatusDisplayPositionConfig, Dummy>;
-using IndicatorStatusLineLeft = DocumentationEntry<IndicatorStatusLineLeftConfig, Dummy>;
-using IndicatorStatusLineMiddle = DocumentationEntry<IndicatorStatusLineMiddleConfig, Dummy>;
-using IndicatorStatusLineRight = DocumentationEntry<IndicatorStatusLineRightConfig, Dummy>;
-using SyncWindowTitleWithHostWritableStatusDisplay =
-    DocumentationEntry<SyncWindowTitleWithHostWritableStatusDisplayConfig, Dummy>;
-using HideScrollbarInAltScreen = DocumentationEntry<HideScrollbarInAltScreenConfig, Dummy>;
+using History = DocumentationEntry<HistoryConfig, Dummy>;
+using Scrollbar = DocumentationEntry<ScrollbarConfig, Dummy>;
+using StatusLine = DocumentationEntry<StatusLineConfig, Dummy>;
 using OptionKeyAsAlt = DocumentationEntry<Dummy, Dummy>;
 using AutoScrollOnUpdate = DocumentationEntry<AutoScrollOnUpdateConfig, Dummy>;
 using Fonts = DocumentationEntry<FontsConfig, Dummy>;
-using CaptureBuffer = DocumentationEntry<CaptureBufferConfig, Dummy>;
-using ChangeFont = DocumentationEntry<ChangeFontConfig, Dummy>;
-using DisplayHostWritableStatusLine = DocumentationEntry<DisplayHostWritableStatusLineConfig, Dummy>;
+using Permissions = DocumentationEntry<PermissionsConfig, Dummy>;
 using DrawBoldTextWithBrightColors = DocumentationEntry<DrawBoldTextWithBrightColorsConfig, Dummy>;
 using Colors = DocumentationEntry<ColorsConfig, Dummy>;
 using ModalCursorScrollOff = DocumentationEntry<ModalCursorScrollOffConfig, Dummy>;
@@ -1154,9 +1151,7 @@ using ModeVisual = DocumentationEntry<ModeVisualConfig, Dummy>;
 using SmoothLineScrolling = DocumentationEntry<SmoothLineScrollingConfig, Dummy>;
 using HighlightTimeout = DocumentationEntry<HighlightTimeoutConfig, Dummy>;
 using HighlightDoubleClickerWord = DocumentationEntry<HighlightDoubleClickerWordConfig, Dummy>;
-using InitialStatusLine = DocumentationEntry<InitialStatusLineConfig, Dummy>;
-using BackgroundOpacity = DocumentationEntry<BackgroundOpacityConfig, Dummy>;
-using BackgroundBlur = DocumentationEntry<BackgroundBlurConfig, Dummy>;
+using Background = DocumentationEntry<BackgroundConfig, Dummy>;
 using Bell = DocumentationEntry<BellConfig, Dummy>;
 using FrozenDecMode = DocumentationEntry<FrozenDecModeConfig, Dummy>;
 using Live = DocumentationEntry<LiveConfig, LiveWeb>;

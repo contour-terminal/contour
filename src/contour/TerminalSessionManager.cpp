@@ -34,7 +34,8 @@ std::unique_ptr<vtpty::Pty> TerminalSessionManager::createPty()
         return make_unique<vtpty::SshSession>(profile->ssh.value());
 #endif
     return make_unique<vtpty::Process>(profile->shell.value(),
-                                       vtpty::createPty(profile->terminalSize.value(), nullopt));
+                                       vtpty::createPty(profile->terminalSize.value(), nullopt),
+                                       profile->escapeSandbox.value());
 }
 
 TerminalSession* TerminalSessionManager::createSession()

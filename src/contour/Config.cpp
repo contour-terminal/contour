@@ -375,34 +375,20 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     auto const child = node[entry];
     if (child)
     {
-        // clang-format off
-        if (child["shell"])
-        {
-            loadFromEntry(child, "shell", where.shell);
-        }
-        else if (child["ssh"])
+        if (child["ssh"])
         {
             loadFromEntry(child, "ssh", where.ssh);
         }
         else
         {
-            // will create default shell if no shell nor ssh config is provided
+            // load shell config if ssh is not provided
             loadFromEntry(child, "shell", where.shell);
         }
         // inforce some default shell setup
         defaultSettings(where.shell.value());
 
-        loadFromEntry(child, "escape_sandbox", where.shell.value().escapeSandbox);
+        loadFromEntry(child, "escape_sandbox", where.escapeSandbox);
         loadFromEntry(child, "copy_last_mark_range_offset", where.copyLastMarkRangeOffset);
-        if(child["initial_working_directory"])
-            {
-                loadFromEntry(child, "initial_working_directory", where.shell.value().workingDirectory);
-            }
-        else
-            {
-                where.shell.value().workingDirectory = homeResolvedPath(where.shell.value().workingDirectory.generic_string(), Process::homeDirectory());
-            }
-
         loadFromEntry(child, "show_title_bar", where.showTitleBar);
         loadFromEntry(child, "size_indicator_on_resize", where.sizeIndicatorOnResize);
         loadFromEntry(child, "fullscreen", where.fullscreen);
@@ -416,27 +402,10 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "frozen_dec_modes", where.frozenModes);
         loadFromEntry(child, "slow_scrolling_time", where.smoothLineScrolling);
         loadFromEntry(child, "terminal_size", where.terminalSize);
-        if (child["history"])
-        {
-            loadFromEntry(child["history"], "limit", where.maxHistoryLineCount);
-            loadFromEntry(child["history"], "scroll_multiplier", where.historyScrollMultiplier);
-            loadFromEntry(child["history"], "auto_scroll_on_update", where.autoScrollOnUpdate);
-        }
-        if (child["scrollbar"])
-        {
-            loadFromEntry(child["scrollbar"], "position", where.scrollbarPosition);
-            loadFromEntry(child["scrollbar"], "hide_in_alt_screen", where.hideScrollbarInAltScreen);
-        }
-        if (child["mouse"])
-            loadFromEntry(child["mouse"], "hide_while_typing", where.mouseHideWhileTyping);
-        if (child["permissions"])
-        {
-            loadFromEntry(child["permissions"], "capture_buffer", where.captureBuffer);
-            loadFromEntry(child["permissions"], "change_font", where.changeFont);
-            loadFromEntry(child["permissions"],
-                          "display_host_writable_statusline",
-                          where.displayHostWritableStatusLine);
-        }
+        loadFromEntry(child, "history", where.history);
+        loadFromEntry(child, "scrollbar", where.scrollbar);
+        loadFromEntry(child, "mouse", where.mouse);
+        loadFromEntry(child, "permissions", where.permissions);
         loadFromEntry(child, "highlight_word_and_matches_on_double_click", where.highlightDoubleClickedWord);
         loadFromEntry(child, "font", where.fonts);
         loadFromEntry(child, "draw_bold_text_with_bright_colors", where.drawBoldTextWithBrightColors);
@@ -444,41 +413,36 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         {
             loadFromEntry(child["cursor"], "shape", where.modeInsert.value().cursor.cursorShape);
             loadFromEntry(child["cursor"], "blinking", where.modeInsert.value().cursor.cursorDisplay);
-            loadFromEntry(child["cursor"], "blinking_interval", where.modeInsert.value().cursor.cursorBlinkInterval);
+            loadFromEntry(
+                child["cursor"], "blinking_interval", where.modeInsert.value().cursor.cursorBlinkInterval);
         }
         if (child["normal_mode"] && child["normal_mode"]["cursor"])
         {
-            loadFromEntry(child["normal_mode"]["cursor"], "shape", where.modeNormal.value().cursor.cursorShape);
-            loadFromEntry(child["normal_mode"]["cursor"], "blinking", where.modeNormal.value().cursor.cursorDisplay);
-            loadFromEntry(child["normal_mode"]["cursor"], "blinking_interval", where.modeNormal.value().cursor.cursorBlinkInterval);
+            loadFromEntry(
+                child["normal_mode"]["cursor"], "shape", where.modeNormal.value().cursor.cursorShape);
+            loadFromEntry(
+                child["normal_mode"]["cursor"], "blinking", where.modeNormal.value().cursor.cursorDisplay);
+            loadFromEntry(child["normal_mode"]["cursor"],
+                          "blinking_interval",
+                          where.modeNormal.value().cursor.cursorBlinkInterval);
         }
         if (child["visual_mode"] && child["visual_mode"]["cursor"])
         {
-            loadFromEntry(child["visual_mode"]["cursor"], "shape", where.modeVisual.value().cursor.cursorShape);
-            loadFromEntry(child["visual_mode"]["cursor"], "blinking", where.modeVisual.value().cursor.cursorDisplay);
-            loadFromEntry(child["visual_mode"]["cursor"], "blinking_interval", where.modeVisual.value().cursor.cursorBlinkInterval);
-            loadFromEntry(child["visual_mode"]["cursor"], "blinking_interval", where.modeVisual.value().cursor.cursorBlinkInterval);
+            loadFromEntry(
+                child["visual_mode"]["cursor"], "shape", where.modeVisual.value().cursor.cursorShape);
+            loadFromEntry(
+                child["visual_mode"]["cursor"], "blinking", where.modeVisual.value().cursor.cursorDisplay);
+            loadFromEntry(child["visual_mode"]["cursor"],
+                          "blinking_interval",
+                          where.modeVisual.value().cursor.cursorBlinkInterval);
+            loadFromEntry(child["visual_mode"]["cursor"],
+                          "blinking_interval",
+                          where.modeVisual.value().cursor.cursorBlinkInterval);
         }
         loadFromEntry(child, "vi_mode_highlight_timeout", where.highlightTimeout);
         loadFromEntry(child, "vi_mode_scrolloff", where.modalCursorScrollOff);
-        if (child["status_line"])
-        {
-            loadFromEntry(child["status_line"], "position", where.statusDisplayPosition);
-            loadFromEntry(child["status_line"], "sync_to_window_title", where.syncWindowTitleWithHostWritableStatusDisplay);
-            loadFromEntry(child["status_line"], "display", where.initialStatusDisplayType);
-
-            if (child["status_line"]["indicator"])
-            {
-                loadFromEntry(child["status_line"]["indicator"], "left", where.indicatorStatusLineLeft);
-                loadFromEntry(child["status_line"]["indicator"], "middle", where.indicatorStatusLineMiddle);
-                loadFromEntry(child["status_line"]["indicator"], "right", where.indicatorStatusLineRight);
-            }
-        }
-        if (child["background"])
-        {
-            loadFromEntry(child["background"], "opacity", where.backgroundOpacity);
-            loadFromEntry(child["background"], "blur", where.backgroundBlur);
-        }
+        loadFromEntry(child, "status_line", where.statusLine);
+        loadFromEntry(child, "background", where.background);
         // clang-format on
 
         loadFromEntry(child, "colors", where.colors);
@@ -491,8 +455,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
             dual->lightMode.useBrightColors = where.drawBoldTextWithBrightColors.value();
         }
 
-        loadFromEntry(child, "hyperlink_decoration.normal", where.hyperlinkDecorationNormal);
-        loadFromEntry(child, "hyperlink_decoration.hover", where.hyperlinkDecorationHover);
+        loadFromEntry(child, "hyperlink_decoration", where.hyperlinkDecoration);
     }
 }
 
@@ -874,10 +837,20 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     {
         where.program = child.as<std::string>();
     }
+    // loading arguments from the profile
     if (auto args = node["arguments"]; args && args.IsSequence())
     {
         for (auto const& argNode: args)
             where.arguments.emplace_back(argNode.as<string>());
+    }
+    if (node["initial_working_directory"])
+    {
+        loadFromEntry(node, "initial_working_directory", where.workingDirectory);
+    }
+    else
+    {
+        where.workingDirectory =
+            homeResolvedPath(where.workingDirectory.generic_string(), Process::homeDirectory());
     }
 }
 
@@ -1126,6 +1099,92 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         uint height = 0;
         loadFromEntry(child, "max_height", height);
         where.maxImageSize = { vtpty::Width { width }, vtpty::Height { height } };
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "limit", where.maxHistoryLineCount);
+        loadFromEntry(child, "scroll_multiplier", where.historyScrollMultiplier);
+        loadFromEntry(child, "auto_scroll_on_update", where.autoScrollOnUpdate);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "position", where.position);
+        loadFromEntry(child, "hide_in_alt_screen", where.hideScrollbarInAltScreen);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, MouseConfig& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "hide_while_typing", where.hideWhileTyping);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     StatusLineConfig& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "position", where.position);
+        loadFromEntry(child, "sync_to_window_title", where.syncWindowTitleWithHostWritableStatusDisplay);
+        loadFromEntry(child, "display", where.initialType);
+        if (child["indicator"])
+        {
+            loadFromEntry(child["indicator"], "left", where.indicator.left);
+            loadFromEntry(child["indicator"], "middle", where.indicator.middle);
+            loadFromEntry(child["indicator"], "right", where.indicator.right);
+        }
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     BackgroundConfig& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "opacity", where.opacity);
+        loadFromEntry(child, "blur", where.blur);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     HyperlinkDecorationConfig& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "normal", where.normal);
+        loadFromEntry(child, "hover", where.hover);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     PermissionsConfig& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "capture_buffer", where.captureBuffer);
+        loadFromEntry(child, "change_font", where.changeFont);
+        loadFromEntry(child, "display_host_writable_statusline", where.displayHostWritableStatusLine);
     }
 }
 
@@ -2060,12 +2119,19 @@ std::string createForProfile(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
-    auto const process = [&](auto v) {
-        doc.append(writer.process(v.documentation, v.value()));
-    };
 
-    auto const processWithDoc = [&](auto&& docString, auto... val) {
-        doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
+    auto const processConfigEntry =
+        [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
+            auto name,
+            contour::config::ConfigEntry<
+                T,
+                contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
+            doc.append(writer.process(writer.whichDoc(v), name, v.value()));
+        };
+
+    auto completeOverload = crispy::overloaded {
+        processConfigEntry,
+        [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
     };
 
     // inside profiles:
@@ -2077,125 +2143,41 @@ std::string createForProfile(Config const& c)
             doc.append(std::format("    {}: \n", name));
             {
                 const auto _ = typename Writer::Offset {};
-                process(entry.shell);
-                process(entry.ssh);
 
-                processWithDoc(documentation::EscapeSandbox {}, entry.shell.value().escapeSandbox);
-                process(entry.copyLastMarkRangeOffset);
-                processWithDoc(documentation::InitialWorkingDirectory {}, [&entry = entry]() {
-                    auto fromConfig = entry.shell.value().workingDirectory.string();
-                    if (fromConfig.empty() || fromConfig == homeResolvedPath("~", Process::homeDirectory()))
-                        return std::string { "\"~\"" };
-                    return fromConfig;
-                }());
-                process(entry.showTitleBar);
-                process(entry.sizeIndicatorOnResize);
-                process(entry.fullscreen);
-                process(entry.maximized);
-                process(entry.searchModeSwitch);
-                process(entry.insertAfterYank);
-                process(entry.bell);
-                process(entry.wmClass);
-                process(entry.terminalId);
-                processWithDoc(documentation::FrozenDecMode {}, 0);
-                process(entry.smoothLineScrolling);
-                process(entry.terminalSize);
-
-                process(entry.margins);
-                // history: section
-                doc.append(Writer::addOffset("history:\n", Writer::Offset::levels * Writer::OneOffset));
-                {
-                    const auto _ = typename Writer::Offset {};
-                    process(entry.maxHistoryLineCount);
-                    process(entry.autoScrollOnUpdate);
-                    process(entry.historyScrollMultiplier);
-                }
-
-                // scrollbar: section
-                doc.append(Writer::addOffset("scrollbar:\n", Writer::Offset::levels * Writer::OneOffset));
-                ;
-                {
-                    const auto _ = typename Writer::Offset {};
-                    process(entry.scrollbarPosition);
-                    process(entry.hideScrollbarInAltScreen);
-                }
-
-                // mouse: section
-                doc.append(Writer::addOffset("mouse:\n", Writer::Offset::levels * Writer::OneOffset));
-                {
-                    const auto _ = typename Writer::Offset {};
-                    process(entry.mouseHideWhileTyping);
-                }
-
-                //  permissions: section
-                processWithDoc(
-                    documentation::DocumentationEntry<
-                        documentation::StringLiteral {
-                            "\n"
-                            "{comment} Some VT sequences should need access permissions.\n"
-                            "{comment} \n"
-                            "{comment}  These can be to:\n"
-                            "{comment}  - allow     Allows the given functionality\n"
-                            "{comment}  - deny      Denies the given functionality\n"
-                            "{comment}  - ask       Asks the user interactively via popup dialog for "
-                            "permission of the given action.\n"
-                            "permissions:\n" },
-                        documentation::StringLiteral { "" }> {},
-                    0);
-                {
-                    const auto _ = typename Writer::Offset {};
-                    process(entry.changeFont);
-                    process(entry.captureBuffer);
-                    process(entry.displayHostWritableStatusLine);
-                }
-                process(entry.highlightDoubleClickedWord);
-                process(entry.fonts);
-                process(entry.drawBoldTextWithBrightColors);
-                process(entry.modeInsert);
-                process(entry.modeNormal);
-                process(entry.modeVisual);
-                process(entry.highlightTimeout);
-                process(entry.modalCursorScrollOff);
-
-                // status_line
-                doc.append(Writer::addOffset("\n"
-                                             "status_line:\n",
-                                             Writer::Offset::levels * Writer::OneOffset));
-                {
-                    const auto _ = typename Writer::Offset {};
-                    process(entry.initialStatusDisplayType);
-                    process(entry.statusDisplayPosition);
-                    process(entry.syncWindowTitleWithHostWritableStatusDisplay);
-
-                    doc.append(Writer::addOffset("indicator:\n", Writer::Offset::levels * Writer::OneOffset));
-                    {
-                        const auto _ = typename Writer::Offset {};
-                        process(entry.indicatorStatusLineLeft);
-                        process(entry.indicatorStatusLineMiddle);
-                        process(entry.indicatorStatusLineRight);
-                    }
-                }
-
-                doc.append(Writer::addOffset("\n"
-                                             "background:\n",
-                                             Writer::Offset::levels * Writer::OneOffset));
-                {
-                    const auto _ = typename Writer::Offset {};
-                    process(entry.backgroundOpacity);
-                    process(entry.backgroundBlur);
-                }
-
-                process(entry.colors);
-
-                doc.append(Writer::addOffset("\n"
-                                             "hyperlink_decoration:\n",
-                                             Writer::Offset::levels * Writer::OneOffset));
-                {
-                    const auto _ = typename Writer::Offset {};
-                    // process(entry.hyperlinkDecorationNormal); // TODO(PR) make them together to use doc
-                    // string from process(entry.hyperlinkDecorationHover);  // TODO(PR)
-                    // documentation::HyperlinkDecoration
-                }
+                Reflection::CallOnMembers(entry, completeOverload);
+                // process(entry.shell);
+                // process(entry.ssh);
+                // process(entry.escapeSandbox);
+                // process(entry.copyLastMarkRangeOffset);
+                // process(entry.showTitleBar);
+                // process(entry.sizeIndicatorOnResize);
+                // process(entry.fullscreen);
+                // process(entry.maximized);
+                // process(entry.searchModeSwitch);
+                // process(entry.insertAfterYank);
+                // process(entry.bell);
+                // process(entry.wmClass);
+                // process(entry.terminalId);
+                // process(entry.frozenModes);
+                // process(entry.smoothLineScrolling);
+                // process(entry.terminalSize);
+                // process(entry.margins);
+                // process(entry.history);
+                // process(entry.scrollbar);
+                // process(entry.mouse);
+                // process(entry.permissions);
+                // process(entry.highlightDoubleClickedWord);
+                // process(entry.fonts);
+                // process(entry.drawBoldTextWithBrightColors);
+                // process(entry.modeInsert);
+                // process(entry.modeNormal);
+                // process(entry.modeVisual);
+                // process(entry.highlightTimeout);
+                // process(entry.modalCursorScrollOff);
+                // process(entry.statusLine);
+                // process(entry.background);
+                // process(entry.colors);
+                // process(entry.hyperlinkDecoration);
             }
         };
     }

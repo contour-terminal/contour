@@ -317,8 +317,8 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
             _session->config().renderer.value().textureAtlasHashtableSlots,
             _session->config().renderer.value().textureAtlasTileCount,
             _session->config().renderer.value().textureAtlasDirectMapping,
-            _session->profile().hyperlinkDecorationNormal.value(),
-            _session->profile().hyperlinkDecorationHover.value()
+            _session->profile().hyperlinkDecoration.value().normal,
+            _session->profile().hyperlinkDecoration.value().hover
             // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
         );
 
