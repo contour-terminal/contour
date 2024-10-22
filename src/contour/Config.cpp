@@ -2135,51 +2135,16 @@ std::string createForProfile(Config const& c)
     };
 
     // inside profiles:
-    doc.append(writer.replaceCommentPlaceholder(c.profiles.documentation));
+    doc.append(writer.replaceCommentPlaceholder(std::string { writer.whichDoc(c.profiles) }));
     {
         const auto _ = typename Writer::Offset {};
         for (auto&& [name, entry]: c.profiles.value())
         {
-            doc.append(std::format("    {}: \n", name));
-            {
-                const auto _ = typename Writer::Offset {};
+            if constexpr (std::same_as<Writer, YAMLConfigWriter>)
+                doc.append(std::format("    {}: \n", name));
 
-                Reflection::CallOnMembers(entry, completeOverload);
-                // process(entry.shell);
-                // process(entry.ssh);
-                // process(entry.escapeSandbox);
-                // process(entry.copyLastMarkRangeOffset);
-                // process(entry.showTitleBar);
-                // process(entry.sizeIndicatorOnResize);
-                // process(entry.fullscreen);
-                // process(entry.maximized);
-                // process(entry.searchModeSwitch);
-                // process(entry.insertAfterYank);
-                // process(entry.bell);
-                // process(entry.wmClass);
-                // process(entry.terminalId);
-                // process(entry.frozenModes);
-                // process(entry.smoothLineScrolling);
-                // process(entry.terminalSize);
-                // process(entry.margins);
-                // process(entry.history);
-                // process(entry.scrollbar);
-                // process(entry.mouse);
-                // process(entry.permissions);
-                // process(entry.highlightDoubleClickedWord);
-                // process(entry.fonts);
-                // process(entry.drawBoldTextWithBrightColors);
-                // process(entry.modeInsert);
-                // process(entry.modeNormal);
-                // process(entry.modeVisual);
-                // process(entry.highlightTimeout);
-                // process(entry.modalCursorScrollOff);
-                // process(entry.statusLine);
-                // process(entry.background);
-                // process(entry.colors);
-                // process(entry.hyperlinkDecoration);
-            }
-        };
+            writer.scoped([&]() { Reflection::CallOnMembers(entry, completeOverload); });
+        }
     }
     return doc;
 }

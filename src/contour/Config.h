@@ -1379,18 +1379,13 @@ struct DocumentationWriter: Writer
         return process(doc, std::string_view { "" }, val...);
     }
 
-    inline std::string removeNewLine(std::string const& docString)
-    {
-        return std::regex_replace(docString, std::regex { "\n" }, " ");
-    }
-
     template <typename... T>
     std::string process(std::string_view doc, std::string_view name, T... val)
     {
         return format("### `{}`\n"
-                      "{}<br/>\n",
+                      "{}\n",
                       name,
-                      format(replaceCommentPlaceholder(removeNewLine(std::string { doc })), val...));
+                      format(replaceCommentPlaceholder(std::string { doc }), val...));
     }
 
     template <typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
