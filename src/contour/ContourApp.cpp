@@ -160,6 +160,8 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.info.vt", bind(&ContourApp::infoVT, this));
     link("contour.documentation.vt", bind(&ContourApp::documentationVT, this));
     link("contour.documentation.keys", bind(&ContourApp::documentationKeyMapping, this));
+    link("contour.documentation.configuration.global", bind(&ContourApp::documentationGlobalConfig, this));
+    link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
 }
 
 template <typename Callback>
@@ -242,6 +244,121 @@ int ContourApp::documentationKeyMapping()
     std::format_to(back, "```\n");
     std::format_to(back, "\n");
 
+    std::cout << info;
+    return EXIT_SUCCESS;
+}
+
+int ContourApp::documentationGlobalConfig()
+{
+    std::string configInfo;
+    auto back = std::back_inserter(configInfo);
+    std::format_to(back, "{}\n", contour::config::documentationGlobalConfig());
+
+    std::string_view const headerInfo = R"(# Configuring Contour
+
+Contour offers a wide range of configuration options that can be customized, including color scheme, shell, initial working directory, and more.
+The configuration options can be categorized into several groups:
+
+- Global options: These settings determine the overall behavior of the terminal and apply to all profiles.<br/>
+- Profiles: With profiles, you can configure the terminal more granularly and create multiple profiles that can be easily switched between.<br/>
+- Color scheme: Contour allows you to define different color schemes for the terminal and choose which one to use for each of the profiles. <br/>
+
+
+On Unix systems, the main configuration file is located at  `~/.config/contour/contour.yml` and is both read from and auto-generated there. On Windows systems, the file is located at  `%LocalAppData%\contour\contour.yml`.
+
+!!! note "Please note that on Unix systems, the environment variable `XDG_CONFIG_HOME` (by default set to `~/.config`) is taken into account."
+
+By default, on Unix systems, Contour is executed with the following arguments `contour config ~/.config/contour/contour.yml profile main`. If the configuration file includes a `default_profile` variable, it will be used as the default profile. Otherwise, the first profile listed in the file will be the default one.
+## How to
+
+### Load specific configuration file
+`contour config /path/to/file/with/configuration.yml`
+### Set profile for current session
+you can utilize the `profile` parameter with the `contour` command <br/>
+`contour profile one_of_profiles`
+
+
+## Global options
+
+Let's go through the different sections of the global configurations in the file:
+)";
+
+    std::string_view const additionalInfo = R"(
+### Defaut global parameters
+
+```yaml
+platform_plugin: auto
+renderer:
+    backend: OpenGL
+    tile_hashtable_slots: 4096
+    tile_cache_count: 4000
+    tile_direct_mapping: true
+word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
+read_buffer_size: 16384
+pty_buffer_size: 1048576
+default_profile: main
+spawn_new_process: false
+reflow_on_resize: true
+bypass_mouse_protocol_modifier: Shift
+mouse_block_selection_modifier: Control
+on_mouse_select: CopyToSelectionClipboard
+live_config: false
+images:
+    sixel_scrolling: true
+    sixel_register_count: 4096
+    max_width: 0
+    max_height: 0
+
+```
+
+The default profile is automatically the top (first) defined profile in the configuration file, but can be explicitly set to an order-independant name using `default_profile` configuration key.
+
+
+## Profiles
+Profiles is the main part of user specific customizations, you can create more than one profile and chose which you want to use during startup or define in configuration file.
+
+
+By default each profile inherites values from `default_profile`. This means that you can specify only values that you want to change in respect to default profile, for example you can create new profile to use `bash` as a shell preserving other configuration from `main` profile
+```
+profiles:
+    main:
+    # default profile here
+    bash:
+        shell: "/usr/bin/bash"
+
+```
+
+For the full list of options see generated configuration file on your system or [Profiles](profiles.md) section of documentation.
+
+
+## Color Schemes
+In contour you can specify different colors inside terminal, for example text background and foreground, cursor properties, selection colors and plenty others.
+You can configure your color profiles, whereas a color can be expressed in standard web format, with a leading # followed by red/green/blue values, 7 characters in total. You may alternatively use 0x as prefix instead of #. For example 0x102030 is equal to '#102030'.
+
+Syntax for color shemes repeat the one of profiles. First color scheme inside configuration file must be named `default`, each other color schemes inherit values from `default` color scheme. Example of configuration for `color_schemes`
+```
+color_schemes:
+    default:
+    # values for default color scheme
+    different_selection:
+      selection:
+        background: '#fff0f0'
+```
+
+For the full list of options see generated configuration file on your system or [Colors](colors.md) section of documentation.
+)";
+
+    std::cout << headerInfo;
+    std::cout << configInfo;
+    std::cout << additionalInfo;
+    return EXIT_SUCCESS;
+}
+
+int ContourApp::documentationProfileConfig()
+{
+    std::string info;
+    auto back = std::back_inserter(info);
+    std::format_to(back, "{}\n", contour::config::documentationProfileConfig());
     std::cout << info;
     return EXIT_SUCCESS;
 }
@@ -385,13 +502,25 @@ crispy::cli::command ContourApp::parameterDefinition() const
                     CLI::command { "vt", "Prints general information about supported VT sequences." },
                     CLI::command { "config", "Prints missing entries from user config file." },
                 } },
-            CLI::command { "documentation",
-                           "Generate documentation for web page",
-                           CLI::option_list {},
-                           CLI::command_list {
-                               CLI::command { "vt", "VT sequence reference documentation" },
-                               CLI::command { "keys", "List of configurable actions for key binding" },
-                           } },
+            CLI::command {
+                "documentation",
+                "Generate documentation for web page",
+                CLI::option_list {},
+                CLI::command_list {
+                    CLI::command { "vt", "VT sequence reference documentation" },
+                    CLI::command { "keys", "List of configurable actions for key binding" },
+                    CLI::command {
+                        "configuration",
+                        "Create documentaion for configuration file",
+                        CLI::option_list {},
+                        CLI::command_list {
+                            CLI::command { "global",
+                                           "Create documentation entry for global part of the config file" },
+                            CLI::command { "profile",
+                                           "Create documentation entry for profile part of the config file" },
+                        } },
+                },
+            },
             CLI::command {
                 "generate",
                 "Generation utilities.",

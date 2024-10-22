@@ -314,9 +314,9 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
             _session->profile().terminalSize.value(),
             sanitizeFontDescription(profile().fonts.value(), fontDPI()),
             _session->terminal().colorPalette(),
-            _session->config().textureAtlasHashtableSlots.value(),
-            _session->config().textureAtlasTileCount.value(),
-            _session->config().textureAtlasDirectMapping.value(),
+            _session->config().renderer.value().textureAtlasHashtableSlots,
+            _session->config().renderer.value().textureAtlasTileCount,
+            _session->config().renderer.value().textureAtlasDirectMapping,
             _session->profile().hyperlinkDecorationNormal.value(),
             _session->profile().hyperlinkDecorationHover.value()
             // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
