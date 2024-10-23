@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/Actions.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalSession.h>
 #include <contour/display/TerminalDisplay.h>
@@ -1181,6 +1182,33 @@ bool TerminalSession::operator()(actions::ScreenshotVT)
                                                          : terminal().alternateScreen().screenshot();
     ofstream ofs { "screenshot.vt", ios::trunc | ios::binary };
     ofs << screenshot;
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SaveScreenshot)
+{
+    auto savePath =
+        app().dumpStateAtExit().value_or(crispy::app::instance()->localStateDir())
+        / fs::path(std::format("contour-screenshot-{:%Y-%m-%d-%H-%M-%S}.png", chrono::system_clock::now()));
+
+    _display->setScreenshotOutput(savePath);
+    auto message = std::format("Saving screenshot to {}", savePath.string());
+    sessionLog()(message);
+
+    _display->post(
+        [this, message]() { emit showNotification("Screenshot", QString::fromStdString(message)); });
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CopyScreenshot)
+{
+    _display->setScreenshotOutput(std::monostate {});
+    auto message = std::format("Saving screenshot to clipboard");
+    sessionLog()(message);
+
+    _display->post(
+        [this, message]() { emit showNotification("Screenshot", QString::fromStdString(message)); });
+
     return true;
 }
 

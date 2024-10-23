@@ -327,6 +327,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ResetConfig);
     bool operator()(actions::ResetFontSize);
     bool operator()(actions::ScreenshotVT);
+    bool operator()(actions::CopyScreenshot);
+    bool operator()(actions::SaveScreenshot);
     bool operator()(actions::ScrollDown);
     bool operator()(actions::ScrollMarkDown);
     bool operator()(actions::ScrollMarkUp);
