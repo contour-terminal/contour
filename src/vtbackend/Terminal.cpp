@@ -986,8 +986,14 @@ void Terminal::sendPaste(string_view text)
         return;
     }
 
-    _inputGenerator.generatePaste(text);
-    flushInput();
+    auto const chunkSize = std::size_t(1024);
+    // send in chunks
+    for (size_t i = 0; i < text.size(); i += chunkSize)
+    {
+        auto const chunk = text.substr(i, std::min(text.size() - i, chunkSize));
+        _inputGenerator.generatePaste(chunk);
+        flushInput();
+    }
 }
 
 void Terminal::sendRawInput(string_view text)

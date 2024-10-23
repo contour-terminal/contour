@@ -41,6 +41,7 @@ enum class GuardedRole : uint8_t
     ChangeFont,
     CaptureBuffer,
     ShowHostWritableStatusLine,
+    BigPaste,
 };
 
 /**
@@ -240,6 +241,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void detachDisplay(display::TerminalDisplay& display);
 
     Q_INVOKABLE void applyPendingFontChange(bool allow, bool remember);
+    Q_INVOKABLE void applyPendingPaste(bool allow, bool remember);
     Q_INVOKABLE void executePendingBufferCapture(bool allow, bool remember);
     Q_INVOKABLE void executeShowHostWritableStatusLine(bool allow, bool remember);
     Q_INVOKABLE void resizeTerminalToDisplaySize();
@@ -393,6 +395,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void onBell(float volume);
     void onAlert();
     void requestPermissionForFontChange();
+    void requestPermissionForPasteLargeFile();
     void requestPermissionForBufferCapture();
     void requestPermissionForShowHostWritableStatusLine();
     void showNotification(QString const& title, QString const& content);
@@ -468,6 +471,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     };
     std::optional<CaptureBufferRequest> _pendingBufferCapture;
     std::optional<vtbackend::FontDef> _pendingFontChange;
+    std::optional<QClipboard*> _pendingBigPaste;
     PermissionCache _rememberedPermissions;
     std::unique_ptr<QThread> _exitWatcherThread;
 
@@ -492,6 +496,7 @@ struct std::formatter<contour::GuardedRole>: std::formatter<std::string_view>
             case contour::GuardedRole::ChangeFont: output = "Change Font"; break;
             case contour::GuardedRole::CaptureBuffer: output = "Capture Buffer"; break;
             case contour::GuardedRole::ShowHostWritableStatusLine:  output = "show Host Writable Statusline"; break;
+            case contour::GuardedRole::BigPaste:  output = "paste large number of characters"; break;
         }
         // clang-format on
         return formatter<string_view>::format(output, ctx);
