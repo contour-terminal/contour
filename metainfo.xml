@@ -109,6 +109,7 @@
         <ul>
           <li>Expose current profile's name through env var `CONTOUR_PROFILE` (#1637)</li>
           <li>Add terminal tabs (#90)</li>
+          <li>Add `SaveScreenshot` and `CopyScreenshot` action (#210)</li>
           <li>Add binding to exit normal mode with `Esc` (#1604)</li>
           <li>Add config option to switch into insert mode after yank (#1604)</li>
           <li>Improves window size/resize handling on HiDPI monitor settings (#1628)</li>

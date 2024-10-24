@@ -40,6 +40,7 @@
 #include <fstream>
 #include <string_view>
 #include <tuple>
+#include <variant>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -736,6 +737,20 @@ void TerminalDisplay::onAfterRendering()
     // We use this to schedule the next rendering frame, if needed.
     // This signal is emitted from the scene graph rendering thread
     paint();
+    if (_saveScreenshot)
+    {
+        std::visit(crispy::overloaded { [&](const std::filesystem::path& path) {
+                                           screenshot().save(QString::fromStdString(path.string()));
+                                       },
+                                        [&](std::monostate) {
+                                            if (QClipboard* clipboard = QGuiApplication::clipboard();
+                                                clipboard != nullptr)
+                                                clipboard->setImage(screenshot(), QClipboard::Clipboard);
+                                        } },
+                   _saveScreenshot.value());
+
+        _saveScreenshot = std::nullopt;
+    }
 
     if (!_state.finish())
     {
@@ -1092,6 +1107,18 @@ void TerminalDisplay::doDumpState()
     _doDumpState = true;
 }
 
+QImage TerminalDisplay::screenshot()
+{
+    _renderer->render(terminal(), _renderingPressure);
+    auto [size, image] = _renderTarget->takeScreenshot();
+
+    return QImage(image.data(),
+                  size.width.as<int>(),
+                  size.height.as<int>(),
+                  QImage::Format_RGBA8888_Premultiplied)
+        .mirrored(false, true);
+}
+
 void TerminalDisplay::doDumpStateInternal()
 {
 
@@ -1178,10 +1205,7 @@ void TerminalDisplay::doDumpStateInternal()
 
     auto screenshotFilePath = targetDir / "screenshot.png";
     displayLog()("Saving screenshot to: {}", screenshotFilePath.generic_string());
-    auto [size, image] = _renderTarget->takeScreenshot();
-    QImage(image.data(), size.width.as<int>(), size.height.as<int>(), QImage::Format_RGBA8888_Premultiplied)
-        .mirrored(false, true)
-        .save(QString::fromStdString(screenshotFilePath.string()));
+    screenshot().save(QString::fromStdString(screenshotFilePath.string()));
 }
 
 void TerminalDisplay::notify(std::string_view /*_title*/, std::string_view /*_body*/)

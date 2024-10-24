@@ -54,6 +54,8 @@ struct ReloadConfig{ std::optional<std::string> profileName; };
 struct ResetConfig{};
 struct ResetFontSize{};
 struct ScreenshotVT{};
+struct SaveScreenshot{};
+struct CopyScreenshot{};
 struct ScrollDown{};
 struct ScrollMarkDown{};
 struct ScrollMarkUp{};
@@ -110,6 +112,8 @@ using Action = std::variant<CancelSelection,
                             ResetConfig,
                             ResetFontSize,
                             ScreenshotVT,
+                            SaveScreenshot,
+                            CopyScreenshot,
                             ScrollDown,
                             ScrollMarkDown,
                             ScrollMarkUp,
@@ -201,6 +205,10 @@ namespace documentation
         "Resets font size to what is configured in the config file."
     };
     constexpr inline std::string_view ScreenshotVT { "Takes a screenshot in form of VT escape sequences." };
+    constexpr inline std::string_view SaveScreenshot { "Takes a screenshot and saves it into a file." };
+    constexpr inline std::string_view CopyScreenshot {
+        "takes a screenshot and puts it into the system clipboard"
+    };
     constexpr inline std::string_view ScrollDown { "Scrolls down by the multiplier factor." };
     constexpr inline std::string_view ScrollMarkDown {
         "Scrolls one mark down (if none present, bottom of the screen)"
@@ -285,6 +293,8 @@ inline auto getDocumentation()
         std::tuple { Action { ResetConfig {} }, documentation::ResetConfig },
         std::tuple { Action { ResetFontSize {} }, documentation::ResetFontSize },
         std::tuple { Action { ScreenshotVT {} }, documentation::ScreenshotVT },
+        std::tuple { Action { SaveScreenshot {} }, documentation::SaveScreenshot },
+        std::tuple { Action { CopyScreenshot {} }, documentation::CopyScreenshot },
         std::tuple { Action { ScrollDown {} }, documentation::ScrollDown },
         std::tuple { Action { ScrollMarkDown {} }, documentation::ScrollMarkDown },
         std::tuple { Action { ScrollMarkUp {} }, documentation::ScrollMarkUp },
@@ -356,6 +366,8 @@ DECLARE_ACTION_FMT(ReloadConfig)
 DECLARE_ACTION_FMT(ResetConfig)
 DECLARE_ACTION_FMT(ResetFontSize)
 DECLARE_ACTION_FMT(ScreenshotVT)
+DECLARE_ACTION_FMT(SaveScreenshot)
+DECLARE_ACTION_FMT(CopyScreenshot)
 DECLARE_ACTION_FMT(ScrollDown)
 DECLARE_ACTION_FMT(ScrollMarkDown)
 DECLARE_ACTION_FMT(ScrollMarkUp)
@@ -433,6 +445,8 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(ResetConfig);
         HANDLE_ACTION(ResetFontSize);
         HANDLE_ACTION(ScreenshotVT);
+        HANDLE_ACTION(CopyScreenshot);
+        HANDLE_ACTION(SaveScreenshot);
         HANDLE_ACTION(ScrollDown);
         HANDLE_ACTION(ScrollMarkDown);
         HANDLE_ACTION(ScrollMarkUp);

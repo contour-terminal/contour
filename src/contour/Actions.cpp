@@ -54,6 +54,8 @@ optional<Action> fromString(string const& name)
         mapAction<actions::ResetConfig>("ResetConfig"),
         mapAction<actions::ResetFontSize>("ResetFontSize"),
         mapAction<actions::ScreenshotVT>("ScreenshotVT"),
+        mapAction<actions::SaveScreenshot>("SaveScreenshot"),
+        mapAction<actions::CopyScreenshot>("CopyScreenshot"),
         mapAction<actions::ScrollDown>("ScrollDown"),
         mapAction<actions::ScrollMarkDown>("ScrollMarkDown"),
         mapAction<actions::ScrollMarkUp>("ScrollMarkUp"),

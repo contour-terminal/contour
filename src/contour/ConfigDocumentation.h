@@ -765,6 +765,8 @@ constexpr StringLiteral InputMappingsConfig {
     "it. Attention, all your current configuration will be lost due to overwrite!\n"
     "{comment} - ResetFontSize     Resets font size to what is configured in the config file.\n"
     "{comment} - ScreenshotVT      Takes a screenshot in form of VT escape sequences.\n"
+    "{comment} - SaveScreenshot    Takes a screenshot and saves it into a file.\n"
+    "{comment} - CopyScreenshot    Takes a screenshot and puts it into the system clipboard\n"
     "{comment} - ScrollDown        Scrolls down by the multiplier factor.\n"
     "{comment} - ScrollMarkDown    Scrolls one mark down (if none present, bottom of the screen)\n"
     "{comment} - ScrollMarkUp      Scrolls one mark up\n"

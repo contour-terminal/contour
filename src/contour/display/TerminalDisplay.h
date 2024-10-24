@@ -20,16 +20,16 @@
 #include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QVector4D>
 #include <QtMultimedia/QMediaPlayer>
+#include <QtQml/QtQml>
 #include <QtQuick/QQuickItem>
 
-#include <QtQml>
-
+#include <filesystem>
+#include <memory>
+#include <optional>
+#include <variant>
 #if defined(CONTOUR_PERF_STATS)
     #include <atomic>
 #endif
-
-#include <memory>
-#include <optional>
 
 namespace contour::display
 {
@@ -151,6 +151,7 @@ class TerminalDisplay: public QQuickItem
     void onSelectionCompleted();
     void bufferChanged(vtbackend::ScreenType);
     void discardImage(vtbackend::Image const&);
+    void setScreenshotOutput(auto&& where) { _saveScreenshot = std::forward<decltype(where)>(where); }
     // }}}
 
     [[nodiscard]] std::optional<double> queryContentScaleOverride() const;
@@ -220,6 +221,7 @@ class TerminalDisplay: public QQuickItem
     // helper methods
     //
     void doDumpStateInternal();
+    QImage screenshot();
     void createRenderer();
     [[nodiscard]] QMatrix4x4 createModelMatrix() const;
     void configureScreenHooks();
@@ -274,6 +276,7 @@ class TerminalDisplay: public QQuickItem
 
     RenderStateManager _state;
     bool _doDumpState = false;
+    std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
 
     QFileSystemWatcher _filesystemWatcher;
     QMediaPlayer _mediaPlayer;
