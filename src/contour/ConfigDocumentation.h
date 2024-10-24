@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <string_view>
+
 namespace contour::config::documentation
 {
 
@@ -31,10 +32,6 @@ constexpr StringLiteral ShellConfig {
     "{comment} But you may as well log in to a remote host.\n"
     "shell: {}\n"
     "arguments: {}\n"
-    "\n"
-};
-
-constexpr StringLiteral InitialWorkingDirectoryConfig {
     "{comment} Sets initial working directory when spawning a new terminal.\n"
     "{comment} A leading ~ is expanded to the user's home directory.\n"
     "{comment} Default value is the user's home directory.\n"
@@ -124,9 +121,10 @@ constexpr StringLiteral ShowIndicatorOnResizeConfig {
     "\n"
 };
 
-constexpr StringLiteral MouseHideWhileTypingConfig { "{comment} whether or not to hide mouse when typing\n"
-                                                     "hide_while_typing: {}\n"
-                                                     "\n" };
+constexpr StringLiteral MouseConfig { "mouse:\n"
+                                      "    {comment} whether or not to hide mouse when typing\n"
+                                      "    hide_while_typing: {}\n"
+                                      "\n" };
 
 constexpr StringLiteral SeachModeSwitchConfig {
     "{comment} Whether or not to switch from search mode into insert on exit. If this value is set to true,\n"
@@ -203,34 +201,28 @@ constexpr StringLiteral HistoryScrollMultiplierConfig {
     "\n"
 };
 
-constexpr StringLiteral ScrollbarPositionConfig {
-    "{comment} scroll bar position: Left, Right, Hidden (ignore-case)\n"
-    "position: {}\n"
+constexpr StringLiteral HistoryConfig {
+
+    "history:\n"
+    "    {comment} Number of lines to preserve (-1 for infinite).\n"
+    "    limit: {}\n"
+    "    {comment} Boolean indicating whether or not to scroll down to the bottom on screen updates.\n"
+    "    auto_scroll_on_update: {}\n"
+    "    {comment} Number of lines to scroll on ScrollUp & ScrollDown events.\n"
+    "    scroll_multiplier: {}\n"
     "\n"
+
 };
 
-constexpr StringLiteral StatusDisplayPositionConfig {
-    "{comment} Position to place the status line to, if it is to be shown.\n"
-    "{comment} This can be either value `top` or value `bottom`.\n"
-    "position: {}\n"
-    "\n"
-};
+constexpr StringLiteral ScrollbarConfig {
 
-constexpr StringLiteral IndicatorStatusLineLeftConfig { "left: \"{}\"\n" };
-constexpr StringLiteral IndicatorStatusLineMiddleConfig { "middle: \"{}\"\n" };
-constexpr StringLiteral IndicatorStatusLineRightConfig { "right: \"{}\"\n" };
-
-constexpr StringLiteral SyncWindowTitleWithHostWritableStatusDisplayConfig {
-    "{comment} Synchronize the window title with the Host Writable status_line if\n"
-    "{comment} and only if the host writable status line was denied to be shown.\n"
-    "sync_to_window_title: {}\n"
+    "scrollbar:\n"
+    "    {comment} scroll bar position: Left, Right, Hidden (ignore-case)\n"
+    "    position: {}\n"
+    "    {comment} whether or not to hide the scrollbar when in alt-screen.\n"
+    "    hide_in_alt_screen: {}\n"
     "\n"
-};
 
-constexpr StringLiteral HideScrollbarInAltScreenConfig {
-    "{comment} whether or not to hide the scrollbar when in alt-screen.\n"
-    "hide_in_alt_screen: {}\n"
-    "\n"
 };
 
 constexpr StringLiteral AutoScrollOnUpdateConfig {
@@ -329,20 +321,24 @@ constexpr StringLiteral FontsConfig {
     "\n"
 };
 
-constexpr StringLiteral CaptureBufferConfig {
-    "{comment} Allows capturing the screen buffer via `CSI > Pm ; Ps ; Pc ST`.\n"
-    "{comment} The response can be read from stdin as sequence `OSC 314 ; <screen capture> ST`\n"
-    "capture_buffer: {}\n"
+constexpr StringLiteral PermissionsConfig {
+
     "\n"
-};
-
-constexpr StringLiteral ChangeFontConfig { "{comment} Allows changing the font via `OSC 50 ; Pt ST`.\n"
-                                           "change_font: {}\n"
-                                           "\n" };
-
-constexpr StringLiteral DisplayHostWritableStatusLineConfig {
-    "{comment} Allows displaying the \" Host Writable Statusline \" programmatically using `DECSSDT 2`.\n"
-    "display_host_writable_statusline: {}\n"
+    "{comment} Some VT sequences should need access permissions.\n"
+    "{comment} \n"
+    "{comment}  These can be to:\n"
+    "{comment}  - allow     Allows the given functionality\n"
+    "{comment}  - deny      Denies the given functionality\n"
+    "{comment}  - ask       Asks the user interactively via popup dialog for "
+    "permission of the given action.\n"
+    "permissions:\n"
+    "    {comment} Allows capturing the screen buffer via `CSI > Pm ; Ps ; Pc ST`.\n"
+    "    {comment} The response can be read from stdin as sequence `OSC 314 ; <screen capture> ST`\n"
+    "    capture_buffer: {}\n"
+    "    {comment} Allows changing the font via `OSC 50 ; Pt ST`.\n"
+    "    change_font: {}\n"
+    "    {comment} Allows displaying the \" Host Writable Statusline \" programmatically using `DECSSDT 2`.\n"
+    "    display_host_writable_statusline: {}\n"
     "\n"
 };
 
@@ -439,25 +435,33 @@ constexpr StringLiteral HighlightDoubleClickerWordConfig {
     "\n"
 };
 
-constexpr StringLiteral InitialStatusLineConfig {
-    "{comment} Either none or indicator.\n"
-    "{comment} This only reflects the initial state of the status line, as it can\n"
-    "{comment} be changed at any time during runtime by the user or by an application.\n"
-    "display: {}\n"
+constexpr StringLiteral StatusLineConfig {
+    "status_line:\n"
+    "    {comment} Either none or indicator.\n"
+    "    {comment} This only reflects the initial state of the status line, as it can\n"
+    "    {comment} be changed at any time during runtime by the user or by an application.\n"
+    "    display: {}\n"
+    "    {comment} Position to place the status line to, if it is to be shown.\n"
+    "    {comment} This can be either value `top` or value `bottom`.\n"
+    "    position: {}\n"
+    "    {comment} Synchronize the window title with the Host Writable status_line if\n"
+    "    {comment} and only if the host writable status line was denied to be shown.\n"
+    "    sync_to_window_title: {}\n"
+    "    indicator:\n"
+    "        left: \"{}\"\n"
+    "        middle: \"{}\"\n"
+    "        right: \"{}\"\n"
     "\n"
 };
 
-constexpr StringLiteral BackgroundOpacityConfig {
-    "{comment} Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully\n"
-    "{comment} transparent. Only values between 0.0 and 1.0 are allowed.\n"
-    "opacity: {}\n"
-    "\n"
-};
-
-constexpr StringLiteral BackgroundBlurConfig {
-    "{comment} Some platforms can blur the transparent background (currently only Windows 10 is "
-    "supported).\n"
-    "blur: {}\n"
+constexpr StringLiteral BackgroundConfig {
+    "background:\n"
+    "    {comment} Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully\n"
+    "    {comment} transparent. Only values between 0.0 and 1.0 are allowed.\n"
+    "    opacity: {}\n"
+    "    {comment} Some platforms can blur the transparent background (currently only Windows is "
+    "    supported).\n"
+    "    blur: {}\n"
     "\n"
 };
 
@@ -499,6 +503,7 @@ constexpr StringLiteral FrozenDecModeConfig {
     "{comment}\n"
     "{comment} Default: (empty object)\n"
     "{comment}frozen_dec_modes:\n"
+    "\n"
 };
 
 constexpr StringLiteral LiveConfig {
@@ -1112,52 +1117,653 @@ constexpr StringLiteral ImagesWeb {
     "image rendering and limits."
 };
 
-using Shell = DocumentationEntry<ShellConfig, Dummy>;
+constexpr StringLiteral ProfilesWeb { "All profiles inside configuration files share parent node `profiles`. "
+                                      "To create profile you need to specify child node\n"
+                                      "```yaml\n"
+                                      "profiles:\n"
+                                      "    main:\n"
+                                      "    #default configuration\n"
+                                      "    profile_for_windows:\n"
+                                      "    # windows specific entries\n"
+                                      "    profile_for_macos:\n"
+                                      "    # macos specific entries\n"
+                                      "\n"
+                                      "```\n"
+                                      "\n"
+                                      "## Profile configuration\n"
+                                      "\n" };
 
-using InitialWorkingDirectory = DocumentationEntry<InitialWorkingDirectoryConfig, Dummy>;
-using EscapeSandbox = DocumentationEntry<EscapeSandboxConfig, Dummy>;
-using SshHostConfig = DocumentationEntry<SshHostConfigConfig, Dummy>;
-using Maximized = DocumentationEntry<MaximizedConfig, Dummy>;
-using Fullscreen = DocumentationEntry<FullscreenConfig, Dummy>;
-using ShowTitleBar = DocumentationEntry<ShowTitleBarConfig, Dummy>;
-using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, Dummy>;
-using MouseHideWhileTyping = DocumentationEntry<MouseHideWhileTypingConfig, Dummy>;
-using SeachModeSwitch = DocumentationEntry<SeachModeSwitchConfig, Dummy>;
-using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, Dummy>;
-using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, Dummy>;
-using WMClass = DocumentationEntry<WMClassConfig, Dummy>;
-using Margins = DocumentationEntry<MarginsConfig, Dummy>;
-using TerminalSize = DocumentationEntry<TerminalSizeConfig, Dummy>;
-using TerminalId = DocumentationEntry<TerminalIdConfig, Dummy>;
-using MaxHistoryLineCount = DocumentationEntry<MaxHistoryLineCountConfig, Dummy>;
-using HistoryScrollMultiplier = DocumentationEntry<HistoryScrollMultiplierConfig, Dummy>;
-using ScrollbarPosition = DocumentationEntry<ScrollbarPositionConfig, Dummy>;
-using StatusDisplayPosition = DocumentationEntry<StatusDisplayPositionConfig, Dummy>;
-using IndicatorStatusLineLeft = DocumentationEntry<IndicatorStatusLineLeftConfig, Dummy>;
-using IndicatorStatusLineMiddle = DocumentationEntry<IndicatorStatusLineMiddleConfig, Dummy>;
-using IndicatorStatusLineRight = DocumentationEntry<IndicatorStatusLineRightConfig, Dummy>;
-using SyncWindowTitleWithHostWritableStatusDisplay =
-    DocumentationEntry<SyncWindowTitleWithHostWritableStatusDisplayConfig, Dummy>;
-using HideScrollbarInAltScreen = DocumentationEntry<HideScrollbarInAltScreenConfig, Dummy>;
-using OptionKeyAsAlt = DocumentationEntry<Dummy, Dummy>;
-using AutoScrollOnUpdate = DocumentationEntry<AutoScrollOnUpdateConfig, Dummy>;
-using Fonts = DocumentationEntry<FontsConfig, Dummy>;
-using CaptureBuffer = DocumentationEntry<CaptureBufferConfig, Dummy>;
-using ChangeFont = DocumentationEntry<ChangeFontConfig, Dummy>;
-using DisplayHostWritableStatusLine = DocumentationEntry<DisplayHostWritableStatusLineConfig, Dummy>;
-using DrawBoldTextWithBrightColors = DocumentationEntry<DrawBoldTextWithBrightColorsConfig, Dummy>;
-using Colors = DocumentationEntry<ColorsConfig, Dummy>;
-using ModalCursorScrollOff = DocumentationEntry<ModalCursorScrollOffConfig, Dummy>;
-using ModeInsert = DocumentationEntry<ModeInsertConfig, Dummy>;
-using ModeNormal = DocumentationEntry<ModeNormalConfig, Dummy>;
-using ModeVisual = DocumentationEntry<ModeVisualConfig, Dummy>;
-using SmoothLineScrolling = DocumentationEntry<SmoothLineScrollingConfig, Dummy>;
-using HighlightTimeout = DocumentationEntry<HighlightTimeoutConfig, Dummy>;
-using HighlightDoubleClickerWord = DocumentationEntry<HighlightDoubleClickerWordConfig, Dummy>;
-using InitialStatusLine = DocumentationEntry<InitialStatusLineConfig, Dummy>;
-using BackgroundOpacity = DocumentationEntry<BackgroundOpacityConfig, Dummy>;
-using BackgroundBlur = DocumentationEntry<BackgroundBlurConfig, Dummy>;
-using Bell = DocumentationEntry<BellConfig, Dummy>;
+constexpr StringLiteral ShellWeb {
+
+    "configuration section allows you to specify the process to be started inside the terminal. It provides "
+    "flexibility to override the default login shell and supports logging in to a remote host.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    shell: \"/bin/bash\"\n"
+    "    arguments: [\"some\", \"optional\", \"arguments\", \"for\", \"the\", \"shell\"]\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==arguments== (optional) Allows you to provide additional command-line "
+    "arguments to the shell executable. These arguments will be passed to the shell when it is started "
+    "inside the terminal.\n"
+    "\n"
+};
+
+constexpr StringLiteral EscapeSandboxWeb {
+    "option in the configuration file allows you to control the sandboxing behavior when the terminal is "
+    "executed from within Flatpak. This configuration is relevant only if the terminal is running in a "
+    "Flatpak environment.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    escape_sandbox: true\n"
+    "```\n"
+    "\n"
+
+};
+
+constexpr StringLiteral SshHostConfigWeb {
+    "With this key, you can bypass local PTY and process execution and directly connect via TCP/IP to a "
+    "remote SSH server.\n"
+    "\n"
+    "```yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    ssh:\n"
+    "      host: remote-server.example.com\n"
+    "      port: 22\n"
+    "      user: \"CustomUserName\"\n"
+    "      private_key: \"path/to/key\"\n"
+    "      public_key: \"path/to/key.pub\"\n"
+    "      known_hosts: \"~/.ssh/known_hosts\"\n"
+    "      forward_agent: false\n"
+    "```\n"
+    "\n"
+    "Note, only `host` option is required. Everything else is defaulted.\n"
+    "Keep in mind, that the user's `~/.ssh/config` will be parsed with respect to the supported options "
+    "above.\n"
+    "These values can be overridden in the local Contour configuration as follows:\n"
+    "\n"
+    ":octicons-horizontal-rule-16: ==ssh.host== SSH server to establish the connection to.\n"
+    ":octicons-horizontal-rule-16: ==ssh.port== SSH port (defaults to `22`). Only specify this value if it "
+    "is deviating from the default value `22`.\n"
+    ":octicons-horizontal-rule-16: ==ssh.private_key== Path to private key to use for key based "
+    "authentication.\n"
+    ":octicons-horizontal-rule-16: ==ssh.public_key== Path to public key that belongs to the private key. "
+    "When using key based authentication, it depends on the underlying backend, if the public key is also "
+    "required. OpenSSL for example does not require it.\n"
+    ":octicons-horizontal-rule-16: ==ssh.known_hosts== Path to `known_hosts` file. This defaults to and "
+    "usually is located in `~/.ssh/known_hosts`.\n"
+    ":octicons-horizontal-rule-16: ==ssh.forward_agent== Boolean, indicating wether or not the local SSH "
+    "auth agent should be requested to be forwarded. Note: this is currently not working due to an issue "
+    "related to the underlying library being used, but is hopefully resolved soon.\n"
+    "\n"
+    "Note, custom environment variables may be passed as well, when connecting to an SSH server using this "
+    "builtin-feature. Mind,\n"
+    "that the SSH server is not required to accept all environment variables.\n"
+    "\n"
+    "If an OpenSSH server is used, have a look at the `AcceptEnv` configuration setting in the "
+    "`sshd_config`\n"
+    "configuration file on the remote SSH server, to configure what environment variables are permitted to "
+    "be sent.\n"
+    "\n"
+};
+
+constexpr StringLiteral MaximizedWeb {
+    "configuration option determines whether the terminal window should be maximized when the specified "
+    "profile is activated. Maximizing a window expands it to fill the entire available space on the screen, "
+    "excluding the taskbar or other system elements.\n"
+};
+
+constexpr StringLiteral MarginsWeb {
+    "Enforces a horizontal and vertical margin to respect on both sides of the terminal.\n"
+    "This is particularily useful on operating systems (like MacOS) that draw the border frame into the main "
+    "widgets space,\n"
+    "or simply to create some artificial space to improve the user's focus.\n"
+    "\n"
+    "```yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    margins:\n"
+    "      horizontal: 5\n"
+    "      vertical: 0\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral BellWeb {
+    "\n"
+    "Configuration section permits tuning the behavior of the terminal bell.\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    bell:\n"
+    "      sound: \"default\"\n"
+    "      alert: false\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==sound== This option determines the sound of `BEL` (also `\a` or `0x07`) "
+    "to `off` or `default` or sound generated by a file located at `path`. <br />\n"
+    ":octicons-horizontal-rule-16: ==alert== This option determines whether or not a window alert will be "
+    "raised each time a bell is ringed. Useful for tiling window managers like i3 or sway.\n"
+    "\n"
+};
+
+constexpr StringLiteral WMClassWeb {
+    "\n"
+    "Configuration option defines the class part of the `WM_CLASS` property of the terminal window. The "
+    "`WM_CLASS` property is a standard X11 property used to identify and classify windows by their class and "
+    "instance.\n"
+    "\n"
+};
+
+constexpr StringLiteral TerminalIdWeb {
+    "\n"
+    "configuration option allows you to specify the terminal type that will be advertised by the terminal "
+    "emulator. The terminal type indicates the set of capabilities and features that the terminal supports, "
+    "enabling compatibility with different applications and systems.\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    terminal_id: VT525\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral TerminalSizeWeb {
+    "configuration option allows you to specify the initial size of the terminal window in terms of the "
+    "number of columns and lines.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    terminal_size:\n"
+    "      columns: 80\n"
+    "      lines: 25\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==columns== This option specifies the number of columns (characters) to "
+    "be displayed in the terminal window. In the provided example, the value is set to 80. <br/>\n"
+    ":octicons-horizontal-rule-16: ==lines== This option specifies the number of lines to be displayed in "
+    "the terminal window. In the provided example, the value is set to 25. <br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral HistoryWeb {
+    "configuration allows you to customize the behavior and settings related to the terminal's history, "
+    "including the number of preserved lines, auto-scrolling, and scroll events.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    history:\n"
+    "      limit: 1000\n"
+    "      auto_scroll_on_update: true\n"
+    "      scroll_multiplier: 3\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==limit== This option specifies the number of lines to preserve in the "
+    "terminal's history. A value of -1 indicates unlimited history, meaning that all lines are preserved. In "
+    "the provided example, the limit is set to 1000. <br/>\n"
+    ":octicons-horizontal-rule-16: ==auto_scroll_on_update== This boolean option determines whether the "
+    "terminal automatically scrolls down to the bottom when new content is added. If set to true, the "
+    "terminal will scroll down on screen updates. If set to false, the terminal will maintain the current "
+    "scroll position. In the provided example, auto_scroll_on_update is set to true.  <br/>\n"
+    ":octicons-horizontal-rule-16: ==scroll_multiplier== This option defines the number of lines to scroll "
+    "when the ScrollUp or ScrollDown events occur. By default, scrolling up or down moves three lines at a "
+    "time. You can adjust this value as needed. In the provided example, scroll_multiplier is set to 3. "
+    "<br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral ScrollbarWeb {
+    "configuration allows you to customize the appearance and behavior of the visual scrollbar in the "
+    "terminal.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    scrollbar:\n"
+    "      position: Hidden\n"
+    "      hide_in_alt_screen: true\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==position==  This option specifies the position of the scrollbar in the "
+    "terminal window. It can be set to one of the following values: Left, Right, Hidden. <br/>\n"
+    ":octicons-horizontal-rule-16: ==hide_in_alt_screen== This boolean option determines whether the "
+    "scrollbar should be hidden when the terminal is in the alternate screen mode. If set to true, the "
+    "scrollbar will be hidden when the terminal switches to the alternate screen. If set to false, the "
+    "scrollbar will remain visible even in the alternate screen mode. <br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral MouseWeb {
+    "configuration allows you to control the behavior of the mouse in the terminal.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    mouse:\n"
+    "      hide_while_typing: true\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==hide_while_typing== This boolean option determines whether the mouse "
+    "cursor should be hidden while typing in the terminal. When set to true, the mouse cursor will be hidden "
+    "when you start typing. When set to false, the mouse cursor will remain visible while typing. <br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral PermissionsWeb {
+    "configuration allows you to control the access permissions for specific VT sequences in the terminal.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    permissions:\n"
+    "      change_font: ask\n"
+    "      capture_buffer: ask\n"
+    "      display_host_writable_statusline: ask\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==change_font== This option determines the access permission for changing "
+    "the font using the VT sequence `OSC 50 ; Pt ST`. The possible values are: allow, deny, ask. <br/>\n"
+    ":octicons-horizontal-rule-16: ==capture_buffer== This option determines the access permission for "
+    "capturing the screen buffer using the VT sequence `CSI > Pm ; Ps ; Pc ST`. The response can be read "
+    "from stdin as the sequence `OSC 314 ; <screen capture> ST`. The possible values are: allow, deny, "
+    "ask.<br/>\n"
+    ":octicons-horizontal-rule-16: ==display_host_writable_statusline== This option determines the access "
+    "permission for displaying the \"Host Writable Statusline\" programmatically using the VT sequence "
+    "`DECSSDT 2`. The possible values are: allow, deny, ask. <br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral HighlightDoubleClickerWordWeb {
+    "configuration option enables the highlighting of a word and its matches when double-clicked on the "
+    "primary screen in the terminal.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    highlight_word_and_matches_on_double_click: true\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==change_font==  When this option is enabled (true), the following "
+    "behavior occurs: <br/>\n"
+    "    - Double-clicking on a word in the primary screen will select and highlight the double-clicked "
+    "word. <br/>\n"
+    "    - Additionally, all other occurrences of the same word will also be highlighted without being "
+    "selected. <br/>\n"
+    "    - This feature is implemented by initiating a search for the double-clicked word. <br/>\n"
+    "    - You can use the FocusNextSearchMatch and FocusPreviousSearchMatch actions to navigate to the next "
+    "or previous occurrence of the same word, even if it is outside the current viewport. <br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral FontsWeb {
+    "section of the configuration allows you to customize the font settings for the terminal.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    font:\n"
+    "      size: 12\n"
+    "      dpi_scale: 1.0\n"
+    "      locator: native\n"
+    "      text_shaping:\n"
+    "        engine: native\n"
+    "      builtin_box_drawing: true\n"
+    "      render_mode: gray\n"
+    "      strict_spacing: true\n"
+    "      regular:\n"
+    "        family: \"monospace\"\n"
+    "        weight: regular\n"
+    "        slant: normal\n"
+    "        features: []\n"
+    "      emoji: \"emoji\"\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==size== Specifies the initial font size in pixels. The default value is "
+    "12. <br/>\n"
+    ":octicons-horizontal-rule-16: ==dpi_scale== Allows applying a DPI scaling factor on top of the system's "
+    "configured DPI. The default value is 1.0. <br/>\n"
+    ":octicons-horizontal-rule-16: ==locator==  Determines the font locator engine to use for locating font "
+    "files and font fallback. Possible values are `native` and `mock`.<br/> `native` will use the "
+    "operating-system native font location service (e.g. CoreText on macOS and DirectWrite on Windows), "
+    "whereas `mock` is solely used for testing the software (not recommended by end-users)<br/>\n"
+    ":octicons-horizontal-rule-16: ==text_shaping.engine== Selects the text shaping and font rendering "
+    "engine. Supported values are native, DirectWrite, CoreText, and OpenShaper.  <br/>\n"
+    ":octicons-horizontal-rule-16: ==builtin_box_drawing== Specifies whether to use built-in textures for "
+    "pixel-perfect box drawing. If disabled, the font's provided box drawing characters will be used. The "
+    "default value is true.<br/>\n"
+    ":octicons-horizontal-rule-16: ==render_mode== Specifies the font render mode, which tells the font "
+    "rasterizer engine what rendering technique to use. Available modes are lcd, light, gray, and "
+    "monochrome.  <br/>\n"
+    ":octicons-horizontal-rule-16: ==strict_spacing== Indicates whether only monospace fonts should be "
+    "included in the font and font fallback list. The default value is true.  <br/>\n"
+    ":octicons-horizontal-rule-16: ==regular== Defines the regular font style with the following parameters: "
+    " <br/>\n"
+    ":octicons-horizontal-rule-16: ==regular.family==  Specifies the font family name, such as "
+    "\"monospace\", \"Courier New\", or \"Fira Code\". <br/>\n"
+    ":octicons-horizontal-rule-16: ==regular.weight==  Specifies the font weight, such as thin, extra_light, "
+    "light, demilight, book, normal, medium, demibold, bold, extra_bold, black, or extra_black. <br/>\n"
+    ":octicons-horizontal-rule-16: ==regular.slant==  Specifies the font slant, which can be normal, italic, "
+    "or oblique.\n"
+    ":octicons-horizontal-rule-16: ==regular.features== Sets optional font features to be enabled. This is "
+    "usually a 4-letter code, such as ss01 or ss02. Refer to your font's documentation for supported "
+    "features. By default, no features are enabled. <br/>\n"
+    ":octicons-horizontal-rule-16: ==emoji== Specifies the font to be used for displaying Unicode symbols "
+    "with emoji presentation. The default value is \"emoji\". <br/>\n"
+    "\n"
+
+};
+
+constexpr StringLiteral DrawBoldTextWithBrightColorsWeb {
+    "Specifies whether bold text should be rendered in bright colors for indexed colors. If disabled, normal "
+    "colors will be used for bold text. The default value is false.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "   draw_bold_text_with_bright_colors: false\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral ModeInsertWeb {
+    "section of the configuration allows you to customize the appearance and behavior of the terminal "
+    "cursor.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "   cursor:\n"
+    "    shape: \"bar\"\n"
+    "    blinking: false\n"
+    "    blinking_interval: 500\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==shape== Specifies the shape of the cursor. You can choose from the "
+    "following options: <br/>\n"
+    "-block: A filled rectangle. <br/>\n"
+    "-rectangle: Just the outline of a block. <br/>\n"
+    "-underscore: A line under the text. <br/>\n"
+    "-bar: The well-known i-Beam cursor. <br/>\n"
+    ":octicons-horizontal-rule-16: ==blinking== Determines whether the cursor should blink over time. If set "
+    "to true, the cursor will blink; if set to false, the cursor will remain static. <br/>\n"
+    ":octicons-horizontal-rule-16: ==blinking_interval== Specifies the blinking interval in milliseconds. "
+    "This value defines how quickly the cursor alternates between being visible and invisible when blinking "
+    "is enabled. <br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral ModeNormalWeb { "section in the configuration allows you to customize the appearance "
+                                        "and behavior of the cursor specifically in vi-like normal mode.\n"
+                                        "``` yaml\n"
+                                        "profiles:\n"
+                                        "  profile_name:\n"
+                                        "    normal_mode:\n"
+                                        "      cursor:\n"
+                                        "        shape: block\n"
+                                        "        blinking: false\n"
+                                        "        blinking_interval: 500\n"
+                                        "```\n"
+                                        "\n" };
+constexpr StringLiteral ModeVisualWeb {
+    "section in the configuration allows you to customize the appearance and behavior of the cursor "
+    "specifically in vi-like normal mode.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    visual_mode:\n"
+    "      cursor:\n"
+    "        shape: block\n"
+    "        blinking: false\n"
+    "        blinking_interval: 500\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral HighlightTimeoutWeb {
+    "option in the configuration determines the duration in milliseconds for which the yank highlight is "
+    "shown in vi mode. After yanking (copying) text in vi mode, the yanked text is typically highlighted "
+    "momentarily to provide visual feedback. This configuration option allows you to specify the duration of "
+    "this highlight.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    vi_mode_highlight_timeout: 300\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral ModalCursorScrollOffWeb {
+    "option in the configuration sets the scrolloff value for cursor movements in normal and visual (block) "
+    "modes. The scrolloff value determines the minimum number of lines to keep visible above and below the "
+    "cursor when scrolling. In other words, it controls the amount of margin or padding around the cursor "
+    "during scrolling operations.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    vi_mode_scrolloff: 8\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral StatusLineWeb {
+
+    "section in the configuration file allows you to customize the behavior and appearance of the status "
+    "line in the terminal.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    status_line:\n"
+    "      display: none\n"
+    "      position: bottom\n"
+    "      sync_to_window_title: false\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==display== specifies whether the status line should be shown or not. The "
+    "possible values are none (status line is not shown) and indicator (status line is shown). In the "
+    "example, the status line is set to none, meaning it will not be displayed initially. <br/>\n"
+    ":octicons-horizontal-rule-16: ==position== determines the placement of the status line. It can be set "
+    "to top or bottom. In the example, the status line is set to bottom, indicating that it will appear at "
+    "the bottom of the terminal window if enabled. <br/>\n"
+    ":octicons-horizontal-rule-16: ==sync_to_window_title== controls whether the window title should be "
+    "synchronized with the Host Writable status line. If the Host Writable status line is denied, enabling "
+    "this option will update the window title accordingly. By default, this option is set to false. <br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral BackgroundWeb {
+    "section in the configuration file allows you to customize the background settings for the terminal.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    background:\n"
+    "      opacity: 1.0\n"
+    "      blur: false\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==opacity== specifies the background opacity to use. The value ranges "
+    "from 0.0 to 1.0, where 0.0 represents fully transparent and 1.0 represents fully opaque. You can adjust "
+    "this value to control the transparency level of the terminal's background. <br/>\n"
+    ":octicons-horizontal-rule-16: ==blur== determines whether the transparent background should be blurred "
+    "on platforms that support it. Currently, only Windows 10 is supported for background blurring. By "
+    "default, this option is set to false, meaning no background blurring will be applied. <br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral ColorsWeb {
+
+    "section in the configuration file allows you to specify the colorscheme to use for the terminal. You "
+    "can use one of the predefined color palettes as a setting for colors entry. \n"
+    "List of predefined colorschemes: `contour`(default colors), `monokai`, `one-light`, `one-dark`, "
+    "`gruvbox-light`, `gruvbox-dark`, `solarized-light`, `solarized-dark`, `papercolor-light`, "
+    "`papercolor-dark`.\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    colors: \" default \"\n"
+    "```\n"
+    "\n"
+    "To make the terminal's color scheme dependant on OS appearance (dark and light "
+    "mode) settings,\n"
+    "you need to specify two color schemes:\n"
+    "\n"
+    "```yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    colors:\n"
+    "      dark: \"some_dark_scheme_name\"\n"
+    "      light: \"some_light_scheme_name\"\n"
+    "```\n"
+    "\n"
+    "With this, the terminal will use the color scheme as specified in `dark` when OS "
+    "dark mode is on,\n"
+    "and `light`'s color scheme otherwise.\n"
+    "\n"
+
+};
+
+constexpr StringLiteral HyperlinkDecorationWeb {
+    "section in the configuration file allows you to configure the styling and colorization of hyperlinks "
+    "when they are displayed in the terminal and when they are hovered over by the cursor.\n"
+    "\n"
+    "Possible values: underline, dotted-underline, double-underline, curly-underline, dashed-underline, "
+    "overline, crossed-out, framed, encircle (if implemented)\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    hyperlink_decoration:\n"
+    "      normal: dotted\n"
+    "      hover: underline\n"
+    "```\n"
+    "\n"
+
+};
+
+constexpr StringLiteral OptionKeyAsAltConfig {
+    "{comment} Tells Contour how to handle Option-Key events on MacOS.\n"
+    "{comment} This value is ignored on other platforms.\n"
+    "{comment}\n"
+    "{comment} Default: false\n"
+    "option_as_alt: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral OptionKeyAsAltWeb {
+    "section tells Contour how to handle Option-Key events on MacOS.\n"
+    "This value is ignored on other platforms.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    option_as_alt: false\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral FullscreenWeb {
+    "configuration option determines whether the terminal's screen should be put into fullscreen mode when "
+    "the terminal profile is activated. Fullscreen mode expands the terminal window to occupy the entire "
+    "screen, providing a distraction-free environment for your terminal sessions.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    fullscreen: false\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral ShowTitleBarWeb { "configuration option determines whether or not the title bar will "
+                                          "be shown when the terminal profile is activated.\n"
+                                          "``` yaml\n"
+                                          "profiles:\n"
+                                          "  profile_name:\n"
+                                          "    show_title_bar: true\n"
+                                          "```\n"
+                                          "\n"
+
+};
+
+constexpr StringLiteral ShowIndicatorOnResizeWeb {
+    "configuration option determines whether or not the size indicator will be shown when terminal will "
+    "resized.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    size_indicator_on_resize: true\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral SeachModeSwitchWeb {
+    "The configuration option determines whether the editor should automatically switch from search mode "
+    "back to insert mode upon exiting a search. If enabled, the terminal will return to insert mode, "
+    "allowing for immediate text input. If disabled, the terminal will remain in normal mode.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    search_mode_switch: true\n"
+    "```\n"
+    "\n"
+
+};
+
+constexpr StringLiteral InsertAfterYankWeb {
+    "This configuration option determines whether the terminal should automatically switch from normal mode "
+    "to insert mode after executing a yank command. When enabled, the terminal will enter insert mode, "
+    "allowing for immediate text input. If disabled, the terminal will remain in normal mode, maintaining "
+    "command functionality.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    insert_after_yank: false\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral CopyLastMarkRangeOffsetWeb {
+    "configuration option is an advanced setting that is useful when using the CopyPreviousMarkRange feature "
+    "with multiline prompts. It allows you to specify an offset value that is added to the current cursor's "
+    "line number minus 1 (i.e., the line above the current cursor).\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    copy_last_mark_range_offset: 0\n"
+    "```\n"
+    "\n"
+};
+
+constexpr StringLiteral SmoothLineScrollingWeb {
+    "Defines the number of milliseconds to wait before actually executing the LF (linefeed) control code\n"
+    "in case DEC mode `DECSCLM` is enabled.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    slow_scrolling_time: 0\n"
+    "```\n"
+    "\n"
+
+};
+
+using Shell = DocumentationEntry<ShellConfig, ShellWeb>;
+using EscapeSandbox = DocumentationEntry<EscapeSandboxConfig, EscapeSandboxWeb>;
+using SshHostConfig = DocumentationEntry<SshHostConfigConfig, SshHostConfigWeb>;
+using Maximized = DocumentationEntry<MaximizedConfig, MaximizedWeb>;
+using Fullscreen = DocumentationEntry<FullscreenConfig, FullscreenWeb>;
+using ShowTitleBar = DocumentationEntry<ShowTitleBarConfig, ShowTitleBarWeb>;
+using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, ShowIndicatorOnResizeWeb>;
+using Mouse = DocumentationEntry<MouseConfig, MouseWeb>;
+using SeachModeSwitch = DocumentationEntry<SeachModeSwitchConfig, SeachModeSwitchWeb>;
+using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYankWeb>;
+using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
+using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
+using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;
+using TerminalSize = DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>;
+using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;
+using History = DocumentationEntry<HistoryConfig, HistoryWeb>;
+using Scrollbar = DocumentationEntry<ScrollbarConfig, ScrollbarWeb>;
+using StatusLine = DocumentationEntry<StatusLineConfig, StatusLineWeb>;
+using OptionKeyAsAlt = DocumentationEntry<OptionKeyAsAltConfig, OptionKeyAsAltWeb>;
+using Fonts = DocumentationEntry<FontsConfig, FontsWeb>;
+using Permissions = DocumentationEntry<PermissionsConfig, PermissionsWeb>;
+using DrawBoldTextWithBrightColors =
+    DocumentationEntry<DrawBoldTextWithBrightColorsConfig, DrawBoldTextWithBrightColorsWeb>;
+using Colors = DocumentationEntry<ColorsConfig, ColorsWeb>;
+using ModalCursorScrollOff = DocumentationEntry<ModalCursorScrollOffConfig, ModalCursorScrollOffWeb>;
+using ModeInsert = DocumentationEntry<ModeInsertConfig, ModeInsertWeb>;
+using ModeNormal = DocumentationEntry<ModeNormalConfig, ModeNormalWeb>;
+using ModeVisual = DocumentationEntry<ModeVisualConfig, ModeVisualWeb>;
+using SmoothLineScrolling = DocumentationEntry<SmoothLineScrollingConfig, SmoothLineScrollingWeb>;
+using HighlightTimeout = DocumentationEntry<HighlightTimeoutConfig, HighlightTimeoutWeb>;
+using HighlightDoubleClickerWord =
+    DocumentationEntry<HighlightDoubleClickerWordConfig, HighlightDoubleClickerWordWeb>;
+using Background = DocumentationEntry<BackgroundConfig, BackgroundWeb>;
+using Bell = DocumentationEntry<BellConfig, BellWeb>;
 using FrozenDecMode = DocumentationEntry<FrozenDecModeConfig, Dummy>;
 using Live = DocumentationEntry<LiveConfig, LiveWeb>;
 using PlatformPlugin = DocumentationEntry<PlatformPluginConfig, PlatformPluginWeb>;
@@ -1166,7 +1772,7 @@ using PTYReadBufferSize = DocumentationEntry<PTYReadBufferSizeConfig, PTYReadBuf
 using PTYBufferObjectSize = DocumentationEntry<PTYBufferObjectSizeConfig, PTYBufferObjectSizeWeb>;
 using ReflowOnResize = DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWeb>;
 using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
-using Profiles = DocumentationEntry<ProfilesConfig, Dummy>;
+using Profiles = DocumentationEntry<ProfilesConfig, ProfilesWeb>;
 using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;
 using WordDelimiters = DocumentationEntry<WordDelimitersConfig, WordDelimitersWeb>;
 using ExtendedWordDelimiters = DocumentationEntry<ExtendedWordDelimitersConfig, ExtendedWordDelimitersWeb>;
@@ -1181,7 +1787,7 @@ using EarlyExitThreshold = DocumentationEntry<EarlyExitThresholdConfig, EarlyExi
 using Images = DocumentationEntry<ImagesConfig, ImagesWeb>;
 using ExperimentalFeatures = DocumentationEntry<ExperimentalFeaturesConfig, StringLiteral { "" }>;
 using DefaultColors = DocumentationEntry<DefaultColorsConfig, Dummy>;
-using HyperlinkDecoration = DocumentationEntry<HyperlinkDecorationConfig, Dummy>;
+using HyperlinkDecoration = DocumentationEntry<HyperlinkDecorationConfig, HyperlinkDecorationWeb>;
 using YankHighlight = DocumentationEntry<YankHighlightConfig, Dummy>;
 using NormalModeCursorline = DocumentationEntry<NormalModeCursorlineConfig, Dummy>;
 using Selection = DocumentationEntry<SelectionConfig, Dummy>;

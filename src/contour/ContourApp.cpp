@@ -356,10 +356,11 @@ For the full list of options see generated configuration file on your system or 
 
 int ContourApp::documentationProfileConfig()
 {
-    std::string info;
-    auto back = std::back_inserter(info);
-    std::format_to(back, "{}\n", contour::config::documentationProfileConfig());
-    std::cout << info;
+    std::string profileInfo;
+    auto back = std::back_inserter(profileInfo);
+    std::format_to(back, "{}", contour::config::documentationProfileConfig());
+
+    std::cout << profileInfo;
     return EXIT_SUCCESS;
 }
 
