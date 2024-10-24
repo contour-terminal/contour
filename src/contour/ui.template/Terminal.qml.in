@@ -135,6 +135,23 @@ ContourTerminal
         }
     }
 
+
+    RequestPermission {
+        id: requestLargeFilePaste
+        text: "The host application is going to paste large file, are you sure?"
+        onYesToAllClicked: vtWidget.session.applyPendingPaste(true, true);
+        onYesClicked: vtWidget.session.applyPendingPaste(true, false);
+        onNoToAllClicked: vtWidget.session.applyPendingPaste(false, true);
+        onNoClicked: vtWidget.session.applyPendingPaste(false, false);
+        onRejected: {
+            console.log("[Terminal] large file paste is rejected.", vtWidget.session)
+            if (vtWidget.session !== null)
+                vtWidget.session.applyPendingPaste(false, false);
+        }
+    }
+
+
+
     RequestPermission {
         id: requestBufferCaptureDialog
         text: "The host application is requesting to capture the terminal buffer."
@@ -265,6 +282,7 @@ ContourTerminal
         vt.requestPermissionForFontChange.connect(requestFontChangeDialog.open);
         vt.requestPermissionForBufferCapture.connect(requestBufferCaptureDialog.open);
         vt.requestPermissionForShowHostWritableStatusLine.connect(requestShowHostWritableStatusLine.open);
+        vt.requestPermissionForPasteLargeFile.connect(requestLargeFilePaste.open);
         forceActiveFocus();
 
         // TAB handling
