@@ -368,6 +368,7 @@ void TerminalSession::executeRole(GuardedRole role, bool allow, bool remember)
         case GuardedRole::ShowHostWritableStatusLine:
             executeShowHostWritableStatusLine(allow, remember);
             break;
+        case GuardedRole::BigPaste: applyPendingPaste(allow, remember); break;
     }
 }
 
@@ -401,6 +402,7 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
                     case GuardedRole::ChangeFont: emit requestPermissionForFontChange(); break;
                     case GuardedRole::CaptureBuffer: emit requestPermissionForBufferCapture(); break;
                     case GuardedRole::ShowHostWritableStatusLine: emit requestPermissionForShowHostWritableStatusLine(); break;
+                    case GuardedRole::BigPaste: emit requestPermissionForPasteLargeFile(); break;
                         // clang-format on
                 }
             }
@@ -651,21 +653,63 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
         sessionLog()("pasteFromClipboard: mime data contains {} formats.", md->formats().size());
         for (int i = 0; i < md->formats().size(); ++i)
             sessionLog()("pasteFromClipboard[{}]: {}\n", i, md->formats().at(i).toStdString());
-        string const text = strip_if(normalize_crlf(clipboard->text(QClipboard::Clipboard)), strip);
-        if (text.empty())
+
+        auto const text = clipboard->text(QClipboard::Clipboard);
+
+        // 1 MB hard limit
+        if (text.size() > 1024 * 1024)
+        {
+            sessionLog()("Clipboard contains huge text. Ignoring.");
+            _display->post([this]() {
+                emit showNotification("Screenshot", QString::fromStdString("Paste is too big"));
+            });
+            return;
+        }
+        // 512 KB soft limit to ask user for permission
+        if (text.size() > 1024 * 512)
+        {
+            _pendingBigPaste = clipboard;
+            emit requestPermissionForPasteLargeFile();
+            sessionLog()("Clipboard contains huge text. Requesting permission.");
+            return;
+        }
+
+        string const strippedText = strip_if(normalize_crlf(clipboard->text(QClipboard::Clipboard)), strip);
+        sessionLog()("Size of text: {}", strippedText.size());
+        if (strippedText.empty())
             sessionLog()("Clipboard does not contain text.");
         else if (count == 1)
-            terminal().sendPaste(string_view { text });
+            terminal().sendPaste(string_view { strippedText });
         else
         {
             string fullPaste;
             for (unsigned i = 0; i < count; ++i)
-                fullPaste += text;
+                fullPaste += strippedText;
             terminal().sendPaste(string_view { fullPaste });
         }
     }
     else
         sessionLog()("Could not access clipboard.");
+}
+
+void TerminalSession::applyPendingPaste(bool allow, bool remember)
+{
+    sessionLog()("applyPendingPaste: allow={}, remember={}", allow, remember);
+    if (remember)
+        _rememberedPermissions[GuardedRole::BigPaste] = allow;
+
+    if (!_pendingBigPaste)
+        return;
+
+    if (!allow)
+    {
+        _pendingBigPaste = std::nullopt;
+        return;
+    }
+
+    auto* clipboard = _pendingBigPaste.value();
+    auto text = clipboard->text(QClipboard::Clipboard);
+    terminal().sendPaste(string_view { text.toStdString() });
 }
 
 void TerminalSession::onSelectionCompleted()
