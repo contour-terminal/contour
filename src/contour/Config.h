@@ -1382,10 +1382,23 @@ struct DocumentationWriter: Writer
     template <typename... T>
     std::string process(std::string_view doc, std::string_view name, T... val)
     {
-        return format("### `{}`\n"
-                      "{}\n",
-                      name,
-                      format(replaceCommentPlaceholder(std::string { doc }), val...));
+        return format(
+            "### `{}`\n"
+            "{}\n",
+            [](std::string_view name) -> std::string {
+                // camelCase into snake_case
+                auto result = std::string { name };
+                for (auto i = 0u; i < result.size(); ++i)
+                {
+                    if (std::isupper(result[i]))
+                    {
+                        result.insert(i, 1, '_');
+                        result[i + 1] = static_cast<char>(std::tolower(result[i + 1]));
+                    }
+                }
+                return result;
+            }(name),
+            format(replaceCommentPlaceholder(std::string { doc }), val...));
     }
 
     template <typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
