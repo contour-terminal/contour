@@ -589,10 +589,12 @@ void Terminal::updateIndicatorStatusLine()
         // Don't show the middle segment if text is too long.
         auto const middleLength = serializeToVT(*this, definitions.middle, Styling::Disabled).size();
         auto const center = pageSize().columns / ColumnCount(2) - ColumnCount(1);
+        // size of middleVT segment is less that number of elements in the string due to formatting
+        // and on average we can assume that the middle segment is half the size of the string
         _indicatorStatusScreen.moveCursorToColumn(
-            ColumnOffset::cast_from(center - ColumnOffset::cast_from(middleLength / 2)));
+            ColumnOffset::cast_from(center - ColumnOffset::cast_from(middleLength / 4)));
         auto const middleVT = serializeToVT(*this, definitions.middle, Styling::Enabled);
-        if (unbox<size_t>(center) > middleLength)
+        if (unbox<size_t>(center) > static_cast<size_t>(middleLength / 2))
             writeToScreenInternal(_indicatorStatusScreen, middleVT);
 
         // Don't show the right part if the left and middle segments are too long.
