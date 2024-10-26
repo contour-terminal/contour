@@ -626,6 +626,10 @@ class Terminal
         return _viCommands.cursorPosition;
     }
     void moveNormalModeCursorTo(CellLocation pos) noexcept { _viCommands.moveCursorTo(pos); }
+    void addLineOffsetToJumpHistory(LineOffset offset) noexcept
+    {
+        _viCommands.addLineOffsetToJumpHistory(offset);
+    }
 
     // {{{ cursor management
     CursorDisplay cursorDisplay() const noexcept { return _settings.cursorDisplay; }

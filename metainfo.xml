@@ -113,6 +113,7 @@
           <li>Protect user from accidentally pasting too large input (#1198)</li>
           <li>Add binding to exit normal mode with `Esc` (#1604)</li>
           <li>Add config option to switch into insert mode after yank (#1604)</li>
+          <li>Add vi-like normal mode Jumps. `''`, `C-O` and `C-I` motions (#1101)</li>
           <li>Improves window size/resize handling on HiDPI monitor settings (#1628)</li>
           <li>Improves macOS key handling for Option+Left|Right keys to jump between words in the shell</li>
           <li>Fixes cropping of underscore character for some fonts (#1603)</li>

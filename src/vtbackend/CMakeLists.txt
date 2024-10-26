@@ -45,6 +45,7 @@ set(vtbackend_HEADERS
     Viewport.h
     ViInputHandler.h
     ViCommands.h
+    JumpHistory.h
     primitives.h
 )
 
@@ -75,6 +76,7 @@ set(vtbackend_SOURCES
     Viewport.cpp
     ViInputHandler.cpp
     ViCommands.cpp
+    JumpHistory.cpp
     primitives.cpp
 )
 
