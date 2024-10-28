@@ -144,10 +144,17 @@ TEST_CASE("InputGenerator.Modifier+ArrowKeys", "[terminal,input]")
         Mapping { Shift, Key::DownArrow, "\033[1;2B"sv },
         Mapping { Shift, Key::RightArrow, "\033[1;2C"sv },
         Mapping { Shift, Key::LeftArrow, "\033[1;2D"sv },
+#ifdef __APPLE__
+        Mapping { Alt, Key::UpArrow, "\033[1;5A"sv },
+        Mapping { Alt, Key::DownArrow, "\033[1;5B"sv },
+        Mapping { Alt, Key::RightArrow, "\033[1;5C"sv },
+        Mapping { Alt, Key::LeftArrow, "\033[1;5D"sv },
+#else
         Mapping { Alt, Key::UpArrow, "\033[1;3A"sv },
         Mapping { Alt, Key::DownArrow, "\033[1;3B"sv },
         Mapping { Alt, Key::RightArrow, "\033[1;3C"sv },
         Mapping { Alt, Key::LeftArrow, "\033[1;3D"sv },
+#endif
         Mapping { Control, Key::UpArrow, "\033[1;5A"sv },
         Mapping { Control, Key::DownArrow, "\033[1;5B"sv },
         Mapping { Control, Key::RightArrow, "\033[1;5C"sv },
