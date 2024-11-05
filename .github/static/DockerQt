@@ -1,10 +1,10 @@
 ARG VERSION="24.04"
-FROM ubuntu:$VERSION
+FROM ubuntu:$VERSION as builder
 ARG ARCH="x86_64"
 
 RUN apt-get update
 RUN apt-get install -y lsb-release software-properties-common gnupg
-RUN apt-get install -y wget ninja-build ccache
+RUN apt-get install -y wget ninja-build ccache g++-14 gcc-14
 
 # QT DEPS
 RUN apt-get install -y libgl-dev libglu-dev  libx11-xcb-dev libxkbcommon-x11-dev libpcre2-dev libz-dev libfreetype6-dev libpng-dev libjpeg-dev libsqlite3-dev libharfbuzz-dev libb2-dev libdouble-conversion-dev libfontconfig1-dev
@@ -23,16 +23,19 @@ RUN chmod +x llvm.sh
 RUN ./llvm.sh 18
 
 WORKDIR /
-RUN bash -c "\
-    wget -q https://download.qt.io/official_releases/qt/6.7/6.7.1/single/qt-everywhere-src-6.7.1.tar.xz &&\
-    tar xf qt-everywhere-src-6.7.1.tar.xz &&\
-    rm qt-everywhere-src-6.7.1.tar.xz &&\
-    cd qt-everywhere-src-6.7.1 &&\
-    cmake -S . -B build -G Ninja \
+RUN wget -q https://download.qt.io/official_releases/qt/6.8/6.8.0/single/qt-everywhere-src-6.8.0.tar.xz
+RUN tar xf qt-everywhere-src-6.8.0.tar.xz
+RUN rm qt-everywhere-src-6.8.0.tar.xz
+WORKDIR qt-everywhere-src-6.8.0
+RUN cmake -S . -B build -G Ninja \
        -D CMAKE_CXX_COMPILER=clang++-18 \
        -D CMAKE_C_COMPILER=clang-18 \
        -D CMAKE_INSTALL_PREFIX=\/usr \
-       -D QT_BUILD_SUBMODULES=\"qtbase;qt5compat;qtmultimedia;qtdeclarative\" \
+       -D QT_BUILD_SUBMODULES='qtbase;qt5compat;qtmultimedia;qtdeclarative' \
+       -D BUILD_qtbase=ON \
+       # -D BUILD_qt5compat=ON \
+       # -D BUILD_qtmultimedia=ON \
+       # -D BUILD_qtdeclarative=ON \
        -D QT_FEATURE_zstd=OFF \
        -D QT_FEATURE_png=OFF \
        -D QT_FEATURE_jpeg=OFF \
@@ -47,12 +50,14 @@ RUN bash -c "\
        -D INPUT_fontconfig=no \
        -D INPUT_optimize_size=yes \
        -D QT_USE_CCACHE=OFF \
-       -D CMAKE_BUILD_TYPE=Release &&\
-    cmake --build build --parallel &&\
-    cmake --build build --target install &&\
-    cd \/ && \
-    rm -rf /qt-everywhere-src-6.7.1"
+       -D CMAKE_BUILD_TYPE=Release
 
+RUN cmake --build build --parallel 6
+RUN cmake --build build --target install
 WORKDIR /
 RUN ln -s /bin/clang-18 /bin/clang
 RUN ln -s /bin/clang++-18 /bin/clang++
+
+FROM ubuntu:$VERSION
+
+COPY --from=builder /usr /usr
