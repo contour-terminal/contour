@@ -71,7 +71,7 @@ Click the following button to install Contour from the Flathub store.
 
 ## Requirements
 
-- **operating system**: A *recent* operating system (macOS 12, Windows 10+, an up-to-date Linux, FreeBSD or OpenBSD)
+- **operating system**: A *recent* operating system (macOS 14, Windows 10+, an up-to-date Linux, FreeBSD or OpenBSD)
 - **GPU**: driver must support at least OpenGL 3.3 hardware accelerated or as software rasterizer.
 - **CPU**: x86-64 AMD or Intel with AES-NI instruction set or ARMv8 with crypto extensions.
 
