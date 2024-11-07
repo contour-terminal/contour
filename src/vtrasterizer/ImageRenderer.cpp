@@ -89,9 +89,9 @@ Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttri
     //                   * fragment.offset().column.value * fragment.offset().line.value
     //                   * fragment.rasterizedImage().cellSize().width.value
     //                   * fragment.rasterizedImage().cellSize().height.value;
-    auto const key = ImageFragmentKey { fragment.rasterizedImage().image().id(),
-                                        fragment.offset(),
-                                        fragment.rasterizedImage().cellSize() };
+    auto const key = ImageFragmentKey { .imageId = fragment.rasterizedImage().image().id(),
+                                        .offset = fragment.offset(),
+                                        .size = fragment.rasterizedImage().cellSize() };
     auto const hash = crispy::strong_hash::compute(key);
 
     return textureAtlas().get_or_try_emplace(

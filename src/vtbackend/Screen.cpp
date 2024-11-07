@@ -340,9 +340,11 @@ void Screen<Cell>::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
     cursorPosition = _grid.resize(mainDisplayPageSize, cursorPosition, _cursor.wrapPending);
     cursorPosition = clampCoordinate(cursorPosition);
 
-    auto const margin =
-        Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
-                 Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
+    auto const margin = Margin {
+        .vertical = Margin::Vertical { .from = {}, .to = mainDisplayPageSize.lines.as<LineOffset>() - 1 },
+        .horizontal =
+            Margin::Horizontal { .from = {}, .to = mainDisplayPageSize.columns.as<ColumnOffset>() - 1 }
+    };
 
     *_margin = margin;
 
@@ -938,7 +940,7 @@ void Screen<Cell>::sendTerminalId()
     // version number
     // TODO: (PACKAGE_VERSION_MAJOR * 100 + PACKAGE_VERSION_MINOR) * 100 + PACKAGE_VERSION_MICRO
     auto constexpr Pv =
-        (LIBTERMINAL_VERSION_MAJOR * 100 + LIBTERMINAL_VERSION_MINOR) * 100 + LIBTERMINAL_VERSION_PATCH;
+        (((LIBTERMINAL_VERSION_MAJOR * 100) + LIBTERMINAL_VERSION_MINOR) * 100) + LIBTERMINAL_VERSION_PATCH;
 
     // ROM cardridge registration number (always 0)
     auto constexpr Pc = 0;
@@ -1032,7 +1034,10 @@ void Screen<Cell>::selectiveEraseLine(LineOffset line)
 
     auto const left = ColumnOffset(0);
     auto const right = boxed_cast<ColumnOffset>(pageSize().columns - 1);
-    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    auto const area = Rect { .top = unbox<Top>(line),
+                             .left = unbox<Left>(left),
+                             .bottom = unbox<Bottom>(line),
+                             .right = unbox<Right>(right) };
     _terminal->markRegionDirty(area);
 }
 
@@ -1054,7 +1059,10 @@ void Screen<Cell>::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOff
 
     auto const left = begin;
     auto const right = end - 1;
-    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    auto const area = Rect { .top = unbox<Top>(line),
+                             .left = unbox<Left>(left),
+                             .bottom = unbox<Bottom>(line),
+                             .right = unbox<Right>(right) };
     _terminal->markRegionDirty(area);
 }
 
@@ -1150,7 +1158,8 @@ void Screen<Cell>::clearToEndOfLine()
     auto const line = _cursor.position.line;
     auto const left = _cursor.position.column;
     auto const right = boxed_cast<ColumnOffset>(pageSize().columns - 1);
-    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    auto const area =
+        Rect { .top = Top(*line), .left = Left(*left), .bottom = Bottom(*line), .right = Right(*right) };
     _terminal->markRegionDirty(area);
 }
 
@@ -1168,7 +1177,8 @@ void Screen<Cell>::clearToBeginOfLine()
     auto const line = _cursor.position.line;
     auto const left = ColumnOffset(0);
     auto const right = _cursor.position.column;
-    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    auto const area =
+        Rect { .top = Top(*line), .left = Left(*left), .bottom = Bottom(*line), .right = Right(*right) };
     _terminal->markRegionDirty(area);
 }
 
@@ -1180,7 +1190,8 @@ void Screen<Cell>::clearLine()
     auto const line = _cursor.position.line;
     auto const left = ColumnOffset(0);
     auto const right = boxed_cast<ColumnOffset>(pageSize().columns - 1);
-    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    auto const area =
+        Rect { .top = Top(*line), .left = Left(*left), .bottom = Bottom(*line), .right = Right(*right) };
     _terminal->markRegionDirty(area);
 }
 // }}}
@@ -1415,9 +1426,9 @@ void Screen<Cell>::hyperlink(string id, string uri)
         }
         // We ignore the user id since we need to ensure it's unique. We generate our own.
         _cursor.hyperlink = _terminal->hyperlinks().nextHyperlinkId++;
-        _terminal->hyperlinks().cache.emplace(
-            _cursor.hyperlink,
-            make_shared<HyperlinkInfo>(HyperlinkInfo { std::move(cacheId), std::move(uri) }));
+        _terminal->hyperlinks().cache.emplace(_cursor.hyperlink,
+                                              make_shared<HyperlinkInfo>(HyperlinkInfo {
+                                                  .userId = std::move(cacheId), .uri = std::move(uri) }));
     }
     // TODO:
     // Care about eviction.
@@ -1548,7 +1559,7 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
 
     size_t constexpr MaxChunkSize = 4096;
     size_t currentChunkSize = 0;
-    auto const pushContent = [&](auto const data) -> void {
+    auto const pushContent = [&](auto const& data) -> void {
         if (data.empty())
             return;
         if (currentChunkSize == 0) // initiate chunk
@@ -1813,7 +1824,7 @@ void Screen<Cell>::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
         ceil(pixelSize.width.as<double>() / _terminal->cellPixelSize().width.as<double>()));
     auto const lineCount = LineCount::cast_from(
         ceil(pixelSize.height.as<double>() / _terminal->cellPixelSize().height.as<double>()));
-    auto const extent = GridSize { lineCount, columnCount };
+    auto const extent = GridSize { .lines = lineCount, .columns = columnCount };
     auto const autoScrollAtBottomMargin = !_terminal->isModeEnabled(DECMode::NoSixelScrolling);
     auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : CellLocation {};
 
@@ -1887,7 +1898,8 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
         for (GridSize::Offset const offset: GridSize { linesToBeRendered, columnsToBeRendered })
         {
             Cell& cell = at(topLeft + offset);
-            cell.setImageFragment(rasterizedImage, CellLocation { offset.line, offset.column });
+            cell.setImageFragment(rasterizedImage,
+                                  CellLocation { .line = offset.line, .column = offset.column });
             cell.setHyperlink(_cursor.hyperlink);
         };
         moveCursorTo(topLeft.line + offset, topLeft.column);
@@ -3297,6 +3309,7 @@ void Screen<Cell>::applyAndLog(Function const& function, Sequence const& seq)
 }
 
 template <CellConcept Cell>
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
 {
     // This function assumed that the incoming instruction has been already resolved to a given
@@ -3393,10 +3406,13 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
 
             auto const targetTop = LineOffset(seq.param_or(5, *origin.line + 1) - 1);
             auto const targetLeft = ColumnOffset(seq.param_or(6, *origin.column + 1) - 1);
-            auto const targetTopLeft = CellLocation { targetTop, targetLeft };
+            auto const targetTopLeft = CellLocation { .line = targetTop, .column = targetLeft };
             auto const targetPage = seq.param_or(7, 0);
 
-            copyArea(Rect { top, left, bottom, right }, page, targetTopLeft, targetPage);
+            copyArea(Rect { .top = top, .left = left, .bottom = bottom, .right = right },
+                     page,
+                     targetTopLeft,
+                     targetPage);
         }
         break;
         case DECERA: {

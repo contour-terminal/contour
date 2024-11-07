@@ -46,8 +46,8 @@ auto setupMockTerminal(std::string_view text,
 {
     return vtbackend::MockTerm<vtpty::MockPty> {
         vtpty::PageSize { // increment line count by one for indicator statusline.
-                          pageSize.lines + 1,
-                          pageSize.columns },
+                          .lines = pageSize.lines + 1,
+                          .columns = pageSize.columns },
         history,
         1024, // ptyReadBufferSize
         [text](auto& mock) {

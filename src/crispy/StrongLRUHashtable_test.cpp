@@ -56,6 +56,7 @@ inline string ch(Value first, Value second, Values... remaining)
 }
 } // namespace
 
+// NOLINTBEGIN(misc-const-correctness,readability-function-cognitive-complexity)
 TEST_CASE("strong_hash", "")
 {
     auto empty = strong_hash::compute("");
@@ -411,3 +412,4 @@ TEST_CASE("strong_lru_hashtable.peek", "")
         REQUIRE(joinHumanReadable(cache.hashes()) == sh(4, 3, 2, 1));
     }
 }
+// NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

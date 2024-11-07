@@ -96,7 +96,7 @@ void DecorationRenderer::renderLine(vtbackend::RenderLine const& line)
     for (auto const& mapping: CellFlagDecorationMappings)
         if (line.textAttributes.flags & mapping.first)
             renderDecoration(mapping.second,
-                             _gridMetrics.mapBottomLeft(vtbackend::CellLocation { line.lineOffset }),
+                             _gridMetrics.mapBottomLeft(vtbackend::CellLocation { .line = line.lineOffset }),
                              line.usedColumns,
                              line.textAttributes.decorationColor);
 }
@@ -111,6 +111,7 @@ void DecorationRenderer::renderCell(vtbackend::RenderCell const& cell)
                              cell.attributes.decorationColor);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto DecorationRenderer::createTileData(Decorator decoration,
                                         atlas::TileLocation tileLocation) -> TextureAtlas::TileCreateData
 {
@@ -147,7 +148,7 @@ auto DecorationRenderer::createTileData(Decorator decoration,
                 auto image = atlas::Buffer(imageSize.area(), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                     for (auto x: crispy::times(unbox(width)))
-                        image[(unbox(height) - y0 - y) * unbox(width) + x] = 0xFF;
+                        image[((unbox(height) - y0 - y) * unbox(width)) + x] = 0xFF;
                 return image;
             });
         }
@@ -155,7 +156,7 @@ auto DecorationRenderer::createTileData(Decorator decoration,
             auto const thickness = max(1u, unsigned(ceil(double(underlineThickness()) * 2.0) / 3.0));
             auto const y1 = max(0u, underlinePosition() + thickness);
             // y1 - 3 thickness can be negative
-            auto const y0 = max(0, static_cast<int>(y1) - 3 * static_cast<int>(thickness));
+            auto const y0 = max(0, static_cast<int>(y1) - (3 * static_cast<int>(thickness)));
             auto const height = vtbackend::Height(y1 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
@@ -164,8 +165,8 @@ auto DecorationRenderer::createTileData(Decorator decoration,
                 {
                     for (auto x: crispy::times(unbox(width)))
                     {
-                        image[(unbox(height) - y1 - y) * unbox(width) + x] = 0xFF; // top line
-                        image[(unbox(height) - y0 - y) * unbox(width) + x] = 0xFF; // bottom line
+                        image[((unbox(height) - y1 - y) * unbox(width)) + x] = 0xFF; // top line
+                        image[((unbox(height) - y0 - y) * unbox(width)) + x] = 0xFF; // bottom line
                     }
                 }
                 return image;
@@ -231,8 +232,8 @@ auto DecorationRenderer::createTileData(Decorator decoration,
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                     for (auto x: crispy::times(unbox(width)))
-                        if (fabsf(float(x) / unbox<float>(width) - 0.5f) >= 0.25f)
-                            image[(unbox(height) - y0 - y) * unbox(width) + x] = 0xFF;
+                        if (fabsf((float(x) / unbox<float>(width)) - 0.5f) >= 0.25f)
+                            image[((unbox(height) - y0 - y) * unbox(width)) + x] = 0xFF;
                 return image;
             });
         }
@@ -247,16 +248,16 @@ auto DecorationRenderer::createTileData(Decorator decoration,
                 for (unsigned y = gap; y < thickness + gap; ++y)
                     for (unsigned x = gap; x < unbox(width) - gap; ++x)
                     {
-                        image[y * unbox(width) + x] = 0xFF;
-                        image[(unbox(cellHeight) - 1 - y) * unbox(width) + x] = 0xFF;
+                        image[(y * unbox(width)) + x] = 0xFF;
+                        image[((unbox(cellHeight) - 1 - y) * unbox(width)) + x] = 0xFF;
                     }
 
                 // Draws the left and right vertical lines
                 for (unsigned y = gap; y < unbox(cellHeight) - gap; y++)
                     for (unsigned x = gap; x < thickness + gap; ++x)
                     {
-                        image[y * unbox(width) + x] = 0xFF;
-                        image[y * unbox(width) + (unbox(width) - 1 - x)] = 0xFF;
+                        image[(y * unbox(width)) + x] = 0xFF;
+                        image[(y * unbox(width)) + (unbox(width) - 1 - x)] = 0xFF;
                     }
                 return image;
             });
@@ -269,7 +270,7 @@ auto DecorationRenderer::createTileData(Decorator decoration,
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(cellHeight), 0);
                 for (auto y: crispy::times(thickness))
                     for (auto x: crispy::times(unbox(width)))
-                        image[y * unbox(width) + x] = 0xFF;
+                        image[(y * unbox(width)) + x] = 0xFF;
                 return image;
             });
         }
@@ -281,7 +282,7 @@ auto DecorationRenderer::createTileData(Decorator decoration,
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                     for (auto x: crispy::times(unbox(width)))
-                        image[y * unbox(width) + x] = 0xFF;
+                        image[(y * unbox(width)) + x] = 0xFF;
                 return image;
             });
         }
@@ -301,7 +302,7 @@ void DecorationRenderer::renderDecoration(Decorator decoration,
         auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
         auto const tileData = createTileData(decoration, tileLocation);
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
-        renderTile({ pos.x + unbox(i) * unbox<int>(_gridMetrics.cellSize.width) },
+        renderTile({ pos.x + (unbox(i) * unbox<int>(_gridMetrics.cellSize.width)) },
                    { pos.y - unbox<int>(tileAttributes.bitmapSize.height) },
                    color,
                    tileAttributes);

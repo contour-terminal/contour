@@ -81,10 +81,12 @@ ShaderConfig builtinShaderConfig(ShaderClass shaderClass)
             auto const fileContents = file.readAll().toStdString();
 
             auto const fileHeader = versionHeader + sharedDefines;
-            return ShaderSource { shaderFilePath, QString::fromStdString(fileHeader + fileContents) };
+            return ShaderSource { .location = shaderFilePath,
+                                  .contents = QString::fromStdString(fileHeader + fileContents) };
         };
         QString const basename = QString::fromStdString(to_string(shaderClass));
-        return ShaderConfig { makeSource(basename + ".vert"), makeSource(basename + ".frag") };
+        return ShaderConfig { .vertexShader = makeSource(basename + ".vert"),
+                              .fragmentShader = makeSource(basename + ".frag") };
     };
     return makeConfig(shaderClass);
 }

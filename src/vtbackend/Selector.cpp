@@ -79,7 +79,7 @@ bool Selection::intersects(Rect area) const noexcept
     // TODO: make me more efficient
     for (auto line = area.top.as<LineOffset>(); line <= area.bottom.as<LineOffset>(); ++line)
         for (auto col = area.left.as<ColumnOffset>(); col <= area.right.as<ColumnOffset>(); ++col)
-            if (contains({ line, col }))
+            if (contains({ .line = line, .column = col }))
                 return true;
 
     return false;
@@ -171,12 +171,12 @@ CellLocation WordWiseSelection::extendSelectionForward(CellLocation pos) const n
         {
             current.line++;
             current.column = ColumnOffset(0);
-            current = stretchedColumn(_helper, { current.line, current.column + 1 });
+            current = stretchedColumn(_helper, { .line = current.line, .column = current.column + 1 });
         }
 
         if (*current.column + 1 < *_helper.pageSize().columns)
         {
-            current = stretchedColumn(_helper, { current.line, current.column + 1 });
+            current = stretchedColumn(_helper, { .line = current.line, .column = current.column + 1 });
         }
         else if (*current.line + 1 < *_helper.pageSize().lines)
         {
@@ -260,7 +260,8 @@ vector<Selection::Range> RectangularSelection::ranges() const
     {
         auto const line = from.line + LineOffset::cast_from(i);
         auto const left = from.column;
-        auto const right = stretchedColumn(_helper, CellLocation { line, to.column }).column;
+        auto const right =
+            stretchedColumn(_helper, CellLocation { .line = line, .column = to.column }).column;
         result[i] = Range { line, left, right };
     }
 
@@ -274,7 +275,8 @@ FullLineSelection::FullLineSelection(SelectionHelper const& helper,
     Selection(helper, ViMode::VisualLine, start, std::move(onSelectionUpdated))
 {
     _from.column = ColumnOffset(0);
-    extend(CellLocation { _to.line, boxed_cast<ColumnOffset>(_helper.pageSize().columns - 1) });
+    extend(CellLocation { .line = _to.line,
+                          .column = boxed_cast<ColumnOffset>(_helper.pageSize().columns - 1) });
 }
 
 bool FullLineSelection::extend(CellLocation to)

@@ -71,7 +71,7 @@ namespace
         auto const col = vtbackend::ColumnOffset(
             clamp((sx - marginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
 
-        return { row, col };
+        return { .line = row, .column = col };
     }
 
     PixelCoordinate makeMousePixelPosition(QHoverEvent* event,
@@ -85,8 +85,8 @@ namespace
 #endif
         auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
         auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
-        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
-                                 PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
+        return PixelCoordinate { .x = PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
+                                 .y = PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
     }
 
     PixelCoordinate makeMousePixelPosition(QMouseEvent* event,
@@ -100,8 +100,8 @@ namespace
 #endif
         auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
         auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
-        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
-                                 PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
+        return PixelCoordinate { .x = PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
+                                 .y = PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
     }
 
     PixelCoordinate makeMousePixelPosition(QWheelEvent* event,
@@ -115,8 +115,8 @@ namespace
 #endif
         auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
         auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
-        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
-                                 PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
+        return PixelCoordinate { .x = PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
+                                 .y = PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
     }
 
     QPoint transposed(QPoint p) noexcept
@@ -137,7 +137,7 @@ namespace
 
         inputLog()("[{}] Accumulate scroll with current value {}",
                    modifiers,
-                   crispy::point { session.getScrollX(), session.getScrollY() });
+                   crispy::point { .x = session.getScrollX(), .y = session.getScrollY() });
 
         if (std::abs(session.getScrollX()) > unbox<int>(session.terminal().cellPixelSize().width))
         {
@@ -357,8 +357,8 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     }
 
     // NOLINTNEXTLINE(readability-qualified-auto)
-    if (auto const i = find_if(
-            begin(KeyMappings), end(KeyMappings), [event](auto const& x) { return x.first == event->key(); });
+    if (auto const i =
+            std::ranges::find_if(KeyMappings, [event](auto const& x) { return x.first == event->key(); });
         i != end(KeyMappings))
     {
         session.sendKeyEvent(i->second, modifiers, eventType, now);
@@ -370,9 +370,8 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     if (event->text().isEmpty())
     {
         // NOLINTNEXTLINE(readability-qualified-auto)
-        if (auto const i = find_if(begin(CharMappings),
-                                   end(CharMappings),
-                                   [event](auto const& x) { return x.first == event->key(); });
+        if (auto const i = std::ranges::find_if(CharMappings,
+                                                [event](auto const& x) { return x.first == event->key(); });
             i != end(CharMappings))
         {
             session.sendCharEvent(static_cast<char32_t>(i->second), physicalKey, modifiers, eventType, now);
@@ -559,12 +558,12 @@ vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer)
         else
             return styledFont.toPattern();
     };
-    return { renderer.fontDescriptions().size.pt,
-             renderer.fontDescriptions().regular.familyName,
-             nameOfStyledFont(text::font_weight::bold, text::font_slant::normal),
-             nameOfStyledFont(text::font_weight::normal, text::font_slant::italic),
-             nameOfStyledFont(text::font_weight::bold, text::font_slant::italic),
-             renderer.fontDescriptions().emoji.toPattern() };
+    return { .size = renderer.fontDescriptions().size.pt,
+             .regular = renderer.fontDescriptions().regular.familyName,
+             .bold = nameOfStyledFont(text::font_weight::bold, text::font_slant::normal),
+             .italic = nameOfStyledFont(text::font_weight::normal, text::font_slant::italic),
+             .boldItalic = nameOfStyledFont(text::font_weight::bold, text::font_slant::italic),
+             .emoji = renderer.fontDescriptions().emoji.toPattern() };
 }
 
 vtrasterizer::PageMargin computeMargin(ImageSize cellSize,

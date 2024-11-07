@@ -55,7 +55,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos) const
 
     auto const xOffset = pos.column * unbox<int>(_cellSize.width);
     auto const yOffset = pos.line * unbox<int>(_cellSize.height);
-    auto const pixelOffset = CellLocation { yOffset, xOffset };
+    auto const pixelOffset = CellLocation { .line = yOffset, .column = xOffset };
 
     Image::Data fragData;
     fragData.resize(_cellSize.area() * 4); // RGBA
@@ -92,7 +92,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos) const
         auto const startOffset = static_cast<size_t>(
             ((pixelOffset.line + y) * unbox<int>(_image->width()) + unbox(pixelOffset.column)) * 4);
         const auto* const source = &_image->data()[startOffset];
-        target = copy(source, source + static_cast<ptrdiff_t>(availableWidth) * 4, target);
+        target = copy(source, source + (static_cast<ptrdiff_t>(availableWidth) * 4), target);
 
         // fill vertical gap on right
         for (int x = availableWidth; x < unbox<int>(_cellSize.width); ++x)

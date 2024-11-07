@@ -43,7 +43,7 @@ vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap,
             unsigned int count = 0;
             for (unsigned y = sr; y < min(sr + factor, size.height.as<unsigned>()); y++)
             {
-                uint8_t const* p = bitmap.data() + (y * *size.width * 4) + sc * 4;
+                uint8_t const* p = bitmap.data() + (y * unbox(size.width) * 4) + (sc * 4);
                 for (unsigned x = sc; x < min(sc + factor, size.width.as<unsigned>()); x++, count++)
                 {
                     b += *(p++);
@@ -101,7 +101,7 @@ vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
             unsigned count = 0; // number of pixels being averaged
             for (auto y = sr; y < min(sr + factor, size.height.as<unsigned>()); y++)
             {
-                uint8_t const* p = bitmap.data() + (y * *size.width * numComponents) + sc * numComponents;
+                uint8_t const* p = bitmap.data() + (y * *size.width * numComponents) + (sc * numComponents);
                 for (auto x = sc; x < min(sc + factor, size.width.as<unsigned>()); x++, count++)
                     for (auto const k: ::ranges::views::iota(0u, numComponents))
                         values.at(k) += *(p++);

@@ -12,6 +12,7 @@
 
 #include <QtQml/QQmlEngine>
 
+#include <algorithm>
 #include <string>
 
 using namespace std::string_literals;
@@ -179,7 +180,7 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
 
     _app.onExit(thatSession); // TODO: the logic behind that impl could probably be moved here.
 
-    auto i = std::find_if(_sessions.begin(), _sessions.end(), [&](auto p) { return p == &thatSession; });
+    auto i = std::ranges::find_if(_sessions, [&](auto p) { return p == &thatSession; });
     if (i != _sessions.end())
     {
         _sessions.erase(i);

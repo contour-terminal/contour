@@ -45,7 +45,9 @@ namespace detail
         lines.reserve(totalLineCount);
 
         for ([[maybe_unused]] auto const _: ranges::views::iota(0u, totalLineCount))
-            lines.emplace_back(defaultLineFlags, TrivialLineBuffer { pageSize.columns, initialSGR });
+            lines.emplace_back(
+                defaultLineFlags,
+                TrivialLineBuffer { .displayWidth = pageSize.columns, .textAttributes = initialSGR });
 
         return lines;
     }
@@ -370,7 +372,8 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
         for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToAllocate))
         {
             _lines.emplace_back(defaultLineFlags(),
-                                TrivialLineBuffer { _pageSize.columns, GraphicsAttributes() });
+                                TrivialLineBuffer { .displayWidth = _pageSize.columns,
+                                                    .textAttributes = GraphicsAttributes() });
         }
         return scrollUp(linesCountToScrollUp, defaultAttributes);
     }
@@ -401,7 +404,8 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
             fill_n(next(_lines.begin(), *_pageSize.lines),
                    unbox<size_t>(linesAppendCount),
                    Line<Cell> { defaultLineFlags(),
-                                TrivialLineBuffer { _pageSize.columns, defaultAttributes } });
+                                TrivialLineBuffer { .displayWidth = _pageSize.columns,
+                                                    .textAttributes = defaultAttributes } });
             rotateBuffersLeft(linesAppendCount);
         }
         if (linesAppendCount < linesCountToScrollUp)
@@ -428,11 +432,12 @@ LineCount Grid<Cell>::scrollUp(LineCount n, GraphicsAttributes defaultAttributes
 
     // these two booleans could be cached and updated whenever margin updates,
     // so not even this needs to be computed for the general case.
-    auto const fullHorizontal =
-        margin.horizontal
-        == Margin::Horizontal { ColumnOffset { 0 }, unbox<ColumnOffset>(_pageSize.columns) - 1 };
+    auto const fullHorizontal = margin.horizontal
+                                == Margin::Horizontal { .from = ColumnOffset { 0 },
+                                                        .to = unbox<ColumnOffset>(_pageSize.columns) - 1 };
     auto const fullVertical =
-        margin.vertical == Margin::Vertical { LineOffset(0), unbox<LineOffset>(_pageSize.lines) - 1 };
+        margin.vertical
+        == Margin::Vertical { .from = LineOffset(0), .to = unbox<LineOffset>(_pageSize.lines) - 1 };
 
     if (fullHorizontal)
     {
@@ -501,11 +506,12 @@ void Grid<Cell>::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttri
     // so not even this needs to be computed for the general case.
     auto const fullHorizontal =
         margin.horizontal
-        == Margin::Horizontal { ColumnOffset { 0 },
-                                unbox<ColumnOffset>(_pageSize.columns) - ColumnOffset(1) };
+        == Margin::Horizontal { .from = ColumnOffset { 0 },
+                                .to = unbox<ColumnOffset>(_pageSize.columns) - ColumnOffset(1) };
     auto const fullVertical =
         margin.vertical
-        == Margin::Vertical { LineOffset(0), unbox<LineOffset>(_pageSize.lines) - LineOffset(1) };
+        == Margin::Vertical { .from = LineOffset(0),
+                              .to = unbox<LineOffset>(_pageSize.lines) - LineOffset(1) };
 
     auto const n = std::min(vN, margin.vertical.length());
 
@@ -621,7 +627,9 @@ CellLocation Grid<Cell>::growLines(LineCount newHeight, CellLocation cursor)
     auto const linesToFill = max(0, *newTotalLineCount - *currentTotalLineCount);
 
     for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToFill))
-        _lines.emplace_back(wrappableFlag, TrivialLineBuffer { _pageSize.columns, GraphicsAttributes {} });
+        _lines.emplace_back(
+            wrappableFlag,
+            TrivialLineBuffer { .displayWidth = _pageSize.columns, .textAttributes = GraphicsAttributes {} });
 
     _pageSize.lines += totalLinesToExtend;
     _linesUsed = min(_linesUsed + totalLinesToExtend, LineCount::cast_from(_lines.size()));
@@ -634,6 +642,7 @@ CellLocation Grid<Cell>::growLines(LineCount newHeight, CellLocation cursor)
 }
 
 template <CellConcept Cell>
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos, bool wrapPending)
 {
     if (_pageSize == newSize)
@@ -693,7 +702,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
             _pageSize.lines -= numLinesToPushUp;
             clampHistory();
             verifyState();
-            return CellLocation { -boxed_cast<LineOffset>(numLinesToPushUp), {} };
+            return CellLocation { .line = -boxed_cast<LineOffset>(numLinesToPushUp), .column = {} };
         }
 
         verifyState();
@@ -710,7 +719,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
                     line.resize(newColumnCount);
             _pageSize.columns = newColumnCount;
             verifyState();
-            return CellLocation { LineOffset(0), ColumnOffset(wrapPending ? 1 : 0) };
+            return CellLocation { .line = LineOffset(0), .column = ColumnOffset(wrapPending ? 1 : 0) };
         }
         else
         {
@@ -787,9 +796,10 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
                 // so fill the gap until we have a full page.
                 cy = _pageSize.lines - LineCount::cast_from(grownLines.size());
                 while (LineCount::cast_from(grownLines.size()) < _pageSize.lines)
-                    grownLines.emplace_back(
-                        defaultLineFlags(),
-                        TrivialLineBuffer { newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
+                    grownLines.emplace_back(defaultLineFlags(),
+                                            TrivialLineBuffer { .displayWidth = newColumnCount,
+                                                                .textAttributes = GraphicsAttributes {},
+                                                                .fillAttributes = GraphicsAttributes {} });
 
                 Ensures(LineCount::cast_from(grownLines.size()) == _pageSize.lines);
             }
@@ -799,9 +809,10 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
             // Fill scrollback lines.
             auto const totalLineCount = unbox<size_t>(_pageSize.lines + maxHistoryLineCount());
             while (grownLines.size() < totalLineCount)
-                grownLines.emplace_back(
-                    defaultLineFlags(),
-                    TrivialLineBuffer { newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
+                grownLines.emplace_back(defaultLineFlags(),
+                                        TrivialLineBuffer { .displayWidth = newColumnCount,
+                                                            .textAttributes = GraphicsAttributes {},
+                                                            .fillAttributes = GraphicsAttributes {} });
 
             _lines = std::move(grownLines);
             _pageSize.columns = newColumnCount;
@@ -810,7 +821,8 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
             rotateBuffersLeft(newHistoryLineCount);
 
             verifyState();
-            return CellLocation { -boxed_cast<LineOffset>(cy), ColumnOffset(wrapPending ? 1 : 0) };
+            return CellLocation { .line = -boxed_cast<LineOffset>(cy),
+                                  .column = ColumnOffset(wrapPending ? 1 : 0) };
         }
     };
 
@@ -904,9 +916,10 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
             Require(numLinesWritten >= _pageSize.lines);
 
             while (shrinkedLines.size() < totalLineCount)
-                shrinkedLines.emplace_back(
-                    LineFlag::None,
-                    TrivialLineBuffer { newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
+                shrinkedLines.emplace_back(LineFlag::None,
+                                           TrivialLineBuffer { .displayWidth = newColumnCount,
+                                                               .textAttributes = GraphicsAttributes {},
+                                                               .fillAttributes = GraphicsAttributes {} });
 
             shrinkedLines.rotate_left(
                 unbox<size_t>(numLinesWritten - _pageSize.lines)); // maybe to be done outisde?
@@ -982,7 +995,10 @@ void Grid<Cell>::appendNewLines(LineCount count, GraphicsAttributes attr)
     if (auto const n = std::min(count, _pageSize.lines); *n > 0)
     {
         generate_n(back_inserter(_lines), *n, [&]() {
-            return Line<Cell>(wrappableFlag, TrivialLineBuffer { _pageSize.columns, attr, attr });
+            return Line<Cell>(wrappableFlag,
+                              TrivialLineBuffer { .displayWidth = _pageSize.columns,
+                                                  .textAttributes = attr,
+                                                  .fillAttributes = attr });
         });
         clampHistory();
     }
@@ -1064,12 +1080,14 @@ CellLocationRange Grid<Cell>::wordRangeUnderCursor(CellLocation position,
             {
                 current.line++;
                 current.column = ColumnOffset(0);
-                current = stretchedColumn(CellLocation { current.line, current.column + 1 });
+                current =
+                    stretchedColumn(CellLocation { .line = current.line, .column = current.column + 1 });
             }
 
             if (*current.column + 1 < *pageSize().columns)
             {
-                current = stretchedColumn(CellLocation { current.line, current.column + 1 });
+                current =
+                    stretchedColumn(CellLocation { .line = current.line, .column = current.column + 1 });
             }
             else if (*current.line + 1 < *pageSize().lines)
             {

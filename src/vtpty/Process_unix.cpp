@@ -103,7 +103,13 @@ Process::Process(string const& path,
                  Environment const& env,
                  bool escapeSandbox,
                  unique_ptr<Pty> pty):
-    _d(new Private { path, args, cwd, env, escapeSandbox, std::move(pty) }, [](Private* p) { delete p; })
+    _d(new Private { .path = path,
+                     .args = args,
+                     .cwd = cwd,
+                     .env = env,
+                     .escapeSandbox = escapeSandbox,
+                     .pty = std::move(pty) },
+       [](Private* p) { delete p; })
 {
 }
 

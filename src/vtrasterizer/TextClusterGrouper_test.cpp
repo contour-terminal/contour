@@ -162,15 +162,19 @@ struct EventRecorder final: public TextClusterGrouper::Events
                          TextStyle style,
                          vtbackend::RGBColor color) override
     {
-        events.emplace_back(TextClusterGroup {
-            std::u32string(codepoints), to_vector<int>(clusters), initialPenPosition, style, color });
+        events.emplace_back(TextClusterGroup { .codepoints = std::u32string(codepoints),
+                                               .clusters = to_vector<int>(clusters),
+                                               .initialPenPosition = initialPenPosition,
+                                               .style = style,
+                                               .color = color });
     }
 
     bool renderBoxDrawingCell(vtbackend::CellLocation position,
                               char32_t codepoint,
                               vtbackend::RGBColor foregroundColor) override
     {
-        events.emplace_back(BoxDrawingCell { position, codepoint, foregroundColor });
+        events.emplace_back(BoxDrawingCell {
+            .position = position, .codepoint = codepoint, .foregroundColor = foregroundColor });
         return true;
     }
 };

@@ -64,7 +64,7 @@ CellLocation Viewport::clampCellLocation(CellLocation const& location) const noe
     auto const line = std::clamp(location.line, viewportTop, viewportBottom);
     auto const column = std::clamp(location.column, viewportLeft, viewportRight);
 
-    return CellLocation { line, column };
+    return CellLocation { .line = line, .column = column };
 }
 
 bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset, LineCount paddingLines)

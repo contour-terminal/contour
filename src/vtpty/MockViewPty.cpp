@@ -22,7 +22,7 @@ std::optional<Pty::ReadResult> MockViewPty::read(crispy::buffer_object<char>& st
                                                  std::optional<std::chrono::milliseconds> /*timeout*/,
                                                  size_t size)
 {
-    auto const n = std::min(std::min(_outputBuffer.size(), storage.bytesAvailable()), size);
+    auto const n = std::min({ _outputBuffer.size(), storage.bytesAvailable(), size });
     auto result = storage.writeAtEnd(_outputBuffer.substr(0, n));
     _outputBuffer.remove_prefix(n);
     return ReadResult { .data = std::string_view(result.data(), result.size()), .fromStdoutFastPipe = false };

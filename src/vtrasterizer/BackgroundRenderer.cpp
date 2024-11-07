@@ -27,7 +27,8 @@ void BackgroundRenderer::renderLine(vtbackend::RenderLine const& line)
 {
     if (line.textAttributes.backgroundColor != _defaultColor)
     {
-        auto const position = vtbackend::CellLocation { line.lineOffset, vtbackend::ColumnOffset(0) };
+        auto const position =
+            vtbackend::CellLocation { .line = line.lineOffset, .column = vtbackend::ColumnOffset(0) };
         auto const pos = _gridMetrics.mapTopLeft(position);
         auto const width = _gridMetrics.cellSize.width * vtbackend::Width::cast_from(line.usedColumns);
 
@@ -41,8 +42,8 @@ void BackgroundRenderer::renderLine(vtbackend::RenderLine const& line)
     if (line.fillAttributes.backgroundColor != _defaultColor)
     {
         auto const position =
-            vtbackend::CellLocation { line.lineOffset,
-                                      boxed_cast<vtbackend::ColumnOffset>(line.usedColumns) };
+            vtbackend::CellLocation { .line = line.lineOffset,
+                                      .column = boxed_cast<vtbackend::ColumnOffset>(line.usedColumns) };
         auto const pos = _gridMetrics.mapTopLeft(position);
         auto const width =
             _gridMetrics.cellSize.width * vtbackend::Width::cast_from(line.displayWidth - line.usedColumns);

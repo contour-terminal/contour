@@ -76,7 +76,7 @@ template <typename T>
 TextSelection(Screen<T> const&) -> TextSelection<T>;
 } // namespace
 
-// NOLINTBEGIN(misc-const-correctness)
+// NOLINTBEGIN(misc-const-correctness,readability-function-cognitive-complexity)
 TEST_CASE("Selector.Linear", "[selector]")
 {
     auto term = MockTerm(PageSize { LineCount(3), ColumnCount(11) }, LineCount(5));
@@ -94,7 +94,7 @@ TEST_CASE("Selector.Linear", "[selector]")
 
     SECTION("single-cell")
     { // "b"
-        auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
+        auto const pos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
         auto selector = LinearSelection(selectionHelper, pos, []() {});
         (void) selector.extend(pos);
         selector.complete();
@@ -114,9 +114,9 @@ TEST_CASE("Selector.Linear", "[selector]")
 
     SECTION("forward single-line")
     { // "b,c"
-        auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
+        auto const pos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
         auto selector = LinearSelection(selectionHelper, pos, []() {});
-        (void) selector.extend(CellLocation { LineOffset(1), ColumnOffset(3) });
+        (void) selector.extend(CellLocation { .line = LineOffset(1), .column = ColumnOffset(3) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -134,9 +134,9 @@ TEST_CASE("Selector.Linear", "[selector]")
 
     SECTION("forward multi-line")
     { // "b,cdefg,hi\n1234"
-        auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
+        auto const pos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
         auto selector = LinearSelection(selectionHelper, pos, []() {});
-        (void) selector.extend(CellLocation { LineOffset(2), ColumnOffset(3) });
+        (void) selector.extend(CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -171,9 +171,9 @@ TEST_CASE("Selector.Linear", "[selector]")
          2 | "bar"
         */
 
-        auto selector =
-            LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(6) }, []() {});
-        (void) selector.extend(CellLocation { LineOffset(-1), ColumnOffset(2) });
+        auto selector = LinearSelection(
+            selectionHelper, CellLocation { .line = LineOffset(-2), .column = ColumnOffset(6) }, []() {});
+        (void) selector.extend(CellLocation { .line = LineOffset(-1), .column = ColumnOffset(2) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -208,9 +208,9 @@ TEST_CASE("Selector.Linear", "[selector]")
          2 | ""
         */
 
-        auto selector =
-            LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(8) }, []() {});
-        (void) selector.extend(CellLocation { LineOffset(0), ColumnOffset(1) });
+        auto selector = LinearSelection(
+            selectionHelper, CellLocation { .line = LineOffset(-2), .column = ColumnOffset(8) }, []() {});
+        (void) selector.extend(CellLocation { .line = LineOffset(0), .column = ColumnOffset(1) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -254,4 +254,4 @@ TEST_CASE("Selector.Rectangular", "[selector]")
 {
     // TODO
 }
-// NOLINTEND(misc-const-correctness)
+// NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

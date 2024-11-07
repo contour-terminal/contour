@@ -22,8 +22,7 @@ std::optional<Pty::ReadResult> MockPty::read(crispy::buffer_object<char>& storag
                                              std::optional<std::chrono::milliseconds> /*timeout*/,
                                              size_t size)
 {
-    auto const n =
-        std::min(size, std::min(_outputBuffer.size() - _outputReadOffset, storage.bytesAvailable()));
+    auto const n = std::min({ size, _outputBuffer.size() - _outputReadOffset, storage.bytesAvailable() });
     auto const chunk = string_view { _outputBuffer.data() + _outputReadOffset, n };
     _outputReadOffset += n;
     auto const pooled = storage.writeAtEnd(chunk);

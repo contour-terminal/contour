@@ -86,12 +86,12 @@ Pixmap& Pixmap::halfFilledCircleLeft()
             paint(xi, yf, 0xFF);
     };
     auto const putAbove = [&](int x, int y) {
-        putpixel(x, y - h / 2);
+        putpixel(x, y - (h / 2));
     };
     auto const putBelow = [&](int x, int y) {
-        putpixel(x, y + h / 2);
+        putpixel(x, y + (h / 2));
     };
-    auto const radius = crispy::point { w, h / 2 };
+    auto const radius = crispy::point { .x = w, .y = h / 2 };
     drawEllipseArc(putAbove, size, radius, Arc::BottomLeft);
     drawEllipseArc(putBelow, size, radius, Arc::TopLeft);
     return *this;
@@ -107,12 +107,12 @@ Pixmap& Pixmap::halfFilledCircleRight()
             paint(x, y, 0xFF);
     };
     auto const putAbove = [&](int x, int y) {
-        putpixel(x, y - h / 2);
+        putpixel(x, y - (h / 2));
     };
     auto const putBelow = [&](int x, int y) {
-        putpixel(x, y + h / 2);
+        putpixel(x, y + (h / 2));
     };
-    auto const radius = crispy::point { w, h / 2 };
+    auto const radius = crispy::point { .x = w, .y = h / 2 };
     drawEllipseArc(putAbove, size, radius, Arc::BottomRight);
     drawEllipseArc(putBelow, size, radius, Arc::TopRight);
     return *this;
@@ -134,8 +134,8 @@ Pixmap& Pixmap::segment_bar(int which)
     auto const r = unbox<int>(size.width) - z;
 
     auto const t = static_cast<int>(ceil(unbox<double>(size.height) * (1 / 8_th))); // Z;
-    auto const b = unbox<int>(size.height) - baseLine - z / 2;
-    auto const m = t + (b - t) / 2;
+    auto const b = unbox<int>(size.height) - baseLine - (z / 2);
+    auto const m = t + ((b - t) / 2);
 
     // clang-format off
     switch (which)

@@ -13,12 +13,11 @@ namespace vtparser
 
 using ranges::views::enumerate;
 
-void parserTableDot(std::ostream& os) // {{{
+auto fillTransitions()
 {
     using Transition = std::pair<State, State>;
     using Range = ParserTable::Range;
     using RangeSet = std::vector<Range>;
-
     ParserTable const& table = ParserTable::get();
     // (State, Byte) -> State
     auto transitions = std::map<Transition, RangeSet> {};
@@ -39,7 +38,13 @@ void parserTableDot(std::ostream& os) // {{{
             }
         }
     }
+    return transitions;
+}
+
+void parserTableDot(std::ostream& os) // {{{
+{
     // TODO: isReachableFromAnywhere(targetState) to check if x can be reached from anywhere.
+    auto const transitions = fillTransitions();
 
     os << "digraph {\n";
     os << "  node [shape=box];\n";

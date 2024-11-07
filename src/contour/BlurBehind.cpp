@@ -72,7 +72,7 @@ namespace
             return nullopt;
         auto const atomName = reply->atom;
 
-        return XcbPropertyInfo { xcbConnection, winId, atomName };
+        return XcbPropertyInfo { .connection = xcbConnection, .window = winId, .propertyAtom = atomName };
     }
 
     void setPropertyX11(QWindow* window, string const& name, uint32_t value)

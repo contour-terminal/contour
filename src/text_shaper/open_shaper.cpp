@@ -374,7 +374,8 @@ namespace
         for (auto const i: iota(0u, glyphCount))
         {
             glyph_position gpos {};
-            gpos.glyph = glyph_key { fontInfo.size, font, glyph_index { info[i].codepoint } };
+            gpos.glyph =
+                glyph_key { .size = fontInfo.size, .font = font, .index = glyph_index { info[i].codepoint } };
 #if defined(GLYPH_KEY_DEBUG)
             {
                 auto const cluster = info[i].cluster;
@@ -432,7 +433,8 @@ struct open_shaper::private_open_shaper // {{{
                                              font_weight fontWeight)
     {
         auto const sourceId = identifierOf(source);
-        if (auto i = fontPathAndSizeToKeyMapping.find(FontInfo { sourceId, fontSize, fontWeight });
+        if (auto i = fontPathAndSizeToKeyMapping.find(
+                FontInfo { .path = sourceId, .size = fontSize, .weight = fontWeight });
             i != fontPathAndSizeToKeyMapping.end())
             return i->second;
 
@@ -450,10 +452,15 @@ struct open_shaper::private_open_shaper // {{{
         auto hbFontPtr =
             hb_font_ptr(hb_ft_font_create_referenced(ftFacePtr.get()), [](auto p) { hb_font_destroy(p); });
 
-        auto fontInfo = HbFontInfo { source, {}, fontSize, std::move(ftFacePtr), std::move(hbFontPtr) };
+        auto fontInfo = HbFontInfo { .primary = source,
+                                     .fallbacks = {},
+                                     .size = fontSize,
+                                     .ftFace = std::move(ftFacePtr),
+                                     .hbFont = std::move(hbFontPtr) };
 
         auto key = create_font_key();
-        fontPathAndSizeToKeyMapping.emplace(pair { FontInfo { sourceId, fontSize, fontWeight }, key });
+        fontPathAndSizeToKeyMapping.emplace(
+            pair { FontInfo { .path = sourceId, .size = fontSize, .weight = fontWeight }, key });
         fontKeyToHbFontInfoMapping.emplace(pair { key, std::move(fontInfo) });
         locatorLog()(
             "Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, sourceId, fontSize, dpi, metrics(key));
@@ -636,7 +643,7 @@ optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
         return nullopt;
 
     glyph_position gpos {};
-    gpos.glyph = glyph_key { fontInfo.size, font, glyphIndex };
+    gpos.glyph = glyph_key { .size = fontInfo.size, .font = font, .index = glyphIndex };
 #if defined(GLYPH_KEY_DEBUG)
     gpos.glyph.text = std::u32string(1, codepoint);
 #endif
@@ -788,8 +795,9 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
             auto const pitch = static_cast<size_t>(ftBitmap.pitch);
             for (auto const i: iota(size_t { 0 }, static_cast<size_t>(ftBitmap.rows)))
                 for (auto const j: iota(size_t { 0 }, static_cast<size_t>(ftBitmap.width)))
-                    output.bitmap[i * width.as<size_t>() + j] = min(
-                        static_cast<uint8_t>(uint8_t(ftBitmap.buffer[i * pitch + j]) * 255), uint8_t { 255 });
+                    output.bitmap[(i * width.as<size_t>()) + j] =
+                        min(static_cast<uint8_t>(uint8_t(ftBitmap.buffer[(i * pitch) + j]) * 255),
+                            uint8_t { 255 });
 
             FT_Bitmap_Done(_d->ft, &ftBitmap);
             break;
@@ -803,7 +811,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
             auto const* const s = ftFace->glyph->bitmap.buffer;
             for (auto const i: iota(0u, *output.bitmapSize.height))
                 for (auto const j: iota(0u, *output.bitmapSize.width))
-                    output.bitmap[i * *output.bitmapSize.width + j] = s[i * pitch + j];
+                    output.bitmap[(i * unbox(output.bitmapSize.width)) + j] = s[(i * pitch) + j];
             break;
         }
         case FT_PIXEL_MODE_LCD: {
@@ -853,7 +861,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
                 {
                     auto const* s =
                         &ftFace->glyph->bitmap
-                             .buffer[static_cast<size_t>(i) * pitch + static_cast<size_t>(j) * 4u];
+                             .buffer[(static_cast<size_t>(i) * pitch) + (static_cast<size_t>(j) * 4u)];
 
                     // BGRA -> RGBA
                     *t++ = s[2];

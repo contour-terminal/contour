@@ -306,7 +306,7 @@ bool captureScreen(CaptureSettings const& settings)
                             settings.logicalLines ? "logical" : "physical",
                             settings.lineCount,
                             settings.words ? "words" : "lines",
-                            settings.outputFile.data());
+                            settings.outputFile);
 
     // request screen capture
     reference_wrapper<ostream> output(cout);

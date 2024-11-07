@@ -740,7 +740,7 @@ inline std::pair<int, size_t> extractCodePrefix(T const& data) noexcept
 }
 
 void parserTableDot(std::ostream& os);
-
+auto fillTransitions();
 } // end namespace vtparser
 
 #include <vtparser/Parser-impl.h>

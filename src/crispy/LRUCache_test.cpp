@@ -37,6 +37,7 @@ static std::string join(std::vector<T> const& list, std::string_view delimiter =
     return s;
 }
 
+// NOLINTBEGIN(misc-const-correctness,readability-function-cognitive-complexity)
 TEST_CASE("lru_cache.ctor", "[lrucache]")
 {
     auto cache = crispy::lru_cache<int, int>(4);
@@ -153,3 +154,4 @@ TEST_CASE("lru_cache.try_emplace", "[lrucache]")
     CHECK(cache.at(2) == 4);
     CHECK(cache.at(3) == 6);
 }
+// NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

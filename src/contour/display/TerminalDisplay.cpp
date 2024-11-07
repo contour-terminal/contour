@@ -1056,7 +1056,7 @@ vtbackend::RefreshRate TerminalDisplay::refreshRate() const
 
 DPI TerminalDisplay::fontDPI() const noexcept
 {
-    return DPI { 96, 96 } * contentScale();
+    return DPI { .x = 96, .y = 96 } * contentScale();
 }
 
 bool TerminalDisplay::isFullScreen() const

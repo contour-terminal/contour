@@ -430,7 +430,7 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
     if (!_display)
         return;
 
-    _pendingBufferCapture = CaptureBufferRequest { lines, logical };
+    _pendingBufferCapture = CaptureBufferRequest { .lines = lines, .logical = logical };
 
     emit requestPermissionForBufferCapture();
     // _display->post(
@@ -1499,7 +1499,7 @@ int TerminalSession::executeAllActions(std::vector<actions::Action> const& actio
     }
 
     auto const containsToggleKeybind = [](std::vector<actions::Action> const& actions) {
-        return std::any_of(actions.begin(), actions.end(), [](actions::Action const& action) {
+        return std::ranges::any_of(actions, [](actions::Action const& action) {
             return holds_alternative<actions::ToggleAllKeyMaps>(action);
         });
     };

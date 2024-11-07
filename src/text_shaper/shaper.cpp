@@ -40,7 +40,8 @@ namespace
                 unsigned int count = 0;
                 for (size_t y = sr; y < min(sr + factor, unbox<size_t>(inputSize.height)); y++)
                 {
-                    uint8_t const* p = inputBitmap.data() + (y * unbox<size_t>(inputSize.width) * 4) + sc * 4;
+                    uint8_t const* p =
+                        inputBitmap.data() + (y * unbox<size_t>(inputSize.width) * 4) + (sc * 4);
                     for (auto x = sc; x < min(sc + factor, unbox<size_t>(inputSize.width)); x++, count++)
                     {
                         for (size_t i = 0; i < NumComponents; ++i)
