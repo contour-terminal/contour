@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/JumpHistory.h>
 #include <vtbackend/ViInputHandler.h>
+#include <vtbackend/primitives.h>
 
 #include <gsl/pointers>
 
+#include <list>
 #include <optional>
 
 namespace vtbackend
@@ -48,8 +51,8 @@ class ViCommands: public ViInputHandler::Executor
 
     void moveCursorTo(CellLocation position);
 
-    [[nodiscard]] CellLocation translateToCellLocation(ViMotion motion, unsigned count) const noexcept;
-    [[nodiscard]] CellLocationRange translateToCellRange(ViMotion motion, unsigned count) const noexcept;
+    [[nodiscard]] CellLocation translateToCellLocationAndRecord(ViMotion motion, unsigned count) noexcept;
+    [[nodiscard]] CellLocationRange translateToCellRange(ViMotion motion, unsigned count) noexcept;
     [[nodiscard]] CellLocationRange translateToCellRange(TextObjectScope scope,
                                                          TextObject textObject) const noexcept;
     [[nodiscard]] CellLocation prev(CellLocation location) const noexcept;
@@ -88,7 +91,7 @@ class ViCommands: public ViInputHandler::Executor
     [[nodiscard]] CellLocation snapToCellRight(CellLocation location) const noexcept;
 
     [[nodiscard]] bool compareCellTextAt(CellLocation position, char32_t codepoint) const noexcept;
-
+    void addLineOffsetToJumpHistory(LineOffset offset) { _jumpHistory.addOffset(offset); }
     // Cursor offset into the grid.
     CellLocation cursorPosition {};
 
@@ -99,6 +102,7 @@ class ViCommands: public ViInputHandler::Executor
     mutable char32_t _lastChar = U'\0';
     std::optional<ViMotion> _lastCharMotion = std::nullopt;
     bool _lastCursorVisible = true;
+    JumpHistory _jumpHistory;
 };
 
 } // namespace vtbackend

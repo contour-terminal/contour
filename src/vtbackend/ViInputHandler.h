@@ -100,6 +100,9 @@ enum class ViMotion : uint8_t
     ToCharLeft,            // F {char}
     RepeatCharMove,        // ;
     RepeatCharMoveReverse, // ,
+    JumpToLastJumpPoint,   // '' or `` (jump to last jump)
+    JumpToMarkBackward,    // <C-O>
+    JumpToMarkForward,     // <C-I>
 };
 
 enum class ViOperator : uint8_t
@@ -370,6 +373,9 @@ struct std::formatter<vtbackend::ViMotion>: formatter<std::string_view>
             case ViMotion::ToCharLeft: name = "ToCharLeft"; break;
             case ViMotion::RepeatCharMove: name = "RepeatCharMove"; break;
             case ViMotion::RepeatCharMoveReverse: name = "RepeatCharMoveReverse"; break;
+            case ViMotion::JumpToLastJumpPoint: name = "JumpToLastJumpPoint"; break;
+            case ViMotion::JumpToMarkBackward: name = "JumpToMarkUp"; break;
+            case ViMotion::JumpToMarkForward: name = "JumpToMarkDown"; break;
             case ViMotion::GlobalCurlyCloseUp: name = "GlobalCurlyCloseUp"; break;
             case ViMotion::GlobalCurlyCloseDown: name = "GlobalCurlyCloseDown"; break;
             case ViMotion::GlobalCurlyOpenUp: name = "GlobalCurlyOpenUp"; break;

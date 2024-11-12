@@ -727,7 +727,8 @@ void Screen<Cell>::linefeed(ColumnOffset newColumn)
 {
     _cursor.wrapPending = false;
     _cursor.position.column = newColumn;
-
+    if (unbox(historyLineCount()) > 0)
+        _terminal->addLineOffsetToJumpHistory(LineOffset { 1 });
     if (*realCursorPosition().line == *margin().vertical.to)
     {
         // TODO(perf) if we know that we text is following this LF
