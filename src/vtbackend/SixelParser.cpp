@@ -50,11 +50,11 @@ namespace
         if (t > 1)
             t -= 1;
         if (t < 1. / 6)
-            return p + (q - p) * 6 * t;
+            return p + ((q - p) * 6 * t);
         if (t < 1. / 2)
             return q;
         if (t < 2. / 3)
-            return p + (q - p) * (2. / 3 - t) * 6;
+            return p + ((q - p) * (2. / 3 - t) * 6);
         return p;
     }
 
@@ -71,13 +71,13 @@ namespace
         }
         else
         {
-            auto const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-            auto const p = 2 * l - q;
+            auto const q = l < 0.5 ? l * (1 + s) : l + s - (l * s);
+            auto const p = (2 * l) - q;
 
             auto result = RGBColor {};
-            result.red = static_cast<uint8_t>(hue2rgb(p, q, h + 1. / 3) * 255);
+            result.red = static_cast<uint8_t>(hue2rgb(p, q, h + (1. / 3)) * 255);
             result.green = static_cast<uint8_t>(hue2rgb(p, q, h) * 255);
-            result.blue = static_cast<uint8_t>(hue2rgb(p, q, h - 1. / 3) * 255);
+            result.blue = static_cast<uint8_t>(hue2rgb(p, q, h - (1. / 3)) * 255);
             return result;
         }
     }
@@ -371,7 +371,7 @@ void SixelImageBuilder::clear(RGBAColor fillColor)
     _sixelCursor = {};
 
     auto* p = _buffer.data();
-    auto* const e = p + _maxSize.area() * 4;
+    auto* const e = p + (_maxSize.area() * 4);
     while (p != e)
     {
         *p++ = fillColor.red();
@@ -385,7 +385,7 @@ RGBAColor SixelImageBuilder::at(CellLocation coord) const noexcept
 {
     auto const line = unbox(coord.line) % unbox(_size.height);
     auto const col = unbox(coord.column) % unbox(_size.width);
-    auto const base = line * unbox(_size.width) * 4 + col * 4;
+    auto const base = (line * unbox(_size.width) * 4) + (col * 4);
     const auto* const color = &_buffer[base];
     return RGBAColor { color[0], color[1], color[2], color[3] };
 }
@@ -405,9 +405,9 @@ void SixelImageBuilder::write(CellLocation const& coord, RGBColor const& value) 
 
         for (unsigned int i = 0; i < _aspectRatio; ++i)
         {
-            auto const base = (coord.line.as<unsigned int>() + i)
-                                  * unbox((_explicitSize ? _size.width : _maxSize.width)) * 4u
-                              + unbox<unsigned int>(coord.column) * 4u;
+            auto const base = ((coord.line.as<unsigned int>() + i)
+                               * unbox((_explicitSize ? _size.width : _maxSize.width)) * 4u)
+                              + (unbox<unsigned int>(coord.column) * 4u);
             _buffer[base + 0] = value.red;
             _buffer[base + 1] = value.green;
             _buffer[base + 2] = value.blue;
@@ -464,7 +464,7 @@ void SixelImageBuilder::render(int8_t sixel)
         for (unsigned int i = 0; i < 6; ++i)
         {
             auto const y = _sixelCursor.line + static_cast<int>(i * _aspectRatio);
-            auto const pos = CellLocation { y, x };
+            auto const pos = CellLocation { .line = y, .column = x };
             auto const pin = 1 << i;
             auto const pinned = (sixel & pin) != 0;
             if (pinned)

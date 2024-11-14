@@ -34,9 +34,9 @@ namespace
                                             uint32_t sliceIndex) noexcept
     {
         return static_cast<uint32_t>(shape) + sliceIndex
-               + uint32_t(width - 1)
-                     * (static_cast<uint32_t>(std::numeric_limits<vtbackend::CursorShape>::count())
-                        + static_cast<uint32_t>(shape));
+               + (uint32_t(width - 1)
+                  * (static_cast<uint32_t>(std::numeric_limits<vtbackend::CursorShape>::count())
+                     + static_cast<uint32_t>(shape)));
     }
 } // namespace
 
@@ -129,8 +129,8 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
                 assert(thickness <= static_cast<size_t>(baseline));
                 for (auto y = size_t(0); y <= static_cast<size_t>(thickness); ++y)
                     for (size_t x = 0; x < *width; ++x)
-                        image[(defaultBitmapSize.height.as<size_t>() - 1 - baseY - unsigned(y))
-                                  * unbox<size_t>(width)
+                        image[((defaultBitmapSize.height.as<size_t>() - 1 - baseY - unsigned(y))
+                               * unbox<size_t>(width))
                               + x] = 0xFF;
                 return image;
             });
@@ -142,7 +142,7 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
 
                 for (size_t x = 0; x < thickness; ++x)
                     for (size_t y = 0; y < unbox<size_t>(height); ++y)
-                        image[y * *width + x] = 0xFF;
+                        image[(y * unbox(width)) + x] = 0xFF;
                 return image;
             });
         case vtbackend::CursorShape::Rectangle:
@@ -151,12 +151,12 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0xFFu);
                 auto const thickness = max(unbox<size_t>(width) / 12, size_t { 1 });
 
-                auto const innerWidth = unbox<size_t>(width) - 2 * thickness;
-                auto const innerHeight = unbox<size_t>(height) - 2 * thickness;
+                auto const innerWidth = unbox<size_t>(width) - (2 * thickness);
+                auto const innerHeight = unbox<size_t>(height) - (2 * thickness);
 
                 for (size_t y = thickness; y <= innerHeight; ++y)
                     for (size_t x = thickness; x <= innerWidth; ++x)
-                        image[y * *width + x] = 0;
+                        image[(y * unbox(width)) + x] = 0;
 
                 return image;
             });
@@ -171,7 +171,7 @@ void CursorRenderer::render(crispy::point pos, int columnWidth, vtbackend::RGBCo
     {
         auto const directMappingIndex = toDirectMappingIndex(_shape, columnWidth, i);
         auto const tileIndex = _directMapping.toTileIndex(directMappingIndex);
-        auto const x = pos.x + int(i) * unbox<int>(_gridMetrics.cellSize.width);
+        auto const x = pos.x + (int(i) * unbox<int>(_gridMetrics.cellSize.width));
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
         renderTile({ int(x) }, { pos.y }, color, tileAttributes);
     }

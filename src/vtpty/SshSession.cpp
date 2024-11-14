@@ -383,6 +383,89 @@ void SshSession::setState(State nextState)
     }
 }
 
+bool SshSession::requestPty()
+{
+    // Mode encoding defined here: https://datatracker.ietf.org/doc/html/rfc4250#section-4.5
+    auto const modes = ""sv;
+    auto const term = _config.env.count("TERM") ? _config.env.at("TERM") : ""s;
+    auto const rc = libssh2_channel_request_pty_ex(_p->sshChannel,
+                                                   term.data(),
+                                                   term.size(),
+                                                   modes.data(),
+                                                   modes.size(),
+                                                   _pageSize.columns.as<int>(),
+                                                   _pageSize.lines.as<int>(),
+                                                   _pixels.has_value() ? _pixels->width.as<int>() : 0,
+                                                   _pixels.has_value() ? _pixels->height.as<int>() : 0);
+    if (rc == LIBSSH2_ERROR_EAGAIN)
+    {
+        _p->wantsWaitForSocket = true;
+        return false;
+    }
+    if (rc != LIBSSH2_ERROR_NONE)
+    {
+        logError("Failed to request PTY. {}", libssl2ErrorString(rc));
+        setState(State::Failure);
+        return false;
+    }
+    setState(State::SetEnv);
+    _walkIndex = 0;
+    return true;
+}
+
+bool SshSession::setEnv()
+{
+    int i = 0;
+    for (auto const& [name, value]: _config.env)
+    {
+        // Skip already set environment variables
+        if (i < _walkIndex)
+        {
+            ++i;
+            continue;
+        }
+
+        if (name == "TERM")
+            continue; // passed later via requestPty()
+
+        int const rc =
+            libssh2_channel_setenv_ex(_p->sshChannel, name.data(), name.size(), value.data(), value.size());
+        if (rc == LIBSSH2_ERROR_EAGAIN)
+        {
+            _walkIndex = i;                // remember where we left off
+            _p->wantsWaitForSocket = true; // and wait for socket to become writable
+            return false;
+        }
+        if (rc != LIBSSH2_ERROR_NONE)
+        {
+            logError("Failed to set SSH environment variable \"{}\". {}", name, libssl2ErrorString(rc));
+        }
+    }
+    setState(State::StartShell);
+    return true;
+}
+
+void SshSession::resizeScreen()
+{
+    auto const rc =
+        libssh2_channel_request_pty_size_ex(_p->sshChannel,
+                                            unbox<int>(_pageSize.columns),
+                                            unbox<int>(_pageSize.lines),
+                                            _pixels.has_value() ? unbox<int>(_pixels->width) : 0,
+                                            _pixels.has_value() ? unbox<int>(_pixels->height) : 0);
+    if (rc == LIBSSH2_ERROR_EAGAIN)
+    {
+        _p->wantsWaitForSocket = true;
+        return;
+    }
+    if (rc != LIBSSH2_ERROR_NONE)
+    {
+        logError("Failed to request PTY resize. {}", libssl2ErrorString(rc));
+        return;
+    }
+    setState(State::Operational);
+}
+
 void SshSession::processState()
 {
     waitForSocket();
@@ -505,64 +588,14 @@ void SshSession::processState()
                 [[fallthrough]];
             }
             case State::RequestPty: {
-                // Mode encoding defined here: https://datatracker.ietf.org/doc/html/rfc4250#section-4.5
-                auto const modes = ""sv;
-                auto const term = _config.env.count("TERM") ? _config.env.at("TERM") : ""s;
-                auto const rc =
-                    libssh2_channel_request_pty_ex(_p->sshChannel,
-                                                   term.data(),
-                                                   term.size(),
-                                                   modes.data(),
-                                                   modes.size(),
-                                                   _pageSize.columns.as<int>(),
-                                                   _pageSize.lines.as<int>(),
-                                                   _pixels.has_value() ? _pixels->width.as<int>() : 0,
-                                                   _pixels.has_value() ? _pixels->height.as<int>() : 0);
-                if (rc == LIBSSH2_ERROR_EAGAIN)
-                {
-                    _p->wantsWaitForSocket = true;
+                if (!requestPty())
                     return;
-                }
-                if (rc != LIBSSH2_ERROR_NONE)
-                {
-                    logError("Failed to request PTY. {}", libssl2ErrorString(rc));
-                    setState(State::Failure);
-                    return;
-                }
-                setState(State::SetEnv);
-                _walkIndex = 0;
+
                 [[fallthrough]];
             }
             case State::SetEnv: {
-                int i = 0;
-                for (auto const& [name, value]: _config.env)
-                {
-                    // Skip already set environment variables
-                    if (i < _walkIndex)
-                    {
-                        ++i;
-                        continue;
-                    }
-
-                    if (name == "TERM")
-                        continue; // passed later via requestPty()
-
-                    int const rc = libssh2_channel_setenv_ex(
-                        _p->sshChannel, name.data(), name.size(), value.data(), value.size());
-                    if (rc == LIBSSH2_ERROR_EAGAIN)
-                    {
-                        _walkIndex = i;                // remember where we left off
-                        _p->wantsWaitForSocket = true; // and wait for socket to become writable
-                        return;
-                    }
-                    if (rc != LIBSSH2_ERROR_NONE)
-                    {
-                        logError("Failed to set SSH environment variable \"{}\". {}",
-                                 name,
-                                 libssl2ErrorString(rc));
-                    }
-                }
-                setState(State::StartShell);
+                if (!setEnv())
+                    return;
                 [[fallthrough]];
             }
             case State::StartShell: {
@@ -582,23 +615,7 @@ void SshSession::processState()
                 //.
                 return;
             case State::ResizeScreen: {
-                auto const rc = libssh2_channel_request_pty_size_ex(
-                    _p->sshChannel,
-                    unbox<int>(_pageSize.columns),
-                    unbox<int>(_pageSize.lines),
-                    _pixels.has_value() ? unbox<int>(_pixels->width) : 0,
-                    _pixels.has_value() ? unbox<int>(_pixels->height) : 0);
-                if (rc == LIBSSH2_ERROR_EAGAIN)
-                {
-                    _p->wantsWaitForSocket = true;
-                    return;
-                }
-                if (rc != LIBSSH2_ERROR_NONE)
-                {
-                    logError("Failed to request PTY resize. {}", libssl2ErrorString(rc));
-                    return;
-                }
-                setState(State::Operational);
+                resizeScreen();
                 return;
             }
             case State::Failure:
@@ -887,7 +904,9 @@ std::optional<SshSession::ExitStatus> SshSession::exitStatus() const
     }
 
     if (exitSignalStr)
-        return SignalExit { exitSignalStr, errorMessage ? errorMessage : "", languageTag ? languageTag : "" };
+        return SignalExit { .signal = exitSignalStr,
+                            .errorMessage = errorMessage ? errorMessage : "",
+                            .languageTag = languageTag ? languageTag : "" };
 
     return NormalExit { exitcode };
 }

@@ -346,8 +346,8 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
 
     for (auto const rowIndex: ranges::views::iota(uintptr_t { 0 }, unbox<uintptr_t>(targetSize.height)))
     {
-        uint8_t* targetRow = slicedBitmap.data() + rowIndex * targetPitch;
-        uint8_t const* sourceRow = tileCreateData.bitmap.data() + rowIndex * sourcePitch;
+        uint8_t* targetRow = slicedBitmap.data() + (rowIndex * targetPitch);
+        uint8_t const* sourceRow = tileCreateData.bitmap.data() + (rowIndex * sourcePitch);
         Require(sourceRow + targetPitch <= tileCreateData.bitmap.data() + tileCreateData.bitmap.size());
         std::copy_n(sourceRow, targetPitch, targetRow);
     }
@@ -496,7 +496,7 @@ point TextRenderer::applyGlyphPositionToPen(point pen,
     //            tileAttributes.bitmapSize.height,
     //            gpos.presentation);
 
-    return point { x, y };
+    return point { .x = x, .y = y };
 }
 
 /**
@@ -662,9 +662,9 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
                 auto bitmap = vector<uint8_t>(subSize.area() * colorComponentCount);
                 for (uintptr_t rowIndex = 0; rowIndex < unbox<uintptr_t>(subSize.height); ++rowIndex)
                 {
-                    uint8_t* targetRow = bitmap.data() + rowIndex * subPitch;
-                    uint8_t const* sourceRow = createData.bitmap.data() + rowIndex * pitch
-                                               + uintptr_t(xOffset) * colorComponentCount;
+                    uint8_t* targetRow = bitmap.data() + (rowIndex * subPitch);
+                    uint8_t const* sourceRow = createData.bitmap.data() + (rowIndex * pitch)
+                                               + (uintptr_t(xOffset) * colorComponentCount);
                     Require(sourceRow + subPitch <= createData.bitmap.data() + createData.bitmap.size());
                     std::memcpy(targetRow, sourceRow, subPitch);
                 }
@@ -686,9 +686,9 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
     auto const headPitch = unbox<uintptr_t>(headWidth) * colorComponentCount;
     auto headBitmap = vector<uint8_t>(headSize.area() * colorComponentCount);
     for (uintptr_t rowIndex = 0; rowIndex < unbox<uintptr_t>(headSize.height); ++rowIndex)
-        std::memcpy(headBitmap.data() + rowIndex * headPitch,    // target
-                    createData.bitmap.data() + rowIndex * pitch, // source
-                    headPitch);                                  // sub-image line length
+        std::memcpy(headBitmap.data() + (rowIndex * headPitch),    // target
+                    createData.bitmap.data() + (rowIndex * pitch), // source
+                    headPitch);                                    // sub-image line length
 
     return { createTileData(tileLocation,
                             std::move(headBitmap),
@@ -836,8 +836,8 @@ text::shape_result TextRenderer::createTextShapedGlyphPositions(u32string_view c
     auto run = unicode::run_segmenter::range {};
     auto rs = unicode::run_segmenter(codepoints); // TODO Consider moving run segmentation to text grouper
     while (rs.consume(out(run)))
-        for (text::glyph_position& glyphPosition: shapeTextRun(run, codepoints, clusters, style))
-            glyphPositions.emplace_back(std::move(glyphPosition));
+        for (text::glyph_position const& glyphPosition: shapeTextRun(run, codepoints, clusters, style))
+            glyphPositions.emplace_back(glyphPosition);
 
     return glyphPositions;
 }

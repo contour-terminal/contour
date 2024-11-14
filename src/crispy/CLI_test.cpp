@@ -44,13 +44,14 @@ namespace cli = crispy::cli;
 using namespace std::string_view_literals;
 using namespace std::string_literals;
 
-// NOLINTBEGIN(misc-const-correctness)
+// NOLINTBEGIN(misc-const-correctness, modernize-use-designated-initializers)
 TEST_CASE("CLI.option.type.bool")
 {
     auto const cmd = cli::command {
-        "contour",
-        "help here",
-        cli::option_list { cli::option { "verbose"sv, cli::value { false }, "Help text here"sv } },
+        .name = "contour",
+        .helpText = "help here",
+        .options = cli::option_list { cli::option {
+            .name = "verbose"sv, .v = cli::value { false }, .helpText = "Help text here"sv } },
     };
 
     SECTION("set")
@@ -120,4 +121,4 @@ TEST_CASE("CLI.contour-full-test")
     CHECK(flags.values.at("contour.capture.output") == cli::value { "out.vt"s });
     CHECK(flags.values.at("contour.capture.timeout") == cli::value { 1.0 });
 }
-// NOLINTEND(misc-const-correctness)
+// NOLINTEND(misc-const-correctness,modernize-use-designated-initializers)

@@ -85,8 +85,10 @@ Grid<Cell> setupGrid(PageSize pageSize,
 
 constexpr Margin fullPageMargin(PageSize pageSize)
 {
-    return Margin { Margin::Vertical { LineOffset(0), pageSize.lines.as<LineOffset>() - 1 },
-                    Margin::Horizontal { ColumnOffset(0), pageSize.columns.as<ColumnOffset>() - 1 } };
+    return Margin { .vertical =
+                        Margin::Vertical { .from = LineOffset(0), .to = pageSize.lines.as<LineOffset>() - 1 },
+                    .horizontal = Margin::Horizontal { .from = ColumnOffset(0),
+                                                       .to = pageSize.columns.as<ColumnOffset>() - 1 } };
 }
 
 [[maybe_unused]] Grid<Cell> setupGrid5x2()
@@ -334,9 +336,10 @@ TEST_CASE("resize_lines_nr2_with_scrollback_moving_fully_into_page", "[grid]")
     CHECK(grid.maxHistoryLineCount() == LineCount(3));
     CHECK(grid.historyLineCount() == LineCount(2));
 
-    auto const curCursorPos = CellLocation { grid.pageSize().lines.as<LineOffset>() - 1, ColumnOffset(1) };
+    auto const curCursorPos =
+        CellLocation { .line = grid.pageSize().lines.as<LineOffset>() - 1, .column = ColumnOffset(1) };
     auto const newPageSize = PageSize { LineCount(4), ColumnCount(3) };
-    auto const newCursorPos0 = CellLocation { curCursorPos.line + 2, curCursorPos.column };
+    auto const newCursorPos0 = CellLocation { .line = curCursorPos.line + 2, .column = curCursorPos.column };
     CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
     CHECK(newCursorPos.line == newCursorPos0.line);
     CHECK(newCursorPos.column == newCursorPos0.column);
@@ -360,7 +363,7 @@ TEST_CASE("resize_lines_nr3_with_scrollback_moving_into_page_overflow", "[grid]"
     REQUIRE(grid.pageSize().columns == ColumnCount(3));
     REQUIRE(grid.pageSize().lines == LineCount(2));
 
-    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
     auto const newPageSize = PageSize { LineCount(5), ColumnCount(3) };
     logGridText(grid, "BEFORE");
     CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
@@ -382,7 +385,7 @@ TEST_CASE("resize_grow_lines_with_history_cursor_no_bottom", "[grid]")
     CHECK(grid.maxHistoryLineCount() == LineCount(3));
     CHECK(grid.historyLineCount() == LineCount(2));
 
-    auto const curCursorPos = CellLocation { LineOffset(0), ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { .line = LineOffset(0), .column = ColumnOffset(1) };
     logGridText(grid, "before resize");
     CellLocation newCursorPos = grid.resize(PageSize { LineCount(3), ColumnCount(3) }, curCursorPos, false);
     logGridText(grid, "after resize");
@@ -410,7 +413,7 @@ TEST_CASE("resize_shrink_lines_with_history", "[grid]")
 
     // shrink by one line (=> move page one line up into scrollback)
     auto const newPageSize = PageSize { LineCount(1), ColumnCount(3) };
-    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
     logGridText(grid, "BEFORE");
     CellLocation const newCursorPos = grid.resize(newPageSize, curCursorPos, false);
     logGridText(grid, "AFTER");
@@ -441,7 +444,7 @@ TEST_CASE("resize_shrink_columns_with_reflow_and_unwrappable", "[grid]")
 
     auto grid = setupGridForResizeTests2x3xN(LineCount(5));
     auto const newPageSize = PageSize { LineCount(2), ColumnCount(2) };
-    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
     grid.lineAt(LineOffset(0)).setWrappable(false);
     logGridText(grid, "BEFORE");
     auto const newCursorPos = grid.resize(newPageSize, curCursorPos, false);
@@ -484,7 +487,7 @@ TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid
     // JK
     // L
     auto grid = setupGridForResizeTests2x3xN(LineCount(5));
-    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
     grid.lineAt(LineOffset(0)).setWrappable(false);
     // logGridText(grid, "BEFORE");
     auto const newCursorPos = grid.resize(PageSize { LineCount(4), ColumnCount(2) }, curCursorPos, false);
@@ -518,7 +521,8 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
     // Shrink slowly from 5x2 to 4x2 to 3x2 to 2x2.
 
     // 4x2
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation { {}, {} }, false);
+    (void) grid.resize(
+        PageSize { LineCount(2), ColumnCount(4) }, CellLocation { .line = {}, .column = {} }, false);
     logGridText(grid, "after resize 4x2");
 
     CHECK(*grid.historyLineCount() == 2);
@@ -541,7 +545,8 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
 
     // 3x2
     std::cout << std::format("Starting resize to 3x2\n");
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation { {}, {} }, false);
+    (void) grid.resize(
+        PageSize { LineCount(2), ColumnCount(3) }, CellLocation { .line = {}, .column = {} }, false);
     logGridText(grid, "after resize 3x2");
 
     CHECK(*grid.historyLineCount() == 2);
@@ -552,7 +557,8 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
     CHECK(grid.lineText(LineOffset(1)) == "de ");
 
     // 2x2
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation { {}, {} }, false);
+    (void) grid.resize(
+        PageSize { LineCount(2), ColumnCount(2) }, CellLocation { .line = {}, .column = {} }, false);
     logGridText(grid, "after resize 2x2");
 
     CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(2) });
@@ -571,7 +577,8 @@ TEST_CASE("Grid.reflow", "[grid]")
 
     SECTION("resize 4x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation { {}, {} }, false);
+        (void) grid.resize(
+            PageSize { LineCount(2), ColumnCount(4) }, CellLocation { .line = {}, .column = {} }, false);
         logGridText(grid, "after resize");
 
         CHECK(grid.historyLineCount() == LineCount(2));
@@ -886,7 +893,12 @@ TEST_CASE("Grid resize", "[grid]")
     bufferObject->writeAtEnd(text);
     auto const bufferFragment = bufferObject->ref(0, 4);
     auto const sgr = GraphicsAttributes {};
-    auto const trivial = TrivialLineBuffer { width, sgr, sgr, HyperlinkId {}, width, bufferFragment };
+    auto const trivial = TrivialLineBuffer { .displayWidth = width,
+                                             .textAttributes = sgr,
+                                             .fillAttributes = sgr,
+                                             .hyperlink = HyperlinkId {},
+                                             .usedColumns = width,
+                                             .text = bufferFragment };
     auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
     grid.lineAt(LineOffset(0)) = lineTrivial;
     REQUIRE(grid.lineAt(LineOffset(0)).isTrivialBuffer());
@@ -910,7 +922,12 @@ TEST_CASE("Grid resize with wrap and spaces", "[grid]")
     bufferObject->writeAtEnd(text);
     auto const bufferFragment = bufferObject->ref(0, unbox(width));
     auto const sgr = GraphicsAttributes {};
-    auto const trivial = TrivialLineBuffer { width, sgr, sgr, HyperlinkId {}, width, bufferFragment };
+    auto const trivial = TrivialLineBuffer { .displayWidth = width,
+                                             .textAttributes = sgr,
+                                             .fillAttributes = sgr,
+                                             .hyperlink = HyperlinkId {},
+                                             .usedColumns = width,
+                                             .text = bufferFragment };
     auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
     grid.lineAt(LineOffset(0)) = lineTrivial;
 

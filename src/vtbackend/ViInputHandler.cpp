@@ -441,7 +441,7 @@ Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
 {
     assert(_searchEditMode != SearchEditMode::Disabled);
 
-    switch (InputMatch { modifiers, ch })
+    switch (InputMatch { .modifiers = modifiers, .ch = ch })
     {
         case '\x1B'_key:
             _searchTerm.clear();

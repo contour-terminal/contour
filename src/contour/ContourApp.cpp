@@ -484,6 +484,7 @@ int ContourApp::profileAction()
 
 crispy::cli::command ContourApp::parameterDefinition() const
 {
+    // NOLINTBEGIN
     return CLI::command {
         "contour",
         "Contour Terminal Emulator " CONTOUR_VERSION_STRING
@@ -606,6 +607,7 @@ crispy::cli::command ContourApp::parameterDefinition() const
                                        "Profile name to activate in the currently connected terminal.",
                                        "NAME" } } } } } }
     };
+    // NOLINTEND
 }
 
 } // namespace contour

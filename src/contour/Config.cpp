@@ -16,6 +16,7 @@
 #include <QtCore/QFile>
 #include <QtGui/QOpenGLContext>
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 
@@ -272,7 +273,7 @@ void compareEntries(Config& config, auto const& output)
 
     for (auto const& entry: existingEntries)
     {
-        if (std::find(userEntries.begin(), userEntries.end(), entry) == userEntries.end())
+        if (std::ranges::find(userEntries, entry) == userEntries.end())
         {
             output()("[diff] Entry {} is missing in user config file\n", entry);
         }
@@ -1098,7 +1099,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "max_width", width);
         uint height = 0;
         loadFromEntry(child, "max_height", height);
-        where.maxImageSize = { vtpty::Width { width }, vtpty::Height { height } };
+        where.maxImageSize = { .width = vtpty::Width { width }, .height = vtpty::Height { height } };
     }
 }
 
@@ -1260,7 +1261,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         {
             if (literal == deprecated)
             {
-                errorLog()("Setting font locator to \"{}\" is deprecated. Use \"native\".", literal);
+                errorLog()(R"(Setting font locator to "{}" is deprecated. Use "native".)", literal);
                 return NativeFontLocator;
             }
         }
@@ -1803,6 +1804,7 @@ std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifierKey(std::stri
     return std::nullopt;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& node)
 {
     if (auto actionNode = node["action"])

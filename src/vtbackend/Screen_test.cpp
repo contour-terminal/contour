@@ -107,7 +107,7 @@ MockTerm<vtpty::MockPty> screenForDECRA()
 } // namespace
 // }}}
 
-// NOLINTBEGIN(misc-const-correctness)
+// NOLINTBEGIN(misc-const-correctness,readability-function-cognitive-complexity)
 
 // {{{ writeText
 // AutoWrap disabled: text length is less then available columns in line.
@@ -2089,18 +2089,19 @@ TEST_CASE("MoveCursorToNextTab", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
     auto& screen = mock.terminal.primaryScreen();
     screen.moveCursorToNextTab();
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1 * TabWidth + 0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(TabWidth + 0) });
 
     screen.moveCursorToColumn(ColumnOffset(TabWidth - 1));
     screen.moveCursorToNextTab();
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1 * TabWidth + 0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(TabWidth + 0) });
 
     screen.moveCursorToColumn(ColumnOffset(TabWidth - 1));
     screen.moveCursorToNextTab();
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1 * TabWidth + 0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(TabWidth + 0) });
 
     screen.moveCursorToNextTab();
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2 * TabWidth + 0) });
+    REQUIRE(screen.logicalCursorPosition()
+            == CellLocation { LineOffset(0), ColumnOffset((2 * TabWidth) + 0) });
 
     screen.moveCursorToNextTab();
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(19) });
@@ -3472,9 +3473,9 @@ TEST_CASE("DECCRA.Right.intersecting", "[screen]")
                                "ghijkl\n";
 
     auto constexpr Page = 0;
-    auto constexpr STopLeft = CellLocation { LineOffset(1), ColumnOffset(1) };
-    auto constexpr SBottomRight = CellLocation { LineOffset(3), ColumnOffset(3) };
-    auto constexpr TTopLeft = CellLocation { LineOffset(1), ColumnOffset(2) };
+    auto constexpr STopLeft = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
+    auto constexpr SBottomRight = CellLocation { .line = LineOffset(3), .column = ColumnOffset(3) };
+    auto constexpr TTopLeft = CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) };
 
     auto const deccraSeq = std::format("\033[{};{};{};{};{};{};{};{}$v",
                                        STopLeft.line + 1,
@@ -3510,9 +3511,9 @@ TEST_CASE("DECCRA.Left.intersecting", "[screen]")
                                      "ghijkl\n";
 
     auto constexpr Page = 0;
-    auto constexpr STopLeft = CellLocation { LineOffset(1), ColumnOffset(3) };
-    auto constexpr SBottomRight = CellLocation { LineOffset(2), ColumnOffset(5) };
-    auto constexpr TTopLeft = CellLocation { LineOffset(1), ColumnOffset(2) };
+    auto constexpr STopLeft = CellLocation { .line = LineOffset(1), .column = ColumnOffset(3) };
+    auto constexpr SBottomRight = CellLocation { .line = LineOffset(2), .column = ColumnOffset(5) };
+    auto constexpr TTopLeft = CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) };
 
     auto const deccraSeq = std::format("\033[{};{};{};{};{};{};{};{}$v",
                                        STopLeft.line + 1,
@@ -3750,7 +3751,7 @@ TEST_CASE("LS1 and LS0", "[screen]")
 // TODO: SendDeviceAttributes
 // TODO: SendTerminalId
 
-// NOLINTEND(misc-const-correctness)
+// NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 
 // NOLINTBEGIN(misc-const-correctness)
 // NOLINTEND(misc-const-correctness)

@@ -11,6 +11,7 @@ using namespace crispy;
 using namespace std;
 using namespace std::string_view_literals;
 
+// NOLINTBEGIN(misc-const-correctness,readability-function-cognitive-complexity)
 TEST_CASE("strong_lru_cache.operator_index", "")
 {
     auto cache = strong_lru_cache<int, string_view>(strong_hashtable_size { 8 }, lru_capacity { 4 });
@@ -278,3 +279,4 @@ TEST_CASE("strong_lru_cache.remove_with_hashTable_lookup_collision", "")
     cache.remove(3);
     REQUIRE(joinHumanReadable(cache.keys()).empty());
 }
+// NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

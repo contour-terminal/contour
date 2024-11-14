@@ -92,7 +92,7 @@ namespace // {{{ helpers
 
     constexpr CellLocation raiseToMinimum(CellLocation location, LineOffset minimumLine) noexcept
     {
-        return CellLocation { std::max(location.line, minimumLine), location.column };
+        return CellLocation { .line = std::max(location.line, minimumLine), .column = location.column };
     }
 
 } // namespace
@@ -141,12 +141,18 @@ Terminal::Terminal(Events& eventListener,
     _cellPixelSize {},
     _defaultColorPalette { _settings.colorPalette },
     _colorPalette { _settings.colorPalette },
-    _mainScreenMargin { Margin::Vertical { {}, _settings.pageSize.lines.as<LineOffset>() - LineOffset(1) },
-                        Margin::Horizontal {
-                            {}, _settings.pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) } },
-    _hostWritableScreenMargin { Margin::Vertical { {}, LineOffset(0) },
-                                Margin::Horizontal {
-                                    {}, _settings.pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) } },
+    _mainScreenMargin {
+        .vertical =
+            Margin::Vertical { .from = {}, .to = _settings.pageSize.lines.as<LineOffset>() - LineOffset(1) },
+        .horizontal =
+            Margin::Horizontal { .from = {},
+                                 .to = _settings.pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) }
+    },
+    _hostWritableScreenMargin { .vertical = Margin::Vertical { .from = {}, .to = LineOffset(0) },
+                                .horizontal =
+                                    Margin::Horizontal { .from = {},
+                                                         .to = _settings.pageSize.columns.as<ColumnOffset>()
+                                                               - ColumnOffset(1) } },
     _maxSixelColorRegisters { _settings.maxImageRegisterCount },
     _effectiveImageCanvasSize { _settings.maxImageSize },
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
@@ -154,7 +160,7 @@ Terminal::Terminal(Events& eventListener,
     _imagePool { [this](Image const* image) {
         discardImage(*image);
     } },
-    _hyperlinks { HyperlinkCache { 1024 } },
+    _hyperlinks { .cache = HyperlinkCache { 1024 } },
     _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
     _parser { std::ref(_sequenceBuilder) },
     _viCommands { *this },
@@ -725,8 +731,8 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
     _speedClicks = (diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4 + 1;
 
     auto const startPos = CellLocation {
-        _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
-        _currentMousePosition.column,
+        .line = _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
+        .column = _currentMousePosition.column,
     };
 
     if (_inputHandler.mode() != ViMode::Insert)
@@ -768,8 +774,8 @@ void Terminal::triggerWordWiseSelectionWithCustomDelimiters(string const& delimi
 {
     verifyState();
     auto const startPos = CellLocation {
-        _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
-        _currentMousePosition.column,
+        .line = _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
+        .column = _currentMousePosition.column,
     };
     if (_inputHandler.mode() != ViMode::Insert)
         _viCommands.cursorPosition = startPos;
@@ -1225,9 +1231,11 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
         setCellPixelSize(pixels.value() / mainDisplayPageSize);
 
     // Reset margin to their default.
-    _primaryScreen.margin() =
-        Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
-                 Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
+    _primaryScreen.margin() = Margin {
+        .vertical = Margin::Vertical { .from = {}, .to = mainDisplayPageSize.lines.as<LineOffset>() - 1 },
+        .horizontal =
+            Margin::Horizontal { .from = {}, .to = mainDisplayPageSize.columns.as<ColumnOffset>() - 1 }
+    };
     _alternateScreen.margin() = _primaryScreen.margin();
 
     applyPageSizeToCurrentBuffer();
@@ -1601,6 +1609,7 @@ void Terminal::setMode(AnsiMode mode, bool enable)
     _modes.set(mode, enable);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void Terminal::setMode(DECMode mode, bool enable)
 {
     if (!isValidDECMode(static_cast<unsigned int>(mode)))
@@ -1627,8 +1636,8 @@ void Terminal::setMode(DECMode mode, bool enable)
             if (!enable)
             {
                 _mainScreenMargin.horizontal =
-                    Margin::Horizontal { ColumnOffset(0),
-                                         boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1) };
+                    Margin::Horizontal { .from = ColumnOffset(0),
+                                         .to = boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1) };
                 _supportedVTSequences.enableSequence(SCOSC);
                 _supportedVTSequences.disableSequence(DECSLRM);
             }
@@ -1898,9 +1907,14 @@ void Terminal::hardReset()
     resetColorPalette();
 
     _hostWritableStatusLineScreen.margin() = Margin {
-        Margin::Vertical { {}, boxed_cast<LineOffset>(_hostWritableStatusLineScreen.pageSize().lines) - 1 },
-        Margin::Horizontal { {},
-                             boxed_cast<ColumnOffset>(_hostWritableStatusLineScreen.pageSize().columns) - 1 }
+        .vertical =
+            Margin::Vertical { .from = {},
+                               .to = boxed_cast<LineOffset>(_hostWritableStatusLineScreen.pageSize().lines)
+                                     - 1 },
+        .horizontal =
+            Margin::Horizontal {
+                .from = {},
+                .to = boxed_cast<ColumnOffset>(_hostWritableStatusLineScreen.pageSize().columns) - 1 },
     };
     _hostWritableStatusLineScreen.verifyState();
 
@@ -1910,14 +1924,20 @@ void Terminal::hardReset()
 
     auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
-    _primaryScreen.margin() =
-        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
-                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 } };
+    _primaryScreen.margin() = Margin {
+        .vertical =
+            Margin::Vertical { .from = {}, .to = boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
+        .horizontal = Margin::Horizontal { .from = {},
+                                           .to = boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 },
+    };
     _primaryScreen.verifyState();
 
-    _alternateScreen.margin() =
-        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
-                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 } };
+    _alternateScreen.margin() = Margin {
+        .vertical =
+            Margin::Vertical { .from = {}, .to = boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
+        .horizontal = Margin::Horizontal { .from = {},
+                                           .to = boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 },
+    };
     alternateScreen().margin() = _primaryScreen.margin();
     // NB: We do *NOT* verify alternate screen, because the page size would probably fail as it is
     // designed to be adjusted when the given screen is activated.
@@ -1993,8 +2013,9 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
 
     // adjust margins for statuslines as well
     auto const statuslineMargin =
-        Margin { Margin::Vertical { {}, statusLineHeight().as<LineOffset>() - 1 },
-                 Margin::Horizontal { {}, _settings.pageSize.columns.as<ColumnOffset>() - 1 } };
+        Margin { .vertical = Margin::Vertical { .from = {}, .to = statusLineHeight().as<LineOffset>() - 1 },
+                 .horizontal = Margin::Horizontal {
+                     .from = {}, .to = _settings.pageSize.columns.as<ColumnOffset>() - 1 } };
     _indicatorScreenMargin = statuslineMargin;
     _hostWritableScreenMargin = statuslineMargin;
 
@@ -2333,7 +2354,7 @@ void Terminal::setHighlightRange(HighlightRange highlightRange)
     {
         auto range = std::get<RectangularHighlight>(highlightRange);
         auto points = orderedPoints(range.from, range.to);
-        range = RectangularHighlight { points.first, points.second };
+        range = RectangularHighlight { .from = points.first, .to = points.second };
     }
     _highlightRange = highlightRange;
     _eventListener.updateHighlights();
@@ -2424,7 +2445,7 @@ void TraceHandler::writeText(char32_t codepoint)
 
 void TraceHandler::writeText(std::string_view codepoints, size_t cellCount)
 {
-    _pendingSequences.emplace_back(CodepointSequence { codepoints, cellCount });
+    _pendingSequences.emplace_back(CodepointSequence { .text = codepoints, .cellCount = cellCount });
 }
 
 void TraceHandler::writeTextEnd()

@@ -53,8 +53,10 @@ namespace
         auto gm = GridMetrics {};
 
         gm.pageSize = pageSize;
-        gm.cellMargin = { 0, 0, 0, 0 }; // TODO (pass as args, and make use of them)
-        gm.pageMargin = { 0, 0, 0 };    // TODO (fill early)
+        gm.cellMargin = {
+            .top = 0, .left = 0, .bottom = 0, .right = 0
+        }; // TODO (pass as args, and make use of them)
+        gm.pageMargin = { .left = 0, .top = 0, .bottom = 0 }; // TODO (fill early)
 
         loadGridMetricsFromFont(font, gm, textShaper);
 
@@ -155,7 +157,8 @@ void Renderer::setRenderTarget(RenderTarget& renderTarget)
     _renderTarget = &renderTarget;
 
     // Reset DirectMappingAllocator (also skipping zero-tile).
-    _directMappingAllocator = atlas::DirectMappingAllocator<RenderTileAttributes> { 1 };
+    _directMappingAllocator =
+        atlas::DirectMappingAllocator<RenderTileAttributes> { .currentlyAllocatedCount = 1 };
 
     // Explicitly enable direct mapping for everything BUT the text renderer.
     // Only the text renderer's direct mapping is configurable (for simplicity for now).
@@ -174,11 +177,12 @@ void Renderer::configureTextureAtlas()
     Require(_renderTarget);
 
     auto const atlasCellSize = _gridMetrics.cellSize;
-    auto atlasProperties = atlas::AtlasProperties { atlas::Format::RGBA,
-                                                    atlasCellSize,
-                                                    _atlasHashtableSlotCount,
-                                                    _atlasTileCount,
-                                                    _directMappingAllocator.currentlyAllocatedCount };
+    auto atlasProperties =
+        atlas::AtlasProperties { .format = atlas::Format::RGBA,
+                                 .tileSize = atlasCellSize,
+                                 .hashCount = _atlasHashtableSlotCount,
+                                 .tileCount = _atlasTileCount,
+                                 .directMappingCount = _directMappingAllocator.currentlyAllocatedCount };
 
     Require(atlasProperties.tileCount.value > 0);
 

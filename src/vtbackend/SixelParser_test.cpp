@@ -41,7 +41,8 @@ TEST_CASE("SixelParser.ground_000000", "[sixel]")
     {
         for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
-            auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
+            auto const& actualColor =
+                ib.at(CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) });
             CHECK(actualColor == DefaultColor);
         }
     }
@@ -67,7 +68,8 @@ TEST_CASE("SixelParser.ground_111111", "[sixel]")
     {
         for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
-            auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
+            auto const& actualColor =
+                ib.at(CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) });
             auto const pinned = x == 0 && y >= 0 && y <= 5;
             INFO(std::format("x={}, y={}, {}", x, y, pinned ? "pinned" : ""));
             if (pinned)
@@ -99,7 +101,8 @@ TEST_CASE("SixelParser.ground_000001", "[sixel]")
         for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
             INFO(std::format("x={}, y={}", x, y));
-            auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
+            auto const& actualColor =
+                ib.at(CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) });
             auto const pinned = x == 0 && y == 0;
             if (pinned)
                 CHECK(actualColor.rgb() == PinColor);
@@ -130,7 +133,8 @@ TEST_CASE("SixelParser.ground_010101", "[sixel]")
         for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
             INFO(std::format("x={}, y={}", x, y));
-            auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
+            auto const& actualColor =
+                ib.at(CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) });
             auto const pinned = x == 0 && (y < 6 && y % 2 == 0);
             if (pinned)
                 CHECK(actualColor.rgb() == PinColor);
@@ -161,7 +165,8 @@ TEST_CASE("SixelParser.ground_101010", "[sixel]")
         for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
             INFO(std::format("x={}, y={}", x, y));
-            auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
+            auto const& actualColor =
+                ib.at(CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) });
             auto const pinned = x == 0 && (y < 6 && y % 2 != 0);
             if (pinned)
                 CHECK(actualColor.rgb() == PinColor);
@@ -227,7 +232,8 @@ TEST_CASE("SixelParser.rep", "[sixel]")
     {
         for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
-            auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
+            auto const& actualColor =
+                ib.at(CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) });
             auto const pinned = x < 12 && y < 6;
             if (pinned)
                 CHECK(actualColor.rgb() == PinColor);
@@ -268,7 +274,7 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
     {
         auto const& expectedColor =
             x < 5 && y < 6 ? PinColors.at(static_cast<size_t>(x ? x : 4)) : DefaultColor;
-        auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
+        auto const& actualColor = ib.at(CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) });
         // INFO(std::format("at {}, expect {}, actual {}",
         //                  CellLocation { LineOffset(y), ColumnOffset(x) },
         //                  expectedColor,
@@ -304,7 +310,7 @@ TEST_CASE("SixelParser.rewind", "[sixel]")
         for (int x = 0; x < 4; ++x)
         {
             auto const expectedColor = x < 2 ? PinColors[2] : PinColors[1];
-            auto const pos = CellLocation { LineOffset(y), ColumnOffset(x) };
+            auto const pos = CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) };
             auto const actualColor = ib.at(pos);
 
             CHECK(actualColor == expectedColor);
@@ -346,7 +352,7 @@ TEST_CASE("SixelParser.newline", "[sixel]")
                 return PinColors[0];
             }(x, y);
 
-            auto const pos = CellLocation { LineOffset(y), ColumnOffset(x) };
+            auto const pos = CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) };
             auto const actualColor = ib.at(pos);
 
             CHECK(actualColor == expectedColor);

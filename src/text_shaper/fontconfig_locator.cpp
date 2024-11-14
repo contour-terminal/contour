@@ -252,7 +252,10 @@ font_source_list fontconfig_locator::locate(font_description const& description)
         if (FcPatternGetInteger(font, FC_SLANT, 0, &integerValue) == FcResultMatch)
             slant = fcToFontSlant(integerValue);
 
-        output.emplace_back(font_path { string { (char const*) (file) }, ttcIndex, weight, slant });
+        output.emplace_back(font_path { .value = string { (char const*) (file) },
+                                        .collectionIndex = ttcIndex,
+                                        .weight = weight,
+                                        .slant = slant });
         locatorLog()("Font {} (ttc index {}, weight {}, slant {}, spacing {}) in chain: {}",
                      output.size(),
                      ttcIndex,
@@ -388,7 +391,7 @@ font_source_list fontconfig_locator::all()
             continue;
 
         locatorLog()("font({}, {}, {})", fcWeightStr(weight), fcSlantStr(slant), (char*) family);
-        output.emplace_back(font_path { (char const*) filename });
+        output.emplace_back(font_path { .value = (char const*) filename });
     }
 
     FcObjectSetDestroy(os);

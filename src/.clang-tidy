@@ -57,7 +57,6 @@ Checks: >-
   -readability-container-contains,
   -readability-convert-member-functions-to-static,
   -readability-else-after-return,
-  -readability-function-cognitive-complexity,
   -readability-identifier-length,
   -readability-implicit-bool-conversion,
   -readability-magic-numbers,
@@ -77,6 +76,8 @@ WarningsAsErrors: >-
   misc-const-correctness,
   modernize-use-nullptr,
   modernize-use-constraints,
+  modernize-use-designated-initializers,
+  readability-math-missing-parentheses,
   bugprone-narrowing-conversions,
 UseColor: true
 HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer)/'
@@ -154,3 +155,5 @@ CheckOptions:
     value:           camelBack
   - key:             readability-identifier-naming.ConstantCasePrefix
     value:           ''
+  - key:             readability-function-cognitive-complexity.Threshold
+    value:           '50'

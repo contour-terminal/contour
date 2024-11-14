@@ -488,7 +488,7 @@ optional<flag_store> parse(command const& command, string_view_list const& args)
 {
     validate(command);
 
-    auto context = parse_context { args };
+    auto context = parse_context { .args = args };
 
     prefillDefaults(context, command);
 
@@ -750,120 +750,135 @@ namespace // {{{ helpers
         return result;
     }
 
+    void printCommandSequence(ostream& os,
+                              command const& com,
+                              unsigned margin,
+                              vector<command const*>& parents,
+                              const auto& stylize)
+    {
+        os << indent(1);
+        for (command const* parent: parents)
+            os << stylize(parent->name, help_element::OptionValue /*well, yeah*/) << ' ';
+
+        if (com.select == command_select::Explicit)
+            os << com.name;
+        else
+        {
+            os << stylize("[", help_element::Braces);
+            os << stylize(com.name, help_element::ImplicitCommand);
+            os << stylize("]", help_element::Braces);
+        }
+
+        os << "\n";
+
+        if (!parents.empty())
+        {
+            unsigned cursor = 1;
+            os << indent(2, &cursor);
+            os << stylize(wordWrapped(com.helpText, cursor, margin, &cursor), help_element::HelpText)
+               << "\n\n";
+        }
+    }
+
+    void printOptions(ostream& os,
+                      command const& com,
+                      help_display_style const& style,
+                      unsigned margin,
+                      [[maybe_unused]] vector<command const*>& parents)
+    {
+        auto const stylize = stylizer(style);
+
+        os << indent(2) << stylize("Options:", help_element::Header) << "\n\n";
+
+        auto const leftPadding = indent(3);
+        auto const minRightPadSize = 2;
+        auto const maxOptionTextSize = longestOptionText(com.options, style.optionStyle);
+        auto const columnWidth =
+            static_cast<unsigned>(leftPadding.size() + maxOptionTextSize + minRightPadSize);
+
+        for (option const& option: com.options)
+        {
+            // if (option.deprecated)
+            //     continue;
+
+            auto const leftSize = leftPadding.size() + printOption(option, nullopt, style.optionStyle).size();
+            assert(columnWidth >= leftSize);
+            auto const actualRightPaddingSize = columnWidth - leftSize;
+            auto const left = leftPadding + printOption(option, style.colors, style.optionStyle)
+                              + spaces(actualRightPaddingSize);
+
+            os << left;
+
+            auto cursor = columnWidth + 1;
+            os << stylize(wordWrapped(option.helpText, columnWidth, margin, &cursor), help_element::HelpText);
+
+            // {{{ append default value, if any
+            auto const defaultValueStr = [&]() -> string {
+                if (holds_alternative<bool>(option.v))
+                    return get<bool>(option.v) ? "true" : "false";
+                else if (holds_alternative<int>(option.v))
+                    return std::to_string(get<int>(option.v));
+                else if (holds_alternative<unsigned int>(option.v))
+                    return std::to_string(get<unsigned int>(option.v));
+                else if (holds_alternative<double>(option.v))
+                    return std::to_string(get<double>(option.v));
+                else
+                    return get<string>(option.v);
+            }();
+            if ((option.presence == presence::Optional && !defaultValueStr.empty())
+                || (holds_alternative<bool>(option.v) && get<bool>(option.v)))
+            {
+                auto const defaultTextPrefix = string("default:");
+                auto const defaultText = stylize("[", help_element::Braces) + defaultTextPrefix + " "
+                                         + stylize(defaultValueStr, help_element::OptionValue)
+                                         + stylize("]", help_element::Braces);
+                auto const defaultTextLength = 1 + defaultTextPrefix.size() + 1 + defaultValueStr.size() + 1;
+                if (cursor + defaultTextLength > margin)
+                    os << "\n" << spaces(columnWidth) << defaultText;
+                else
+                    os << " " << defaultText;
+            }
+            // }}}
+
+            os << '\n';
+        }
+        if (com.verbatim.has_value())
+        {
+            auto const& verbatim = com.verbatim.value();
+            auto const leftSize = static_cast<unsigned>(leftPadding.size() + 2 + verbatim.placeholder.size());
+            assert(columnWidth > leftSize);
+            auto const actualRightPaddingSize = columnWidth - leftSize;
+            auto const left = leftPadding + stylize("[", help_element::Braces)
+                              + stylize(verbatim.placeholder, help_element::Verbatim)
+                              + stylize("]", help_element::Braces) + spaces(actualRightPaddingSize);
+
+            os << left;
+            auto cursor = columnWidth + 1;
+            os << stylize(wordWrapped(verbatim.helpText, columnWidth, margin, &cursor),
+                          help_element::HelpText);
+            os << '\n';
+        }
+        os << '\n';
+    }
+
     void detailedDescription(ostream& os,
                              command const& com,
                              help_display_style const& style,
                              unsigned margin,
-                             vector<command const*>& parents)
+                             [[maybe_unused]] vector<command const*>& parents)
     {
         // NOTE: We asume that cursor position is at first column!
         auto const stylize = stylizer(style);
-        bool const hasParentCommand = !parents.empty();
         bool const isLeafCommand = com.children.empty();
 
         if (isLeafCommand || !com.options.empty() || com.verbatim.has_value()) // {{{ print command sequence
         {
-            os << indent(1);
-            for (command const* parent: parents)
-                os << stylize(parent->name, help_element::OptionValue /*well, yeah*/) << ' ';
-
-            if (com.select == command_select::Explicit)
-                os << com.name;
-            else
-            {
-                os << stylize("[", help_element::Braces);
-                os << stylize(com.name, help_element::ImplicitCommand);
-                os << stylize("]", help_element::Braces);
-            }
-
-            os << "\n";
-
-            if (hasParentCommand)
-            {
-                unsigned cursor = 1;
-                os << indent(2, &cursor);
-                os << stylize(wordWrapped(com.helpText, cursor, margin, &cursor), help_element::HelpText)
-                   << "\n\n";
-            }
+            printCommandSequence(os, com, margin, parents, stylize);
         }
         // }}}
         if (!com.options.empty() || com.verbatim.has_value()) // {{{ print options
         {
-            os << indent(2) << stylize("Options:", help_element::Header) << "\n\n";
-
-            auto const leftPadding = indent(3);
-            auto const minRightPadSize = 2;
-            auto const maxOptionTextSize = longestOptionText(com.options, style.optionStyle);
-            auto const columnWidth =
-                static_cast<unsigned>(leftPadding.size() + maxOptionTextSize + minRightPadSize);
-
-            for (option const& option: com.options)
-            {
-                // if (option.deprecated)
-                //     continue;
-
-                auto const leftSize =
-                    leftPadding.size() + printOption(option, nullopt, style.optionStyle).size();
-                assert(columnWidth >= leftSize);
-                auto const actualRightPaddingSize = columnWidth - leftSize;
-                auto const left = leftPadding + printOption(option, style.colors, style.optionStyle)
-                                  + spaces(actualRightPaddingSize);
-
-                os << left;
-
-                auto cursor = columnWidth + 1;
-                os << stylize(wordWrapped(option.helpText, columnWidth, margin, &cursor),
-                              help_element::HelpText);
-
-                // {{{ append default value, if any
-                auto const defaultValueStr = [&]() -> string {
-                    if (holds_alternative<bool>(option.v))
-                        return get<bool>(option.v) ? "true" : "false";
-                    else if (holds_alternative<int>(option.v))
-                        return std::to_string(get<int>(option.v));
-                    else if (holds_alternative<unsigned int>(option.v))
-                        return std::to_string(get<unsigned int>(option.v));
-                    else if (holds_alternative<double>(option.v))
-                        return std::to_string(get<double>(option.v));
-                    else
-                        return get<string>(option.v);
-                }();
-                if ((option.presence == presence::Optional && !defaultValueStr.empty())
-                    || (holds_alternative<bool>(option.v) && get<bool>(option.v)))
-                {
-                    auto const defaultTextPrefix = string("default:");
-                    auto const defaultText = stylize("[", help_element::Braces) + defaultTextPrefix + " "
-                                             + stylize(defaultValueStr, help_element::OptionValue)
-                                             + stylize("]", help_element::Braces);
-                    auto const defaultTextLength =
-                        1 + defaultTextPrefix.size() + 1 + defaultValueStr.size() + 1;
-                    if (cursor + defaultTextLength > margin)
-                        os << "\n" << spaces(columnWidth) << defaultText;
-                    else
-                        os << " " << defaultText;
-                }
-                // }}}
-
-                os << '\n';
-            }
-            if (com.verbatim.has_value())
-            {
-                auto const& verbatim = com.verbatim.value();
-                auto const leftSize =
-                    static_cast<unsigned>(leftPadding.size() + 2 + verbatim.placeholder.size());
-                assert(columnWidth > leftSize);
-                auto const actualRightPaddingSize = columnWidth - leftSize;
-                auto const left = leftPadding + stylize("[", help_element::Braces)
-                                  + stylize(verbatim.placeholder, help_element::Verbatim)
-                                  + stylize("]", help_element::Braces) + spaces(actualRightPaddingSize);
-
-                os << left;
-                auto cursor = columnWidth + 1;
-                os << stylize(wordWrapped(verbatim.helpText, columnWidth, margin, &cursor),
-                              help_element::HelpText);
-                os << '\n';
-            }
-            os << '\n';
+            printOptions(os, com, style, margin, parents);
         }
         // }}}
         if (!com.children.empty()) // {{{ recurse to sub commands

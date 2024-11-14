@@ -70,6 +70,7 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
 {
     auto command = ContourApp::parameterDefinition();
 
+    // NOLINTBEGIN
     command.children.insert(
         command.children.begin(),
         CLI::command {
@@ -147,6 +148,7 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
             CLI::verbatim { "PROGRAM ARGS...",
                             "Executes given program instead of the one provided in the configuration." } });
 
+    // NOLINTEND
     return command;
 }
 

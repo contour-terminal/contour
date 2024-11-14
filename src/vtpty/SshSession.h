@@ -116,6 +116,11 @@ class SshSession final: public Pty
     // Handles each individual states.
     void processState();
 
+    // some of the complex states to handle
+    bool requestPty();
+    bool setEnv();
+    void resizeScreen();
+
     void setState(State nextState);
 
     void logInfo(std::string_view message) const;

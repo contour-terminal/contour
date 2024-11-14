@@ -46,16 +46,16 @@ void TextClusterGrouper::renderLine(std::string_view text,
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(text);
     auto columnOffset = vtbackend::ColumnOffset(0);
 
-    _initialPenPosition = vtbackend::CellLocation { lineOffset, columnOffset };
+    _initialPenPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };
 
     for (auto const& graphemeCluster: graphemeClusterSegmenter)
     {
-        auto const gridPosition = vtbackend::CellLocation { lineOffset, columnOffset };
+        auto const gridPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };
         auto const width = graphemeClusterWidth(graphemeCluster);
         renderCell(gridPosition, graphemeCluster, style, foregroundColor);
 
         for (int i = 1; i < width; ++i)
-            renderCell(vtbackend::CellLocation { gridPosition.line, columnOffset + i },
+            renderCell(vtbackend::CellLocation { .line = gridPosition.line, .column = columnOffset + i },
                        U" ",
                        style,
                        foregroundColor);

@@ -471,7 +471,7 @@ struct VTSerializer
 
 std::string serializeToVT(Terminal const& vt, StatusLineSegment const& segment, StatusLineStyling styling)
 {
-    auto serializer = VTSerializer { vt, styling };
+    auto serializer = VTSerializer { .vt = vt, .styling = styling };
     for (auto const& item: segment)
         serializer(item);
     return serializer.result;

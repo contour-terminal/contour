@@ -136,9 +136,8 @@ void app::link(std::string command, std::function<int()> handler)
 void app::listDebugTags()
 {
     auto& categories = logstore::get();
-    sort(begin(categories), end(categories), [](auto const& a, auto const& b) {
-        return a.get().name() < b.get().name();
-    });
+    std::ranges::sort(categories,
+                      [](auto const& a, auto const& b) { return a.get().name() < b.get().name(); });
 
     auto const maxNameLength =
         std::accumulate(begin(categories), end(categories), size_t { 0 }, [&](auto acc, auto const& cat) {

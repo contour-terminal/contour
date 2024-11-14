@@ -38,8 +38,12 @@ TEST_CASE("Line.resize", "[Line]")
     auto const bufferFragment = bufferObject->ref(0, 4);
 
     auto const sgr = GraphicsAttributes {};
-    auto const trivial =
-        TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
+    auto const trivial = TrivialLineBuffer { .displayWidth = DisplayWidth,
+                                             .textAttributes = sgr,
+                                             .fillAttributes = sgr,
+                                             .hyperlink = HyperlinkId {},
+                                             .usedColumns = DisplayWidth,
+                                             .text = bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
     auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
     CHECK(lineTrivial.isTrivialBuffer());
@@ -65,8 +69,12 @@ TEST_CASE("Line.reflow", "[Line]")
     auto const bufferFragment = bufferObject->ref(0, 4);
 
     auto const sgr = GraphicsAttributes {};
-    auto const trivial =
-        TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
+    auto const trivial = TrivialLineBuffer { .displayWidth = DisplayWidth,
+                                             .textAttributes = sgr,
+                                             .fillAttributes = sgr,
+                                             .hyperlink = HyperlinkId {},
+                                             .usedColumns = DisplayWidth,
+                                             .text = bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
     auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
     CHECK(lineTrivial.isTrivialBuffer());
@@ -91,8 +99,12 @@ TEST_CASE("Line.inflate", "[Line]")
     sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);
     sgr.underlineColor = Color::Indexed(IndexedColor::Red);
     sgr.flags |= CellFlag::CurlyUnderlined;
-    auto const trivial =
-        TrivialLineBuffer { ColumnCount(10), sgr, sgr, HyperlinkId {}, ColumnCount(10), bufferFragment };
+    auto const trivial = TrivialLineBuffer { .displayWidth = ColumnCount(10),
+                                             .textAttributes = sgr,
+                                             .fillAttributes = sgr,
+                                             .hyperlink = HyperlinkId {},
+                                             .usedColumns = ColumnCount(10),
+                                             .text = bufferFragment };
 
     auto const inflated = inflate<Cell>(trivial);
 
@@ -127,8 +139,12 @@ TEST_CASE("Line.inflate.Unicode", "[Line]")
     sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);
     sgr.underlineColor = Color::Indexed(IndexedColor::Red);
     sgr.flags |= CellFlag::CurlyUnderlined;
-    auto const trivial =
-        TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
+    auto const trivial = TrivialLineBuffer { .displayWidth = DisplayWidth,
+                                             .textAttributes = sgr,
+                                             .fillAttributes = sgr,
+                                             .hyperlink = HyperlinkId {},
+                                             .usedColumns = DisplayWidth,
+                                             .text = bufferFragment };
 
     auto const inflated = inflate<Cell>(trivial);
 
@@ -184,8 +200,12 @@ TEST_CASE("Line.inflate.Unicode.FamilyEmoji", "[Line]")
     fillSGR.underlineColor = Color::Indexed(IndexedColor::Red);
     fillSGR.flags |= CellFlag::CurlyUnderlined;
 
-    auto const trivial =
-        TrivialLineBuffer { DisplayWidth, sgr, fillSGR, HyperlinkId {}, UsedColumnCount, bufferFragment };
+    auto const trivial = TrivialLineBuffer { .displayWidth = DisplayWidth,
+                                             .textAttributes = sgr,
+                                             .fillAttributes = fillSGR,
+                                             .hyperlink = HyperlinkId {},
+                                             .usedColumns = UsedColumnCount,
+                                             .text = bufferFragment };
 
     auto const inflated = inflate<Cell>(trivial);
 
