@@ -7,7 +7,7 @@ Some even support switching from dark to light and light to dark mode based on s
 
 In order to not make the terminal emulator look bad after such switch, we must
 enable the applications inside the terminal to detect when the terminal has
-updated the color palette. This may happen either due to the operaging system having
+updated the color palette. This may happen either due to the operating system having
 changed the current theme or simply because the user has explicitly requested to
 reconfigure the currently used theme.
 
