@@ -1,0 +1,2395 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+      
+      
+        <meta name="author" content="Christian Parpart">
+      
+      
+      
+        <link rel="prev" href="../demo/size_indicator/">
+      
+      
+        <link rel="next" href="../vt-extensions/">
+      
+      
+      <link rel="icon" href="/assets/contour-logo.png">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.17">
+    
+    
+      
+        <title>VT sequences - Contour Terminal Emulator</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.bcfcd587.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+   <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"/><style>
+    html.glightbox-open { overflow: initial; height: 100%; }
+    .gslide-title { margin-top: 0px; user-select: text; }
+    .gslide-desc { color: #666; user-select: text; }
+    .gslide-image img { background: white; }
+    .gscrollbar-fixer { padding-right: 15px; }
+    .gdesc-inner { font-size: 0.75rem; }
+    body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color);}
+    body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color);}
+    body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color);}</style> <script src="../assets/javascripts/glightbox.min.js"></script></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#vt-sequences" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Contour Terminal Emulator" class="md-header__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Contour Terminal Emulator
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              VT sequences
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5c-.84 0-1.65.15-2.39.42L12 2M3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29L3.34 7m.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14L3.36 17M20.65 7l-1.77 3.79a7.023 7.023 0 0 0-2.38-4.15l4.15.36m-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29L20.64 17M12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44L12 22Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-red" data-md-color-accent="red"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3 3.19.09m3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95 2.06.05m-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31Z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href=".." class="md-tabs__link">
+          
+  
+    
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../install/" class="md-tabs__link">
+          
+  
+    
+  
+  Getting started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+    
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../features/" class="md-tabs__link">
+          
+  
+    
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+    
+  
+  VT sequence reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../vt-extensions/" class="md-tabs__link">
+          
+  
+    
+  
+  VT extensions
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../internals/" class="md-tabs__link">
+          
+  
+    
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Contour Terminal Emulator" class="md-nav__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    Contour Terminal Emulator
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href=".." class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Home
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Contribution Guidelines
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Getting started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Getting started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release-notes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Release Notes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../configuration/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Configuration
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/profiles/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Profiles
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/colors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Colors
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/indicator-statusline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Indicator Statusline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/key-mapping/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Key Mapping
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Features
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    List of features
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/font-ligatures/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Font ligatures
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/images/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Images
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/ime/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Input method editor (IME)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/line-marks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Line marks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/statusline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Status line
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../input-modes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Input modes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/size_indicator/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Size indicator
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="./" class="md-nav__link md-nav__link--active">
+              
+  
+  <span class="md-ellipsis">
+    VT sequence reference
+  </span>
+  
+
+            </a>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            VT sequence reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../vt-extensions/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    VT extensions
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            VT extensions
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/clickable-links/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Clickable Links
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/unicode-core/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Unicode Core
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/vertical-line-marks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Vertical Line Markers
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/color-palette-update-notifications/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Dark and Light Mode detection
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/synchronized-output/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Synchronized Output
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/buffer-capture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Buffer Capture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/font-settings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Query or Change Font Settings
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/line-reflow-mode/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Line Reflow Reconfiguration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/save-and-restore-sgr-attributes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Save and Restore SGR attributes.
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../internals/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/CODING_STYLE/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Coding Style Guidelines
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/text-stack/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    A terminal emulator's text stack.
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#control-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Control Codes
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#escape-sequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      Escape Sequences
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#control-sequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      Control Sequences
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operating-system-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      Operating System Commands
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#device-control-sequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      Device Control Sequences
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/contour-terminal/contour/edit/master/docs/vt-sequence/index.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4v-2m10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1 2.1 2.1Z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/contour-terminal/contour/raw/master/docs/vt-sequence/index.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.15 8.15 0 0 1-1.23-2Z"/></svg>
+    </a>
+  
+
+
+<div><h1 id="vt-sequences">VT sequences</h1>
+<p>List of VT sequences supported by Contour Terminal Emulator.</p>
+<h2 id="control-codes">Control Codes</h2>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Code</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>\x04</code></td>
+<td>EOT</td>
+<td>End of Transmission</td>
+</tr>
+<tr>
+<td><code>\x07</code></td>
+<td>BEL</td>
+<td>Bell</td>
+</tr>
+<tr>
+<td><code>\x08</code></td>
+<td>BS</td>
+<td>Backspace</td>
+</tr>
+<tr>
+<td><code>\t</code></td>
+<td>TAB</td>
+<td>Tab</td>
+</tr>
+<tr>
+<td><code>\n</code></td>
+<td>LF</td>
+<td>Line Feed</td>
+</tr>
+<tr>
+<td><code>\x0b</code></td>
+<td>VT</td>
+<td>Vertical Tab</td>
+</tr>
+<tr>
+<td><code>\x0c</code></td>
+<td>FF</td>
+<td>Form Feed</td>
+</tr>
+<tr>
+<td><code>\r</code></td>
+<td>CR</td>
+<td>Carriage Return</td>
+</tr>
+<tr>
+<td><code>\x0e</code></td>
+<td>LS1</td>
+<td>Shift Out; Maps G1 into GL.</td>
+</tr>
+<tr>
+<td><code>\x0f</code></td>
+<td>LS0</td>
+<td>Shift In; Maps G0 into GL (the default).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="escape-sequences">Escape Sequences</h2>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Code</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ESC ( 0</code></td>
+<td>SCS_G0_SPECIAL</td>
+<td>Set G0 to DEC Special Character and Line Drawing Set</td>
+</tr>
+<tr>
+<td><code>ESC ) 0</code></td>
+<td>SCS_G1_SPECIAL</td>
+<td>Set G1 to DEC Special Character and Line Drawing Set</td>
+</tr>
+<tr>
+<td><code>ESC   6</code></td>
+<td>DECBI</td>
+<td>Back Index</td>
+</tr>
+<tr>
+<td><code>ESC   7</code></td>
+<td>DECSC</td>
+<td>Save Cursor</td>
+</tr>
+<tr>
+<td><code>ESC   8</code></td>
+<td>DECRS</td>
+<td>Restore Cursor</td>
+</tr>
+<tr>
+<td><code>ESC # 8</code></td>
+<td>DECALN</td>
+<td>Screen Alignment Pattern</td>
+</tr>
+<tr>
+<td><code>ESC   9</code></td>
+<td>DECFI</td>
+<td>Forward Index</td>
+</tr>
+<tr>
+<td><code>ESC   =</code></td>
+<td>DECKPAM</td>
+<td>Keypad Application Mode</td>
+</tr>
+<tr>
+<td><code>ESC   &gt;</code></td>
+<td>DECKPNM</td>
+<td>Keypad Numeric Mode</td>
+</tr>
+<tr>
+<td><code>ESC ( B</code></td>
+<td>SCS_G0_USASCII</td>
+<td>Set G0 to USASCII</td>
+</tr>
+<tr>
+<td><code>ESC ) B</code></td>
+<td>SCS_G1_USASCII</td>
+<td>Set G1 to USASCII</td>
+</tr>
+<tr>
+<td><code>ESC   D</code></td>
+<td>IND</td>
+<td>Index</td>
+</tr>
+<tr>
+<td><code>ESC   E</code></td>
+<td>NEL</td>
+<td>Next Line</td>
+</tr>
+<tr>
+<td><code>ESC   H</code></td>
+<td>HTS</td>
+<td>Horizontal Tab Set</td>
+</tr>
+<tr>
+<td><code>ESC   M</code></td>
+<td>RI</td>
+<td>Reverse Index</td>
+</tr>
+<tr>
+<td><code>ESC   N</code></td>
+<td>SS2</td>
+<td>Single Shift Select (G2 Character Set)</td>
+</tr>
+<tr>
+<td><code>ESC   O</code></td>
+<td>SS3</td>
+<td>Single Shift Select (G3 Character Set)</td>
+</tr>
+<tr>
+<td><code>ESC   c</code></td>
+<td>RIS</td>
+<td>Reset to Initial State (Hard Reset)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="control-sequences">Control Sequences</h2>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Code</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CSI   0      6</code></td>
+<td>DECXCPR</td>
+<td>Report cursor position</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   @</code></td>
+<td>ICH</td>
+<td>Insert characters</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   A</code></td>
+<td>CUU</td>
+<td>Move cursor up</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   B</code></td>
+<td>CUD</td>
+<td>Move cursor down</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   C</code></td>
+<td>CUF</td>
+<td>Move cursor forward</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   D</code></td>
+<td>CUB</td>
+<td>Move cursor backward</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   E</code></td>
+<td>CNL</td>
+<td>Move cursor to next line</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   F</code></td>
+<td>CPL</td>
+<td>Move cursor to previous line</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   G</code></td>
+<td>CHA</td>
+<td>Move cursor to column</td>
+</tr>
+<tr>
+<td><code>CSI   0..2   H</code></td>
+<td>CUP</td>
+<td>Move cursor to position</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   I</code></td>
+<td>CHT</td>
+<td>Cursor Horizontal Forward Tabulation</td>
+</tr>
+<tr>
+<td><code>CSI   0..    J</code></td>
+<td>ED</td>
+<td>Erase in Display</td>
+</tr>
+<tr>
+<td><code>CSI ? 0..1   J</code></td>
+<td>DECSED</td>
+<td>Selective Erase in Display</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   K</code></td>
+<td>EL</td>
+<td>Erase in Line</td>
+</tr>
+<tr>
+<td><code>CSI ? 0..1   K</code></td>
+<td>DECSEL</td>
+<td>Selective Erase in Line</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   L</code></td>
+<td>IL</td>
+<td>Insert lines</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   M</code></td>
+<td>DL</td>
+<td>Delete lines</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0      M</code></td>
+<td>SETMARK</td>
+<td>Set Mark</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   P</code></td>
+<td>DCH</td>
+<td>Delete characters</td>
+</tr>
+<tr>
+<td><code>CSI   0..  # P</code></td>
+<td>XTPUSHCOLORS</td>
+<td>Pushes the color palette onto the palette's saved-stack.</td>
+</tr>
+<tr>
+<td><code>CSI   0..  # Q</code></td>
+<td>XTPOPCOLORS</td>
+<td>Pops the color palette from the palette's saved-stack.</td>
+</tr>
+<tr>
+<td><code>CSI   0    # R</code></td>
+<td>XTREPORTCOLORS</td>
+<td>Reports number of color palettes on the stack.</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   S</code></td>
+<td>SU</td>
+<td>Scroll Up</td>
+</tr>
+<tr>
+<td><code>CSI ? 2..4   S</code></td>
+<td>XTSMGRAPHICS</td>
+<td>Set/request graphics attribute</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   T</code></td>
+<td>SD</td>
+<td>Scroll Down</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   X</code></td>
+<td>ECH</td>
+<td>Erase characters</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   Z</code></td>
+<td>CBT</td>
+<td>Cursor Backward Tabulation</td>
+</tr>
+<tr>
+<td><code>CSI   1      ```</code></td>
+<td>HPA</td>
+<td>Horizontal Position Absolute</td>
+</tr>
+<tr>
+<td><code>CSI   1      a</code></td>
+<td>HPR</td>
+<td>Horizontal Position Relative</td>
+</tr>
+<tr>
+<td><code>CSI   1      b</code></td>
+<td>REP</td>
+<td>Repeat last character</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   c</code></td>
+<td>DA1</td>
+<td>Primary Device Attributes</td>
+</tr>
+<tr>
+<td><code>CSI = 0..1   c</code></td>
+<td>DA3</td>
+<td>Tertiary Device Attributes</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..1   c</code></td>
+<td>DA2</td>
+<td>Secondary Device Attributes</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   d</code></td>
+<td>VPA</td>
+<td>Vertical Position Absolute</td>
+</tr>
+<tr>
+<td><code>CSI   0..2   f</code></td>
+<td>HVP</td>
+<td>Horizontal and Vertical Position</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   g</code></td>
+<td>TBC</td>
+<td>Horizontal Tab Clear</td>
+</tr>
+<tr>
+<td><code>CSI   1..    h</code></td>
+<td>SM</td>
+<td>Set Mode</td>
+</tr>
+<tr>
+<td><code>CSI ? 1..    h</code></td>
+<td>DECSM</td>
+<td>Set DEC-mode</td>
+</tr>
+<tr>
+<td><code>CSI   1..    l</code></td>
+<td>RM</td>
+<td>Reset Mode</td>
+</tr>
+<tr>
+<td><code>CSI ? 1..    l</code></td>
+<td>DECRM</td>
+<td>Reset DEC-mode</td>
+</tr>
+<tr>
+<td><code>CSI   0..    m</code></td>
+<td>SGR</td>
+<td>Select Graphic Rendition</td>
+</tr>
+<tr>
+<td><code>CSI   1      n</code></td>
+<td>DSR</td>
+<td>Device Status Report (DEC)</td>
+</tr>
+<tr>
+<td><code>CSI ? 1      n</code></td>
+<td>DSR</td>
+<td>Device Status Report (DEC)</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   p</code></td>
+<td>DECSSCLS</td>
+<td>Set Scroll Speed.</td>
+</tr>
+<tr>
+<td><code>CSI   0    ! p</code></td>
+<td>DECSTR</td>
+<td>Soft terminal reset</td>
+</tr>
+<tr>
+<td><code>CSI   2    " p</code></td>
+<td>DECSCL</td>
+<td>Set conformance level (DECSCL), VT220 and up.</td>
+</tr>
+<tr>
+<td><code>CSI   1    $ p</code></td>
+<td>DECRQM_ANSI</td>
+<td>Request ANSI-mode</td>
+</tr>
+<tr>
+<td><code>CSI ? 1    $ p</code></td>
+<td>DECRQM</td>
+<td>Request DEC-mode</td>
+</tr>
+<tr>
+<td><code>CSI   0..1   q</code></td>
+<td>DECSCUSR</td>
+<td>Set Cursor Style</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 " q</code></td>
+<td>DECSCA</td>
+<td>Select Character Protection Attribute</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..1   q</code></td>
+<td>XTVERSION</td>
+<td>Report xterm version</td>
+</tr>
+<tr>
+<td><code>CSI   0..2   r</code></td>
+<td>DECSTBM</td>
+<td>Set top/bottom margin</td>
+</tr>
+<tr>
+<td><code>CSI   5..  $ r</code></td>
+<td>DECCARA</td>
+<td>Change Attributes in Rectangular Area</td>
+</tr>
+<tr>
+<td><code>CSI ? 0..    r</code></td>
+<td>XTRESTORE</td>
+<td>Restore DEC private modes.</td>
+</tr>
+<tr>
+<td><code>CSI   0      s</code></td>
+<td>SCOSC</td>
+<td>Save Cursor (available only when DECLRMM is disabled)</td>
+</tr>
+<tr>
+<td><code>CSI   0..2   s</code></td>
+<td>DECSLRM</td>
+<td>Set left/right margin</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..1   s</code></td>
+<td>XTSHIFTESCAPE</td>
+<td>Set/reset shift-escape options</td>
+</tr>
+<tr>
+<td><code>CSI ? 0..    s</code></td>
+<td>XTSAVE</td>
+<td>Save DEC private modes.</td>
+</tr>
+<tr>
+<td><code>CSI   1..3   t</code></td>
+<td>WINMANIP</td>
+<td>Window Manipulation</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..2   t</code></td>
+<td>XTCAPTURE</td>
+<td>Report screen buffer capture.</td>
+</tr>
+<tr>
+<td><code>CSI   0      u</code></td>
+<td>ANSISYSSC</td>
+<td>Save Cursor (ANSI.SYS)</td>
+</tr>
+<tr>
+<td><code>CSI &lt; 0..1   u</code></td>
+<td>CSIULEAVE</td>
+<td>Leave Extended keyboard mode</td>
+</tr>
+<tr>
+<td><code>CSI = 1..2   u</code></td>
+<td>CSIUENHCE</td>
+<td>Request enhancement to extended keyboard mode</td>
+</tr>
+<tr>
+<td><code>CSI &gt; 0..1   u</code></td>
+<td>CSIUENTER</td>
+<td>Enter Extended keyboard mode</td>
+</tr>
+<tr>
+<td><code>CSI ? 0      u</code></td>
+<td>CSIUQUERY</td>
+<td>Query Extended keyboard mode</td>
+</tr>
+<tr>
+<td><code>CSI   0..8 $ v</code></td>
+<td>DECCRA</td>
+<td>Copy rectangular area</td>
+</tr>
+<tr>
+<td><code>CSI   1    $ w</code></td>
+<td>DECRQPSR</td>
+<td>Request presentation state report</td>
+</tr>
+<tr>
+<td><code>CSI   0..5 $ x</code></td>
+<td>DECFRA</td>
+<td>Fill rectangular area</td>
+</tr>
+<tr>
+<td><code>CSI   0..4 $ z</code></td>
+<td>DECERA</td>
+<td>Erase rectangular area</td>
+</tr>
+<tr>
+<td><code>CSI   0    # {</code></td>
+<td>SGRSAVE</td>
+<td>Saves video attributes onto stack.</td>
+</tr>
+<tr>
+<td><code>CSI   0..4 $ {</code></td>
+<td>DECSERA</td>
+<td>Selective Erase in Rectangular Area</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 $ |</code></td>
+<td>DECSCPP</td>
+<td>Select 80 or 132 Columns per Page</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 * |</code></td>
+<td>DECSNLS</td>
+<td>Select number of lines per screen.</td>
+</tr>
+<tr>
+<td><code>CSI   0    # }</code></td>
+<td>SGRRESTORE</td>
+<td>Restores video attributes.</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 $ }</code></td>
+<td>DECSASD</td>
+<td>Select Active Status Display</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 ' }</code></td>
+<td>DECIC</td>
+<td>Insert column</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 $ ~</code></td>
+<td>DECSSDT</td>
+<td>Select Status Display (Line) Type</td>
+</tr>
+<tr>
+<td><code>CSI   0..1 ' ~</code></td>
+<td>DECDC</td>
+<td>Delete column</td>
+</tr>
+<tr>
+<td><code>CSI   3..18 , ~</code></td>
+<td>DECPS</td>
+<td>Controls the sound frequency or notes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="operating-system-commands">Operating System Commands</h2>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Code</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>OSC 0</code></td>
+<td>SETTITLE</td>
+<td>Change Window &amp; Icon Title</td>
+</tr>
+<tr>
+<td><code>OSC 1</code></td>
+<td>SETICON</td>
+<td>Change Icon Title</td>
+</tr>
+<tr>
+<td><code>OSC 2</code></td>
+<td>SETWINTITLE</td>
+<td>Change Window Title</td>
+</tr>
+<tr>
+<td><code>OSC 3</code></td>
+<td>SETXPROP</td>
+<td>Set X11 property</td>
+</tr>
+<tr>
+<td><code>OSC 4</code></td>
+<td>SETCOLPAL</td>
+<td>Set/Query color palette</td>
+</tr>
+<tr>
+<td><code>OSC 7</code></td>
+<td>SETCWD</td>
+<td>Set current working directory</td>
+</tr>
+<tr>
+<td><code>OSC 8</code></td>
+<td>HYPERLINK</td>
+<td>Hyperlinked Text</td>
+</tr>
+<tr>
+<td><code>OSC 10</code></td>
+<td>COLORFG</td>
+<td>Change or request text foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 11</code></td>
+<td>COLORBG</td>
+<td>Change or request text background color.</td>
+</tr>
+<tr>
+<td><code>OSC 12</code></td>
+<td>COLORCURSOR</td>
+<td>Change text cursor color to Pt.</td>
+</tr>
+<tr>
+<td><code>OSC 13</code></td>
+<td>COLORMOUSEFG</td>
+<td>Change mouse foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 14</code></td>
+<td>COLORMOUSEBG</td>
+<td>Change mouse background color.</td>
+</tr>
+<tr>
+<td><code>OSC 50</code></td>
+<td>SETFONT</td>
+<td>Get or set font.</td>
+</tr>
+<tr>
+<td><code>OSC 52</code></td>
+<td>CLIPBOARD</td>
+<td>Clipboard management.</td>
+</tr>
+<tr>
+<td><code>OSC 60</code></td>
+<td>SETFONTALL</td>
+<td>Get or set all font faces, styles, size.</td>
+</tr>
+<tr>
+<td><code>OSC 104</code></td>
+<td>RCOLPAL</td>
+<td>Reset color full palette or entry</td>
+</tr>
+<tr>
+<td><code>OSC 106</code></td>
+<td>COLORSPECIAL</td>
+<td>Enable/disable Special Color Number c.</td>
+</tr>
+<tr>
+<td><code>OSC 110</code></td>
+<td>RCOLORFG</td>
+<td>Reset VT100 text foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 111</code></td>
+<td>RCOLORBG</td>
+<td>Reset VT100 text background color.</td>
+</tr>
+<tr>
+<td><code>OSC 112</code></td>
+<td>RCOLORCURSOR</td>
+<td>Reset text cursor color.</td>
+</tr>
+<tr>
+<td><code>OSC 113</code></td>
+<td>RCOLORMOUSEFG</td>
+<td>Reset mouse foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 114</code></td>
+<td>RCOLORMOUSEBG</td>
+<td>Reset mouse background color.</td>
+</tr>
+<tr>
+<td><code>OSC 117</code></td>
+<td>RCOLORHIGHLIGHTBG</td>
+<td>Reset highlight background color.</td>
+</tr>
+<tr>
+<td><code>OSC 119</code></td>
+<td>RCOLORHIGHLIGHTFG</td>
+<td>Reset highlight foreground color.</td>
+</tr>
+<tr>
+<td><code>OSC 777</code></td>
+<td>NOTIFY</td>
+<td>Send Notification.</td>
+</tr>
+<tr>
+<td><code>OSC 888</code></td>
+<td>DUMPSTATE</td>
+<td>Dumps internal state to debug stream.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="device-control-sequences">Device Control Sequences</h2>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Code</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DCS   0    $ p</code></td>
+<td>STP</td>
+<td>Set Terminal Profile</td>
+</tr>
+<tr>
+<td><code>DCS   0..3   q</code></td>
+<td>DECSIXEL</td>
+<td>Sixel Graphics Image</td>
+</tr>
+<tr>
+<td><code>DCS   0    $ q</code></td>
+<td>DECRQSS</td>
+<td>Request Status String</td>
+</tr>
+<tr>
+<td><code>DCS   0    + q</code></td>
+<td>XTGETTCAP</td>
+<td>Request Termcap/Terminfo String</td>
+</tr>
+</tbody>
+</table></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var tab,labels=set.querySelector(".tabbed-labels");for(tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../demo/size_indicator/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Size indicator">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Size indicator
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../vt-extensions/" class="md-footer__link md-footer__link--next" aria-label="Next: VT extensions">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                VT extensions
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11H4Z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["content.action.edit", "content.action.view", "content.code.copy", "content.tabs.link", "navigation.expand", "navigation.footer", "navigation.indexes", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.sections", "navigation.tracking", "search.highlight", "search.share", "search.suggest", "toc.follow"], "search": "../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.1e8ae164.min.js"></script>
+      
+    
+  <script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(() => { lightbox.reload() });
+</script></body>
+</html>
