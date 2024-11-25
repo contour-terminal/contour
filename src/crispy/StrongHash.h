@@ -113,10 +113,10 @@ inline strong_hash operator*(strong_hash const& a, strong_hash const& b) noexcep
 
     return strong_hash { hashValue };
 #else
-    return strong_hash { fnv<uint32_t, uint32_t>()(a.value[0], b.value[0]),
-                         fnv<uint32_t, uint32_t>()(a.value[1], b.value[1]),
-                         fnv<uint32_t, uint32_t>()(a.value[2], b.value[2]),
-                         fnv<uint32_t, uint32_t>()(a.value[3], b.value[3]) };
+    return strong_hash { fnv<char32_t, uint32_t>()(a.value[0], b.value[0]),
+                         fnv<char32_t, uint32_t>()(a.value[1], b.value[1]),
+                         fnv<char32_t, uint32_t>()(a.value[2], b.value[2]),
+                         fnv<char32_t, uint32_t>()(a.value[3], b.value[3]) };
 #endif
 }
 
@@ -189,9 +189,9 @@ inline strong_hash strong_hash::compute(void const* data, size_t n) noexcept
 
     return strong_hash { hashValue };
 #else
-    auto const* i = (uint8_t const*) data;
+    auto const* i = (char8_t const*) data;
     auto const* e = i + n;
-    auto const result = fnv<uint8_t, uint64_t>()(i, e);
+    auto const result = fnv<char8_t, uint64_t>()(i, e);
     auto constexpr A = 0;
     auto constexpr B = 0;
     auto const c = static_cast<uint32_t>((result >> 32) & 0xFFFFFFFFu);
