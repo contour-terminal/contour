@@ -325,6 +325,10 @@ void ViInputHandler::setMode(ViMode theMode)
     clearPendingInput();
 
     _executor->modeChanged(theMode);
+
+    // clear search term when switching to insert mode
+    if (_viMode == ViMode::Insert)
+        clearSearch();
 }
 
 Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, KeyboardEventType eventType)
@@ -449,12 +453,14 @@ Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
                 setMode(ViMode::Insert);
             _searchEditMode = SearchEditMode::Disabled;
             _executor->searchCancel();
+            _executor->updateSearchTerm(_searchTerm);
             break;
         case '\x0D'_key:
             if (_settings.fromSearchIntoInsertMode && _searchEditMode == SearchEditMode::ExternallyEnabled)
                 setMode(ViMode::Insert);
             _searchEditMode = SearchEditMode::Disabled;
             _executor->searchDone();
+            _executor->updateSearchTerm(_searchTerm);
             break;
         case '\x08'_key:
         case '\x7F'_key:
@@ -573,6 +579,12 @@ void ViInputHandler::toggleMode(ViMode newMode)
 void ViInputHandler::setSearchModeSwitch(bool enabled)
 {
     _settings.fromSearchIntoInsertMode = enabled;
+}
+
+void ViInputHandler::clearSearch()
+{
+    _searchTerm.clear();
+    _executor->updateSearchTerm(_searchTerm);
 }
 
 } // namespace vtbackend
