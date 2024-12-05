@@ -1,6 +1,7 @@
 ARG VERSION="24.04"
-FROM ubuntu:$VERSION as builder
+FROM ubuntu:$VERSION AS builder
 ARG ARCH="x86_64"
+ARG QT_VERSION="6.8.1"
 
 RUN apt-get update
 RUN apt-get install -y lsb-release software-properties-common gnupg
@@ -23,10 +24,10 @@ RUN chmod +x llvm.sh
 RUN ./llvm.sh 18
 
 WORKDIR /
-RUN wget -q https://download.qt.io/official_releases/qt/6.8/6.8.0/single/qt-everywhere-src-6.8.0.tar.xz
-RUN tar xf qt-everywhere-src-6.8.0.tar.xz
-RUN rm qt-everywhere-src-6.8.0.tar.xz
-WORKDIR qt-everywhere-src-6.8.0
+RUN wget -q https://download.qt.io/official_releases/qt/6.8/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz
+RUN tar xf qt-everywhere-src-$QT_VERSION.tar.xz
+RUN rm qt-everywhere-src-$QT_VERSION.tar.xz
+WORKDIR qt-everywhere-src-$QT_VERSION
 RUN cmake -S . -B build -G Ninja \
        -D CMAKE_CXX_COMPILER=clang++-18 \
        -D CMAKE_C_COMPILER=clang-18 \
