@@ -224,3 +224,12 @@ struct std::formatter<vtpty::SshSession::ExitStatus>: std::formatter<std::string
                           status);
     }
 };
+
+template <>
+struct std::formatter<vtpty::SshHostConfig>: std::formatter<std::string>
+{
+    auto format(vtpty::SshHostConfig const& config, auto& ctx) const
+    {
+        return std::formatter<std::string>::format(config.toString(), ctx);
+    }
+};
