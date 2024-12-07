@@ -134,63 +134,6 @@ jobs:
       - uses: editorconfig-checker/action-editorconfig-checker@main
       - run: editorconfig-checker
   # }}}
-  # {{{ ArchLinux
-  archlinux:
-    if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
-    strategy:
-      matrix:
-        arch:
-          [
-            "linux/amd64 x86_64"
-          ]
-    name: "Archlinux ${{ matrix.arch }}"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-        with:
-          platforms: all
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v2
-        with:
-          version: latest
-      - name: Read info
-        id: tags
-        shell: bash
-        run: |
-          arch="${{ matrix.arch }}"
-          echo "PLATFORM=${arch%% *}" >> "$GITHUB_OUTPUT"
-          echo "ARCH=${arch##* }" >> "$GITHUB_OUTPUT"
-      - name: "update APT database"
-        run: sudo apt -q update
-      - name: Installing xmllint for ci-set-vars
-        run: sudo apt -qy install libxml2-utils
-      - name: set environment variables
-        id: set_vars
-        run: ./scripts/ci-set-vars.sh
-        env:
-          REPOSITORY: ${{ github.event.repository.name }}
-      - name: Build ${{ matrix.arch }} release
-        shell: bash
-        run: |
-          docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
-          --tag contour:${{ steps.tags.outputs.ARCH }} \
-          -f .github/archlinux/Dockerfile \
-          --load \
-          .
-          docker create --name contour-${{ steps.tags.outputs.ARCH }} contour:${{ steps.tags.outputs.ARCH }}
-          docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/contour.pkg.tar.zst contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst
-          docker container rm contour-${{ steps.tags.outputs.ARCH }}
-      - name: "Uploading Archlinux .pkg.tar.zst package"
-        uses: actions/upload-artifact@v4
-        with:
-          name: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
-          path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
-          if-no-files-found: error
-          retention-days: 1
-  # }}}
   # {{{ StaticBuild
   staticBuild:
     if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
@@ -1221,7 +1164,6 @@ jobs:
     needs:
       - check_links
       - check_release
-      - archlinux
       - check_notcurses_test_matrix
       - fedora
       - macOSx86
@@ -1254,10 +1196,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc40.x86_64.rpm"
-      - name: "fetch artifact: ArchLinux"
-        uses: actions/download-artifact@v4
-        with:
-          name: "contour-x86_64.pkg.tar.zst"
       - name: "fetch artifact: MacOS (ARM)"
         uses: actions/download-artifact@v4
         with:

@@ -43,14 +43,19 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 
 ## Installation
 
-`contour` is packaged and available for installation on multiple distributions.
+`contour` is packaged and available for installation on multiple distributions:
  - `Fedora` use official [package](https://packages.fedoraproject.org/pkgs/contour-terminal/contour-terminal/)
+ - `Arch` use official [package](https://archlinux.org/packages/extra/x86_64/contour/)
+ - `Void` use official [package](https://github.com/void-linux/void-packages/tree/master/srcpkgs/contour)
+ - `openSUSE` use official [package](https://build.opensuse.org/package/show/X11:terminals/contour-terminal)
 
-```sh
-sudo dnf install contour-terminal
-```
+Additional packages can be found on the release [page](https://github.com/contour-terminal/contour/releases) including:
+ - ubuntu package
+ - AppImage
+ - static build
+ - MacOS bundle
+ - Windows installer and zipped app
 
- - `Arch` use AUR [package](https://aur.archlinux.org/packages/contour)
 
 ### Installing via Flatpak
 
