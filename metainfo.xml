@@ -107,6 +107,7 @@
     <release version="0.5.2" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes search editor preservation bug on exit from search mode</li>
           <li>Expose current profile's name through env var `CONTOUR_PROFILE` (#1637)</li>
           <li>Add terminal tabs (#90)</li>
           <li>Add `SaveScreenshot` and `CopyScreenshot` action (#210)</li>

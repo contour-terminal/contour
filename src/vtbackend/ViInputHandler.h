@@ -219,6 +219,7 @@ class ViInputHandler: public InputHandler
     void startSearchExternally();
 
     void setSearchModeSwitch(bool enabled);
+    void clearSearch();
 
   private:
     enum class ModeSelect : uint8_t
