@@ -117,6 +117,7 @@
           <li>Improves window size/resize handling on HiDPI monitor settings (#1628)</li>
           <li>Improves macOS key handling for Option+Left|Right keys to jump between words in the shell</li>
           <li>Fixes cropping of underscore character for some fonts (#1603)</li>
+          <li>Fixes DECFRA limits (#1664)</li>
         </ul>
       </description>
     </release>
