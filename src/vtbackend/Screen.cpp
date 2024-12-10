@@ -3442,8 +3442,11 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
             auto const size = pageSize();
             auto const bottom = std::min(seq.param_or(3, *size.lines), *size.lines);
             auto const right = std::min(seq.param_or(4, *size.columns), *size.columns);
-
-            fillArea(ch, *top, *left, bottom, right);
+            fillArea(ch,
+                     unbox(top),
+                     unbox(left),
+                     std::min(bottom, unbox(pageSize().lines)) - 1,
+                     std::min(right, unbox(pageSize().columns) - 1));
         }
         break;
         case DECDC: deleteColumns(seq.param_or(0, ColumnCount(1))); break;
