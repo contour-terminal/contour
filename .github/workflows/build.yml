@@ -1165,7 +1165,6 @@ jobs:
       - check_links
       - check_release
       - check_notcurses_test_matrix
-      - fedora
       - macOSx86
       - macOSArm
       - package_for_Ubuntu
@@ -1192,10 +1191,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
-      - name: "fetch artifact: Fedora 40"
-        uses: actions/download-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc40.x86_64.rpm"
       - name: "fetch artifact: MacOS (ARM)"
         uses: actions/download-artifact@v4
         with:
