@@ -3440,10 +3440,12 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
             // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the
             // value is treated as the width or height of that page.
             auto const size = pageSize();
-            auto const bottom = std::min(seq.param_or(3, *size.lines), *size.lines);
-            auto const right = std::min(seq.param_or(4, *size.columns), *size.columns);
+            auto const bottom = std::min(seq.param_or(3, unbox(size.lines)), unbox(size.lines));
+            auto const right = std::min(seq.param_or(4, unbox(size.columns)), unbox(size.columns));
 
-            fillArea(ch, *top, *left, bottom, right);
+            // internal indices starts at 0, for DECFRA they start from 1
+            // we need to adjust it and then make shure they are in bounds
+            fillArea(ch, std::max(0, unbox(top) - 1), std::max(0, unbox(left) - 1), bottom - 1, right - 1);
         }
         break;
         case DECDC: deleteColumns(seq.param_or(0, ColumnCount(1))); break;

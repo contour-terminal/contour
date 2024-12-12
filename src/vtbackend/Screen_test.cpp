@@ -1346,8 +1346,58 @@ TEST_CASE("DECFRA", "[screen]")
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
-    mock.writeToScreen("\033[46;1;1;3;3$x");
+    mock.writeToScreen("\033[46;2;2;4;4$x");
     CHECK(escape(mainPageText(screen)) == "12345\\n6...0\\nA...E\\nF...J\\nKLMNO\\n");
+}
+
+TEST_CASE("DECFRA.Vertical", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+
+    mock.writeToScreen("\033[46;3;1;3;5$x");
+    CHECK(escape(mainPageText(screen)) == "12345\\n67890\\n.....\\nFGHIJ\\nKLMNO\\n");
+}
+
+TEST_CASE("DECFRA.Horizontal", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+
+    mock.writeToScreen("\033[46;1;3;5;3$x");
+    CHECK(escape(mainPageText(screen)) == "12.45\\n67.90\\nAB.DE\\nFG.IJ\\nKL.NO\\n");
+}
+
+TEST_CASE("DECFRA.Invalid", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+
+    mock.writeToScreen("\033[46;0;0;5;5$x");
+    CHECK(escape(mainPageText(screen)) == ".....\\n.....\\n.....\\n.....\\n.....\\n");
+}
+
+TEST_CASE("DECFRA.Default", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+
+    mock.writeToScreen("\033[46$x");
+    CHECK(escape(mainPageText(screen)) == ".....\\n.....\\n.....\\n.....\\n.....\\n");
+}
+
+TEST_CASE("DECFRA.Full", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+
+    mock.writeToScreen("\033[46;1;1;5;5$x");
+    CHECK(escape(mainPageText(screen)) == ".....\\n.....\\n.....\\n.....\\n.....\\n");
 }
 
 TEST_CASE("DeleteColumns", "[screen]")
