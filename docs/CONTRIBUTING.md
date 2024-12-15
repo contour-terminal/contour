@@ -18,7 +18,7 @@ You can also see some live development on [Twitch](https://www.twitch.tv/christi
 - Always work on a branch based off the master branch, if it is a feature or a bugfix.
 - Please have a look at the [coding style guidelines](internals/CODING_STYLE.md).
 - When creating a pull request, please see if you can keep the commits as atomic as possible.
-  That is, a single reasonabily sized feature or functionality should be committed as
+  That is, a single reasonably sized feature or functionality should be committed as
   one single commit. If you can branch out a some functionality, let it be a more generalized API or
   refactor of something that can stand on their own, then those deserve their own commits.
 - Every new feature should ideally be unit-testable, this isn't always possible or easy for pure GUI

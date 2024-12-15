@@ -46,7 +46,7 @@ renderer:
 Enables/disables the use of direct-mapped texture atlas tiles for
 the most often used ones (US-ASCII, cursor shapes, underline styles)
 
-You most likely do not wnat to touch this and leave it enabled.
+You most likely do not want to touch this and leave it enabled.
 
 Default: true
 

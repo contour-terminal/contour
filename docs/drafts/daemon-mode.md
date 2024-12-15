@@ -9,7 +9,7 @@ Let's implement a terminal multiplexing server that `Contour` can connect to.
 - support for handling multiple sessions
 - support concurrent clients to the same sessions
 - a session has one or more terminals, with a server managed layout (stacked, tabbed, tiled, ...)
-- connected clients to the same terminal can independantly scroll in history.
+- connected clients to the same terminal can independently scroll in history.
 - communication via `AF_UNIX` and `AF_INET`.
 - attached clients to a terminal receive:
   - An initial fullscreen redraw event,
