@@ -154,7 +154,13 @@ template <typename Cell>
         case GraphicsRendition::Bold: flags |= CellFlag::Bold; break;
         case GraphicsRendition::Faint: flags |= CellFlag::Faint; break;
         case GraphicsRendition::Italic: flags |= CellFlag::Italic; break;
-        case GraphicsRendition::Underline: flags |= CellFlag::Underline; break;
+        case GraphicsRendition::Underline:
+            flags = flags.without({ CellFlag::DoublyUnderlined,
+                                    CellFlag::CurlyUnderlined,
+                                    CellFlag::DottedUnderline,
+                                    CellFlag::DashedUnderline });
+            flags |= CellFlag::Underline;
+            break;
         case GraphicsRendition::Blinking:
             flags.disable(CellFlag::RapidBlinking);
             flags.enable(CellFlag::Blinking);
@@ -166,10 +172,34 @@ template <typename Cell>
         case GraphicsRendition::Inverse: flags |= CellFlag::Inverse; break;
         case GraphicsRendition::Hidden: flags |= CellFlag::Hidden; break;
         case GraphicsRendition::CrossedOut: flags |= CellFlag::CrossedOut; break;
-        case GraphicsRendition::DoublyUnderlined: flags |= CellFlag::DoublyUnderlined; break;
-        case GraphicsRendition::CurlyUnderlined: flags |= CellFlag::CurlyUnderlined; break;
-        case GraphicsRendition::DottedUnderline: flags |= CellFlag::DottedUnderline; break;
-        case GraphicsRendition::DashedUnderline: flags |= CellFlag::DashedUnderline; break;
+        case GraphicsRendition::DoublyUnderlined:
+            flags = flags.without({ CellFlag::Underline,
+                                    CellFlag::CurlyUnderlined,
+                                    CellFlag::DottedUnderline,
+                                    CellFlag::DashedUnderline });
+            flags |= CellFlag::DoublyUnderlined;
+            break;
+        case GraphicsRendition::CurlyUnderlined:
+            flags = flags.without({ CellFlag::Underline,
+                                    CellFlag::DoublyUnderlined,
+                                    CellFlag::DottedUnderline,
+                                    CellFlag::DashedUnderline });
+            flags |= CellFlag::CurlyUnderlined;
+            break;
+        case GraphicsRendition::DottedUnderline:
+            flags = flags.without({ CellFlag::Underline,
+                                    CellFlag::DoublyUnderlined,
+                                    CellFlag::CurlyUnderlined,
+                                    CellFlag::DashedUnderline });
+            flags |= CellFlag::DottedUnderline;
+            break;
+        case GraphicsRendition::DashedUnderline:
+            flags = flags.without({ CellFlag::Underline,
+                                    CellFlag::DoublyUnderlined,
+                                    CellFlag::CurlyUnderlined,
+                                    CellFlag::DottedUnderline });
+            flags |= CellFlag::DashedUnderline;
+            break;
         case GraphicsRendition::Framed: flags |= CellFlag::Framed; break;
         case GraphicsRendition::Overline: flags |= CellFlag::Overline; break;
         case GraphicsRendition::Normal: flags = flags.without({ CellFlag::Bold, CellFlag::Faint }); break;
