@@ -13,7 +13,7 @@ src/              - Contour source code
   vtbackend/      - core terminal library
   vtparser/       - VT parser library
   vtpty/          - PTY library
-  vtrasterizer/   - frontend independant Terminal rendering library
+  vtrasterizer/   - frontend independent Terminal rendering library
 test/             - Contains a set of test scripts.
 ```
 
@@ -25,7 +25,7 @@ are too small to be their own library and ease general development.
 ### `text_shaper` library
 
 This library abstracts font location service, text shaping, as well as
-glyph rasterization into a platform independant API.
+glyph rasterization into a platform independent API.
 
 ### `vtpty` library
 

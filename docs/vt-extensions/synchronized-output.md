@@ -57,7 +57,7 @@ than having no synchronized output at all.
 
 ## Adoption State
 
-| Support | Terminal/Tookit/App   | Notes  |
+| Support | Terminal/Toolkit/App   | Notes  |
 |---------|------------|--------|
 | n/a     | xterm.js   | see tracker [xterm.js#3375](https://github.com/xtermjs/xterm.js/issues/3375) |
 | not yet | Windows Terminal | Proof-of-concept implementation by @j4james exists; tracker: [wt#8331](https://github.com/microsoft/terminal/issues/8331)  |

@@ -69,7 +69,7 @@ the terminal to scroll the view to make that target line visible.
 Contour currently only supports OSC-8 hyperlinks as well as explicitly opening selected text.
 
 In normal mode, you can open links by moving the cursor onto a resource (URL or local file) and
-then press `oiW` (open in (space sperated) word) or use any of the other supported text objects
+then press `oiW` (open in (space separated) word) or use any of the other supported text objects
 to denote what to open.
 
 You may as well type `oo` to open the URL under the current line. This works if no other information

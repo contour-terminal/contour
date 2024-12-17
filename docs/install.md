@@ -61,7 +61,7 @@ by default contour will be compiler with Qt 6, to change Qt version use `QTVER=5
 ```
 
 This script *might* ask you for the administrator password if a package dependency
-can be insalled via the system package manager.
+can be installed via the system package manager.
 
 #### Compile
 

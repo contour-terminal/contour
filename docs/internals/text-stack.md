@@ -4,7 +4,7 @@ A terminal emulator's text stack.
 TL;DR
 -----
 
-This document describes how rendering text is architectually implemented
+This document describes how rendering text is architecturally implemented
 in Contour, an in-early-development virtual terminal emulator, in order to
 support complex unicode as well as (and especially) complex colored emoji.
 
@@ -100,7 +100,7 @@ text along with some latin and Kanji or Emoji in between or a font style change
 for obvious reasons.
 Each segment (usually called run) must be shaped individually with its own set
 of fallback fonts. Emoji are using a different font and font fallback
-list than regular text which uses a different font and font falback list then
+list than regular text which uses a different font and font fallback list then
 bold, italic, or bold itaic fonts.
 Emoji also have two different presentation styles, the one
 that everybody expects and is named Emoji emoji presentation
@@ -155,7 +155,7 @@ to introduce feature detection and mode switching on how to process
 grapheme clusters and their width, if legacy apps are of concern.
 
 Algorithmic wise, implementing grapheme cluster segmentation isn't too hard
-but in execution very expensive. Also grapheme cluster width compuation
+but in execution very expensive. Also grapheme cluster width computation
 is expensive. But luckily, in the context of terminal emulators,
 both can be optimized for the general case in terminal emulatoors, which is
 mostly US-ASCII, and yields almost no penalty with optimizations or a
@@ -170,7 +170,7 @@ without caching without hurting user experience.
 After investigating into the above optimization possibilities however, I do
 not see why a terminal emulator should *not* do provide support for
 complex unicode, as the performance I have achieved so far is above average at
-least, and therefore should be suffient for everyday use.
+least, and therefore should be sufficient for everyday use.
 
 Bidirectional text was not addressed in this document nor in the implementation
 in the Contour terminal yet, as this imposes a new set of challenges

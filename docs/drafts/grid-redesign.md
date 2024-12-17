@@ -20,7 +20,7 @@
 - because of the meaning of the scroll-offset, reflow can be O(1) implemented
   with a `Line()` being arbitrary long(!) and the top screen line being
   computed by subtracting `(PageLineCount - 1) * PageColumnCount)`,
-  then *just* lineary walking forward until the bottom right.
+  then *just* linearly walking forward until the bottom right.
   - this enables relative jumps (`CUU` etc) to jump up logical lines.
   - we could make the cursor jump behavior configurable, via DEC mode.
 - On char write overflow
@@ -33,7 +33,7 @@
 
 ### Notes
 
-Suppose only a single overly long line is written and ocupies the full screen
+Suppose only a single overly long line is written and occupies the full screen
 (many page counts).
 
 ```

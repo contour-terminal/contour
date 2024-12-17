@@ -19,7 +19,7 @@ Modifiers:
 * Alt
 * Control
 * Shift
-* Meta (this is the Windows key on Windows OS, ans the Command key on macOS, and Meta on anything else)<br />Keys can be expressed case-insensitively symbolic.
+* Meta (this is the Windows key on Windows OS, and the Command key on macOS, and Meta on anything else)<br />Keys can be expressed case-insensitively symbolic.
 
 Keys can be expressed case-insensitively symbolic:
 
