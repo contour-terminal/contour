@@ -120,6 +120,7 @@
           <li>Fixes cropping of underscore character for some fonts (#1603)</li>
           <li>Fixes DECFRA limits (#1664)</li>
           <li>Fixes underline styles not being reset on switching to a new style (#1365)</li>
+          <li>Few improvements and bug fixes for the tabs</li>
         </ul>
       </description>
     </release>

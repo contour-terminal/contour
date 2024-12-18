@@ -311,6 +311,8 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar.value());
 
     if (!_renderer)
+    {
+
         _renderer = make_unique<vtrasterizer::Renderer>(
             _session->profile().terminalSize.value(),
             sanitizeFontDescription(profile().fonts.value(), fontDPI()),
@@ -323,9 +325,11 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
             // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
         );
 
-    applyFontDPI();
-    updateImplicitSize();
-    updateMinimumSize();
+        // setup once with the renderer creation
+        applyFontDPI();
+        updateImplicitSize();
+        updateMinimumSize();
+    }
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
 

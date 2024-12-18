@@ -13,6 +13,7 @@
 #include <QtQml/QQmlEngine>
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 
 using namespace std::string_literals;
@@ -27,13 +28,15 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app): _app { app }
 {
 }
 
-std::unique_ptr<vtpty::Pty> TerminalSessionManager::createPty()
+std::unique_ptr<vtpty::Pty> TerminalSessionManager::createPty(std::string cwd)
 {
     auto const& profile = _app.config().profile(_app.profileName());
 #if defined(VTPTY_LIBSSH2)
     if (!profile->ssh.value().hostname.empty())
         return make_unique<vtpty::SshSession>(profile->ssh.value());
 #endif
+    if (!cwd.empty())
+        profile->shell.value().workingDirectory = std::filesystem::path(cwd);
     return make_unique<vtpty::Process>(profile->shell.value(),
                                        vtpty::createPty(profile->terminalSize.value(), nullopt),
                                        profile->escapeSandbox.value());
@@ -43,7 +46,27 @@ TerminalSession* TerminalSessionManager::createSession()
 {
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessable from within QML.
-    auto* session = new TerminalSession(createPty(), _app);
+    auto* session = new TerminalSession(
+        createPty([this]() -> std::string {
+            if (_activeSession)
+            {
+                auto& terminal = _activeSession->terminal();
+                auto const wd = [&]() -> std::string {
+#if !defined(_WIN32)
+                    if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&terminal.device()))
+                        return ptyProcess->workingDirectory();
+#else
+                    auto const _l = scoped_lock { _terminal };
+                    return _terminal.currentWorkingDirectory();
+#endif
+                    return ""s;
+                }();
+                return wd;
+            }
+            return ""s;
+        }()),
+        _app);
+    managerLog()("CREATE SESSION, new session: {}", (void*) session);
 
     _sessions.push_back(session);
 
@@ -57,6 +80,7 @@ TerminalSession* TerminalSessionManager::createSession()
 
     // we can close application right after session has been created
     _lastTabChange = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    _activeSession = session;
     return session;
 }
 
@@ -72,13 +96,10 @@ void TerminalSessionManager::setSession(size_t index)
     if (index < _sessions.size())
         _activeSession = _sessions[index];
     else
-        _activeSession = createSession();
+        createSession();
 
     if (oldSession == _activeSession)
         return;
-
-    if (oldSession)
-        oldSession->detachDisplay(*display);
 
     Require(display != nullptr);
     auto const pixels = display->pixelSize();
@@ -87,6 +108,7 @@ void TerminalSessionManager::setSession(size_t index)
     display->setSession(_activeSession);
     _activeSession->terminal().resizeScreen(totalPageSize, pixels);
     updateStatusLine();
+
     _lastTabChange = std::chrono::steady_clock::now();
 }
 
@@ -106,16 +128,9 @@ void TerminalSessionManager::switchToTabLeft()
     {
         setSession(currentSessionIndex - 1);
     }
-}
-
-void TerminalSessionManager::switchToTab(int position)
-{
-    managerLog()(std::format(
-        "switchToTab from {} to {} (out of {})", getCurrentSessionIndex(), position - 1, _sessions.size()));
-
-    if (1 <= position && position <= static_cast<int>(_sessions.size()))
+    else // wrap
     {
-        setSession(position - 1);
+        setSession(_sessions.size() - 1);
     }
 }
 
@@ -128,6 +143,21 @@ void TerminalSessionManager::switchToTabRight()
     if (std::cmp_less(currentSessionIndex, _sessions.size() - 1))
     {
         setSession(currentSessionIndex + 1);
+    }
+    else // wrap
+    {
+        setSession(0);
+    }
+}
+
+void TerminalSessionManager::switchToTab(int position)
+{
+    managerLog()(std::format(
+        "switchToTab from {} to {} (out of {})", getCurrentSessionIndex(), position - 1, _sessions.size()));
+
+    if (1 <= position && position <= static_cast<int>(_sessions.size()))
+    {
+        setSession(position - 1);
     }
 }
 
