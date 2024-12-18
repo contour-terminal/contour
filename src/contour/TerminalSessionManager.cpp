@@ -106,16 +106,9 @@ void TerminalSessionManager::switchToTabLeft()
     {
         setSession(currentSessionIndex - 1);
     }
-}
-
-void TerminalSessionManager::switchToTab(int position)
-{
-    managerLog()(std::format(
-        "switchToTab from {} to {} (out of {})", getCurrentSessionIndex(), position - 1, _sessions.size()));
-
-    if (1 <= position && position <= static_cast<int>(_sessions.size()))
+    else // wrap
     {
-        setSession(position - 1);
+        setSession(_sessions.size() - 1);
     }
 }
 
@@ -128,6 +121,21 @@ void TerminalSessionManager::switchToTabRight()
     if (std::cmp_less(currentSessionIndex, _sessions.size() - 1))
     {
         setSession(currentSessionIndex + 1);
+    }
+    else // wrap
+    {
+        setSession(0);
+    }
+}
+
+void TerminalSessionManager::switchToTab(int position)
+{
+    managerLog()(std::format(
+        "switchToTab from {} to {} (out of {})", getCurrentSessionIndex(), position - 1, _sessions.size()));
+
+    if (1 <= position && position <= static_cast<int>(_sessions.size()))
+    {
+        setSession(position - 1);
     }
 }
 
