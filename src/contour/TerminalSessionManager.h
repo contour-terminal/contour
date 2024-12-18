@@ -49,7 +49,7 @@ class TerminalSessionManager: public QAbstractListModel
     TerminalSession* getSession() { return _sessions[0]; }
 
   private:
-    std::unique_ptr<vtpty::Pty> createPty();
+    std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> cwd);
     [[nodiscard]] auto getCurrentSessionIndex() const
     {
         return [](auto const& sessions, auto const& activeSession) {
@@ -87,7 +87,7 @@ class TerminalSessionManager: public QAbstractListModel
     TerminalSession* _activeSession = nullptr;
     std::vector<TerminalSession*> _sessions;
     std::chrono::time_point<std::chrono::steady_clock> _lastTabChange;
-    std::chrono::milliseconds _timeBetweenTabSwitches { 100 };
+    std::chrono::milliseconds _timeBetweenTabSwitches { 10 };
 };
 
 } // namespace contour

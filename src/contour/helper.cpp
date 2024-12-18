@@ -607,8 +607,8 @@ void applyResize(vtbackend::ImageSize newPixelSize,
                  TerminalSession& session,
                  vtrasterizer::Renderer& renderer)
 {
-    if (*newPixelSize.width == 0
-                                                      || *newPixelSize.height == 0) return;
+    if (*newPixelSize.width == 0 || *newPixelSize.height == 0)
+        return;
 
     auto const oldPageSize = session.terminal().pageSize();
     auto const newPageSize = pageSizeForPixels(
