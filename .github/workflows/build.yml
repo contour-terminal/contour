@@ -1238,10 +1238,8 @@ jobs:
           files: |
             *.deb
             *.ddeb
-            *.rpm
             *.dmg
             *.msi
-            *.zst
             *.zip
             *.AppImage
   # }}}
