@@ -1131,7 +1131,7 @@ struct Writer
         return format(doc, v.count());
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, vtpty::Process::ExecInfo v)
+    [[nodiscard]] std::string format(std::string_view doc, vtpty::Process::ExecInfo const& v)
     {
         auto args = std::string { "[" };
         args.append(v.arguments | ranges::views::join(", ") | ranges::to<std::string>);
