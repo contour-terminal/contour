@@ -2131,7 +2131,30 @@ std::string createForProfile(Config const& c)
             doc.append(writer.process(writer.whichDoc(v), name, v.value()));
         };
 
+    // Something is wrong for vtpty::Process::ExecInfo formating for static build
+    // we add this lambda to handle it in overload set for now
+    auto const processConfigEntryWithExecInfo =
+        [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
+            auto name,
+            contour::config::ConfigEntry<
+                vtpty::Process::ExecInfo,
+                contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& vEntry) {
+            auto v = vEntry.value();
+            auto args = std::string { "[" };
+            args.append(v.arguments | ::ranges::views::join(", ") | ::ranges::to<std::string>);
+            args.append("]");
+
+            doc.append(writer.process(writer.whichDoc(vEntry), name, v.program, args, [&]() -> std::string {
+                auto fromConfig = v.workingDirectory.string();
+                if (fromConfig.empty()
+                    || fromConfig == crispy::homeResolvedPath("~", vtpty::Process::homeDirectory()))
+                    return std::string { "\"~\"" };
+                return fromConfig;
+            }()));
+        };
+
     auto completeOverload = crispy::overloaded {
+        processConfigEntryWithExecInfo,
         processConfigEntry,
         [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
     };

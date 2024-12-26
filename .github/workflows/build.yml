@@ -540,7 +540,7 @@ jobs:
           # cmake --build build --target package-verbose
           # ls -hl build/
           # find build/src/contour/contour.app -print
-          BASENAME="contour-${{ steps.set_vars.outputs.version }}-macOS-x86
+          BASENAME="contour-${{ steps.set_vars.outputs.version }}-macOS-x86"
           mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v4
