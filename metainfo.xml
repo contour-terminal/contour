@@ -104,7 +104,7 @@
 
     -->
 
-    <release version="0.5.2" urgency="medium" type="development">
+    <release version="0.6.0" urgency="medium" date="2024-12-26">
       <description>
         <ul>
           <li>Fixes search editor preservation bug on exit from search mode</li>
