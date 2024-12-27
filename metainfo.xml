@@ -107,7 +107,7 @@
     <release version="0.6.1" urgency="medium" type="development">
       <description>
         <ul>
-          <li> ... </li>
+          <li>Do not abort when failing to create `XDG_STATE_HOME/contour/crash` directory</li>
         </ul>
       </description>
     </release>
