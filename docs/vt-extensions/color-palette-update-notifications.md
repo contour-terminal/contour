@@ -43,3 +43,14 @@ e.g. by configuration.
 
 Please have a look at our example C++ [source code](https://github.com/contour-terminal/contour/blob/master/examples/detect-dark-light-mode.cpp)
 in order to see how to implement this in your own application.
+
+## Adoption State
+| Support  | Terminal/Toolkit/App | Notes                                                                                               |
+|----------|----------------------|-----------------------------------------------------------------------------------------------------|
+| ✅       | Contour              |                                                                                                     |
+| ✅       | Ghostty              | since `1.0.0`                                                                                       |
+| ✅       | Kitty                | since [`0.38.1`](https://sw.kovidgoyal.net/kitty/changelog/#detailed-list-of-changes)               |
+| ✅ (tui) | Neovim               | since [`d460928`](https://github.com/neovim/neovim/commit/d460928263d0ff53283f301dfcb85f5b6e17d2ac) |
+| not yet  | tmux                 | see tracker: [tmux#4269](https://github.com/tmux/tmux/issues/4269)                                  |
+| not yet  | WezTerm              | see tracker: [wezterm#6454](https://github.com/wez/wezterm/issues/6454)                             |
+| not yet  | Zellij               | see tracker: [zellij#3831](https://github.com/zellij-org/zellij/issues/3831)                        |
