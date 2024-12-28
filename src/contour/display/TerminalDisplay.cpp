@@ -1071,7 +1071,11 @@ bool TerminalDisplay::isFullScreen() const
 vtbackend::ImageSize TerminalDisplay::pixelSize() const
 {
     assert(_session);
-    return gridMetrics().cellSize * _session->terminal().pageSize();
+    auto const scaledWindowMargins = applyContentScale(_session->profile().margins.value(), contentScale());
+    auto const scaledWindowMarginsPixels =
+        vtbackend::ImageSize { Width::cast_from(unbox(scaledWindowMargins.horizontal) * 2),
+                               Height::cast_from(unbox(scaledWindowMargins.vertical) * 2) };
+    return gridMetrics().cellSize * _session->terminal().pageSize() + scaledWindowMarginsPixels;
 }
 
 vtbackend::ImageSize TerminalDisplay::cellSize() const
