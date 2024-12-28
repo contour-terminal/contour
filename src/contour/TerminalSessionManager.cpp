@@ -97,21 +97,27 @@ void TerminalSessionManager::setSession(size_t index)
     if (!isAllowedToChangeTabs())
         return;
 
+    Require(display != nullptr);
+    auto const pixels = display->pixelSize();
+    auto const totalPageSize = display->calculatePageSize() + _activeSession->terminal().statusLineHeight();
+
     auto* oldSession = _activeSession;
 
     if (index < _sessions.size())
+    {
         _activeSession = _sessions[index];
+        // Ensure that the existing session is resized to the display's size.
+        _activeSession->terminal().resizeScreen(totalPageSize, pixels);
+    }
     else
         createSession();
 
     if (oldSession == _activeSession)
         return;
 
-    Require(display != nullptr);
-    auto const pixels = display->pixelSize();
-    auto const totalPageSize = display->calculatePageSize() + _activeSession->terminal().statusLineHeight();
-
     display->setSession(_activeSession);
+    // Resize active session after display is attached to it
+    // to return a lost line
     _activeSession->terminal().resizeScreen(totalPageSize, pixels);
     updateStatusLine();
 
