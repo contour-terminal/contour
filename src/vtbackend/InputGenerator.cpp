@@ -68,6 +68,7 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
         return true;
     }
 
+    // Backtab handling, 0x09 is Tab
     if (modifiers == Modifier::Shift && characterEvent == 0x09)
     {
         append("\033[Z"); // introduced by linux_console in 1995, adopted by xterm in 2002
@@ -175,7 +176,7 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
         case Key::F35: append(select(modifiers, { .std = CSI "49~", .mods = CSI "49;{}~" })); break;
         case Key::Escape: append("\033"); break;
         case Key::Enter: append(select(modifiers, { .std = "\r" })); break;
-        case Key::Tab: append(select(modifiers, { .std = "\t" })); break;
+        case Key::Tab: generateChar('\t', 0, modifiers, eventType); break;
         case Key::Backspace:
             // Well accepted hack to distinguish between Backspace nad Ctrl+Backspace,
             // - Backspace is emitting 0x7f,
