@@ -527,7 +527,7 @@ void ContourGuiApp::setupQCoreApplication()
         return defaultAppName;
     }();
 
-    // On Wayland, we want to set the Applicion Id to the configured value via the desktop file name.
+    // On Wayland, we want to set the Application Id to the configured value via the desktop file name.
     // We use the desktop file name as the application id, because that's what Qt uses to set the
     // app id on Wayland.
     // I know this sounds weird. This is because it is weird. But it's the only way to set the

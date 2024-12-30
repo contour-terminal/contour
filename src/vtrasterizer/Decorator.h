@@ -10,7 +10,7 @@
 namespace vtrasterizer
 {
 
-/// Dectorator, to decorate a grid cell, eventually containing a character
+/// Decorator, to decorate a grid cell, eventually containing a character
 ///
 /// It should be possible to render multiple decoration onto the same coordinates.
 enum class Decorator : uint8_t

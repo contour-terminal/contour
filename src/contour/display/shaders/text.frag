@@ -47,7 +47,7 @@ void renderLcdGlyphSimple()
     fragColor = vec4(v.rgb * fs_textColor.rgb, a);
 }
 
-// Calcualtes subpixel shifting.
+// Calculates subpixel shifting.
 //
 // @param current       current pixel to render
 // @param previous      previous pixel, left neighbor of current.

@@ -41,7 +41,7 @@ color_schemes:
 
 
 ### `cursor`
-section in the configuration file let you costimize the color of the cursosr and optionally override the text color.
+section in the configuration file let you customize the color of the cursor and optionally override the text color.
 ``` yaml
 color_schemes:
   default:

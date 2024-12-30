@@ -81,7 +81,7 @@ struct command
     // std::vector<command> children = {};
     command_list children = {};
     command_select select = command_select::Explicit;
-    std::optional<cli::verbatim> verbatim = {}; // Unly allowed if no sub commands were specified.
+    std::optional<cli::verbatim> verbatim = {}; // Only allowed if no sub commands were specified.
 };
 
 using command_list = command::command_list;

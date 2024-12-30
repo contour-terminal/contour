@@ -151,7 +151,7 @@ class Line
     /**
      * Fills this line with the given content.
      *
-     * @p start offset into this line of the first charater
+     * @p start offset into this line of the first character
      * @p sgr graphics rendition for the line starting at @c start until the end
      * @p ascii the US-ASCII characters to fill with
      */

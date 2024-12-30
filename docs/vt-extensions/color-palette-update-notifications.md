@@ -16,7 +16,7 @@ Ideally we are getting CLI tools like [delta]() to query the theme mode before s
 to the terminal to make the output look more in line with the rest of the desktop.
 
 But also TUIs like vim should be able to reflect dark/light mode changes as soon as the
-desktop has charnged to light/dark mode or the user has changed the terminal profile.
+desktop has changed to light/dark mode or the user has changed the terminal profile.
 
 ## Query the current theme mode?
 
