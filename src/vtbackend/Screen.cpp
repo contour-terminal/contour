@@ -992,7 +992,7 @@ void Screen<Cell>::eraseCharacters(ColumnCount n)
     // would go outside margins.
     // TODO: See what xterm does ;-)
 
-    // erase characters from current colum to the right
+    // erase characters from current column to the right
     auto const columnsAvailable = pageSize().columns - boxed_cast<ColumnCount>(realCursorPosition().column);
     auto const clampedN = unbox<long>(clamp(n, ColumnCount(1), columnsAvailable));
 

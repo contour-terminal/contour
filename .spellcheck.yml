@@ -1,0 +1,24 @@
+matrix:
+- name: Markdown
+  aspell:
+    lang: en
+  dictionary:
+    encoding: utf-8
+  pipeline:
+  - pyspelling.filters.markdown:
+  - pyspelling.filters.html:
+      comments: false
+      ignores:
+      - code
+      - pre
+  sources:
+  - '**/*.md'
+  wordlists:
+  - .wordlist.txt
+  default_encoding: utf-8
+- name: cpp
+  sources:
+  - '**/*.{cpp,hpp,c,h}'
+  pipeline:
+  - pyspelling.filters.cpp:
+      line_comments: false

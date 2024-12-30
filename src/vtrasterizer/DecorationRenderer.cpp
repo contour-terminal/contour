@@ -221,7 +221,7 @@ auto DecorationRenderer::createTileData(Decorator decoration,
             });
         }
         case Decorator::DashedUnderline: {
-            // Devides a grid cell's underline in three sub-ranges and only renders first and third one,
+            // Divides a grid cell's underline in three sub-ranges and only renders first and third one,
             // whereas the middle one is being skipped.
             auto const thicknessHalf = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
             auto const thickness = max(1u, thicknessHalf * 2);

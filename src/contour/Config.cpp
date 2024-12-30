@@ -2255,7 +2255,7 @@ std::string createForColorScheme(Config const& c)
                                entry.searchHighlight.background,
                                entry.searchHighlight.backgroundAlpha);
 
-                processWithDoc(documentation::SearchHighlihtFocused {},
+                processWithDoc(documentation::SearchHighlightFocused {},
                                entry.searchHighlightFocused.foreground,
                                entry.searchHighlightFocused.foregroundAlpha,
                                entry.searchHighlightFocused.background,

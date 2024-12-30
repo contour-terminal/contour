@@ -289,7 +289,7 @@ Let's go through the different sections of the global configurations in the file
 )";
 
     std::string_view const additionalInfo = R"(
-### Defaut global parameters
+### Default global parameters
 
 ```yaml
 platform_plugin: auto

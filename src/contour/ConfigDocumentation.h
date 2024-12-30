@@ -948,7 +948,7 @@ constexpr StringLiteral SearchHighlightConfig {
     "    background_alpha: {}\n"
 };
 
-constexpr StringLiteral SearchHighlihtFocusedConfig {
+constexpr StringLiteral SearchHighlightFocusedConfig {
     "\n"
     "{comment} Search match highlighting (focused term). Similar to selection "
     "highlighting.\n"
@@ -1794,7 +1794,7 @@ using YankHighlight = DocumentationEntry<YankHighlightConfig, Dummy>;
 using NormalModeCursorline = DocumentationEntry<NormalModeCursorlineConfig, Dummy>;
 using Selection = DocumentationEntry<SelectionConfig, Dummy>;
 using SearchHighlight = DocumentationEntry<SearchHighlightConfig, Dummy>;
-using SearchHighlihtFocused = DocumentationEntry<SearchHighlihtFocusedConfig, Dummy>;
+using SearchHighlightFocused = DocumentationEntry<SearchHighlightFocusedConfig, Dummy>;
 using WordHighlightCurrent = DocumentationEntry<WordHighlightCurrentConfig, Dummy>;
 using WordHighlight = DocumentationEntry<WordHighlightConfig, Dummy>;
 using IndicatorStatusLine = DocumentationEntry<IndicatorStatusLineConfig, Dummy>;

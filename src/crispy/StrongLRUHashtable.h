@@ -146,7 +146,7 @@ class strong_lru_hashtable
     /// if it wasn't in the hashtable just yet.
     [[nodiscard]] Value& operator[](strong_hash const& hash) noexcept;
 
-    /// Assignes the given value to the given hash key.
+    /// Assigns the given value to the given hash key.
     /// If the hash key was not found, it is being created,
     /// otherwise the value will be re-assigned with the new value.
     Value& emplace(strong_hash const& hash, Value value) noexcept;
@@ -685,7 +685,7 @@ void strong_lru_hashtable<Value>::inspect(std::ostream& output) const
         entryIndex = entry.prevInLRU;
     }
 
-    auto const humanReadableUtiliation = [](auto a, auto b) -> std::string {
+    auto const humanReadableUtilization = [](auto a, auto b) -> std::string {
         auto const da = static_cast<double>(a);
         auto const db = static_cast<double>(b);
         auto const dr = (da / db) * 100.0;
@@ -700,15 +700,15 @@ void strong_lru_hashtable<Value>::inspect(std::ostream& output) const
     output << std::format("-------------------------------------------------------------\n", _name);
     output << std::format("hashslot collisions : {} ({})\n",
                           hashSlotCollisions,
-                          humanReadableUtiliation(hashSlotCollisions, _hashCount.value));
+                          humanReadableUtilization(hashSlotCollisions, _hashCount.value));
     output << std::format("stats               : {}\n", _stats);
     output << std::format("hash table capacity : {} ({} utilization)\n",
                           _hashCount.value,
-                          humanReadableUtiliation(_size, _hashCount.value));
+                          humanReadableUtilization(_size, _hashCount.value));
     output << std::format("entry count         : {}\n", _size);
     output << std::format("entry capacity      : {} ({} utilization)\n",
                           _capacity.value,
-                          humanReadableUtiliation(_size, _capacity.value));
+                          humanReadableUtilization(_size, _capacity.value));
     output << std::format("-------------------------------------------------------------\n", _name);
 }
 

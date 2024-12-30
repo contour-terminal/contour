@@ -11,7 +11,7 @@ You can also see some live development on [Twitch](https://www.twitch.tv/christi
 
 ## Some general tips:
 
-- Please keep in mind, this project is still in its very early stages (started Augost 2019) and thus
+- Please keep in mind, this project is still in its very early stages (started August 2019) and thus
   under very active development. It's not perfect nor bug-free yet.
 - Please fork the main repository at [github.com/contour-terminal/contour](https://github.com/contour-terminal/contour.git)
   then git clone your repository into your preferred location.

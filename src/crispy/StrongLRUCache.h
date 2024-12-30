@@ -63,7 +63,7 @@ class strong_lru_cache
     /// Clears all entries from the cache.
     void clear();
 
-    // Delets the key and its associated value from the LRU cache
+    // Deletes the key and its associated value from the LRU cache
     void remove(Key key);
 
     /// Touches a given key, putting it to the front of the LRU chain.
@@ -89,7 +89,7 @@ class strong_lru_cache
     /// if it wasn't in the cache just yet.
     [[nodiscard]] Value& operator[](Key key) noexcept;
 
-    /// Assignes the given value to the given key.
+    /// Assigns the given value to the given key.
     /// If the key was not found, it is being created, otherwise the value will
     /// be re-assigned with the new value.
     Value& emplace(Key key, Value value) noexcept;

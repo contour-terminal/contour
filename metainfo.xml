@@ -111,6 +111,7 @@
           <li>Fixes tab switch crash after resize</li>
           <li>Fixes tab shrinking after tab creation/switches when a non-zero horizontal window margin is configured</li>
           <li>Fixes backtab (Shift+Tab) handling (#1685)</li>
+          <li>Fixes various spelling typos across the codebase (#1688)</li>
         </ul>
       </description>
     </release>
@@ -691,7 +692,7 @@
       <description>
         <ul>
           <li>Reverts change from 0.2.0: "Changes behaviour when receiving `U+FE0E` (VS15) to not enforce the width of 1 but leave it as is (usually 2). This seems to match what the web browser is doing, too."</li>
-          <li>Adds support for loading terminal color schemes from an exernal file, such as `~/.config/contour/colorschemes/onedark.yml` for the scheme `onedark` (file file format is simply a sub-tree of how colors can be specified inline).</li>
+          <li>Adds support for loading terminal color schemes from an external file, such as `~/.config/contour/colorschemes/onedark.yml` for the scheme `onedark` (file file format is simply a sub-tree of how colors can be specified inline).</li>
           <li>Adds some more tmux-extension entries to the terminfo database that are supported by contour (`Ss`, `Se`, `Cs`, `Smol`, `Smulx`, `Setulc`).</li>
           <li>Adds `Sync` capability entry to terminfo file.</li>
           <li>Adds many more pixel-perfect graphical characters: `23A1`..`23A6`, `2580`..`2590`, `2594`..`259F`, `1FB00`..`1FB3B`, `1FB3C`..`1FBAF`, `1FBF0`..`1FBF9`.</li>

@@ -464,7 +464,7 @@ enum class ScreenType : uint8_t
 };
 
 // TODO: Maybe make boxed.h into its own C++ github repo?
-// TODO: Differenciate Line/Column types for DECOM enabled/disabled coordinates?
+// TODO: Differentiate Line/Column types for DECOM enabled/disabled coordinates?
 //
 // Line, Column                 : respects DECOM if enabled (a.k.a. logical column)
 // PhysicalLine, PhysicalColumn : always relative to origin (top left)

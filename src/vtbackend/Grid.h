@@ -260,7 +260,7 @@ struct LogicalLine
     }
 
   private:
-    // Finds the maximum number of charecters of searchText that can be matched from right end of line
+    // Finds the maximum number of characters of searchText that can be matched from right end of line
     [[nodiscard]] size_t searchPartialMatch(std::u32string_view searchText,
                                             const Line<Cell>& line,
                                             bool isCaseSensitive) const noexcept
@@ -278,7 +278,7 @@ struct LogicalLine
         return 0;
     }
 
-    // Finds the maximum number of charecters of searchText that can be matched from left end of line
+    // Finds the maximum number of characters of searchText that can be matched from left end of line
     [[nodiscard]] size_t searchPartialMatchReverse(std::u32string_view searchText,
                                                    const Line<Cell>& line,
                                                    bool isCaseSensitive) const noexcept

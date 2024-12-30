@@ -52,6 +52,67 @@ jobs:
     - name: "Checking for open PR-related TODO items"
       run: ./scripts/check-pr-todos.sh
 
+  check_spelling:
+    name: Check spelling
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      security-events: write
+    outputs:
+      followup: ${{ steps.spelling.outputs.followup }}
+    steps:
+      - uses: check-spelling/check-spelling@v0.0.24
+        name: Check spelling
+        id: spellcheck
+        with:
+          suppress_push_for_open_pull_request: ${{ github.actor != 'dependabot[bot]' && 1 }}
+          checkout: true
+          check_file_names: 1
+          spell_check_this: contour-terminal/contour@master
+          post_comment: 0
+          use_magic_file: 1
+          report-timing: 1
+          warnings: bad-regex,binary-file,deprecated-feature,ignored-expect-variant,large-file,limited-references,no-newline-at-eof,noisy-file,non-alpha-in-dictionary,token-is-substring,unexpected-line-ending,whitespace-in-dictionary,minified-file,unsupported-configuration,no-files-to-check,unclosed-block-ignore-begin,unclosed-block-ignore-end
+          check_extra_dictionaries: ""
+          dictionary_source_prefixes: >
+            {
+            "cspell": "https://raw.githubusercontent.com/check-spelling/cspell-dicts/v20241114/dictionaries/"
+            }
+          extra_dictionaries: |
+              cspell:aws/aws.txt
+              cspell:cpp/compiler-clang-attributes.txt
+              cspell:cpp/compiler-msvc.txt
+              cspell:cpp/ecosystem.txt
+              cspell:cpp/lang-keywords.txt
+              cspell:cpp/stdlib-c.txt
+              cspell:cpp/stdlib-cmath.txt
+              cspell:cpp/stdlib-cpp.txt
+              cspell:csharp/csharp.txt
+              cspell:css/css.txt
+              cspell:dart/dart.txt
+              cspell:django/django.txt
+              cspell:dotnet/dotnet.txt
+              cspell:filetypes/filetypes.txt
+              cspell:fullstack/fullstack.txt
+              cspell:golang/go.txt
+              cspell:html/html.txt
+              cspell:java/java-terms.txt
+              cspell:java/java.txt
+              cspell:lorem-ipsum/dictionary.txt
+              cspell:mnemonics/mnemonics.txt
+              cspell:node/node.txt
+              cspell:npm/npm.txt
+              cspell:php/php.txt
+              cspell:powershell/powershell.txt
+              cspell:python/common/extra.txt
+              cspell:python/python/python-lib.txt
+              cspell:python/python/python.txt
+              cspell:r/r.txt
+              cspell:software-terms/softwareTerms.txt
+              cspell:typescript/typescript.txt
+
   check_clang_format:
     name: "Check C++ style"
     runs-on: ubuntu-24.04

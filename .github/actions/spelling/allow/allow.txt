@@ -1,0 +1,7 @@
+FreeBSD
+OpenBSD
+UpperCamelCase
+copy'n'paste
+lowerCamelCase
+macOS
+zypper
