@@ -10,7 +10,7 @@ enable the applications **inside** the terminal to detect when the terminal has
 updated the color palette. This may happen either due to the operating system having
 changed the current theme or simply because the user has explicitly requested to
 reconfigure the currently used theme (e.g. because the user requested to change the terminal profile,
-also containing a different color schemem).
+also containing a different color scheme).
 
 Ideally we are getting CLI tools like [delta]() to query the theme mode before sending out RGB values
 to the terminal to make the output look more in line with the rest of the desktop.
