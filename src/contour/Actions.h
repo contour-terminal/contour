@@ -82,6 +82,7 @@ struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
 struct CreateNewTab{};
 struct CloseTab{};
 struct SwitchToTab{ int position; };
+struct SwitchToPreviousTab{};
 struct SwitchToTabLeft{};
 struct SwitchToTabRight{};
 // clang-format on
@@ -140,6 +141,7 @@ using Action = std::variant<CancelSelection,
                             CreateNewTab,
                             CloseTab,
                             SwitchToTab,
+                            SwitchToPreviousTab,
                             SwitchToTabLeft,
                             SwitchToTabRight>;
 
@@ -260,6 +262,7 @@ namespace documentation
     constexpr inline std::string_view SwitchToTab {
         "Switch to absolute tab position (starting at number 1)"
     };
+    constexpr inline std::string_view SwitchToPreviousTab { "Switch to the previously focused tab" };
     constexpr inline std::string_view SwitchToTabLeft { "Switch to tab to the left" };
     constexpr inline std::string_view SwitchToTabRight { "Switch to tab to the right" };
 } // namespace documentation
@@ -321,6 +324,7 @@ inline auto getDocumentation()
         std::tuple { Action { CreateNewTab {} }, documentation::CreateNewTab },
         std::tuple { Action { CloseTab {} }, documentation::CloseTab },
         std::tuple { Action { SwitchToTab {} }, documentation::SwitchToTab },
+        std::tuple { Action { SwitchToPreviousTab {} }, documentation::SwitchToPreviousTab },
         std::tuple { Action { SwitchToTabLeft {} }, documentation::SwitchToTabLeft },
         std::tuple { Action { SwitchToTabRight {} }, documentation::SwitchToTabRight },
     };
@@ -393,6 +397,7 @@ DECLARE_ACTION_FMT(ViNormalMode)
 DECLARE_ACTION_FMT(WriteScreen)
 DECLARE_ACTION_FMT(CreateNewTab)
 DECLARE_ACTION_FMT(CloseTab)
+DECLARE_ACTION_FMT(SwitchToPreviousTab)
 DECLARE_ACTION_FMT(SwitchToTabLeft)
 DECLARE_ACTION_FMT(SwitchToTabRight)
 // }}}
@@ -471,6 +476,7 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(ViNormalMode);
         HANDLE_ACTION(CreateNewTab);
         HANDLE_ACTION(CloseTab);
+        HANDLE_ACTION(SwitchToPreviousTab);
         HANDLE_ACTION(SwitchToTabLeft);
         HANDLE_ACTION(SwitchToTabRight);
         if (std::holds_alternative<contour::actions::SwitchToTab>(_action))

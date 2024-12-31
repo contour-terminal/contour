@@ -113,6 +113,8 @@
           <li>Fixes startup crash when window is not yet fully initialized</li>
           <li>Fixes backtab (Shift+Tab) handling (#1685)</li>
           <li>Fixes various spelling typos across the codebase (#1688)</li>
+          <li>Improve tab close handling to better select previously focused tab</li>
+          <li>Add action `SwitchToPreviousTab` to switch to the previously focused tab</li>
         </ul>
       </description>
     </release>

@@ -82,6 +82,7 @@ optional<Action> fromString(string const& name)
         mapAction<actions::CreateNewTab>("CreateNewTab"),
         mapAction<actions::CloseTab>("CloseTab"),
         mapAction<actions::SwitchToTab>("SwitchToTab"),
+        mapAction<actions::SwitchToPreviousTab>("SwitchToPreviousTab"),
         mapAction<actions::SwitchToTabLeft>("SwitchToTabLeft"),
         mapAction<actions::SwitchToTabRight>("SwitchToTabRight"),
     };
