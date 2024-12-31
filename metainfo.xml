@@ -104,7 +104,7 @@
 
     -->
 
-    <release version="0.6.1" urgency="medium" type="development">
+    <release version="0.6.1" urgency="medium" date="2024-12-31">
       <description>
         <ul>
           <li>Do not abort when failing to create `XDG_STATE_HOME/contour/crash` directory</li>
