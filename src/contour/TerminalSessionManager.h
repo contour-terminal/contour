@@ -27,14 +27,19 @@ class TerminalSessionManager: public QAbstractListModel
   public:
     TerminalSessionManager(ContourGuiApp& app);
 
+    contour::TerminalSession* createSessionInBackground();
+    contour::TerminalSession* activateSession(TerminalSession* session, bool isNewSession = false);
+
     Q_INVOKABLE contour::TerminalSession* createSession();
     Q_INVOKABLE void addSession();
 
+    Q_INVOKABLE void switchToPreviousTab();
     Q_INVOKABLE void switchToTabLeft();
     Q_INVOKABLE void switchToTabRight();
     Q_INVOKABLE void switchToTab(int position);
     Q_INVOKABLE void closeTab();
-    Q_INVOKABLE void setSession(size_t index);
+
+    void setSession(size_t index);
 
     void removeSession(TerminalSession&);
 
@@ -50,13 +55,17 @@ class TerminalSessionManager: public QAbstractListModel
 
   private:
     std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> cwd);
-    [[nodiscard]] auto getCurrentSessionIndex() const
+
+    [[nodiscard]] std::optional<std::size_t> getSessionIndexOf(TerminalSession* session) const noexcept
     {
-        return [](auto const& sessions, auto const& activeSession) {
-            auto i =
-                std::find_if(sessions.begin(), sessions.end(), [&](auto p) { return p == activeSession; });
-            return i != sessions.end() ? i - sessions.begin() : -1;
-        }(_sessions, _activeSession);
+        if (auto const i = std::ranges::find(_sessions, session); i != _sessions.end())
+            return static_cast<std::size_t>(std::distance(_sessions.begin(), i));
+        return std::nullopt;
+    }
+
+    [[nodiscard]] auto getCurrentSessionIndex() const noexcept
+    {
+        return getSessionIndexOf(_activeSession).value();
     }
 
     void updateStatusLine()
@@ -66,11 +75,11 @@ class TerminalSessionManager: public QAbstractListModel
 
         _activeSession->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
             .tabCount = _sessions.size(),
-            .activeTabPosition = _sessions.empty() ? 0 : static_cast<size_t>(1 + getCurrentSessionIndex()),
+            .activeTabPosition = 1 + getSessionIndexOf(_activeSession).value_or(0),
         });
     }
 
-    bool isAllowedToChangeTabs()
+    [[nodiscard]] bool isAllowedToChangeTabs() const
     {
         // QML for some reason sends multiple signals requests in a row, so we need to ignore them.
         auto now = std::chrono::steady_clock::now();
@@ -85,9 +94,10 @@ class TerminalSessionManager: public QAbstractListModel
     ContourGuiApp& _app;
     std::chrono::seconds _earlyExitThreshold;
     TerminalSession* _activeSession = nullptr;
+    TerminalSession* _previousActiveSession = nullptr;
     std::vector<TerminalSession*> _sessions;
     std::chrono::time_point<std::chrono::steady_clock> _lastTabChange;
-    std::chrono::milliseconds _timeBetweenTabSwitches { 10 };
+    std::chrono::milliseconds _timeBetweenTabSwitches { 50 };
 };
 
 } // namespace contour

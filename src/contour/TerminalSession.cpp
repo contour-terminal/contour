@@ -1446,6 +1446,12 @@ bool TerminalSession::operator()(actions::SwitchToTab const& event)
     return true;
 }
 
+bool TerminalSession::operator()(actions::SwitchToPreviousTab)
+{
+    emit switchToPreviousTab();
+    return true;
+}
+
 bool TerminalSession::operator()(actions::SwitchToTabLeft)
 {
     emit switchToTabLeft();
