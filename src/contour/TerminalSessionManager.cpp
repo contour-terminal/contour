@@ -145,7 +145,7 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
 
 void TerminalSessionManager::addSession()
 {
-    activateSession(createSessionInBackground(), true);
+    activateSession(createSessionInBackground(), true /*force resize on before display-attach*/);
 }
 
 void TerminalSessionManager::switchToPreviousTab()
