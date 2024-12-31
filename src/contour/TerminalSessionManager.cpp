@@ -130,7 +130,7 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
             display->calculatePageSize() + _previousActiveSession->terminal().statusLineHeight();
 
         // Ensure that the existing session is resized to the display's size.
-        if(!isNewSession)
+        if (!isNewSession)
             _activeSession->terminal().resizeScreen(totalPageSize, pixels);
 
         display->setSession(_activeSession);
