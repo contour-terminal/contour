@@ -106,7 +106,7 @@ void TerminalSessionManager::setSession(size_t index)
         activateSession(createSessionInBackground());
 }
 
-TerminalSession* TerminalSessionManager::activateSession(TerminalSession* session)
+TerminalSession* TerminalSessionManager::activateSession(TerminalSession* session, bool isNewSession)
 {
     managerLog()(
         "Activating session ID {} at index {}", session->id(), getSessionIndexOf(session).value_or(-1));
@@ -127,10 +127,11 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
         managerLog()("Attaching display to session.");
         auto const pixels = display->pixelSize();
         auto const totalPageSize =
-            display->calculatePageSize() + _activeSession->terminal().statusLineHeight();
+            display->calculatePageSize() + _previousActiveSession->terminal().statusLineHeight();
 
         // Ensure that the existing session is resized to the display's size.
-        _activeSession->terminal().resizeScreen(totalPageSize, pixels);
+        if(!isNewSession)
+            _activeSession->terminal().resizeScreen(totalPageSize, pixels);
 
         display->setSession(_activeSession);
 
@@ -144,12 +145,12 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
 
 void TerminalSessionManager::addSession()
 {
-    activateSession(createSessionInBackground());
+    activateSession(createSessionInBackground(), true);
 }
 
 void TerminalSessionManager::switchToPreviousTab()
 {
-    managerLog()("SWITCH TO LAST TAB (current: {}, last: {})",
+    managerLog()("switch to previous tab (current: {}, previous: {})",
                  getSessionIndexOf(_activeSession).value_or(-1),
                  getSessionIndexOf(_previousActiveSession).value_or(-1));
 
@@ -162,7 +163,7 @@ void TerminalSessionManager::switchToPreviousTab()
 void TerminalSessionManager::switchToTabLeft()
 {
     const auto currentSessionIndex = getCurrentSessionIndex();
-    managerLog()(std::format("PREVIOUS TAB: currentSessionIndex: {}, _sessions.size(): {}",
+    managerLog()(std::format("previous tab: currentSessionIndex: {}, _sessions.size(): {}",
                              currentSessionIndex,
                              _sessions.size()));
 

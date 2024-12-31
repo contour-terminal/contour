@@ -28,7 +28,7 @@ class TerminalSessionManager: public QAbstractListModel
     TerminalSessionManager(ContourGuiApp& app);
 
     contour::TerminalSession* createSessionInBackground();
-    contour::TerminalSession* activateSession(TerminalSession* session);
+    contour::TerminalSession* activateSession(TerminalSession* session, bool isNewSession = false);
 
     Q_INVOKABLE contour::TerminalSession* createSession();
     Q_INVOKABLE void addSession();
