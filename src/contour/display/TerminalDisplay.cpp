@@ -547,6 +547,10 @@ void TerminalDisplay::onBeforeSynchronize()
     if (!_session)
         return;
 
+    if (width() < 1.0 || height() < 1.0)
+        // e.g. this can happen when the window is not yet fully initialized
+        return;
+
     window()->setScreen(findScreenWithBiggestWidth(window()->screen()));
 
     if (_sessionChanged)
@@ -568,7 +572,6 @@ void TerminalDisplay::onBeforeSynchronize()
 
     auto const dpr = contentScale();
     auto const windowSize = window()->size() * dpr;
-    Require(width() > 1.0 && height() > 1.0);
 
     auto const viewSize =
         ImageSize { Width::cast_from(windowSize.width()), Height::cast_from(windowSize.height()) };

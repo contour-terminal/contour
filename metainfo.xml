@@ -110,6 +110,7 @@
           <li>Do not abort when failing to create `XDG_STATE_HOME/contour/crash` directory</li>
           <li>Fixes tab switch crash after resize</li>
           <li>Fixes tab shrinking after tab creation/switches when a non-zero horizontal window margin is configured</li>
+          <li>Fixes startup crash when window is not yet fully initialized</li>
           <li>Fixes backtab (Shift+Tab) handling (#1685)</li>
           <li>Fixes various spelling typos across the codebase (#1688)</li>
         </ul>
