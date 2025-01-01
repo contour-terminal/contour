@@ -1444,6 +1444,12 @@ bool TerminalSession::operator()(actions::CloseTab)
     return true;
 }
 
+bool TerminalSession::operator()(actions::MoveTabTo event)
+{
+    _manager->moveTabTo(event.position);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::MoveTabToLeft)
 {
     _manager->moveTabToLeft(this);

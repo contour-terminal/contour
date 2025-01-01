@@ -220,6 +220,21 @@ void TerminalSessionManager::closeTab()
     removeSession(*_activeSession);
 }
 
+void TerminalSessionManager::moveTabTo(int position)
+{
+    auto const currentIndexOpt = getSessionIndexOf(_activeSession);
+    if (!currentIndexOpt)
+        return;
+
+    if (position < 1 || position > static_cast<int>(_sessions.size()))
+        return;
+
+    auto const index = static_cast<size_t>(position - 1);
+
+    std::swap(_sessions[currentIndexOpt.value()], _sessions[index]);
+    updateStatusLine();
+}
+
 void TerminalSessionManager::moveTabToLeft(TerminalSession* session)
 {
     auto const maybeIndex = getSessionIndexOf(session);

@@ -357,6 +357,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::WriteScreen const& event);
     bool operator()(actions::CreateNewTab);
     bool operator()(actions::CloseTab);
+    bool operator()(actions::MoveTabTo);
     bool operator()(actions::MoveTabToLeft);
     bool operator()(actions::MoveTabToRight);
     bool operator()(actions::SwitchToTab const& event);

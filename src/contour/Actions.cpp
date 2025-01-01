@@ -81,6 +81,7 @@ optional<Action> fromString(string const& name)
         mapAction<actions::WriteScreen>("WriteScreen"),
         mapAction<actions::CreateNewTab>("CreateNewTab"),
         mapAction<actions::CloseTab>("CloseTab"),
+        mapAction<actions::MoveTabTo>("MoveTabTo"),
         mapAction<actions::MoveTabToLeft>("MoveTabToLeft"),
         mapAction<actions::MoveTabToRight>("MoveTabToRight"),
         mapAction<actions::SwitchToTab>("SwitchToTab"),
