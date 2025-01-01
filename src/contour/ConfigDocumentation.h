@@ -783,6 +783,7 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - SendChars         Writes given characters in `chars` member to the applications input.\n"
     "{comment} - SwitchToTab       Switches to the tab position, given by extra parameter \"position\".\n"
     "{comment}                     The positions start at number 1.\n"
+    "{comment} - SwitchToPreviousTab Switches to the previously active tab.\n"
     "{comment} - SwitchToTabLeft   Switches to the tab left of the current tab.\n"
     "{comment} - SwitchToTabRight  Switches to the tab right of the current tab.\n"
     "{comment} - CreateNewTab      Creates a new tab.\n"
