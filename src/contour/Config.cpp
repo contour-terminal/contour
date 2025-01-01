@@ -1827,6 +1827,14 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 return std::nullopt;
         }
 
+        if (holds_alternative<actions::MoveTabTo>(action))
+        {
+            if (auto position = node["position"]; position.IsScalar())
+                return actions::MoveTabTo { position.as<int>() };
+            else
+                return std::nullopt;
+        }
+
         if (holds_alternative<actions::SwitchToTab>(action))
         {
             if (auto position = node["position"]; position.IsScalar())

@@ -76,10 +76,14 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
     }
 #endif
 
-    auto* session = new TerminalSession(createPty(ptyPath), _app);
+    auto* session = new TerminalSession(this, createPty(ptyPath), _app);
     managerLog()("Create new session with ID {} at index {}", session->id(), _sessions.size());
 
-    _sessions.push_back(session);
+    auto const currentSessionIterator = std::ranges::find(_sessions, _activeSession);
+    auto const insertPoint = currentSessionIterator != _sessions.end() ? std::next(currentSessionIterator)
+                                                                       : currentSessionIterator;
+
+    _sessions.insert(insertPoint, session);
 
     connect(session, &TerminalSession::sessionClosed, [this, session]() { removeSession(*session); });
 
@@ -108,6 +112,9 @@ void TerminalSessionManager::setSession(size_t index)
 
 TerminalSession* TerminalSessionManager::activateSession(TerminalSession* session, bool isNewSession)
 {
+    if (!session)
+        return nullptr;
+
     managerLog()(
         "Activating session ID {} at index {}", session->id(), getSessionIndexOf(session).value_or(-1));
 
@@ -214,6 +221,51 @@ void TerminalSessionManager::closeTab()
                  _activeSession->id());
 
     removeSession(*_activeSession);
+}
+
+void TerminalSessionManager::moveTabTo(int position)
+{
+    auto const currentIndexOpt = getSessionIndexOf(_activeSession);
+    if (!currentIndexOpt)
+        return;
+
+    if (position < 1 || position > static_cast<int>(_sessions.size()))
+        return;
+
+    auto const index = static_cast<size_t>(position - 1);
+
+    std::swap(_sessions[currentIndexOpt.value()], _sessions[index]);
+    updateStatusLine();
+}
+
+void TerminalSessionManager::moveTabToLeft(TerminalSession* session)
+{
+    auto const maybeIndex = getSessionIndexOf(session);
+    if (!maybeIndex)
+        return;
+
+    auto const index = maybeIndex.value();
+
+    if (index > 0)
+    {
+        std::swap(_sessions[index], _sessions[index - 1]);
+        updateStatusLine();
+    }
+}
+
+void TerminalSessionManager::moveTabToRight(TerminalSession* session)
+{
+    auto const maybeIndex = getSessionIndexOf(session);
+    if (!maybeIndex)
+        return;
+
+    auto const index = maybeIndex.value();
+
+    if (index + 1 < _sessions.size())
+    {
+        std::swap(_sessions[index], _sessions[index + 1]);
+        updateStatusLine();
+    }
 }
 
 void TerminalSessionManager::removeSession(TerminalSession& thatSession)

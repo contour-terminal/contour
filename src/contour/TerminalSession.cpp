@@ -34,6 +34,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <limits>
 
@@ -185,7 +186,10 @@ namespace
 
 } // namespace
 
-TerminalSession::TerminalSession(unique_ptr<vtpty::Pty> pty, ContourGuiApp& app):
+TerminalSession::TerminalSession(TerminalSessionManager* manager,
+                                 unique_ptr<vtpty::Pty> pty,
+                                 ContourGuiApp& app):
+    _manager { manager },
     _id { createSessionId() },
     _startTime { steady_clock::now() },
     _config { app.config() },
@@ -1430,13 +1434,31 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
 
 bool TerminalSession::operator()(actions::CreateNewTab)
 {
-    emit createNewTab();
+    _manager->createSession();
     return true;
 }
 
 bool TerminalSession::operator()(actions::CloseTab)
 {
     emit closeTab();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::MoveTabTo event)
+{
+    _manager->moveTabTo(event.position);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::MoveTabToLeft)
+{
+    _manager->moveTabToLeft(this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::MoveTabToRight)
+{
+    _manager->moveTabToRight(this);
     return true;
 }
 
