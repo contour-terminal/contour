@@ -741,6 +741,8 @@ constexpr StringLiteral InputMappingsConfig {
     "position.\n"
     "{comment} - IncreaseFontSize  Increases the font size by 1 pixel.\n"
     "{comment} - IncreaseOpacity   Increases the default-background opacity by 5%.\n"
+    "{comment} - MoveTabToLeft     Moves the current tab to the left.\n"
+    "{comment} - MoveTabToRight    Moves the current tab to the right.\n"
     "{comment} - NewTerminal       Spawns a new terminal at the current terminals current working "
     "directory.\n"
     "{comment} - NoSearchHighlight Disables current search highlighting, if anything is still "

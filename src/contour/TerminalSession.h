@@ -32,6 +32,7 @@ namespace display
 }
 
 class ContourGuiApp;
+class TerminalSessionManager;
 
 /**
  * A set of user-facing activities that are guarded behind a permission-check wall.
@@ -215,7 +216,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
      * @param pty a PTY object (can be process, networked, mockup, ...)
      * @param display fronend display to render the terminal.
      */
-    TerminalSession(std::unique_ptr<vtpty::Pty> pty, ContourGuiApp& app);
+    TerminalSession(TerminalSessionManager* manager, std::unique_ptr<vtpty::Pty> pty, ContourGuiApp& app);
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
@@ -356,6 +357,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::WriteScreen const& event);
     bool operator()(actions::CreateNewTab);
     bool operator()(actions::CloseTab);
+    bool operator()(actions::MoveTabToLeft);
+    bool operator()(actions::MoveTabToRight);
     bool operator()(actions::SwitchToTab const& event);
     bool operator()(actions::SwitchToPreviousTab);
     bool operator()(actions::SwitchToTabLeft);
@@ -437,6 +440,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     // private data
     //
+    TerminalSessionManager* _manager;
     int _id;
     std::chrono::steady_clock::time_point _startTime;
     config::Config _config;

@@ -81,6 +81,8 @@ struct ViNormalMode{};
 struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
 struct CreateNewTab{};
 struct CloseTab{};
+struct MoveTabToLeft{};
+struct MoveTabToRight{};
 struct SwitchToTab{ int position; };
 struct SwitchToPreviousTab{};
 struct SwitchToTabLeft{};
@@ -140,6 +142,8 @@ using Action = std::variant<CancelSelection,
                             WriteScreen,
                             CreateNewTab,
                             CloseTab,
+                            MoveTabToLeft,
+                            MoveTabToRight,
                             SwitchToTab,
                             SwitchToPreviousTab,
                             SwitchToTabLeft,
@@ -259,6 +263,8 @@ namespace documentation
     };
     constexpr inline std::string_view CreateNewTab { "Creates a new tab in the terminal emulator." };
     constexpr inline std::string_view CloseTab { "Closes current tab." };
+    constexpr inline std::string_view MoveTabToLeft { "Moves current tab to the left." };
+    constexpr inline std::string_view MoveTabToRight { "Moves current tab to the right." };
     constexpr inline std::string_view SwitchToTab {
         "Switch to absolute tab position (starting at number 1)"
     };
@@ -323,6 +329,8 @@ inline auto getDocumentation()
         std::tuple { Action { WriteScreen {} }, documentation::WriteScreen },
         std::tuple { Action { CreateNewTab {} }, documentation::CreateNewTab },
         std::tuple { Action { CloseTab {} }, documentation::CloseTab },
+        std::tuple { Action { MoveTabToLeft {} }, documentation::MoveTabToLeft },
+        std::tuple { Action { MoveTabToRight {} }, documentation::MoveTabToRight },
         std::tuple { Action { SwitchToTab {} }, documentation::SwitchToTab },
         std::tuple { Action { SwitchToPreviousTab {} }, documentation::SwitchToPreviousTab },
         std::tuple { Action { SwitchToTabLeft {} }, documentation::SwitchToTabLeft },
@@ -397,6 +405,8 @@ DECLARE_ACTION_FMT(ViNormalMode)
 DECLARE_ACTION_FMT(WriteScreen)
 DECLARE_ACTION_FMT(CreateNewTab)
 DECLARE_ACTION_FMT(CloseTab)
+DECLARE_ACTION_FMT(MoveTabToLeft)
+DECLARE_ACTION_FMT(MoveTabToRight)
 DECLARE_ACTION_FMT(SwitchToPreviousTab)
 DECLARE_ACTION_FMT(SwitchToTabLeft)
 DECLARE_ACTION_FMT(SwitchToTabRight)
@@ -476,6 +486,8 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(ViNormalMode);
         HANDLE_ACTION(CreateNewTab);
         HANDLE_ACTION(CloseTab);
+        HANDLE_ACTION(MoveTabToLeft);
+        HANDLE_ACTION(MoveTabToRight);
         HANDLE_ACTION(SwitchToPreviousTab);
         HANDLE_ACTION(SwitchToTabLeft);
         HANDLE_ACTION(SwitchToTabRight);

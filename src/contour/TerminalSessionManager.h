@@ -38,6 +38,8 @@ class TerminalSessionManager: public QAbstractListModel
     Q_INVOKABLE void switchToTabRight();
     Q_INVOKABLE void switchToTab(int position);
     Q_INVOKABLE void closeTab();
+    Q_INVOKABLE void moveTabToLeft(TerminalSession* session);
+    Q_INVOKABLE void moveTabToRight(TerminalSession* session);
 
     void setSession(size_t index);
 

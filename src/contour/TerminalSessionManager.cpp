@@ -76,7 +76,7 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
     }
 #endif
 
-    auto* session = new TerminalSession(createPty(ptyPath), _app);
+    auto* session = new TerminalSession(this, createPty(ptyPath), _app);
     managerLog()("Create new session with ID {} at index {}", session->id(), _sessions.size());
 
     _sessions.push_back(session);
@@ -214,6 +214,36 @@ void TerminalSessionManager::closeTab()
                  _activeSession->id());
 
     removeSession(*_activeSession);
+}
+
+void TerminalSessionManager::moveTabToLeft(TerminalSession* session)
+{
+    auto const maybeIndex = getSessionIndexOf(session);
+    if (!maybeIndex)
+        return;
+
+    auto const index = maybeIndex.value();
+
+    if (index > 0)
+    {
+        std::swap(_sessions[index], _sessions[index - 1]);
+        updateStatusLine();
+    }
+}
+
+void TerminalSessionManager::moveTabToRight(TerminalSession* session)
+{
+    auto const maybeIndex = getSessionIndexOf(session);
+    if (!maybeIndex)
+        return;
+
+    auto const index = maybeIndex.value();
+
+    if (index + 1 < _sessions.size())
+    {
+        std::swap(_sessions[index], _sessions[index + 1]);
+        updateStatusLine();
+    }
 }
 
 void TerminalSessionManager::removeSession(TerminalSession& thatSession)

@@ -107,6 +107,7 @@
     <release version="0.6.2" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Adds `MoveTabToLeft` and `MoveTabToRight` actions to move tabs around (#1695)</li>
         </ul>
       </description>
     </release>
