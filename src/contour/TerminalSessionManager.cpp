@@ -79,7 +79,11 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
     auto* session = new TerminalSession(this, createPty(ptyPath), _app);
     managerLog()("Create new session with ID {} at index {}", session->id(), _sessions.size());
 
-    _sessions.push_back(session);
+    auto const currentSessionIterator = std::ranges::find(_sessions, _activeSession);
+    auto const insertPoint = currentSessionIterator != _sessions.end() ? std::next(currentSessionIterator)
+                                                                       : currentSessionIterator;
+
+    _sessions.insert(insertPoint, session);
 
     connect(session, &TerminalSession::sessionClosed, [this, session]() { removeSession(*session); });
 

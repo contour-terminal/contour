@@ -107,7 +107,9 @@
     <release version="0.6.2" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes `CreateTab` to sometimes spawn more than one tab (#1695)</li>
           <li>Adds `MoveTabToLeft` and `MoveTabToRight` actions to move tabs around (#1695)</li>
+          <li>Ensure inserting new tabs happens right next to the currently active tab (#1695)</li>
         </ul>
       </description>
     </release>

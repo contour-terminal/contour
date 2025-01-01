@@ -1434,7 +1434,7 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
 
 bool TerminalSession::operator()(actions::CreateNewTab)
 {
-    emit createNewTab();
+    _manager->createSession();
     return true;
 }
 
