@@ -112,6 +112,9 @@ void TerminalSessionManager::setSession(size_t index)
 
 TerminalSession* TerminalSessionManager::activateSession(TerminalSession* session, bool isNewSession)
 {
+    if (!session)
+        return nullptr;
+
     managerLog()(
         "Activating session ID {} at index {}", session->id(), getSessionIndexOf(session).value_or(-1));
 
