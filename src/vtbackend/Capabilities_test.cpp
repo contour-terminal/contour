@@ -27,7 +27,7 @@ TEST_CASE("Capabilities.get")
     REQUIRE(rgb == "8/8/8");
 
     auto const colors = tcap.numericCapability("colors");
-    REQUIRE(colors == 256);
+    REQUIRE(colors == std::numeric_limits<int16_t>::max());
 
     auto const bce = tcap.numericCapability("bce");
     REQUIRE(bce);
