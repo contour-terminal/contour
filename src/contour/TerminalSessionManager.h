@@ -7,7 +7,6 @@
 #include <QtCore/QAbstractListModel>
 #include <QtQml/QQmlEngine>
 
-#include <chrono>
 #include <vector>
 
 namespace contour
@@ -31,16 +30,15 @@ class TerminalSessionManager: public QAbstractListModel
     contour::TerminalSession* activateSession(TerminalSession* session, bool isNewSession = false);
 
     Q_INVOKABLE contour::TerminalSession* createSession();
-    Q_INVOKABLE void addSession();
 
-    Q_INVOKABLE void switchToPreviousTab();
-    Q_INVOKABLE void switchToTabLeft();
-    Q_INVOKABLE void switchToTabRight();
-    Q_INVOKABLE void switchToTab(int position);
-    Q_INVOKABLE void closeTab();
-    Q_INVOKABLE void moveTabTo(int position);
-    Q_INVOKABLE void moveTabToLeft(TerminalSession* session);
-    Q_INVOKABLE void moveTabToRight(TerminalSession* session);
+    void switchToPreviousTab();
+    void switchToTabLeft();
+    void switchToTabRight();
+    void switchToTab(int position);
+    void closeTab();
+    void moveTabTo(int position);
+    void moveTabToLeft(TerminalSession* session);
+    void moveTabToRight(TerminalSession* session);
 
     void setSession(size_t index);
 
@@ -82,25 +80,11 @@ class TerminalSessionManager: public QAbstractListModel
         });
     }
 
-    [[nodiscard]] bool isAllowedToChangeTabs() const
-    {
-        // QML for some reason sends multiple signals requests in a row, so we need to ignore them.
-        auto now = std::chrono::steady_clock::now();
-        if (abs(now - _lastTabChange) < _timeBetweenTabSwitches)
-        {
-            managerLog()("Ignoring change request due to too frequent change requests.");
-            return false;
-        }
-        return true;
-    }
-
     ContourGuiApp& _app;
     std::chrono::seconds _earlyExitThreshold;
     TerminalSession* _activeSession = nullptr;
     TerminalSession* _previousActiveSession = nullptr;
     std::vector<TerminalSession*> _sessions;
-    std::chrono::time_point<std::chrono::steady_clock> _lastTabChange;
-    std::chrono::milliseconds _timeBetweenTabSwitches { 50 };
 };
 
 } // namespace contour

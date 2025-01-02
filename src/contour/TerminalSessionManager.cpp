@@ -42,11 +42,6 @@ std::unique_ptr<vtpty::Pty> TerminalSessionManager::createPty(std::optional<std:
                                        profile->escapeSandbox.value());
 }
 
-TerminalSession* TerminalSessionManager::createSession()
-{
-    return activateSession(createSessionInBackground());
-}
-
 TerminalSession* TerminalSessionManager::createSessionInBackground()
 {
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
@@ -101,9 +96,6 @@ void TerminalSessionManager::setSession(size_t index)
     Require(index <= _sessions.size());
     managerLog()(std::format("SET SESSION: index: {}, _sessions.size(): {}", index, _sessions.size()));
 
-    if (!isAllowedToChangeTabs())
-        return;
-
     if (index < _sessions.size())
         activateSession(_sessions[index]);
     else
@@ -126,7 +118,6 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
 
     _previousActiveSession = _activeSession;
     _activeSession = session;
-    _lastTabChange = std::chrono::steady_clock::now();
     updateStatusLine();
 
     if (display)
@@ -150,9 +141,9 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
     return session;
 }
 
-void TerminalSessionManager::addSession()
+TerminalSession* TerminalSessionManager::createSession()
 {
-    activateSession(createSessionInBackground(), true /*force resize on before display-attach*/);
+    return activateSession(createSessionInBackground(), true /*force resize on before display-attach*/);
 }
 
 void TerminalSessionManager::switchToPreviousTab()
@@ -160,9 +151,6 @@ void TerminalSessionManager::switchToPreviousTab()
     managerLog()("switch to previous tab (current: {}, previous: {})",
                  getSessionIndexOf(_activeSession).value_or(-1),
                  getSessionIndexOf(_previousActiveSession).value_or(-1));
-
-    if (!isAllowedToChangeTabs())
-        return;
 
     activateSession(_previousActiveSession);
 }
@@ -206,9 +194,6 @@ void TerminalSessionManager::switchToTab(int position)
                  getSessionIndexOf(_activeSession).value_or(-1),
                  position - 1,
                  _sessions.size());
-
-    if (!isAllowedToChangeTabs())
-        return;
 
     if (1 <= position && position <= static_cast<int>(_sessions.size()))
         activateSession(_sessions[position - 1]);
@@ -271,9 +256,6 @@ void TerminalSessionManager::moveTabToRight(TerminalSession* session)
 void TerminalSessionManager::removeSession(TerminalSession& thatSession)
 {
     managerLog()("REMOVE SESSION: session: {}, _sessions.size(): {}", (void*) &thatSession, _sessions.size());
-
-    if (!isAllowedToChangeTabs())
-        return;
 
     if (&thatSession == _activeSession && _previousActiveSession)
         activateSession(_previousActiveSession);

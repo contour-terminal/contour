@@ -833,7 +833,8 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
         if (auto const* actions =
                 config::apply(_config.inputMappings.value().keyMappings, key, modifiers, matchModeFlags()))
         {
-            executeAllActions(*actions);
+            if (eventType == KeyboardEventType::Press)
+                executeAllActions(*actions);
             return;
         }
     }
@@ -868,7 +869,8 @@ void TerminalSession::sendCharEvent(
                 config::apply(_config.inputMappings.value().charMappings, value, modifiers, matchModeFlags());
             actions && !_terminal.inputHandler().isEditingSearch())
         {
-            executeAllActions(*actions);
+            if (eventType == KeyboardEventType::Press)
+                executeAllActions(*actions);
             return;
         }
     }
@@ -1440,7 +1442,7 @@ bool TerminalSession::operator()(actions::CreateNewTab)
 
 bool TerminalSession::operator()(actions::CloseTab)
 {
-    emit closeTab();
+    _manager->closeTab();
     return true;
 }
 
@@ -1464,25 +1466,25 @@ bool TerminalSession::operator()(actions::MoveTabToRight)
 
 bool TerminalSession::operator()(actions::SwitchToTab const& event)
 {
-    emit switchToTab(event.position);
+    _manager->switchToTab(event.position);
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwitchToPreviousTab)
 {
-    emit switchToPreviousTab();
+    _manager->switchToPreviousTab();
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwitchToTabLeft)
 {
-    emit switchToTabLeft();
+    _manager->switchToTabLeft();
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwitchToTabRight)
 {
-    emit switchToTabRight();
+    _manager->switchToTabRight();
     return true;
 }
 

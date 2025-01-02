@@ -16,18 +16,6 @@ ContourTerminal
 
     session: terminalSessions.createSession()
 
-    signal switchToTab(int index)
-    signal switchToPreviousTab
-    signal switchToTabLeft
-    signal switchToTabRight
-    signal closeTab
-
-    onSwitchToPreviousTab: terminalSessions.switchToPreviousTab()
-    onSwitchToTabLeft: terminalSessions.switchToTabLeft()
-    onSwitchToTabRight: terminalSessions.switchToTabRight()
-    onCloseTab: terminalSessions.closeTab()
-    onSwitchToTab: (i) => terminalSessions.switchToTab(i)
-
     Rectangle {
         id : backgroundColor
         anchors.centerIn: parent
@@ -288,12 +276,5 @@ ContourTerminal
         vt.requestPermissionForPasteLargeFile.connect(requestLargeFilePaste.open);
         forceActiveFocus();
 
-        // TAB handling
-        vt.createNewTab.connect(onCreateNewTab);
-        vt.closeTab.connect(closeTab);
-        vt.switchToTab.connect(switchToTab);
-        vt.switchToPreviousTab.connect(switchToPreviousTab);
-        vt.switchToTabLeft.connect(switchToTabLeft);
-        vt.switchToTabRight.connect(switchToTabRight);
     }
 }
