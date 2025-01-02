@@ -119,6 +119,7 @@
       <description>
         <ul>
           <li>Do not abort when failing to create `XDG_STATE_HOME/contour/crash` directory</li>
+          <li>Fixes DECRQSS for SGR (#1696)</li>
           <li>Fixes tab switch crash after resize</li>
           <li>Fixes tab shrinking after tab creation/switches when a non-zero horizontal window margin is configured</li>
           <li>Fixes startup crash when window is not yet fully initialized</li>
