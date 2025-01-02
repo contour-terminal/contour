@@ -142,6 +142,7 @@ namespace // {{{ helper
             output += value;
         };
         auto const sgrAddSub = [&](unsigned value) {
+            sgrSep();
             output += std::to_string(value);
         };
 
