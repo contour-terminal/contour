@@ -108,9 +108,9 @@
       <description>
         <ul>
           <li>Fixes `CreateTab` to sometimes spawn more than one tab (#1695)</li>
+          <li>Ensure inserting new tabs happens right next to the currently active tab (#1695)</li>
           <li>Adds `MoveTabToLeft` and `MoveTabToRight` actions to move tabs around (#1695)</li>
           <li>Adds `MoveTabTo` action to move tabs to a specific position (#1695)</li>
-          <li>Ensure inserting new tabs happens right next to the currently active tab (#1695)</li>
           <li>Adds CenterCursor (`zz`) vi motion</li>
         </ul>
       </description>
