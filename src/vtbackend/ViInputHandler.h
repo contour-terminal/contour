@@ -103,6 +103,7 @@ enum class ViMotion : uint8_t
     JumpToLastJumpPoint,   // '' or `` (jump to last jump)
     JumpToMarkBackward,    // <C-O>
     JumpToMarkForward,     // <C-I>
+    CenterCursor,          // zz
 };
 
 enum class ViOperator : uint8_t
@@ -383,6 +384,7 @@ struct std::formatter<vtbackend::ViMotion>: formatter<std::string_view>
             case ViMotion::GlobalCurlyOpenDown: name = "GlobalCurlyOpenDown"; break;
             case ViMotion::LineMarkUp: name = "LineMarkUp"; break;
             case ViMotion::LineMarkDown: name = "LineMarkDown"; break;
+            case ViMotion::CenterCursor: name = "CenterCursor"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
