@@ -828,7 +828,7 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
     if (_profile.mouse.value().hideWhileTyping)
         _display->setMouseCursorShape(MouseCursorShape::Hidden);
 
-    if (eventType != KeyboardEventType::Release)
+    if (eventType == KeyboardEventType::Press)
     {
         if (auto const* actions =
                 config::apply(_config.inputMappings.value().keyMappings, key, modifiers, matchModeFlags()))
@@ -861,7 +861,7 @@ void TerminalSession::sendCharEvent(
             _display->setMouseCursorShape(MouseCursorShape::Hidden);
     }
 
-    if (eventType != KeyboardEventType::Release)
+    if (eventType == KeyboardEventType::Press)
     {
         // find if action exist for the given key, and ignore if editing search prompt
         if (auto const* actions =
@@ -1440,7 +1440,7 @@ bool TerminalSession::operator()(actions::CreateNewTab)
 
 bool TerminalSession::operator()(actions::CloseTab)
 {
-    emit closeTab();
+    _manager->closeTab();
     return true;
 }
 
@@ -1464,25 +1464,25 @@ bool TerminalSession::operator()(actions::MoveTabToRight)
 
 bool TerminalSession::operator()(actions::SwitchToTab const& event)
 {
-    emit switchToTab(event.position);
+    _manager->switchToTab(event.position);
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwitchToPreviousTab)
 {
-    emit switchToPreviousTab();
+    _manager->switchToPreviousTab();
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwitchToTabLeft)
 {
-    emit switchToTabLeft();
+    _manager->switchToTabLeft();
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwitchToTabRight)
 {
-    emit switchToTabRight();
+    _manager->switchToTabRight();
     return true;
 }
 
