@@ -1085,6 +1085,11 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
         case ViMotion::JumpToLastJumpPoint: return _jumpHistory.jumpToLast(cursorPosition);
         case ViMotion::JumpToMarkBackward: return _jumpHistory.jumpToMarkBackward(cursorPosition);
         case ViMotion::JumpToMarkForward: return _jumpHistory.jumpToMarkForward(cursorPosition);
+        case ViMotion::CenterCursor: {
+            _terminal->viewport().makeVisibleWithinSafeArea(unbox<LineOffset>(cursorPosition.line),
+                                                            LineCount(_terminal->pageSize().lines / 2));
+            return cursorPosition;
+        }
     }
     crispy::unreachable();
 }
