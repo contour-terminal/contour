@@ -49,8 +49,6 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     if (eventType == KeyboardEventType::Release)
         return false;
 
-    char const chr = static_cast<char>(characterEvent);
-
     // See section "Alt and Meta Keys" in ctlseqs.txt from xterm.
     if (modifiers == Modifier::Alt)
         // NB: There are other modes in xterm to send Alt+Key options or even send ESC on Meta key instead.
@@ -82,38 +80,57 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
         return true;
     }
 
-    if (modifiers == Modifier::Control && characterEvent == L' ')
+    // See: DEC STD-070 in section 6.16 (Control Codes and Keystrokes), page 6-170
+    //
+    // https://vt100.net/mirror/antonio/std070_c_video_systems_reference_manual.pdf
+    if (modifiers.without(Modifier::Shift) == Modifier::Control)
     {
-        append('\x00');
-        return true;
-    }
-
-    if (modifiers == Modifier::Control && crispy::ascending('A', chr, 'Z'))
-    {
-        append(static_cast<char>(chr - 'A' + 1));
-        return true;
-    }
-
-    // handle Control + 5, 6, 7
-    if (modifiers == Modifier::Control && crispy::ascending('5', chr, '7'))
-    {
-        // part of the control characters
-        // 5 6 7 corresponds to 1D 1E 1F
-        append(static_cast<char>(24 + characterEvent - '0'));
-        return true;
-    }
-
-    // handle Control + 8  which is DEL
-    if (modifiers == Modifier::Control && chr == '8')
-    {
-        append('\x7F');
-        return true;
-    }
-
-    if (modifiers == Modifier::Control && characterEvent >= '[' && characterEvent <= '_')
-    {
-        append(static_cast<char>(chr - 'A' + 1)); // remaining C0 characters 0x1B .. 0x1F
-        return true;
+        // clang-format off
+        switch (characterEvent)
+        {
+            case ' ':
+            case '2':
+                append('\x00');
+                return true;
+            case 'A': case 'B': case 'C': case 'D': case 'E': case 'F':
+            case 'G': case 'H': case 'I': case 'J': case 'K': case 'L':
+            case 'M': case 'N': case 'O': case 'P': case 'Q': case 'R':
+            case 'S': case 'T': case 'U': case 'V': case 'W': case 'X':
+            case 'Y': case 'Z':
+                append(static_cast<char>(characterEvent - 'A' + 1));
+                return true;
+            case '3':
+            case '[':
+                append('\x1B');
+                return true;
+            case '4':
+            case '\\':
+                append('\x1C');
+                return true;
+            case '5':
+            case ']':
+                append('\x1D');
+                return true;
+            case '6':
+            case '~':
+            case '^':
+                append('\x1E');
+                return true;
+            case '7':
+            case '?':
+            case '_':
+                append('\x1F');
+                return true;
+            case '8':
+                append('\x7F');
+                return true;
+            case '\x09': // TAB
+                append('\x09');
+                return true;
+            default:
+            break;
+        }
+        // clang-format on
     }
 
     if (modifiers.without(Modifier::Alt).none() || modifiers == Modifier::Shift)
