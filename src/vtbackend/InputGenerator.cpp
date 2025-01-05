@@ -94,6 +94,22 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
         return true;
     }
 
+    // handle Control + 5, 6, 7
+    if (modifiers == Modifier::Control && crispy::ascending('5', chr, '7'))
+    {
+        // part of the control characters
+        // 5 6 7 corresponds to 1D 1E 1F
+        append(static_cast<char>(24 + characterEvent - '0'));
+        return true;
+    }
+
+    // handle Control + 8  which is DEL
+    if (modifiers == Modifier::Control && chr == '8')
+    {
+        append('\x7F');
+        return true;
+    }
+
     if (modifiers == Modifier::Control && characterEvent >= '[' && characterEvent <= '_')
     {
         append(static_cast<char>(chr - 'A' + 1)); // remaining C0 characters 0x1B .. 0x1F
