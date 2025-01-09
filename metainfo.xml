@@ -116,6 +116,7 @@
           <li>Adds `MoveTabTo` action to move tabs to a specific position (#1695)</li>
           <li>Adds handling of control codes for Ctrl+5|6|7|8 (#1701)</li>
           <li>Adds CenterCursor (`zz`) vi motion</li>
+          <li>Adds ability to name tabs (#1690)</li>
         </ul>
       </description>
     </release>

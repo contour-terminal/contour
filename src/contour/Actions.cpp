@@ -88,6 +88,7 @@ optional<Action> fromString(string const& name)
         mapAction<actions::SwitchToPreviousTab>("SwitchToPreviousTab"),
         mapAction<actions::SwitchToTabLeft>("SwitchToTabLeft"),
         mapAction<actions::SwitchToTabRight>("SwitchToTabRight"),
+        mapAction<actions::SetTabName>("SetTabName"),
     };
 
     auto const lowerCaseName = toLower(name);
