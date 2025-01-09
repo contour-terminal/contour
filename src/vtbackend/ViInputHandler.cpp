@@ -337,7 +337,20 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
     if (eventType == KeyboardEventType::Release)
         return Handled { true };
 
-    if (_searchEditMode != SearchEditMode::Disabled)
+    if (_promptEditMode != PromptMode::Disabled)
+    {
+        // TODO: support cursor movements.
+        switch (key)
+        {
+            case Key::Backspace: return handlePromptEditor('\x08', modifiers);
+            case Key::Enter: return handlePromptEditor('\x0D', modifiers);
+            case Key::Escape: return handlePromptEditor('\x1B', modifiers);
+            default: break;
+        }
+        return Handled { true };
+    }
+
+    if (_searchEditMode != PromptMode::Disabled)
     {
         // TODO: support cursor movements.
         switch (key)
@@ -432,61 +445,110 @@ void ViInputHandler::startSearchExternally()
     _executor->searchStart();
 
     if (_viMode != ViMode::Insert)
-        _searchEditMode = SearchEditMode::Enabled;
+        _searchEditMode = PromptMode::Enabled;
     else
     {
-        _searchEditMode = SearchEditMode::ExternallyEnabled;
+        _searchEditMode = PromptMode::ExternallyEnabled;
         setMode(ViMode::Normal);
         // ^^^ So that we can see the statusline (which contains the search edit field),
         // AND it's weird to be in insert mode while typing in the search term anyways.
     }
 }
 
-Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
+auto handleEditor(char32_t ch,
+                  Modifiers modifiers,
+                  auto& where,
+                  PromptMode& promptEditMode,
+                  auto& settings,
+                  auto setViMode,
+                  auto cancel,
+                  auto done,
+                  auto update)
 {
-    assert(_searchEditMode != SearchEditMode::Disabled);
-
     switch (InputMatch { .modifiers = modifiers, .ch = ch })
     {
-        case '\x1B'_key:
-            _searchTerm.clear();
-            if (_searchEditMode == SearchEditMode::ExternallyEnabled)
-                setMode(ViMode::Insert);
-            _searchEditMode = SearchEditMode::Disabled;
-            _executor->searchCancel();
-            _executor->updateSearchTerm(_searchTerm);
-            break;
-        case '\x0D'_key:
-            if (_settings.fromSearchIntoInsertMode && _searchEditMode == SearchEditMode::ExternallyEnabled)
-                setMode(ViMode::Insert);
-            _searchEditMode = SearchEditMode::Disabled;
-            _executor->searchDone();
-            _executor->updateSearchTerm(_searchTerm);
-            break;
+        case '\x1B'_key: {
+            where.clear();
+            if (promptEditMode == PromptMode::ExternallyEnabled)
+                setViMode(ViMode::Insert);
+            promptEditMode = PromptMode::Enabled;
+            cancel();
+            update(where);
+        }
+        break;
+        case '\x0D'_key: {
+            if (settings.fromSearchIntoInsertMode && promptEditMode == PromptMode::ExternallyEnabled)
+                setViMode(ViMode::Insert);
+            promptEditMode = PromptMode::Disabled;
+            done();
+        }
+        break;
         case '\x08'_key:
         case '\x7F'_key:
-            if (!_searchTerm.empty())
-                _searchTerm.resize(_searchTerm.size() - 1);
-            _executor->updateSearchTerm(_searchTerm);
+            if (!where.empty())
+                where.resize(where.size() - 1);
+            update(where);
             break;
         case Modifier::Control | 'L':
         case Modifier::Control | 'U':
-            _searchTerm.clear();
-            _executor->updateSearchTerm(_searchTerm);
+            where.clear();
+            update(where);
             break;
         case Modifier::Control | 'A': // TODO: move cursor to BOL
         case Modifier::Control | 'E': // TODO: move cursor to EOL
         default:
             if (ch >= 0x20 && modifiers.without(Modifier::Shift).none())
             {
-                _searchTerm += ch;
-                _executor->updateSearchTerm(_searchTerm);
+                where += ch;
+                update(where);
             }
             else
                 errorLog()("ViInputHandler: Receiving control code {}+0x{:02X} in search mode. Ignoring.",
                            modifiers,
                            (unsigned) ch);
     }
+}
+
+Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
+{
+    assert(_searchEditMode != PromptMode::Disabled);
+
+    handleEditor(
+        ch,
+        modifiers,
+        _searchTerm,
+        _searchEditMode,
+        _settings,
+        [&](auto mode) { setMode(mode); },
+        [&]() { _executor->searchCancel(); },
+        [&]() { _executor->searchDone(); },
+        [&](const auto& val) { _executor->updateSearchTerm(val); });
+
+    return Handled { true };
+}
+
+Handled ViInputHandler::handlePromptEditor(char32_t ch, Modifiers modifiers)
+{
+    assert(_promptEditMode != PromptMode::Disabled);
+
+    handleEditor(
+        ch,
+        modifiers,
+        _promptText,
+        _promptEditMode,
+        _settings,
+        [&](auto mode) { setMode(mode); },
+        [&]() { _executor->promptCancel(); },
+        [&]() {
+            _executor->promptDone();
+            if (_setTabNameCallback)
+            {
+                _setTabNameCallback.value()(_promptText);
+                setMode(ViMode::Insert);
+                _setTabNameCallback = std::nullopt;
+            }
+        },
+        [&](const auto& val) { _executor->updatePromptText(val); });
 
     return Handled { true };
 }
@@ -496,8 +558,11 @@ Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers, Key
     if (eventType == KeyboardEventType::Release)
         return Handled { true };
 
-    if (_searchEditMode != SearchEditMode::Disabled)
+    if (_searchEditMode != PromptMode::Disabled)
         return handleSearchEditor(ch, modifiers);
+
+    if (_promptEditMode != PromptMode::Disabled)
+        return handlePromptEditor(ch, modifiers);
 
     if (_viMode == ViMode::Insert)
         return Handled { false };
@@ -568,7 +633,7 @@ bool ViInputHandler::parseCount(char32_t ch, Modifiers modifiers)
 
 void ViInputHandler::startSearch()
 {
-    _searchEditMode = SearchEditMode::Enabled;
+    _searchEditMode = PromptMode::Enabled;
     _executor->searchStart();
 }
 

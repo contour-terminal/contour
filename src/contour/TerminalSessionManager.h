@@ -27,7 +27,6 @@ class TerminalSessionManager: public QAbstractListModel
     TerminalSessionManager(ContourGuiApp& app);
 
     contour::TerminalSession* createSessionInBackground();
-    contour::TerminalSession* activateSession(TerminalSession* session, bool isNewSession = false);
 
     Q_INVOKABLE contour::TerminalSession* createSession();
 
@@ -54,7 +53,10 @@ class TerminalSessionManager: public QAbstractListModel
     display::TerminalDisplay* display = nullptr;
     TerminalSession* getSession() { return _sessions[0]; }
 
+    void update() { updateStatusLine(); }
+
   private:
+    contour::TerminalSession* activateSession(TerminalSession* session, bool isNewSession = false);
     std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> cwd);
 
     [[nodiscard]] std::optional<std::size_t> getSessionIndexOf(TerminalSession* session) const noexcept
@@ -73,9 +75,15 @@ class TerminalSessionManager: public QAbstractListModel
     {
         if (!_activeSession)
             return;
-
         _activeSession->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
-            .tabCount = _sessions.size(),
+            .tabs = std::ranges::transform_view(_sessions,
+                                                [](auto* session) {
+                                                    return vtbackend::TabsInfo::Tab {
+                                                        .name = session->name(),
+                                                        .color = vtbackend::RGBColor { 0, 0, 0 },
+                                                    };
+                                                })
+                    | ranges::to<std::vector>(),
             .activeTabPosition = 1 + getSessionIndexOf(_activeSession).value_or(0),
         });
     }
