@@ -149,6 +149,43 @@ namespace
         settings.indicatorStatusLine.left = profile.statusLine.value().indicator.left;
         settings.indicatorStatusLine.middle = profile.statusLine.value().indicator.middle;
         settings.indicatorStatusLine.right = profile.statusLine.value().indicator.right;
+        settings.tabNamingMode = [&]() {
+            // try to find Tab section in one of the status line segments
+
+            std::string segment;
+            if (profile.statusLine.value().indicator.left.find("Tabs") != std::string::npos)
+            {
+                segment = profile.statusLine.value().indicator.left;
+            }
+            else if (profile.statusLine.value().indicator.middle.find("Tabs") != std::string::npos)
+            {
+                segment = profile.statusLine.value().indicator.middle;
+            }
+            else if (profile.statusLine.value().indicator.right.find("Tabs") != std::string::npos)
+            {
+                segment = profile.statusLine.value().indicator.right;
+            }
+
+            // check if indexing is defined
+            if (segment.find("Indexing=") != std::string::npos)
+            {
+                // cut the string after indexing=
+                std::string indexing = segment.substr(segment.find("Indexing=") + 9);
+                // cut right part of the string
+                indexing = indexing.substr(0, indexing.find(','));
+                indexing = indexing.substr(0, indexing.find('}'));
+
+                std::ranges::transform(
+                    indexing, indexing.begin(), [](unsigned char c) { return std::tolower(c); });
+
+                if (indexing == "title")
+                {
+                    return vtbackend::TabsNamingMode::Title;
+                }
+            }
+            return vtbackend::TabsNamingMode::Indexing;
+        }();
+
         settings.syncWindowTitleWithHostWritableStatusDisplay =
             profile.statusLine.value().syncWindowTitleWithHostWritableStatusDisplay;
         if (auto const* p = preferredColorPalette(profile.colors.value(), colorPreference))
@@ -262,6 +299,7 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 void TerminalSession::scheduleRedraw()
 {
     _terminal.markScreenDirty();
+    _manager->update();
     if (_display)
         _display->scheduleRedraw();
 }
@@ -1505,6 +1543,12 @@ bool TerminalSession::operator()(actions::SwitchToTabLeft)
 bool TerminalSession::operator()(actions::SwitchToTabRight)
 {
     _manager->switchToTabRight();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SetTabName)
+{
+    terminal().requestTabName();
     return true;
 }
 

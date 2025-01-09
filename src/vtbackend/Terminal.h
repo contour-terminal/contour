@@ -42,6 +42,7 @@
 #include <mutex>
 #include <stack>
 #include <string_view>
+#include <utility>
 
 namespace vtbackend
 {
@@ -143,6 +144,12 @@ struct Search
     bool initiatedByDoubleClick = false;
 };
 
+struct Prompt
+{
+    std::string prompt;
+    std::string text;
+};
+
 // Mandates what execution mode the terminal will take to process VT sequences.
 //
 enum class ExecutionMode : uint8_t
@@ -209,7 +216,13 @@ class TraceHandler: public SequenceHandler
 
 struct TabsInfo
 {
-    size_t tabCount = 1;
+    struct Tab
+    {
+        std::optional<std::string> name;
+        Color color;
+    };
+
+    std::vector<Tab> tabs;
     size_t activeTabPosition = 1;
 };
 
@@ -246,6 +259,7 @@ class Terminal
         virtual void requestWindowResize(Width, Height) {}
         virtual void requestShowHostWritableStatusLine() {}
         virtual void setWindowTitle(std::string_view /*title*/) {}
+        virtual void setTabName(std::string_view /*title*/) {}
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
@@ -276,6 +290,7 @@ class Terminal
         void requestWindowResize(Width, Height) override {}
         void requestShowHostWritableStatusLine() override {}
         void setWindowTitle(std::string_view /*title*/) override {}
+        void setTabName(std::string_view /*title*/) override {}
         void setTerminalProfile(std::string const& /*configProfileName*/) override {}
         void discardImage(Image const&) override {}
         void inputModeChanged(ViMode /*mode*/) override {}
@@ -357,7 +372,7 @@ class Terminal
 
     [[nodiscard]] CellLocation clampToScreen(CellLocation coord) const noexcept
     {
-        return { clampedLine(coord.line), clampedColumn(coord.column) };
+        return { .line = clampedLine(coord.line), .column = clampedColumn(coord.column) };
     }
 
     // Tests if given coordinate is within the visible screen area.
@@ -797,10 +812,14 @@ class Terminal
     void setMouseTransport(MouseTransport transport);
     void setMouseWheelMode(InputGenerator::MouseWheelMode mode);
     void setWindowTitle(std::string_view title);
+    void setTabName(std::string_view title);
     [[nodiscard]] std::string const& windowTitle() const noexcept;
+    [[nodiscard]] std::optional<std::string> tabName() const noexcept;
     [[nodiscard]] bool focused() const noexcept { return _focused; }
     [[nodiscard]] Search& search() noexcept { return _search; }
     [[nodiscard]] Search const& search() const noexcept { return _search; }
+    [[nodiscard]] Prompt& prompt() noexcept { return _prompt; }
+    [[nodiscard]] Prompt const& prompt() const noexcept { return _prompt; }
     void saveWindowTitle();
     void restoreWindowTitle();
     void setTerminalProfile(std::string const& configProfileName);
@@ -881,6 +900,9 @@ class Terminal
 
     bool setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick);
     void clearSearch();
+
+    void setPrompt(std::string prompt);
+    void setPromptText(std::string text);
 
     // Tests if the grid cell at the given location does contain a word delimiter.
     [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;
@@ -966,7 +988,10 @@ class Terminal
     void resetStatusLineDefinition();
 
     TabsInfo guiTabsInfoForStatusLine() const noexcept { return _guiTabInfoForStatusLine; }
-    void setGuiTabInfoForStatusLine(TabsInfo info) { _guiTabInfoForStatusLine = info; }
+    void setGuiTabInfoForStatusLine(TabsInfo&& info) { _guiTabInfoForStatusLine = std::move(info); }
+
+    TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
+    void requestTabName();
 
   private:
     void mainLoop();
@@ -1080,7 +1105,9 @@ class Terminal
     Viewport _viewport;
     StatusLineDefinition _indicatorStatusLineDefinition;
 
+    // {{{ tabs info
     TabsInfo _guiTabInfoForStatusLine;
+    // }}}
 
     // {{{ selection states
     std::unique_ptr<Selection> _selection;
@@ -1147,6 +1174,7 @@ class Terminal
     ActiveStatusDisplay _activeStatusDisplay = ActiveStatusDisplay::Main;
 
     Search _search;
+    Prompt _prompt;
 
     CursorDisplay _cursorDisplay = CursorDisplay::Steady;
     CursorShape _cursorShape = CursorShape::Block;
@@ -1164,6 +1192,8 @@ class Terminal
 
     std::string _windowTitle {};
     std::stack<std::string> _savedWindowTitles {};
+
+    std::optional<std::string> _tabName {};
 
     struct ModeDependantSequenceHandler
     {
