@@ -1562,9 +1562,24 @@ void Terminal::setWindowTitle(string_view title)
     _eventListener.setWindowTitle(title);
 }
 
+void Terminal::setTabName(string_view title)
+{
+    _tabName = title;
+}
+
 std::string const& Terminal::windowTitle() const noexcept
 {
     return _windowTitle;
+}
+
+void Terminal::setTabName()
+{
+    inputHandler().setTabName([&](std::string name) { _tabName = name; });
+}
+
+std::optional<std::string> Terminal::tabName() const noexcept
+{
+    return _tabName;
 }
 
 void Terminal::saveWindowTitle()
@@ -2193,6 +2208,16 @@ bool Terminal::setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick
 
     _search.pattern = std::move(text);
     return true;
+}
+
+void Terminal::setPrompt(std::string prompt)
+{
+    _prompt.prompt = std::move(prompt);
+}
+
+void Terminal::setPromptText(std::string text)
+{
+    _prompt.text = std::move(text);
 }
 
 optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)
