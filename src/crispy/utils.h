@@ -560,4 +560,7 @@ struct overloaded: Ts...
 template <class... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
+template <typename T, typename... Ts>
+concept one_of = (std::same_as<T, Ts> || ...);
+
 } // namespace crispy

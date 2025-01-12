@@ -835,6 +835,24 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
         {
             if (eventType == KeyboardEventType::Press)
                 executeAllActions(*actions);
+            else if (eventType == KeyboardEventType::Repeat)
+            {
+                // filter out actions that are not repeatable
+                std::vector<actions::Action> tmpActions;
+
+                auto set = crispy::overloaded {
+                    [&](actions::RepeatableActionConcept auto const& action) {
+                        tmpActions.emplace_back(action);
+                    },
+                    [&]([[maybe_unused]] auto const& action) {},
+                };
+
+                for (auto const& action: *actions)
+                {
+                    std::visit(set, action);
+                }
+                executeAllActions(tmpActions);
+            }
             return;
         }
     }
