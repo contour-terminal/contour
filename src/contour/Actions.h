@@ -2,6 +2,7 @@
 #pragma once
 
 #include <crispy/assert.h>
+#include <crispy/utils.h>
 
 #include <format>
 #include <optional>
@@ -150,6 +151,23 @@ using Action = std::variant<CancelSelection,
                             SwitchToPreviousTab,
                             SwitchToTabLeft,
                             SwitchToTabRight>;
+
+template <typename T>
+concept RepeatableActionConcept = crispy::one_of<T,
+                                                 DecreaseFontSize,
+                                                 DecreaseOpacity,
+                                                 IncreaseFontSize,
+                                                 IncreaseOpacity,
+                                                 ScrollDown,
+                                                 ScrollMarkDown,
+                                                 ScrollMarkUp,
+                                                 ScrollOneDown,
+                                                 ScrollOneUp,
+                                                 ScrollPageDown,
+                                                 ScrollPageUp,
+                                                 ScrollToBottom,
+                                                 ScrollToTop,
+                                                 ScrollUp>;
 
 std::optional<Action> fromString(std::string const& name);
 
