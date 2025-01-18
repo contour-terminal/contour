@@ -88,6 +88,7 @@ struct SwitchToTab{ int position; };
 struct SwitchToPreviousTab{};
 struct SwitchToTabLeft{};
 struct SwitchToTabRight{};
+struct SetTabName{};
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -149,7 +150,8 @@ using Action = std::variant<CancelSelection,
                             SwitchToTab,
                             SwitchToPreviousTab,
                             SwitchToTabLeft,
-                            SwitchToTabRight>;
+                            SwitchToTabRight,
+                            SetTabName>;
 
 std::optional<Action> fromString(std::string const& name);
 
@@ -276,6 +278,7 @@ namespace documentation
     constexpr inline std::string_view SwitchToPreviousTab { "Switch to the previously focused tab" };
     constexpr inline std::string_view SwitchToTabLeft { "Switch to tab to the left" };
     constexpr inline std::string_view SwitchToTabRight { "Switch to tab to the right" };
+    constexpr inline std::string_view SetTabName { "Set the name of the current tab" };
 } // namespace documentation
 
 inline auto getDocumentation()
@@ -341,6 +344,7 @@ inline auto getDocumentation()
         std::tuple { Action { SwitchToPreviousTab {} }, documentation::SwitchToPreviousTab },
         std::tuple { Action { SwitchToTabLeft {} }, documentation::SwitchToTabLeft },
         std::tuple { Action { SwitchToTabRight {} }, documentation::SwitchToTabRight },
+        std::tuple { Action { SetTabName {} }, documentation::SetTabName },
     };
 }
 
@@ -416,6 +420,7 @@ DECLARE_ACTION_FMT(MoveTabToRight)
 DECLARE_ACTION_FMT(SwitchToPreviousTab)
 DECLARE_ACTION_FMT(SwitchToTabLeft)
 DECLARE_ACTION_FMT(SwitchToTabRight)
+DECLARE_ACTION_FMT(SetTabName)
 // }}}
 #undef DECLARE_ACTION_FMT
 
@@ -506,6 +511,7 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(SwitchToPreviousTab);
         HANDLE_ACTION(SwitchToTabLeft);
         HANDLE_ACTION(SwitchToTabRight);
+        HANDLE_ACTION(SetTabName);
         if (std::holds_alternative<contour::actions::MoveTabTo>(_action))
         {
             const auto action = std::get<contour::actions::MoveTabTo>(_action);
