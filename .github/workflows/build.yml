@@ -695,16 +695,21 @@ jobs:
             "Clang 18",
           ]
         qt_version: [6]
-    name: "Ubuntu Linux 24.04 (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
-    runs-on: ubuntu-24.04
+        runner:
+          [
+             "ubuntu-24.04",
+             "ubuntu-24.04-arm",
+          ]
+    name: "${{ matrix.runner }} (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
+    runs-on: ${{ matrix.runner }}
     outputs:
-      id: "${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
+      id: "${{ matrix.runner }} ${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
     steps:
       - uses: actions/checkout@v4
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: "ccache-ubuntu2404-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}-${{ matrix.qt_version  }}"
+          key: "ccache-{{ matrix.runner }}-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}-${{ matrix.qt_version  }}"
           max-size: 256M
       - name: "update APT database"
         run: sudo apt -q update
@@ -775,7 +780,7 @@ jobs:
       - name: "tests"
         run: cmake --build --preset linux-debug --target test
       - name: "Upload unit tests"
-        if: ${{ matrix.compiler == 'GCC 14' && matrix.cxx == '20' && matrix.qt_version == '6' }}
+        if: ${{ matrix.compiler == 'GCC 14' && matrix.cxx == '20' && matrix.qt_version == '6' && matrix.runner == 'ubuntu-24.04'}}
         uses: actions/upload-artifact@v4
         with:
           name: contour-ubuntu2404-tests
