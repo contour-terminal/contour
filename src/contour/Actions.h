@@ -2,6 +2,7 @@
 #pragma once
 
 #include <crispy/assert.h>
+#include <crispy/utils.h>
 
 #include <format>
 #include <optional>
@@ -150,6 +151,9 @@ using Action = std::variant<CancelSelection,
                             SwitchToPreviousTab,
                             SwitchToTabLeft,
                             SwitchToTabRight>;
+
+template <typename T>
+concept NonRepeatableActionConcept = crispy::one_of<T, CreateNewTab, CloseTab>;
 
 std::optional<Action> fromString(std::string const& name);
 

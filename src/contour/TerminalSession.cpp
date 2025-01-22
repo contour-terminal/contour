@@ -814,6 +814,28 @@ void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 }
 // }}}
 // {{{ Input Events
+
+void handleAction(auto const& actions, auto eventType, auto callback)
+{
+    if (eventType == KeyboardEventType::Press)
+        callback(*actions);
+    else if (eventType == KeyboardEventType::Repeat)
+    {
+        // filter out actions that are not repeatable
+        std::vector<actions::Action> tmpActions;
+        auto set = crispy::overloaded {
+            [&]([[maybe_unused]] actions::NonRepeatableActionConcept auto const& action) {},
+            [&](auto const& action) { tmpActions.emplace_back(action); },
+        };
+
+        for (auto const& action: *actions)
+        {
+            std::visit(set, action);
+        }
+        callback(tmpActions);
+    }
+}
+
 void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
 {
     inputLog()("Key {} event received: {} {}", eventType, modifiers, key);
@@ -833,8 +855,7 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
         if (auto const* actions =
                 config::apply(_config.inputMappings.value().keyMappings, key, modifiers, matchModeFlags()))
         {
-            if (eventType == KeyboardEventType::Press)
-                executeAllActions(*actions);
+            handleAction(actions, eventType, [&](auto const& actions) { executeAllActions(actions); });
             return;
         }
     }
@@ -869,8 +890,7 @@ void TerminalSession::sendCharEvent(
                 config::apply(_config.inputMappings.value().charMappings, value, modifiers, matchModeFlags());
             actions && !_terminal.inputHandler().isEditingSearch())
         {
-            if (eventType == KeyboardEventType::Press)
-                executeAllActions(*actions);
+            handleAction(actions, eventType, [&](auto const& actions) { executeAllActions(actions); });
             return;
         }
     }
