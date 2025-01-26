@@ -109,6 +109,7 @@
         <ul>
           <li>Fixes `CancelSelection` default binding with escape (#1710)</li>
           <li>Fixes `CreateTab` to sometimes spawn more than one tab (#1695)</li>
+          <li>Fixes crash using Chinese IME (#1707)</li>
           <li>Ensure inserting new tabs happens right next to the currently active tab (#1695)</li>
           <li>Adds `MoveTabToLeft` and `MoveTabToRight` actions to move tabs around (#1695)</li>
           <li>Adds `MoveTabTo` action to move tabs to a specific position (#1695)</li>
