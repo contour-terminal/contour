@@ -409,11 +409,11 @@ struct TerminalProfile
     ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> frozenModes {};
     ConfigEntry<std::chrono::milliseconds, documentation::SmoothLineScrolling> smoothLineScrolling { 100 };
     ConfigEntry<vtbackend::PageSize, documentation::TerminalSize> terminalSize { {
-        vtbackend::LineCount(25),
-        vtbackend::ColumnCount(80),
+        .lines = vtbackend::LineCount(25),
+        .columns = vtbackend::ColumnCount(80),
     } };
-    ConfigEntry<WindowMargins, documentation::Margins> margins { { HorizontalMargin { 0u },
-                                                                   VerticalMargin { 0u } } };
+    ConfigEntry<WindowMargins, documentation::Margins> margins { { .horizontal = HorizontalMargin { 0u },
+                                                                   .vertical = VerticalMargin { 0u } } };
     ConfigEntry<HistoryConfig, documentation::History> history {};
     ConfigEntry<ScrollBarConfig, documentation::Scrollbar> scrollbar {};
     ConfigEntry<MouseConfig, documentation::Mouse> mouse { true };
@@ -422,16 +422,18 @@ struct TerminalProfile
     ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont };
     ConfigEntry<bool, documentation::DrawBoldTextWithBrightColors> drawBoldTextWithBrightColors { false };
     ConfigEntry<InputModeConfig, documentation::ModeInsert> modeInsert { CursorConfig {
-        vtbackend::CursorShape::Bar, vtbackend::CursorDisplay::Steady, std::chrono::milliseconds { 500 } } };
+        .cursorShape = vtbackend::CursorShape::Bar,
+        .cursorDisplay = vtbackend::CursorDisplay::Steady,
+        .cursorBlinkInterval = std::chrono::milliseconds { 500 } } };
     ConfigEntry<InputModeConfig, documentation::ModeNormal> modeNormal {
-        CursorConfig { vtbackend::CursorShape::Block,
-                       vtbackend::CursorDisplay::Steady,
-                       std::chrono::milliseconds { 500 } },
+        CursorConfig { .cursorShape = vtbackend::CursorShape::Block,
+                       .cursorDisplay = vtbackend::CursorDisplay::Steady,
+                       .cursorBlinkInterval = std::chrono::milliseconds { 500 } },
     };
     ConfigEntry<InputModeConfig, documentation::ModeVisual> modeVisual {
-        CursorConfig { vtbackend::CursorShape::Block,
-                       vtbackend::CursorDisplay::Steady,
-                       std::chrono::milliseconds { 500 } },
+        CursorConfig { .cursorShape = vtbackend::CursorShape::Block,
+                       .cursorDisplay = vtbackend::CursorDisplay::Steady,
+                       .cursorBlinkInterval = std::chrono::milliseconds { 500 } },
     };
     ConfigEntry<std::chrono::milliseconds, documentation::HighlightTimeout> highlightTimeout { 100 };
     ConfigEntry<vtbackend::LineCount, documentation::ModalCursorScrollOff> modalCursorScrollOff {
@@ -452,7 +454,12 @@ const InputMappings defaultInputMappings {
                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
                           .input = vtbackend::Key::Enter,
                           .binding = { { actions::ToggleFullscreen {} } } },
-        KeyInputMapping { .modes {},
+        KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
+                             auto mods = vtbackend::MatchModes();
+                             mods.enable(vtbackend::MatchModes::Select);
+                             mods.enable(vtbackend::MatchModes::Insert);
+                             return mods;
+                         }(),
                           .modifiers { vtbackend::Modifiers {} },
                           .input = vtbackend::Key::Escape,
                           .binding = { { actions::CancelSelection {} } } },
@@ -1049,10 +1056,15 @@ struct Writer
 
     [[nodiscard]] std::string format(KeyInputMapping v)
     {
+        auto actionAndModes = format(" action: {} }}", v.binding[0]);
+        if (v.modes.any())
+        {
+            actionAndModes = format(" action: {}, mode: '{}' }}", v.binding[0], v.modes);
+        }
         return format("{:<30},{:<30},{:<30}\n",
                       format("- {{ mods: [{}]", format(v.modifiers)),
                       format(" key: '{}'", v.input),
-                      format(" action: {} }}", v.binding[0]));
+                      actionAndModes);
     }
 
     [[nodiscard]] std::string format(CharInputMapping v)
