@@ -44,6 +44,12 @@ if(DEFINED MSVC)
     add_compile_options(/nologo)
 endif()
 
+
+# CMAKE_BUILD_TYPE check for None
+if(CMAKE_BUILD_TYPE STREQUAL "None")
+    add_compile_definitions(-DNDEBUG)
+endif()
+
 if (CONTOUR_BUILD_WITH_MIMALLOC)
     add_definitions(-DCONTOUR_BUILD_WITH_MIMALLOC)
 endif()

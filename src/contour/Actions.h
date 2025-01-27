@@ -282,7 +282,11 @@ namespace documentation
     constexpr inline std::string_view SwitchToTabRight { "Switch to tab to the right" };
 } // namespace documentation
 
-inline auto getDocumentation()
+#if defined(__clang__) && __clang_major__ >= 19
+constexpr
+#endif
+    inline auto
+    getDocumentation()
 {
     return std::array {
         std::tuple { Action { CancelSelection {} }, documentation::CancelSelection },
@@ -347,6 +351,10 @@ inline auto getDocumentation()
         std::tuple { Action { SwitchToTabRight {} }, documentation::SwitchToTabRight },
     };
 }
+
+#if defined(__clang__) && __clang_major__ >= 19
+static_assert(getDocumentation().size() == std::variant_size_v<Action>);
+#endif
 
 } // namespace contour::actions
 
