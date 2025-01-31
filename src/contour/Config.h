@@ -445,7 +445,7 @@ struct TerminalProfile
     ConfigEntry<HyperlinkDecorationConfig, documentation::HyperlinkDecoration> hyperlinkDecoration {};
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
-    ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
+    ConfigEntry<bool, documentation::CommandKeyAsAlt> commandKeyAsAlt { true };
 };
 
 const InputMappings defaultInputMappings {

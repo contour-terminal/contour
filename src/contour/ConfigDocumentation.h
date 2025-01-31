@@ -1631,22 +1631,22 @@ constexpr StringLiteral HyperlinkDecorationWeb {
 
 };
 
-constexpr StringLiteral OptionKeyAsAltConfig {
-    "{comment} Tells Contour how to handle Option-Key events on MacOS.\n"
+constexpr StringLiteral CommandKeyAsAltConfig {
+    "{comment} Tells Contour how to handle Command-Key events on MacOS.\n"
     "{comment} This value is ignored on other platforms.\n"
     "{comment}\n"
-    "{comment} Default: false\n"
-    "option_as_alt: {}\n"
+    "{comment} Default: true\n"
+    "command_as_alt: {}\n"
     "\n"
 };
 
-constexpr StringLiteral OptionKeyAsAltWeb {
-    "section tells Contour how to handle Option-Key events on MacOS.\n"
+constexpr StringLiteral CommandKeyAsAltWeb {
+    "section tells Contour how to handle Command-Key events on MacOS.\n"
     "This value is ignored on other platforms.\n"
     "``` yaml\n"
     "profiles:\n"
     "  profile_name:\n"
-    "    option_as_alt: false\n"
+    "    command_as_alt: false\n"
     "```\n"
     "\n"
 };
@@ -1753,7 +1753,7 @@ using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;
 using History = DocumentationEntry<HistoryConfig, HistoryWeb>;
 using Scrollbar = DocumentationEntry<ScrollbarConfig, ScrollbarWeb>;
 using StatusLine = DocumentationEntry<StatusLineConfig, StatusLineWeb>;
-using OptionKeyAsAlt = DocumentationEntry<OptionKeyAsAltConfig, OptionKeyAsAltWeb>;
+using CommandKeyAsAlt = DocumentationEntry<CommandKeyAsAltConfig, CommandKeyAsAltWeb>;
 using Fonts = DocumentationEntry<FontsConfig, FontsWeb>;
 using Permissions = DocumentationEntry<PermissionsConfig, PermissionsWeb>;
 using DrawBoldTextWithBrightColors =

@@ -246,7 +246,7 @@ profiles:
         # This value is ignored on other platforms.
         #
         # Default: false
-        option_as_alt: false
+        command_as_alt: false
 
         # Environment variables to be passed to the shell.
         # environment:
