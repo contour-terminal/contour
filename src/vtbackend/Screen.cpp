@@ -34,6 +34,8 @@
 #include <type_traits>
 #include <variant>
 
+#include "vtbackend/primitives.h"
+
 #if defined(_WIN32)
     #include <Windows.h>
 #endif
@@ -3723,6 +3725,35 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case SETICON: return ApplyResult::Ok; // NB: Silently ignore!
         case SETWINTITLE: _terminal->setWindowTitle(seq.intermediateCharacters()); break;
         case SETXPROP: return ApplyResult::Unsupported;
+        case SCREENSHOT: {
+            auto coords = seq.intermediateCharacters();
+            // format: top;left;bottom;right
+            auto splitted = crispy::split(coords, ';');
+            auto top = std::stoi(std::string { splitted[0] });
+            auto left = std::stoi(std::string { splitted[1] });
+            auto bottom = std::stoi(std::string { splitted[2] });
+            auto right = std::stoi(std::string { splitted[3] });
+
+            // OSC 533 ; top ; left ; lines ; columns ; format ; Pt ST
+            std::string answer;
+            auto out = std::back_inserter(answer);
+            std::format_to(
+                out, "{};{};{};{};{};Pt", top, left, bottom - top, right - left, "plain text");
+
+            for (auto indexRow = top; indexRow <= bottom; ++indexRow)
+            {
+                for (auto indexColumn = left; indexColumn <= right; ++indexColumn)
+                {
+                    auto& cell = at(LineOffset { indexRow }, ColumnOffset { indexColumn });
+                    std::format_to(out, "{}", cell.toUtf8());
+                }
+                std::format_to(out, "\n");
+            }
+            std::cout << std::format("HERE: {} '{}'\n", answer.size(), answer);
+            answer = std::format("\033]533;{}",answer);
+
+            return ApplyResult::Unsupported;
+        }
         case SETCOLPAL: return impl::SETCOLPAL(seq, *_terminal);
         case RCOLPAL: return impl::RCOLPAL(seq, *_terminal);
         case SETCWD: return impl::SETCWD(seq, *this);
@@ -3781,6 +3812,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookSixel(Sequence const& seq)
             case 4:
             case 3: return 3;
             case 2: return 5;
+
             case 1:
             case 0: return 2;
             default: return 1;
