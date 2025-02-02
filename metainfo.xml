@@ -173,6 +173,7 @@
     <release version="0.5.0" urgency="medium" date="2024-09-18">
       <description>
         <ul>
+          <li>macOS package signing is now done with a valid Apple ID</li>
           <li>macOS package is now Apple Silicon native</li>
           <li>Add CoreText font fallback implementation for macOS (#1533)</li>
           <li>Add Ubuntu-24.04 in github actions (#1460)</li>
