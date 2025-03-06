@@ -11,7 +11,7 @@ body:
 - type: input
   attributes:
     label: Contour Terminal version
-    placeholder: "0.2.3"
+    placeholder: "0.1.2.9999"
     description: |
       Contour terminal version. Try running `contour version` at the commandline to find out.
       Please copy'n'paste the full version line.
@@ -25,11 +25,11 @@ body:
     description: |
       Where did you get the software from.
     options:
-    - "Github: source code cloned"
-    - "Github: CI actions"
-    - "GitHub: release page"
+    - "GitHub: Source code"
+    - "GitHub: CI (Actions) artifact"
+    - "GitHub: Release page attachment"
     - "Ubuntu: PPA"
-    - "something else (please specify below)"
+    - "Something else (please specify below)"
   validations:
     required: true
 
@@ -57,11 +57,10 @@ body:
       What hardware architecture is Contour and your OS running on.
       In most cases, this is usually x86-64, but may vary.
     options:
-    - "x86-64"
-    - "x86"
-    - "ARM64"
-    - "AArch64"
-    - "something else (please specify below)"
+    - "x86 / i386"
+    - "x86-64 / amd64"
+    - "AArch64 / ARM64"
+    - "Something else (please specify below)"
   validations:
     required: true
 
