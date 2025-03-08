@@ -24,7 +24,7 @@ have automatic markers set.
 
 ## Integration into ZSH:
 
-zsh is way to configurable to give a fully generic answer here, but to show how you can integrate vertical line markers when using the [powerlevel9k](https://github.com/Powerlevel9k/powerlevel9k), this is what your `~/.zshrc` config could contain:
+zsh is way too configurable to give a fully generic answer here, but to show how you can integrate vertical line markers when using [powerlevel9k](https://github.com/Powerlevel9k/powerlevel9k), this is what your `~/.zshrc` config could contain:
 
 ```sh
 prompt_setmark() {

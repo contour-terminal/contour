@@ -32,7 +32,7 @@ The website is living directly in the project's main repository.
 We are using [MkDocs](https://squidfunk.github.io/mkdocs-material/) to create the website
 and have the project well documented.
 
-Please bare with us, we just started developing this website, it is incomplete and far from perfect.
+Please bear with us, we just started developing this website, it is incomplete and far from perfect.
 This is why documentation and website development needs the most love and probably external contributions.
 
 ## Running the website locally
