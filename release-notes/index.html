@@ -1,0 +1,2781 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+      
+      
+        <meta name="author" content="Christian Parpart">
+      
+      
+      
+        <link rel="prev" href="../install/">
+      
+      
+        <link rel="next" href="../configuration/">
+      
+      
+      <link rel="icon" href="/assets/contour-logo.png">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.17">
+    
+    
+      
+        <title>Release Notes - Contour Terminal Emulator</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.bcfcd587.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+   <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"/><style>
+    html.glightbox-open { overflow: initial; height: 100%; }
+    .gslide-title { margin-top: 0px; user-select: text; }
+    .gslide-desc { color: #666; user-select: text; }
+    .gslide-image img { background: white; }
+    .gscrollbar-fixer { padding-right: 15px; }
+    .gdesc-inner { font-size: 0.75rem; }
+    body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color);}
+    body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color);}
+    body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color);}</style> <script src="../assets/javascripts/glightbox.min.js"></script></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#releases" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Contour Terminal Emulator" class="md-header__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Contour Terminal Emulator
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Release Notes
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5c-.84 0-1.65.15-2.39.42L12 2M3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29L3.34 7m.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14L3.36 17M20.65 7l-1.77 3.79a7.023 7.023 0 0 0-2.38-4.15l4.15.36m-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29L20.64 17M12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44L12 22Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-red" data-md-color-accent="red"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3 3.19.09m3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95 2.06.05m-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31Z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href=".." class="md-tabs__link">
+          
+  
+    
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../install/" class="md-tabs__link">
+          
+  
+    
+  
+  Getting started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+    
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../features/" class="md-tabs__link">
+          
+  
+    
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../vt-sequence/" class="md-tabs__link">
+          
+  
+    
+  
+  VT sequence reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../vt-extensions/" class="md-tabs__link">
+          
+  
+    
+  
+  VT extensions
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../internals/" class="md-tabs__link">
+          
+  
+    
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Contour Terminal Emulator" class="md-nav__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    Contour Terminal Emulator
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href=".." class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Home
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Contribution Guidelines
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Getting started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Getting started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Release Notes
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Release Notes
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#062-unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.6.2 (unreleased)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#061-2024-12-31" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.6.1 (2024-12-31)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#060-2024-12-26" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.6.0 (2024-12-26)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#051-2024-09-30" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.5.1 (2024-09-30)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#050-2024-09-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.5.0 (2024-09-18)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#043-2024-02-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.4.3 (2024-02-04)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#042-2024-02-03" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.4.2 (2024-02-03)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#041-2023-12-31" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.4.1 (2023-12-31)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#040-2023-12-19" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.4.0 (2023-12-19)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0312-2023-05-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.12 (2023-05-29)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0311-2023-03-01" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.11 (2023-03-01)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0310-2023-01-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.10 (2023-01-22)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#039-2022-12-24" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.9 (2022-12-24)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#038-2022-12-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.8 (2022-12-18)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#037-2022-11-01" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.7 (2022-11-01)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#036-2022-10-30" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.6 (2022-10-30)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#035-2022-10-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.5 (2022-10-21)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#034-2022-09-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.4 (2022-09-13)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#033204-2022-08-30" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.3.204 (2022-08-30)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#032202-2022-07-07" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.2.202 (2022-07-07)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#031200-2022-05-01" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.1.200 (2022-05-01)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#030198-2022-04-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.0.198 (2022-04-18)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#023183-2022-01-09" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.2.3.183 (2022-01-09)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#022175-2021-11-19" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.2.2.175 (2021-11-19)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#021174-2021-11-14" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.2.1.174 (2021-11-14)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020173-2021-08-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.2.0.173 (2021-08-17)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#011-2020-12-31" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.1.1 (2020-12-31)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010-2020-12-24" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.1.0 (2020-12-24)
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../configuration/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Configuration
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/profiles/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Profiles
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/colors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Colors
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/indicator-statusline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Indicator Statusline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/key-mapping/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Key Mapping
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Features
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    List of features
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/font-ligatures/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Font ligatures
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/images/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Images
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/ime/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Input method editor (IME)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/line-marks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Line marks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/statusline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Status line
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../input-modes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Input modes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/size_indicator/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Size indicator
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../vt-sequence/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    VT sequence reference
+  </span>
+  
+
+            </a>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            VT sequence reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../vt-extensions/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    VT extensions
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            VT extensions
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/clickable-links/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Clickable Links
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/unicode-core/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Unicode Core
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/vertical-line-marks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Vertical Line Markers
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/color-palette-update-notifications/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Dark and Light Mode detection
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/synchronized-output/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Synchronized Output
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/buffer-capture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Buffer Capture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/font-settings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Query or Change Font Settings
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/line-reflow-mode/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Line Reflow Reconfiguration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/save-and-restore-sgr-attributes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Save and Restore SGR attributes.
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../internals/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/CODING_STYLE/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Coding Style Guidelines
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/text-stack/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    A terminal emulator's text stack.
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#062-unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.6.2 (unreleased)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#061-2024-12-31" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.6.1 (2024-12-31)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#060-2024-12-26" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.6.0 (2024-12-26)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#051-2024-09-30" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.5.1 (2024-09-30)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#050-2024-09-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.5.0 (2024-09-18)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#043-2024-02-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.4.3 (2024-02-04)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#042-2024-02-03" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.4.2 (2024-02-03)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#041-2023-12-31" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.4.1 (2023-12-31)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#040-2023-12-19" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.4.0 (2023-12-19)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0312-2023-05-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.12 (2023-05-29)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0311-2023-03-01" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.11 (2023-03-01)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0310-2023-01-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.10 (2023-01-22)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#039-2022-12-24" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.9 (2022-12-24)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#038-2022-12-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.8 (2022-12-18)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#037-2022-11-01" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.7 (2022-11-01)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#036-2022-10-30" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.6 (2022-10-30)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#035-2022-10-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.5 (2022-10-21)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#034-2022-09-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.4 (2022-09-13)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#033204-2022-08-30" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.3.204 (2022-08-30)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#032202-2022-07-07" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.2.202 (2022-07-07)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#031200-2022-05-01" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.1.200 (2022-05-01)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#030198-2022-04-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.3.0.198 (2022-04-18)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#023183-2022-01-09" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.2.3.183 (2022-01-09)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#022175-2021-11-19" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.2.2.175 (2021-11-19)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#021174-2021-11-14" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.2.1.174 (2021-11-14)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020173-2021-08-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.2.0.173 (2021-08-17)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#011-2020-12-31" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.1.1 (2020-12-31)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010-2020-12-24" class="md-nav__link">
+    <span class="md-ellipsis">
+      0.1.0 (2020-12-24)
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/contour-terminal/contour/edit/master/docs/release-notes.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4v-2m10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1 2.1 2.1Z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/contour-terminal/contour/raw/master/docs/release-notes.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.15 8.15 0 0 1-1.23-2Z"/></svg>
+    </a>
+  
+
+
+<div><h1 id="releases">Releases</h1>
+<h2 id="062-unreleased">0.6.2 (unreleased)</h2>
+<ul>
+<li>Fixes <code>CancelSelection</code> default binding with escape (#1710)</li>
+<li>Fixes <code>CreateTab</code> to sometimes spawn more than one tab (#1695)</li>
+<li>Fixes crash using Chinese IME (#1707)</li>
+<li>Ensure inserting new tabs happens right next to the currently active tab (#1695)</li>
+<li>Allow glyphs to underflow if they are not bigger than the cell size (#1603)</li>
+<li>Adds <code>MoveTabToLeft</code> and <code>MoveTabToRight</code> actions to move tabs around (#1695)</li>
+<li>Adds <code>MoveTabTo</code> action to move tabs to a specific position (#1695)</li>
+<li>Adds handling of control codes for Ctrl+5|6|7|8 (#1701)</li>
+<li>Adds CenterCursor (<code>zz</code>) vi motion</li>
+</ul>
+<h2 id="061-2024-12-31">0.6.1 (2024-12-31)</h2>
+<ul>
+<li>Do not abort when failing to create <code>XDG_STATE_HOME/contour/crash</code> directory</li>
+<li>Fixes DECRQSS for SGR (#1696)</li>
+<li>Fixes tab switch crash after resize</li>
+<li>Fixes tab shrinking after tab creation/switches when a non-zero horizontal window margin is configured</li>
+<li>Fixes startup crash when window is not yet fully initialized</li>
+<li>Fixes backtab (Shift+Tab) handling (#1685)</li>
+<li>Fixes various spelling typos across the codebase (#1688)</li>
+<li>Improve tab close handling to better select previously focused tab</li>
+<li>Change <code>colors</code> terminfo entry from 256 up to 32767 colors</li>
+<li>Add action <code>SwitchToPreviousTab</code> to switch to the previously focused tab</li>
+</ul>
+<h2 id="060-2024-12-26">0.6.0 (2024-12-26)</h2>
+<ul>
+<li>Fixes search editor preservation bug on exit from search mode</li>
+<li>Expose current profile's name through env var <code>CONTOUR_PROFILE</code> (#1637)</li>
+<li>Add terminal tabs (#90)</li>
+<li>Add <code>SaveScreenshot</code> and <code>CopyScreenshot</code> action (#210)</li>
+<li>Protect user from accidentally pasting too large input (#1198)</li>
+<li>Add binding to exit normal mode with <code>Esc</code> (#1604)</li>
+<li>Add config option to switch into insert mode after yank (#1604)</li>
+<li>Add vi-like normal mode Jumps. <code>''</code>, <code>C-O</code> and <code>C-I</code> motions (#1101)</li>
+<li>Improves window size/resize handling on HiDPI monitor settings (#1628)</li>
+<li>Improves macOS key handling for Option+Left|Right keys to jump between words in the shell</li>
+<li>Fixes cropping of underscore character for some fonts (#1603)</li>
+<li>Fixes DECFRA limits (#1664)</li>
+<li>Fixes underline styles not being reset on switching to a new style (#1365)</li>
+</ul>
+<h2 id="051-2024-09-30">0.5.1 (2024-09-30)</h2>
+<ul>
+<li>Fixes vi-mode motions like <code>viW</code>, <code>yiW</code>, <code>oiW</code> as well as <code>B</code> and <code>W</code></li>
+<li>Fixes rendered backend loading from config</li>
+<li>Fixes mouse wheel scrolling on High-DPI screens feeling too slow</li>
+<li>Enable support for Unicode version 16.0.0 (#1606)</li>
+<li>Port to C++20's <code>std::format()</code> (#1598)</li>
+<li>Drop support for Ubuntu 23.10 and older. In order to have less burdain of maintencne, we only support the latest LTS of Ubuntu, which currently is 24.04 (#1607)</li>
+</ul>
+<h2 id="050-2024-09-18">0.5.0 (2024-09-18)</h2>
+<ul>
+<li>macOS package is now Apple Silicon native</li>
+<li>Add CoreText font fallback implementation for macOS (#1533)</li>
+<li>Add Ubuntu-24.04 in github actions (#1460)</li>
+<li>Add 'early_exit_threshold' config option (#1460)</li>
+<li>Add AppImage package with Qt6 support (#586)</li>
+<li>Add ability to customize the indicator statusline through configuration (#687)</li>
+<li>Add generation of config file from internal state (#1282)</li>
+<li>Add SGRSAVE and SGRRESTORE VT sequences to save and restore SGR state (They intentionally conflict with XTPUSHSGR and XTPOPSGR)</li>
+<li>Add extended word selection feature (#1023)</li>
+<li>Add some more missing vi input motions, such as <code>y$</code>, <code>o$</code>, and many others as initiated by <code>y</code> and <code>o</code> (#1441)</li>
+<li>Add CPM fallback for the dependencies</li>
+<li>Add static build</li>
+<li>Add shell integration for bash shell.</li>
+<li>Add better bell sound (#1378)</li>
+<li>Add config entry to configure behaviour on exit from search mode</li>
+<li>Add config entry to configure font fallback (#225)</li>
+<li>Add handling of different input commands (#629)</li>
+<li>Add key bindings disabled indicator for status line (#783)</li>
+<li>Add support for highlighting matches of the currently selected text area (beyond double click)</li>
+<li>When switching to normal mode screen will stay in same position (#808)</li>
+<li>Add customizable per-input-mode default text/background coloring for indicator statusline (#1528)</li>
+<li>Add option PasteSelection to paste text as a shell input (#1549)</li>
+<li>Add case-insensitive smart search (#1410)</li>
+<li>Add OpenBSD support</li>
+<li>Add new CLI command: <code>contour info config</code> to list missing entries from config file (#1125).</li>
+<li>Add xdg-terminal-exec support (#1570).</li>
+<li>Add predefined color palettes (monokai, gruvbox-light/dark, solarized-light/dark, papercolor-light/dark, one-light, one-dark) (#1285).</li>
+<li>Update of contour.desktop file (#1423)</li>
+<li>Changed configuration entry values for <code>font_locator</code> down to <code>native</code> and <code>mock</code> only (#1538).</li>
+<li>Do not export the <code>TERM</code> environment variable on Windows OS (when using ConPTY).</li>
+<li>Fixes line corruption after resize (#883)</li>
+<li>Fixes resize of trivial line (#916)</li>
+<li>Fixes copying of wrapped line</li>
+<li>Fixes deletion of spaces on resize </li>
+<li>Fixes forwarding of input while in normal mode (#1468)</li>
+<li>Fixes OSC-8 link id collision (#1499)</li>
+<li>Fixed overlap of glyphs for long codepoints (#1349)</li>
+<li>Fixed too verbose info during ssh session login (#1447)</li>
+<li>Fixes corruption of sixel image on high resolution (#1049)</li>
+<li>Fixes bad wording of OS/X to macOS (#1462)</li>
+<li>Fixes key bindings and search prompt collision (#1472)</li>
+<li>Fixes <code>CSI 8 ; (COLS) ; (ROWS) t</code> to resize the terminal with respect to High-DPI</li>
+<li>Fixes screen sampling with multiple monitors (#940)</li>
+<li>Fixes bell sound in spawned window in same process (#1515)</li>
+<li>Fixes status line crush (#1511)</li>
+<li>Fixes application window icon on (KDE) Wayland</li>
+<li>Fixes missing keymapping for numpad (#1325)</li>
+<li>Improves handling of constant bell sound spawning</li>
+<li>Fixes yW (yank WORD) not working properly in normal mode (#1448)</li>
+<li>Fixes key mapping Shift+Tab (#1578)</li>
+</ul>
+<h2 id="043-2024-02-04">0.4.3 (2024-02-04)</h2>
+<ul>
+<li>Fixes dead lock bug on mouse selection.</li>
+</ul>
+<h2 id="042-2024-02-03">0.4.2 (2024-02-03)</h2>
+<ul>
+<li>Fixes Windows alt/control key modifiers (#1408).</li>
+<li>Fixes Windows built accidentally not including builtin-SSH support (#1427).</li>
+<li>Fixes some text run segmentation problems, e.g., not making use of some programming ligatures (#395).</li>
+<li>Fixes mouse scroll wheel events going into the wrong direction if <code>Alt</code> modifier was pressed at the same time (#394).</li>
+<li>Fixes <code>scripts/install-deps.sh</code> for openSuSE (Tumbleweed) to install the correct dependencies.</li>
+<li>Fixes missing dependencies for release .deb packages (#1397).</li>
+<li>Fixes legacy keyboard input protocol not reporting non-Alt modifier (#1411).</li>
+<li>Fixes thread safety issue on mouse move event handling (#1444).</li>
+<li>Digitally sign MacOS release binaries using a valid Apple ID.</li>
+<li>Add support for authenticating to SSH servers with a private key without a password and without requesting for one - also allow password retry (#1425).</li>
+<li>Default history limit is now 1000 lines rather than 0 lines.</li>
+</ul>
+<h2 id="041-2023-12-31">0.4.1 (2023-12-31)</h2>
+<ul>
+<li>Fixes fast scrolling when using trackpad (#1360)</li>
+<li>Fixes variable fonts loading</li>
+<li>Fixes Command modifier for input mappings, such as Command+C or Command+V on on MacOS (#1379).</li>
+<li>Fixes CSIu encoding of shift modifier produced characters (#1373).</li>
+<li>Fixes screen destruction on sibling cells when overwriting wide characters, such as Emoji, Kanji, etc.</li>
+<li>Changes VT sequence <code>DECSCUSR</code> (<code>CSI ? 0 SP q</code> and <code>CSI ? SP q</code>) to reset to user-configured cursor style (#1377).</li>
+<li>Remove <code>contour-latest</code> terminfo file. Please use <code>contour</code> terminfo instead.</li>
+<li>Adds <code>Command</code> as modifier to input mappings on MacOS to work along with <code>Meta</code> for convenience reasons (#1379).</li>
+<li>Adds config option <code>profiles.*.margins</code> to allow customizing the horizontal / vertical margins (#1384).</li>
+<li>Adds config option for colorscheme <code>default.bright_foreground</code> and <code>default.dimmed_foreground</code> to configure bright and dimmed default foreground text respectively (#1383).</li>
+</ul>
+<h2 id="040-2023-12-19">0.4.0 (2023-12-19)</h2>
+<ul>
+<li>Fixes GUI terminating on idle input in some conditions.</li>
+<li>Fixes search term rendering highlighting for search terms containing whitespaces (#966).</li>
+<li>Fixes rendering in cases of glyphs with inverted orientation (#1115).</li>
+<li>Fixes Emoji rendering being too small on macOS (#1215)</li>
+<li>Fixes config option <code>show_title_bar</code> (#1153)</li>
+<li>Fixes VT sequence DECSTBM and DECSLRM defaulting parameters (#1164).</li>
+<li>Fixes VT sequence DECFRA (#1189).</li>
+<li>Fixes VT sequence DECSCPP and DECCOLM (#1205).</li>
+<li>Fixes VT sequence DECALN to properly reset margins when statusline is shown</li>
+<li>Fixes VT sequence ED (CSI J) when statusline is shown.</li>
+<li>Fixes VT sequence SM ?1003 (Any Event mouse tracking) not reporting mouse move events.</li>
+<li>Fixes VT sequence XTWINOPS (<code>CSI 22 t</code> and <code>CSI 23 t</code>) to not assert and terminate the terminal but default to missing paramter <code>0</code> instead (#1369).</li>
+<li>Fixes VT sequences CUU/CUD/CUF/CUB to better respect margins (#1201)</li>
+<li>Fixes printing over 2nd cell of a wide character should delete wide character (#1268)</li>
+<li>Fixes URI re-encoding of local files in <code>OSC 8</code> (#1199)</li>
+<li>Fixes LCD subpixel rendering for overly wide US-ASCII glyphs (#1022)</li>
+<li>Fixes alive process when GUI is closed</li>
+<li>Fixes vi mode <code>f</code> action freeze on last line</li>
+<li>Fixes AltGr handling on Windows (#150)</li>
+<li>Fixes rarely happening bad access to GPU texture atlas (#1309)</li>
+<li>Fixes terminal session not being terminated when the process terminated, but the PTY handle was still open (e.g. by other processes).</li>
+<li>Fixes setting window class (<code>app_id</code>) on Wayland (#1336)</li>
+<li>Fixes screen margins not being shared across primary and alt screen, as it should be.</li>
+<li>Do not clear search term when entering search editor again.</li>
+<li>Clear search term when switch to insert vi mode (#1135)</li>
+<li>Delete dpi_scale entry in configuration (#1137)</li>
+<li>Removes the ability to inline colorschemes within a configuration profile. Colorschemes must now always be referenced by their name.</li>
+<li>Moves the vi-like cursor with the viewport when scrolling up/down.</li>
+<li>Adds normal mode motion <code>Ctrl+e</code> and <code>Ctrl+y</code> to vertically move the viewport.</li>
+<li>Adds the ability to chose a color scheme based on the operating systems's dark/light mode setting. This will change live whenever the OS's dark/light mode setting changes as well (#604).</li>
+<li>Adds VT sequence DECSSCLS (change scroll speed) and properly handle DECSCLM (enable slow scrolling mode) (#1204)</li>
+<li>Adds VT sequence parameter ?996 to DSR to request a report of current color scheme dark/light mode hint.</li>
+<li>Adds VT sequence <code>SM ?2031</code> and <code>RM ?2031</code> to enable/disable unsolicited DSR for color scheme updates by the user or OS.</li>
+<li>Adds support the extended <code>CSIu</code> keyboard protocol to better report key modifiers.</li>
+<li>Adds extended keyboard protocol support (CSI u) to better report key modifiers.</li>
+<li>Adds support vor horizontal mouse scrolling event reporting sequences.</li>
+<li>Adds percentage value to Indicator Statusline to indicate scroll offset in scrollback buffer.</li>
+<li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
+<li>Adds config option <code>profiles.*.bell</code> to adjust BEL behavior (#1348) and fixes (#1162) and (#1163).</li>
+<li>Adds config option <code>profiles.*.frozen_dec_modes</code> to permanently enable/disable certain DEC modes.</li>
+<li>Adds config option <code>profiles.*.option_as_meta</code> to allow remapping Option key to Alt on MacOS.</li>
+<li>Adds config option <code>profiles.*.ssh</code> to allow connecting to an SSH server directly from Contour.</li>
+<li>Adds capital <code>A</code> and <code>I</code> keys to switch from normal mode back to insert mode, too.</li>
+<li>Adds size indicator window on resize (#1203).</li>
+<li>Adds config entry <code>profile.*.size_indicator_on_resize</code> to control size indicator on resize and makes resize indicator small.</li>
+<li>Adds OpenSelection action, and honor case in the configuration bindings</li>
+<li>Adds open resource (URL, local file) feature also to vi mode.</li>
+<li>Adds configurable window alerts on terminal bells.</li>
+</ul>
+<h2 id="0312-2023-05-29">0.3.12 (2023-05-29)</h2>
+<ul>
+<li>Fixes terminfo <code>tsl</code> to how todays apps are using it (e.g. zsh) to simply set the window title.</li>
+<li>Fixes selecting a single character not working easily (#1066).</li>
+<li>Fixes cycling between different selection modes (by speed-clicking) not properly working.</li>
+<li>Fixes tcsh shell integration not working (#1074).</li>
+<li>Fixes <code>[count]w</code> ignoring the <code>[count]</code> parameter in modal mode.</li>
+<li>Fixes statusline being misplaced after resize when being in alt screen (#1091).</li>
+<li>Fixes hyperlinks with IDs (#1088)</li>
+<li>Fixes hyperlink highlight when screen has been scrolled (#1084)</li>
+<li>Fixes cursor shape changes when entering vi-like normal mode or visual mode.</li>
+<li>Improves mouse selection to be more natural extending into new grid cells.</li>
+<li>Modal mode: Improves how <code>[m</code> jumps from the current prompt to the next prompt above it.</li>
+<li>Adds <code>profiles.*.permissions.display_host_writable_statusline</code> to allow the user to intervene in <code>DECSSDT 2</code> VT sequence to show the host writable statusline.</li>
+<li>Adds config entry <code>input_method_editor</code> colorscheme key to allow customization of the IME (input method editor) region (#1058).</li>
+<li>Adds <code>gui.shader</code> log option for the output of shader configuration procedure (#715).</li>
+<li>Adds config entry <code>profiles.*.status_line.position</code> to change statusline position to be either bottom (default) or top.</li>
+<li>Adds config entry <code>profiles.*.status_line.sync_to_window_title</code> to synchronize the window title with the host writable statusline (if it was denied to be shown).</li>
+<li>Linux: Adds support for writing to utmp/wtmp.</li>
+<li>Extends <code>ViNormalMode</code> to toggle between insert and normal mode rather than just entering normal mode.</li>
+<li>Modal mode: Adds Return key to also move the cursor down (like vim).</li>
+<li>Model mode: Adds text object <code>im</code> and <code>am</code> to select the range between two line marks.</li>
+<li>Model mode: Adds handling of <code>Home</code> and <code>End</code> keys (#1098).</li>
+</ul>
+<h2 id="0311-2023-03-01">0.3.11 (2023-03-01)</h2>
+<ul>
+<li>Fixes normal mode motion <code>J</code> and <code>K</code> that got accidentally unimplemented and make it also available to visual mode.</li>
+<li>Fixes use of config <code>bypass_mouse_protocol_modifier</code> that was ignored.</li>
+<li>Fixes abnormal termination on incomplete foreground/background color-pair specification.</li>
+<li>Fixes <code>SendChars</code> input acion to actually send the chars as-is to the standard input of the connected application.</li>
+<li>Fixes mouse selection to only be initiated if actually meant to, i.e. in alt screen mode only if bypass-modifier was pressed (#1017).</li>
+<li>Fixes mouse selection within scrolloff setting to not cause the viewport to jump anymore (#1019).</li>
+<li>Fixes rendering sixel image when status line is active (#1050).</li>
+<li>Adds normal mode motion <code>[[</code>, <code>]]</code>, <code>[]</code>, <code>][</code> mimmicking exactly what vim does.</li>
+<li>Adds normal mode motion <code>[m</code> and <code>]m</code> to jump line marks up/down.</li>
+<li>Adds normal mode motion <code>mm</code> to toggle the line mark at the current active cursor position.</li>
+<li>Adds normal mode motion <code>t{char}</code>, <code>T{char}</code>, <code>f{char}</code>, <code>F{char}</code>, <code>;</code>, <code>,</code> to move cursor in line till before/after or to given <code>{char}</code>.</li>
+<li>Adds config entry <code>vi_mode_highlight</code> to color palette to highlight current cursor's line when not in insert mode (aka. in Vi-mode).</li>
+<li>Adds shell integration for fish shell.</li>
+<li>Adds shell integration for tcsh shell.</li>
+<li>Improve performance of parsing UTF-8 text on ARM64 platfroms through the use SIMD instructions.</li>
+<li>Contour can now run on platforms not supporting hardware crypto extension for ARM64 nor AES-NI for x86-64. Hardware acceleration support can be configured to be included at compile time.</li>
+<li>Fixes scroll up when infinte history limit is set</li>
+</ul>
+<h2 id="0310-2023-01-22">0.3.10 (2023-01-22)</h2>
+<ul>
+<li>Fixes <code>initial_working_directory</code> setting being ignored (#946).</li>
+<li>Fixes background image being accidentally inverted (Bug introduced in 0.3.3.204).</li>
+<li>Fixes crash in some corner cases of too small fonts (#949).</li>
+<li>Fixes linefeed not inheriting graphics attributes when scrolling up to create a new line (#945).</li>
+<li>Fixes normal mode's motion <code>[count]|</code> that was off by one.</li>
+<li>Fixes switching to normal mode sometimes placing the vi cursor wrong.</li>
+<li>Fixes vi-like normal mode's word motions <code>w</code>, <code>e</code>, and <code>b</code> to better emulate vim's behaviour.</li>
+<li>Fixes copying text to clipboard stripping TAB-character generated spaces (#982).</li>
+<li>Fixes <code>BEL</code>'s audio feedback not working on some platform by streamlineing the behaviour with a custom bell sound.</li>
+<li>Adds new config option <code>word_highlight_current</code> and <code>word_highlight_other</code> to better distinguish between double-click initiated word highlights and actual searches / selections.</li>
+<li>Adds trace mode to single-step through each VT sequence. New actions: <code>TraceEnter</code>, <code>TraceLeave</code>, <code>TraceStep</code>, <code>TraceBreakAtEmptyQueue</code> and new mode flag <code>Trace</code>.</li>
+<li>Adds implementation for <code>SO</code> and <code>SI</code> control codes.</li>
+<li>Adds ability to explicitly disable a font feature by prefixing the feature with a <code>-</code>, such as <code>-calt</code>, explicitly enabling via <code>+</code> prefix was added as well.</li>
+<li>Adds terminal capability <code>hs</code> and <code>es</code> to improve status-line feature detection via terminfo.</li>
+<li>Adds normal mode motion: <code>B</code>, <code>B</code>, <code>E</code>.</li>
+<li>Adds support for mouse in normal mode for selection and normal-mode's cursor placement.</li>
+<li>Changes terminfo entries <code>tsl</code>, <code>fsl</code> and <code>dsl</code> to make use of the host-writable statusline.</li>
+<li>Improvements to text objects in vi-like normal mode (<code>i)</code>, <code>a)</code>, <code>i&gt;</code>, <code>a&gt;</code>, <code>i]</code>, <code>a]</code>, <code>i}</code>, <code>a}</code>).</li>
+<li>Improvements to vi-like normal mode: yank-motions (<code>yw</code>, <code>y$</code>, etc).</li>
+<li>Improvements to vi-like normal mode: support nested matching pairs, such as <code>{</code>, <code>(</code> etc in text objects.</li>
+<li>Improvements to vi-like normal mode: Add <code>%</code> motion to jump to matching symbol pairs.</li>
+<li>Improvements to vi-like normal mode: Add <code>M</code> motion to jump to middle screen line (same column).</li>
+<li>Improvements to vi-like normal mode: Add <code>P</code> to paste the clipboard with newlines stripped.</li>
+<li>Improvements to vi-like normal mode: Add <code>SP</code> and <code>BS</code> to move left/right.</li>
+</ul>
+<h2 id="039-2022-12-24">0.3.9 (2022-12-24)</h2>
+<ul>
+<li>Fixes statusline clock to show the correct local time.</li>
+<li>Fixes running within OpenGL/ES context.</li>
+<li>Fixes failing startup due to <code>background_image.path</code> pointing to a non-existing file (#928).</li>
+<li>Fixes terminfo entries <code>Se</code>, and adds missing entries <code>Rmol</code>, <code>Sync</code> (#936).</li>
+<li>Fixes rendering glitches (reverting PR #918 until a better solution has been found).</li>
+<li>Fixes loading TTC (TrueType Collection) font files not honor which face to load within the collection (#939).</li>
+<li>Adds config entry <code>mouse.hide_while_typing</code> to specify mouse behavior while typing whether hide it or not.</li>
+<li>Adds config entry <code>indicator_statusline_inactive</code> colorscheme key to colorize the status line differently when the terminal is currently not in focus.</li>
+</ul>
+<h2 id="038-2022-12-18">0.3.8 (2022-12-18)</h2>
+<ul>
+<li>Fixes restoring the cursor visibility after leaving alternate screen when application wasn't restoring mode switches in reverse order.</li>
+<li>Fixes country flags rendering due to misleading grapheme cluster segmentation in corner cases.</li>
+<li>Fixes mouse reporting in primary screen when viewport has been scrolled into the scrollback area.</li>
+<li>Fixes VT sequence <code>DECSTR</code> (soft reset) to not move the cursor to home position.</li>
+<li>Fixes cursor movements for the vi-like cursor (normal mode).</li>
+<li>Fixes Alt+Backspace on macOS.</li>
+<li>Fixes default config entry <code>profiles.*.draw_bold_text_with_bright_colors</code> (it was renamed from <code>profiles.*.bold_is_bright</code>). Please rename this in your existing configuration if not done yet.</li>
+<li>Fixes sometimes rendering two cursors when statusline is shown.</li>
+<li>Fixes normal mode's page top (S-H)/ page bottom (S-L) cursor movements to respect scroll offset.</li>
+<li>Fixes VT sequences <code>RIS</code> and action <code>ClearHistoryAndReset</code> when statusline is shown.</li>
+<li>Fixes cursor going beyond the terminal screnn in vim mode, move right motion (#917).</li>
+<li>Fixes selection while statusline is shown. (#910)</li>
+<li>Improves hard-reset (<code>RIS</code>) to restore initial statusline state.</li>
+<li>Improves <code>$</code> motion in vi-like normal mode to point to the last non-empty grid cell in the current line instead of the right page margin.</li>
+<li>Vi Mode search can handle line wrapping and searchText larger than line length (#869) (#870).</li>
+<li>Adds ability to highlight same words on double click via <code>profile.*.highlight_word_and_matches_on_double_click</code>.</li>
+<li>Adds color scheme key <code>indicator_statusline.foreground</code> and <code>indicator_statusline.background</code> to customize indicator statusline colors.</li>
+<li>Adds clock to indicator status line.</li>
+<li>Adds current viewport position in scrollback buffer to indicator status line.</li>
+<li>Adds optional parameter <code>strip</code> to PasteClipboard configuration action to allow stripping newlines and normalizing whitespaces.</li>
+<li>EXPERIMENTAL: Adds VT extension to enable passive mouse tracking via <code>CSI ? 2029 h</code> / <code>CSI ? 2029 l</code>. Passive mouse tracking enables the application to get notified on mouse events while still allowing mouse selection.</li>
+<li>EXPERIMENTAL: Adds VT extension to enable text selection tracking via <code>CSI ? 2030 h</code> / <code>CSI ? 2030 l</code>.</li>
+</ul>
+<h2 id="037-2022-11-01">0.3.7 (2022-11-01)</h2>
+<ul>
+<li>Fixes display of non-insert mode (vi-like) cursor on monochrome lines.</li>
+<li>Fixes cursor movements on wide characters for the vi-like cursor.</li>
+<li>Fixes TERM value resolving in Flatpak environment when not escaping the sandbox.</li>
+</ul>
+<h2 id="036-2022-10-30">0.3.6 (2022-10-30)</h2>
+<ul>
+<li>Fixes ground-state infinite loop in corner case + refactor and tiny optimization.</li>
+<li>Fixes assertion in optimized bulk text processing.</li>
+<li>Fixes rare displacement of characters following a wide character (e.g. Emoji) in some cases.</li>
+<li>Fixes IME (input method editor) background rendering for wide characters (e.g. Kanji).</li>
+<li>Fixes <code>escape_sandbox</code> config option that wasn't set to <code>true</code> by default as documented.</li>
+<li>Improve throughput performance for scroll-up when custom vertical margins are in effect.</li>
+<li>Improve rendering performance slightly for so called trivial lines.</li>
+<li>Adds menu entry to Dolphin file manager to open Contour at current working directory.</li>
+</ul>
+<h2 id="035-2022-10-21">0.3.5 (2022-10-21)</h2>
+<ul>
+<li>Fixes a problem with oversized glyphs being wrongly cut off (#821).</li>
+<li>Fixes Sixel handling of non-standard aspect ratio (#827).</li>
+<li>Fixes Sixel mode, when updating the color palette with a new color, that color must also be used for subsequent paints.</li>
+<li>Fixes vertical cursor movement for Sixel graphics with only newlines (#822).</li>
+<li>Fixes Sixel rendering for images with aspect ratios other than 1:1.</li>
+<li>Fixes Sixel rendering for images that show below but should be rendered above text (#831).</li>
+<li>Fixes cursor highlight in VI mode</li>
+<li>Removes <code>images.sixel_cursor_conformance</code> config option.</li>
+<li>Adds VT sequence DECSCA, DECSEL, DECSED and DECSERA to support protected grid areas during erase operations (#29, #30, #31).</li>
+<li>Improve Input Method (IME) handling, visualizing preedit-text.</li>
+<li>Improve throughput performance of arbitrary complex Unicode.</li>
+<li>Update Unicode data to version 15.0.0 (release). See Announcing The Unicode® Standard, Version 15.0.0.</li>
+</ul>
+<h2 id="034-2022-09-13">0.3.4 (2022-09-13)</h2>
+<ul>
+<li>Fixes selection magically deselecting when indicator status line was shown and the top page line was selected.</li>
+<li>Fixes interpretation of VT sequence DECSDM to disable Sixel auto-scrolling, if enabled.</li>
+<li>Fixes visibility of the cursor in some situation when blending too much into the background color.</li>
+<li>Fixes dim/faint coloring to not affect background and default text coloring when feint SGR attribute is set (#786).</li>
+<li>Fixes SGR 9 (crossed out) and 53 (overline) to both look like underline.</li>
+<li>Fixes size of drawn sixel image if no size is given beforehand (#809).</li>
+<li>Fixes glyph rendering for some unexpectly oversized glyphs (#423).</li>
+<li>Adds <code>line#24</code> to terminfo file for backwards compatibility.</li>
+<li>Adds configuration key <code>live_config</code> to determine whether or not to reload running terminal instances on every config file change.</li>
+<li>Adds DEC-mode 2027 for enabling/discovering Unicode support as per draft specification (Terminal Unicode Core).</li>
+<li>Adds <code>CreateDebugDump</code> action to dump terminal state for debugging purposes.</li>
+<li>[Flatpak] Adds configuration key <code>profiles.*.escape_sandbox</code> to decide whether or not to escape the sandbox.</li>
+<li>[Packaging] Adding AppImage files to Github release page and CI artifacts and bump Ubuntu packages using Ubuntu 22.04 LTS</li>
+<li>[Linux] Changes context menu icon for "Run in Contour" action to be the Contour logo.</li>
+<li>Improve startup-time by not pre-rasterizing all printable US-ASCII codepoints at once.</li>
+</ul>
+<h2 id="033204-2022-08-30">0.3.3.204 (2022-08-30)</h2>
+<ul>
+<li>Fixes a screen buffer manipulation bug that may happen on non-stylyzed but interactive command prompts (#787).</li>
+<li>Fixes viewport misalignment when in scrollback area white new lines are being added to the main page area.</li>
+<li>Fixes logging file toggle.</li>
+<li>Adds VT sequence <code>CSI 5m</code> (blink) and <code>CSI 6m</code> (rapid blink).</li>
+<li>Adds vim-like <code>scrolloff</code> feature to normal mode cursor movements to ensure a line padding when scrolling up/down.</li>
+<li>Adds vim-like incremental search functionality with realtime highlighting and cycling through the matches.</li>
+<li>Adds ability to initiate search via configuration action <code>SearchReverse</code> in input mappings.</li>
+<li>Adds ability to cancel highlighted search terms via configuration action <code>NoSearchHighlight</code> in input mappings.</li>
+<li>Adds input mapping mode <code>Search</code> to conditionally enable input mapping when a search term is present.</li>
+<li>Adds support for HSL colorspace in Sixel images.</li>
+<li>Adds configuration key <code>colorscheme.*.search_highlight</code> for coloring search matches.</li>
+<li>Adds configuration key <code>colorscheme.*.search_highlight_focused</code> for coloring the active search match, containing the cursor.</li>
+<li>Adds alpha value to <code>colorscheme.*.vi_mode_highlight</code> color configuration.</li>
+<li>Adds VT sequence for ANSI mode NLM (NewLine Mode).</li>
+<li>Always show indicator status line when ANSI mode KAM is enabled (which can be toggled via action <code>ToggleInputProtection</code>).</li>
+<li>Always show indicator status line when in non-insert mode.</li>
+<li>[Linux] Changes the .desktop file name and icon file name to conform to the flatpak recommendations.</li>
+<li>[Linux] Provide an AppStream XML file.</li>
+<li>[Linux] Drop KDE/KWin dependency on the binary by implementing enabling blur-behind background manually.</li>
+<li>[Linux] Adds support for blur-behind window on GNOME shell.</li>
+<li>[Flatpak] Also pass stdout-fastpipe (<code>3</code>) to shell.</li>
+<li>[Flatpak] Do not set controlling terminal in order to allow TTY abilities like Ctrl+C. This seems to be a known bug in flatpak.</li>
+<li>[Flatpak] Exposes TERMINFO environment variable pointing to a valid path containing the contour terminfo file.</li>
+<li>Changes behavior of PTY (and shell process) creation until only when a PTY is required by the terminal emulator during instanciation, possibly avoiding problems with xdotool running too early.</li>
+<li>Internal: Y-axis inverted to match GUI coordinate systems where (0, 0) is top left rather than bottom left.</li>
+</ul>
+<h2 id="032202-2022-07-07">0.3.2.202 (2022-07-07)</h2>
+<ul>
+<li>Fixes writing to a non-empty line sometimes destroying the contents of that line (#702).</li>
+<li>Fixes underline decoration for wide character cells.</li>
+<li>Fixes SGR 8 (Conceal/Hidden) attribute doesn't work as expected (#699).</li>
+<li>Fixes Synchronized Updates (<code>SM/RM ? 2026</code>) sometimes lagging behind in rendering.</li>
+<li>Fixes SGR and text breakage when altering charsets via <code>ESC ( 0</code> VT sequence (#661).</li>
+<li>Fixes SEGV when closing the terminal via GUI close button.</li>
+<li>Fixes scrolling in alt-screen.</li>
+<li>Fixes VT sequence for setting indexed color from palette.</li>
+<li>Fixes some config false positives error messages.</li>
+<li>Fixes command line arguments parser handling of <code>--</code> for switching to verbatim mode (#670).</li>
+<li>Fixes rendering of U+E0B2  in pixel-perfect box drawing mode (#707).</li>
+<li>Fixes rendering of cursor sometimes being almost invisible when foreground and background colors are similar/equal (#691).</li>
+<li>Fixes line based selection sometimes not selecting the full line when wrapped over multiple lines.</li>
+<li>Fixes warning message on terminal's console output when enabling blurred background images.</li>
+<li>Fixes Win32 command output: Attaches to parent console if present, so typing <code>contour help</code> in a terminal actually shows something.</li>
+<li>Changes <code>XTSMGRAPHICS</code> to match implementation of xterm <em>exactly</em> when querying sixel image limits, to be capped at terminal viewport dimensions (#656).</li>
+<li>Changes CLI syntax for <code>contour parser-table</code> to <code>contour generate parser-table</code>.</li>
+<li>Implements UTF-8 encoded mouse transport (<code>CSI ? 1005 h</code>)</li>
+<li>Modal mode: Improved vi-like input modes.</li>
+<li>Modal mode: Fixed the text cursor not being visible during selection.</li>
+<li>Modal mode: Don't leak but actually support cursor keys up/down/left/right/page-up/page-down.</li>
+<li>Modal mode: Added <code>vip</code>, <code>vap</code> (and <code>yip</code> / <code>yap</code>) motions.</li>
+<li>Modal mode: Adds <code>^</code> motion.</li>
+<li>Modal mode: When being in normal mode, pressing <code>a</code> also puts you back to insert mode.</li>
+<li>Modal mode: Properly show cursor if it was hidden in insert mode and restore visibility &amp; shape when going back to insert mode.</li>
+<li>Modal mode: Shift+K and Shift+J don't just move the cursor up/down but also move the terminal's viewport respectively (inspired by tmux).</li>
+<li>Modal mode: Shift+H and Shift+L to move cursor to the current viewport's page top/bottom (inspired by tmux).</li>
+<li>Modal mode: and more...</li>
+<li>Adds new config option <code>profile.*.vi_mode_highlight_timeout</code> and <code>colorscheme.*.vi_mode_highlight</code> and adds cell highlighting on yank (#669).</li>
+<li>Adds support for running on ARMv8 platform with crypto extensions (#611).</li>
+<li>Adds back support OpenGL ES (3.1).</li>
+<li>Adds E3 capability, so <code>clear</code> now defaults to clearing screen and scrollback (#693).</li>
+<li>Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.</li>
+<li>Adds basic support for Indicator status line and their VT sequences <code>DECSASD</code> and <code>DECSSDT</code>, and <code>DECRQSS</code> has been adapted (#687).</li>
+<li>Adds configuration option <code>profiles.*.status_line.display</code> to be either <code>none</code> or <code>indicator</code> to reflect the initial state of the status line (more customizability of the Indicator status-line will come in future releases).</li>
+<li>Adds new action <code>ToggleInputProtection</code> to protect terminal application against accidental input (#697).</li>
+<li>Adds configuration options <code>logging.enabled</code> as well as <code>logging.file</code>.</li>
+<li>Adds VT sequences <code>XTPUSHCOLORS</code>, <code>XTPOPCOLORS</code>, <code>XTREPORTCOLORS</code> (#714).</li>
+<li>Adds CLI syntax <code>contour info vt</code> to print list of supported VT sequences (#730).</li>
+<li>Adds VT sequence <code>DECPS</code> (#237).</li>
+<li>Adds new config option <code>colorscheme.selection.foreground_alpha</code> and <code>colorscheme.selection.background_alpha</code> to enable somewhat more eye-candy visual looks on text selection.</li>
+<li>Extends config option <code>colorscheme.selection.foreground</code> and <code>colorscheme.selection.background</code> to also accept <code>CellForeground</code> and <code>CellBackground</code> as value.</li>
+</ul>
+<h2 id="031200-2022-05-01">0.3.1.200 (2022-05-01)</h2>
+<ul>
+<li>Adds Vi-like input modes for improved selection and copy'n'paste experience.</li>
+<li>Adds contour executable to search path for spawned shell process on macOS and Windows.</li>
+<li>Adds customizability to dim colors (#664).</li>
+<li>Adds the profile configuration option: <code>draw_bold_text_with_bright_colors</code>.</li>
+<li>Fixes <code>CSI K</code> accidentally removing line flags, e.g. line marks (#658).</li>
+<li>Fixes wrong-spacing rendering bug on some lines.</li>
+<li>Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).</li>
+<li>Fixes assertion on too quick shell terminations (#647).</li>
+<li>Fixes fallback shell execution on UNIX-like systems when the reuqested shell cannot be spawned (#647).</li>
+<li>Fixes selection being wrongly rendered when viewport is scrolled (#641).</li>
+<li>Fixes full-line selection not properly injecting linefeeds between the lines.</li>
+<li>Changes behaviour of full-line selection to include a trailing linefeed for the last line (#641).</li>
+<li>Changes behaviour of bold text to by rendered using normal colors by default (was forced to bright before, and is now configurable via <code>draw_bold_text_with_bright_colors</code>).</li>
+</ul>
+<h2 id="030198-2022-04-18">0.3.0.198 (2022-04-18)</h2>
+<p>TLDR; Many thanks to all for the great support and feedback. This release
+marks a huge milestone for me especially with regards to VT backend performance(!),
+improved rendering architecture, and a more complete list of pixel perfect box drawings.</p>
+<ul>
+<li>Fixes installation from <code>.deb</code> (missing terminfo dependency)</li>
+<li>Fixes PTY write race condition.</li>
+<li>Fixes VT sequence <code>DECFI</code>.</li>
+<li>Fixes VT sequence <code>ICH</code> (#559).</li>
+<li>Fixes VT sequence <code>OSC 4</code>'s response.</li>
+<li>Fixes VT sequence <code>OESC 4</code> to also support setting color via <code>#RRGGBB</code>.</li>
+<li>Fixes VT sequence extension: capture buffer (#493).</li>
+<li>Fixes <code>DECRC</code> with respect to <code>DECSTBM</code> enabled and <code>DECOM</code> being inverted interpreted.</li>
+<li>Fixes <code>XTGETTCAP</code> (#582).</li>
+<li>Fixes <code>SU</code> in combination with <code>DECLRM</code> (#593).</li>
+<li>Fixes an assertion in text renderer.</li>
+<li>Fixes wrongly advertising DEC locator mode (it is not supported).</li>
+<li>Improved VT backend performance (#342).</li>
+<li>Improved text selection behaviour.</li>
+<li>Improved detection of runtime DPI changes for KDE (Plasma) desktop environment.</li>
+<li>Improves Window manipulation VT sequence for saving/restoring window title (<code>CSI 22 ; Ps t</code>, <code>CSI 23 ; Ps t</code>)</li>
+<li>Adds pixel-perfect box-drawing for U+EE00 .. U+EE05 for progress bar glyphs as first introduced by Fira Code (#521).</li>
+<li>Adds pixel-perfect box-drawing for U+E0B0, U+E0B2, U+E0BA (Triangle Powerline glyphs).</li>
+<li>Adds preliminary implementation of <code>DA3</code> VT sequence.</li>
+<li>Adds new configuration option <code>mouse_block_selection_modifier</code>.</li>
+<li>Adds new configuration option <code>profiles.*.copy_last_mark_range_offset</code> (default <code>0</code>) to adjust where to start looking upwards for the <code>CopyPreviousMarkRange</code> action. This is useful for multi-line prompts.</li>
+<li>Adds new configuration option <code>platform_plugin</code>.</li>
+<li>Adds new configuration option <code>renderer.backend</code> for explicitly setting renderer to one of: <code>OpenGL</code>, <code>software</code>, <code>default</code>.</li>
+<li>Adds new configuration option <code>renderer.tile_hashtable_slots</code> to configure texture atlas hashtable capacity.</li>
+<li>Adds new configuration option <code>renderer.tile_cache_count</code> to configure texture atlas cache capacity.</li>
+<li>Adds new configuration option <code>renderer.tile_direct_mapping</code> to enable/disalbe texture atlas direct mapping.</li>
+<li>Adds new colorscheme setting <code>background_image.path</code> and <code>background_image.opacity</code> to optionally render a terminal background image.</li>
+<li>Adds stdout-fastpipe support on new shell file descriptor <code>3</code> and exposing availability via environment variable <code>STDOUT_FASTPIPE</code> (with value <code>3</code>). When writing to this file descriptor rather than to stdout (file descriptor <code>1</code>), the full performance of Contour can be explored.</li>
+<li>Adds new configuration option <code>pty_buffer_size</code> for tweaking the new size in bytes for the PTY buffer objects.</li>
+<li>Adds <code>mock</code> font locator (mostly interesting for advanced use for CI testing).</li>
+<li>Adds VT sequence <code>SM ? 8452 h</code> / <code>RM ? 8452 l</code> for enabling/disabling sixel cursor placement conformance (xterm extension).</li>
+<li>Adds SGR-Pixels support, VT sequence <code>SM ? 1016 h</code> / <code>RM ? 1016 l</code> (#574).</li>
+<li>Adds VT sequence DECCARA, Change Attributes in Rectangular Area, with the extension that it applies to <em>all</em> SGR attributes. (#15).</li>
+</ul>
+<h2 id="023183-2022-01-09">0.2.3.183 (2022-01-09)</h2>
+<p>Important: It is recommended to also use the latest <code>contour</code> termcap file if you are already using one
+from a previous release.</p>
+<ul>
+<li>Fixes Sixel image rendering when scrolling is needed and ANSI cursor is not on left margin.</li>
+<li>Fixes Qt-related CLI options that that were largely ignored.</li>
+<li>Fixes crash caused by VT sequence PM and SOS (#513).</li>
+<li>Fixes parsing VT sequence RGB color parsing for cell decoratioins (e.g. underline).</li>
+<li>Fixes double-underline to not look like a very thick line on small font sizes.</li>
+<li>Applies antialiasing to curly underline.</li>
+<li>Changes <code>contour</code> exit code to reflect the shell's exit code of the last closed window.</li>
+<li>Improves text cursor rendering and extends cursor configuration accordingly (#526).</li>
+<li>Improves visual appearance of dotted underline SGR.</li>
+<li>Adds CLI option <code>terminal early-exit-threshold SECS</code> (defaulting to 6) to only report and wait if the process did exit below this threshold seconds.</li>
+<li>Adds CLI option <code>terminal dump-state-at-exit</code> to auto-dump internal state at exit.</li>
+<li>Adds support for CoreText for matching font descriptions and font fallback (#479).</li>
+<li>Adds support for font feature settings. This is currently only implemented for <code>openshaper</code>, not yet for <code>dwrite</code> (#520).</li>
+<li>Adds pixel-perfect box-drawing for U+E0B4, U+E0B6, U+E0BC, U+E0BE (some Powerline extended codepoints).</li>
+</ul>
+<h2 id="022175-2021-11-19">0.2.2.175 (2021-11-19)</h2>
+<ul>
+<li>Fixes input mapping containing <code>Control</code> modifier.</li>
+<li>Fixes input mapping mode <code>Select</code> being ignored.</li>
+<li>Fixes Modifier+Enter input mapping not being catched.</li>
+<li>Fixes slant detection for DirectWrite.</li>
+<li>Changes <code>DECCOLM</code> to only switch back to 80 when it was 132 before.</li>
+<li>Adds new config option <code>spawn_new_process</code> to define new terminal window behavior.</li>
+<li>Adds action <code>CancelSelection</code> to allow actively canceling selection via input mappings.</li>
+<li>Adds key bindings to default configuration to allow simply pressing Ctrl+C/Ctrl+V (without Shift modifier) when an active selection is present.</li>
+<li>Adds process current working directory on macOS.</li>
+<li>Adds <code>contour license</code> CLI command to show project license but also an overview of all dependencies.</li>
+<li>Adds a proper CLI to <code>bench-headless</code>. Building the headless benchmark tool is not shipped by default.</li>
+</ul>
+<h2 id="021174-2021-11-14">0.2.1.174 (2021-11-14)</h2>
+<ul>
+<li>Reverts change from 0.2.0: "Changes behaviour when receiving <code>U+FE0E</code> (VS15) to not enforce the width of 1 but leave it as is (usually 2). This seems to match what the web browser is doing, too."</li>
+<li>Adds support for loading terminal color schemes from an external file, such as <code>~/.config/contour/colorschemes/onedark.yml</code> for the scheme <code>onedark</code> (file file format is simply a sub-tree of how colors can be specified inline).</li>
+<li>Adds some more tmux-extension entries to the terminfo database that are supported by contour (<code>Ss</code>, <code>Se</code>, <code>Cs</code>, <code>Smol</code>, <code>Smulx</code>, <code>Setulc</code>).</li>
+<li>Adds <code>Sync</code> capability entry to terminfo file.</li>
+<li>Adds many more pixel-perfect graphical characters: <code>23A1</code>..<code>23A6</code>, <code>2580</code>..<code>2590</code>, <code>2594</code>..<code>259F</code>, <code>1FB00</code>..<code>1FB3B</code>, <code>1FB3C</code>..<code>1FBAF</code>, <code>1FBF0</code>..<code>1FBF9</code>.</li>
+<li>Adds support for building with embedded FreeType and HarfBuzz (experimental, disabled by default).</li>
+<li>Adds a shell early-exit-guard to not instantly close the terminal window but print a message instead and wait for any key press in order to close.</li>
+<li>Adds missing config option <code>read_buffer_size</code> to default <code>contour.yml</code>.</li>
+<li>Adds new config option <code>reflow_on_resize</code> to mandate whether or not text reflow is enabled on primary screen. If this option is false, it cannot be enabled programmatically either.</li>
+<li>Adds new config option <code>on_mouse_select</code> to decide what action to pick when text has been selected (copy to clipboard or copy to selection-clipboard, or do nothing)</li>
+<li>Unicode data updated to version 14.0 (release). See Announcing The Unicode® Standard, Version 14.0.</li>
+<li>Do not force OpenGL ES on Linux anymore.</li>
+<li>Changes default (Sixel) image size limits to the primary screen's pixel dimensions (#408).</li>
+<li>Changes font locator engine default on Windows to DirectWrite (#452).</li>
+<li>Changes tcap-query feature from experimental to always enabled (not configurable anymore).</li>
+<li>Automatically detect if <code>contour</code> or <code>contour-latest</code> terminfo entries are present use that as default.</li>
+<li>Fixes VT sequences that cause a cursor restore to sometimes crash.</li>
+<li>Fixes terminfo installation path on macOS and tries to auto-set <code>TERMINFO_DIRS</code> to it on startup (#443).</li>
+<li>Fixes terminfo entry <code>pairs</code>.</li>
+<li>Fixes SGR 24 to remove any kind of underline (#451).</li>
+<li>Fixes font fallback for <code>open_shaper</code> where in rare cases the text was not rendered at all.</li>
+<li>Fixes CPU load going up on mouse move inside terminal window (#407).</li>
+<li>Fixes terminfo entries accidentally double-escaping <code>\E</code> to <code>\\E</code> (#399).</li>
+<li>Fixes RGB color parsing via ':2::Pr:Pg:Pb' syntax and also adapt setrgbf &amp; setrgbb accordingly.</li>
+<li>Fixes SEGV with overflowing (Sixel) images (#409).</li>
+<li>Fixes XTSMGRAPHICS for invalid SetValue actions and setting Sixel image size limits (#422).</li>
+<li>Fixes internal pixel width/height tracking in VT screen, which did affect sizes of rendered Sixel images (#408).</li>
+<li>Fixes configuring a custom shell on macOS (#425).</li>
+<li>Fixes off-by-one bug in builtin box drawing (#424).</li>
+<li>Fixes assertion in text renderer with regards to colored glyphs.</li>
+<li>Fixes Sixel background select to support transparency (#450).</li>
+<li>Fixes session resuming on KDE desktop envionment which is respawing all Contour instances upon re-login but failed due to invalid command line parameters (#461).</li>
+<li>Fixes Meta+Key keyboard inputs being ignored.</li>
+<li>Changes DECSDM such that it works like a real VT340; also xterm, as of version 369, changed that recently (#287).</li>
+<li>Adds context menu support for KDE.</li>
+</ul>
+<h2 id="020173-2021-08-17">0.2.0.173 (2021-08-17)</h2>
+<ul>
+<li>Improved performance (optimized render loop, optimized grapheme cluster segmentation algorithm)</li>
+<li>Improves selection to better automatically deselect on selected area corruption.</li>
+<li>Fixes <code>ioctl(..., TIOCGWINSZ, ...)</code> pixel values that were only set during resize but not initially.</li>
+<li>Fixes mouse in VIM+Vimspector to also change the document position when moving the mouse.</li>
+<li>Fixes SGR decorations to use designated underline thickness and underline position.</li>
+<li>Fixes font glyph render in some corner cases where the rendered glyph did result in rectangle garbage on the screen.</li>
+<li>Fixes copying the selection containing trailing whitespaces.</li>
+<li>Fixes hard-reset with regards to default tab width.</li>
+<li>Fixes VT sequence <code>DECRQPSR</code> for <code>DECTABSR</code>.</li>
+<li>Fixes keyboard keys for <code>F1</code>..<code>F4</code> when pressed with and without modifiers.</li>
+<li>Fixes OSC 8 hyperlink rendering when scrolled.</li>
+<li>Fixes SGR 1 (bold) wrongly applied on indexed background colors.</li>
+<li>Fixes text shaping sometimes showing missing glyphs instead of the actual glyphs (by changing the last-resort font fallback mechanism to chape each cluster individually with its own font fallback).</li>
+<li>Preserve active profile when reloading config, and forces redraw after config reload.</li>
+<li>Changes config entry <code>profile.*.font_size</code> to <code>profile.*.font.size</code>.</li>
+<li>Changes config entries <code>scrollbar.*</code> to <code>profile.*.scrollbar.*</code>.</li>
+<li>Changes behavior of live configuration reload, which is not default anymore and must be explicitly enabled via CLI parameter <code>--live-config</code>.</li>
+<li>Changes behaviour when receiving <code>U+FE0E</code> (VS15) to not enforce the width of 1 but leave it as is (usually 2). This seems to match what the web browser is doing, too.</li>
+<li>Changes the CLI command line interface syntax.</li>
+<li>Removes <code>tab_width</code> configuration. Tab width cannot be configured anymore but remaints by default at 8.</li>
+<li>Adds basic automatically created archive for Arch Linux to the CI build artifacts page and release page.</li>
+<li>Adds support for bypassing the mouse protocol via Shift-click (configurable via <code>bypass_mouse_protocol_modifier</code>)</li>
+<li>Adds improved debug logging. via CLI flag <code>-d</code> (<code>--enable-debug</code>) to accept a comma seperated list of tags to enable logging for. Appending a <code>*</code> at the end of a debug tag will enable all debug tags that match prefix its prefix.  The list of available debuglog tags can be found via CLI flag <code>-D</code> (<code>--list-debug-tags</code>).</li>
+<li>Adds support for different font render modes: <code>lcd</code>, <code>light</code>, <code>gray</code>, <code>monochrome</code> in <code>profiles.NAME.font.render_mode</code> (default: <code>lcd</code>).</li>
+<li>Adds support for different text render engines: <code>OpenShaper</code>, <code>DirectWrite</code> and <code>CoreText</code> for upcoming native platform support on Windows (and later macOS).</li>
+<li>Adds support for different font location engines: <code>fontconfig</code> (others will follow).</li>
+<li>Adds experimental text reflow.</li>
+<li>Adds OpenFileManager action to configuration.</li>
+<li>Adds terminal identification environment variables <code>TERMINAL_NAME</code>, <code>TERMINAL_VERSION_TRIPLE</code> and <code>TERMINAL_VERSION_STRING</code>.</li>
+<li>Adds config option <code>mode</code> to input modifiers for additionally filtering based on modes (alt screen, app cursor/keypad, text selection modes, ...).</li>
+<li>Adds config option <code>profile.*.terminal_id: STR</code> to set the terminal identification to one of VT100, VT220, VT340, etc.</li>
+<li>Adds config option <code>profile.*.maximized: BOOL</code> to indicate maximized state during profile activation.</li>
+<li>Adds config option <code>profile.*.fullscreen: BOOL</code> to indicate fullscreen state during profile activation.</li>
+<li>Adds config option <code>profile.*.font.strict_spacing: BOOL</code> to indicate that only monospace fonts may be used.</li>
+<li>Adds config option <code>profile.*.font.TYPE.weight: WEIGHT</code> and <code>profile.*.fonts.TYPE.slant: SLANT</code> options (optional) along with <code>profile.*.fonts.TYPE.family: STRING</code>.</li>
+<li>Adds config option <code>profile.*.font.TYPE.weight: WEIGHT</code> and <code>profile.*.fonts.TYPE.slant: SLANT</code> options (optional) along with <code>profile.*.fonts.TYPE.family: STRING</code>.</li>
+<li>Adds config option <code>profile.*.font.dpi_scale: FLOAT</code> to apply some additional DPI scaling on fonts.</li>
+<li>Adds config option <code>profile.*.font.builtin_box_drawing: BOOL</code> to use pixel-perfect builtin box drawing instead of font provided box drawing characters.</li>
+<li>Adds config option <code>profile.*.refresh_rate: FLOAT</code> to configure how often the terminal screen will be rendered at most when currently under heavy screen changes. A value of <code>"auto"</code> will use the currently connected monitor's refresh rate.</li>
+<li>Adds configuration's action <code>ToggleAllKeyMaps</code> to enable/disable intercepting and interpreting keybinds. The one that did toggle it will not be disabled.</li>
+<li>Adds configuration's action <code>ClearHistoryAndReset</code> to clear the history, and resetting the terminal.</li>
+<li>Adds VT sequence for enabling/disabling debug logging. <code>CSI ? 46 h</code> and <code>CSI ? 46 l</code> and CLI option <code>-d</code>.</li>
+<li>Adds VT sequence for querying/setting current font <code>OSC 50 ; ? ST</code> and <code>OSC 50 ; Font ST</code> (and <code>OSC 60 Ps Ps Ps Ps Ps ST</code> for a more fine grained font query/setting control).</li>
+<li>Adds VT sequence <code>CSI 18 t</code> and <code>CSI 19 t</code> for getting screen character size. Responds with <code>CSI 8 ; $columns ; $rows t</code> and  <code>CSI 9 ; $columns ; $rows t</code> respectively.</li>
+<li>Adds VT sequence to capture the current screen buffer <code>CSI &gt; LineMode ; StartLine ; LineCount t</code> giving the respone back on stdin via <code>OSC 314 ; $screen_buffer ST</code>, and feature detection via <code>DA1</code> number <code>314</code>.</li>
+<li>Adds VT sequence <code>DECSNLS</code> for setting number of lines to display.</li>
+<li>Adds VT sequence <code>CSI Ps b</code> (<code>REP</code>) for repeating the last graphical character <code>Ps</code> times.</li>
+<li>Adds VT sequence <code>OSC 4 ; INDEX ; COLOR ST</code> for setting or querying color palette (if COLOR is <code>?</code> instead of a color spec).</li>
+<li>Adds VT sequence <code>OSC 104 ; INDEX ST</code> for resetting color palette entry or complete palette (if no (index is given).</li>
+<li>Adds VT sequence <code>DECCRA</code> to copy a rectangular area.</li>
+<li>Adds VT sequence <code>DECERA</code> to erase a rectangular area.</li>
+<li>Adds VT sequence <code>DECFRA</code> to fill a rectangular area.</li>
+<li>Adds VT sequence <code>CSI &gt; q</code> (XTVERSION) to query terminal identification (name and version). Response comes as <code>DCS &gt;| Contour ContourVersion ST</code>.</li>
+<li>Adds VT sequence <code>DECRQM</code> to request ANSI/DEC modes states (set / unset / not recognized).</li>
+<li>Adds new CLI command: <code>contour capture ...</code> to capture the screen buffer.</li>
+<li>Adds new CLI command: <code>contour set profile to NAME</code> to change the profile on the fly.</li>
+<li>Adds new CLI command: <code>contour generate terminfo output OUTPUT_FILE</code> to create a Contour terminfo file.</li>
+<li>Adds new CLI command: <code>contour generate config output OUTPUT_FILE</code> to create a new default config.</li>
+<li>Adds new CLI command: <code>contour generate integration shell SHELL output OUTPUT_FILE</code> to create the shell integreation file for the given shell (only zsh supported for now). Also adds a pre-generated shell integration file for Linux (and macOS) to <code>/usr/share/contour/shell-integration.zsh</code>.</li>
+<li>Unicode data updated to version 14.0 beta.</li>
+<li>Adds support for building with Qt 6 (disabled by default).</li>
+<li>Adds support for building with mimalloc (experimental, disabled by default).</li>
+</ul>
+<h2 id="011-2020-12-31">0.1.1 (2020-12-31)</h2>
+<ul>
+<li>Fixes race condition when displaying image animations (e.g. gifs via sixel).</li>
+<li>Fixes <code>NewTerminal</code> action to also inherit the active configuration file.</li>
+<li>Fixes restoring cursor position in <code>RM ?1049</code>.</li>
+<li>Fixes <code>DECSTR</code> resetting saved-cursor state and active cursor-position.</li>
+<li>Fixes selecting text not being pushed into the selection-clipboard.</li>
+<li>Adds VT sequence <code>OSC 7</code> (set current working directory).</li>
+<li>Adds VT sequence <code>DCS $ p $Name ST</code> to change config profile name to <code>$Name</code>.</li>
+</ul>
+<h2 id="010-2020-12-24">0.1.0 (2020-12-24)</h2>
+<ul>
+<li>Available on all 3 major platforms, Linux, macOS, Windows.</li>
+<li>Emoji support (-: 🌈 💝 😛 👪 :-)</li>
+<li>Font ligatures support (such as in Fira Code).</li>
+<li>Bold and italic fonts</li>
+<li>GPU-accelerated rendering.</li>
+<li>Vertical Line Markers (quickly jump to markers in your history!)</li>
+<li>Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.</li>
+<li>Runtime configuration reload</li>
+<li>256-color and Truecolor support</li>
+<li>Key binding customization</li>
+<li>Color Schemes</li>
+<li>Profiles (grouped customization of: color scheme, login shell, and related behaviours)</li>
+<li>Clickable hyperlinks via OSC 8</li>
+<li>Sixel inline images</li>
+</ul></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var tab,labels=set.querySelector(".tabbed-labels");for(tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../install/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Installation">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Installation
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../configuration/" class="md-footer__link md-footer__link--next" aria-label="Next: Configuring Contour">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Configuring Contour
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11H4Z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["content.action.edit", "content.action.view", "content.code.copy", "content.tabs.link", "navigation.expand", "navigation.footer", "navigation.indexes", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.sections", "navigation.tracking", "search.highlight", "search.share", "search.suggest", "toc.follow"], "search": "../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.1e8ae164.min.js"></script>
+      
+    
+  <script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(() => { lightbox.reload() });
+</script></body>
+</html>
