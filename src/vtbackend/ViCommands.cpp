@@ -192,6 +192,28 @@ void ViCommands::searchCancel()
     _terminal->screenUpdated();
 }
 
+void ViCommands::promptStart(std::string const& query)
+{
+    _terminal->setPrompt(query);
+    _terminal->screenUpdated();
+}
+
+void ViCommands::promptDone()
+{
+    _terminal->screenUpdated();
+}
+
+void ViCommands::promptCancel()
+{
+    _terminal->screenUpdated();
+}
+
+void ViCommands::updatePromptText(std::string const& text)
+{
+    _terminal->setPromptText(text);
+    _terminal->screenUpdated();
+}
+
 bool ViCommands::jumpToNextMatch(unsigned count)
 {
     for (unsigned i = 0; i < count; ++i)

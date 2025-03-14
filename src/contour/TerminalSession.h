@@ -220,6 +220,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
+    std::optional<std::string> name() const noexcept
+    {
+        if (terminal().tabName())
+            return terminal().tabName();
+        if (terminal().getTabsNamingMode() == vtbackend::TabsNamingMode::Title)
+            return terminal().windowTitle();
+        return std::nullopt;
+    }
 
     /// Starts the VT background thread.
     void start();
@@ -364,6 +372,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::SwitchToPreviousTab);
     bool operator()(actions::SwitchToTabLeft);
     bool operator()(actions::SwitchToTabRight);
+    bool operator()(actions::SetTabName);
 
     void scheduleRedraw();
 

@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdio>
 #include <format>
+#include <optional>
 
 using namespace std::string_view_literals;
 
@@ -156,6 +157,7 @@ std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
             styles,
             activeColor,
             activeBackground,
+            std::nullopt, // separator
         };
     }
 
@@ -404,6 +406,9 @@ struct VTSerializer
             return std::format("Search: {}█",
                                unicode::convert_to<char>(std::u32string_view(vt.search().pattern)));
 
+        if (vt.inputHandler().isEditingPrompt())
+            return std::format("{}{}█", vt.prompt().prompt, vt.prompt().text);
+
         return {};
     }
 
@@ -443,10 +448,10 @@ struct VTSerializer
         auto const tabsInfo = vt.guiTabsInfoForStatusLine();
 
         std::string fragment;
-        for (const auto position: std::views::iota(1u, tabsInfo.tabCount + 1))
+        for (const auto position: std::views::iota(1u, tabsInfo.tabs.size() + 1))
         {
             if (!fragment.empty())
-                fragment += ' ';
+                fragment += tabs.separator.value_or("|");
 
             auto const isActivePosition = position == tabsInfo.activeTabPosition;
             auto const activePositionStylized =
@@ -459,7 +464,10 @@ struct VTSerializer
                 fragment += makeBackgroundColor(tabs.activeBackground);
             }
 
-            fragment += std::to_string(position);
+            if (tabsInfo.tabs[position - 1].name)
+                fragment += tabsInfo.tabs[position - 1].name.value();
+            else
+                fragment += std::to_string(position);
 
             if (activePositionStylized)
                 fragment += SGRRESTORE();
