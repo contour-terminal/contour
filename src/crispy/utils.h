@@ -136,8 +136,8 @@ constexpr inline bool split(std::basic_string_view<T> text, T delimiter, Callbac
 }
 
 template <typename T>
-constexpr inline auto split(std::basic_string_view<T> text,
-                            T delimiter) -> std::vector<std::basic_string_view<T>>
+constexpr inline auto split(std::basic_string_view<T> text, T delimiter)
+    -> std::vector<std::basic_string_view<T>>
 {
     std::vector<std::basic_string_view<T>> output {};
     split(text, delimiter, [&](auto value) {

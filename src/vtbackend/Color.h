@@ -103,7 +103,7 @@ inline double distance(RGBColor e1, RGBColor e2) noexcept
     return sqrt((((512 + rmean) * r * r) >> 8) + 4 * g * g + (((767 - rmean) * b * b) >> 8));
 }
 
-constexpr RGBColor operator"" _rgb(unsigned long long value)
+constexpr RGBColor operator""_rgb(unsigned long long value)
 {
     return RGBColor { static_cast<uint32_t>(value) };
 }

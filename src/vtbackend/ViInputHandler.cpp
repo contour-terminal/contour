@@ -46,7 +46,7 @@ namespace
         }
     };
 
-    constexpr InputMatch operator"" _key(char ch)
+    constexpr InputMatch operator""_key(char ch)
     {
         return InputMatch { .modifiers = Modifier::None, .ch = static_cast<char32_t>(ch) };
     }

@@ -122,10 +122,10 @@ jobs:
       run: |
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 18
-        sudo apt-get install clang-format-18
+        sudo ./llvm.sh 20
+        sudo apt-get install clang-format-20
     - name: "Clang-format"
-      run: find ./src/ -name "*.cpp" -o -name "*.h" | xargs clang-format-18 --Werror --dry-run
+      run: find ./src/ -name "*.cpp" -o -name "*.h" | xargs clang-format-20 --Werror --dry-run
     - name: "Check includes"
       run: ./scripts/check-includes.sh
 
@@ -157,12 +157,13 @@ jobs:
       run: |
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 18
+        sudo ./llvm.sh 20
+        sudo apt-get install clang-tidy-20
     - name: "cmake"
       run: |
         cmake --preset linux-debug -B build -G Ninja \
-        -D CMAKE_CXX_COMPILER="clang++-18" \
-        -D ENABLE_TIDY=ON -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-18
+        -D CMAKE_CXX_COMPILER="clang++-20" \
+        -D ENABLE_TIDY=ON -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-20
     - name: "build"
       run: cmake --build build
 
@@ -692,7 +693,7 @@ jobs:
         compiler:
           [
             "GCC 14",
-            "Clang 18",
+            "Clang 20",
           ]
         qt_version: [6]
         runner:
@@ -742,10 +743,12 @@ jobs:
         run: sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: Install Clang
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
-        run: sudo apt install -y clang-${{ steps.extract_matrix.outputs.CC_VERSION }} #libc++-dev libc++abi-dev
-      - name: Install Clang-Tidy
-        if: ${{ startsWith(matrix.compiler, 'Clang') }}
-        run: sudo apt install -y clang-tidy-${{ steps.extract_matrix.outputs.CC_VERSION }}
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+          sudo apt install -y clang-20
+          sudo apt install -y clang-tidy-20
       - name: "create build directory"
         run: mkdir build
       - name: CMake version

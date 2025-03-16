@@ -59,7 +59,7 @@ constexpr auto inline EatNewlineGlitch = Def { Code { "xn" }, "xenl" };
 
 namespace literals
 {
-    constexpr Code operator"" _tcap(char const* code, size_t)
+    constexpr Code operator""_tcap(char const* code, size_t)
     {
         return Code { uint16_t(code[0] << 8 | code[1]) };
     }

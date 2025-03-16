@@ -65,7 +65,7 @@ int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
 
     auto tbp = termbench::Benchmark { std::forward<Writer>(writer),
                                       options.testSizeMB,
-                                      termbench::TerminalSize { 80, 24 },
+                                      termbench::TerminalSize { .columns = 80, .lines = 24 },
                                       [&](termbench::Test const& test) {
                                           cout << std::format("Running test {} ...\n", test.name);
                                       } };
@@ -129,33 +129,46 @@ class ContourHeadlessBench: public crispy::app
     [[nodiscard]] crispy::cli::command parameterDefinition() const override
     {
         auto const perfOptions = CLI::option_list {
-            CLI::option { "size", CLI::value { 32u }, "Number of megabyte to process per test.", "MB" },
-            CLI::option { "cat", CLI::value { false }, "Enable cat-style short-line ASCII stream test." },
-            CLI::option { "long", CLI::value { false }, "Enable long-line ASCII stream test." },
-            CLI::option { "sgr", CLI::value { false }, "Enable SGR stream test." },
-            CLI::option { "binary", CLI::value { false }, "Enable binary stream test." },
+            CLI::option { .name = "size",
+                          .v = CLI::value { 32u },
+                          .helpText = "Number of megabyte to process per test.",
+                          .placeholder = "MB" },
+            CLI::option { .name = "cat",
+                          .v = CLI::value { false },
+                          .helpText = "Enable cat-style short-line ASCII stream test." },
+            CLI::option { .name = "long",
+                          .v = CLI::value { false },
+                          .helpText = "Enable long-line ASCII stream test." },
+            CLI::option { .name = "sgr", .v = CLI::value { false }, .helpText = "Enable SGR stream test." },
+            CLI::option {
+                .name = "binary", .v = CLI::value { false }, .helpText = "Enable binary stream test." },
         };
 
         return CLI::command {
-            "bench-headless",
-            "Contour Terminal Emulator " CONTOUR_VERSION_STRING
-            " - https://github.com/contour-terminal/contour/ ;-)",
-            CLI::option_list {},
-            CLI::command_list {
-                CLI::command { "help", "Shows this help and exits." },
-                CLI::command { "meta", "Shows some terminal backend meta information and exits." },
-                CLI::command { "version", "Shows the version and exits." },
-                CLI::command { "license",
-                               "Shows the license, and project URL of the used projects and Contour." },
-                CLI::command { "grid",
-                               "Performs performance tests utilizing the full grid including VT parser.",
-                               perfOptions },
-                CLI::command {
-                    "parser", "Performs performance tests utilizing the VT parser only.", perfOptions },
-                CLI::command {
-                    "pty",
-                    "Performs performance tests utilizing the underlying operating system's PTY only." },
-            }
+            .name = "bench-headless",
+            .helpText = "Contour Terminal Emulator " CONTOUR_VERSION_STRING
+                        " - https://github.com/contour-terminal/contour/ ;-)",
+            .options = CLI::option_list {},
+            .children =
+                CLI::command_list {
+                    CLI::command { .name = "help", .helpText = "Shows this help and exits." },
+                    CLI::command { .name = "meta",
+                                   .helpText = "Shows some terminal backend meta information and exits." },
+                    CLI::command { .name = "version", .helpText = "Shows the version and exits." },
+                    CLI::command {
+                        .name = "license",
+                        .helpText = "Shows the license, and project URL of the used projects and Contour." },
+                    CLI::command {
+                        .name = "grid",
+                        .helpText = "Performs performance tests utilizing the full grid including VT parser.",
+                        .options = perfOptions },
+                    CLI::command { .name = "parser",
+                                   .helpText = "Performs performance tests utilizing the VT parser only.",
+                                   .options = perfOptions },
+                    CLI::command { .name = "pty",
+                                   .helpText = "Performs performance tests utilizing the underlying "
+                                               "operating system's PTY only." },
+                }
         };
     }
 
@@ -228,7 +241,8 @@ class ContourHeadlessBench: public crispy::app
 
         // Setup benchmark
         std::string const text = createText(PtyWriteSize);
-        unique_ptr<Pty> ptyObject = createPty(PageSize { LineCount(25), ColumnCount(80) }, std::nullopt);
+        unique_ptr<Pty> ptyObject =
+            createPty(PageSize { .lines = LineCount(25), .columns = ColumnCount(80) }, std::nullopt);
         auto& pty = *ptyObject;
         auto& ptySlave = pty.slave();
         (void) ptySlave.configure();
