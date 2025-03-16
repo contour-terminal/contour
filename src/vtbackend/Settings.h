@@ -24,6 +24,12 @@ struct RefreshInterval
     explicit RefreshInterval(RefreshRate rate): value { static_cast<long long>(1000.0 / rate.value) } {}
 };
 
+enum class TabsNamingMode : uint8_t
+{
+    Indexing,
+    Title
+};
+
 /// Terminal settings, enabling hardware reset to be easier implemented.
 struct Settings
 {
@@ -90,6 +96,8 @@ struct Settings
 
     bool fromSearchIntoInsertMode = true;
     bool isInsertAfterYank = false;
+
+    TabsNamingMode tabNamingMode = TabsNamingMode::Indexing;
 
     // TODO: we could configure also the number of lines of the host writable statusline and indicator
     // statusline.

@@ -144,7 +144,7 @@ struct RectangularHighlight { CellLocation from; CellLocation to; };
 
 using HighlightRange = std::variant<LinearHighlight, RectangularHighlight>;
 
-enum class SearchEditMode : uint8_t
+enum class PromptMode : uint8_t
 {
     Disabled,
     Enabled,
@@ -176,6 +176,11 @@ class ViInputHandler: public InputHandler
         virtual void searchDone() = 0;
         virtual void searchCancel() = 0;
         virtual void updateSearchTerm(std::u32string const& text) = 0;
+
+        virtual void promptStart(std::string const& query) = 0;
+        virtual void promptDone() = 0;
+        virtual void promptCancel() = 0;
+        virtual void updatePromptText(std::string const& text) = 0;
 
         virtual void scrollViewport(ScrollOffset delta) = 0;
 
@@ -212,12 +217,28 @@ class ViInputHandler: public InputHandler
         crispy::unreachable();
     }
 
-    [[nodiscard]] bool isEditingSearch() const noexcept
-    {
-        return _searchEditMode != SearchEditMode::Disabled;
-    }
+    [[nodiscard]] bool isEditingSearch() const noexcept { return _searchEditMode != PromptMode::Disabled; }
+    [[nodiscard]] bool isEditingPrompt() const noexcept { return _promptEditMode != PromptMode::Disabled; }
 
     void startSearchExternally();
+
+    void setTabName(auto&& callback)
+    {
+        _promptText.clear();
+        _executor->promptStart("Tab name: ");
+
+        if (_viMode != ViMode::Insert)
+            _promptEditMode = PromptMode::Enabled;
+        else
+        {
+            _promptEditMode = PromptMode::ExternallyEnabled;
+            setMode(ViMode::Normal);
+            // ^^^ So that we can see the statusline (which contains the search edit field),
+            // AND it's weird to be in insert mode while typing in the prompt term anyways.
+        }
+
+        _setTabNameCallback = callback;
+    }
 
     void setSearchModeSwitch(bool enabled);
     void clearSearch();
@@ -250,14 +271,17 @@ class ViInputHandler: public InputHandler
     bool parseCount(char32_t ch, Modifiers modifiers);
     bool parseTextObject(char32_t ch, Modifiers modifiers);
     Handled handleSearchEditor(char32_t ch, Modifiers modifiers);
+    Handled handlePromptEditor(char32_t ch, Modifiers modifiers);
     Handled handleModeSwitches(char32_t ch, Modifiers modifiers);
     void startSearch();
 
     ViMode _viMode = ViMode::Normal;
 
-    SearchEditMode _searchEditMode = SearchEditMode::Disabled;
+    PromptMode _searchEditMode = PromptMode::Disabled;
+    PromptMode _promptEditMode = PromptMode::Disabled;
     bool _searchExternallyActivated = false;
     std::u32string _searchTerm;
+    std::string _promptText;
 
     std::string _pendingInput;
     CommandHandlerMap _normalMode;
@@ -265,6 +289,7 @@ class ViInputHandler: public InputHandler
     unsigned _count = 0;
     char32_t _lastChar = 0;
     gsl::not_null<Executor*> _executor;
+    std::optional<std::function<void(std::string)>> _setTabNameCallback { std::nullopt };
 };
 
 } // namespace vtbackend

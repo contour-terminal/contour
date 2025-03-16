@@ -813,6 +813,8 @@ constexpr StringLiteral InputMappingsConfig {
     "p.\n"
     "{comment} - WriteScreen       Writes VT sequence in `chars` member to the screen (bypassing the "
     "application).\n"
+    "{comment} - SetTabName        Ask the user to assign a name to the active tab.\n"
+    "\n"
     "input_mapping:\n"
 };
 

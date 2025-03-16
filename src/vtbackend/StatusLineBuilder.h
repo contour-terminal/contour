@@ -43,6 +43,7 @@ namespace StatusLineDefinitions
     {
         std::optional<RGBColor> activeColor;
         std::optional<RGBColor> activeBackground;
+        std::optional<std::string> separator;
     };
 
     using Item = std::variant<
