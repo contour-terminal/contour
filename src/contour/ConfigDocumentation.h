@@ -24,7 +24,7 @@ struct DocumentationEntry
 {
 };
 
-constexpr StringLiteral Dummy { "{comment} fmt formatted doc {} \n" };
+constexpr StringLiteral Dummy { "{comment} fmt formatted doc {}\n" };
 
 constexpr StringLiteral ShellConfig {
     "{comment} You can override the process to be started inside the terminal."
@@ -142,9 +142,9 @@ constexpr StringLiteral InsertAfterYankConfig {
 };
 
 constexpr StringLiteral CopyLastMarkRangeOffsetConfig {
-    "{comment} Advanced value that is useful when CopyPreviousMarkRange is used \n"
-    "{comment} with multiline-prompts. This offset value is being added to the \n"
-    "{comment} current cursor's line number minus 1 (i.e. the line above the current cursor). \n"
+    "{comment} Advanced value that is useful when CopyPreviousMarkRange is used\n"
+    "{comment} with multiline-prompts. This offset value is being added to the\n"
+    "{comment} current cursor's line number minus 1 (i.e. the line above the current cursor).\n"
     "copy_last_mark_range_offset: {}\n"
     "\n"
 };
@@ -168,8 +168,8 @@ constexpr StringLiteral MarginsConfig {
 
 constexpr StringLiteral TerminalSizeConfig { "{comment}Determines the initial terminal size in  characters\n"
                                              "terminal_size:\n"
-                                             "    columns: {} \n"
-                                             "    lines: {} \n"
+                                             "    columns: {}\n"
+                                             "    lines: {}\n"
                                              "\n" };
 
 constexpr StringLiteral TerminalIdConfig {
@@ -325,7 +325,7 @@ constexpr StringLiteral PermissionsConfig {
 
     "\n"
     "{comment} Some VT sequences should need access permissions.\n"
-    "{comment} \n"
+    "{comment}\n"
     "{comment}  These can be to:\n"
     "{comment}  - allow     Allows the given functionality\n"
     "{comment}  - deny      Denies the given functionality\n"
@@ -476,7 +476,6 @@ constexpr StringLiteral BellConfig {
     "    sound: {}\n"
     "\n"
     "    {comment} Bell volume, a normalized value between 0.0 (silent) and 1.0 (loudest).\n"
-    "    {comment} Default: 1.0\n"
     "    volume: {}\n"
     "\n"
     "    {comment} If this boolean is true, a window alert will "
@@ -501,82 +500,81 @@ constexpr StringLiteral FrozenDecModeConfig {
     "{comment}         2026: false\n"
     "{comment}         2027: true\n"
     "{comment}\n"
-    "{comment} Default: (empty object)\n"
     "{comment}frozen_dec_modes:\n"
     "\n"
 };
 
 constexpr StringLiteral LiveConfig {
     "{comment} Determines whether the instance is reloading the configuration files "
-    "whenever it is changing or not. \n"
-    "live_config: {} \n"
+    "whenever it is changing or not.\n"
+    "live_config: {}\n"
     "\n"
 };
 
 constexpr StringLiteral PlatformPluginConfig {
-    "{comment} Overrides the auto-detected platform plugin to be loaded. \n"
-    "{comment} \n"
+    "{comment} Overrides the auto-detected platform plugin to be loaded.\n"
+    "{comment}\n"
     "{comment} Possible (incomplete list of) values are:\n"
     "{comment} - auto        The platform will be auto-detected.\n"
     "{comment} - xcb         Uses XCB plugin (for X11 environment).\n"
     "{comment} - cocoa       Used to be run on Mac OS/X.\n"
     "{comment} - direct2d    Windows platform plugin using Direct2D.\n"
     "{comment} - winrt       Windows platform plugin using WinRT.\n"
-    "platform_plugin: {} \n"
+    "platform_plugin: {}\n"
     "\n"
 };
 
 constexpr StringLiteral RendererConfig {
     "renderer:\n"
-    "    {comment} Backend to use for rendering the terminal onto the screen \n"
-    "    {comment} Possible values are: \n"
-    "    {comment} - default     Uses the default rendering option as decided by the terminal. \n"
-    "    {comment} - software    Uses software-based rendering. \n"
-    "    {comment} - OpenGL      Use (possibly) hardware accelerated OpenGL \n"
-    "    backend: {} \n"
+    "    {comment} Backend to use for rendering the terminal onto the screen\n"
+    "    {comment} Possible values are:\n"
+    "    {comment} - default     Uses the default rendering option as decided by the terminal.\n"
+    "    {comment} - software    Uses software-based rendering.\n"
+    "    {comment} - OpenGL      Use (possibly) hardware accelerated OpenGL\n"
+    "    backend: {}\n"
     "\n"
-    "    {comment} Enables/disables the use of direct-mapped texture atlas tiles for \n"
-    "    {comment} the most often used ones (US-ASCII, cursor shapes, underline styles) \n"
-    "    {comment} You most likely do not want to touch this. \n"
-    "    {comment} \n"
-    "    tile_direct_mapping: {} \n"
+    "    {comment} Enables/disables the use of direct-mapped texture atlas tiles for\n"
+    "    {comment} the most often used ones (US-ASCII, cursor shapes, underline styles)\n"
+    "    {comment} You most likely do not want to touch this.\n"
+    "    {comment}\n"
+    "    tile_direct_mapping: {}\n"
     "\n"
-    "    {comment} Number of hashtable slots to map to the texture tiles. \n"
-    "    {comment} Larger values may increase performance, but too large may also decrease. \n"
-    "    {comment} This value is rounded up to a value equal to the power of two. \n"
-    "    {comment} \n"
-    "    tile_hashtable_slots: {} \n"
+    "    {comment} Number of hashtable slots to map to the texture tiles.\n"
+    "    {comment} Larger values may increase performance, but too large may also decrease.\n"
+    "    {comment} This value is rounded up to a value equal to the power of two.\n"
+    "    {comment}\n"
+    "    tile_hashtable_slots: {}\n"
     "\n"
-    "    {comment} Number of tiles that must fit at lest into the texture atlas. \n"
-    "    {comment} \n"
-    "    {comment} This does not include direct mapped tiles (US-ASCII glyphs, \n"
-    "    {comment} cursor shapes and decorations), if tile_direct_mapping is set to true). \n"
-    "    {comment} \n"
-    "    {comment} Value must be at least as large as grid cells available in the terminal view. \n"
-    "    {comment} This value is automatically adjusted if too small. \n"
-    "    {comment} \n"
-    "    tile_cache_count: {} \n"
+    "    {comment} Number of tiles that must fit at lest into the texture atlas.\n"
+    "    {comment}\n"
+    "    {comment} This does not include direct mapped tiles (US-ASCII glyphs,\n"
+    "    {comment} cursor shapes and decorations), if tile_direct_mapping is set to true).\n"
+    "    {comment}\n"
+    "    {comment} Value must be at least as large as grid cells available in the terminal view.\n"
+    "    {comment} This value is automatically adjusted if too small.\n"
+    "    {comment}\n"
+    "    tile_cache_count: {}\n"
     "\n"
 };
 
-constexpr StringLiteral PTYReadBufferSizeConfig { "{comment} Default PTY read buffer size. \n"
-                                                  "{comment} \n"
-                                                  "{comment} This is an advance option. Use with care! \n"
-                                                  "read_buffer_size: {} \n"
+constexpr StringLiteral PTYReadBufferSizeConfig { "{comment} Default PTY read buffer size.\n"
+                                                  "{comment}\n"
+                                                  "{comment} This is an advance option. Use with care!\n"
+                                                  "read_buffer_size: {}\n"
                                                   "\n" };
 
 constexpr StringLiteral PTYBufferObjectSizeConfig {
-    "{comment} Size in bytes per PTY Buffer Object. \n "
-    "{comment} \n"
-    "{comment} This is an advanced option of an internal storage. Only change with care! \n"
-    "pty_buffer_size: {} \n"
+    "{comment} Size in bytes per PTY Buffer Object.\n"
+    "{comment}\n"
+    "{comment} This is an advanced option of an internal storage. Only change with care!\n"
+    "pty_buffer_size: {}\n"
     "\n"
 };
 
 constexpr StringLiteral ReflowOnResizeConfig {
     "\n"
-    "{comment} Whether or not to reflow the lines on terminal resize events. \n"
-    "reflow_on_resize: {} \n"
+    "{comment} Whether or not to reflow the lines on terminal resize events.\n"
+    "reflow_on_resize: {}\n"
 };
 
 constexpr StringLiteral ColorSchemesConfig {
@@ -603,56 +601,56 @@ constexpr StringLiteral ProfilesConfig {
     "\n"
 };
 
-constexpr StringLiteral WordDelimitersConfig { "{comment} Word delimiters when selecting word-wise. \n"
-                                               "word_delimiters: \"{}\" \n"
+constexpr StringLiteral WordDelimitersConfig { "{comment} Word delimiters when selecting word-wise.\n"
+                                               "word_delimiters: \"{}\"\n"
                                                "\n" };
 
 constexpr StringLiteral ExtendedWordDelimitersConfig {
-    "{comment} Word delimiters for second selection when selecting word-wise. \n"
-    "{comment} Setting allows you to set less strict boundaried between words, for example \n"
-    "{comment} if you want to select whole ip address during selection set delimieters to \" \" (space) \n"
-    "extended_word_delimiters: \"{}\" \n"
+    "{comment} Word delimiters for second selection when selecting word-wise.\n"
+    "{comment} Setting allows you to set less strict boundaried between words, for example\n"
+    "{comment} if you want to select whole ip address during selection set delimieters to \" \" (space)\n"
+    "extended_word_delimiters: \"{}\"\n"
     "\n"
 };
 
 constexpr StringLiteral BypassMouseProtocolModifiersConfig {
-    "{comment} This keyboard modifier can be used to bypass the terminal's mouse protocol, \n"
-    "{comment} which can be used to select screen content even if the an application \n"
-    "{comment} mouse protocol has been activated (Default: Shift). \n"
-    "{comment} \n"
-    "{comment} The same modifier values apply as with input modifiers (see below). \n"
-    "bypass_mouse_protocol_modifier: {} \n"
+    "{comment} This keyboard modifier can be used to bypass the terminal's mouse protocol,\n"
+    "{comment} which can be used to select screen content even if the an application\n"
+    "{comment} mouse protocol has been activated (Default: Shift).\n"
+    "{comment}\n"
+    "{comment} The same modifier values apply as with input modifiers (see below).\n"
+    "bypass_mouse_protocol_modifier: {}\n"
     "\n"
 };
 
 constexpr StringLiteral OnMouseSelectionConfig {
-    "{comment} Selects an action to perform when a text selection has been made. \n"
-    "{comment} \n"
-    "{comment} Possible values are: \n"
-    "{comment} \n"
-    "{comment} - None                        Does nothing \n"
-    "{comment} - CopyToClipboard             Copies the selection to the primary clipboard. \n"
-    "{comment} - CopyToSelectionClipboard    Copies the selection to the selection clipboard. \n"
-    "{comment}This is not supported on all platforms. \n"
-    "{comment} \n"
-    "on_mouse_select: {} \n"
+    "{comment} Selects an action to perform when a text selection has been made.\n"
+    "{comment}\n"
+    "{comment} Possible values are:\n"
+    "{comment}\n"
+    "{comment} - None                        Does nothing\n"
+    "{comment} - CopyToClipboard             Copies the selection to the primary clipboard.\n"
+    "{comment} - CopyToSelectionClipboard    Copies the selection to the selection clipboard.\n"
+    "{comment}This is not supported on all platforms.\n"
+    "{comment}\n"
+    "on_mouse_select: {}\n"
     "\n"
 };
 
 constexpr StringLiteral MouseBlockSelectionModifiersConfig {
-    "{comment} Modifier to be pressed in order to initiate block-selection \n"
-    "{comment} using the left mouse button. \n"
-    "{comment} \n"
-    "{comment} This is usually the Control modifier, but on OS/X that is not possible, \n"
-    "{comment} so Alt or Meta would be recommended instead. \n"
-    "{comment} \n"
-    "{comment} Supported modifiers: \n"
-    "{comment} - Alt \n"
-    "{comment} - Control \n"
-    "{comment} - Shift \n"
-    "{comment} - Meta \n"
-    "{comment} \n"
-    "mouse_block_selection_modifier: {} \n"
+    "{comment} Modifier to be pressed in order to initiate block-selection\n"
+    "{comment} using the left mouse button.\n"
+    "{comment}\n"
+    "{comment} This is usually the Control modifier, but on OS/X that is not possible,\n"
+    "{comment} so Alt or Meta would be recommended instead.\n"
+    "{comment}\n"
+    "{comment} Supported modifiers:\n"
+    "{comment} - Alt\n"
+    "{comment} - Control\n"
+    "{comment} - Shift\n"
+    "{comment} - Meta\n"
+    "{comment}\n"
+    "mouse_block_selection_modifier: {}\n"
     "\n"
 };
 
@@ -820,31 +818,31 @@ constexpr StringLiteral InputMappingsConfig {
 
 constexpr StringLiteral SpawnNewProcessConfig {
     "\n"
-    "{comment} Flag to determine whether to spawn new process or not when creating new terminal \n"
-    "spawn_new_process: {} \n"
+    "{comment} Flag to determine whether to spawn new process or not when creating new terminal\n"
+    "spawn_new_process: {}\n"
 };
 
 constexpr unsigned DefaultEarlyExitThreshold = 5u;
 constexpr StringLiteral EarlyExitThresholdConfig { "\n"
-                                                   "{comment} Time in seconds to check for early threshold \n"
-                                                   "early_exit_threshold: {} \n" };
+                                                   "{comment} Time in seconds to check for early threshold\n"
+                                                   "early_exit_threshold: {}\n" };
 
 constexpr StringLiteral ImagesConfig {
     "images:\n"
-    "    {comment} Enable or disable sixel scrolling (SM/RM ?80 default) \n"
-    "    sixel_scrolling: {} \n"
+    "    {comment} Enable or disable sixel scrolling (SM/RM ?80 default)\n"
+    "    sixel_scrolling: {}\n"
     "\n"
     "    {comment} Configures the maximum number of color registers available when rendering Sixel "
-    "graphics. \n"
-    "    sixel_register_count: {} \n"
+    "graphics.\n"
+    "    sixel_register_count: {}\n"
     "\n"
     "    {comment} maximum width in pixels of an image to be accepted (0 defaults to system screen pixel "
     "width) "
     "\n"
-    "    max_width: {} \n"
+    "    max_width: {}\n"
     "    {comment} maximum height in pixels of an image to be accepted (0 defaults to system screen pixel "
-    "height) \n"
-    "    max_height: {} \n"
+    "height)\n"
+    "    max_height: {}\n"
 };
 
 constexpr StringLiteral ExperimentalFeaturesConfig {
@@ -1585,7 +1583,7 @@ constexpr StringLiteral BackgroundWeb {
 constexpr StringLiteral ColorsWeb {
 
     "section in the configuration file allows you to specify the colorscheme to use for the terminal. You "
-    "can use one of the predefined color palettes as a setting for colors entry. \n"
+    "can use one of the predefined color palettes as a setting for colors entry.\n"
     "List of predefined colorschemes: `contour`(default colors), `monokai`, `one-light`, `one-dark`, "
     "`gruvbox-light`, `gruvbox-dark`, `solarized-light`, `solarized-dark`, `papercolor-light`, "
     "`papercolor-dark`.\n"
