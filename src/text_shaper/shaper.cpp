@@ -42,8 +42,8 @@ namespace
                 //  calculate area average
                 std::array<unsigned int, NumComponents> components { {} };
                 unsigned int count = 0;
-                for (auto const y: ::ranges::views::iota(i * factor,
-                                                   min((i + 1) * factor, unbox<size_t>(inputSize.height))))
+                for (auto const y: ::ranges::views::iota(
+                         i * factor, min((i + 1) * factor, unbox<size_t>(inputSize.height))))
                 {
                     uint8_t const* p =
                         inputBitmap.data() + (y * unbox<size_t>(inputSize.width) * 4) + (j * factor * 4);

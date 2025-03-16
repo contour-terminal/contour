@@ -5,3 +5,4 @@ copy'n'paste
 lowerCamelCase
 macOS
 zypper
+lazygit
