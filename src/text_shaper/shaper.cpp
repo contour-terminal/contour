@@ -30,29 +30,37 @@ namespace
                                      vector<uint8_t>& outputBitmap) noexcept
     {
         outputBitmap.resize(outputSize.area() * NumComponents);
-        uint8_t* d = outputBitmap.data();
-        for (size_t i = 0, sr = 0; i < *outputSize.height; i++, sr += factor)
+
+        auto index = [&](size_t i, size_t j, size_t component) {
+            return 4 * i * unbox(outputSize.width) + j * 4 + component;
+        };
+
+        for (auto const i: ::ranges::views::iota(size_t { 0 }, unbox(outputSize.height)))
         {
-            for (size_t j = 0, sc = 0; j < *outputSize.width; j++, sc += factor, d += 4)
+            for (auto const j: ::ranges::views::iota(size_t { 0 }, unbox(outputSize.width)))
             {
-                // calculate area average
+                //  calculate area average
                 std::array<unsigned int, NumComponents> components { {} };
                 unsigned int count = 0;
-                for (size_t y = sr; y < min(sr + factor, unbox<size_t>(inputSize.height)); y++)
+                for (auto const y: ::ranges::views::iota(
+                         i * factor, min((i + 1) * factor, unbox<size_t>(inputSize.height))))
                 {
                     uint8_t const* p =
-                        inputBitmap.data() + (y * unbox<size_t>(inputSize.width) * 4) + (sc * 4);
-                    for (auto x = sc; x < min(sc + factor, unbox<size_t>(inputSize.width)); x++, count++)
+                        inputBitmap.data() + (y * unbox<size_t>(inputSize.width) * 4) + (j * factor * 4);
+                    for ([[maybe_unused]] auto const _: ::ranges::views::iota(
+                             j * factor, min((j + 1) * factor, unbox<size_t>(inputSize.width))))
                     {
-                        for (size_t i = 0; i < NumComponents; ++i)
-                            components[i] += *(p++);
+                        ++count;
+                        for (auto const componentIndex: ::ranges::views::iota(size_t { 0 }, NumComponents))
+                            components[componentIndex] += *(p++);
                     }
                 }
 
                 if (count)
                 {
-                    for (size_t i = 0; i < NumComponents; ++i)
-                        d[i] = static_cast<uint8_t>(components[i] / count);
+                    for (auto const componentIndex: ::ranges::views::iota(size_t { 0 }, NumComponents))
+                        outputBitmap[index(i, j, componentIndex)] =
+                            static_cast<uint8_t>(components[componentIndex] / count);
                 }
             }
         }
@@ -85,7 +93,7 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::
                     ratio,
                     factor);
 
-    vector<uint8_t> dest;
+    vector<uint8_t> dest {};
     switch (bitmap.format)
     {
         case bitmap_format::rgba:
@@ -98,35 +106,6 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::
             scaleDownExplicit<1>(bitmap.bitmap, bitmap.bitmapSize, newSize, factor, dest);
             break;
     }
-
-    // for (unsigned i = 0, sr = 0; i < *newSize.height; i++, sr += factor)
-    // {
-    //     for (unsigned j = 0, sc = 0; j < *newSize.width; j++, sc += factor, d += 4)
-    //     {
-    //         // calculate area average
-    //         unsigned int r = 0, g = 0, b = 0, a = 0, count = 0;
-    //         for (unsigned y = sr; y < min(sr + factor, bitmap.bitmapSize.height.as<unsigned>()); y++)
-    //         {
-    //             uint8_t const* p = bitmap.bitmap.data() + (y * *bitmap.bitmapSize.width * 4) + sc * 4;
-    //             for (unsigned x = sc; x < min(sc + factor, bitmap.bitmapSize.width.as<unsigned>());
-    //                  x++, count++)
-    //             {
-    //                 b += *(p++);
-    //                 g += *(p++);
-    //                 r += *(p++);
-    //                 a += *(p++);
-    //             }
-    //         }
-    //
-    //         if (count)
-    //         {
-    //             d[0] = static_cast<uint8_t>(b / count);
-    //             d[1] = static_cast<uint8_t>(g / count);
-    //             d[2] = static_cast<uint8_t>(r / count);
-    //             d[3] = static_cast<uint8_t>(a / count);
-    //         }
-    //     }
-    // }
 
     auto output = rasterized_glyph {};
     output.format = bitmap.format;
