@@ -27,7 +27,7 @@ struct DocumentationEntry
 constexpr StringLiteral Dummy { "{comment} fmt formatted doc {}\n" };
 
 constexpr StringLiteral ShellConfig {
-    "{comment} You can override the process to be started inside the terminal."
+    "{comment} You can override the process to be started inside the terminal.\n"
     "{comment} If nothing is specified, the users' default login shell will be used.\n"
     "{comment} But you may as well log in to a remote host.\n"
     "shell: {}\n"
