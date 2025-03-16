@@ -32,7 +32,7 @@ namespace
         outputBitmap.resize(outputSize.area() * NumComponents);
 
         auto index = [&](size_t i, size_t j, size_t component) {
-            return 4 * i * unbox(outputSize.width) + j * 4 + component;
+            return (4 * i * unbox(outputSize.width)) + (j * 4) + component;
         };
 
         for (auto const i: ::ranges::views::iota(size_t { 0 }, unbox(outputSize.height)))

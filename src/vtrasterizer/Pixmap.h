@@ -22,7 +22,7 @@ struct Ratio1
 {
     double value;
 };
-constexpr Ratio1 operator"" _th(unsigned long long ratio)
+constexpr Ratio1 operator""_th(unsigned long long ratio)
 {
     return Ratio1 { static_cast<double>(ratio) };
 }
