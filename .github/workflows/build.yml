@@ -1002,7 +1002,7 @@ jobs:
         if: ${{ needs.package_for_Ubuntu.result != 'success' && needs.package_for_Ubuntu.result != 'skipped' }}
         run: exit 1
       - name: "Delete artifact: contour-ubuntu2404-tests"
-        uses: geekyeggo/delete-artifact@v2
+        uses: geekyeggo/delete-artifact@v5
         with:
           name: contour-ubuntu2404-tests
   # }}}
