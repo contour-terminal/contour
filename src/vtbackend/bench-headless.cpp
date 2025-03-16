@@ -65,7 +65,7 @@ int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
 
     auto tbp = termbench::Benchmark { std::forward<Writer>(writer),
                                       options.testSizeMB,
-                                      termbench::TerminalSize { .columns=80, .lines=24 },
+                                      termbench::TerminalSize { .columns = 80, .lines = 24 },
                                       [&](termbench::Test const& test) {
                                           cout << std::format("Running test {} ...\n", test.name);
                                       } };

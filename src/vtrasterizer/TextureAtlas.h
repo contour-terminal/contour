@@ -541,8 +541,8 @@ constexpr bool TextureAtlas<Metadata>::contains(crispy::strong_hash const& id) c
 
 template <typename Metadata>
 template <typename CreateTileDataFn>
-auto TextureAtlas<Metadata>::constructTile(CreateTileDataFn createTileData,
-                                           uint32_t entryIndex) -> std::optional<TileAttributes<Metadata>>
+auto TextureAtlas<Metadata>::constructTile(CreateTileDataFn createTileData, uint32_t entryIndex)
+    -> std::optional<TileAttributes<Metadata>>
 {
     Require(1 <= entryIndex && entryIndex <= _tileCache->capacity());
     auto const tileIndex = _atlasProperties.directMappingCount + entryIndex;

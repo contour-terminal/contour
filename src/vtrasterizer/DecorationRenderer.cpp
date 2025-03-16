@@ -112,8 +112,8 @@ void DecorationRenderer::renderCell(vtbackend::RenderCell const& cell)
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-auto DecorationRenderer::createTileData(Decorator decoration,
-                                        atlas::TileLocation tileLocation) -> TextureAtlas::TileCreateData
+auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocation tileLocation)
+    -> TextureAtlas::TileCreateData
 {
     auto const width = _gridMetrics.cellSize.width;
 

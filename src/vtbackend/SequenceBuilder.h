@@ -191,7 +191,7 @@ class SequenceBuilder
 };
 
 template <SequenceHandlerConcept Handler, InstructionCounterConcept IncrementInstructionCounter>
-SequenceBuilder(Handler&,
-                IncrementInstructionCounter) -> SequenceBuilder<Handler, IncrementInstructionCounter>;
+SequenceBuilder(Handler&, IncrementInstructionCounter)
+    -> SequenceBuilder<Handler, IncrementInstructionCounter>;
 
 } // namespace vtbackend
