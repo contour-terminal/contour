@@ -816,12 +816,6 @@ constexpr StringLiteral InputMappingsConfig {
     "input_mapping:\n"
 };
 
-constexpr StringLiteral SpawnNewProcessConfig {
-    "\n"
-    "{comment} Flag to determine whether to spawn new process or not when creating new terminal\n"
-    "spawn_new_process: {}\n"
-};
-
 constexpr unsigned DefaultEarlyExitThreshold = 5u;
 constexpr StringLiteral EarlyExitThresholdConfig { "\n"
                                                    "{comment} Time in seconds to check for early threshold\n"
@@ -1089,9 +1083,6 @@ constexpr StringLiteral EarlyExitThresholdWeb {
     "threshold, additional message will be printed that contour terminated too early and additional key "
     "press is required to close contour."
 };
-
-constexpr StringLiteral SpawnNewProcessWeb { "flag determines whether a new process should be spawned when "
-                                             "creating a new terminal. The default value is `false`." };
 
 constexpr StringLiteral ReflowOnResizeWeb {
     "option controls whether or not the lines in the terminal should be reflowed when a resize event occurs. "
@@ -1787,7 +1778,6 @@ using OnMouseSelection = DocumentationEntry<OnMouseSelectionConfig, OnMouseSelec
 using MouseBlockSelectionModifiers =
     DocumentationEntry<MouseBlockSelectionModifiersConfig, MouseBlockSelectionModifiersWeb>;
 using InputMappings = DocumentationEntry<InputMappingsConfig, Dummy>;
-using SpawnNewProcess = DocumentationEntry<SpawnNewProcessConfig, SpawnNewProcessWeb>;
 using EarlyExitThreshold = DocumentationEntry<EarlyExitThresholdConfig, EarlyExitThresholdWeb>;
 using Images = DocumentationEntry<ImagesConfig, ImagesWeb>;
 using ExperimentalFeatures = DocumentationEntry<ExperimentalFeaturesConfig, StringLiteral { "" }>;

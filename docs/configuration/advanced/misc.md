@@ -25,17 +25,6 @@ Default: 16384
     read_buffer_size: 16384
 
 
-## New-Terminal spawn behaviour
-
-This flag determines whether to spawn new process or not when creating new terminal
-
-If this option is set to `false`, then simply a new terminal window is being
-created rather thena fully creating a new process.
-
-Default: `false`
-
-    spawn_new_process: false
-
 # Text reflow on resize
 
 Whether or not to reflow the lines on terminal resize events.

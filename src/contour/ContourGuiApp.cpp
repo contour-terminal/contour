@@ -461,7 +461,8 @@ int ContourGuiApp::terminalGuiAction()
     // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
 
     // Spawn initial window.
-    newWindow();
+    _qmlEngine->load(resolveResource("ui/main.qml"));
+    _sessionManager.display = _sessionManager.getSession()->display();
 
     if (auto const& bell = config().profile().bell.value().sound; bell == "off")
     {
@@ -556,12 +557,6 @@ void ContourGuiApp::ensureTermInfoFile()
     auto const sandboxTerminfoFile = fs::path("/app/share/terminfo/c/contour");
     if (!fs::is_regular_file(hostTerminfoBaseDirectory / "contour"))
         fs::copy_file(sandboxTerminfoFile, hostTerminfoBaseDirectory / "contour");
-}
-
-void ContourGuiApp::newWindow()
-{
-    _qmlEngine->load(resolveResource("ui/main.qml"));
-    _sessionManager.display = _sessionManager.getSession()->display();
 }
 
 void ContourGuiApp::showNotification(std::string_view title, std::string_view content)

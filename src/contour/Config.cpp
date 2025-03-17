@@ -353,7 +353,6 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("images", c.images);
         loadFromEntry("live_config", c.live);
         loadFromEntry("early_exit_threshold", c.earlyExitThreshold);
-        loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("experimental", c.experimentalFeatures);
         loadFromEntry("bypass_mouse_protocol_modifier", c.bypassMouseProtocolModifiers);

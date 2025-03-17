@@ -107,6 +107,7 @@
     <release version="0.6.2" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Removes `spawn_new_process` option to spawn always in separate process (#1725)</li>
           <li>Fixes `CancelSelection` default binding with escape (#1710)</li>
           <li>Fixes `CreateTab` to sometimes spawn more than one tab (#1695)</li>
           <li>Fixes crash using Chinese IME (#1707)</li>

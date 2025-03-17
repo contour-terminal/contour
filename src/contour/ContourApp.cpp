@@ -302,7 +302,6 @@ word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
 read_buffer_size: 16384
 pty_buffer_size: 1048576
 default_profile: main
-spawn_new_process: false
 reflow_on_resize: true
 bypass_mouse_protocol_modifier: Shift
 mouse_block_selection_modifier: Control

@@ -1635,17 +1635,8 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
         return "."s;
     }();
 
-    if (_config.spawnNewProcess.value())
-    {
-        sessionLog()("spawning new process");
-        ::contour::spawnNewTerminal(_app.programPath(), _config.configFile.generic_string(), profileName, wd);
-    }
-    else
-    {
-        sessionLog()("spawning new in-process window");
-        _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
-        _app.newWindow();
-    }
+    sessionLog()("spawning new process");
+    ::contour::spawnNewTerminal(_app.programPath(), _config.configFile.generic_string(), profileName, wd);
 }
 
 void TerminalSession::activateProfile(string const& newProfileName)

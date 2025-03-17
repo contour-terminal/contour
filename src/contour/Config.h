@@ -759,7 +759,6 @@ struct Config
     ConfigEntry<unsigned, documentation::EarlyExitThreshold> earlyExitThreshold {
         documentation::DefaultEarlyExitThreshold
     };
-    ConfigEntry<bool, documentation::SpawnNewProcess> spawnNewProcess { false };
     ConfigEntry<bool, documentation::ReflowOnResize> reflowOnResize { true };
     ConfigEntry<vtbackend::Modifiers, documentation::BypassMouseProtocolModifiers>
         bypassMouseProtocolModifiers { vtbackend::Modifier::Shift };
