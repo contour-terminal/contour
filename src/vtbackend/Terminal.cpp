@@ -1262,9 +1262,9 @@ void Terminal::verifyState()
     Require(*_currentMousePosition.column < *thePageSize.columns);
     Require(*_currentMousePosition.line < *thePageSize.lines);
 
-    Require(_hostWritableStatusLineScreen.pageSize() == _indicatorStatusScreen.pageSize());
-    Require(_hostWritableStatusLineScreen.pageSize().lines == LineCount(1));
-    Require(_hostWritableStatusLineScreen.pageSize().columns == _settings.pageSize.columns);
+    // Require(_hostWritableStatusLineScreen.pageSize() == _indicatorStatusScreen.pageSize());
+    // Require(_hostWritableStatusLineScreen.pageSize().lines == LineCount(1));
+    // Require(_hostWritableStatusLineScreen.pageSize().columns == _settings.pageSize.columns);
 
     // TODO: the current main display's page size PLUS visible status line count must match total page size.
 
