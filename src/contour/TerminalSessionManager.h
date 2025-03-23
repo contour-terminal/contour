@@ -7,10 +7,17 @@
 #include <QtCore/QAbstractListModel>
 #include <QtQml/QQmlEngine>
 
+#include <unordered_map>
 #include <vector>
 
 namespace contour
 {
+
+struct DisplayState
+{
+    TerminalSession* activeSession = nullptr;
+    TerminalSession* previousActiveSession = nullptr;
+};
 
 /**
  * Manages terminal sessions.
@@ -50,8 +57,9 @@ class TerminalSessionManager: public QAbstractListModel
     [[nodiscard]] int count() const noexcept { return static_cast<int>(_sessions.size()); }
 
     void updateColorPreference(vtbackend::ColorPreference const& preference);
-    display::TerminalDisplay* display = nullptr;
-    TerminalSession* getSession() { return _sessions[0]; }
+
+    display::TerminalDisplay* activeDisplay = nullptr;
+    void FocusOnDisplay(display::TerminalDisplay* display) { activeDisplay = display; }
 
     void update() { updateStatusLine(); }
 
@@ -66,32 +74,33 @@ class TerminalSessionManager: public QAbstractListModel
         return std::nullopt;
     }
 
-    [[nodiscard]] auto getCurrentSessionIndex() const noexcept
+    [[nodiscard]] auto getCurrentSessionIndex() noexcept
     {
-        return getSessionIndexOf(_activeSession).value();
+        return getSessionIndexOf(_displayStates[activeDisplay].activeSession).value();
     }
 
     void updateStatusLine()
     {
-        if (!_activeSession)
+        if (!_displayStates[activeDisplay].activeSession)
             return;
-        _activeSession->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
-            .tabs = std::ranges::transform_view(_sessions,
-                                                [](auto* session) {
-                                                    return vtbackend::TabsInfo::Tab {
-                                                        .name = session->name(),
-                                                        .color = vtbackend::RGBColor { 0, 0, 0 },
-                                                    };
-                                                })
-                    | ranges::to<std::vector>(),
-            .activeTabPosition = 1 + getSessionIndexOf(_activeSession).value_or(0),
-        });
+        _displayStates[activeDisplay].activeSession->terminal().setGuiTabInfoForStatusLine(
+            vtbackend::TabsInfo {
+                .tabs = std::ranges::transform_view(_sessions,
+                                                    [](auto* session) {
+                                                        return vtbackend::TabsInfo::Tab {
+                                                            .name = session->name(),
+                                                            .color = vtbackend::RGBColor { 0, 0, 0 },
+                                                        };
+                                                    })
+                        | ranges::to<std::vector>(),
+                .activeTabPosition =
+                    1 + getSessionIndexOf(_displayStates[activeDisplay].activeSession).value_or(0),
+            });
     }
 
     ContourGuiApp& _app;
     std::chrono::seconds _earlyExitThreshold;
-    TerminalSession* _activeSession = nullptr;
-    TerminalSession* _previousActiveSession = nullptr;
+    std::unordered_map<display::TerminalDisplay*, DisplayState> _displayStates;
     std::vector<TerminalSession*> _sessions;
 };
 
