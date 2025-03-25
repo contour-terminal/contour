@@ -831,7 +831,6 @@ void TerminalDisplay::focusInEvent(QFocusEvent* event)
 
     if (_session)
     {
-        managerLog()("Setting active display to {}", (void*) this);
         _session->getTerminalManager()->FocusOnDisplay(this);
         _session->sendFocusInEvent(); // TODO: paint with "normal" colors
     }
