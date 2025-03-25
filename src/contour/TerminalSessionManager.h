@@ -13,12 +13,6 @@
 namespace contour
 {
 
-struct DisplayState
-{
-    TerminalSession* activeSession = nullptr;
-    TerminalSession* previousActiveSession = nullptr;
-};
-
 /**
  * Manages terminal sessions.
  */
@@ -41,7 +35,7 @@ class TerminalSessionManager: public QAbstractListModel
     void switchToTabLeft();
     void switchToTabRight();
     void switchToTab(int position);
-    void closeTab();
+    Q_INVOKABLE void closeTab();
     void moveTabTo(int position);
     void moveTabToLeft(TerminalSession* session);
     void moveTabToRight(TerminalSession* session);
@@ -49,6 +43,7 @@ class TerminalSessionManager: public QAbstractListModel
     void setSession(size_t index);
 
     void removeSession(TerminalSession&);
+    void currentSessionIsTerminated();
 
     Q_INVOKABLE [[nodiscard]] QVariant data(const QModelIndex& index,
                                             int role = Qt::DisplayRole) const override;
@@ -59,13 +54,15 @@ class TerminalSessionManager: public QAbstractListModel
     void updateColorPreference(vtbackend::ColorPreference const& preference);
 
     display::TerminalDisplay* activeDisplay = nullptr;
-    void FocusOnDisplay(display::TerminalDisplay* display) { activeDisplay = display; }
+    void FocusOnDisplay(display::TerminalDisplay* display);
 
     void update() { updateStatusLine(); }
 
   private:
     contour::TerminalSession* activateSession(TerminalSession* session, bool isNewSession = false);
     std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> cwd);
+
+    void tryFindSessionForDisplayOrClose();
 
     [[nodiscard]] std::optional<std::size_t> getSessionIndexOf(TerminalSession* session) const noexcept
     {
@@ -76,31 +73,30 @@ class TerminalSessionManager: public QAbstractListModel
 
     [[nodiscard]] auto getCurrentSessionIndex() noexcept
     {
-        return getSessionIndexOf(_displayStates[activeDisplay].activeSession).value();
+        // TODO cache this value
+        return getSessionIndexOf(_displayStates[activeDisplay]).value();
     }
 
     void updateStatusLine()
     {
-        if (!_displayStates[activeDisplay].activeSession)
+        if (!_displayStates[activeDisplay])
             return;
-        _displayStates[activeDisplay].activeSession->terminal().setGuiTabInfoForStatusLine(
-            vtbackend::TabsInfo {
-                .tabs = std::ranges::transform_view(_sessions,
-                                                    [](auto* session) {
-                                                        return vtbackend::TabsInfo::Tab {
-                                                            .name = session->name(),
-                                                            .color = vtbackend::RGBColor { 0, 0, 0 },
-                                                        };
-                                                    })
-                        | ranges::to<std::vector>(),
-                .activeTabPosition =
-                    1 + getSessionIndexOf(_displayStates[activeDisplay].activeSession).value_or(0),
-            });
+        _displayStates[activeDisplay]->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
+            .tabs = std::ranges::transform_view(_sessions,
+                                                [](auto* session) {
+                                                    return vtbackend::TabsInfo::Tab {
+                                                        .name = session->name(),
+                                                        .color = vtbackend::RGBColor { 0, 0, 0 },
+                                                    };
+                                                })
+                    | ranges::to<std::vector>(),
+            .activeTabPosition = 1 + getSessionIndexOf(_displayStates[activeDisplay]).value_or(0),
+        });
     }
 
     ContourGuiApp& _app;
     std::chrono::seconds _earlyExitThreshold;
-    std::unordered_map<display::TerminalDisplay*, DisplayState> _displayStates;
+    std::unordered_map<display::TerminalDisplay*, TerminalSession*> _displayStates;
     std::vector<TerminalSession*> _sessions;
 };
 
