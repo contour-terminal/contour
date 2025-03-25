@@ -606,8 +606,9 @@ void TerminalSession::inspect()
     // Deferred termination? Then close display now.
     if (_terminal.device().isClosed() && !_app.dumpStateAtExit().has_value())
     {
-        sessionLog()("Terminal device is closed. Closing display.");
-        _display->closeDisplay();
+        sessionLog()("Terminal device is closed. Notify session manager.");
+        _manager->currentSessionIsTerminated();
+        //_display->closeDisplay(); // TODO MOVE LOGIC
     }
 }
 
@@ -680,8 +681,9 @@ void TerminalSession::onClosed()
         inspect();
     else if (_display)
     {
-        sessionLog()("Terminal device is closed. Closing display.");
-        _display->closeDisplay();
+        sessionLog()("Terminal device is closed. Notify manager.");
+        _manager->currentSessionIsTerminated();
+        // _display->closeDisplay(); // TODO MOVE LOGIC
     }
     else
         sessionLog()("Terminal device is closed. But no display available (yet).");
