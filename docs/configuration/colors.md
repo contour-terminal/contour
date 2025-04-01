@@ -193,11 +193,14 @@ color_schemes:
         inactive:
           foreground: '#FFFFFF'
           background: '#0270C0'
+        insert_mode:
+          foreground: '#FFFFFF'
+          background: '#0270C0'
         normal_mode:
-          foreground: '#0f0002'
+          foreground: '#0F0002'
           background: '#0270C0'
         visual_mode:
-          foreground: '#ffffff'
+          foreground: '#FFFFFF'
           background: '#0270C0'
 ```
 
@@ -291,11 +294,21 @@ color_schemes:
             foreground_alpha: 1.0
             background_alpha: 0.5
         indicator_statusline:
-            foreground: '#808080'
-            background: '#000000'
-        indicator_statusline_inactive:
-            foreground: '#808080'
-            background: '#000000'
+            default:
+              foreground: '#FFFFFF'
+              background: '#0270C0'
+            inactive:
+              foreground: '#FFFFFF'
+              background: '#0270C0'
+            insert_mode:
+              foreground: '#FFFFFF'
+              background: '#0270C0'
+            normal_mode:
+              foreground: '#FFFFFF'
+              background: '#0270C0'
+            visual_mode:
+              foreground: '#FFFFFF'
+              background: '#0270C0'
         input_method_editor:
             foreground: '#FFFFFF'
             background: '#FF0000'
