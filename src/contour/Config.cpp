@@ -550,11 +550,13 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
             vtbackend::RGBColorPair defaultIndicatorStatusLine;
             loadFromEntry(child["indicator_statusline"], "default", defaultIndicatorStatusLine);
             where.indicatorStatusLineInactive = defaultIndicatorStatusLine;
+            where.indicatorStatusLineInsertMode = defaultIndicatorStatusLine;
             where.indicatorStatusLineNormalMode = defaultIndicatorStatusLine;
             where.indicatorStatusLineVisualMode = defaultIndicatorStatusLine;
         }
         for (auto const& [name, defaultColor]:
              { pair { "inactive", &where.indicatorStatusLineInactive },
+               pair { "insert_mode", &where.indicatorStatusLineInsertMode },
                pair { "normal_mode", &where.indicatorStatusLineNormalMode },
                pair { "visual_mode", &where.indicatorStatusLineVisualMode } })
         {
