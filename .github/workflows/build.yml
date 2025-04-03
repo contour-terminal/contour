@@ -1120,7 +1120,7 @@ jobs:
     - name: "configure cmake"
       run: |
         cmake -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX=~/opt/notcurses \
+              -DCMAKE_INSTALL_PREFIX=~/home/runner/opt/notcurses \
               -DUSE_CPP=OFF \
               -DUSE_DEFLATE=OFF \
               -DUSE_MULTIMEDIA=ffmpeg \
