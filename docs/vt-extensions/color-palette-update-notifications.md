@@ -61,6 +61,6 @@ in order to see how to implement this in your own application.
 | ✅       | Neovim               | since [`d460928`](https://github.com/neovim/neovim/commit/d460928263d0ff53283f301dfcb85f5b6e17d2ac) |
 | ✅       | tmux                 | see tracker: [tmux#4269](https://github.com/tmux/tmux/issues/4269)                                  |
 | not yet  | LazyGit              | see tracker: [lazygit#4366](https://github.com/jesseduffield/lazygit/issues/4366)                   |
-| not yet  | Helix                | see tracker: [helix#12362](https://github.com/helix-editor/helix/pull/12362)                        |
+| not yet  | Helix                | see tracker: [helix#13281](https://github.com/helix-editor/helix/issues/13281)                      |
 | not yet  | WezTerm              | see tracker: [wezterm#6454](https://github.com/wez/wezterm/issues/6454)                             |
 | not yet  | Zellij               | see tracker: [zellij#3831](https://github.com/zellij-org/zellij/issues/3831)                        |
