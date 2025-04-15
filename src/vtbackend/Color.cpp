@@ -135,7 +135,7 @@ optional<RGBColor> parseColor(string_view const& value)
     {
         // "rgb:RR/GG/BB"
         //  0123456789a
-        if (value.size() == 12 && value.substr(0, 4) == "rgb:" && value[6] == '/' && value[9] == '/')
+        if (value.size() == 12 && value.starts_with("rgb:") && value[6] == '/' && value[9] == '/')
         {
             auto const r = crispy::to_integer<16, uint8_t>(value.substr(4, 2));
             auto const g = crispy::to_integer<16, uint8_t>(value.substr(7, 2));

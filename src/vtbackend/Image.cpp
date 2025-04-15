@@ -105,7 +105,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos) const
     }
 
     // fill horizontal gap at the bottom
-    for (auto y = availableHeight * unbox<int>(_cellSize.width); y < int(_cellSize.area()); ++y)
+    for (auto y = availableHeight * unbox<int>(_cellSize.width); std::cmp_less(y, int(_cellSize.area())); ++y)
     {
         *target++ = _defaultColor.red();
         *target++ = _defaultColor.green();

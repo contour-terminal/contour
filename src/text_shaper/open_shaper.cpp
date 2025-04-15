@@ -829,7 +829,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
 
             auto const* s = ftBitmap.buffer;
             auto* t = output.bitmap.data();
-            if (ftBitmap.width == static_cast<unsigned>(std::abs(ftBitmap.pitch)))
+            if (std::cmp_equal(ftBitmap.width, std::abs(ftBitmap.pitch)))
             {
                 std::copy_n(s, ftBitmap.width * ftBitmap.rows, t);
             }

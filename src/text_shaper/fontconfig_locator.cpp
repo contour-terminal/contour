@@ -284,6 +284,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
 
                                // remove spaces from the fonts names
                                auto fallbackFontNoSpaces = fallbackFont;
+                               // NOLINTBEGIN
                                fallbackFontNoSpaces.erase(
                                    std::remove(fallbackFontNoSpaces.begin(), fallbackFontNoSpaces.end(), ' '),
                                    fallbackFontNoSpaces.end());
@@ -291,6 +292,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
                                familyNoSpaces.erase(
                                    std::remove(familyNoSpaces.begin(), familyNoSpaces.end(), ' '),
                                    familyNoSpaces.end());
+                               // NOLINTEND
                                if (fallbackFontNoSpaces == familyNoSpaces)
                                {
                                    addFont(font);

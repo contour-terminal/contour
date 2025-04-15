@@ -158,7 +158,7 @@ TEST_CASE("Line.inflate.Unicode", "[Line]")
         REQUIRE(cell.foregroundColor() == sgr.foregroundColor);
         REQUIRE(cell.backgroundColor() == sgr.backgroundColor);
         REQUIRE(cell.underlineColor() == sgr.underlineColor);
-        for (int n = 1; n < cell.width(); ++n)
+        for (int n = 1; std::cmp_less(n, cell.width()); ++n)
         {
             INFO(std::format("column.sub: {}\n", n));
             auto const& fillCell = inflated.at(i + static_cast<size_t>(n));
