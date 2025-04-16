@@ -90,10 +90,7 @@ via the CLI (see below), these currently exist for zsh, fish and tcsh.
 ## Installing from source
 
 Contour is best installed from supported package managers, but you can build
-from source by following the instructions below. You can use Qt 5 or Qt 6,
-by default contour will be compiled with Qt 6, to change Qt version use
-`QTVER=5 ./scripts/install-deps.sh` to fetch dependencies and cmake flag
-`-D CONTOUR_QT_VERSION=5`.
+from source by following the instructions below.
 
 ### UNIX-like systems (Linux, FreeBSD, OpenBSD, macOS)
 
