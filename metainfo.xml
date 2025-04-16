@@ -107,6 +107,7 @@
     <release version="0.6.2" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Drop Qt5 support</li>
           <li>Fixes insert mode / default status line colorscheme loading (#1737)</li>
           <li>Fixes `CancelSelection` default binding with escape (#1710)</li>
           <li>Fixes `CreateTab` to sometimes spawn more than one tab (#1695)</li>

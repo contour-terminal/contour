@@ -17,12 +17,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_COLOR_DIAGNOSTICS ON)
 
-set(QT_VERSION_DEFAULT  "6")
-
-if(NOT CONTOUR_QT_VERSION)
-    set(CONTOUR_QT_VERSION "${QT_VERSION_DEFAULT}")
-endif()
-
 if((CMAKE_CXX_COMPILER_ID STREQUAL "Clang") OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
     set(CMAKE_CXX_FLAGS_DEBUG "-Og -g")
 endif()
@@ -152,12 +146,7 @@ else()
 endif()
 
 if(CONTOUR_FRONTEND_GUI)
-    find_package(Qt${CONTOUR_QT_VERSION} COMPONENTS Core QUIET)
-    if (NOT Qt${CONTOUR_QT_VERSION}_FOUND)
-        set(QT_VERSION ${Qt5_VERSION})
-    else()
-        set(QT_VERSION ${Qt6_VERSION})
-    endif()
+    find_package(Qt6 COMPONENTS Core QUIET)
 endif()
 
 add_custom_target(package-verbose
@@ -179,9 +168,6 @@ macro(ContourConfigurationSummary)
     message(STATUS "Build unit tests:                                   ${CONTOUR_TESTING}")
     message(STATUS "Enable with code coverage:                          ${CONTOUR_CODE_COVERAGE_ENABLED}")
     message(STATUS "Build contour frontend GUI:                         ${CONTOUR_FRONTEND_GUI}")
-    if(CONTOUR_FRONTEND_GUI)
-        message(STATUS "Build contour using Qt:                             ${CONTOUR_QT_VERSION} (${QT_VERSION})")
-    endif()
     message(STATUS "Build contour using mimalloc:                       ${CONTOUR_BUILD_WITH_MIMALLOC}")
     message(STATUS "Clang Tidy:                                         ${USING_TIDY_STRING}")
     message(STATUS "|> Enable performance metrics:                      ${CONTOUR_PERF_STATS}")
