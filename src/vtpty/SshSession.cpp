@@ -842,7 +842,7 @@ int SshSession::write(std::string_view buf)
     if (ptyOutLog)
     {
         if (rv >= 0)
-            ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf.data(), buf.data() + rv));
+            ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf.data(), buf.data() + rv)); // NOLINT
 
         if (0 <= rv && static_cast<size_t>(rv) < buf.size())
             ptyOutLog()("Partial write. {} bytes written and {} bytes left.",
@@ -959,7 +959,7 @@ bool SshSession::connect(std::string_view host, int port)
         hints.ai_protocol = IPPROTO_TCP;
 
         addrinfo* addrList = nullptr;
-        if (auto const rc = getaddrinfo(host.data(), nullptr, &hints, &addrList); rc != 0)
+        if (auto const rc = getaddrinfo(host.data(), nullptr, &hints, &addrList); rc != 0) // NOLINT
         {
             logError("Failed to resolve host \"{}\". {}", host, gai_strerror(rc));
             return false;
@@ -1303,7 +1303,7 @@ bool SshSession::authenticateWithAgent()
     libssh2_agent_publickey* prevIdentity = nullptr;
     int rc = 0;
     int i = 0;
-    while ((rc = libssh2_agent_get_identity(_p->sshAgent, &identity, prevIdentity)) == 0)
+    while ((rc = libssh2_agent_get_identity(_p->sshAgent, &identity, prevIdentity)) == 0) // NOLINT
     {
         prevIdentity = identity;
         if (i < _walkIndex)

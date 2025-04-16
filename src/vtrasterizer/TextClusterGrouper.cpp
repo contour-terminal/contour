@@ -54,7 +54,7 @@ void TextClusterGrouper::renderLine(std::string_view text,
         auto const width = graphemeClusterWidth(graphemeCluster);
         renderCell(gridPosition, graphemeCluster, style, foregroundColor);
 
-        for (int i = 1; i < width; ++i)
+        for (int i = 1; std::cmp_less(i, width); ++i)
             renderCell(vtbackend::CellLocation { .line = gridPosition.line, .column = columnOffset + i },
                        U" ",
                        style,

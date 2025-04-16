@@ -869,7 +869,7 @@ bool InputGenerator::mouseTransportX10(uint8_t button, uint8_t modifier, CellLoc
     constexpr uint8_t SkipCount = 0x20; // TODO std::numeric_limits<ControlCode>::max();
     constexpr uint8_t MaxCoordValue = std::numeric_limits<uint8_t>::max() - SkipCount;
 
-    if (*pos.line < MaxCoordValue && *pos.column < MaxCoordValue)
+    if (std::cmp_less(unbox(pos.line), MaxCoordValue) && std::cmp_less(unbox(pos.column), MaxCoordValue))
     {
         auto const buttonValue = static_cast<uint8_t>(SkipCount + static_cast<uint8_t>(button | modifier));
         auto const line = static_cast<uint8_t>(SkipCount + *pos.line + 1);

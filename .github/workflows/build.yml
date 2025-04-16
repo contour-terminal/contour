@@ -631,9 +631,9 @@ jobs:
           ./scripts/install-deps.ps1 --skip-vcpkg
           type ./_deps/sources/CMakeLists.txt
       - name: Install Qt
-        uses: jurplel/install-qt-action@v3
+        uses: jurplel/install-qt-action@v4
         with:
-          version: "6.6.1"
+          version: "6.9.*"
           #version: "5.15.*"
           modules: qtmultimedia qt5compat qtshadertools
       - name: "vcpkg: Install dependencies"

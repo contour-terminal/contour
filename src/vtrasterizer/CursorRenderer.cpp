@@ -6,6 +6,7 @@
 #include <crispy/utils.h>
 
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 using crispy::each_element;
@@ -126,7 +127,7 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
                 auto const baseY = max((*height - thickness) / 2, 0u);
                 auto image = atlas::Buffer(defaultBitmapSize.area(), 0);
 
-                assert(thickness <= static_cast<size_t>(baseline));
+                assert(std::cmp_less_equal(thickness, baseline));
                 for (auto y = size_t(0); y <= static_cast<size_t>(thickness); ++y)
                     for (size_t x = 0; x < *width; ++x)
                         image[((defaultBitmapSize.height.as<size_t>() - 1 - baseY - unsigned(y))
@@ -167,7 +168,7 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
 
 void CursorRenderer::render(crispy::point pos, int columnWidth, vtbackend::RGBColor color)
 {
-    for (uint32_t i = 0; i < uint32_t(columnWidth); ++i)
+    for (uint32_t i = 0; std::cmp_less(i, uint32_t(columnWidth)); ++i)
     {
         auto const directMappingIndex = toDirectMappingIndex(_shape, columnWidth, i);
         auto const tileIndex = _directMapping.toTileIndex(directMappingIndex);

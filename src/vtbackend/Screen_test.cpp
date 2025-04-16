@@ -2756,17 +2756,17 @@ TEST_CASE("render into history", "[screen]")
     REQUIRE("FGHIJ\nKLMNO\n" == renderedText);
 
     // 1 line into history") {
-    fill(renderedText.begin(), renderedText.end(), ' ');
+    std::ranges::fill(renderedText, ' ');
     screen.render(renderer, ScrollOffset { 1 });
     REQUIRE("ABCDE\nFGHIJ\n" == renderedText);
 
     // 2 lines into history") {
-    fill(renderedText.begin(), renderedText.end(), ' ');
+    std::ranges::fill(renderedText, ' ');
     screen.render(renderer, ScrollOffset { 2 });
     REQUIRE("67890\nABCDE\n" == renderedText);
 
     // 3 lines into history") {
-    fill(renderedText.begin(), renderedText.end(), ' ');
+    std::ranges::fill(renderedText, ' ');
     screen.render(renderer, ScrollOffset { 3 });
     REQUIRE("12345\n67890\n" == renderedText);
 }

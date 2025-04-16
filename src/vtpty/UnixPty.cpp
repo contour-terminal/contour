@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 #if defined(__APPLE__) || defined(__OpenBSD__)
     #include <util.h>
@@ -60,8 +61,8 @@ namespace
     UnixPty::PtyHandles createUnixPty(PageSize const& windowSize, optional<ImageSize> pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
-        assert(*windowSize.lines <= numeric_limits<unsigned short>::max());
-        assert(*windowSize.columns <= numeric_limits<unsigned short>::max());
+        assert(std::cmp_less_equal(unbox(windowSize.lines), numeric_limits<unsigned short>::max()));
+        assert(std::cmp_less_equal(unbox(windowSize.columns), numeric_limits<unsigned short>::max()));
 
         winsize const ws { .ws_row = unbox<unsigned short>(windowSize.lines),
                            .ws_col = unbox<unsigned short>(windowSize.columns),
@@ -328,7 +329,7 @@ int UnixPty::write(std::string_view data)
         if (rv < 0)
             // errorlog()("PTY write failed: {}", strerror(errno));
             ptyOutLog()("PTY write of {} bytes failed. {}\n", size, strerror(errno));
-        else if (0 <= rv && static_cast<size_t>(rv) < size)
+        else if (0 <= rv && std::cmp_less(rv, size))
             // clang-format off
             ptyOutLog()("Partial write. {} bytes written and {} bytes left.",
                         rv,
@@ -336,7 +337,7 @@ int UnixPty::write(std::string_view data)
         // clang-format on
     }
 
-    if (0 <= rv && static_cast<size_t>(rv) < size)
+    if (0 <= rv && std::cmp_less(rv, size))
     {
         util::setFileBlocking(_masterFd, true);
         auto const rv2 = ::write(_masterFd, buf + rv, size - rv);
