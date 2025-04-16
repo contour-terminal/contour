@@ -1,9 +1,9 @@
 // vim:syntax=qml
-import @qml_import_QtQuick@
-import @qml_import_QtQuickControls@
-import @qml_import_QtQuickLayouts@
-import @qml_import_QtQuickWindow@
-import @qml_import_QtQuicklabs@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick.Window
+import Qt.labs.platform
 
 ApplicationWindow
 {

@@ -1,5 +1,5 @@
 // vim:syntax=qml
-import @qml_import_QtQuicklabs@
+import Qt.labs.platform
 
 MessageDialog {
     id: messageDialog

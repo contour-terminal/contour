@@ -1,11 +1,11 @@
 // vim:syntax=qml
-import @qml_import_ContourTerminal@
-import @qml_import_QtQuick@
-import @qml_import_QtQuickControls@
-import @qml_import_QtQuickLayouts@
-import @qml_import_QtMultimedia@
-import @qml_import_QtQuickWindow@
-import @qml_import_QtGraphicalEffects@
+import Contour.Terminal
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtMultimedia
+import QtQuick.Window
+import Qt5Compat.GraphicalEffects
 
 ContourTerminal
 {
@@ -99,7 +99,7 @@ ContourTerminal
         stepSize : 1.0 / (vtWidget.session.pageLineCount + vtWidget.session.historyLineCount)
     }
 
-    @qml_audio@ {
+    AudioOutput {
         id: bellAudioOutput
         objectName: "BellAudioOutput"
     }
@@ -108,7 +108,7 @@ ContourTerminal
         id: bellSoundEffect
         objectName: "Bell"
         source: session.bellSource
-        @qml_media_player@
+        audioOutput: bellAudioOutput
     }
 
     RequestPermission {

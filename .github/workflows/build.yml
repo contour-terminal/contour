@@ -408,7 +408,6 @@ jobs:
         id: set_vars
         run: |
           ./scripts/ci-set-vars.sh
-          echo QTVER=6 >> "$GITHUB_OUTPUT"
           # Please read the following link on how to use MacOS code signing on Github CI:
           # https://docs.github.com/en/actions/deployment/deploying-xcode-applications/installing-an-apple-certificate-on-macos-runners-for-xcode-development
           echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
@@ -446,7 +445,7 @@ jobs:
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ccache-macosArm_qt${{ steps.set_vars.outputs.QTVER }}-r1
+          key: ccache-macosArm-r1
           max-size: 256M
       - name: "Install dependencies"
         # Sometimes, brew thinks it needs to install from source rather than binary.
@@ -460,19 +459,16 @@ jobs:
           # Trying to work around some Github CI issues causing `brew install` to fail
           brew uninstall aws-sam-cli azure-cli
 
-          QTVER=${{ steps.set_vars.outputs.QTVER }}
-          QTVER=${QTVER} ./scripts/install-deps.sh
+          ./scripts/install-deps.sh
       - name: "Create build directory"
         run: mkdir build
       - name: "Generate build files"
         run: |
-          QTVER=${{ steps.set_vars.outputs.QTVER }}
           cmake . \
                 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
                 -DCONTOUR_TESTING=ON \
-                -DCONTOUR_QT_VERSION=${QTVER} \
-                -DCMAKE_PREFIX_PATH$="$(brew --prefix qt@${QTVER})" \
-                -DMACDEPLOYQT_EXECUTABLE="$(brew --prefix qt${QTVER})/bin/macdeployqt" \
+                -DCMAKE_PREFIX_PATH$="$(brew --prefix qt@6)" \
+                -DMACDEPLOYQT_EXECUTABLE="$(brew --prefix qt6)/bin/macdeployqt" \
                 -DMACDEPLOYQT_QML_WORKAROUND=ON \
                 -DCODE_SIGN_CERTIFICATE_ID="${{ steps.set_vars.outputs.CODE_SIGN_CERTIFICATE_ID }}" \
                 -B build/
@@ -553,7 +549,7 @@ jobs:
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ccache-macOSx86_qt${{ steps.set_vars.outputs.QTVER }}-r1
+          key: ccache-macOSx86-r1
           max-size: 256M
       - name: "Install dependencies"
         # Sometimes, brew thinks it needs to install from source rather than binary.
@@ -567,19 +563,16 @@ jobs:
           # Trying to work around some Github CI issues causing `brew install` to fail
           brew uninstall aws-sam-cli azure-cli
 
-          QTVER=${{ steps.set_vars.outputs.QTVER }}
-          QTVER=${QTVER} ./scripts/install-deps.sh
+           ./scripts/install-deps.sh
       - name: "Create build directory"
         run: mkdir build
       - name: "Generate build files"
         run: |
-          QTVER=${{ steps.set_vars.outputs.QTVER }}
           cmake . \
                 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
                 -DCONTOUR_TESTING=ON \
-                -DCONTOUR_QT_VERSION=${QTVER} \
-                -DCMAKE_PREFIX_PATH$="$(brew --prefix qt@${QTVER})" \
-                -DMACDEPLOYQT_EXECUTABLE="$(brew --prefix qt${QTVER})/bin/macdeployqt" \
+                -DCMAKE_PREFIX_PATH$="$(brew --prefix qt@6)" \
+                -DMACDEPLOYQT_EXECUTABLE="$(brew --prefix qt6)/bin/macdeployqt" \
                 -DMACDEPLOYQT_QML_WORKAROUND=ON \
                 -DCODE_SIGN_CERTIFICATE_ID="${{ steps.set_vars.outputs.CODE_SIGN_CERTIFICATE_ID }}" \
                 -B build/
@@ -774,7 +767,6 @@ jobs:
               -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}" \
               -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS}" \
               -DCMAKE_INSTALL_PREFIX="/usr" \
-              -DCONTOUR_QT_VERSION=${{ matrix.qt_version }} \
               -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
               -DPEDANTIC_COMPILER_WERROR=OFF \
               --preset linux-debug
@@ -783,7 +775,7 @@ jobs:
       - name: "tests"
         run: cmake --build --preset linux-debug --target test
       - name: "Upload unit tests"
-        if: ${{ matrix.compiler == 'GCC 14' && matrix.cxx == '20' && matrix.qt_version == '6' && matrix.runner == 'ubuntu-24.04'}}
+        if: ${{ matrix.compiler == 'GCC 14' && matrix.cxx == '20' && matrix.runner == 'ubuntu-24.04'}}
         uses: actions/upload-artifact@v4
         with:
           name: contour-ubuntu2404-tests
@@ -881,7 +873,7 @@ jobs:
         run: |
           # TODO: turn on -Werror again, that requires some code changes.
           CMAKE_CXX_STANDARD=20
-          EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=6"
+          EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS"
           EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_PACKAGE_TERMINFO=OFF"
           BUILD_DIR="build" \
             CMAKE_BUILD_TYPE=RelWithDebInfo \

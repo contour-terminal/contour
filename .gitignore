@@ -61,10 +61,6 @@ configure-stamp
 build-stamp
 install-stamp
 
-src/contour/ui/RequestPermission.qml
-src/contour/ui/Terminal.qml
-src/contour/ui/main.qml
-
 # mkdocs
 docs/vt-sequence/index.md
 
