@@ -828,8 +828,12 @@ void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
 void TerminalDisplay::focusInEvent(QFocusEvent* event)
 {
     QQuickItem::focusInEvent(event);
+
     if (_session)
+    {
+        _session->getTerminalManager()->FocusOnDisplay(this);
         _session->sendFocusInEvent(); // TODO: paint with "normal" colors
+    }
 }
 
 void TerminalDisplay::focusOutEvent(QFocusEvent* event)
