@@ -75,10 +75,10 @@ struct GridMetrics
     constexpr crispy::point mapTopLeft(vtbackend::LineOffset line,
                                        vtbackend::ColumnOffset column) const noexcept
     {
-        auto const x = pageMargin.left + *column * cellSize.width.as<int>();
-        auto const y = pageMargin.top + *line * cellSize.height.as<int>();
+        auto const x = pageMargin.left + (*column * cellSize.width.as<int>());
+        auto const y = pageMargin.top + (*line * cellSize.height.as<int>());
 
-        return { x, y };
+        return { .x = x, .y = y };
     }
 
     constexpr crispy::point mapBottomLeft(vtbackend::CellLocation pos) const noexcept

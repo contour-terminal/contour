@@ -14,6 +14,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace vtbackend
 {
@@ -470,7 +471,7 @@ class InputGenerator
     void consume(int n)
     {
         _consumedBytes += n;
-        if (_consumedBytes == static_cast<int>(_pendingSequence.size()))
+        if (std::cmp_equal(_consumedBytes, _pendingSequence.size()))
         {
             _consumedBytes = 0;
             _pendingSequence.clear();

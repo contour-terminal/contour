@@ -58,7 +58,7 @@ namespace detail
         using iterator = times_iterator<I, T>;
 
         [[nodiscard]] constexpr std::size_t size() const noexcept { return count; }
-        constexpr T operator[](size_t i) const noexcept { return start + i * step; }
+        constexpr T operator[](size_t i) const noexcept { return start + (i * step); }
 
         [[nodiscard]] constexpr iterator begin() const noexcept
         {
@@ -67,7 +67,7 @@ namespace detail
 
         [[nodiscard]] constexpr iterator end() const noexcept
         {
-            return iterator { start, I {}, step, static_cast<T>(start + count * step) };
+            return iterator { start, I {}, step, static_cast<T>(start + (count * step)) };
         }
     };
 

@@ -17,6 +17,7 @@
 #include <gsl/span>
 #include <gsl/span_ext>
 
+#include <algorithm>
 #include <string>
 #include <variant>
 #include <vector>
@@ -316,7 +317,7 @@ class Line
                 return false;
 
             auto bufferCopyText = std::string(buffer.text.view());
-            std::transform(bufferCopyText.begin(), bufferCopyText.end(), bufferCopyText.begin(), ::tolower);
+            std::ranges::transform(bufferCopyText, bufferCopyText.begin(), ::tolower);
             auto const resultIndex = bufferCopyText.substr(unbox<size_t>(column))
                                          .find(std::string_view(u8Text), unbox<size_t>(column));
             return resultIndex == 0;
@@ -360,7 +361,7 @@ class Line
             auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
             auto const resultIndex = buffer.text.view().find(std::string_view(u8Text), unbox<size_t>(column));
             if (resultIndex != std::string_view::npos)
-                return SearchResult { ColumnOffset::cast_from(resultIndex) };
+                return SearchResult { .column = ColumnOffset::cast_from(resultIndex) };
             else
                 return std::nullopt; // Not found, so stay with initial column as result.
         }
@@ -378,10 +379,10 @@ class Line
                 {
                     text.remove_suffix(text.size() - (unbox<size_t>(size()) - unbox<size_t>(baseColumn)));
                     if (matchTextAt(text, baseColumn))
-                        return SearchResult { startColumn, text.size() };
+                        return SearchResult { .column = startColumn, .partialMatchLength = text.size() };
                 }
                 else if (matchTextAt(text, baseColumn))
-                    return SearchResult { baseColumn };
+                    return SearchResult { .column = baseColumn };
                 baseColumn++;
             }
 
@@ -412,7 +413,7 @@ class Line
             auto const resultIndex =
                 buffer.text.view().rfind(std::string_view(u8Text), unbox<size_t>(column));
             if (resultIndex != std::string_view::npos)
-                return SearchResult { ColumnOffset::cast_from(resultIndex) };
+                return SearchResult { .column = ColumnOffset::cast_from(resultIndex) };
             else
                 return std::nullopt; // Not found, so stay with initial column as result.
         }
@@ -434,7 +435,7 @@ class Line
             while (!text.empty())
             {
                 if (matchTextAt(text, ColumnOffset(0)))
-                    return SearchResult { startColumn, text.size() };
+                    return SearchResult { .column = startColumn, .partialMatchLength = text.size() };
                 baseColumn--;
                 text.remove_prefix(1);
             }

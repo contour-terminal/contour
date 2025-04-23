@@ -12,7 +12,7 @@ namespace vtbackend
 struct Metrics
 {
     // XXX Too bad the key is a string.
-    std::map<std::string, uint64_t> sequences;
+    std::map<std::string, uint64_t> sequences {};
 
     void operator()(Sequence const& seq) { sequences[seq.text()]++; }
 

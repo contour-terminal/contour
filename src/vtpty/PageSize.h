@@ -33,12 +33,12 @@ struct PageSize
 
 constexpr PageSize operator+(PageSize pageSize, LineCount lines) noexcept
 {
-    return PageSize { pageSize.lines + lines, pageSize.columns };
+    return PageSize { .lines = pageSize.lines + lines, .columns = pageSize.columns };
 }
 
 constexpr PageSize operator-(PageSize pageSize, LineCount lines) noexcept
 {
-    return PageSize { pageSize.lines - lines, pageSize.columns };
+    return PageSize { .lines = pageSize.lines - lines, .columns = pageSize.columns };
 }
 
 constexpr bool operator==(PageSize a, PageSize b) noexcept
@@ -53,12 +53,13 @@ constexpr bool operator!=(PageSize a, PageSize b) noexcept
 
 constexpr ImageSize operator*(ImageSize a, PageSize b) noexcept
 {
-    return ImageSize { a.width * boxed_cast<Width>(b.columns), a.height * boxed_cast<Height>(b.lines) };
+    return ImageSize { .width = a.width * boxed_cast<Width>(b.columns),
+                       .height = a.height * boxed_cast<Height>(b.lines) };
 }
 
 constexpr ImageSize operator/(ImageSize a, PageSize s) noexcept
 {
-    return { Width::cast_from(unbox(a.width) / unbox(s.columns)),
-             Height::cast_from(unbox(a.height) / unbox(s.lines)) };
+    return { .width = Width::cast_from(unbox(a.width) / unbox(s.columns)),
+             .height = Height::cast_from(unbox(a.height) / unbox(s.lines)) };
 }
 } // namespace vtpty

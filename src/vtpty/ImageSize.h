@@ -52,39 +52,39 @@ constexpr bool operator<(ImageSize a, ImageSize b) noexcept
 
 constexpr ImageSize operator+(ImageSize a, ImageSize b) noexcept
 {
-    return ImageSize { a.width + b.width, a.height + b.height };
+    return ImageSize { .width = a.width + b.width, .height = a.height + b.height };
 }
 
 constexpr ImageSize operator-(ImageSize a, ImageSize b) noexcept
 {
-    return ImageSize { a.width - b.width, a.height - b.height };
+    return ImageSize { .width = a.width - b.width, .height = a.height - b.height };
 }
 
 constexpr ImageSize operator/(ImageSize a, ImageSize b) noexcept
 {
-    return ImageSize { a.width / b.width, a.height / b.height };
+    return ImageSize { .width = a.width / b.width, .height = a.height / b.height };
 }
 
 inline ImageSize operator/(ImageSize a, double scalar) noexcept
 {
-    return ImageSize { Width::cast_from(std::ceil(double(*a.width) / scalar)),
-                       Height::cast_from(std::ceil(double(*a.height) / scalar)) };
+    return ImageSize { .width = Width::cast_from(std::ceil(double(*a.width) / scalar)),
+                       .height = Height::cast_from(std::ceil(double(*a.height) / scalar)) };
 }
 
 inline ImageSize operator*(ImageSize a, double scalar) noexcept
 {
-    return ImageSize { Width::cast_from(std::ceil(double(*a.width) * scalar)),
-                       Height::cast_from(std::ceil(double(*a.height) * scalar)) };
+    return ImageSize { .width = Width::cast_from(std::ceil(double(*a.width) * scalar)),
+                       .height = Height::cast_from(std::ceil(double(*a.height) * scalar)) };
 }
 
 constexpr ImageSize min(ImageSize a, ImageSize b) noexcept
 {
-    return ImageSize { std::min(a.width, b.width), std::min(a.height, b.height) };
+    return ImageSize { .width = std::min(a.width, b.width), .height = std::min(a.height, b.height) };
 }
 
 constexpr ImageSize max(ImageSize a, ImageSize b) noexcept
 {
-    return ImageSize { std::max(a.width, b.width), std::max(a.height, b.height) };
+    return ImageSize { .width = std::max(a.width, b.width), .height = std::max(a.height, b.height) };
 }
 
 } // namespace vtpty

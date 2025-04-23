@@ -67,7 +67,7 @@ constexpr DPI operator*(DPI dpi, double scale) noexcept
 {
     auto const dpiX = static_cast<int>(static_cast<double>(dpi.x) * scale);
     auto const dpiY = static_cast<int>(static_cast<double>(dpi.y) * scale);
-    return DPI { dpiX, dpiY };
+    return DPI { .x = dpiX, .y = dpiY };
 }
 
 constexpr double average(DPI dpi) noexcept

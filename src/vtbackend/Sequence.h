@@ -148,7 +148,7 @@ class SequenceParameterBuilder
 
     constexpr void multiplyBy10AndAdd(uint8_t value) noexcept
     {
-        *_currentParameter = static_cast<uint16_t>(*_currentParameter * 10 + value);
+        *_currentParameter = static_cast<uint16_t>((*_currentParameter * 10) + value);
     }
 
     constexpr void apply(uint16_t value) noexcept
@@ -266,18 +266,22 @@ class Sequence
         switch (_category)
         {
             case FunctionCategory::OSC:
-                return FunctionSelector {
-                    _category, 0, static_cast<int>(parameterCount() ? param(0) : 0), 0, 0
-                };
+                return FunctionSelector { .category = _category,
+                                          .leader = 0,
+                                          .argc = static_cast<int>(parameterCount() ? param(0) : 0),
+                                          .intermediate = 0,
+                                          .finalSymbol = 0 };
             default: {
                 // Only support CSI sequences with 0 or 1 intermediate characters.
                 char const intermediate = _intermediateCharacters.size() == 1
                                               ? static_cast<char>(_intermediateCharacters[0])
                                               : char {};
 
-                return FunctionSelector {
-                    _category, _leaderSymbol, static_cast<int>(parameterCount()), intermediate, _finalChar
-                };
+                return FunctionSelector { .category = _category,
+                                          .leader = _leaderSymbol,
+                                          .argc = static_cast<int>(parameterCount()),
+                                          .intermediate = intermediate,
+                                          .finalSymbol = _finalChar };
             }
         }
     }

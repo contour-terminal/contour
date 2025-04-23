@@ -72,16 +72,16 @@ class Viewport
     constexpr CellLocation translateScreenToGridCoordinate(CellLocation p) const noexcept
     {
         return CellLocation {
-            p.line - boxed_cast<LineOffset>(_scrollOffset),
-            p.column,
+            .line = p.line - boxed_cast<LineOffset>(_scrollOffset),
+            .column = p.column,
         };
     }
 
     constexpr CellLocation translateGridToScreenCoordinate(CellLocation p) const noexcept
     {
         return CellLocation {
-            p.line + boxed_cast<LineOffset>(_scrollOffset),
-            p.column,
+            .line = p.line + boxed_cast<LineOffset>(_scrollOffset),
+            .column = p.column,
         };
     }
 
