@@ -423,25 +423,25 @@ constexpr auto sliced(vtbackend::Width tileWidth, uint32_t offsetX, vtbackend::I
 
         [[nodiscard]] constexpr iterator begin() noexcept
         {
-            return iterator { tileWidth,
-                              TileSliceIndex {
-                                  0,               // index
-                                  offsetX,         // begin
-                                  unbox(tileWidth) // end
+            return iterator { .tileWidth = tileWidth,
+                              .value = TileSliceIndex {
+                                  .sliceIndex = 0,         // index
+                                  .beginX = offsetX,       // begin
+                                  .endX = unbox(tileWidth) // end
                               } };
         }
 
         [[nodiscard]] constexpr iterator end() noexcept
         {
-            return iterator { tileWidth,
-                              TileSliceIndex {
-                                  0,               // index (irrelevant, undefind)
-                                  offsetForEndX(), // begin
-                                  offsetForEndX()  // end
+            return iterator { .tileWidth = tileWidth,
+                              .value = TileSliceIndex {
+                                  .sliceIndex = 0,           // index (irrelevant, undefind)
+                                  .beginX = offsetForEndX(), // begin
+                                  .endX = offsetForEndX()    // end
                               } };
         }
     };
-    return Container { tileWidth, offsetX, bitmapSize };
+    return Container { .tileWidth = tileWidth, .offsetX = offsetX, .bitmapSize = bitmapSize };
 }
 
 // {{{ implementation
@@ -495,7 +495,7 @@ TextureAtlas<Metadata>::TextureAtlas(AtlasBackend& backend, AtlasProperties atla
                                // minus the number of reserved tiles for direct-mapping, and
                                // minus one for the LRU-sentinel entry (which is why entryIndex
                                // is between 1 and capacity inclusive)
-                               _tilesInX * _tilesInY - _atlasProperties.directMappingCount - 1 },
+                               (_tilesInX * _tilesInY) - _atlasProperties.directMappingCount - 1 },
         "LRU cache for texture atlas") },
     _tileLocations { static_cast<size_t>(_tilesInX * _tilesInY) }
 {

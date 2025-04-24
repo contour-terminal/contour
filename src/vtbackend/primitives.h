@@ -152,33 +152,35 @@ inline std::ostream& operator<<(std::ostream& os, CellLocation coord)
 
 inline CellLocation operator+(CellLocation a, CellLocation b) noexcept
 {
-    return { a.line + b.line, a.column + b.column };
+    return { .line = a.line + b.line, .column = a.column + b.column };
 }
 
 constexpr CellLocation operator+(CellLocation c, LineOffset y) noexcept
 {
-    return CellLocation { c.line + y, c.column };
+    return CellLocation { .line = c.line + y, .column = c.column };
 }
 
 constexpr CellLocation operator-(CellLocation c, LineOffset y) noexcept
 {
-    return CellLocation { c.line - y, c.column };
+    return CellLocation { .line = c.line - y, .column = c.column };
 }
 
 constexpr CellLocation operator+(CellLocation c, ColumnOffset x) noexcept
 {
-    return CellLocation { c.line, c.column + x };
+    return CellLocation { .line = c.line, .column = c.column + x };
 }
 
 constexpr CellLocation operator-(CellLocation c, ColumnOffset x) noexcept
 {
-    return CellLocation { c.line, c.column - x };
+    return CellLocation { .line = c.line, .column = c.column - x };
 }
 // Constructs a top-left and bottom-right coordinate-pair from given input.
 constexpr std::pair<CellLocation, CellLocation> orderedPoints(CellLocation a, CellLocation b) noexcept
 {
-    auto const topLeft = CellLocation { std::min(a.line, b.line), std::min(a.column, b.column) };
-    auto const bottomRight = CellLocation { std::max(a.line, b.line), std::max(a.column, b.column) };
+    auto const topLeft =
+        CellLocation { .line = std::min(a.line, b.line), .column = std::min(a.column, b.column) };
+    auto const bottomRight =
+        CellLocation { .line = std::max(a.line, b.line), .column = std::max(a.column, b.column) };
     return std::pair { topLeft, bottomRight };
 }
 
@@ -276,10 +278,10 @@ struct Rect
 
     [[nodiscard]] Rect clampTo(PageSize size) const noexcept
     {
-        return Rect { top,
-                      left,
-                      std::min(bottom, Bottom::cast_from(size.lines)),
-                      std::min(right, Right::cast_from(size.columns)) };
+        return Rect { .top = top,
+                      .left = left,
+                      .bottom = std::min(bottom, Bottom::cast_from(size.lines)),
+                      .right = std::min(right, Right::cast_from(size.columns)) };
     }
 };
 
@@ -295,11 +297,11 @@ struct PageMargin
 
 constexpr Range horizontal(PageMargin m) noexcept
 {
-    return Range { From { *m.top }, To { *m.bottom } };
+    return Range { .from = From { *m.top }, .to = To { *m.bottom } };
 }
 constexpr Range vertical(PageMargin m) noexcept
 {
-    return Range { From { *m.left }, To { *m.right } };
+    return Range { .from = From { *m.left }, .to = To { *m.right } };
 }
 
 // }}}
@@ -365,7 +367,8 @@ struct GridSize
 
         constexpr Offset makeOffset(int offset) noexcept
         {
-            return Offset { LineOffset(offset / unbox(_width)), ColumnOffset(offset % unbox(_width)) };
+            return Offset { .line = LineOffset(offset / unbox(_width)),
+                            .column = ColumnOffset(offset % unbox(_width)) };
         }
     };
 
@@ -378,7 +381,7 @@ struct GridSize
 
 constexpr CellLocation operator+(CellLocation a, GridSize::Offset b) noexcept
 {
-    return CellLocation { a.line + b.line, a.column + b.column };
+    return CellLocation { .line = a.line + b.line, .column = a.column + b.column };
 }
 
 constexpr GridSize::iterator begin(GridSize const& s) noexcept
@@ -568,20 +571,20 @@ enum class AnsiMode : uint8_t
 
 enum class DECMode : std::uint16_t
 {
-    UseApplicationCursorKeys,
-    DesignateCharsetUSASCII,
-    Columns132,
-    SmoothScroll,
-    ReverseVideo,
+    UseApplicationCursorKeys = 0,
+    DesignateCharsetUSASCII = 1,
+    Columns132 = 2,
+    SmoothScroll = 3,
+    ReverseVideo = 4,
 
-    MouseProtocolX10,
-    MouseProtocolNormalTracking,
-    MouseProtocolHighlightTracking,
-    MouseProtocolButtonTracking,
-    MouseProtocolAnyEventTracking,
+    MouseProtocolX10 = 5,
+    MouseProtocolNormalTracking = 6,
+    MouseProtocolHighlightTracking = 7,
+    MouseProtocolButtonTracking = 8,
+    MouseProtocolAnyEventTracking = 9,
 
-    SaveCursor,
-    ExtendedAltScreen,
+    SaveCursor = 10,
+    ExtendedAltScreen = 11,
 
     /**
      * DECOM - Origin Mode.
@@ -600,7 +603,7 @@ enum class DECMode : std::uint16_t
      * The starting point for line numbers is independent of the margins.
      * The cursor can move outside of the margins.
      */
-    Origin,
+    Origin = 12,
 
     /**
      * DECAWM - Autowrap Mode.
@@ -613,22 +616,22 @@ enum class DECMode : std::uint16_t
      *
      * Any text on the page scrolls up if the cursor is at the end of the scrolling region.
      */
-    AutoWrap,
+    AutoWrap = 13,
 
-    PrinterExtend,
-    LeftRightMargin,
+    PrinterExtend = 14,
+    LeftRightMargin = 15,
 
-    ShowToolbar,
-    BlinkingCursor,
-    VisibleCursor, // DECTCEM
-    ShowScrollbar,
-    AllowColumns80to132, // ?40
-    DebugLogging,        // ?46,
-    UseAlternateScreen,
-    BracketedPaste,
-    FocusTracking,            // 1004
-    NoSixelScrolling,         // ?80
-    UsePrivateColorRegisters, // ?1070
+    ShowToolbar = 16,
+    BlinkingCursor = 17,
+    VisibleCursor = 18, // DECTCEM
+    ShowScrollbar = 19,
+    AllowColumns80to132 = 20, // ?40
+    DebugLogging = 21,        // ?46,
+    UseAlternateScreen = 22,
+    BracketedPaste = 23,
+    FocusTracking = 24,            // 1004
+    NoSixelScrolling = 25,         // ?80
+    UsePrivateColorRegisters = 26, // ?1070
 
     // {{{ Mouse related flags
     /// extend mouse protocl encoding

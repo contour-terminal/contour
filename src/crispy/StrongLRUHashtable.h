@@ -319,7 +319,7 @@ constexpr inline size_t strong_lru_hashtable<Value>::requiredMemorySize(strong_h
     Require(entryCount.value >= 2);
 
     auto const hashSize = hashCount.value * sizeof(uint32_t);
-    auto const entrySize = (1 + entryCount.value) * sizeof(entry) + std::alignment_of_v<entry>;
+    auto const entrySize = ((1 + entryCount.value) * sizeof(entry)) + std::alignment_of_v<entry>;
     auto const totalSize = sizeof(strong_lru_hashtable) + hashSize + entrySize;
     return totalSize;
 }

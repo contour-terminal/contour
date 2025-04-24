@@ -108,7 +108,7 @@ enum class ViMotion : uint8_t
 
 enum class ViOperator : uint8_t
 {
-    MoveCursor,
+    MoveCursor = 0,
     Yank = 'y',
     Paste = 'p',
     PasteStripped = 'P',

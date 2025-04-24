@@ -1090,8 +1090,8 @@ class Terminal
         bool state = false;
         std::chrono::milliseconds interval {};
     };
-    mutable BlinkerState _slowBlinker { false, std::chrono::milliseconds { 500 } };
-    mutable BlinkerState _rapidBlinker { false, std::chrono::milliseconds { 300 } };
+    mutable BlinkerState _slowBlinker { .state = false, .interval = std::chrono::milliseconds { 500 } };
+    mutable BlinkerState _rapidBlinker { .state = false, .interval = std::chrono::milliseconds { 300 } };
     mutable std::chrono::steady_clock::time_point _lastBlink;
     mutable std::chrono::steady_clock::time_point _lastRapidBlink;
     // }}}

@@ -164,7 +164,8 @@ struct LogicalLine
                     std::u32string_view const remainingTextToMatch(searchText.data() + result,
                                                                    searchText.size() - result);
                     if (matchTextAt(remainingTextToMatch, ColumnOffset(0), line + 1, isCaseSensitive))
-                        return CellLocation { i, ColumnOffset(static_cast<int>(lineLength - result)) };
+                        return CellLocation { .line = i,
+                                              .column = ColumnOffset(static_cast<int>(lineLength - result)) };
                 }
                 startPosition = ColumnOffset(0);
                 ++i;
@@ -183,8 +184,8 @@ struct LogicalLine
                 if (line + 1 != lines.end()
                     && (line + 1)->get().matchTextAtWithSensetivityMode(
                         remainingText, ColumnOffset(0), isCaseSensitive))
-                    return CellLocation { i,
-                                          ColumnOffset::cast_from(
+                    return CellLocation { .line = i,
+                                          .column = ColumnOffset::cast_from(
                                               static_cast<int>(unbox<size_t>(line->get().size())
                                                                - result->partialMatchLength)) };
             }
@@ -782,7 +783,7 @@ class Grid
         if (line.isTrivialBuffer())
         {
             if (line.empty())
-                return CellLocation { lineOffset, ColumnOffset(0) };
+                return CellLocation { .line = lineOffset, .column = ColumnOffset(0) };
 
             auto const& trivial = line.trivialBuffer();
             auto const columnOffset = ColumnOffset::cast_from(trivial.usedColumns - 1);
@@ -793,7 +794,7 @@ class Grid
         auto columnOffset = ColumnOffset::cast_from(_pageSize.columns - 1);
         while (columnOffset > ColumnOffset(0) && inflatedLine[unbox<size_t>(columnOffset)].empty())
             --columnOffset;
-        return CellLocation { lineOffset, columnOffset };
+        return CellLocation { .line = lineOffset, .column = columnOffset };
     }
 
     [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept

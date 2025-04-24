@@ -40,25 +40,25 @@ struct Ratio
 
 // clang-format off
 struct RatioBlock { Ratio from {}; Ratio to {}; };
-constexpr RatioBlock lower(double r) noexcept { return RatioBlock { { 0, 1 - r },     { 1, 1 } }; }
-constexpr RatioBlock upper(double r) noexcept { return RatioBlock { { 0, 0 },         { 1, r } }; }
-constexpr RatioBlock left(double r) noexcept  { return RatioBlock { { 0, 0 },         { r, 1 } }; }
-constexpr RatioBlock right(double r) noexcept { return RatioBlock { { 1.f - r, 0.f }, { 1.f, 1.f } }; }
+constexpr RatioBlock lower(double r) noexcept { return RatioBlock { .from={ .x=0, .y=1 - r },     .to={ .x=1, .y=1 } }; }
+constexpr RatioBlock upper(double r) noexcept { return RatioBlock { .from={ .x=0, .y=0 },         .to={ .x=1, .y=r } }; }
+constexpr RatioBlock left(double r) noexcept  { return RatioBlock { .from={ .x=0, .y=0 },         .to={ .x=r, .y=1 } }; }
+constexpr RatioBlock right(double r) noexcept { return RatioBlock { .from={ .x=1.f - r, .y=0.f }, .to={ .x=1.f, .y=1.f } }; }
 // clang-format on
 
 constexpr crispy::point operator*(vtbackend::ImageSize a, Ratio b) noexcept
 {
-    return crispy::point { static_cast<int>(a.width.as<double>() * b.x),
-                           static_cast<int>(a.height.as<double>() * b.y) };
+    return crispy::point { .x = static_cast<int>(a.width.as<double>() * b.x),
+                           .y = static_cast<int>(a.height.as<double>() * b.y) };
 }
 
 constexpr auto linearEq(crispy::point p1, crispy::point p2) noexcept
 {
     // Require(p2.x != p1.x);
     auto const m = double(p2.y - p1.y) / double(p2.x - p1.x);
-    auto const n = double(p1.y) - m * double(p1.x);
+    auto const n = double(p1.y) - (m * double(p1.x));
     return [m, n](int x) -> int {
-        return int(double(m) * double(x) + n);
+        return int((double(m) * double(x)) + n);
     };
 }
 
@@ -235,9 +235,10 @@ template <std::size_t SupersamplingFactor = 1>
 inline Pixmap blockElement(vtbackend::ImageSize size)
 {
     auto const superSize = size * SupersamplingFactor;
-    return Pixmap { atlas::Buffer(superSize.width.as<size_t>() * superSize.height.as<size_t>(), 0x00),
-                    superSize,
-                    size };
+    return Pixmap { .buffer =
+                        atlas::Buffer(superSize.width.as<size_t>() * superSize.height.as<size_t>(), 0x00),
+                    .size = superSize,
+                    .downsampledSize = size };
 }
 
 template <size_t N, typename F>
@@ -257,7 +258,7 @@ inline void Pixmap::paint(int x, int y, uint8_t value)
         return;
     if (!(0 <= x && x < w))
         return;
-    buffer.at(static_cast<unsigned>((h - y) * w + x)) = value;
+    buffer.at(static_cast<unsigned>(((h - y) * w) + x)) = value;
 }
 
 inline void Pixmap::paintOver(int x, int y, uint8_t intensity)
@@ -268,7 +269,7 @@ inline void Pixmap::paintOver(int x, int y, uint8_t intensity)
         return;
     if (!(0 <= x && x < w))
         return;
-    auto& target = buffer.at(static_cast<unsigned>((h - y) * w + x));
+    auto& target = buffer.at(static_cast<unsigned>(((h - y) * w) + x));
     target = static_cast<uint8_t>(std::min(static_cast<int>(target) + static_cast<int>(intensity), 255));
 }
 

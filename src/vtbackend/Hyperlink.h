@@ -31,7 +31,7 @@ struct HyperlinkInfo
     URI uri;
     mutable HyperlinkState state = HyperlinkState::Inactive;
 
-    bool isLocal() const noexcept { return uri.size() >= 7 && uri.substr(0, 7) == "file://"; }
+    bool isLocal() const noexcept { return uri.size() >= 7 && uri.starts_with("file://"); }
 
     [[nodiscard]] std::string_view host() const noexcept
     {

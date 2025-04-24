@@ -37,8 +37,9 @@ namespace vtbackend::CellUtil
         reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
                      : std::pair { ColorTarget::Foreground, ColorTarget::Background };
 
-    auto rgbColors = RGBColorPair { apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
-                                    apply(colorPalette, backgroundColor, bgColorTarget, BgMode) };
+    auto rgbColors =
+        RGBColorPair { .foreground = apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
+                       .background = apply(colorPalette, backgroundColor, bgColorTarget, BgMode) };
 
     if (cellFlags & CellFlag::Inverse)
         rgbColors = rgbColors.swapped();

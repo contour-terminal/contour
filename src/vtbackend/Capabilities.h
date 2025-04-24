@@ -51,9 +51,9 @@ struct Def
 };
 
 // {{{ variable names
-constexpr auto inline AutoLeftMargin = Def { Code { "am" }, "am" };
-constexpr auto inline CanChange = Def { Code { "cc" }, "ccc" };
-constexpr auto inline EatNewlineGlitch = Def { Code { "xn" }, "xenl" };
+constexpr auto inline AutoLeftMargin = Def { .code = Code { "am" }, .name = "am" };
+constexpr auto inline CanChange = Def { .code = Code { "cc" }, .name = "ccc" };
+constexpr auto inline EatNewlineGlitch = Def { .code = Code { "xn" }, .name = "xenl" };
 // TODO ... (all the rest that is at least needed by us)
 // }}}
 

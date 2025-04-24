@@ -16,19 +16,19 @@ struct [[nodiscard]] point
 template <typename T>
 constexpr inline T Zero {};
 template <>
-constexpr inline point Zero<point> = point { 0, 0 };
+constexpr inline point Zero<point> = point { .x = 0, .y = 0 };
 
 constexpr point operator*(point p, double s) noexcept
 {
     return point {
-        static_cast<int>(static_cast<double>(p.x) * s),
-        static_cast<int>(static_cast<double>(p.y) * s),
+        .x = static_cast<int>(static_cast<double>(p.x) * s),
+        .y = static_cast<int>(static_cast<double>(p.y) * s),
     };
 }
 
 constexpr point operator+(point a, point b) noexcept
 {
-    return point { a.x + b.x, a.y + b.y };
+    return point { .x = a.x + b.x, .y = a.y + b.y };
 }
 
 constexpr point& operator+=(point& a, point b) noexcept

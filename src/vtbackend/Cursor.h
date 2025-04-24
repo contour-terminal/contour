@@ -14,7 +14,7 @@ namespace vtbackend
 /// NB: Take care what to store here, as DECSC/DECRC will save/restore this struct.
 struct Cursor
 {
-    CellLocation position { LineOffset(0), ColumnOffset(0) };
+    CellLocation position { .line = LineOffset(0), .column = ColumnOffset(0) };
     bool autoWrap = true; // false;
     bool originMode = false;
     bool wrapPending = false;

@@ -43,11 +43,11 @@ struct [[nodiscard]] size
       private:
         int _width;
         int _next;
-        point _coord { 0, 0 };
+        point _coord { .x = 0, .y = 0 };
 
         constexpr point makeCoordinate(int offset) const noexcept
         {
-            return point { offset % _width, offset / _width };
+            return point { .x = offset % _width, .y = offset / _width };
         }
     };
 
@@ -86,27 +86,28 @@ constexpr bool operator!=(size const& a, size const& b) noexcept
 
 constexpr size operator+(size a, size b) noexcept
 {
-    return size { a.width + b.width, a.height + b.height };
+    return size { .width = a.width + b.width, .height = a.height + b.height };
 }
 
 constexpr size operator-(size a, size b) noexcept
 {
-    return size { a.width - b.width, a.height - b.height };
+    return size { .width = a.width - b.width, .height = a.height - b.height };
 }
 
 constexpr size operator*(size a, size b) noexcept
 {
-    return size { a.width * b.width, a.height * b.height };
+    return size { .width = a.width * b.width, .height = a.height * b.height };
 }
 
 inline size operator*(size a, double scalar) noexcept
 {
-    return size { int(ceil(double(a.width) * scalar)), int(ceil(double(a.height) * scalar)) };
+    return size { .width = int(ceil(double(a.width) * scalar)),
+                  .height = int(ceil(double(a.height) * scalar)) };
 }
 
 constexpr size operator/(size a, size b) noexcept
 {
-    return size { a.width / b.width, a.height / b.height };
+    return size { .width = a.width / b.width, .height = a.height / b.height };
 }
 
 } // end namespace crispy

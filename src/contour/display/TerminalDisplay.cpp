@@ -1127,7 +1127,7 @@ QImage TerminalDisplay::screenshot()
                   size.width.as<int>(),
                   size.height.as<int>(),
                   QImage::Format_RGBA8888_Premultiplied)
-        .mirrored(false, true);
+        .transformed(QTransform().scale(1, -1));
 }
 
 void TerminalDisplay::doDumpStateInternal()

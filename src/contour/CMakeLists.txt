@@ -17,18 +17,12 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 # {{{ Setup QT_COMPONENTS
 # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
 # NB: Widgets is rquired for SystemTrayIcon's fallback implementation
-set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets)
-if(CONTOUR_QT_VERSION EQUAL 6)
-    list(APPEND QT_COMPONENTS OpenGL OpenGLWidgets Core5Compat)
-endif()
-if(NOT(WIN32) AND NOT(APPLE) AND (CONTOUR_QT_VERSION EQUAL 5))
-    list(APPEND QT_COMPONENTS X11Extras)
-endif()
+set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets OpenGL OpenGLWidgets Core5Compat)
 # }}}
 
 message(STATUS "Qt components: ${QT_COMPONENTS}")
 
-find_package(Qt${CONTOUR_QT_VERSION} COMPONENTS ${QT_COMPONENTS} REQUIRED)
+find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 
 add_subdirectory(display)
 
@@ -76,53 +70,12 @@ if(WIN32)
 endif()
 
 set(_qt_resources resources.qrc)
-if(CONTOUR_QT_VERSION EQUAL "5")
-    qt5_add_resources(_qt_resources ${_qt_resources})
-else()
-    qt_add_resources(_qt_resources ${_qt_resources})
-endif()
-
-# {{{ configure QML files and their imports
-function(DeclareQmlImport name import version)
-    set(import_v6_alternative ${ARGN})
-
-    if(CONTOUR_QT_VERSION EQUAL "5")
-        set(${name} "${import} ${version}" PARENT_SCOPE)
-    elseif("${import_v6_alternative}" STREQUAL "")
-        set(${name} "${import}" PARENT_SCOPE)
-    else()
-        set(${name} "${import_v6_alternative}" PARENT_SCOPE)
-    endif()
-endfunction()
-
-function(DeclareQML name name_qt5 name_qt6)
-    if(CONTOUR_QT_VERSION EQUAL "5")
-        set(${name} "${name_qt5}" PARENT_SCOPE)
-    else()
-        set(${name} "${name_qt6}" PARENT_SCOPE)
-    endif()
-endfunction()
-
-DeclareQmlImport(qml_import_ContourTerminal "Contour.Terminal" "1.0")
-DeclareQmlImport(qml_import_QtQuick "QtQuick" "2.6")
-DeclareQmlImport(qml_import_QtQuickControls "QtQuick.Controls" "2.2")
-DeclareQmlImport(qml_import_QtQuickLayouts "QtQuick.Layouts" "1.11")
-DeclareQmlImport(qml_import_QtQuickWindow "QtQuick.Window" "2.6")
-DeclareQmlImport(qml_import_QtQuicklabs "Qt.labs.platform" "1.1")
-DeclareQmlImport(qml_import_QtMultimedia "QtMultimedia" "5.12")
-DeclareQmlImport(qml_import_QtGraphicalEffects "QtGraphicalEffects" "1.12" "Qt5Compat.GraphicalEffects")
-DeclareQML(qml_audio "Audio" "AudioOutput")
-DeclareQML(qml_media_player "" "audioOutput: bellAudioOutput")
-
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/RequestPermission.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/RequestPermission.qml)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/Terminal.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/Terminal.qml)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/main.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/main.qml)
-# }}}
+qt_add_resources(_qt_resources ${_qt_resources})
 
 set(_qml_files
-    ui.template/RequestPermission.qml.in
-    ui.template/Terminal.qml.in
-    ui.template/main.qml.in
+    ui/RequestPermission.qml
+    ui/Terminal.qml
+    ui/main.qml
 )
 
 source_group(Sources FILES ${_source_files})
@@ -226,38 +179,22 @@ if(CONTOUR_FRONTEND_GUI)
     if(OPENBSD)
         find_package(X11 REQUIRED)
     endif()
-    if(CONTOUR_QT_VERSION EQUAL "6")
-        target_link_libraries(contour
-            PRIVATE
-            Qt6::Core
-            Qt6::Core5Compat
-            Qt6::Multimedia
-            Qt6::Network
-            Qt6::OpenGL
-            Qt6::Qml
-            Qt6::QuickControls2
-            Qt6::Widgets
-        )
+    target_link_libraries(contour
+        PRIVATE
+        Qt6::Core
+        Qt6::Core5Compat
+        Qt6::Multimedia
+        Qt6::Network
+        Qt6::OpenGL
+        Qt6::Qml
+        Qt6::QuickControls2
+        Qt6::Widgets
+    )
 
-        if(OPENBSD)
-            target_link_libraries(contour PRIVATE X11::xcb X11::xcb_cursor)
-        elseif(NOT(WIN32) AND NOT(APPLE))
-            target_link_libraries(contour PRIVATE xcb)
-        endif()
-    else()
-        target_link_libraries(contour
-            PRIVATE
-            Qt5::Core
-            Qt5::Gui
-            Qt5::Multimedia
-            Qt5::Network
-            Qt5::Widgets
-        )
-        if(OPENBSD)
-            target_link_libraries(contour PRIVATE Qt5::X11Extras X11::xcb)
-        elseif(NOT(WIN32) AND NOT(APPLE))
-            target_link_libraries(contour PRIVATE Qt5::X11Extras xcb)
-        endif()
+    if(OPENBSD)
+        target_link_libraries(contour PRIVATE X11::xcb X11::xcb_cursor)
+    elseif(NOT(WIN32) AND NOT(APPLE))
+        target_link_libraries(contour PRIVATE xcb)
     endif()
     if(CONTOUR_BUILD_STATIC)
         qt_import_qml_plugins(contour)
@@ -333,7 +270,7 @@ endif()
 # }}}
 
 # {{{ Qt bundle installation helpers
-set(INSTALLED_QT_VERSION ${CONTOUR_QT_VERSION})
+set(INSTALLED_QT_VERSION 6)
 
 function(_qt_get_plugin_name_with_version target out_var)
     string(REGEX REPLACE "^Qt::(.+)" "Qt${INSTALLED_QT_VERSION}::\\1" qt_plugin_with_version "${target}")
@@ -590,11 +527,7 @@ else()
         set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libutempter0")
     endif()
 
-    if(CONTOUR_QT_VERSION EQUAL "6")
-        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins")
-    else()
-        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt5core5a, libqt5gui5, libqt5network5, libqt5multimedia5, libqt5x11extras5") # Qt 5
-    endif()
+    set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins")
 
     # Generator: Debian
     # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS

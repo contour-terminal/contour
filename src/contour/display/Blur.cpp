@@ -265,7 +265,8 @@ void Blur::initFBOTextures()
 
     delete _textureToBlur;
 
-    _textureToBlur = new QOpenGLTexture(_imageToBlur.mirrored(), QOpenGLTexture::DontGenerateMipMaps);
+    _textureToBlur = new QOpenGLTexture(_imageToBlur.transformed(QTransform().scale(-1, 1)),
+                                        QOpenGLTexture::DontGenerateMipMaps);
     _textureToBlur->setWrapMode(QOpenGLTexture::ClampToEdge);
     _textureToBlur->setMinMagFilters(QOpenGLTexture::Linear, QOpenGLTexture::Linear);
 }

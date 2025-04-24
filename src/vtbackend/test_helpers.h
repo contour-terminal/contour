@@ -28,7 +28,7 @@ constexpr ColumnOffset operator""_columnOffset(unsigned long long value) noexcep
 
 constexpr CellLocation operator+(LineOffset line, ColumnOffset column) noexcept
 {
-    return { line, column };
+    return { .line = line, .column = column };
 }
 
 template <typename S>

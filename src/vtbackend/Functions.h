@@ -10,10 +10,12 @@
 #include <gsl/pointers>
 #include <gsl/span>
 
+#include <algorithm>
 #include <array>
 #include <format>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace vtbackend
 {
@@ -307,10 +309,10 @@ constexpr int compare(FunctionSelector const& a, Function const& b) noexcept
     if (a.category == FunctionCategory::OSC)
         return static_cast<int>(a.argc) - static_cast<int>(b.maximumParameters);
 
-    if (a.argc < b.minimumParameters)
+    if (std::cmp_less(a.argc, b.minimumParameters))
         return -1;
 
-    if (a.argc > b.maximumParameters)
+    if (std::cmp_greater(a.argc, b.maximumParameters))
         return +1;
 
     return 0;
@@ -881,7 +883,12 @@ inline Function const* selectEscape(char intermediate,
                                     char finalCharacter,
                                     gsl::span<Function const> availableDefinition)
 {
-    return select({ FunctionCategory::ESC, 0, 0, intermediate, finalCharacter }, availableDefinition);
+    return select({ .category = FunctionCategory::ESC,
+                    .leader = 0,
+                    .argc = 0,
+                    .intermediate = intermediate,
+                    .finalSymbol = finalCharacter },
+                  availableDefinition);
 }
 
 /// Selects a FunctionDefinition based on given input control sequence fields.
@@ -900,7 +907,12 @@ inline Function const* selectControl(char leader,
                                      char finalCharacter,
                                      gsl::span<Function const> availableDefinition)
 {
-    return select({ FunctionCategory::CSI, leader, argc, intermediate, finalCharacter }, availableDefinition);
+    return select({ .category = FunctionCategory::CSI,
+                    .leader = leader,
+                    .argc = argc,
+                    .intermediate = intermediate,
+                    .finalSymbol = finalCharacter },
+                  availableDefinition);
 }
 
 /// Selects a FunctionDefinition based on given input control sequence fields.
@@ -912,7 +924,9 @@ inline Function const* selectControl(char leader,
 /// @return the matching FunctionDefinition or nullptr if none matched.
 inline Function const* selectOSCommand(int id, gsl::span<Function const> availableDefinition)
 {
-    return select({ FunctionCategory::OSC, 0, id, 0, 0 }, availableDefinition);
+    return select(
+        { .category = FunctionCategory::OSC, .leader = 0, .argc = id, .intermediate = 0, .finalSymbol = 0 },
+        availableDefinition);
 }
 
 } // namespace vtbackend

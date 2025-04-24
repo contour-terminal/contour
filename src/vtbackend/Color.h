@@ -100,7 +100,7 @@ inline double distance(RGBColor e1, RGBColor e2) noexcept
     auto const r = uint32_t(e1.red) - uint32_t(e2.red);
     auto const g = uint32_t(e1.green) - uint32_t(e2.green);
     auto const b = uint32_t(e1.blue) - uint32_t(e2.blue);
-    return sqrt((((512 + rmean) * r * r) >> 8) + 4 * g * g + (((767 - rmean) * b * b) >> 8));
+    return sqrt((((512 + rmean) * r * r) >> 8) + (4 * g * g) + (((767 - rmean) * b * b) >> 8));
 }
 
 constexpr RGBColor operator""_rgb(unsigned long long value)
@@ -121,7 +121,7 @@ struct RGBColorPair
     [[nodiscard]] RGBColorPair distinct(double threshold = 0.25) const noexcept
     {
         if (isTooSimilar(threshold))
-            return { foreground.inverse(), foreground };
+            return { .foreground = foreground.inverse(), .background = foreground };
         else
             return *this;
     }
@@ -129,33 +129,33 @@ struct RGBColorPair
     [[nodiscard]] constexpr RGBColorPair constructDefaulted(std::optional<RGBColor> fgOpt,
                                                             std::optional<RGBColor> bgOpt) const noexcept
     {
-        return { fgOpt.value_or(foreground), bgOpt.value_or(background) };
+        return { .foreground = fgOpt.value_or(foreground), .background = bgOpt.value_or(background) };
     }
 
     [[nodiscard]] constexpr RGBColorPair swapped() const noexcept
     {
         // Swap fg/bg.
-        return { background, foreground };
+        return { .foreground = background, .background = foreground };
     }
 
     [[nodiscard]] constexpr RGBColorPair allForeground() const noexcept
     {
         // All same color components as foreground.
-        return { foreground, foreground };
+        return { .foreground = foreground, .background = foreground };
     }
 
     [[nodiscard]] constexpr RGBColorPair allBackground() const noexcept
     {
         // All same color components as foreground.
-        return { background, background };
+        return { .foreground = background, .background = background };
     }
 };
 
 constexpr RGBColorPair mix(RGBColorPair a, RGBColorPair b, float t = 0.5) noexcept
 {
     return RGBColorPair {
-        mix(a.foreground, b.foreground, t),
-        mix(a.background, b.background, t),
+        .foreground = mix(a.foreground, b.foreground, t),
+        .background = mix(a.background, b.background, t),
     };
 }
 // }}}

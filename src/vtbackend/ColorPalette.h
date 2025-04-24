@@ -107,28 +107,28 @@ struct ColorPalette
         RGBColor hover = 0xFF0000_rgb;
     } hyperlinkDecoration;
 
-    RGBColorPair inputMethodEditor = { 0xFFFFFF_rgb, 0xFF0000_rgb };
+    RGBColorPair inputMethodEditor = { .foreground = 0xFFFFFF_rgb, .background = 0xFF0000_rgb };
 
     std::shared_ptr<BackgroundImage> backgroundImage;
 
     // clang-format off
-    CellRGBColorAndAlphaPair yankHighlight { CellForegroundColor {}, 1.0f, 0xffA500_rgb, 0.5f };
+    CellRGBColorAndAlphaPair yankHighlight { .foreground=CellForegroundColor {}, .foregroundAlpha=1.0f, .background=0xffA500_rgb, .backgroundAlpha=0.5f };
 
-    CellRGBColorAndAlphaPair searchHighlight { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
-    CellRGBColorAndAlphaPair searchHighlightFocused {  CellBackgroundColor {}, 1.0f,CellForegroundColor {}, 1.0f };
+    CellRGBColorAndAlphaPair searchHighlight { .foreground=CellBackgroundColor {}, .foregroundAlpha=1.0f, .background=CellForegroundColor {}, .backgroundAlpha=1.0f };
+    CellRGBColorAndAlphaPair searchHighlightFocused {  .foreground=CellBackgroundColor {}, .foregroundAlpha=1.0f,.background=CellForegroundColor {}, .backgroundAlpha=1.0f };
 
-    CellRGBColorAndAlphaPair wordHighlight { CellForegroundColor {}, 1.0f, 0x909090_rgb, 0.5f };
-    CellRGBColorAndAlphaPair wordHighlightCurrent { CellForegroundColor {}, 1.0f, RGBColor{0x90, 0x90, 0x90}, 0.6f };
+    CellRGBColorAndAlphaPair wordHighlight { .foreground=CellForegroundColor {}, .foregroundAlpha=1.0f, .background=0x909090_rgb, .backgroundAlpha=0.5f };
+    CellRGBColorAndAlphaPair wordHighlightCurrent { .foreground=CellForegroundColor {}, .foregroundAlpha=1.0f, .background=RGBColor{0x90, 0x90, 0x90}, .backgroundAlpha=0.6f };
 
-    CellRGBColorAndAlphaPair selection { CellForegroundColor {}, 1.0f, 0x4040f0_rgb , 0.5f };
+    CellRGBColorAndAlphaPair selection { .foreground=CellForegroundColor {}, .foregroundAlpha=1.0f, .background=0x4040f0_rgb , .backgroundAlpha=0.5f };
 
-    CellRGBColorAndAlphaPair normalModeCursorline = { 0xFFFFFF_rgb, 0.2f, 0x808080_rgb, 0.4f };
+    CellRGBColorAndAlphaPair normalModeCursorline = { .foreground=0xFFFFFF_rgb, .foregroundAlpha=0.2f, .background=0x808080_rgb, .backgroundAlpha=0.4f };
     // clang-format on
 
-    RGBColorPair indicatorStatusLineInactive = { 0xFFFFFF_rgb, 0x0270c0_rgb };
-    RGBColorPair indicatorStatusLineInsertMode = { 0xFFFFFF_rgb, 0x0270c0_rgb };
-    RGBColorPair indicatorStatusLineNormalMode = { 0xFFFFFF_rgb, 0x0270c0_rgb };
-    RGBColorPair indicatorStatusLineVisualMode = { 0xFFFFFF_rgb, 0x0270c0_rgb };
+    RGBColorPair indicatorStatusLineInactive = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
+    RGBColorPair indicatorStatusLineInsertMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
+    RGBColorPair indicatorStatusLineNormalMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
+    RGBColorPair indicatorStatusLineVisualMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
 };
 
 bool defaultColorPalettes(std::string const& colorPaletteName, ColorPalette& palette) noexcept;
