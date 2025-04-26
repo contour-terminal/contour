@@ -23,13 +23,12 @@ namespace text
 namespace
 {
     template <std::size_t NumComponents>
-    constexpr void scaleDownExplicit(vector<uint8_t> const& inputBitmap,
-                                     vtbackend::ImageSize inputSize,
-                                     vtbackend::ImageSize outputSize,
-                                     size_t factor,
-                                     vector<uint8_t>& outputBitmap) noexcept
+    constexpr vector<uint8_t> scaleDownExplicit(vector<uint8_t> const& inputBitmap,
+                                                vtbackend::ImageSize inputSize,
+                                                vtbackend::ImageSize outputSize,
+                                                size_t factor) noexcept
     {
-        outputBitmap.resize(outputSize.area() * NumComponents);
+        vector<uint8_t> ret(outputSize.area() * NumComponents);
 
         auto index = [&](size_t i, size_t j, size_t component) {
             return (4 * i * unbox(outputSize.width)) + (j * 4) + component;
@@ -59,11 +58,12 @@ namespace
                 if (count)
                 {
                     for (auto const componentIndex: ::ranges::views::iota(size_t { 0 }, NumComponents))
-                        outputBitmap[index(i, j, componentIndex)] =
+                        ret[index(i, j, componentIndex)] =
                             static_cast<uint8_t>(components[componentIndex] / count);
                 }
             }
         }
+        return ret;
     }
 
 } // namespace
@@ -97,13 +97,13 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::
     switch (bitmap.format)
     {
         case bitmap_format::rgba:
-            scaleDownExplicit<4>(bitmap.bitmap, bitmap.bitmapSize, newSize, factor, dest);
+            dest = scaleDownExplicit<4>(bitmap.bitmap, bitmap.bitmapSize, newSize, factor);
             break;
         case bitmap_format::rgb:
-            scaleDownExplicit<3>(bitmap.bitmap, bitmap.bitmapSize, newSize, factor, dest);
+            dest = scaleDownExplicit<3>(bitmap.bitmap, bitmap.bitmapSize, newSize, factor);
             break;
         case bitmap_format::alpha_mask:
-            scaleDownExplicit<1>(bitmap.bitmap, bitmap.bitmapSize, newSize, factor, dest);
+            dest = scaleDownExplicit<1>(bitmap.bitmap, bitmap.bitmapSize, newSize, factor);
             break;
     }
 
