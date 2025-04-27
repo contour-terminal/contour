@@ -77,6 +77,7 @@ option(CONTOUR_PACKAGE_TERMINFO "Package terminfo files" ON)
 option(CONTOUR_WITH_UTEMPTER "Build with utempter support [default: ON]" ON)
 option(CONTOUR_USE_CPM "Use CPM to fetch dependencies [default: OFF]" OFF)
 option(CONTOUR_BUILD_STATIC "Link to static libraries [default: OFF]" OFF)
+option(CONTOUR_BUILD_NATIVE "Build for native architecture [default: OFF]" OFF)
 
 
 if(CONTOUR_BUILD_STATIC)
@@ -89,6 +90,10 @@ endif()
 if(NOT WIN32 AND NOT CONTOUR_SANITIZE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CONTOUR_SANITIZE "OFF" CACHE STRING "Choose the sanitizer mode." FORCE)
     set_property(CACHE CONTOUR_SANITIZE PROPERTY STRINGS OFF address thread)
+endif()
+
+if(CONTOUR_BUILD_NATIVE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
 endif()
 
 # ----------------------------------------------------------------------------
