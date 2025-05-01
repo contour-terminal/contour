@@ -38,6 +38,9 @@ class ConPty: public Pty
     HPCON master() const noexcept { return _master; }
 
   private:
+    // Private class for ConPTY API implementation details
+    class ConptyApiImpl;
+    
     std::mutex _mutex; // used to guard close()
     PageSize _size;
     HPCON _master;
@@ -45,6 +48,7 @@ class ConPty: public Pty
     HANDLE _output;
     std::vector<char> _buffer;
     std::unique_ptr<PtySlave> _slave;
+    std::unique_ptr<ConptyApiImpl> _conptyApi; // ConPTY API implementation (dynamically loaded)
 };
 
 } // namespace vtpty
