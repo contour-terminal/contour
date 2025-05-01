@@ -2103,25 +2103,36 @@ std::string createForGlobal(Config const& c)
             doc.append(writer.process(writer.whichDoc(v), name, escapeSequence(v.value())));
         };
 
-    auto completeOverload = crispy::overloaded {
+    // Define lambda types explicitly
+    using ProcessEntryLambda = decltype(processConfigEntry);
+    using ProcessEntryEscapeLambda = decltype(processConfigEntryWithEscape);
+    using IgnoredEntryLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v){});
+    using ColorPaletteIgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>, documentation::ColorSchemes> const& v){});
+    using DECModeIgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> const& v){});
+    using InputMappingsIgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] ConfigEntry<InputMappings, documentation::InputMappings> const& v){});
+    using TerminalProfileIgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, TerminalProfile>, documentation::Profiles> const& v){});
+
+    // Construct on heap using new, then wrap in unique_ptr
+    using OverloadType = crispy::overloaded<
+        ProcessEntryLambda,
+        ProcessEntryEscapeLambda,
+        ColorPaletteIgnoreLambda,
+        DECModeIgnoreLambda,
+        InputMappingsIgnoreLambda,
+        TerminalProfileIgnoreLambda,
+        IgnoredEntryLambda>;
+
+    auto completeOverloadPtr = std::unique_ptr<OverloadType>(new OverloadType{
         processConfigEntry,
         processConfigEntryWithEscape,
-        // Ignored entries
-        [&]([[maybe_unused]] auto name,
-            [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>,
-                                         documentation::ColorSchemes> const& v) {},
-        [&]([[maybe_unused]] auto name,
-            [[maybe_unused]] ConfigEntry<std::map<vtbackend::DECMode, bool>,
-                                         documentation::FrozenDecMode> const& v) {},
-        [&]([[maybe_unused]] auto name,
-            [[maybe_unused]] ConfigEntry<InputMappings, documentation::InputMappings> const& v) {},
-        [&]([[maybe_unused]] auto name,
-            [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, TerminalProfile>,
-                                         documentation::Profiles> const& v) {},
-        [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
-    };
+        ColorPaletteIgnoreLambda{},
+        DECModeIgnoreLambda{},
+        InputMappingsIgnoreLambda{},
+        TerminalProfileIgnoreLambda{},
+        IgnoredEntryLambda{}
+    });
 
-    Reflection::CallOnMembers(c, completeOverload);
+    Reflection::CallOnMembers(c, *completeOverloadPtr);
 
     return doc;
 }
@@ -2163,11 +2174,22 @@ std::string createForProfile(Config const& c)
             }()));
         };
 
-    auto completeOverload = crispy::overloaded {
+    // Define lambda types explicitly
+    using ProcessExecInfoLambda = decltype(processConfigEntryWithExecInfo);
+    using ProcessEntryLambda = decltype(processConfigEntry);
+    using IgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v){});
+
+    // Construct on heap using new, then wrap in unique_ptr
+    using OverloadType = crispy::overloaded<
+        ProcessExecInfoLambda,
+        ProcessEntryLambda,
+        IgnoreLambda>;
+
+    auto completeOverloadPtr = std::unique_ptr<OverloadType>(new OverloadType{
         processConfigEntryWithExecInfo,
         processConfigEntry,
-        [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
-    };
+        IgnoreLambda{}
+    });
 
     // inside profiles:
     doc.append(writer.replaceCommentPlaceholder(std::string { writer.whichDoc(c.profiles) }));
@@ -2178,7 +2200,7 @@ std::string createForProfile(Config const& c)
             if constexpr (std::same_as<Writer, YAMLConfigWriter>)
                 doc.append(std::format("    {}: \n", name));
 
-            writer.scoped([&]() { Reflection::CallOnMembers(entry, completeOverload); });
+            writer.scoped([&]() { Reflection::CallOnMembers(entry, *completeOverloadPtr); });
         }
     }
     return doc;
