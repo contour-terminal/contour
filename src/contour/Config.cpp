@@ -2085,7 +2085,7 @@ std::string createForGlobal(Config const& c)
             std::regex_replace(value, std::regex("\\\\"), "\\$&"), std::regex("\""), "\\$&");
     };
 
-    auto const processConfigEntry =
+    auto processConfigEntry =
         [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
             auto name,
             contour::config::ConfigEntry<
@@ -2094,7 +2094,7 @@ std::string createForGlobal(Config const& c)
             doc.append(writer.process(writer.whichDoc(v), name, v.value()));
         };
 
-    auto const processConfigEntryWithEscape =
+    auto processConfigEntryWithEscape =
         [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
             auto name,
             contour::config::ConfigEntry<
@@ -2152,7 +2152,7 @@ std::string createForProfile(Config const& c)
     auto doc = std::string {};
     Writer writer;
 
-    auto const processConfigEntry =
+    auto processConfigEntry =
         [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
             auto name,
             contour::config::ConfigEntry<
@@ -2163,7 +2163,7 @@ std::string createForProfile(Config const& c)
 
     // Something is wrong for vtpty::Process::ExecInfo formating for static build
     // we add this lambda to handle it in overload set for now
-    auto const processConfigEntryWithExecInfo =
+    auto processConfigEntryWithExecInfo =
         [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
             auto name,
             contour::config::ConfigEntry<
