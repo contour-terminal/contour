@@ -2123,7 +2123,7 @@ std::string createForGlobal(Config const& c)
                     [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, TerminalProfile>,
                                                  documentation::Profiles> const& v) {});
 
-    // Construct on heap using new, then wrap in unique_ptr
+    // Create on heap to avoid stack corruption
     using OverloadType = crispy::overloaded<ProcessEntryLambda,
                                             ProcessEntryEscapeLambda,
                                             ColorPaletteIgnoreLambda,
@@ -2132,16 +2132,17 @@ std::string createForGlobal(Config const& c)
                                             TerminalProfileIgnoreLambda,
                                             IgnoredEntryLambda>;
 
-    auto completeOverloadPtr =
-        std::unique_ptr<OverloadType>(new OverloadType { processConfigEntry,
-                                                         processConfigEntryWithEscape,
-                                                         ColorPaletteIgnoreLambda {},
-                                                         DECModeIgnoreLambda {},
-                                                         InputMappingsIgnoreLambda {},
-                                                         TerminalProfileIgnoreLambda {},
-                                                         IgnoredEntryLambda {} });
+    // Use make_shared instead of unique_ptr + new for better cross-compiler compatibility
+    auto overloadPtr = std::make_shared<OverloadType>(
+        processConfigEntry,
+        processConfigEntryWithEscape,
+        ColorPaletteIgnoreLambda{},
+        DECModeIgnoreLambda{},
+        InputMappingsIgnoreLambda{},
+        TerminalProfileIgnoreLambda{},
+        IgnoredEntryLambda{});
 
-    Reflection::CallOnMembers(c, *completeOverloadPtr);
+    Reflection::CallOnMembers(c, *overloadPtr);
 
     return doc;
 }
@@ -2188,11 +2189,14 @@ std::string createForProfile(Config const& c)
     using ProcessEntryLambda = decltype(processConfigEntry);
     using IgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {});
 
-    // Construct on heap using new, then wrap in unique_ptr
+    // Create on heap to avoid stack corruption
     using OverloadType = crispy::overloaded<ProcessExecInfoLambda, ProcessEntryLambda, IgnoreLambda>;
 
-    auto completeOverloadPtr = std::unique_ptr<OverloadType>(
-        new OverloadType { processConfigEntryWithExecInfo, processConfigEntry, IgnoreLambda {} });
+    // Use make_shared instead of unique_ptr + new for better cross-compiler compatibility
+    auto overloadPtr = std::make_shared<OverloadType>(
+        processConfigEntryWithExecInfo, 
+        processConfigEntry, 
+        IgnoreLambda{});
 
     // inside profiles:
     doc.append(writer.replaceCommentPlaceholder(std::string { writer.whichDoc(c.profiles) }));
@@ -2203,7 +2207,7 @@ std::string createForProfile(Config const& c)
             if constexpr (std::same_as<Writer, YAMLConfigWriter>)
                 doc.append(std::format("    {}: \n", name));
 
-            writer.scoped([&]() { Reflection::CallOnMembers(entry, *completeOverloadPtr); });
+            writer.scoped([&]() { Reflection::CallOnMembers(entry, *overloadPtr); });
         }
     }
     return doc;
