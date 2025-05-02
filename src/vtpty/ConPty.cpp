@@ -3,8 +3,8 @@
 
 #include <crispy/BufferObject.h>
 
-#include <utility>
 #include <memory>
+#include <utility>
 
 #include <Windows.h>
 
@@ -19,30 +19,35 @@ using ResizePseudoConsoleFn = HRESULT(WINAPI*)(HPCON, COORD);
 using ClosePseudoConsoleFn = void(WINAPI*)(HPCON);
 
 // Implementation of the ConPTY API
-class ConPty::ConptyApiImpl {
-public:
+class ConPty::ConptyApiImpl
+{
+  public:
     CreatePseudoConsoleFn createPseudoConsole;
     ResizePseudoConsoleFn resizePseudoConsole;
     ClosePseudoConsoleFn closePseudoConsole;
 
     // Constructor loads the appropriate API implementation
-    ConptyApiImpl() {
+    ConptyApiImpl()
+    {
         // First try to load conpty.dll from the same directory as our executable
         wchar_t exePath[MAX_PATH];
         DWORD pathLen = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
         HMODULE hModule = nullptr;
-        
-        if (pathLen > 0 && pathLen < MAX_PATH) {
+
+        if (pathLen > 0 && pathLen < MAX_PATH)
+        {
             // Find the last backslash to get the directory
             wchar_t* lastBackslash = wcsrchr(exePath, L'\\');
-            if (lastBackslash != nullptr) {
+            if (lastBackslash != nullptr)
+            {
                 // Replace executable name with conpty.dll
                 wcscpy_s(lastBackslash + 1, MAX_PATH - (lastBackslash - exePath) - 1, L"conpty.dll");
-                
+
                 // Try loading from this path
                 hModule = LoadLibraryW(exePath);
-                
-                if (hModule != nullptr) {
+
+                if (hModule != nullptr)
+                {
                     // Convert wide string to narrow string for logging using proper Windows API
                     int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, exePath, -1, NULL, 0, NULL, NULL);
                     std::string path(sizeNeeded, 0);
@@ -53,35 +58,41 @@ public:
                 }
             }
         }
-        
+
         // If not found in executable directory, try loading from PATH
-        if (hModule == nullptr) {
+        if (hModule == nullptr)
+        {
             hModule = LoadLibraryW(L"conpty.dll");
-            if (hModule != nullptr) {
+            if (hModule != nullptr)
+            {
                 ptyLog()("Found conpty.dll in system PATH");
             }
         }
-        
-        if (hModule != nullptr) {
+
+        if (hModule != nullptr)
+        {
             // Found conpty.dll, load functions from it
-            createPseudoConsole = reinterpret_cast<CreatePseudoConsoleFn>(
-                GetProcAddress(hModule, "CreatePseudoConsole"));
-            resizePseudoConsole = reinterpret_cast<ResizePseudoConsoleFn>(
-                GetProcAddress(hModule, "ResizePseudoConsole"));
-            closePseudoConsole = reinterpret_cast<ClosePseudoConsoleFn>(
-                GetProcAddress(hModule, "ClosePseudoConsole"));
-            
+            createPseudoConsole =
+                reinterpret_cast<CreatePseudoConsoleFn>(GetProcAddress(hModule, "CreatePseudoConsole"));
+            resizePseudoConsole =
+                reinterpret_cast<ResizePseudoConsoleFn>(GetProcAddress(hModule, "ResizePseudoConsole"));
+            closePseudoConsole =
+                reinterpret_cast<ClosePseudoConsoleFn>(GetProcAddress(hModule, "ClosePseudoConsole"));
+
             // Verify all functions were found
-            if (createPseudoConsole && resizePseudoConsole && closePseudoConsole) {
-                ptyLog()("Using conpty.dll for pseudoconsole - this should improve mouse input handling on Windows 10");
+            if (createPseudoConsole && resizePseudoConsole && closePseudoConsole)
+            {
+                ptyLog()("Using conpty.dll for pseudoconsole - this should improve mouse input handling on "
+                         "Windows 10");
                 return;
             }
-            
+
             // If any function is missing, fall back to kernel32
-            ptyLog()("conpty.dll was found but missing required functions, falling back to system implementation");
+            ptyLog()(
+                "conpty.dll was found but missing required functions, falling back to system implementation");
             FreeLibrary(hModule);
         }
-        
+
         // Use default Windows API functions from kernel32.dll
         ptyLog()("Using Windows system API for pseudoconsole");
         createPseudoConsole = ::CreatePseudoConsole;
@@ -92,28 +103,28 @@ public:
 
 namespace
 {
-string GetLastErrorAsString()
-{
-    DWORD errorMessageID = GetLastError();
-    if (errorMessageID == 0)
-        return "";
+    string GetLastErrorAsString()
+    {
+        DWORD errorMessageID = GetLastError();
+        if (errorMessageID == 0)
+            return "";
 
-    LPSTR messageBuffer = nullptr;
-    size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM
-                                     | FORMAT_MESSAGE_IGNORE_INSERTS,
-                                 nullptr,
-                                 errorMessageID,
-                                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                                 (LPSTR) &messageBuffer,
-                                 0,
-                                 nullptr);
+        LPSTR messageBuffer = nullptr;
+        size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM
+                                         | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                     nullptr,
+                                     errorMessageID,
+                                     MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                     (LPSTR) &messageBuffer,
+                                     0,
+                                     nullptr);
 
-    string message(messageBuffer, size);
+        string message(messageBuffer, size);
 
-    LocalFree(messageBuffer);
+        LocalFree(messageBuffer);
 
-    return message;
-}
+        return message;
+    }
 } // anonymous namespace
 
 struct ConPtySlave: public PtySlaveDummy
@@ -138,7 +149,7 @@ ConPty::ConPty(PageSize const& windowSize): _size { windowSize }
     _input = INVALID_HANDLE_VALUE;
     _output = INVALID_HANDLE_VALUE;
     _buffer.resize(10240);
-    
+
     // Create the ConptyApi implementation
     _conptyApi = std::make_unique<ConptyApiImpl>();
 }

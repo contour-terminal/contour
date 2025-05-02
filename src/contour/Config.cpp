@@ -2106,31 +2106,40 @@ std::string createForGlobal(Config const& c)
     // Define lambda types explicitly
     using ProcessEntryLambda = decltype(processConfigEntry);
     using ProcessEntryEscapeLambda = decltype(processConfigEntryWithEscape);
-    using IgnoredEntryLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v){});
-    using ColorPaletteIgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>, documentation::ColorSchemes> const& v){});
-    using DECModeIgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> const& v){});
-    using InputMappingsIgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] ConfigEntry<InputMappings, documentation::InputMappings> const& v){});
-    using TerminalProfileIgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, TerminalProfile>, documentation::Profiles> const& v){});
+    using IgnoredEntryLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {});
+    using ColorPaletteIgnoreLambda =
+        decltype([]([[maybe_unused]] auto name,
+                    [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>,
+                                                 documentation::ColorSchemes> const& v) {});
+    using DECModeIgnoreLambda =
+        decltype([]([[maybe_unused]] auto name,
+                    [[maybe_unused]] ConfigEntry<std::map<vtbackend::DECMode, bool>,
+                                                 documentation::FrozenDecMode> const& v) {});
+    using InputMappingsIgnoreLambda =
+        decltype([]([[maybe_unused]] auto name,
+                    [[maybe_unused]] ConfigEntry<InputMappings, documentation::InputMappings> const& v) {});
+    using TerminalProfileIgnoreLambda =
+        decltype([]([[maybe_unused]] auto name,
+                    [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, TerminalProfile>,
+                                                 documentation::Profiles> const& v) {});
 
     // Construct on heap using new, then wrap in unique_ptr
-    using OverloadType = crispy::overloaded<
-        ProcessEntryLambda,
-        ProcessEntryEscapeLambda,
-        ColorPaletteIgnoreLambda,
-        DECModeIgnoreLambda,
-        InputMappingsIgnoreLambda,
-        TerminalProfileIgnoreLambda,
-        IgnoredEntryLambda>;
+    using OverloadType = crispy::overloaded<ProcessEntryLambda,
+                                            ProcessEntryEscapeLambda,
+                                            ColorPaletteIgnoreLambda,
+                                            DECModeIgnoreLambda,
+                                            InputMappingsIgnoreLambda,
+                                            TerminalProfileIgnoreLambda,
+                                            IgnoredEntryLambda>;
 
-    auto completeOverloadPtr = std::unique_ptr<OverloadType>(new OverloadType{
-        processConfigEntry,
-        processConfigEntryWithEscape,
-        ColorPaletteIgnoreLambda{},
-        DECModeIgnoreLambda{},
-        InputMappingsIgnoreLambda{},
-        TerminalProfileIgnoreLambda{},
-        IgnoredEntryLambda{}
-    });
+    auto completeOverloadPtr =
+        std::unique_ptr<OverloadType>(new OverloadType { processConfigEntry,
+                                                         processConfigEntryWithEscape,
+                                                         ColorPaletteIgnoreLambda {},
+                                                         DECModeIgnoreLambda {},
+                                                         InputMappingsIgnoreLambda {},
+                                                         TerminalProfileIgnoreLambda {},
+                                                         IgnoredEntryLambda {} });
 
     Reflection::CallOnMembers(c, *completeOverloadPtr);
 
@@ -2177,19 +2186,13 @@ std::string createForProfile(Config const& c)
     // Define lambda types explicitly
     using ProcessExecInfoLambda = decltype(processConfigEntryWithExecInfo);
     using ProcessEntryLambda = decltype(processConfigEntry);
-    using IgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v){});
+    using IgnoreLambda = decltype([]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {});
 
     // Construct on heap using new, then wrap in unique_ptr
-    using OverloadType = crispy::overloaded<
-        ProcessExecInfoLambda,
-        ProcessEntryLambda,
-        IgnoreLambda>;
+    using OverloadType = crispy::overloaded<ProcessExecInfoLambda, ProcessEntryLambda, IgnoreLambda>;
 
-    auto completeOverloadPtr = std::unique_ptr<OverloadType>(new OverloadType{
-        processConfigEntryWithExecInfo,
-        processConfigEntry,
-        IgnoreLambda{}
-    });
+    auto completeOverloadPtr = std::unique_ptr<OverloadType>(
+        new OverloadType { processConfigEntryWithExecInfo, processConfigEntry, IgnoreLambda {} });
 
     // inside profiles:
     doc.append(writer.replaceCommentPlaceholder(std::string { writer.whichDoc(c.profiles) }));

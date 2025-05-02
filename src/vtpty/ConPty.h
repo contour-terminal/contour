@@ -40,7 +40,7 @@ class ConPty: public Pty
   private:
     // Private class for ConPTY API implementation details
     class ConptyApiImpl;
-    
+
     std::mutex _mutex; // used to guard close()
     PageSize _size;
     HPCON _master;
