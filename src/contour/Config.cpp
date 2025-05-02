@@ -2133,14 +2133,13 @@ std::string createForGlobal(Config const& c)
                                             IgnoredEntryLambda>;
 
     // Use make_shared instead of unique_ptr + new for better cross-compiler compatibility
-    auto overloadPtr = std::make_shared<OverloadType>(
-        processConfigEntry,
-        processConfigEntryWithEscape,
-        ColorPaletteIgnoreLambda{},
-        DECModeIgnoreLambda{},
-        InputMappingsIgnoreLambda{},
-        TerminalProfileIgnoreLambda{},
-        IgnoredEntryLambda{});
+    auto overloadPtr = std::make_shared<OverloadType>(processConfigEntry,
+                                                      processConfigEntryWithEscape,
+                                                      ColorPaletteIgnoreLambda {},
+                                                      DECModeIgnoreLambda {},
+                                                      InputMappingsIgnoreLambda {},
+                                                      TerminalProfileIgnoreLambda {},
+                                                      IgnoredEntryLambda {});
 
     Reflection::CallOnMembers(c, *overloadPtr);
 
@@ -2193,10 +2192,8 @@ std::string createForProfile(Config const& c)
     using OverloadType = crispy::overloaded<ProcessExecInfoLambda, ProcessEntryLambda, IgnoreLambda>;
 
     // Use make_shared instead of unique_ptr + new for better cross-compiler compatibility
-    auto overloadPtr = std::make_shared<OverloadType>(
-        processConfigEntryWithExecInfo, 
-        processConfigEntry, 
-        IgnoreLambda{});
+    auto overloadPtr =
+        std::make_shared<OverloadType>(processConfigEntryWithExecInfo, processConfigEntry, IgnoreLambda {});
 
     // inside profiles:
     doc.append(writer.replaceCommentPlaceholder(std::string { writer.whichDoc(c.profiles) }));
