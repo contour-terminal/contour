@@ -122,6 +122,19 @@ cmake --build --preset linux-release --target install
 For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Studio 2019, installed.
 It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
 
+### Using External ConPTY Support on Windows 10
+
+On Windows 10, the built-in ConPTY implementation has limitations with mouse input handling, particularly when using WSL2 with terminal applications like tmux. This is a known issue that affects several terminal emulators.
+
+Contour supports using an external `conpty.dll` implementation which resolves these issues on Windows 10.
+
+To enable external ConPTY:
+
+1. Get `conpty.dll` and `OpenConsole.exe` files from wezterm:
+   Go to https://github.com/wez/wezterm/tree/main/assets/windows/conhost and download `conpty.dll` and `OpenConsole.exe`
+2. Put these files into your Contour bin directory (e.g. C:\Program Files\Contour Terminal Emulator 0.6\bin\)
+3. Start Contour. It will automatically detect and use the external ConPTY implementation.
+
 1. Set up [vcpkg](https://vcpkg.io/en/getting-started.html), preferably somewhere high up in the folder hierarchy, and add the folder to your `PATH`.
 
 ```
