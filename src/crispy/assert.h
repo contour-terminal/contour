@@ -107,7 +107,7 @@ inline void set_fail_handler(fail_handler_t handler)
 #define Require(cond)                                                                \
     do                                                                               \
     {                                                                                \
-        if (false && !(cond))                                                        \
+        if (!(cond))                                                                 \
         {                                                                            \
             crispy::detail::fail(#cond, "Precondition failed.", __FILE__, __LINE__); \
         }                                                                            \

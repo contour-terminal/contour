@@ -58,6 +58,8 @@ class TerminalSessionManager: public QAbstractListModel
 
     void update() { updateStatusLine(); }
 
+    void allowCreation() { _allowCreation = true; }
+
   private:
     contour::TerminalSession* activateSession(TerminalSession* session, bool isNewSession = false);
     std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> cwd);
@@ -98,6 +100,12 @@ class TerminalSessionManager: public QAbstractListModel
     std::chrono::seconds _earlyExitThreshold;
     std::unordered_map<display::TerminalDisplay*, TerminalSession*> _displayStates;
     std::vector<TerminalSession*> _sessions;
+
+    // on windows qt tries to create a new session
+    // twice on qml file loading, this bool is used to
+    // prevent that, and to allow creation of new session
+    // user have to call allowCreation() method first
+    std::atomic<bool> _allowCreation;
 };
 
 } // namespace contour
