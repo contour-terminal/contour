@@ -52,6 +52,21 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
         managerLog()("No active display found. something went wrong.");
     }
 
+    if (!_allowCreation)
+    {
+        managerLog()("Session creation is disabled.");
+        // try to find for the selected display a session to use
+
+        for (auto& session: _sessions)
+        {
+            if (_displayStates[activeDisplay] == session)
+            {
+                managerLog()("Found suitable session Returning it.");
+                return session;
+            }
+        }
+    }
+
 #if !defined(_WIN32)
     auto ptyPath = [this]() -> std::optional<std::string> {
         if (_sessions.empty())
@@ -63,9 +78,9 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
     }();
 #else
     std::optional<std::string> ptyPath = std::nullopt;
-    if (_activeSession)
+    if (!_sessions.empty())
     {
-        auto& terminal = _activeSession->terminal();
+        auto& terminal = _sessions[0]->terminal();
         {
             auto _l = std::scoped_lock { terminal };
             ptyPath = terminal.currentWorkingDirectory();
@@ -87,6 +102,7 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
     // sessions. This will work around it, by explicitly claiming ownership of the object.
     QQmlEngine::setObjectOwnership(session, QQmlEngine::CppOwnership);
 
+    _allowCreation = false;
     return session;
 }
 
@@ -132,7 +148,7 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
 
     if (!activeDisplay)
     {
-        managerLog()("No active display fond. something went wrong.");
+        managerLog()("No active display found. something went wrong.");
     }
 
     auto& displayState = _displayStates[activeDisplay];

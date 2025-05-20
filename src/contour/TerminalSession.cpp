@@ -1496,6 +1496,7 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
 
 bool TerminalSession::operator()(actions::CreateNewTab)
 {
+    _manager->allowCreation();
     _manager->createSession();
     return true;
 }
@@ -1646,6 +1647,7 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     {
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
+        _manager->allowCreation();
         _app.newWindow();
     }
 }
