@@ -790,6 +790,7 @@ jobs:
   # }}}
   # {{{ Linux AppImage (Using Ubuntu 24.04 as base).
   package_for_AppImage:
+    if: github.ref == 'disabled'
     name: "Packaging for AppImage"
     runs-on: ubuntu-24.04
     steps:
