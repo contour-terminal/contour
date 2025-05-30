@@ -683,7 +683,6 @@ void TerminalSession::onClosed()
     {
         sessionLog()("Terminal device is closed. Notify manager.");
         _manager->currentSessionIsTerminated();
-        // _display->closeDisplay(); // TODO MOVE LOGIC
     }
     else
         sessionLog()("Terminal device is closed. But no display available (yet).");
@@ -1647,6 +1646,7 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     {
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
+        _manager->doNotSwitchToNewSession();
         _manager->allowCreation();
         _app.newWindow();
     }
