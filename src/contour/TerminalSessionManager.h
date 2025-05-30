@@ -53,7 +53,6 @@ class TerminalSessionManager: public QAbstractListModel
 
     void updateColorPreference(vtbackend::ColorPreference const& preference);
 
-    display::TerminalDisplay* activeDisplay = nullptr;
     void FocusOnDisplay(display::TerminalDisplay* display);
 
     void update() { updateStatusLine(); }
@@ -76,30 +75,30 @@ class TerminalSessionManager: public QAbstractListModel
     [[nodiscard]] auto getCurrentSessionIndex() noexcept
     {
         // TODO cache this value
-        return getSessionIndexOf(_displayStates[activeDisplay]).value();
+        return getSessionIndexOf(_displayStates[_activeDisplay]).value();
     }
 
     void updateStatusLine()
     {
-        if (!_displayStates[activeDisplay])
-            return;
-        _displayStates[activeDisplay]->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
-            .tabs = std::ranges::transform_view(_sessions,
-                                                [](auto* session) {
-                                                    return vtbackend::TabsInfo::Tab {
-                                                        .name = session->name(),
-                                                        .color = vtbackend::RGBColor { 0, 0, 0 },
-                                                    };
-                                                })
-                    | ranges::to<std::vector>(),
-            .activeTabPosition = 1 + getSessionIndexOf(_displayStates[activeDisplay]).value_or(0),
-        });
+        if (auto* displayState = _displayStates[_activeDisplay]; displayState)
+            displayState->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
+                .tabs = std::ranges::transform_view(_sessions,
+                                                    [](auto* session) {
+                                                        return vtbackend::TabsInfo::Tab {
+                                                            .name = session->name(),
+                                                            .color = vtbackend::RGBColor { 0, 0, 0 },
+                                                        };
+                                                    })
+                        | ranges::to<std::vector>(),
+                .activeTabPosition = 1 + getSessionIndexOf(_displayStates[_activeDisplay]).value_or(0),
+            });
     }
 
     ContourGuiApp& _app;
     std::chrono::seconds _earlyExitThreshold;
     std::unordered_map<display::TerminalDisplay*, TerminalSession*> _displayStates;
     std::vector<TerminalSession*> _sessions;
+    display::TerminalDisplay* _activeDisplay = nullptr;
 
     // on windows qt tries to create a new session
     // twice on qml file loading, this bool is used to

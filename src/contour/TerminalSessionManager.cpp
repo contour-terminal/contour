@@ -47,7 +47,7 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessable from within QML.
 
-    if (!activeDisplay)
+    if (!_activeDisplay)
     {
         managerLog()("No active display found. something went wrong.");
     }
@@ -59,7 +59,7 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
 
         for (auto& session: _sessions)
         {
-            if (_displayStates[activeDisplay] == session)
+            if (_displayStates[_activeDisplay] == session)
             {
                 managerLog()("Found suitable session Returning it.");
                 return session;
@@ -136,7 +136,7 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
     // iterate over _displayStates to see if this session is already active
     for (auto& [display, state]: _displayStates)
     {
-        if (state == session && (nullptr != display))
+        if (display && state == session)
         {
             managerLog()("Session is already active : (display {}, ID {} {})",
                          (void*) display,
@@ -146,35 +146,35 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
         }
     }
 
-    if (!activeDisplay)
+    if (!_activeDisplay)
     {
         managerLog()("No active display found. something went wrong.");
     }
 
-    auto& displayState = _displayStates[activeDisplay];
+    auto& displayState = _displayStates[_activeDisplay];
     displayState = session;
     updateStatusLine();
 
-    if (activeDisplay)
+    if (_activeDisplay)
     {
 
-        auto const pixels = activeDisplay->pixelSize();
+        auto const pixels = _activeDisplay->pixelSize();
         auto const totalPageSize =
-            activeDisplay->calculatePageSize() + displayState->terminal().statusLineHeight();
+            _activeDisplay->calculatePageSize() + displayState->terminal().statusLineHeight();
 
         // Ensure that the existing session is resized to the display's size.
         if (!isNewSession)
         {
             managerLog()("Resize existing session to display size: {}x{}.",
-                         activeDisplay->width(),
-                         activeDisplay->height());
+                         _activeDisplay->width(),
+                         _activeDisplay->height());
             displayState->terminal().resizeScreen(totalPageSize, pixels);
         }
 
         managerLog()(
-            "Set display {} to session: {}({}).", (void*) activeDisplay, session->id(), (void*) session);
+            "Set display {} to session: {}({}).", (void*) _activeDisplay, session->id(), (void*) session);
         // resize terminal session before display is attached to it
-        activeDisplay->setSession(displayState);
+        _activeDisplay->setSession(displayState);
 
         // Resize active session after display is attached to it
         // to return a lost line
@@ -187,18 +187,18 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
 void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
 {
     managerLog()("Setting active display to {}", (void*) display);
-    activeDisplay = display;
+    _activeDisplay = display;
 
     // if we have a session in nullptr display, set it to this one
     if (_displayStates[nullptr] != nullptr)
     {
-        _displayStates[activeDisplay] = _displayStates[nullptr];
+        _displayStates[_activeDisplay] = _displayStates[nullptr];
         _displayStates[nullptr] = nullptr;
-        activateSession(_displayStates[activeDisplay]);
+        activateSession(_displayStates[_activeDisplay]);
     }
 
     // if this is new display, find a session to attach to
-    if (_displayStates[activeDisplay] == nullptr)
+    if (_displayStates[_activeDisplay] == nullptr)
     {
         tryFindSessionForDisplayOrClose();
     }
@@ -255,7 +255,7 @@ void TerminalSessionManager::switchToTabRight()
 void TerminalSessionManager::switchToTab(int position)
 {
     managerLog()("switchToTab from index {} to {} (out of {})",
-                 getSessionIndexOf(_displayStates[activeDisplay]).value_or(-1),
+                 getSessionIndexOf(_displayStates[_activeDisplay]).value_or(-1),
                  position - 1,
                  _sessions.size());
 
@@ -266,15 +266,15 @@ void TerminalSessionManager::switchToTab(int position)
 void TerminalSessionManager::closeTab()
 {
     managerLog()("Close tab: current session ID {}, index {}",
-                 getSessionIndexOf(_displayStates[activeDisplay]).value_or(-1),
-                 _displayStates[activeDisplay]->id());
+                 getSessionIndexOf(_displayStates[_activeDisplay]).value_or(-1),
+                 _displayStates[_activeDisplay]->id());
 
-    removeSession(*_displayStates[activeDisplay]);
+    removeSession(*_displayStates[_activeDisplay]);
 }
 
 void TerminalSessionManager::moveTabTo(int position)
 {
-    auto const currentIndexOpt = getSessionIndexOf(_displayStates[activeDisplay]);
+    auto const currentIndexOpt = getSessionIndexOf(_displayStates[_activeDisplay]);
     if (!currentIndexOpt)
         return;
 
@@ -347,7 +347,7 @@ void TerminalSessionManager::tryFindSessionForDisplayOrClose()
         // check if session is not used by any display and then switch
         for (auto& [display, state]: _displayStates)
         {
-            if ((state == session) && (display != nullptr))
+            if (display && (state == session))
             {
                 saveToSwitch = false;
                 break;
@@ -363,8 +363,8 @@ void TerminalSessionManager::tryFindSessionForDisplayOrClose()
     }
 
     updateStatusLine();
-    _displayStates.erase(activeDisplay);
-    activeDisplay->closeDisplay();
+    _displayStates.erase(_activeDisplay);
+    _activeDisplay->closeDisplay();
 }
 
 void TerminalSessionManager::updateColorPreference(vtbackend::ColorPreference const& preference)
