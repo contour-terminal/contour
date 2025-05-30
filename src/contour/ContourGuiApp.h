@@ -56,9 +56,10 @@ class ContourGuiApp: public QObject, public ContourApp
     [[nodiscard]] config::Config const& config() const noexcept { return _config; }
     [[nodiscard]] config::TerminalProfile const& profile() const noexcept
     {
-        const auto* const profile = config().profile(profileName());
-        return *profile;
+        if (const auto* const profile = config().profile(profileName()))
+            return *profile;
         displayLog()("Failed to access config profile.");
+        Require(false);
     }
 
     [[nodiscard]] bool liveConfig() const noexcept { return _config.live.value(); }

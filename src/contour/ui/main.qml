@@ -36,6 +36,12 @@ ApplicationWindow
         onOpacityChanged: appWindow.applyOpacity()
     }
 
+    onClosing: {
+        console.log("Terminal closed. Removing session.");
+        terminalSessions.closeWindow();
+    }
+
+
     onWidthChanged : function() {
         vtui.width = width
         vtui.updateSizeWidget()
