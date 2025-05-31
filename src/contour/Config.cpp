@@ -470,7 +470,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     if (vtbackend::defaultColorPalettes(entry, where))
     {
         logger()("Loaded predefined color palette {}", entry);
-        return;
     }
 
     if (!child) // can not load directly from config file
