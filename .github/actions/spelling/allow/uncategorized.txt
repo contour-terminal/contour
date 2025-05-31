@@ -1079,3 +1079,5 @@ yim
 yiw
 ypixel
 zsync
+servicemenus
+kio
