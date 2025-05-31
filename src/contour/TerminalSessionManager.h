@@ -7,6 +7,7 @@
 #include <QtCore/QAbstractListModel>
 #include <QtQml/QQmlEngine>
 
+#include <unordered_map>
 #include <vector>
 
 namespace contour
@@ -34,7 +35,7 @@ class TerminalSessionManager: public QAbstractListModel
     void switchToTabLeft();
     void switchToTabRight();
     void switchToTab(int position);
-    void closeTab();
+    Q_INVOKABLE void closeTab();
     void moveTabTo(int position);
     void moveTabToLeft(TerminalSession* session);
     void moveTabToRight(TerminalSession* session);
@@ -42,6 +43,7 @@ class TerminalSessionManager: public QAbstractListModel
     void setSession(size_t index);
 
     void removeSession(TerminalSession&);
+    void currentSessionIsTerminated();
 
     Q_INVOKABLE [[nodiscard]] QVariant data(const QModelIndex& index,
                                             int role = Qt::DisplayRole) const override;
@@ -50,14 +52,18 @@ class TerminalSessionManager: public QAbstractListModel
     [[nodiscard]] int count() const noexcept { return static_cast<int>(_sessions.size()); }
 
     void updateColorPreference(vtbackend::ColorPreference const& preference);
-    display::TerminalDisplay* display = nullptr;
-    TerminalSession* getSession() { return _sessions[0]; }
+
+    void FocusOnDisplay(display::TerminalDisplay* display);
 
     void update() { updateStatusLine(); }
+
+    void allowCreation() { _allowCreation = true; }
 
   private:
     contour::TerminalSession* activateSession(TerminalSession* session, bool isNewSession = false);
     std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> cwd);
+
+    void tryFindSessionForDisplayOrClose();
 
     [[nodiscard]] std::optional<std::size_t> getSessionIndexOf(TerminalSession* session) const noexcept
     {
@@ -66,33 +72,39 @@ class TerminalSessionManager: public QAbstractListModel
         return std::nullopt;
     }
 
-    [[nodiscard]] auto getCurrentSessionIndex() const noexcept
+    [[nodiscard]] auto getCurrentSessionIndex() noexcept
     {
-        return getSessionIndexOf(_activeSession).value();
+        // TODO cache this value
+        return getSessionIndexOf(_displayStates[_activeDisplay]).value();
     }
 
     void updateStatusLine()
     {
-        if (!_activeSession)
-            return;
-        _activeSession->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
-            .tabs = std::ranges::transform_view(_sessions,
-                                                [](auto* session) {
-                                                    return vtbackend::TabsInfo::Tab {
-                                                        .name = session->name(),
-                                                        .color = vtbackend::RGBColor { 0, 0, 0 },
-                                                    };
-                                                })
-                    | ranges::to<std::vector>(),
-            .activeTabPosition = 1 + getSessionIndexOf(_activeSession).value_or(0),
-        });
+        if (auto* displayState = _displayStates[_activeDisplay]; displayState)
+            displayState->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
+                .tabs = std::ranges::transform_view(_sessions,
+                                                    [](auto* session) {
+                                                        return vtbackend::TabsInfo::Tab {
+                                                            .name = session->name(),
+                                                            .color = vtbackend::RGBColor { 0, 0, 0 },
+                                                        };
+                                                    })
+                        | ranges::to<std::vector>(),
+                .activeTabPosition = 1 + getSessionIndexOf(_displayStates[_activeDisplay]).value_or(0),
+            });
     }
 
     ContourGuiApp& _app;
     std::chrono::seconds _earlyExitThreshold;
-    TerminalSession* _activeSession = nullptr;
-    TerminalSession* _previousActiveSession = nullptr;
+    std::unordered_map<display::TerminalDisplay*, TerminalSession*> _displayStates;
     std::vector<TerminalSession*> _sessions;
+    display::TerminalDisplay* _activeDisplay = nullptr;
+
+    // on windows qt tries to create a new session
+    // twice on qml file loading, this bool is used to
+    // prevent that, and to allow creation of new session
+    // user have to call allowCreation() method first
+    std::atomic<bool> _allowCreation;
 };
 
 } // namespace contour
