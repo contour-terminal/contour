@@ -2,6 +2,9 @@ Color scheme configure colors that are used inside terminal. To specify which co
 
 ## Color scheme configuration
 
+Color configuration is set under `profiles` with `colors`.
+Then the scheme is defined under `color_schemes`.
+
 ### `default`
 section defines the default colors used in the terminal.
 ``` yaml
@@ -182,6 +185,20 @@ color_schemes:
           foreground: '#808080'
           background: '#000000'
 ```
+
+### Palette Presets 
+When choosing a palette from a preset as the color scheme  (in `profiles`) it is possible to tweak any configuration:
+``` yaml
+color_schemes:
+  one-light:
+      word_highlight_other:
+          foreground: CellForeground
+          background: CellBackground
+          foreground_alpha: 1.0
+          background_alpha: 1.0
+```
+ 
+
 Complete configuration looks like this:
 ``` yaml
 color_schemes:
