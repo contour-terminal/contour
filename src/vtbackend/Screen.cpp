@@ -924,7 +924,7 @@ void Screen<Cell>::sendDeviceAttributes()
                                  // TODO: DeviceAttributes::SelectiveErase |
                                  DeviceAttributes::SixelGraphics |
                                  // TODO: DeviceAttributes::TechnicalCharacters |
-                                 DeviceAttributes::UserDefinedKeys);
+                                 DeviceAttributes::UserDefinedKeys | DeviceAttributes::ClipboardExtension);
 
     reply("\033[?{};{}c", id, attrs);
 }

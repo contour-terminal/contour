@@ -19,7 +19,7 @@ string to_string(DeviceAttributes v)
         s += v;
     };
 
-    auto constexpr Mappings = array<pair<DeviceAttributes, string_view>, 11> {
+    auto constexpr Mappings = std::array {
         pair { DeviceAttributes::AnsiColor, "AnsiColor" },
         pair { DeviceAttributes::AnsiTextLocator, "AnsiTextLocator" },
         pair { DeviceAttributes::Columns132, "Columns132" },
@@ -31,6 +31,7 @@ string to_string(DeviceAttributes v)
         pair { DeviceAttributes::TechnicalCharacters, "TechnicalCharacters" },
         pair { DeviceAttributes::UserDefinedKeys, "UserDefinedKeys" },
         pair { DeviceAttributes::Windowing, "Windowing" },
+        pair { DeviceAttributes::ClipboardExtension, "ClipboardExtension" },
     };
 
     for (auto const& mapping: Mappings)
@@ -50,7 +51,7 @@ string to_params(DeviceAttributes v)
         s += v;
     };
 
-    auto constexpr Mappings = array<pair<DeviceAttributes, string_view>, 12> {
+    auto constexpr Mappings = std::array {
         pair { DeviceAttributes::AnsiColor, "22" },
         pair { DeviceAttributes::AnsiTextLocator, "29" },
         pair { DeviceAttributes::CaptureScreenBuffer, "314" },
@@ -63,6 +64,7 @@ string to_params(DeviceAttributes v)
         pair { DeviceAttributes::TechnicalCharacters, "15" },
         pair { DeviceAttributes::UserDefinedKeys, "8" },
         pair { DeviceAttributes::Windowing, "18" },
+        pair { DeviceAttributes::ClipboardExtension, "52" },
     };
 
     for (auto const& mapping: Mappings)
