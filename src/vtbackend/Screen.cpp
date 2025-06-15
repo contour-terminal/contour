@@ -2948,7 +2948,8 @@ namespace impl
         {
             // Only setting clipboard contents is supported, not reading.
             auto const& params = seq.intermediateCharacters();
-            if (auto const splits = crispy::split(params, ';'); splits.size() == 2 && splits[0] == "c")
+            if (auto const splits = crispy::split(params, ';');
+                splits.size() == 2 && (splits[0] == "c" || splits[0] == ""))
             {
                 terminal.copyToClipboard(crispy::base64::decode(splits[1]));
                 return ApplyResult::Ok;
