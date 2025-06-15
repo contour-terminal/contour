@@ -1,7 +1,7 @@
 ARG VERSION="24.04"
 FROM ubuntu:$VERSION AS builder
 ARG ARCH="x86_64"
-ARG QT_VERSION="6.8.1"
+ARG QT_VERSION="6.9.1"
 
 RUN apt-get update
 RUN apt-get install -y lsb-release software-properties-common gnupg
@@ -21,16 +21,16 @@ RUN rm /cmake-3.30.4-linux-$ARCH.sh
 # Install compilers
 RUN wget -q https://apt.llvm.org/llvm.sh
 RUN chmod +x llvm.sh
-RUN ./llvm.sh 18
+RUN ./llvm.sh 20
 
 WORKDIR /
-RUN wget -q https://download.qt.io/official_releases/qt/6.8/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz
+RUN wget -q https://download.qt.io/official_releases/qt/6.9/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz
 RUN tar xf qt-everywhere-src-$QT_VERSION.tar.xz
 RUN rm qt-everywhere-src-$QT_VERSION.tar.xz
 WORKDIR qt-everywhere-src-$QT_VERSION
 RUN cmake -S . -B build -G Ninja \
-       -D CMAKE_CXX_COMPILER=clang++-18 \
-       -D CMAKE_C_COMPILER=clang-18 \
+       -D CMAKE_CXX_COMPILER=clang++-20 \
+       -D CMAKE_C_COMPILER=clang-20 \
        -D CMAKE_INSTALL_PREFIX=\/usr \
        -D QT_BUILD_SUBMODULES='qtbase;qt5compat;qtmultimedia;qtdeclarative' \
        -D BUILD_qtbase=ON \
@@ -56,8 +56,8 @@ RUN cmake -S . -B build -G Ninja \
 RUN cmake --build build --parallel 6
 RUN cmake --build build --target install
 WORKDIR /
-RUN ln -s /bin/clang-18 /bin/clang
-RUN ln -s /bin/clang++-18 /bin/clang++
+RUN ln -s /bin/clang-20 /bin/clang
+RUN ln -s /bin/clang++-20 /bin/clang++
 
 FROM ubuntu:$VERSION
 
