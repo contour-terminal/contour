@@ -57,6 +57,7 @@ enum class DeviceAttributes : uint16_t
     RectangularEditing = (1 << 9),
     Windowing = (1 << 10),
     CaptureScreenBuffer = (1 << 11),
+    ClipboardExtension = (1 << 12),
 };
 
 constexpr DeviceAttributes operator|(DeviceAttributes a, DeviceAttributes b)
