@@ -36,8 +36,8 @@ namespace contour::display
 
 class OpenGLRenderer;
 
-// It currently just handles one terminal inside, but ideally later it can handle
-// multiple terminals in tabbed views as well tiled.
+// It currently can handles multiple terminals inside via tabs support.
+// that is managed by TerminalSessionManager.
 class TerminalDisplay: public QQuickItem
 {
     Q_OBJECT
