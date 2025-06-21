@@ -606,8 +606,9 @@ void TerminalSession::inspect()
     // Deferred termination? Then close display now.
     if (_terminal.device().isClosed() && !_app.dumpStateAtExit().has_value())
     {
-        sessionLog()("Terminal device is closed. Closing display.");
-        _display->closeDisplay();
+        sessionLog()("Terminal device is closed. Notify session manager.");
+        _manager->currentSessionIsTerminated();
+        //_display->closeDisplay(); // TODO MOVE LOGIC
     }
 }
 
@@ -680,8 +681,8 @@ void TerminalSession::onClosed()
         inspect();
     else if (_display)
     {
-        sessionLog()("Terminal device is closed. Closing display.");
-        _display->closeDisplay();
+        sessionLog()("Terminal device is closed. Notify manager.");
+        _manager->currentSessionIsTerminated();
     }
     else
         sessionLog()("Terminal device is closed. But no display available (yet).");
@@ -1494,6 +1495,7 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
 
 bool TerminalSession::operator()(actions::CreateNewTab)
 {
+    _manager->allowCreation();
     _manager->createSession();
     return true;
 }
@@ -1644,6 +1646,8 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     {
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
+        _manager->doNotSwitchToNewSession();
+        _manager->allowCreation();
         _app.newWindow();
     }
 }
