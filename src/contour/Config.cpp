@@ -108,9 +108,9 @@ namespace
                     "Could not create directory {}. {}", path.parent_path().string(), ec.message()) };
     }
 
-    vector<fs::path> getTermInfoDirs(optional<fs::path> const& appTerminfoDir)
+    std::vector<fs::path> getTermInfoDirs(optional<fs::path> const& appTerminfoDir)
     {
-        auto locations = vector<fs::path>();
+        auto locations = std::vector<fs::path>();
 
         if (appTerminfoDir.has_value())
             locations.emplace_back(appTerminfoDir.value().string());
@@ -140,7 +140,7 @@ namespace
             return "contour";
 
         auto locations = getTermInfoDirs(appTerminfoDir);
-        auto const terms = vector<string> {
+        auto const terms = std::vector<string> {
             "contour", "xterm-256color", "xterm", "vt340", "vt220",
         };
 
