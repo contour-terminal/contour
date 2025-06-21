@@ -194,7 +194,9 @@ class SequenceParameterBuilder
 class Sequence
 {
   public:
-    size_t constexpr static MaxOscLength = 512; // NOLINT(readability-identifier-naming)
+    // Make maximum size 50 kB since we need to support adding to the clipboard
+    // and the clipboard can contain large amounts of text.
+    size_t constexpr static MaxOscLength = 1024 * 50; // NOLINT(readability-identifier-naming)
 
     using Parameter = uint16_t;
     using Intermediaries = std::string;
