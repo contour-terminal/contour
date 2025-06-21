@@ -2,7 +2,9 @@ FreeBSD
 OpenBSD
 UpperCamelCase
 copy'n'paste
+lazygit
+leiserfg
 lowerCamelCase
 macOS
+nushell
 zypper
-lazygit
