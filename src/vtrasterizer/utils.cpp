@@ -23,7 +23,7 @@ vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap,
     auto const ratio = max(ratioX, ratioY);
     auto const factor = static_cast<unsigned>(ceil(ratio));
 
-    std::vector<uint8_t> dest;
+    vector<uint8_t> dest;
     dest.resize(*newSize.height * *newSize.width * 4);
 
     // RasterizerLog()("scaling from {} to {}, ratio {}x{} ({}), factor {}",
@@ -79,7 +79,7 @@ vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
     auto const ratio = max(ratioX, ratioY);
     auto const factor = static_cast<unsigned>(ceil(ratio));
 
-    std::vector<uint8_t> dest(*newSize.width * *newSize.height * numComponents, 0);
+    vector<uint8_t> dest(*newSize.width * *newSize.height * numComponents, 0);
 
     rasterizerLog()("downsample from {} to {}, ratio {}x{} ({}), factor {}",
                     size,
