@@ -85,7 +85,7 @@ bool Selection::intersects(Rect area) const noexcept
     return false;
 }
 
-std::vector<Selection::Range> Selection::ranges() const
+vector<Selection::Range> Selection::ranges() const
 {
     auto [result, from, to] = prepare(*this);
 

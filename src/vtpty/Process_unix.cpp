@@ -58,9 +58,7 @@ namespace
         return strerror(errno);
     }
 
-    [[nodiscard]] char** createArgv(string const& arg0,
-                                    std::vector<string> const& args,
-                                    size_t startIndex = 0)
+    [[nodiscard]] char** createArgv(string const& arg0, vector<string> const& args, size_t startIndex = 0)
     {
         // Factor out in order to avoid false-positive by static analysers.
         auto const argCount = args.size() - startIndex;
@@ -172,7 +170,7 @@ void Process::start()
 
                 // Prepend flatpak to jump out of sandbox:
                 // flatpak-spawn --host --watch-bus --env=TERM=$TERM /bin/zsh
-                auto realArgs = std::vector<string> {};
+                auto realArgs = vector<string> {};
                 realArgs.emplace_back("--host");
                 realArgs.emplace_back("--watch-bus");
                 realArgs.emplace_back(

@@ -137,7 +137,7 @@ namespace
         return hr;
     }
 
-    char** createArgv(string const& arg0, std::vector<string> const& args, size_t i = 0)
+    char** createArgv(string const& arg0, vector<string> const& args, size_t i = 0)
     {
         auto const argCount = args.size(); // factor out in order to avoid false-positive by static analysers.
         char** argv = new char*[argCount + 2 - i];

@@ -18,7 +18,7 @@ void Renderable::setRenderTarget(RenderTarget& renderTarget, DirectMappingAlloca
 }
 
 auto Renderable::createTileData(atlas::TileLocation tileLocation,
-                                std::vector<uint8_t> bitmap,
+                                vector<uint8_t> bitmap,
                                 atlas::Format bitmapFormat,
                                 ImageSize bitmapSize,
                                 ImageSize renderBitmapSize,
