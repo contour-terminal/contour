@@ -47,23 +47,40 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessable from within QML.
 
-    _previousActiveSession = _activeSession;
+    if (!_activeDisplay)
+    {
+        managerLog()("No active display found. something went wrong.");
+    }
+
+    if (!_allowCreation)
+    {
+        managerLog()("Session creation is disabled.");
+        // try to find for the selected display a session to use
+
+        for (auto& session: _sessions)
+        {
+            if (_displayStates[_activeDisplay].currentSession == session)
+            {
+                managerLog()("Found suitable session Returning it.");
+                return session;
+            }
+        }
+    }
 
 #if !defined(_WIN32)
     auto ptyPath = [this]() -> std::optional<std::string> {
-        if (_activeSession)
-        {
-            auto& terminal = _activeSession->terminal();
-            if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&terminal.device()))
-                return ptyProcess->workingDirectory();
-        }
+        if (_sessions.empty())
+            return std::nullopt;
+        auto& terminal = _sessions[0]->terminal();
+        if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&terminal.device()))
+            return ptyProcess->workingDirectory();
         return std::nullopt;
     }();
 #else
     std::optional<std::string> ptyPath = std::nullopt;
-    if (_activeSession)
+    if (!_sessions.empty())
     {
-        auto& terminal = _activeSession->terminal();
+        auto& terminal = _sessions[0]->terminal();
         {
             auto _l = std::scoped_lock { terminal };
             ptyPath = terminal.currentWorkingDirectory();
@@ -72,13 +89,10 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
 #endif
 
     auto* session = new TerminalSession(this, createPty(ptyPath), _app);
-    managerLog()("Create new session with ID {} at index {}", session->id(), _sessions.size());
+    managerLog()(
+        "Create new session with ID {}({}) at index {}", session->id(), (void*) session, _sessions.size());
 
-    auto const currentSessionIterator = std::ranges::find(_sessions, _activeSession);
-    auto const insertPoint = currentSessionIterator != _sessions.end() ? std::next(currentSessionIterator)
-                                                                       : currentSessionIterator;
-
-    _sessions.insert(insertPoint, session);
+    _sessions.insert(_sessions.end(), session);
 
     connect(session, &TerminalSession::sessionClosed, [this, session]() { removeSession(*session); });
 
@@ -88,6 +102,7 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
     // sessions. This will work around it, by explicitly claiming ownership of the object.
     QQmlEngine::setObjectOwnership(session, QQmlEngine::CppOwnership);
 
+    _allowCreation = false;
     return session;
 }
 
@@ -107,38 +122,102 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
     if (!session)
         return nullptr;
 
-    managerLog()(
-        "Activating session ID {} at index {}", session->id(), getSessionIndexOf(session).value_or(-1));
-
-    if (_activeSession == session)
+    // debug for displayStates
+    for (auto& [display, state]: _displayStates)
     {
-        managerLog()("Session is already active. (index {}, ID {})", getCurrentSessionIndex(), session->id());
+        managerLog()("display: {}, session: {}\n", (void*) display, (void*) state.currentSession);
+    }
+
+    managerLog()("Activating session ID {} {} at index {}",
+                 session->id(),
+                 (void*) session,
+                 getSessionIndexOf(session).value_or(-1));
+
+    // iterate over _displayStates to see if this session is already active
+    for (auto& [display, state]: _displayStates)
+    {
+        if (display && state.currentSession == session)
+        {
+            if (!display->hasSession())
+            {
+                managerLog()("Display does not have a session will set it to another session.");
+                continue;
+            }
+            managerLog()("Session is already active : (display {}, ID {} {})",
+                         (void*) display,
+                         session->id(),
+                         (void*) session);
+            return session;
+        }
+    }
+
+    if (!_activeDisplay)
+    {
+        managerLog()("No active display found. something went wrong.");
+    }
+
+    if (!_allowSwitchOfTheSession)
+    {
+        _displayStates[nullptr].currentSession = session;
+        _allowSwitchOfTheSession = true;
         return session;
     }
 
-    _previousActiveSession = _activeSession;
-    _activeSession = session;
+    auto& displayState = _displayStates[_activeDisplay];
+    displayState.previousSession = displayState.currentSession;
+    displayState.currentSession = session;
     updateStatusLine();
 
-    if (display)
+    if (_activeDisplay)
     {
-        managerLog()("Attaching display to session.");
-        auto const pixels = display->pixelSize();
+
+        auto const pixels = _activeDisplay->pixelSize();
         auto const totalPageSize =
-            display->calculatePageSize() + _previousActiveSession->terminal().statusLineHeight();
+            _activeDisplay->calculatePageSize() + displayState.currentSession->terminal().statusLineHeight();
 
         // Ensure that the existing session is resized to the display's size.
         if (!isNewSession)
-            _activeSession->terminal().resizeScreen(totalPageSize, pixels);
+        {
+            managerLog()("Resize existing session to display size: {}x{}.",
+                         _activeDisplay->width(),
+                         _activeDisplay->height());
+            displayState.currentSession->terminal().resizeScreen(totalPageSize, pixels);
+        }
 
-        display->setSession(_activeSession);
+        managerLog()(
+            "Set display {} to session: {}({}).", (void*) _activeDisplay, session->id(), (void*) session);
+        // resize terminal session before display is attached to it
+        _activeDisplay->setSession(displayState.currentSession);
 
         // Resize active session after display is attached to it
         // to return a lost line
-        _activeSession->terminal().resizeScreen(totalPageSize, pixels);
+        displayState.currentSession->terminal().resizeScreen(totalPageSize, pixels);
     }
 
     return session;
+}
+
+void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
+{
+    managerLog()("Setting active display to {}", (void*) display);
+    _activeDisplay = display;
+
+    // if we have a session in nullptr display, set it to this one
+    if (_displayStates[nullptr].currentSession != nullptr)
+    {
+        _displayStates[_activeDisplay] = _displayStates[nullptr];
+        _displayStates[nullptr].currentSession = nullptr;
+    }
+
+    // if this is new display, find a session to attach to
+    if (_displayStates[_activeDisplay].currentSession == nullptr)
+    {
+        tryFindSessionForDisplayOrClose();
+        return;
+    }
+
+    updateStatusLine();
+    activateSession(_displayStates[_activeDisplay].currentSession);
 }
 
 TerminalSession* TerminalSessionManager::createSession()
@@ -149,10 +228,10 @@ TerminalSession* TerminalSessionManager::createSession()
 void TerminalSessionManager::switchToPreviousTab()
 {
     managerLog()("switch to previous tab (current: {}, previous: {})",
-                 getSessionIndexOf(_activeSession).value_or(-1),
-                 getSessionIndexOf(_previousActiveSession).value_or(-1));
+                 getSessionIndexOf(_displayStates[_activeDisplay].currentSession).value_or(-1),
+                 getSessionIndexOf(_displayStates[_activeDisplay].previousSession).value_or(-1));
 
-    activateSession(_previousActiveSession);
+    activateSession(_displayStates[_activeDisplay].previousSession);
 }
 
 void TerminalSessionManager::switchToTabLeft()
@@ -191,7 +270,7 @@ void TerminalSessionManager::switchToTabRight()
 void TerminalSessionManager::switchToTab(int position)
 {
     managerLog()("switchToTab from index {} to {} (out of {})",
-                 getSessionIndexOf(_activeSession).value_or(-1),
+                 getSessionIndexOf(_displayStates[_activeDisplay].currentSession).value_or(-1),
                  position - 1,
                  _sessions.size());
 
@@ -199,18 +278,46 @@ void TerminalSessionManager::switchToTab(int position)
         activateSession(_sessions[position - 1]);
 }
 
+void TerminalSessionManager::closeWindow()
+{
+    if (!_activeDisplay)
+    {
+        managerLog()("No active display found. Cannot close window.");
+        return;
+    }
+    if (_displayStates[_activeDisplay].currentSession)
+    {
+        managerLog()("Removing display {} from _displayStates.", (void*) _activeDisplay);
+        auto session = std::ranges::find(_sessions, _displayStates[_activeDisplay].currentSession);
+        if (session != _sessions.end())
+            _sessions.erase(session);
+        _activeDisplay = nullptr;
+    }
+    else
+    {
+        managerLog()("No session in active display. Cannot close window.");
+    }
+}
+
 void TerminalSessionManager::closeTab()
 {
-    managerLog()("Close tab: current session ID {}, index {}",
-                 getSessionIndexOf(_activeSession).value_or(-1),
-                 _activeSession->id());
 
-    removeSession(*_activeSession);
+    if (!_activeDisplay || !_displayStates[_activeDisplay].currentSession)
+    {
+        managerLog()("Failed to close tab: no active display or no session in active display.");
+        return;
+    }
+
+    managerLog()("Close tab: current session ID {}, index {}",
+                 getSessionIndexOf(_displayStates[_activeDisplay].currentSession).value_or(-1),
+                 _displayStates[_activeDisplay].currentSession->id());
+
+    removeSession(*_displayStates[_activeDisplay].currentSession);
 }
 
 void TerminalSessionManager::moveTabTo(int position)
 {
-    auto const currentIndexOpt = getSessionIndexOf(_activeSession);
+    auto const currentIndexOpt = getSessionIndexOf(_displayStates[_activeDisplay].currentSession);
     if (!currentIndexOpt)
         return;
 
@@ -253,12 +360,16 @@ void TerminalSessionManager::moveTabToRight(TerminalSession* session)
     }
 }
 
+void TerminalSessionManager::currentSessionIsTerminated()
+{
+    managerLog()("got notified that session is terminated, number of existing sessions: _sessions.size(): {}",
+                 _sessions.size());
+    return;
+}
+
 void TerminalSessionManager::removeSession(TerminalSession& thatSession)
 {
-    managerLog()("REMOVE SESSION: session: {}, _sessions.size(): {}", (void*) &thatSession, _sessions.size());
-
-    if (&thatSession == _activeSession && _previousActiveSession)
-        activateSession(_previousActiveSession);
+    managerLog()("remove session: session: {}, _sessions.size(): {}", (void*) &thatSession, _sessions.size());
 
     auto i = std::ranges::find(_sessions, &thatSession);
     if (i == _sessions.end())
@@ -267,21 +378,34 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
         return;
     }
     _sessions.erase(i);
-    _app.onExit(thatSession); // TODO: the logic behind that impl could probably be moved here.
+    tryFindSessionForDisplayOrClose();
+}
 
-    _previousActiveSession = [&]() -> TerminalSession* {
-        auto const currentIndex = getSessionIndexOf(_activeSession).value_or(0);
-        if (currentIndex + 1 < _sessions.size())
-            return _sessions[currentIndex + 1];
-        else if (currentIndex > 0)
-            return _sessions[currentIndex - 1];
-        else
-            return nullptr;
-    }();
-    managerLog()("Calculated next \"previous\" session index {}",
-                 getSessionIndexOf(_previousActiveSession).value_or(-1));
+void TerminalSessionManager::tryFindSessionForDisplayOrClose()
+{
+    managerLog()("Trying to find session for display: {}", (void*) _activeDisplay);
+    for (auto& session: _sessions)
+    {
+        bool saveToSwitch { true };
+        // check if session is not used by any display and then switch
+        for (auto& [display, state]: _displayStates)
+        {
+            if (display && (state.currentSession == session))
+            {
+                saveToSwitch = false;
+                break;
+            }
+        }
 
+        if (saveToSwitch)
+        {
+            managerLog()("Switching to session: {}", (void*) session);
+            activateSession(session);
+            return;
+        }
+    }
     updateStatusLine();
+    _activeDisplay->closeDisplay();
 }
 
 void TerminalSessionManager::updateColorPreference(vtbackend::ColorPreference const& preference)
@@ -308,5 +432,21 @@ int TerminalSessionManager::rowCount(const QModelIndex& parent) const
     return static_cast<int>(_sessions.size());
 }
 // }}}
+
+bool TerminalSessionManager::canCloseWindow() const noexcept
+{
+    auto const displayCount = std::count_if(
+        _displayStates.begin(), _displayStates.end(), [](auto const& pair) { return pair.first != nullptr; });
+
+    if (_sessions.size() >= static_cast<size_t>(displayCount))
+    {
+        managerLog()(
+            "Cannot close window: there are {} sessions, and {} displays.", _sessions.size(), displayCount);
+        // If there are more sessions than displays, we cannot close the window.
+        return false;
+    }
+
+    return true;
+}
 
 } // namespace contour

@@ -196,11 +196,10 @@ ContourTerminal
 
     onTerminated: {
         console.log("Client process terminated. Closing the window.");
-        if (terminalSessions.count == 0)
+        if (terminalSessions.canCloseWindow())
             Window.window.close(); // https://stackoverflow.com/a/53829662/386670
-        else
-            terminalSessions.closeTab();
     }
+
 
     function playBell(volume) {
         if (bellSoundEffect.playbackState === MediaPlayer.PlayingState)

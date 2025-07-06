@@ -249,6 +249,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void attachDisplay(display::TerminalDisplay& display);
     void detachDisplay(display::TerminalDisplay& display);
 
+    TerminalSessionManager* getTerminalManager() const noexcept { return _manager; }
+
     Q_INVOKABLE void applyPendingFontChange(bool allow, bool remember);
     Q_INVOKABLE void applyPendingPaste(bool allow, bool remember);
     Q_INVOKABLE void executePendingBufferCapture(bool allow, bool remember);

@@ -36,6 +36,7 @@ if(DEFINED MSVC)
     add_definitions(-DNOMINMAX)
     add_compile_options(/utf-8)
     add_compile_options(/nologo)
+    add_compile_options(/bigobj)
 endif()
 
 
