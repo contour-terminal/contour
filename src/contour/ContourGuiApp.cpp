@@ -315,7 +315,13 @@ bool ContourGuiApp::loadConfig(string const& target)
     }
 
     if (auto const wmClass = flags.get<string>("contour.terminal.class"); !wmClass.empty())
-        _config.profile(profileName())->wmClass = wmClass;
+    {
+        auto profile = _config.profile(profileName());
+        if (profile)
+        {
+            profile->wmClass = wmClass;
+        }
+    }
 
     return true;
 }
