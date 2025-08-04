@@ -103,9 +103,8 @@ constexpr inline vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModi
 
     Modifiers modifiers {};
 
-    // TODO: Can we safely enable this? Especially with respect to CSIu?
-    // if (qtModifiers & Qt::KeypadModifier)
-    //     modifiers |= Modifier::NumLock;
+    if (qtModifiers & Qt::KeypadModifier)
+        modifiers |= Modifier::NumLock;
 
     if (qtModifiers & Qt::AltModifier)
         modifiers |= Modifier::Alt;

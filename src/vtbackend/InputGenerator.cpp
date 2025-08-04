@@ -148,6 +148,15 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     return true;
 }
 
+std::string StandardKeyboardInputGenerator::selectNumpad(Modifiers modifiers,
+                                                         FunctionKeyMapping mapping) const
+{
+    if (modifiers.contains(Modifier::NumLock))
+        return select(modifiers, { .std = mapping.std, .mods = mapping.std, .appKeypad = mapping.std });
+
+    return select(modifiers, mapping);
+}
+
 std::string StandardKeyboardInputGenerator::select(Modifiers modifiers, FunctionKeyMapping mapping) const
 {
     if (modifiers && !mapping.mods.empty())
@@ -225,23 +234,23 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
         case Key::PageDown: append(select(modifiers, { .std = CSI "6~", .mods = CSI "6;{}~", .appKeypad = CSI "6~" })); break;
         case Key::Insert: append(select(modifiers, { .std = CSI "2~", .mods = CSI "2;{}~" })); break;
         case Key::Delete: append(select(modifiers, { .std = CSI "3~", .mods = CSI "3;{}~" })); break;
-        case Key::Numpad_Enter:    append(select(modifiers, { .std = "\r", .appKeypad = SS3 "M" })); break;
-        case Key::Numpad_Multiply: append(select(modifiers, { .std = "*",  .appKeypad = SS3 "j" })); break;
-        case Key::Numpad_Add:      append(select(modifiers, { .std = "+",  .appKeypad = SS3 "k" })); break;
-        case Key::Numpad_Subtract: append(select(modifiers, { .std = "-",  .appKeypad = SS3 "m" })); break;
-        case Key::Numpad_Decimal:  append(select(modifiers, { .std = ".",  .appKeypad = CSI "3~" })); break;
-        case Key::Numpad_Divide:   append(select(modifiers, { .std = "/",  .appKeypad = SS3 "o" })); break;
-        case Key::Numpad_0:        append(select(modifiers, { .std = "0",  .appKeypad = CSI "2~" })); break;
-        case Key::Numpad_1:        append(select(modifiers, { .std = "1",  .appKeypad = SS3 "F" })); break;
-        case Key::Numpad_2:        append(select(modifiers, { .std = "2",  .appKeypad = CSI "B" })); break;
-        case Key::Numpad_3:        append(select(modifiers, { .std = "3",  .appKeypad = CSI "6~" })); break;
-        case Key::Numpad_4:        append(select(modifiers, { .std = "4",  .appKeypad = CSI "D" })); break;
-        case Key::Numpad_5:        append(select(modifiers, { .std = "5",  .appKeypad = CSI "E" })); break;
-        case Key::Numpad_6:        append(select(modifiers, { .std = "6",  .appKeypad = CSI "C" })); break;
-        case Key::Numpad_7:        append(select(modifiers, { .std = "7",  .appKeypad = SS3 "H" })); break;
-        case Key::Numpad_8:        append(select(modifiers, { .std = "8",  .appKeypad = CSI "A" })); break;
-        case Key::Numpad_9:        append(select(modifiers, { .std = "9",  .appKeypad = CSI "5~" })); break;
-        case Key::Numpad_Equal:    append(select(modifiers, { .std = "=",  .appKeypad = SS3 "X" })); break;
+        case Key::Numpad_Enter:    append(selectNumpad(modifiers, { .std = "\r", .appKeypad = SS3 "M" })); break;
+        case Key::Numpad_Multiply: append(selectNumpad(modifiers, { .std = "*",  .appKeypad = SS3 "j" })); break;
+        case Key::Numpad_Add:      append(selectNumpad(modifiers, { .std = "+",  .appKeypad = SS3 "k" })); break;
+        case Key::Numpad_Subtract: append(selectNumpad(modifiers, { .std = "-",  .appKeypad = SS3 "m" })); break;
+        case Key::Numpad_Decimal:  append(selectNumpad(modifiers, { .std = ".",  .appKeypad = CSI "3~" })); break;
+        case Key::Numpad_Divide:   append(selectNumpad(modifiers, { .std = "/",  .appKeypad = SS3 "o" })); break;
+        case Key::Numpad_0:        append(selectNumpad(modifiers, { .std = "0",  .appKeypad = CSI "2~" })); break;
+        case Key::Numpad_1:        append(selectNumpad(modifiers, { .std = "1",  .appKeypad = SS3 "F" })); break;
+        case Key::Numpad_2:        append(selectNumpad(modifiers, { .std = "2",  .appKeypad = CSI "B" })); break;
+        case Key::Numpad_3:        append(selectNumpad(modifiers, { .std = "3",  .appKeypad = CSI "6~" })); break;
+        case Key::Numpad_4:        append(selectNumpad(modifiers, { .std = "4",  .appKeypad = CSI "D" })); break;
+        case Key::Numpad_5:        append(selectNumpad(modifiers, { .std = "5",  .appKeypad = CSI "E" })); break;
+        case Key::Numpad_6:        append(selectNumpad(modifiers, { .std = "6",  .appKeypad = CSI "C" })); break;
+        case Key::Numpad_7:        append(selectNumpad(modifiers, { .std = "7",  .appKeypad = SS3 "H" })); break;
+        case Key::Numpad_8:        append(selectNumpad(modifiers, { .std = "8",  .appKeypad = CSI "A" })); break;
+        case Key::Numpad_9:        append(selectNumpad(modifiers, { .std = "9",  .appKeypad = CSI "5~" })); break;
+        case Key::Numpad_Equal:    append(selectNumpad(modifiers, { .std = "=",  .appKeypad = SS3 "X" })); break;
         // {{{ unsupported keys in legacy input protocol
         case Key::MediaPlay:
         case Key::MediaStop:
