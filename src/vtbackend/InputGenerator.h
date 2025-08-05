@@ -287,6 +287,7 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
         std::string_view appKeypad {};
     };
 
+    [[nodiscard]] std::string selectNumpad(Modifiers modifier, FunctionKeyMapping mapping) const;
     [[nodiscard]] std::string select(Modifiers modifier, FunctionKeyMapping mapping) const;
     void append(char ch) { _pendingSequence += ch; }
     void append(std::string_view sequence) { _pendingSequence += sequence; }
