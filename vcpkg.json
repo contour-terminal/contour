@@ -1,6 +1,5 @@
 {
     "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
-    "builtin-baseline": "5b1214315250939257ef5d62ecdcbca18cf4fb1c",
     "dependencies": [
         { "name": "catch2", "version>=": "3.9.0" },
         { "name": "libssh2", "version>=": "1.11.0" },
