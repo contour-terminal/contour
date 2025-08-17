@@ -630,12 +630,9 @@ jobs:
           #version: "5.15.*"
           modules: qtmultimedia qt5compat qtshadertools
       - name: "vcpkg: Install dependencies"
-        uses: lukka/run-vcpkg@v11.1
-        id: runvcpkg
-        with:
-          vcpkgDirectory: ${{ runner.workspace }}/vcpkg
-          vcpkgGitCommitId: 80403036a665cb8fcc1a1b3e17593d20b03b2489
-
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git ${{ runner.workspace }}\vcpkg
+          ${{ runner.workspace }}\vcpkg\bootstrap-vcpkg.bat
       - name: "Install cmake"
         uses: lukka/get-cmake@v3.29.0
       - name: "Check cmake version"
