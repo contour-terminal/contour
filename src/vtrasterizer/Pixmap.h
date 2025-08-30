@@ -62,6 +62,11 @@ constexpr auto linearEq(crispy::point p1, crispy::point p2) noexcept
     };
 }
 
+enum class Orientation : uint8_t
+{
+    Horizontal,
+    Vertical
+};
 enum class Dir : uint8_t
 {
     Top,
@@ -74,7 +79,6 @@ enum class Inverted : uint8_t
     No,
     Yes
 };
-
 enum Arc : uint8_t
 {
     NoArc,

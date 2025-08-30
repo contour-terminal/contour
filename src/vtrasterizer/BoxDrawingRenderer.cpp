@@ -251,6 +251,10 @@ namespace detail
             }
         };
 
+        struct LineComposition
+        {
+
+        };
         struct Box
         {
             Line upval = NoLine;
@@ -348,22 +352,22 @@ namespace detail
 
         constexpr auto BoxDrawingDefinitions = std::array<Box, 0x80> // {{{
             {
-                Box {}.horizontal(Light),        // U+2500
-                Box {}.horizontal(Heavy),        // U+2501
-                Box {}.vertical(Light),          // U+2502
-                Box {}.vertical(Heavy),          // U+2503
-                Box {}.horizontal(Light3),       // U+2504
-                Box {}.horizontal(Heavy3),       // U+2505
-                Box {}.vertical(Light3),         // U+2506
-                Box {}.vertical(Heavy3),         // U+2507
-                Box {}.horizontal(Light4),       // U+2508
-                Box {}.horizontal(Heavy4),       // U+2509
-                Box {}.vertical(Light4),         // U+250A
-                Box {}.vertical(Heavy4),         // U+250B
-                Box {}.right().down(),           // U+250C
-                Box {}.right(Heavy).down(Light), // U+250D
-                Box {}.right(Light).down(Heavy), // U+250E
-                Box {}.right(Heavy).down(Heavy), // U+250F
+                Box {}.horizontal(Light),        // U+2500 ─
+                Box {}.horizontal(Heavy),        // U+2501 ━
+                Box {}.vertical(Light),          // U+2502 │
+                Box {}.vertical(Heavy),          // U+2503 ┃
+                Box {}.horizontal(Light3),       // U+2504 ┄
+                Box {}.horizontal(Heavy3),       // U+2505 ┅
+                Box {}.vertical(Light3),         // U+2506 ┆
+                Box {}.vertical(Heavy3),         // U+2507 ┇
+                Box {}.horizontal(Light4),       // U+2508 ┈
+                Box {}.horizontal(Heavy4),       // U+2509 ┉
+                Box {}.vertical(Light4),         // U+250A ┊
+                Box {}.vertical(Heavy4),         // U+250B ┋
+                Box {}.right().down(),           // U+250C ┌
+                Box {}.right(Heavy).down(Light), // U+250D ┍
+                Box {}.right(Light).down(Heavy), // U+250E ┎
+                Box {}.right(Heavy).down(Heavy), // U+250F ┏
 
                 Box {}.down().left(),                      // U+2510
                 Box {}.down(Light).left(Heavy),            // U+2511
@@ -463,10 +467,10 @@ namespace detail
                 Box {}.horizontal(Double).vertical(Light),  // U+256A
                 Box {}.horizontal(Light).vertical(Double),  // U+256B
                 Box {}.horizontal(Double).vertical(Double), // U+256C
-                Box {}.arc(TopLeft),                        // U+256D
-                Box {}.arc(TopRight),                       // U+256E
-                Box {}.arc(BottomRight),                    // U+256F
 
+                Box {}.arc(TopLeft),             // U+256D
+                Box {}.arc(TopRight),            // U+256E
+                Box {}.arc(BottomRight),         // U+256F
                 Box {}.arc(BottomLeft),          // U+2570
                 Box {}.diagonal(Forward),        // U+2571
                 Box {}.diagonal(Backward),       // U+2572
@@ -728,6 +732,29 @@ namespace detail
         {
             auto pixmap = blockElement<2>(size);
             fillTriangle<Direction, Inv, DivisorX>(pixmap);
+            return pixmap.take();
+        }
+
+        template <auto Segment>
+        concept GitGraphSegment = (std::same_as<decltype(Segment), Arc> && (Segment != Arc::NoArc))
+                                  || (std::same_as<decltype(Segment), Orientation>);
+
+        template <auto... Segments>
+            requires(GitGraphSegment<Segments> && ...)
+        atlas::Buffer gitGraphLine(ImageSize size, size_t lineThickness)
+        {
+            auto pixmap = blockElement<2>(size);
+            auto applySegment = [&](auto segment) {
+                if constexpr (std::same_as<decltype(segment), Arc>)
+                {
+                    detail::drawArc(pixmap.buffer, pixmap.size, lineThickness, segment);
+                }
+                else
+                {
+                }
+            };
+
+            // fillTriangle<Direction, Inv, DivisorX>(pixmap);
             return pixmap.take();
         }
 
@@ -1611,8 +1638,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
 
     // left & right
     {
-        auto const left = tuple { box.leftval, 0u, *width / 2, true };
-        auto const right = tuple { box.rightval, *width / 2, *width, false };
+        auto const left = tuple { box.leftval, 0u, *width / 2 };
+        auto const right = tuple { box.rightval, *width / 2, *width };
         auto const offset = horizontalOffset;
 
         auto fillImage = [&](auto ymax, auto xmax, auto x0, auto y0){
@@ -1622,9 +1649,10 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
         };
         for (auto const& pq: { left, right })
         {
-            auto const lm = get<0>(pq);
-            auto const x0 = get<1>(pq);
-            auto const x1 = get<2>(pq);
+            auto const [lm, x0, x1] = pq;
+            // auto const lm = get<0>(pq);
+            // auto const x0 = get<1>(pq);
+            // auto const x1 = get<2>(pq);
             switch (lm)
             {
                 case detail::NoLine: break;
