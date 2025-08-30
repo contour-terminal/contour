@@ -114,6 +114,8 @@ namespace detail
 
         void drawArc(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
         {
+            if (thickness == 0)
+                return;
             // Used to record all the pixel coordinates that have been written to per scanline.
             //
             // The vector index represents the y-axis.
@@ -225,24 +227,24 @@ namespace detail
                 switch (part)
                 {
                 case Part::Left:
-                    b.rect({ .x=BlockLeft-(2*Gap), .y=BlockTop-(2*Gap) },  { .x=1,             .y=BlockTop-Gap });      // top line
-                    b.rect({ .x=BlockLeft-(2*Gap), .y=blockBottom+Gap }, { .x=1,             .y=blockBottom+(2*Gap) }); // bottom line
-                    b.rect({ .x=BlockLeft-(2*Gap), .y=BlockTop-(2*Gap) },  { .x=BlockLeft-Gap, .y=blockBottom+Gap });   // left bar
+                    b.rect({ .x=BlockLeft-(2*Gap), .y=BlockTop-(2*Gap) }, { .x=1,             .y=BlockTop-Gap });      // top line
+                    b.rect({ .x=BlockLeft-(2*Gap), .y=blockBottom+Gap  }, { .x=1,             .y=blockBottom+(2*Gap) }); // bottom line
+                    b.rect({ .x=BlockLeft-(2*Gap), .y=BlockTop-(2*Gap) }, { .x=BlockLeft-Gap, .y=blockBottom+Gap });   // left bar
                     if (filledval)
-                        b.rect({ .x=BlockLeft,   .y=BlockTop },        { .x=1,             .y=blockBottom });
+                        b.rect({ .x=BlockLeft,   .y=BlockTop },           { .x=1,             .y=blockBottom });
                     break;
                 case Part::Middle:
-                    b.rect({ .x=0, .y=BlockTop-(2*Gap) },  { .x=1, .y=BlockTop-Gap });      // top line
-                    b.rect({ .x=0, .y=blockBottom+Gap }, { .x=1, .y=blockBottom+(2*Gap) }); // bottom line
+                    b.rect({ .x=0, .y=BlockTop-(2*Gap) }, { .x=1, .y=BlockTop-Gap });      // top line
+                    b.rect({ .x=0, .y=blockBottom+Gap },  { .x=1, .y=blockBottom+(2*Gap) }); // bottom line
                     if (filledval)
-                        b.rect({ .x=0,   .y=BlockTop },  { .x=1, .y=blockBottom });
+                        b.rect({ .x=0,   .y=BlockTop },   { .x=1, .y=blockBottom });
                     break;
                 case Part::Right:
-                    b.rect({ .x=0,              .y=BlockTop-(2*Gap) },  { .x=BlockRight+(2*Gap), .y=BlockTop-Gap });      // top line
-                    b.rect({ .x=0,              .y=blockBottom+Gap }, { .x=BlockRight+(2*Gap), .y=blockBottom+(2*Gap) }); // bottom line
-                    b.rect({ .x=BlockRight+Gap, .y=BlockTop-(2*Gap) },  { .x=BlockRight+(2*Gap), .y=blockBottom+Gap });   // left bar
+                    b.rect({ .x=0,              .y=BlockTop-(2*Gap) }, { .x=BlockRight+(2*Gap), .y=BlockTop-Gap });      // top line
+                    b.rect({ .x=0,              .y=blockBottom+Gap },  { .x=BlockRight+(2*Gap), .y=blockBottom+(2*Gap) }); // bottom line
+                    b.rect({ .x=BlockRight+Gap, .y=BlockTop-(2*Gap) }, { .x=BlockRight+(2*Gap), .y=blockBottom+Gap });   // left bar
                     if (filledval)
-                        b.rect({ .x=0,          .y=BlockTop },        { .x=BlockRight,       .y=blockBottom });
+                        b.rect({ .x=0,          .y=BlockTop },         { .x=BlockRight,       .y=blockBottom });
                     break;
                 }
                 // clang-format on
@@ -250,19 +252,19 @@ namespace detail
                 return b;
             }
         };
-
-        struct LineComposition
-        {
-
-        };
         struct Box
         {
             Line upval = NoLine;
             Line rightval = NoLine;
             Line downval = NoLine;
             Line leftval = NoLine;
+
             Diagonal diagonalval = NoDiagonal;
-            Arc arcval = NoArc;
+
+            Line arcTR = NoLine;
+            Line arcTL = NoLine;
+            Line arcBL = NoLine;
+            Line arcBR = NoLine;
 
             [[nodiscard]] constexpr Box up(Line value = Light)
             {
@@ -295,10 +297,17 @@ namespace detail
                 return b;
             }
 
-            [[nodiscard]] constexpr Box arc(Arc value)
+            [[nodiscard]] constexpr Box arc(Arc arc, Line line = Light)
             {
                 Box b(*this);
-                b.arcval = value;
+                switch (arc)
+                {
+                    case Arc::TopRight: b.arcTR = line; break;
+                    case Arc::TopLeft: b.arcTL = line; break;
+                    case Arc::BottomLeft: b.arcBL = line; break;
+                    case Arc::BottomRight: b.arcBR = line; break;
+                    case Arc::NoArc: break;
+                }
                 return b;
             }
 
@@ -347,7 +356,6 @@ namespace detail
                 }
             }
         };
-
         // U+2500 .. U+257F (128 box drawing characters)
 
         constexpr auto BoxDrawingDefinitions = std::array<Box, 0x80> // {{{
@@ -369,124 +377,124 @@ namespace detail
                 Box {}.right(Light).down(Heavy), // U+250E ┎
                 Box {}.right(Heavy).down(Heavy), // U+250F ┏
 
-                Box {}.down().left(),                      // U+2510
-                Box {}.down(Light).left(Heavy),            // U+2511
-                Box {}.down(Heavy).left(Light),            // U+2512
-                Box {}.down(Heavy).left(Heavy),            // U+2513
-                Box {}.up().right(),                       // U+2514
-                Box {}.up(Light).right(Heavy),             // U+2515
-                Box {}.up(Heavy).right(Light),             // U+2516
-                Box {}.up(Heavy).right(Heavy),             // U+2517
-                Box {}.up().left(),                        // U+2518
-                Box {}.up(Light).left(Heavy),              // U+2519
-                Box {}.up(Heavy).left(Light),              // U+251A
-                Box {}.up(Heavy).left(Heavy),              // U+251B
-                Box {}.vertical().right(),                 // U+251C
-                Box {}.vertical(Light).right(Heavy),       // U+251D
-                Box {}.up(Heavy).right(Light).down(Light), // U+251E
-                Box {}.up(Light).right(Light).down(Heavy), // U+251F
+                Box {}.down().left(),                      // U+2510 ┐
+                Box {}.down(Light).left(Heavy),            // U+2511 ┑
+                Box {}.down(Heavy).left(Light),            // U+2512 ┒
+                Box {}.down(Heavy).left(Heavy),            // U+2513 ┓
+                Box {}.up().right(),                       // U+2514 └
+                Box {}.up(Light).right(Heavy),             // U+2515 ┕
+                Box {}.up(Heavy).right(Light),             // U+2516 ┖
+                Box {}.up(Heavy).right(Heavy),             // U+2517 ┗
+                Box {}.up().left(),                        // U+2518 ┘
+                Box {}.up(Light).left(Heavy),              // U+2519 ┙
+                Box {}.up(Heavy).left(Light),              // U+251A ┚
+                Box {}.up(Heavy).left(Heavy),              // U+251B ┛
+                Box {}.vertical().right(),                 // U+251C ├
+                Box {}.vertical(Light).right(Heavy),       // U+251D ┝
+                Box {}.up(Heavy).right(Light).down(Light), // U+251E ┞
+                Box {}.up(Light).right(Light).down(Heavy), // U+251F ┟
 
-                Box {}.vertical(Heavy).right(Light),         // U+2520
-                Box {}.up(Heavy).right(Heavy).down(Light),   // U+2521
-                Box {}.up(Light).right(Heavy).down(Heavy),   // U+2522
-                Box {}.up(Heavy).right(Heavy).down(Heavy),   // U+2523
-                Box {}.vertical(Light).left(Light),          // U+2524
-                Box {}.vertical(Light).left(Heavy),          // U+2525
-                Box {}.up(Heavy).down(Light).left(Light),    // U+2526
-                Box {}.up(Light).down(Heavy).left(Light),    // U+2527
-                Box {}.up(Heavy).down(Heavy).left(Light),    // U+2528
-                Box {}.up(Heavy).down(Light).left(Heavy),    // U+2529
-                Box {}.up(Light).down(Heavy).left(Heavy),    // U+252A
-                Box {}.up(Heavy).down(Heavy).left(Heavy),    // U+252B
-                Box {}.right(Light).down(Light).left(Light), // U+252C
-                Box {}.right(Light).down(Light).left(Heavy), // U+252D
-                Box {}.right(Heavy).down(Light).left(Light), // U+252E
-                Box {}.right(Heavy).down(Light).left(Heavy), // U+252F
+                Box {}.vertical(Heavy).right(Light),         // U+2520 ┠
+                Box {}.up(Heavy).right(Heavy).down(Light),   // U+2521 ┡
+                Box {}.up(Light).right(Heavy).down(Heavy),   // U+2522 ┢
+                Box {}.up(Heavy).right(Heavy).down(Heavy),   // U+2523 ┣
+                Box {}.vertical(Light).left(Light),          // U+2524 ┤
+                Box {}.vertical(Light).left(Heavy),          // U+2525 ┥
+                Box {}.up(Heavy).down(Light).left(Light),    // U+2526 ┦
+                Box {}.up(Light).down(Heavy).left(Light),    // U+2527 ┧
+                Box {}.up(Heavy).down(Heavy).left(Light),    // U+2528 ┩
+                Box {}.up(Heavy).down(Light).left(Heavy),    // U+2529 ┩
+                Box {}.up(Light).down(Heavy).left(Heavy),    // U+252A ┪
+                Box {}.up(Heavy).down(Heavy).left(Heavy),    // U+252B ┫
+                Box {}.right(Light).down(Light).left(Light), // U+252C ┬
+                Box {}.right(Light).down(Light).left(Heavy), // U+252D ┭
+                Box {}.right(Heavy).down(Light).left(Light), // U+252E ┮
+                Box {}.right(Heavy).down(Light).left(Heavy), // U+252F ┯
 
-                Box {}.right(Light).down(Heavy).left(Light),           // U+2530
-                Box {}.right(Light).down(Heavy).left(Heavy),           // U+2531
-                Box {}.right(Heavy).down(Heavy).left(Light),           // U+2532
-                Box {}.right(Heavy).down(Heavy).left(Heavy),           // U+2533
-                Box {}.up(Light).right(Light).left(Light),             // U+2534
-                Box {}.up(Light).right(Light).left(Heavy),             // U+2535
-                Box {}.up(Light).right(Heavy).left(Light),             // U+2536
-                Box {}.up(Light).right(Heavy).left(Heavy),             // U+2537
-                Box {}.up(Heavy).right(Light).left(Light),             // U+2538
-                Box {}.up(Heavy).right(Light).left(Heavy),             // U+2539
-                Box {}.up(Heavy).right(Heavy).left(Light),             // U+253A
-                Box {}.up(Heavy).right(Heavy).left(Heavy),             // U+253B
-                Box {}.up(Light).right(Light).down(Light).left(Light), // U+253C
-                Box {}.up(Light).right(Light).down(Light).left(Heavy), // U+253D
-                Box {}.up(Light).right(Heavy).down(Light).left(Light), // U+253E
-                Box {}.up(Light).right(Heavy).down(Light).left(Heavy), // U+253F
+                Box {}.right(Light).down(Heavy).left(Light),           // U+2530 ┰
+                Box {}.right(Light).down(Heavy).left(Heavy),           // U+2531 ┱
+                Box {}.right(Heavy).down(Heavy).left(Light),           // U+2532 ┲
+                Box {}.right(Heavy).down(Heavy).left(Heavy),           // U+2533 ┳
+                Box {}.up(Light).right(Light).left(Light),             // U+2534 ┴
+                Box {}.up(Light).right(Light).left(Heavy),             // U+2535 ┵
+                Box {}.up(Light).right(Heavy).left(Light),             // U+2536 ┶
+                Box {}.up(Light).right(Heavy).left(Heavy),             // U+2537 ┷
+                Box {}.up(Heavy).right(Light).left(Light),             // U+2538 ┸
+                Box {}.up(Heavy).right(Light).left(Heavy),             // U+2539 ┹
+                Box {}.up(Heavy).right(Heavy).left(Light),             // U+253A ┺
+                Box {}.up(Heavy).right(Heavy).left(Heavy),             // U+253B ┻
+                Box {}.up(Light).right(Light).down(Light).left(Light), // U+253C ┼
+                Box {}.up(Light).right(Light).down(Light).left(Heavy), // U+253D ┽
+                Box {}.up(Light).right(Heavy).down(Light).left(Light), // U+253E ┾
+                Box {}.up(Light).right(Heavy).down(Light).left(Heavy), // U+253F ┿
 
-                Box {}.up(Heavy).right(Light).down(Light).left(Heavy), // U+2540
-                Box {}.up(Light).right(Light).down(Heavy).left(Light), // U+2541
-                Box {}.up(Heavy).right(Light).down(Heavy).left(Light), // U+2542
-                Box {}.up(Heavy).right(Light).down(Light).left(Heavy), // U+2543
-                Box {}.up(Heavy).right(Heavy).down(Light).left(Light), // U+2544
-                Box {}.up(Light).right(Light).down(Heavy).left(Heavy), // U+2545
-                Box {}.up(Light).right(Heavy).down(Heavy).left(Light), // U+2546
-                Box {}.up(Heavy).right(Heavy).down(Light).left(Heavy), // U+2547
-                Box {}.up(Light).right(Heavy).down(Heavy).left(Heavy), // U+2548
-                Box {}.up(Heavy).right(Light).down(Heavy).left(Heavy), // U+2549
-                Box {}.up(Heavy).right(Heavy).down(Heavy).left(Light), // U+254A
-                Box {}.up(Heavy).right(Heavy).down(Heavy).left(Heavy), // U+254B
-                Box {}.horizontal(Light2),                             // U+254C
-                Box {}.horizontal(Heavy2),                             // U+254D
-                Box {}.vertical(Light2),                               // U+254E
-                Box {}.vertical(Heavy2),                               // U+254F
+                Box {}.up(Heavy).right(Light).down(Light).left(Heavy), // U+2540 ╀
+                Box {}.up(Light).right(Light).down(Heavy).left(Light), // U+2541 ╁
+                Box {}.up(Heavy).right(Light).down(Heavy).left(Light), // U+2542 ╂
+                Box {}.up(Heavy).right(Light).down(Light).left(Heavy), // U+2543 ╃
+                Box {}.up(Heavy).right(Heavy).down(Light).left(Light), // U+2544 ╄
+                Box {}.up(Light).right(Light).down(Heavy).left(Heavy), // U+2545 ╄
+                Box {}.up(Light).right(Heavy).down(Heavy).left(Light), // U+2546 ╆
+                Box {}.up(Heavy).right(Heavy).down(Light).left(Heavy), // U+2547 ╇
+                Box {}.up(Light).right(Heavy).down(Heavy).left(Heavy), // U+2548 ╈
+                Box {}.up(Heavy).right(Light).down(Heavy).left(Heavy), // U+2549 ╉
+                Box {}.up(Heavy).right(Heavy).down(Heavy).left(Light), // U+254A ╊
+                Box {}.up(Heavy).right(Heavy).down(Heavy).left(Heavy), // U+254B ╋
+                Box {}.horizontal(Light2),                             // U+254C ╌
+                Box {}.horizontal(Heavy2),                             // U+254D ╍
+                Box {}.vertical(Light2),                               // U+254E ╎
+                Box {}.vertical(Heavy2),                               // U+254F ╏
 
-                Box {}.horizontal(Double),                   // U+2550
-                Box {}.vertical(Double),                     // U+2551
-                Box {}.right(Double).down(Light),            // U+2552
-                Box {}.right(Light).down(Double),            // U+2553
-                Box {}.right(Double).down(Double),           // U+2554
-                Box {}.down(Light).left(Double),             // U+2555
-                Box {}.down(Double).left(Light),             // U+2556
-                Box {}.down(Double).left(Double),            // U+2557
-                Box {}.up(Light).right(Double),              // U+2558
-                Box {}.up(Double).right(Light),              // U+2559
-                Box {}.up(Double).right(Double),             // U+255A
-                Box {}.up(Light).left(Double),               // U+255B
-                Box {}.up(Double).left(Light),               // U+255C
-                Box {}.up(Double).left(Double),              // U+255D
-                Box {}.up(Light).right(Double).down(Light),  // U+255E
-                Box {}.up(Double).right(Light).down(Double), // U+255F
+                Box {}.horizontal(Double),                   // U+2550 ═
+                Box {}.vertical(Double),                     // U+2551 ║
+                Box {}.right(Double).down(Light),            // U+2552 ╒
+                Box {}.right(Light).down(Double),            // U+2553 ╓
+                Box {}.right(Double).down(Double),           // U+2554 ╔
+                Box {}.down(Light).left(Double),             // U+2555 ╕
+                Box {}.down(Double).left(Light),             // U+2556 ╖
+                Box {}.down(Double).left(Double),            // U+2557 ╗
+                Box {}.up(Light).right(Double),              // U+2558 ╘
+                Box {}.up(Double).right(Light),              // U+2559 ╙
+                Box {}.up(Double).right(Double),             // U+255A ╚
+                Box {}.up(Light).left(Double),               // U+255B ╛
+                Box {}.up(Double).left(Light),               // U+255C ╜
+                Box {}.up(Double).left(Double),              // U+255D ╝
+                Box {}.up(Light).right(Double).down(Light),  // U+255E ╞
+                Box {}.up(Double).right(Light).down(Double), // U+255F ╟
 
-                Box {}.vertical(Double).right(Double),      // U+2560
-                Box {}.vertical(Light).left(Double),        // U+2561
-                Box {}.vertical(Double).left(Light),        // U+2562
-                Box {}.vertical(Double).left(Double),       // U+2563
-                Box {}.horizontal(Double).down(Light),      // U+2564
-                Box {}.horizontal(Light).down(Double),      // U+2565
-                Box {}.horizontal(Double).down(Double),     // U+2566
-                Box {}.horizontal(Double).up(Light),        // U+2567
-                Box {}.horizontal(Light).up(Double),        // U+2568
-                Box {}.horizontal(Double).up(Double),       // U+2569
-                Box {}.horizontal(Double).vertical(Light),  // U+256A
-                Box {}.horizontal(Light).vertical(Double),  // U+256B
-                Box {}.horizontal(Double).vertical(Double), // U+256C
+                Box {}.vertical(Double).right(Double),      // U+2560 ╠
+                Box {}.vertical(Light).left(Double),        // U+2561 ╡
+                Box {}.vertical(Double).left(Light),        // U+2562 ╢
+                Box {}.vertical(Double).left(Double),       // U+2563 ╣
+                Box {}.horizontal(Double).down(Light),      // U+2564 ╤
+                Box {}.horizontal(Light).down(Double),      // U+2565 ╥
+                Box {}.horizontal(Double).down(Double),     // U+2566 ╦
+                Box {}.horizontal(Double).up(Light),        // U+2567 ╧
+                Box {}.horizontal(Light).up(Double),        // U+2568 ╨
+                Box {}.horizontal(Double).up(Double),       // U+2569 ╩
+                Box {}.horizontal(Double).vertical(Light),  // U+256A ╪
+                Box {}.horizontal(Light).vertical(Double),  // U+256B ╫
+                Box {}.horizontal(Double).vertical(Double), // U+256C ╬
 
-                Box {}.arc(TopLeft),             // U+256D
-                Box {}.arc(TopRight),            // U+256E
-                Box {}.arc(BottomRight),         // U+256F
-                Box {}.arc(BottomLeft),          // U+2570
-                Box {}.diagonal(Forward),        // U+2571
-                Box {}.diagonal(Backward),       // U+2572
-                Box {}.diagonal(Crossing),       // U+2573
-                Box {}.left(),                   // U+2574
-                Box {}.up(),                     // U+2575
-                Box {}.right(),                  // U+2576
-                Box {}.down(),                   // U+2577
-                Box {}.left(Heavy),              // U+2578
-                Box {}.up(Heavy),                // U+2579
-                Box {}.right(Heavy),             // U+257A
-                Box {}.down(Heavy),              // U+257B
-                Box {}.right(Heavy).left(Light), // U+257C
-                Box {}.up(Light).down(Heavy),    // U+257D
-                Box {}.right(Light).left(Heavy), // U+257E
-                Box {}.up(Heavy).down(Light),    // U+257F
+                Box {}.arc(TopLeft),             // U+256D ╭
+                Box {}.arc(TopRight),            // U+256E ╮
+                Box {}.arc(BottomRight),         // U+256F ╯
+                Box {}.arc(BottomLeft),          // U+2570 ╰
+                Box {}.diagonal(Forward),        // U+2571 ╱
+                Box {}.diagonal(Backward),       // U+2572 ╲
+                Box {}.diagonal(Crossing),       // U+2573 ╳
+                Box {}.left(),                   // U+2574 ╴
+                Box {}.up(),                     // U+2575 ╵
+                Box {}.right(),                  // U+2576 ╶
+                Box {}.down(),                   // U+2577 ╷
+                Box {}.left(Heavy),              // U+2578 ╸
+                Box {}.up(Heavy),                // U+2579 ╹
+                Box {}.right(Heavy),             // U+257A ╺
+                Box {}.down(Heavy),              // U+257B ╻
+                Box {}.right(Heavy).left(Light), // U+257C ╼
+                Box {}.up(Light).down(Heavy),    // U+257D ╽
+                Box {}.right(Light).left(Heavy), // U+257E ╾
+                Box {}.up(Heavy).down(Light),    // U+257F ╿
             };
         // }}}
 
@@ -971,7 +979,12 @@ constexpr inline bool containsNonCanonicalLines(char32_t codepoint)
     if (codepoint < 0x2500 || codepoint > 0x257F)
         return false;
     auto const& box = detail::BoxDrawingDefinitions[codepoint - 0x2500];
-    return box.diagonalval != detail::NoDiagonal || box.arcval != NoArc;
+    return box.diagonalval != detail::NoDiagonal //
+           || box.arcTR != detail::NoLine        //
+           || box.arcTL != detail::NoLine        //
+           || box.arcBL != detail::NoLine        //
+           || box.arcBR != detail::NoLine        //
+        ;
 }
 
 auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation tileLocation)
@@ -1542,13 +1555,13 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0xEE04: return progressBar().middle().filled();
         case 0xEE05: return progressBar().right().filled();
     }
-    // clang-format off
+    // clang-format on
 
     return nullopt;
 }
 
-
-auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness){
+auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness)
+{
     auto const height = size.height;
     auto const width = size.width;
     auto const lightThickness = (unsigned) lineThickness;
@@ -1557,24 +1570,22 @@ auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness){
     auto const thickness = thicknessMode == detail::Thickness::Heavy ? heavyThickness : lightThickness;
     auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0x00);
 
-        auto const y0 = (*height / 2) - ((unsigned) thickness / 2);
-        auto const w = (unsigned) thickness;
-        auto const p = unbox<double>(width) / static_cast<double>(dashCount * 2.0);
+    auto const y0 = (*height / 2) - ((unsigned) thickness / 2);
+    auto const w = (unsigned) thickness;
+    auto const p = unbox<double>(width) / static_cast<double>(dashCount * 2.0);
 
-        auto x0 = round(p / 2.0);
-        for ([[maybe_unused]] auto const _: iota(0u, dashCount))
-        {
-            auto const x0l = static_cast<int>(round(x0));
-            for (auto const y: iota(y0, y0 + w))
-                for (auto const x: iota(x0l, x0l + static_cast<int>(p)))
-                    image[(y * unbox(width)) + unsigned(x)] = 0xFF;
-            x0 += unbox<double>(width) / static_cast<double>(dashCount);
-        }
+    auto x0 = round(p / 2.0);
+    for ([[maybe_unused]] auto const _: iota(0u, dashCount))
+    {
+        auto const x0l = static_cast<int>(round(x0));
+        for (auto const y: iota(y0, y0 + w))
+            for (auto const x: iota(x0l, x0l + static_cast<int>(p)))
+                image[(y * unbox(width)) + unsigned(x)] = 0xFF;
+        x0 += unbox<double>(width) / static_cast<double>(dashCount);
+    }
 
-        return image;
-
+    return image;
 }
-
 
 auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
 {
@@ -1603,22 +1614,12 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
     return image;
 }
 
-
-
-
-optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
-                                                             ImageSize size,
-                                                             int lineThickness)
+auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::optional<atlas::Buffer>
 {
-    if (!(codepoint >= 0x2500 && codepoint <= 0x257F))
-        return nullopt;
-
-    auto box = detail::BoxDrawingDefinitions[codepoint - 0x2500];
-
     auto const height = size.height;
     auto const width = size.width;
-    auto const horizontalOffset = *height / 2;
-    auto const verticalOffset = *width / 2;
+    auto const yOffset = *height / 2;
+    auto const xOffset = *width / 2;
     auto const lightThickness = (unsigned) lineThickness;
     auto const heavyThickness = (unsigned) lineThickness * 2;
 
@@ -1627,119 +1628,219 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
     // catch all non-solid single-lines before the quad-render below
 
     if (auto const dashed = box.get_dashed_horizontal())
-    {
         return boxDashedHorizontal(dashed, size, lineThickness);
-    }
 
     if (auto const dashed = box.get_dashed_vertical())
-    {
         return boxDashedVertical(dashed, size, lineThickness);
-    }
 
-    // left & right
-    {
-        auto const left = tuple { box.leftval, 0u, *width / 2 };
-        auto const right = tuple { box.rightval, *width / 2, *width };
-        auto const offset = horizontalOffset;
-
-        auto fillImage = [&](auto ymax, auto xmax, auto x0, auto y0){
-            for (auto const yi: iota(0u, ymax))
-                for (auto const xi: iota(0u, xmax))
-                    image[((y0 + yi) * unbox(width)) + x0 + xi] = 0xFF;
-        };
-        for (auto const& pq: { left, right })
+    auto const nonDashLine = [](detail::Line line) {
+        switch (line)
         {
-            auto const [lm, x0, x1] = pq;
-            // auto const lm = get<0>(pq);
-            // auto const x0 = get<1>(pq);
-            // auto const x1 = get<2>(pq);
-            switch (lm)
+            using enum detail::Line;
+            case NoLine:
+            case Light:
+            case Double:
+            case Heavy: return true;
+            case Light2:
+            case Light3:
+            case Light4:
+            case Heavy2:
+            case Heavy3:
+            case Heavy4: return false;
+        }
+        assert(false);
+    };
+    auto const validLines = nonDashLine(box.rightval)   //
+                            && nonDashLine(box.leftval) //
+                            && nonDashLine(box.upval)   //
+                            && nonDashLine(box.downval) //
+                            && nonDashLine(box.arcTR)   //
+                            && nonDashLine(box.arcTL)   //
+                            && nonDashLine(box.arcBR)   //
+                            && nonDashLine(box.arcBL);
+    if (not validLines)
+        return std::nullopt;
+
+    auto const getThickness = [=](detail::Line value) -> size_t {
+        switch (value)
+        {
+            using enum detail::Line;
+            case NoLine: return 0;
+            case Light: return lightThickness;
+            case Double: return lightThickness;
+            case Heavy: return heavyThickness;
+            default:
+                // dashed lines are handled explictily
+                assert(false);
+        }
+    };
+
+    {
+        using detail::Line;
+        auto const is2Line = [](Line line) {
+            return line == Line::Double;
+        };
+        auto xCenter0 = xOffset - (lightThickness / 2);
+        auto xCenter1 = xCenter0 + (lightThickness * 1);
+        auto yCenter0 = yOffset - (lightThickness / 2);
+        auto yCenter1 = yCenter0 + (lightThickness * 1);
+
+        auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1) {
+            for (auto const yi: iota(y0, y1))
+                for (auto const xi: iota(x0, x1))
+                    image[(yi * unbox(width)) + xi] = 0xFF;
+        };
+        {
+            auto const thickness = getThickness(box.rightval);
+            auto const y0 = yOffset - (thickness / 2);
+            if (is2Line(box.rightval))
             {
-                case detail::NoLine: break;
-                case detail::Light: {
-                    auto const y0 = offset - (lightThickness / 2);
-                    // BoxDrawingLog()("{}: line:{}, x:{}..{}, y:{}..{}",
-                    //                 isFirst ? "left" : "right",
-                    //                 to_stringview(lm),
-                    //                 x0,
-                    //                 x1 - 1,
-                    //                 y0,
-                    //                 y0 + lightThickness - 1,
-                    //                 offset);
-                    fillImage(lightThickness, x1 - x0, x0, y0);
+                fillRect(xCenter1, *width, y0 - thickness, y0);
+                fillRect(xCenter1, *width, y0 + thickness, y0 + (2 * thickness));
+            }
+            else
+                fillRect(xCenter1, *width, y0, y0 + thickness);
+        }
+        {
+            auto const thickness = getThickness(box.leftval);
+            auto const y0 = yOffset - (thickness / 2);
+            if (is2Line(box.leftval))
+            {
+                fillRect(0U, xCenter0, y0 - thickness, y0);
+                fillRect(0U, xCenter0, y0 + thickness, y0 + (2 * thickness));
+            }
+            else
+                fillRect(0U, xCenter0, y0, y0 + thickness);
+        }
+        {
+            auto const thickness = getThickness(box.upval);
+            auto const x0 = xOffset - (thickness / 2);
+            if (is2Line(box.upval))
+            {
+                fillRect(x0 - thickness, x0, yCenter1, *height);
+                fillRect(x0 + thickness, x0 + (2 * thickness), yCenter1, *height);
+            }
+            else
+                fillRect(x0, x0 + thickness, yCenter1, *height);
+        }
+        {
+            auto const thickness = getThickness(box.downval);
+            auto const x0 = xOffset - (thickness / 2);
+            if (is2Line(box.downval))
+            {
+                fillRect(x0 - thickness, x0, 0, yCenter0);
+                fillRect(x0 + thickness, x0 + (2 * thickness), 0, yCenter0);
+            }
+            else
+                fillRect(x0, x0 + thickness, 0, yCenter0);
+        }
+        // center fill
+        xCenter0 -= lightThickness;
+        xCenter1 += lightThickness;
+        yCenter0 -= lightThickness;
+        yCenter1 += lightThickness;
 
-                    break;
-                }
-                case detail::Double: {
-                    auto y0 = offset - (lightThickness / 2) - lightThickness;
-                    fillImage(lightThickness, x1 - x0, x0, y0);
-
-                    y0 = offset + lightThickness / 2;
-                    fillImage(lightThickness, x1 - x0, x0, y0);
-                    break;
-                }
-                case detail::Heavy: {
-                    auto const y0 = offset - (heavyThickness / 2);
-                    fillImage(heavyThickness, x1 - x0, x0, y0);
-                    break;
-                }
-                case detail::Light2:
-                case detail::Light3:
-                case detail::Light4:
-                case detail::Heavy2:
-                case detail::Heavy3:
-                case detail::Heavy4:
-                    // handled above
-                    assert(false);
-                    return nullopt;
+        if ((is2Line(box.upval) or is2Line(box.downval)) and not is2Line(box.rightval))
+        { // center right edge
+            auto const x0 = xOffset - (lightThickness / 2) + lightThickness;
+            if (box.upval == box.downval || is2Line(box.leftval))
+                fillRect(x0, x0 + lightThickness, yCenter0, yCenter1);
+            else if (is2Line(box.upval))
+                fillRect(x0, x0 + lightThickness, yOffset, yCenter1);
+            else
+                fillRect(x0, x0 + lightThickness, yCenter0, yOffset);
+        }
+        if ((is2Line(box.rightval) or is2Line(box.leftval)) and not is2Line(box.upval))
+        { // center top edge
+            auto const y0 = yOffset - (lightThickness / 2) + lightThickness;
+            if (box.leftval == box.rightval || is2Line(box.downval))
+                fillRect(xCenter0, xCenter1, y0, y0 + lightThickness);
+            else if (is2Line(box.rightval))
+                fillRect(xOffset, xCenter1, y0, y0 + lightThickness);
+            else
+                fillRect(xCenter0, xOffset, y0, y0 + lightThickness);
+        }
+        if ((is2Line(box.upval) or is2Line(box.downval)) and not is2Line(box.leftval))
+        { // center left edge
+            auto const x0 = xOffset - (lightThickness / 2) - lightThickness;
+            if (box.upval == box.downval || is2Line(box.rightval))
+                fillRect(x0, x0 + lightThickness, yCenter0, yCenter1);
+            else if (is2Line(box.upval))
+                fillRect(x0, x0 + lightThickness, yOffset, yCenter1);
+            else
+                fillRect(x0, x0 + lightThickness, yCenter0, yOffset);
+        }
+        if ((is2Line(box.rightval) or is2Line(box.leftval)) and not is2Line(box.downval))
+        { // center bottom edge
+            auto const y0 = yOffset - (lightThickness / 2) - lightThickness;
+            if (box.leftval == box.rightval || is2Line(box.upval))
+                fillRect(xCenter0, xCenter1, y0, y0 + lightThickness);
+            else if (is2Line(box.rightval))
+                fillRect(xOffset, xCenter1, y0, y0 + lightThickness);
+            else
+                fillRect(xCenter0, xOffset, y0, y0 + lightThickness);
+        }
+        if (!is2Line(box.rightval)                           //
+            && !(is2Line(box.upval) && is2Line(box.downval)) // double straight vertical
+            && !(is2Line(box.leftval) && (is2Line(box.upval) || is2Line(box.downval)))) // double corner
+        {
+            auto const thickness = getThickness(box.rightval);
+            auto const y0 = yOffset - (thickness / 2);
+            if (is2Line(box.upval) || is2Line(box.downval))
+                fillRect(xCenter0, xCenter1, y0, y0 + thickness);
+            else
+            {
+                auto const offsetTh = std::max(getThickness(box.upval), getThickness(box.downval));
+                auto const x0 = xOffset - (offsetTh / 2);
+                fillRect(x0, xCenter1, y0, y0 + thickness);
             }
         }
-    }
 
-    // up & down
-    // XXX same as (left & right) but with x/y and w/h coords swapped. can we reuse that?
-    {
-        auto const up = tuple { box.downval, 0u, *height / 2, true };
-        auto const down = tuple { box.upval, *height / 2, *height, false };
-        auto const offset = verticalOffset;
-        auto fillImage = [&](auto ymax, auto xmax, auto x0, auto y0){
-            for (auto const yi: iota(0u, ymax))
-                for (auto const xi: iota(0u, xmax))
-                    image[((y0 + yi) * unbox(width)) + x0 + xi] = 0xFF;
-        };
-        for (auto const& pq: { up, down })
+        if (!is2Line(box.upval)                                 //
+            && !(is2Line(box.leftval) && is2Line(box.rightval)) // double straight horizontal
+            && !(is2Line(box.downval) && (is2Line(box.leftval) || is2Line(box.rightval)))) // double corner
         {
-            auto const lm = get<0>(pq);
-            auto const y0 = get<1>(pq);
-            auto const y1 = get<2>(pq);
-            // auto const isFirst = get<3>(pq);
-            switch (lm)
+            auto const thickness = getThickness(box.upval);
+            auto const x0 = xOffset - (thickness / 2);
+            if (is2Line(box.leftval) || is2Line(box.rightval))
+                fillRect(x0, x0 + thickness, yCenter0, yCenter1);
+            else
             {
-                case detail::NoLine: break;
-                case detail::Light: {
-                    auto const x0 = offset - (lightThickness / 2);
-                    fillImage(y1 - y0, lightThickness, x0, y0);
-                    break;
-                }
-                case detail::Double: {
-                    auto x0 = offset - (lightThickness / 2) - lightThickness;
-                    fillImage(y1 - y0, lightThickness, x0, y0);
+                auto const offsetTh = std::max(getThickness(box.leftval), getThickness(box.rightval));
+                auto const y0 = yOffset - (offsetTh / 2);
+                fillRect(x0, x0 + thickness, y0, yCenter1);
+            }
+        }
 
-                    x0 = offset - lightThickness / 2 + lightThickness;
-                    fillImage(y1 - y0, lightThickness, x0, y0);
-                    break;
-                }
-                case detail::Heavy: {
-                    auto const x0 = offset - ((lightThickness * 3) / 2);
-                    fillImage(y1 - y0, lightThickness * 3, x0, y0);
-                    break;
-                }
-                case detail::Light2:
-                case detail::Light3:
-                case detail::Light4:
-                case detail::Heavy2:
-                case detail::Heavy3:
-                case detail::Heavy4: assert(false && "Cases handled above already."); return nullopt;
+        if (!is2Line(box.leftval)                            //
+            && !(is2Line(box.upval) && is2Line(box.downval)) // double straight vertical
+            && !(is2Line(box.rightval) && (is2Line(box.upval) || is2Line(box.downval)))) // double corner
+        {
+            auto const thickness = getThickness(box.leftval);
+            auto const y0 = yOffset - (thickness / 2);
+            if (is2Line(box.upval) || is2Line(box.downval))
+                fillRect(xCenter0, xCenter1, y0, y0 + thickness);
+            else
+            {
+                auto const offsetTh = std::max(getThickness(box.upval), getThickness(box.downval));
+                auto const x0 = xOffset - (offsetTh / 2);
+                fillRect(xCenter0, x0 + offsetTh, y0, y0 + thickness);
+            }
+        }
+
+        if (!is2Line(box.downval)                               //
+            && !(is2Line(box.leftval) && is2Line(box.rightval)) // double straight horizontal
+            && !(is2Line(box.upval) && (is2Line(box.leftval) || is2Line(box.rightval)))) // double corner
+        {
+            auto const thickness = getThickness(box.downval);
+            auto const x0 = xOffset - (thickness / 2);
+            if (is2Line(box.leftval) || is2Line(box.rightval))
+                fillRect(x0, x0 + thickness, yCenter0, yCenter1);
+            else
+            {
+                auto const offsetTh = std::max(getThickness(box.leftval), getThickness(box.rightval));
+                auto const y0 = yOffset - (offsetTh / 2);
+                fillRect(x0, x0 + thickness, yCenter0, y0 + offsetTh);
             }
         }
     }
@@ -1769,11 +1870,26 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
         }
     }
 
-    if (box.arcval != NoArc)
-        detail::drawArc(image, size, lightThickness, box.arcval);
+    {
+        using enum Arc;
+        detail::drawArc(image, size, getThickness(box.arcTR), TopRight);
+        detail::drawArc(image, size, getThickness(box.arcTL), TopLeft);
+        detail::drawArc(image, size, getThickness(box.arcBL), BottomLeft);
+        detail::drawArc(image, size, getThickness(box.arcBR), BottomRight);
+    }
+    return image;
+}
 
+optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
+                                                             ImageSize size,
+                                                             int lineThickness)
+{
+    if (!(codepoint >= 0x2500 && codepoint <= 0x257F))
+        return nullopt;
+
+    auto box = detail::BoxDrawingDefinitions[codepoint - 0x2500];
+    auto image = buildBox(box, size, lineThickness);
     boxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
-
     return image;
 }
 
