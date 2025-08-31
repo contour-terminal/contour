@@ -6,6 +6,8 @@ namespace vtbackend
 
 CellLocation JumpHistory::jumpToLast(CellLocation current)
 {
+    if (std::ranges::empty(_history))
+        return current;
     applyOffset();
     CellLocation last = _history.back();
     if (last == current)
@@ -25,6 +27,8 @@ CellLocation JumpHistory::jumpToLast(CellLocation current)
 
 CellLocation JumpHistory::jumpToMarkBackward([[maybe_unused]] CellLocation current)
 {
+    if (std::ranges::empty(_history))
+        return current;
     applyOffset();
     if (_current == 0)
     {
@@ -40,6 +44,8 @@ CellLocation JumpHistory::jumpToMarkBackward([[maybe_unused]] CellLocation curre
 
 CellLocation JumpHistory::jumpToMarkForward([[maybe_unused]] CellLocation current)
 {
+    if (std::ranges::empty(_history))
+        return current;
     applyOffset();
     if (_current == _history.size())
     {
