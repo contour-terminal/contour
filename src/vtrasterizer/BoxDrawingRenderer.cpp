@@ -330,10 +330,31 @@ namespace detail
             auto radius = std::round(static_cast<double>(std::min(upWidth, upHeight) / 2) * 0.75);
             auto upThickness = thickness * supersampling;
             fillCircle(radius, 0xFF);
-            if (line == Line::Double || line == Line::Light)
-                fillCircle(radius - upThickness, 0x00);
-            if (line == Line::Double)
-                fillCircle(radius - (2.5 * upThickness), 0xFF);
+            switch (line)
+            {
+                case Line::Double: {
+                    auto space = 1.35 * upThickness;
+                    if (radius < 3 * upThickness + space)
+                    {
+                        auto solidTh = radius - space;
+                        if (solidTh <= 0)
+                            break;
+                        auto inner = 2 * solidTh / 3;
+                        fillCircle(inner + space, 0x00);
+                        fillCircle(inner, 0xFF);
+                    }
+                    else
+                    {
+                        fillCircle(radius - upThickness, 0x00);
+                        fillCircle(radius - upThickness - space, 0xFF);
+                    }
+                    break;
+                }
+                case Line::Light: {
+                    fillCircle(radius - upThickness, 0x00);
+                }
+                default: break;
+            }
             buffer = downsample(image, 1, upSize, imageSize);
         }
 
