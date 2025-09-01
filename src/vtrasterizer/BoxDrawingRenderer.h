@@ -50,7 +50,8 @@ class BoxDrawingRenderer: public Renderable
 
     [[nodiscard]] static std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
                                                                        ImageSize size,
-                                                                       int lineThickness);
+                                                                       int lineThickness,
+                                                                       size_t supersampling = 1);
     [[nodiscard]] std::optional<atlas::Buffer> buildElements(char32_t codepoint);
 };
 

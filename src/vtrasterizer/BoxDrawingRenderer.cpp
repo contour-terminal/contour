@@ -112,10 +112,11 @@ namespace detail
             Crossing = 0x03
         };
 
-        void drawArc(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
+        void drawArcLegacy(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
         {
             if (thickness == 0)
                 return;
+
             // Used to record all the pixel coordinates that have been written to per scanline.
             //
             // The vector index represents the y-axis.
@@ -172,6 +173,168 @@ namespace detail
                         buffer.at((y * unbox<size_t>(imageSize.width)) + xi) = 0xFF;
                 }
             }
+        }
+        void drawArcCirc(
+            atlas::Buffer& buffer, ImageSize imageSize, uint thickness, Arc arc, uint supersampling)
+        {
+            if (thickness == 0)
+                return;
+            auto const width = *imageSize.width;
+            auto const height = *imageSize.height;
+            auto xOffset = width / 2;
+            auto yOffset = height / 2;
+            auto x0 = xOffset - (thickness / 2);
+            auto y0 = yOffset - (thickness / 2);
+
+            auto [arcImage, cx, cy] = [size = imageSize * supersampling, //
+                                       x0 = x0 * supersampling,
+                                       y0 = y0 * supersampling,
+                                       thickness = thickness * supersampling,
+                                       supersampling,
+                                       arc] {
+                auto const width = *size.width;
+                auto const height = *size.height;
+                double ri = 0.0;
+                double ro = 0.0;
+                double cx = 0.0;
+                double cy = 0.0;
+
+                ro = std::min({ width - x0, height - y0, x0 + thickness, y0 + thickness });
+                ri = ro - thickness;
+                switch (arc)
+                {
+                    case (Arc::UR):
+                        cx = x0 + ro;
+                        cy = y0 + ro;
+                        break;
+                    case (Arc::UL):
+                        cx = x0 - ri;
+                        cy = y0 + ro;
+                        break;
+                    case (Arc::BL):
+                        cx = x0 - ri;
+                        cy = y0 - ri;
+                        break;
+                    case (Arc::BR):
+                        cx = x0 + ro;
+                        cy = y0 - ri;
+                        break;
+                    default: break;
+                }
+
+                auto image = atlas::Buffer(width * height, 0x00);
+
+                auto xQuadrant = [=](auto x) -> bool {
+                    switch (arc)
+                    {
+                        case (Arc::UR): [[fallthrough]];
+                        case (Arc::BR): return (x <= 0);
+                        case (Arc::UL): [[fallthrough]];
+                        case (Arc::BL): return (x >= 0);
+                        default: return false;
+                    }
+                };
+                auto yQuadrant = [=](auto y) -> bool {
+                    switch (arc)
+                    {
+                        case (Arc::UR): [[fallthrough]];
+                        case (Arc::UL): return (y <= 0);
+                        case (Arc::BL): [[fallthrough]];
+                        case (Arc::BR): return (y >= 0);
+                        default: return false;
+                    }
+                };
+
+                for (auto yi: iota(0U, height))
+                {
+                    auto y = static_cast<double>(yi) - cy + 0.5;
+                    if (not yQuadrant(y))
+                        continue;
+                    y *= y;
+                    for (auto xi: iota(0U, width))
+                    {
+                        auto x = static_cast<double>(xi) - cx + 0.5;
+                        if (not xQuadrant(x))
+                            continue;
+                        x *= x;
+                        if ((x + y) <= ro * ro and (x + y) >= ri * ri)
+                            image[(width * yi) + xi] = 0xFF;
+                    }
+                }
+
+                auto dsImage = downsample(image, 1, size, size / supersampling);
+                return std::make_tuple(dsImage, cx / supersampling, cy / supersampling);
+            }();
+            cx = cx > width ? width : cx;
+            cy = cy > height ? height : cy;
+            for (auto [v, vArc]: ranges::zip_view(buffer, arcImage))
+                v = std::max(v, vArc);
+
+            auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1) {
+                for (auto const yi: iota(y0, y1))
+                    for (auto const xi: iota(x0, x1))
+                        buffer[(yi * width) + xi] = 0xFF;
+            };
+            if (arc == Arc::UR or arc == Arc::BR)
+                fillRect(cx, width, y0, y0 + thickness);
+            if (arc == Arc::UR or arc == Arc::UL)
+                fillRect(x0, x0 + thickness, cy, height);
+            if (arc == Arc::UL or arc == Arc::BL)
+                fillRect(0, cx, y0, y0 + thickness);
+            if (arc == Arc::BL or arc == Arc::BR)
+                fillRect(x0, x0 + thickness, 0, cy);
+        }
+        void drawArc(
+            atlas::Buffer& buffer, ImageSize imageSize, size_t thickness, Arc arc, size_t supersampling)
+        {
+            // drawArcLegacy(buffer, imageSize, thickness, arc);
+            drawArcCirc(buffer, imageSize, thickness, arc, supersampling);
+            if (false)
+                drawArcLegacy(buffer, imageSize, thickness, arc);
+        }
+
+        void drawCircle(
+            atlas::Buffer& buffer, ImageSize imageSize, size_t thickness, Line line, size_t supersampling)
+        {
+            if (thickness == 0)
+                return;
+            auto const width = *imageSize.width;
+            auto const height = *imageSize.height;
+            auto xOffset = width / 2;
+            auto yOffset = height / 2;
+
+            auto const upSize = imageSize * supersampling;
+            auto const upWidth = *upSize.width;
+            auto const upHeight = *upSize.height;
+            auto image = atlas::Buffer(upWidth * upHeight, 0x00);
+            for (auto yi: iota(0U, height))
+                for (auto xi: iota(0U, width))
+                {
+                    auto v = buffer[(yi * width) + xi];
+                    for (auto ysi: iota(0U, supersampling))
+                        for (auto xsi: iota(0U, supersampling))
+                            image[((yi * supersampling + ysi) * upWidth) + (xi * supersampling + xsi)] = v;
+                }
+            auto fillCircle = [&](double radius, unsigned char value) {
+                for (auto yi: iota(0U, upHeight))
+                {
+                    auto y = static_cast<double>(yi) - yOffset * supersampling;
+                    for (auto xi: iota(0U, upWidth))
+                    {
+                        auto x = static_cast<double>(xi) - xOffset * supersampling;
+                        if ((x * x + y * y) <= radius * radius)
+                            image[(yi * upWidth) + xi] = value;
+                    }
+                }
+            };
+            auto radius = std::round(static_cast<double>(std::min(upWidth, upHeight) / 2) * 0.75);
+            auto upThickness = thickness * supersampling;
+            fillCircle(radius, 0xFF);
+            if (line == Line::Double || line == Line::Light)
+                fillCircle(radius - upThickness, 0x00);
+            if (line == Line::Double)
+                fillCircle(radius - (2.5 * upThickness), 0xFF);
+            buffer = downsample(image, 1, upSize, imageSize);
         }
 
         struct ProgressBar
@@ -261,10 +424,12 @@ namespace detail
 
             Diagonal diagonalval = NoDiagonal;
 
-            Line arcTR = NoLine;
-            Line arcTL = NoLine;
-            Line arcBL = NoLine;
-            Line arcBR = NoLine;
+            Line arcURval = NoLine;
+            Line arcULval = NoLine;
+            Line arcBLval = NoLine;
+            Line arcBRval = NoLine;
+
+            Line circleval = NoLine;
 
             [[nodiscard]] constexpr Box up(Line value = Light)
             {
@@ -297,17 +462,28 @@ namespace detail
                 return b;
             }
 
-            [[nodiscard]] constexpr Box arc(Arc arc, Line line = Light)
+            [[nodiscard]] constexpr Box arcUR(Line line = Light)
             {
                 Box b(*this);
-                switch (arc)
-                {
-                    case Arc::TopRight: b.arcTR = line; break;
-                    case Arc::TopLeft: b.arcTL = line; break;
-                    case Arc::BottomLeft: b.arcBL = line; break;
-                    case Arc::BottomRight: b.arcBR = line; break;
-                    case Arc::NoArc: break;
-                }
+                b.arcURval = line;
+                return b;
+            }
+            [[nodiscard]] constexpr Box arcUL(Line line = Light)
+            {
+                Box b(*this);
+                b.arcULval = line;
+                return b;
+            }
+            [[nodiscard]] constexpr Box arcBL(Line line = Light)
+            {
+                Box b(*this);
+                b.arcBLval = line;
+                return b;
+            }
+            [[nodiscard]] constexpr Box arcBR(Line line = Light)
+            {
+                Box b(*this);
+                b.arcBRval = line;
                 return b;
             }
 
@@ -334,6 +510,13 @@ namespace detail
                 Box b(*this);
                 b.leftval = value;
                 b.rightval = value;
+                return b;
+            }
+
+            [[nodiscard]] constexpr Box circle(Line value = Light)
+            {
+                Box b(*this);
+                b.circleval = value;
                 return b;
             }
 
@@ -476,10 +659,10 @@ namespace detail
                 Box {}.horizontal(Light).vertical(Double),  // U+256B ╫
                 Box {}.horizontal(Double).vertical(Double), // U+256C ╬
 
-                Box {}.arc(TopLeft),             // U+256D ╭
-                Box {}.arc(TopRight),            // U+256E ╮
-                Box {}.arc(BottomRight),         // U+256F ╯
-                Box {}.arc(BottomLeft),          // U+2570 ╰
+                Box {}.arcBR(),                  // U+256D ╭
+                Box {}.arcBL(),                  // U+256E ╮
+                Box {}.arcUL(),                  // U+256F ╯
+                Box {}.arcUR(),                  // U+2570 ╰
                 Box {}.diagonal(Forward),        // U+2571 ╱
                 Box {}.diagonal(Backward),       // U+2572 ╲
                 Box {}.diagonal(Crossing),       // U+2573 ╳
@@ -495,10 +678,78 @@ namespace detail
                 Box {}.up(Light).down(Heavy),    // U+257D ╽
                 Box {}.right(Light).left(Heavy), // U+257E ╾
                 Box {}.up(Heavy).down(Light),    // U+257F ╿
+                                                 // ╭─╮
+                                                 // │ │
+                                                 // ╰─╯
             };
         // }}}
 
         static_assert(BoxDrawingDefinitions.size() == 0x80);
+        constexpr auto BranchDrawingDefinitions = std::array<Box, 44> {
+            /*U+F5D0 */ Box {}.horizontal(),
+            /*U+F5D1 */ Box {}.vertical(),
+            /*U+F5D2 */ Box {}.horizontal(),
+            /*U+F5D3 */ Box {}.horizontal(),
+            /*U+F5D4 */ Box {}.vertical(),
+            /*U+F5D5 */ Box {}.vertical(),
+            /*U+F5D6 */ Box {}.arcBR(),
+            /*U+F5D7 */ Box {}.arcBL(),
+            /*U+F5D8 */ Box {}.arcUR(),
+            /*U+F5D9 */ Box {}.arcUL(),
+            /*U+F5DA */ Box {}.vertical().arcUR(),
+            /*U+F5DB */ Box {}.vertical().arcBR(),
+            /*U+F5DC */ Box {}.arcUR().arcBR(),
+            /*U+F5DD */ Box {}.vertical().arcUL(),
+            /*U+F5DE */ Box {}.vertical().arcBL(),
+            /*U+F5DF */ Box {}.arcUL().arcBL(),
+            /*U+F5E0 */ Box {}.horizontal().arcBL(),
+            /*U+F5E1 */ Box {}.horizontal().arcBR(),
+            /*U+F5E2 */ Box {}.arcBL().arcBR(),
+            /*U+F5E3 */ Box {}.horizontal().arcUL(),
+            /*U+F5E4 */ Box {}.horizontal().arcUR(),
+            /*U+F5E5 */ Box {}.arcUR().arcUL(),
+            /*U+F5E6 */ Box {}.vertical().arcUL().arcUR(),
+            /*U+F5E7 */ Box {}.vertical().arcBL().arcBR(),
+            /*U+F5E8 */ Box {}.horizontal().arcUL().arcBL(),
+            /*U+F5E9 */ Box {}.horizontal().arcUR().arcBR(),
+            /*U+F5EA */ Box {}.vertical().arcUL().arcBR(),
+            /*U+F5EB */ Box {}.vertical().arcUR().arcBL(),
+            /*U+F5EC */ Box {}.horizontal().arcUL().arcBR(),
+            /*U+F5ED */ Box {}.horizontal().arcUR().arcBL(),
+            /*U+F5EE */ Box {}.circle(Line::Heavy),               // filled
+            /*U+F5EF */ Box {}.circle(),                          // empty
+            /*U+F5F0 */ Box {}.right().circle(Line::Double),      // fr
+            /*U+F5F1 */ Box {}.right().circle(),                  // et
+            /*U+F5F2 */ Box {}.left().circle(Line::Double),       // fl
+            /*U+F5F3 */ Box {}.left().circle(),                   // el
+            /*U+F5F4 */ Box {}.horizontal().circle(Line::Double), // fh
+            /*U+F5F5 */ Box {}.horizontal().circle(),             // eh
+            /*U+F5F6 */ Box {}.down().circle(Line::Double),       // fd
+            /*U+F5F7 */ Box {}.down().circle(),                   // ed
+            /*U+F5F8 */ Box {}.up().circle(Line::Double),         // fu
+            /*U+F5F9 */ Box {}.up().circle(),                     // eu
+            /*U+F5FA */ Box {}.vertical().circle(Line::Double),   // fv
+            /*U+F5FB */ Box {}.vertical().circle(),               // ev
+            /*       │*/
+
+        };
+        constexpr bool isBoxDrawing(char32_t codepoint)
+        {
+            bool standardBox = codepoint >= 0x2500 && codepoint <= 0x257F;
+            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint <= 0xF5FB;
+            return standardBox || gitBranchBox;
+        }
+        constexpr auto getBoxDrawing(char32_t codepoint) -> std::optional<Box>
+        {
+            bool standardBox = codepoint >= 0x2500 && codepoint <= 0x257F;
+            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint <= 0xF5FB;
+            if (not(standardBox || gitBranchBox))
+                return std::nullopt;
+
+            auto box = standardBox ? detail::BoxDrawingDefinitions[codepoint - 0x2500]
+                                   : detail::BranchDrawingDefinitions[codepoint - 0xF5D0];
+            return box;
+        }
 
         // {{{ block element construction
 
@@ -743,29 +994,6 @@ namespace detail
             return pixmap.take();
         }
 
-        template <auto Segment>
-        concept GitGraphSegment = (std::same_as<decltype(Segment), Arc> && (Segment != Arc::NoArc))
-                                  || (std::same_as<decltype(Segment), Orientation>);
-
-        template <auto... Segments>
-            requires(GitGraphSegment<Segments> && ...)
-        atlas::Buffer gitGraphLine(ImageSize size, size_t lineThickness)
-        {
-            auto pixmap = blockElement<2>(size);
-            auto applySegment = [&](auto segment) {
-                if constexpr (std::same_as<decltype(segment), Arc>)
-                {
-                    detail::drawArc(pixmap.buffer, pixmap.size, lineThickness, segment);
-                }
-                else
-                {
-                }
-            };
-
-            // fillTriangle<Direction, Inv, DivisorX>(pixmap);
-            return pixmap.take();
-        }
-
         enum class UpperOrLower : uint8_t
         {
             Upper,
@@ -932,7 +1160,6 @@ namespace detail
             return image;
         }
         // }}}
-
     } // namespace
 } // namespace detail
 
@@ -976,14 +1203,15 @@ bool BoxDrawingRenderer::render(vtbackend::LineOffset line,
 
 constexpr inline bool containsNonCanonicalLines(char32_t codepoint)
 {
-    if (codepoint < 0x2500 || codepoint > 0x257F)
+    auto box = detail::getBoxDrawing(codepoint);
+    if (not box)
         return false;
-    auto const& box = detail::BoxDrawingDefinitions[codepoint - 0x2500];
-    return box.diagonalval != detail::NoDiagonal //
-           || box.arcTR != detail::NoLine        //
-           || box.arcTL != detail::NoLine        //
-           || box.arcBL != detail::NoLine        //
-           || box.arcBR != detail::NoLine        //
+    return box->diagonalval != detail::NoDiagonal //
+           || box->arcURval != detail::NoLine     //
+           || box->arcULval != detail::NoLine     //
+           || box->arcBLval != detail::NoLine     //
+           || box->arcBRval != detail::NoLine     //
+           || box->circleval != detail::NoLine    //
         ;
 }
 
@@ -1016,14 +1244,20 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
                 return 1;
             return val;
         }();
-        auto const supersamplingSize = _gridMetrics.cellSize * supersamplingFactor;
-        auto const supersamplingLineThickness = _gridMetrics.underline.thickness * 2;
-        auto tmp = buildBoxElements(codepoint, supersamplingSize, supersamplingLineThickness);
+        auto tmp = buildBoxElements(codepoint, //
+                                    _gridMetrics.cellSize,
+                                    _gridMetrics.underline.thickness,
+                                    supersamplingFactor);
+        // auto tmp = buildBoxElements(codepoint, supersamplingSize, supersamplingLineThickness);
+        // auto const supersamplingSize = _gridMetrics.cellSize * supersamplingFactor;
+        // auto const supersamplingLineThickness = _gridMetrics.underline.thickness * 2;
+        // auto tmp = buildBoxElements(codepoint, supersamplingSize, supersamplingLineThickness);
         if (!tmp)
             return nullopt;
 
         // pixels = downsample(*tmp, _gridMetrics.cellSize, supersamplingFactor);
-        pixels = downsample(*tmp, 1, supersamplingSize, _gridMetrics.cellSize);
+        pixels = *tmp;
+        // pixels = downsample(*tmp, 1, supersamplingSize, _gridMetrics.cellSize);
     }
     else
     {
@@ -1072,6 +1306,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
            || codepoint == 0xE0BA         // 
            || codepoint == 0xE0BC         // 
            || codepoint == 0xE0BE         // 
+           || ascending(0xF5D0, 0xF5FB)   // git tree symbols
         ;
 }
 
@@ -1614,7 +1849,8 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
     return image;
 }
 
-auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::optional<atlas::Buffer>
+auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersampling)
+    -> std::optional<atlas::Buffer>
 {
     auto const height = size.height;
     auto const width = size.width;
@@ -1650,14 +1886,14 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::option
         }
         assert(false);
     };
-    auto const validLines = nonDashLine(box.rightval)   //
-                            && nonDashLine(box.leftval) //
-                            && nonDashLine(box.upval)   //
-                            && nonDashLine(box.downval) //
-                            && nonDashLine(box.arcTR)   //
-                            && nonDashLine(box.arcTL)   //
-                            && nonDashLine(box.arcBR)   //
-                            && nonDashLine(box.arcBL);
+    auto const validLines = nonDashLine(box.rightval)    //
+                            && nonDashLine(box.leftval)  //
+                            && nonDashLine(box.upval)    //
+                            && nonDashLine(box.downval)  //
+                            && nonDashLine(box.arcURval) //
+                            && nonDashLine(box.arcULval) //
+                            && nonDashLine(box.arcBRval) //
+                            && nonDashLine(box.arcBLval);
     if (not validLines)
         return std::nullopt;
 
@@ -1750,6 +1986,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::option
             else
                 fillRect(x0, x0 + lightThickness, yCenter0, yOffset);
         }
+
         if ((is2Line(box.rightval) or is2Line(box.leftval)) and not is2Line(box.upval))
         { // center top edge
             auto const y0 = yOffset - (lightThickness / 2) + lightThickness;
@@ -1760,6 +1997,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::option
             else
                 fillRect(xCenter0, xOffset, y0, y0 + lightThickness);
         }
+
         if ((is2Line(box.upval) or is2Line(box.downval)) and not is2Line(box.leftval))
         { // center left edge
             auto const x0 = xOffset - (lightThickness / 2) - lightThickness;
@@ -1770,6 +2008,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::option
             else
                 fillRect(x0, x0 + lightThickness, yCenter0, yOffset);
         }
+
         if ((is2Line(box.rightval) or is2Line(box.leftval)) and not is2Line(box.downval))
         { // center bottom edge
             auto const y0 = yOffset - (lightThickness / 2) - lightThickness;
@@ -1780,7 +2019,8 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::option
             else
                 fillRect(xCenter0, xOffset, y0, y0 + lightThickness);
         }
-        if (!is2Line(box.rightval)                           //
+
+        if (!is2Line(box.rightval)                           // extend right line
             && !(is2Line(box.upval) && is2Line(box.downval)) // double straight vertical
             && !(is2Line(box.leftval) && (is2Line(box.upval) || is2Line(box.downval)))) // double corner
         {
@@ -1796,7 +2036,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::option
             }
         }
 
-        if (!is2Line(box.upval)                                 //
+        if (!is2Line(box.upval)                                 // extend up line
             && !(is2Line(box.leftval) && is2Line(box.rightval)) // double straight horizontal
             && !(is2Line(box.downval) && (is2Line(box.leftval) || is2Line(box.rightval)))) // double corner
         {
@@ -1812,7 +2052,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::option
             }
         }
 
-        if (!is2Line(box.leftval)                            //
+        if (!is2Line(box.leftval)                            // extend left line
             && !(is2Line(box.upval) && is2Line(box.downval)) // double straight vertical
             && !(is2Line(box.rightval) && (is2Line(box.upval) || is2Line(box.downval)))) // double corner
         {
@@ -1828,7 +2068,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::option
             }
         }
 
-        if (!is2Line(box.downval)                               //
+        if (!is2Line(box.downval)                               // extend down line
             && !(is2Line(box.leftval) && is2Line(box.rightval)) // double straight horizontal
             && !(is2Line(box.upval) && (is2Line(box.leftval) || is2Line(box.rightval)))) // double corner
         {
@@ -1872,23 +2112,24 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness) -> std::option
 
     {
         using enum Arc;
-        detail::drawArc(image, size, getThickness(box.arcTR), TopRight);
-        detail::drawArc(image, size, getThickness(box.arcTL), TopLeft);
-        detail::drawArc(image, size, getThickness(box.arcBL), BottomLeft);
-        detail::drawArc(image, size, getThickness(box.arcBR), BottomRight);
+        detail::drawArc(image, size, getThickness(box.arcURval), UR, supersampling);
+        detail::drawArc(image, size, getThickness(box.arcULval), UL, supersampling);
+        detail::drawArc(image, size, getThickness(box.arcBLval), BL, supersampling);
+        detail::drawArc(image, size, getThickness(box.arcBRval), BR, supersampling);
     }
+    detail::drawCircle(image, size, getThickness(box.circleval), box.circleval, supersampling);
     return image;
 }
 
 optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
                                                              ImageSize size,
-                                                             int lineThickness)
+                                                             int lineThickness,
+                                                             size_t supersampling)
 {
-    if (!(codepoint >= 0x2500 && codepoint <= 0x257F))
-        return nullopt;
-
-    auto box = detail::BoxDrawingDefinitions[codepoint - 0x2500];
-    auto image = buildBox(box, size, lineThickness);
+    auto box = detail::getBoxDrawing(codepoint);
+    if (not box)
+        return std::nullopt;
+    auto image = buildBox(*box, size, lineThickness, supersampling);
     boxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
     return image;
 }

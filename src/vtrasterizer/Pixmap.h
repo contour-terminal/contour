@@ -82,10 +82,10 @@ enum class Inverted : uint8_t
 enum Arc : uint8_t
 {
     NoArc,
-    TopLeft,
-    TopRight,
-    BottomRight,
-    BottomLeft
+    BR,
+    BL,
+    UL,
+    UR,
 };
 
 template <typename F>
@@ -96,10 +96,10 @@ auto makeDraw4WaySymmetric(Arc arc, vtbackend::ImageSize size, F putpixel)
         auto const h = unbox<int>(size.height);
         switch (arc)
         {
-            case Arc::TopLeft: putpixel(w - x, y); break;
-            case Arc::TopRight: putpixel(x, y); break;
-            case Arc::BottomLeft: putpixel(w - x, h - y); break;
-            case Arc::BottomRight: putpixel(x, h - y); break;
+            case Arc::BR: putpixel(w - x, y); break;
+            case Arc::BL: putpixel(x, y); break;
+            case Arc::UR: putpixel(w - x, h - y); break;
+            case Arc::UL: putpixel(x, h - y); break;
             case Arc::NoArc: break;
         }
     };
@@ -313,10 +313,10 @@ struct std::formatter<vtrasterizer::Arc>: std::formatter<string_view>
         switch (value)
         {
             case Arc::NoArc: name = "NoArc"; break;
-            case Arc::TopLeft: name = "TopLeft"; break;
-            case Arc::TopRight: name = "TopRight"; break;
-            case Arc::BottomLeft: name = "BottomLeft"; break;
-            case Arc::BottomRight: name = "BottomRight"; break;
+            case Arc::BR: name = "TopLeft"; break;
+            case Arc::BL: name = "TopRight"; break;
+            case Arc::UR: name = "BottomLeft"; break;
+            case Arc::UL: name = "BottomRight"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

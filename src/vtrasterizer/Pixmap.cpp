@@ -91,8 +91,8 @@ Pixmap& Pixmap::halfFilledCircleLeft()
         putpixel(x, y + (h / 2));
     };
     auto const radius = crispy::point { .x = w, .y = h / 2 };
-    drawEllipseArc(putAbove, size, radius, Arc::BottomLeft);
-    drawEllipseArc(putBelow, size, radius, Arc::TopLeft);
+    drawEllipseArc(putAbove, size, radius, Arc::UL);
+    drawEllipseArc(putBelow, size, radius, Arc::BR);
     return *this;
 }
 
@@ -112,8 +112,8 @@ Pixmap& Pixmap::halfFilledCircleRight()
         putpixel(x, y + (h / 2));
     };
     auto const radius = crispy::point { .x = w, .y = h / 2 };
-    drawEllipseArc(putAbove, size, radius, Arc::BottomRight);
-    drawEllipseArc(putBelow, size, radius, Arc::TopRight);
+    drawEllipseArc(putAbove, size, radius, Arc::UL);
+    drawEllipseArc(putBelow, size, radius, Arc::BL);
     return *this;
 }
 
