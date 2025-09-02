@@ -706,6 +706,7 @@ namespace detail
         // }}}
 
         static_assert(BoxDrawingDefinitions.size() == 0x80);
+
         constexpr auto BranchDrawingDefinitions = std::array {
             /*U+F5D0  */ Box {}.horizontal(),
             /*U+F5D1  */ Box {}.vertical(),
@@ -737,35 +738,57 @@ namespace detail
             /*U+F5EB  */ Box {}.vertical().arcUR().arcBL(),
             /*U+F5EC  */ Box {}.horizontal().arcUL().arcBR(),
             /*U+F5ED  */ Box {}.horizontal().arcUR().arcBL(),
-            /*U+F5EE  */ Box {}.circle(Line::Heavy),               // filled
-            /*U+F5EF  */ Box {}.circle(),                          // empty
-            /*U+F5F0  */ Box {}.right().circle(Line::Double),      // fr
-            /*U+F5F1  */ Box {}.right().circle(),                  // et
-            /*U+F5F2  */ Box {}.left().circle(Line::Double),       // fl
-            /*U+F5F3  */ Box {}.left().circle(),                   // el
-            /*U+F5F4  */ Box {}.horizontal().circle(Line::Double), // fh
-            /*U+F5F5  */ Box {}.horizontal().circle(),             // eh
-            /*U+F5F6  */ Box {}.down().circle(Line::Double),       // fd
-            /*U+F5F7  */ Box {}.down().circle(),                   // ed
-            /*U+F5F8  */ Box {}.up().circle(Line::Double),         // fu
-            /*U+F5F9  */ Box {}.up().circle(),                     // eu
-            /*U+F5FA  */ Box {}.vertical().circle(Line::Double),   // fv
-            /*U+F5FB  */ Box {}.vertical().circle(),               // ev
-
-            /*U+F5FC  */ Box {}.right().down().circle(Line::Double),
-            /*U+F5FD  */ Box {}.right().vertical().circle(Line::Double),
-            /*U+F5FE  */ Box {}.right().vertical().circle(),
-            /*U+F5FF  */ Box {}.right().up().circle(),
-
-            // 
-            // │
-            // 
-            // ││
-            // 
-            // │
-            // 
-
+            /*U+F5EE  */ Box {}.circle(Line::Heavy),
+            /*U+F5EF  */ Box {}.circle(Line::Light),
+            /*U+F5F0  */ Box {}.circle(Line::Heavy).right(),
+            /*U+F5F1  */ Box {}.circle(Line::Light).right(),
+            /*U+F5F2  */ Box {}.circle(Line::Heavy).left(),
+            /*U+F5F3  */ Box {}.circle(Line::Light).left(),
+            /*U+F5F4  */ Box {}.circle(Line::Heavy).horizontal(),
+            /*U+F5F5  */ Box {}.circle(Line::Light).horizontal(),
+            /*U+F5F6  */ Box {}.circle(Line::Heavy).down(),
+            /*U+F5F7  */ Box {}.circle(Line::Light).down(),
+            /*U+F5F8  */ Box {}.circle(Line::Heavy).up(),
+            /*U+F5F9  */ Box {}.circle(Line::Light).up(),
+            /*U+F5FA  */ Box {}.circle(Line::Heavy).vertical(),
+            /*U+F5FB  */ Box {}.circle(Line::Light).vertical(),
+            /*U+F5FC  */ Box {}.circle(Line::Heavy).right().down(),
+            /*U+F5FD  */ Box {}.circle(Line::Light).right().down(),
+            /*U+F5FE  */ Box {}.circle(Line::Heavy).left().down(),
+            /*U+F5FF  */ Box {}.circle(Line::Light).left().down(),
+            /*U+F600  */ Box {}.circle(Line::Heavy).right().up(),
+            /*U+F601  */ Box {}.circle(Line::Light).right().up(),
+            /*U+F602  */ Box {}.circle(Line::Heavy).left().up(),
+            /*U+F603  */ Box {}.circle(Line::Light).left().up(),
+            /*U+F604  */ Box {}.circle(Line::Heavy).vertical().right(),
+            /*U+F605  */ Box {}.circle(Line::Light).vertical().right(),
+            /*U+F606  */ Box {}.circle(Line::Heavy).vertical().left(),
+            /*U+F607  */ Box {}.circle(Line::Light).vertical().left(),
+            /*U+F608  */ Box {}.circle(Line::Heavy).horizontal().down(),
+            /*U+F609  */ Box {}.circle(Line::Light).horizontal().down(),
+            /*U+F60A  */ Box {}.circle(Line::Heavy).horizontal().up(),
+            /*U+F60B  */ Box {}.circle(Line::Light).horizontal().up(),
+            /*U+F60C  */ Box {}.circle(Line::Heavy).horizontal().vertical(),
+            /*U+F60D  */ Box {}.circle(Line::Light).horizontal().vertical(),
         };
+
+        // 
+        // │
+        // 
+        // │
+        // │
+        // │││
+        // │││
+        // 
+        // ││
+        // 
+        // │││
+        // │
+        // ││ 
+        // 
+        // │
+        // 
+
         constexpr bool isBoxDrawing(char32_t codepoint)
         {
             bool standardBox = codepoint >= 0x2500 && codepoint <= 0x257F;
@@ -2143,14 +2166,13 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
         }
     }
 
-    {
-        using enum Arc;
-        detail::drawArc(image, size, getThickness(box.arcURval), UR, supersampling);
-        detail::drawArc(image, size, getThickness(box.arcULval), UL, supersampling);
-        detail::drawArc(image, size, getThickness(box.arcBLval), BL, supersampling);
-        detail::drawArc(image, size, getThickness(box.arcBRval), BR, supersampling);
-    }
-    detail::drawCircle(image, size, getThickness(box.circleval), box.circleval, supersampling);
+    detail::drawArc(image, size, getThickness(box.arcURval), Arc::UR, supersampling);
+    detail::drawArc(image, size, getThickness(box.arcULval), Arc::UL, supersampling);
+    detail::drawArc(image, size, getThickness(box.arcBLval), Arc::BL, supersampling);
+    detail::drawArc(image, size, getThickness(box.arcBRval), Arc::BR, supersampling);
+
+    if (box.circleval != detail::Line::NoLine)
+        detail::drawCircle(image, size, lightThickness, box.circleval, supersampling);
     return image;
 }
 
