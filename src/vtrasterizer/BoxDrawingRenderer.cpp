@@ -706,69 +706,81 @@ namespace detail
         // }}}
 
         static_assert(BoxDrawingDefinitions.size() == 0x80);
-        constexpr auto BranchDrawingDefinitions = std::array<Box, 44> {
-            /*U+F5D0 */ Box {}.horizontal(),
-            /*U+F5D1 */ Box {}.vertical(),
-            /*U+F5D2 */ Box {}.horizontal(),
-            /*U+F5D3 */ Box {}.horizontal(),
-            /*U+F5D4 */ Box {}.vertical(),
-            /*U+F5D5 */ Box {}.vertical(),
-            /*U+F5D6 */ Box {}.arcBR(),
-            /*U+F5D7 */ Box {}.arcBL(),
-            /*U+F5D8 */ Box {}.arcUR(),
-            /*U+F5D9 */ Box {}.arcUL(),
-            /*U+F5DA */ Box {}.vertical().arcUR(),
-            /*U+F5DB */ Box {}.vertical().arcBR(),
-            /*U+F5DC */ Box {}.arcUR().arcBR(),
-            /*U+F5DD */ Box {}.vertical().arcUL(),
-            /*U+F5DE */ Box {}.vertical().arcBL(),
-            /*U+F5DF */ Box {}.arcUL().arcBL(),
-            /*U+F5E0 */ Box {}.horizontal().arcBL(),
-            /*U+F5E1 */ Box {}.horizontal().arcBR(),
-            /*U+F5E2 */ Box {}.arcBL().arcBR(),
-            /*U+F5E3 */ Box {}.horizontal().arcUL(),
-            /*U+F5E4 */ Box {}.horizontal().arcUR(),
-            /*U+F5E5 */ Box {}.arcUR().arcUL(),
-            /*U+F5E6 */ Box {}.vertical().arcUL().arcUR(),
-            /*U+F5E7 */ Box {}.vertical().arcBL().arcBR(),
-            /*U+F5E8 */ Box {}.horizontal().arcUL().arcBL(),
-            /*U+F5E9 */ Box {}.horizontal().arcUR().arcBR(),
-            /*U+F5EA */ Box {}.vertical().arcUL().arcBR(),
-            /*U+F5EB */ Box {}.vertical().arcUR().arcBL(),
-            /*U+F5EC */ Box {}.horizontal().arcUL().arcBR(),
-            /*U+F5ED */ Box {}.horizontal().arcUR().arcBL(),
-            /*U+F5EE */ Box {}.circle(Line::Heavy),               // filled
-            /*U+F5EF */ Box {}.circle(),                          // empty
-            /*U+F5F0 */ Box {}.right().circle(Line::Double),      // fr
-            /*U+F5F1 */ Box {}.right().circle(),                  // et
-            /*U+F5F2 */ Box {}.left().circle(Line::Double),       // fl
-            /*U+F5F3 */ Box {}.left().circle(),                   // el
-            /*U+F5F4 */ Box {}.horizontal().circle(Line::Double), // fh
-            /*U+F5F5 */ Box {}.horizontal().circle(),             // eh
-            /*U+F5F6 */ Box {}.down().circle(Line::Double),       // fd
-            /*U+F5F7 */ Box {}.down().circle(),                   // ed
-            /*U+F5F8 */ Box {}.up().circle(Line::Double),         // fu
-            /*U+F5F9 */ Box {}.up().circle(),                     // eu
-            /*U+F5FA */ Box {}.vertical().circle(Line::Double),   // fv
-            /*U+F5FB */ Box {}.vertical().circle(),               // ev
-            /*       │*/
+        constexpr auto BranchDrawingDefinitions = std::array {
+            /*U+F5D0  */ Box {}.horizontal(),
+            /*U+F5D1  */ Box {}.vertical(),
+            /*U+F5D2  */ Box {}.horizontal(),
+            /*U+F5D3  */ Box {}.horizontal(),
+            /*U+F5D4  */ Box {}.vertical(),
+            /*U+F5D5  */ Box {}.vertical(),
+            /*U+F5D6  */ Box {}.arcBR(),
+            /*U+F5D7  */ Box {}.arcBL(),
+            /*U+F5D8  */ Box {}.arcUR(),
+            /*U+F5D9  */ Box {}.arcUL(),
+            /*U+F5DA  */ Box {}.vertical().arcUR(),
+            /*U+F5DB  */ Box {}.vertical().arcBR(),
+            /*U+F5DC  */ Box {}.arcUR().arcBR(),
+            /*U+F5DD  */ Box {}.vertical().arcUL(),
+            /*U+F5DE  */ Box {}.vertical().arcBL(),
+            /*U+F5DF  */ Box {}.arcUL().arcBL(),
+            /*U+F5E0  */ Box {}.horizontal().arcBL(),
+            /*U+F5E1  */ Box {}.horizontal().arcBR(),
+            /*U+F5E2  */ Box {}.arcBL().arcBR(),
+            /*U+F5E3  */ Box {}.horizontal().arcUL(),
+            /*U+F5E4  */ Box {}.horizontal().arcUR(),
+            /*U+F5E5  */ Box {}.arcUR().arcUL(),
+            /*U+F5E6  */ Box {}.vertical().arcUL().arcUR(),
+            /*U+F5E7  */ Box {}.vertical().arcBL().arcBR(),
+            /*U+F5E8  */ Box {}.horizontal().arcUL().arcBL(),
+            /*U+F5E9  */ Box {}.horizontal().arcUR().arcBR(),
+            /*U+F5EA  */ Box {}.vertical().arcUL().arcBR(),
+            /*U+F5EB  */ Box {}.vertical().arcUR().arcBL(),
+            /*U+F5EC  */ Box {}.horizontal().arcUL().arcBR(),
+            /*U+F5ED  */ Box {}.horizontal().arcUR().arcBL(),
+            /*U+F5EE  */ Box {}.circle(Line::Heavy),               // filled
+            /*U+F5EF  */ Box {}.circle(),                          // empty
+            /*U+F5F0  */ Box {}.right().circle(Line::Double),      // fr
+            /*U+F5F1  */ Box {}.right().circle(),                  // et
+            /*U+F5F2  */ Box {}.left().circle(Line::Double),       // fl
+            /*U+F5F3  */ Box {}.left().circle(),                   // el
+            /*U+F5F4  */ Box {}.horizontal().circle(Line::Double), // fh
+            /*U+F5F5  */ Box {}.horizontal().circle(),             // eh
+            /*U+F5F6  */ Box {}.down().circle(Line::Double),       // fd
+            /*U+F5F7  */ Box {}.down().circle(),                   // ed
+            /*U+F5F8  */ Box {}.up().circle(Line::Double),         // fu
+            /*U+F5F9  */ Box {}.up().circle(),                     // eu
+            /*U+F5FA  */ Box {}.vertical().circle(Line::Double),   // fv
+            /*U+F5FB  */ Box {}.vertical().circle(),               // ev
+
+            /*U+F5FC  */ Box {}.right().down().circle(Line::Double),
+            /*U+F5FD  */ Box {}.right().vertical().circle(Line::Double),
+            /*U+F5FE  */ Box {}.right().vertical().circle(),
+            /*U+F5FF  */ Box {}.right().up().circle(),
+
+            // 
+            // │
+            // 
+            // ││
+            // 
+            // │
+            // 
 
         };
         constexpr bool isBoxDrawing(char32_t codepoint)
         {
             bool standardBox = codepoint >= 0x2500 && codepoint <= 0x257F;
-            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint <= 0xF5FB;
+            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint <= 0xF5D0 + BranchDrawingDefinitions.size();
             return standardBox || gitBranchBox;
         }
         constexpr auto getBoxDrawing(char32_t codepoint) -> std::optional<Box>
         {
             bool standardBox = codepoint >= 0x2500 && codepoint <= 0x257F;
-            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint <= 0xF5FB;
+            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint <= 0xF5D0 + BranchDrawingDefinitions.size();
             if (not(standardBox || gitBranchBox))
                 return std::nullopt;
 
-            auto box = standardBox ? detail::BoxDrawingDefinitions[codepoint - 0x2500]
-                                   : detail::BranchDrawingDefinitions[codepoint - 0xF5D0];
+            auto box = standardBox ? BoxDrawingDefinitions[codepoint - 0x2500]
+                                   : BranchDrawingDefinitions[codepoint - 0xF5D0];
             return box;
         }
 
@@ -1314,20 +1326,20 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
         return a <= codepoint && codepoint <= b;
     };
 
-    return ascending(0x23A1, 0x23A6)      // mathematical square brackets
-           || ascending(0x2500, 0x2590)   // box drawing, block elements
-           || ascending(0x2594, 0x259F)   // Terminal graphic characters
-           || ascending(0x1FB00, 0x1FBAF) // more block sextants
-           || ascending(0x1FBF0, 0x1FBF9) // digits
-           || ascending(0xEE00, 0xEE05)   // progress bar (Fira Code)
-           || codepoint == 0xE0B0         // 
-           || codepoint == 0xE0B2         // 
-           || codepoint == 0xE0B4         // 
-           || codepoint == 0xE0B6         // 
-           || codepoint == 0xE0BA         // 
-           || codepoint == 0xE0BC         // 
-           || codepoint == 0xE0BE         // 
-           || ascending(0xF5D0, 0xF5FB)   // git tree symbols
+    return ascending(0x23A1, 0x23A6)          // mathematical square brackets
+                                              // || ascending(0x2500, 0x2590)   // box drawing, block elements
+           || ascending(0x2594, 0x259F)       // Terminal graphic characters
+           || ascending(0x1FB00, 0x1FBAF)     // more block sextants
+           || ascending(0x1FBF0, 0x1FBF9)     // digits
+           || ascending(0xEE00, 0xEE05)       // progress bar (Fira Code)
+           || codepoint == 0xE0B0             // 
+           || codepoint == 0xE0B2             // 
+           || codepoint == 0xE0B4             // 
+           || codepoint == 0xE0B6             // 
+           || codepoint == 0xE0BA             // 
+           || codepoint == 0xE0BC             // 
+           || codepoint == 0xE0BE             // 
+           || detail::isBoxDrawing(codepoint) //
         ;
 }
 
