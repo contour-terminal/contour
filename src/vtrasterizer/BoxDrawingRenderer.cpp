@@ -46,16 +46,13 @@ namespace
     {
         atlas::Buffer dest;
         dest.resize(cellSize.area());
-        auto const pitch = cellSize.width.as<size_t>();
+        auto const width = cellSize.width.as<size_t>();
         auto const height = cellSize.height.as<size_t>();
+        auto const pitch = width;
 
-        for (size_t i = 0; i < cellSize.height.as<size_t>(); ++i)
-        {
-            for (size_t j = 0; j < cellSize.width.as<size_t>(); ++j)
-            {
+        for (auto i: iota(0U, height))
+            for (auto j: iota(0U, width))
                 dest[(i * pitch) + j] = image[((height - i - 1u) * pitch) + j];
-            }
-        }
         return dest;
     }
 } // namespace
@@ -173,189 +170,6 @@ namespace detail
                         buffer.at((y * unbox<size_t>(imageSize.width)) + xi) = 0xFF;
                 }
             }
-        }
-        void drawArcCirc(
-            atlas::Buffer& buffer, ImageSize imageSize, uint thickness, Arc arc, uint supersampling)
-        {
-            if (thickness == 0)
-                return;
-            auto const width = *imageSize.width;
-            auto const height = *imageSize.height;
-            auto xOffset = width / 2;
-            auto yOffset = height / 2;
-            auto x0 = xOffset - (thickness / 2);
-            auto y0 = yOffset - (thickness / 2);
-
-            auto [arcImage, cx, cy] = [size = imageSize * supersampling, //
-                                       x0 = x0 * supersampling,
-                                       y0 = y0 * supersampling,
-                                       thickness = thickness * supersampling,
-                                       supersampling,
-                                       arc] {
-                auto const width = *size.width;
-                auto const height = *size.height;
-                double ri = 0.0;
-                double ro = 0.0;
-                double cx = 0.0;
-                double cy = 0.0;
-
-                ro = std::min({ width - x0, height - y0, x0 + thickness, y0 + thickness });
-                ri = ro - thickness;
-                switch (arc)
-                {
-                    case (Arc::UR):
-                        cx = x0 + ro;
-                        cy = y0 + ro;
-                        break;
-                    case (Arc::UL):
-                        cx = x0 - ri;
-                        cy = y0 + ro;
-                        break;
-                    case (Arc::BL):
-                        cx = x0 - ri;
-                        cy = y0 - ri;
-                        break;
-                    case (Arc::BR):
-                        cx = x0 + ro;
-                        cy = y0 - ri;
-                        break;
-                    default: break;
-                }
-
-                auto image = atlas::Buffer(width * height, 0x00);
-
-                auto xQuadrant = [=](auto x) -> bool {
-                    switch (arc)
-                    {
-                        case (Arc::UR): [[fallthrough]];
-                        case (Arc::BR): return (x <= 0);
-                        case (Arc::UL): [[fallthrough]];
-                        case (Arc::BL): return (x >= 0);
-                        default: return false;
-                    }
-                };
-                auto yQuadrant = [=](auto y) -> bool {
-                    switch (arc)
-                    {
-                        case (Arc::UR): [[fallthrough]];
-                        case (Arc::UL): return (y <= 0);
-                        case (Arc::BL): [[fallthrough]];
-                        case (Arc::BR): return (y >= 0);
-                        default: return false;
-                    }
-                };
-
-                for (auto yi: iota(0U, height))
-                {
-                    auto y = static_cast<double>(yi) - cy + 0.5;
-                    if (not yQuadrant(y))
-                        continue;
-                    y *= y;
-                    for (auto xi: iota(0U, width))
-                    {
-                        auto x = static_cast<double>(xi) - cx + 0.5;
-                        if (not xQuadrant(x))
-                            continue;
-                        x *= x;
-                        if ((x + y) <= ro * ro and (x + y) >= ri * ri)
-                            image[(width * yi) + xi] = 0xFF;
-                    }
-                }
-
-                auto dsImage = downsample(image, 1, size, size / supersampling);
-                return std::make_tuple(dsImage, cx / supersampling, cy / supersampling);
-            }();
-            cx = cx > width ? width : cx;
-            cy = cy > height ? height : cy;
-            for (auto [v, vArc]: ranges::zip_view(buffer, arcImage))
-                v = std::max(v, vArc);
-
-            auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1) {
-                for (auto const yi: iota(y0, y1))
-                    for (auto const xi: iota(x0, x1))
-                        buffer[(yi * width) + xi] = 0xFF;
-            };
-            if (arc == Arc::UR or arc == Arc::BR)
-                fillRect(cx, width, y0, y0 + thickness);
-            if (arc == Arc::UR or arc == Arc::UL)
-                fillRect(x0, x0 + thickness, cy, height);
-            if (arc == Arc::UL or arc == Arc::BL)
-                fillRect(0, cx, y0, y0 + thickness);
-            if (arc == Arc::BL or arc == Arc::BR)
-                fillRect(x0, x0 + thickness, 0, cy);
-        }
-        void drawArc(
-            atlas::Buffer& buffer, ImageSize imageSize, size_t thickness, Arc arc, size_t supersampling)
-        {
-            // drawArcLegacy(buffer, imageSize, thickness, arc);
-            drawArcCirc(buffer, imageSize, thickness, arc, supersampling);
-            if (false)
-                drawArcLegacy(buffer, imageSize, thickness, arc);
-        }
-
-        void drawCircle(
-            atlas::Buffer& buffer, ImageSize imageSize, size_t thickness, Line line, size_t supersampling)
-        {
-            if (thickness == 0)
-                return;
-            auto const width = *imageSize.width;
-            auto const height = *imageSize.height;
-            auto xOffset = width / 2;
-            auto yOffset = height / 2;
-
-            auto const upSize = imageSize * supersampling;
-            auto const upWidth = *upSize.width;
-            auto const upHeight = *upSize.height;
-            auto image = atlas::Buffer(upWidth * upHeight, 0x00);
-            for (auto yi: iota(0U, height))
-                for (auto xi: iota(0U, width))
-                {
-                    auto v = buffer[(yi * width) + xi];
-                    for (auto ysi: iota(0U, supersampling))
-                        for (auto xsi: iota(0U, supersampling))
-                            image[((yi * supersampling + ysi) * upWidth) + (xi * supersampling + xsi)] = v;
-                }
-            auto fillCircle = [&](double radius, unsigned char value) {
-                for (auto yi: iota(0U, upHeight))
-                {
-                    auto y = static_cast<double>(yi) - yOffset * supersampling;
-                    for (auto xi: iota(0U, upWidth))
-                    {
-                        auto x = static_cast<double>(xi) - xOffset * supersampling;
-                        if ((x * x + y * y) <= radius * radius)
-                            image[(yi * upWidth) + xi] = value;
-                    }
-                }
-            };
-            auto radius = std::round(static_cast<double>(std::min(upWidth, upHeight) / 2) * 0.75);
-            auto upThickness = thickness * supersampling;
-            fillCircle(radius, 0xFF);
-            switch (line)
-            {
-                case Line::Double: {
-                    auto space = 1.35 * upThickness;
-                    if (radius < 3 * upThickness + space)
-                    {
-                        auto solidTh = radius - space;
-                        if (solidTh <= 0)
-                            break;
-                        auto inner = 2 * solidTh / 3;
-                        fillCircle(inner + space, 0x00);
-                        fillCircle(inner, 0xFF);
-                    }
-                    else
-                    {
-                        fillCircle(radius - upThickness, 0x00);
-                        fillCircle(radius - upThickness - space, 0xFF);
-                    }
-                    break;
-                }
-                case Line::Light: {
-                    fillCircle(radius - upThickness, 0x00);
-                }
-                default: break;
-            }
-            buffer = downsample(image, 1, upSize, imageSize);
         }
 
         struct ProgressBar
@@ -1027,14 +841,12 @@ namespace detail
             auto const w = unbox(pixmap.size.width);
             auto const h = unbox(pixmap.size.height) - 1;
 
-            for (auto const y: ranges::views::iota(0u, unbox(pixmap.size.height)))
-            {
-                for (auto const x: ranges::views::iota(0u, unbox(pixmap.size.width)))
+            for (auto const y: iota(0u, unbox(pixmap.size.height)))
+                for (auto const x: iota(0u, unbox(pixmap.size.width)))
                 {
                     auto const [a, b] = p(int(x));
                     pixmap.buffer[(unsigned(h - y) * w) + x] = a <= int(y) && int(y) <= b ? set : unset;
                 }
-            }
         }
 
         template <Dir Direction, Inverted Inv = Inverted::No, int DivisorX = 2>
@@ -1061,8 +873,8 @@ namespace detail
 
             auto const h = pixmap.size.height.as<unsigned>() - 1;
             auto const w = pixmap.size.width.as<unsigned>();
-            for (auto const y: ranges::views::iota(0u, pixmap.size.height.as<unsigned>()))
-                for (auto const x: ranges::views::iota(0u, pixmap.size.width.as<unsigned>()))
+            for (auto const y: iota(0u, pixmap.size.height.as<unsigned>()))
+                for (auto const x: iota(0u, pixmap.size.width.as<unsigned>()))
                     if (condition(int(x), int(y)))
                         pixmap.buffer.at((w * (h - y)) + x) = 0xFF;
         }
@@ -1299,16 +1111,9 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
                                     _gridMetrics.cellSize,
                                     _gridMetrics.underline.thickness,
                                     supersamplingFactor);
-        // auto tmp = buildBoxElements(codepoint, supersamplingSize, supersamplingLineThickness);
-        // auto const supersamplingSize = _gridMetrics.cellSize * supersamplingFactor;
-        // auto const supersamplingLineThickness = _gridMetrics.underline.thickness * 2;
-        // auto tmp = buildBoxElements(codepoint, supersamplingSize, supersamplingLineThickness);
         if (!tmp)
             return nullopt;
-
-        // pixels = downsample(*tmp, _gridMetrics.cellSize, supersamplingFactor);
         pixels = *tmp;
-        // pixels = downsample(*tmp, 1, supersamplingSize, _gridMetrics.cellSize);
     }
     else
     {
@@ -1903,14 +1708,6 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
 auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersampling)
     -> std::optional<atlas::Buffer>
 {
-    auto const height = size.height;
-    auto const width = size.width;
-    auto const yOffset = *height / 2;
-    auto const xOffset = *width / 2;
-    auto const lightThickness = (unsigned) lineThickness;
-    auto const heavyThickness = (unsigned) lineThickness * 2;
-
-    auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0x00);
 
     // catch all non-solid single-lines before the quad-render below
 
@@ -1948,6 +1745,42 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
     if (not validLines)
         return std::nullopt;
 
+    auto height = unbox<size_t>(size.height);
+    auto width = unbox<size_t>(size.width);
+    auto yOffset = height / 2;
+    auto xOffset = width / 2;
+    auto lightThickness = (unsigned) lineThickness;
+    auto heavyThickness = (unsigned) lineThickness * 2;
+    auto ss = box.diagonalval != detail::NoDiagonal      //
+                      || box.arcURval != detail::NoLine  //
+                      || box.arcULval != detail::NoLine  //
+                      || box.arcBLval != detail::NoLine  //
+                      || box.arcBRval != detail::NoLine  //
+                      || box.circleval != detail::NoLine //
+                  ? supersampling
+                  : 1U;
+
+    auto const getZeros = [=](detail::Line value) -> std::pair<size_t, size_t> {
+        switch (value)
+        {
+            using enum detail::Line;
+            case NoLine: return { xOffset * ss, yOffset * ss };
+            case Light: return { (xOffset - lightThickness / 2) * ss, (yOffset - lightThickness / 2) * ss };
+            case Double: return { (xOffset - lightThickness / 2) * ss, (yOffset - lightThickness / 2) * ss };
+            case Heavy: return { (xOffset - lightThickness) * ss, (yOffset - lightThickness) * ss };
+            default:
+                assert(false);
+                return { xOffset * ss, yOffset * ss }; // dashed lines are handled explictily
+        }
+    };
+    height *= ss;
+    width *= ss;
+    yOffset *= ss;
+    xOffset *= ss;
+    lightThickness *= ss;
+    heavyThickness *= ss;
+    auto image = atlas::Buffer(width * height, 0x00);
+
     auto const getThickness = [=](detail::Line value) -> size_t {
         switch (value)
         {
@@ -1956,41 +1789,38 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             case Light: return lightThickness;
             case Double: return lightThickness;
             case Heavy: return heavyThickness;
-            default:
-                // dashed lines are handled explictily
-                assert(false);
+            default: assert(false); // dashed lines are handled explictily
         }
     };
 
+    auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1, uint8_t value = 0xFF) {
+        for (auto const yi: iota(y0, y1))
+            for (auto const xi: iota(x0, x1))
+                image[(yi * width) + xi] = value;
+    };
     {
         using detail::Line;
         auto const is2Line = [](Line line) {
             return line == Line::Double;
         };
-        auto xCenter0 = xOffset - (lightThickness / 2);
+        auto [xCenter0, yCenter0] = getZeros(Line::Light);
         auto xCenter1 = xCenter0 + (lightThickness * 1);
-        auto yCenter0 = yOffset - (lightThickness / 2);
         auto yCenter1 = yCenter0 + (lightThickness * 1);
 
-        auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1) {
-            for (auto const yi: iota(y0, y1))
-                for (auto const xi: iota(x0, x1))
-                    image[(yi * unbox(width)) + xi] = 0xFF;
-        };
         {
             auto const thickness = getThickness(box.rightval);
-            auto const y0 = yOffset - (thickness / 2);
+            auto const [_, y0] = getZeros(box.rightval);
             if (is2Line(box.rightval))
             {
-                fillRect(xCenter1, *width, y0 - thickness, y0);
-                fillRect(xCenter1, *width, y0 + thickness, y0 + (2 * thickness));
+                fillRect(xCenter1, width, y0 - thickness, y0);
+                fillRect(xCenter1, width, y0 + thickness, y0 + (2 * thickness));
             }
             else
-                fillRect(xCenter1, *width, y0, y0 + thickness);
+                fillRect(xCenter1, width, y0, y0 + thickness);
         }
         {
             auto const thickness = getThickness(box.leftval);
-            auto const y0 = yOffset - (thickness / 2);
+            auto const [_, y0] = getZeros(box.leftval);
             if (is2Line(box.leftval))
             {
                 fillRect(0U, xCenter0, y0 - thickness, y0);
@@ -2001,18 +1831,18 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
         }
         {
             auto const thickness = getThickness(box.upval);
-            auto const x0 = xOffset - (thickness / 2);
+            auto const [x0, _] = getZeros(box.upval);
             if (is2Line(box.upval))
             {
-                fillRect(x0 - thickness, x0, yCenter1, *height);
-                fillRect(x0 + thickness, x0 + (2 * thickness), yCenter1, *height);
+                fillRect(x0 - thickness, x0, yCenter1, height);
+                fillRect(x0 + thickness, x0 + (2 * thickness), yCenter1, height);
             }
             else
-                fillRect(x0, x0 + thickness, yCenter1, *height);
+                fillRect(x0, x0 + thickness, yCenter1, height);
         }
         {
             auto const thickness = getThickness(box.downval);
-            auto const x0 = xOffset - (thickness / 2);
+            auto const [x0, _] = getZeros(box.downval);
             if (is2Line(box.downval))
             {
                 fillRect(x0 - thickness, x0, 0, yCenter0);
@@ -2029,7 +1859,8 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
 
         if ((is2Line(box.upval) or is2Line(box.downval)) and not is2Line(box.rightval))
         { // center right edge
-            auto const x0 = xOffset - (lightThickness / 2) + lightThickness;
+            auto [x0, _] = getZeros(Line::Light);
+            x0 += lightThickness;
             if (box.upval == box.downval || is2Line(box.leftval))
                 fillRect(x0, x0 + lightThickness, yCenter0, yCenter1);
             else if (is2Line(box.upval))
@@ -2040,7 +1871,8 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
 
         if ((is2Line(box.rightval) or is2Line(box.leftval)) and not is2Line(box.upval))
         { // center top edge
-            auto const y0 = yOffset - (lightThickness / 2) + lightThickness;
+            auto [_, y0] = getZeros(Line::Light);
+            y0 += lightThickness;
             if (box.leftval == box.rightval || is2Line(box.downval))
                 fillRect(xCenter0, xCenter1, y0, y0 + lightThickness);
             else if (is2Line(box.rightval))
@@ -2051,7 +1883,8 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
 
         if ((is2Line(box.upval) or is2Line(box.downval)) and not is2Line(box.leftval))
         { // center left edge
-            auto const x0 = xOffset - (lightThickness / 2) - lightThickness;
+            auto [x0, _] = getZeros(Line::Light);
+            x0 -= lightThickness;
             if (box.upval == box.downval || is2Line(box.rightval))
                 fillRect(x0, x0 + lightThickness, yCenter0, yCenter1);
             else if (is2Line(box.upval))
@@ -2062,7 +1895,8 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
 
         if ((is2Line(box.rightval) or is2Line(box.leftval)) and not is2Line(box.downval))
         { // center bottom edge
-            auto const y0 = yOffset - (lightThickness / 2) - lightThickness;
+            auto [_, y0] = getZeros(Line::Light);
+            y0 -= lightThickness;
             if (box.leftval == box.rightval || is2Line(box.upval))
                 fillRect(xCenter0, xCenter1, y0, y0 + lightThickness);
             else if (is2Line(box.rightval))
@@ -2076,7 +1910,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             && !(is2Line(box.leftval) && (is2Line(box.upval) || is2Line(box.downval)))) // double corner
         {
             auto const thickness = getThickness(box.rightval);
-            auto const y0 = yOffset - (thickness / 2);
+            auto [_, y0] = getZeros(box.rightval);
             if (is2Line(box.upval) || is2Line(box.downval))
                 fillRect(xCenter0, xCenter1, y0, y0 + thickness);
             else
@@ -2092,7 +1926,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             && !(is2Line(box.downval) && (is2Line(box.leftval) || is2Line(box.rightval)))) // double corner
         {
             auto const thickness = getThickness(box.upval);
-            auto const x0 = xOffset - (thickness / 2);
+            auto [x0, _] = getZeros(box.upval);
             if (is2Line(box.leftval) || is2Line(box.rightval))
                 fillRect(x0, x0 + thickness, yCenter0, yCenter1);
             else
@@ -2108,7 +1942,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             && !(is2Line(box.rightval) && (is2Line(box.upval) || is2Line(box.downval)))) // double corner
         {
             auto const thickness = getThickness(box.leftval);
-            auto const y0 = yOffset - (thickness / 2);
+            auto [_, y0] = getZeros(box.leftval);
             if (is2Line(box.upval) || is2Line(box.downval))
                 fillRect(xCenter0, xCenter1, y0, y0 + thickness);
             else
@@ -2124,7 +1958,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             && !(is2Line(box.upval) && (is2Line(box.leftval) || is2Line(box.rightval)))) // double corner
         {
             auto const thickness = getThickness(box.downval);
-            auto const x0 = xOffset - (thickness / 2);
+            auto [x0, _] = getZeros(box.upval);
             if (is2Line(box.leftval) || is2Line(box.rightval))
                 fillRect(x0, x0 + thickness, yCenter0, yCenter1);
             else
@@ -2138,37 +1972,151 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
 
     if (box.diagonalval != detail::NoDiagonal)
     {
-        auto const a = height.as<double>() / width.as<double>();
+        auto const a = static_cast<double>(height) / static_cast<double>(width);
         auto const aInv = 1.0 / a;
         using Diagonal = detail::Diagonal;
         if (unsigned(box.diagonalval) & unsigned(Diagonal::Forward))
         {
-            for (auto const y: iota(0u, height.as<unsigned>()))
+            for (auto const y: iota(0u, height))
             {
                 auto const x = int(double(y) * aInv);
                 for (auto const xi: iota(-int(lineThickness) / 2, int(lineThickness) / 2))
-                    image[(y * unbox(width)) + (unsigned) max(0, min(x + xi, unbox<int>(width) - 1))] = 0xFF;
+                    image[(y * width) + (unsigned) max(0, min<int>(x + xi, width - 1))] = 0xFF;
             }
         }
         if (unsigned(box.diagonalval) & unsigned(Diagonal::Backward))
         {
-            for (auto const y: iota(0u, height.as<unsigned>()))
+            for (auto const y: iota(0U, height))
             {
-                auto const x = int(double(*height - y - 1) * aInv);
+                auto const x = int(double(height - y - 1) * aInv);
                 for (auto const xi: iota(-int(lineThickness) / 2, int(lineThickness) / 2))
-                    image[(y * unbox(width)) + (unsigned) max(0, min(x + xi, unbox<int>(width) - 1))] = 0xFF;
+                    image[(y * width) + (unsigned) max(0, min<int>(x + xi, width - 1))] = 0xFF;
             }
         }
     }
 
-    detail::drawArc(image, size, getThickness(box.arcURval), Arc::UR, supersampling);
-    detail::drawArc(image, size, getThickness(box.arcULval), Arc::UL, supersampling);
-    detail::drawArc(image, size, getThickness(box.arcBLval), Arc::BL, supersampling);
-    detail::drawArc(image, size, getThickness(box.arcBRval), Arc::BR, supersampling);
+    auto drawArc = [=, &image](Arc arc, size_t th, uint8_t value) {
+        auto x0 = (xOffset / ss - th / ss / 2) * ss;
+        auto y0 = (yOffset / ss - th / ss / 2) * ss;
+
+        auto ro = static_cast<double>(std::min({ width - x0, height - y0, x0 + th, y0 + th }));
+        auto ri = ro - th;
+
+        auto [dcx, dcy] = [=] {
+            switch (arc)
+            {
+                case (Arc::UR): return std::make_pair(x0 + ro, y0 + ro);
+                case (Arc::UL): return std::make_pair(x0 - ri, y0 + ro);
+                case (Arc::BL): return std::make_pair(x0 - ri, y0 - ri);
+                case (Arc::BR): return std::make_pair(x0 + ro, y0 - ri);
+                default: assert(false); return std::make_pair(0., 0.);
+            }
+        }();
+        auto xQuadrant = [=](auto x) -> bool {
+            switch (arc)
+            {
+                case (Arc::UR): [[fallthrough]];
+                case (Arc::BR): return (x <= 0);
+                case (Arc::UL): [[fallthrough]];
+                case (Arc::BL): return (x >= 0);
+                default: return false;
+            }
+        };
+        auto yQuadrant = [=](auto y) -> bool {
+            switch (arc)
+            {
+                case (Arc::UR): [[fallthrough]];
+                case (Arc::UL): return (y <= 0);
+                case (Arc::BL): [[fallthrough]];
+                case (Arc::BR): return (y >= 0);
+                default: return false;
+            }
+        };
+
+        for (auto yi: iota(0U, height))
+        {
+            auto y = static_cast<double>(yi) - dcy + 0.5;
+            if (not yQuadrant(y))
+                continue;
+            y *= y;
+            for (auto xi: iota(0U, width))
+            {
+                auto x = static_cast<double>(xi) - dcx + 0.5;
+                if (not xQuadrant(x))
+                    continue;
+                x *= x;
+                if ((x + y) <= ro * ro and (x + y) >= ri * ri)
+                    image[(width * yi) + xi] = value;
+            }
+        }
+        auto cx = dcx > static_cast<double>(width) ? width : static_cast<size_t>(dcx);
+        auto cy = dcy > static_cast<double>(height) ? height : static_cast<size_t>(dcy);
+
+        if (arc == Arc::UR or arc == Arc::BR)
+            fillRect(cx, width, y0, y0 + th, value);
+        if (arc == Arc::UR or arc == Arc::UL)
+            fillRect(x0, x0 + th, cy, height, value);
+        if (arc == Arc::UL or arc == Arc::BL)
+            fillRect(0, cx, y0, y0 + th, value);
+        if (arc == Arc::BL or arc == Arc::BR)
+            fillRect(x0, x0 + th, 0, cy, value);
+    };
+
+    drawArc(Arc::UR, getThickness(box.arcURval), 0xFF);
+    drawArc(Arc::UL, getThickness(box.arcULval), 0xFF);
+    drawArc(Arc::BL, getThickness(box.arcBLval), 0xFF);
+    drawArc(Arc::BR, getThickness(box.arcBRval), 0xFF);
+    if (false)
+    {
+        detail::drawArcLegacy(image, size, getThickness(box.arcURval), Arc::UR);
+        detail::drawArcLegacy(image, size, getThickness(box.arcULval), Arc::UL);
+        detail::drawArcLegacy(image, size, getThickness(box.arcBLval), Arc::BL);
+        detail::drawArcLegacy(image, size, getThickness(box.arcBRval), Arc::BR);
+    }
 
     if (box.circleval != detail::Line::NoLine)
-        detail::drawCircle(image, size, lightThickness, box.circleval, supersampling);
-    return image;
+    {
+        auto fillCircle = [&](double radius, unsigned char value) {
+            for (auto yi: iota(0U, height))
+                for (auto xi: iota(0U, width))
+                {
+                    auto y = static_cast<double>(yi) - static_cast<double>(yOffset);
+                    auto x = static_cast<double>(xi) - static_cast<double>(xOffset);
+                    if ((x * x + y * y) <= radius * radius)
+                        image[(yi * width) + xi] = value;
+                }
+        };
+        auto radius = std::round(static_cast<double>(std::min(width, height)) / 2. * 0.75);
+        fillCircle(radius, 0xFF);
+        switch (box.circleval)
+        {
+            case detail::Line::Double: {
+                auto space = 1.35 * lightThickness;
+                if (radius < 3 * lightThickness + space)
+                {
+                    auto solidTh = radius - space;
+                    if (solidTh <= 0)
+                        break;
+                    auto inner = 2 * solidTh / 3;
+                    fillCircle(inner + space, 0x00);
+                    fillCircle(inner, 0xFF);
+                }
+                else
+                {
+                    fillCircle(radius - lightThickness, 0x00);
+                    fillCircle(radius - lightThickness - space, 0xFF);
+                }
+                break;
+            }
+            case detail::Line::Light: {
+                fillCircle(radius - lightThickness, 0x00);
+                break;
+            }
+            default: break;
+        }
+    }
+
+    return downsample(image, 1, size * ss, size);
 }
 
 optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
