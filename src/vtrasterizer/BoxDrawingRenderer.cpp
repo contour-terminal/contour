@@ -516,87 +516,88 @@ namespace detail
         static_assert(BoxDrawingDefinitions.size() == 0x80);
 
         constexpr auto MCommitLine = Line::Double; // style for merge commit
+        constexpr auto BranchLine = Line::Double;
         constexpr auto BranchDrawingDefinitions = std::array {
-            /*U+F5D0  */ Box {}.horizontal(),
-            /*U+F5D1  */ Box {}.vertical(),
-            /*U+F5D2  */ Box {}.horizontal(),
-            /*U+F5D3  */ Box {}.horizontal(),
-            /*U+F5D4  */ Box {}.vertical(),
-            /*U+F5D5  */ Box {}.vertical(),
-            /*U+F5D6  */ Box {}.arcBR(),
-            /*U+F5D7  */ Box {}.arcBL(),
-            /*U+F5D8  */ Box {}.arcUR(),
-            /*U+F5D9  */ Box {}.arcUL(),
-            /*U+F5DA  */ Box {}.vertical().arcUR(),
-            /*U+F5DB  */ Box {}.vertical().arcBR(),
-            /*U+F5DC  */ Box {}.arcUR().arcBR(),
-            /*U+F5DD  */ Box {}.vertical().arcUL(),
-            /*U+F5DE  */ Box {}.vertical().arcBL(),
-            /*U+F5DF  */ Box {}.arcUL().arcBL(),
-            /*U+F5E0  */ Box {}.horizontal().arcBL(),
-            /*U+F5E1  */ Box {}.horizontal().arcBR(),
-            /*U+F5E2  */ Box {}.arcBL().arcBR(),
-            /*U+F5E3  */ Box {}.horizontal().arcUL(),
-            /*U+F5E4  */ Box {}.horizontal().arcUR(),
-            /*U+F5E5  */ Box {}.arcUR().arcUL(),
-            /*U+F5E6  */ Box {}.vertical().arcUL().arcUR(),
-            /*U+F5E7  */ Box {}.vertical().arcBL().arcBR(),
-            /*U+F5E8  */ Box {}.horizontal().arcUL().arcBL(),
-            /*U+F5E9  */ Box {}.horizontal().arcUR().arcBR(),
-            /*U+F5EA  */ Box {}.vertical().arcUL().arcBR(),
-            /*U+F5EB  */ Box {}.vertical().arcUR().arcBL(),
-            /*U+F5EC  */ Box {}.horizontal().arcUL().arcBR(),
-            /*U+F5ED  */ Box {}.horizontal().arcUR().arcBL(),
+            /*U+F5D0  */ Box {}.horizontal(BranchLine),
+            /*U+F5D1  */ Box {}.vertical(BranchLine),
+            /*U+F5D2  */ Box {}.horizontal(BranchLine),
+            /*U+F5D3  */ Box {}.horizontal(BranchLine),
+            /*U+F5D4  */ Box {}.vertical(BranchLine),
+            /*U+F5D5  */ Box {}.vertical(BranchLine),
+            /*U+F5D6  */ Box {}.arcBR(BranchLine),
+            /*U+F5D7  */ Box {}.arcBL(BranchLine),
+            /*U+F5D8  */ Box {}.arcUR(BranchLine),
+            /*U+F5D9  */ Box {}.arcUL(BranchLine),
+            /*U+F5DA  */ Box {}.vertical(BranchLine).arcUR(BranchLine),
+            /*U+F5DB  */ Box {}.vertical(BranchLine).arcBR(BranchLine),
+            /*U+F5DC  */ Box {}.arcUR(BranchLine).arcBR(BranchLine),
+            /*U+F5DD  */ Box {}.vertical(BranchLine).arcUL(BranchLine),
+            /*U+F5DE  */ Box {}.vertical(BranchLine).arcBL(BranchLine),
+            /*U+F5DF  */ Box {}.arcUL(BranchLine).arcBL(BranchLine),
+            /*U+F5E0  */ Box {}.horizontal(BranchLine).arcBL(BranchLine),
+            /*U+F5E1  */ Box {}.horizontal(BranchLine).arcBR(BranchLine),
+            /*U+F5E2  */ Box {}.arcBL(BranchLine).arcBR(BranchLine),
+            /*U+F5E3  */ Box {}.horizontal(BranchLine).arcUL(BranchLine),
+            /*U+F5E4  */ Box {}.horizontal(BranchLine).arcUR(BranchLine),
+            /*U+F5E5  */ Box {}.arcUR(BranchLine).arcUL(BranchLine),
+            /*U+F5E6  */ Box {}.vertical(BranchLine).arcUL(BranchLine).arcUR(BranchLine),
+            /*U+F5E7  */ Box {}.vertical(BranchLine).arcBL(BranchLine).arcBR(BranchLine),
+            /*U+F5E8  */ Box {}.horizontal(BranchLine).arcUL(BranchLine).arcBL(BranchLine),
+            /*U+F5E9  */ Box {}.horizontal(BranchLine).arcUR(BranchLine).arcBR(BranchLine),
+            /*U+F5EA  */ Box {}.vertical(BranchLine).arcUL(BranchLine).arcBR(BranchLine),
+            /*U+F5EB  */ Box {}.vertical(BranchLine).arcUR(BranchLine).arcBL(BranchLine),
+            /*U+F5EC  */ Box {}.horizontal(BranchLine).arcUL(BranchLine).arcBR(BranchLine),
+            /*U+F5ED  */ Box {}.horizontal(BranchLine).arcUR(BranchLine).arcBL(BranchLine),
             /*U+F5EE  */ Box {}.circle(MCommitLine),
             /*U+F5EF  */ Box {}.circle(Line::Light),
-            /*U+F5F0  */ Box {}.circle(MCommitLine).right(),
-            /*U+F5F1  */ Box {}.circle(Line::Light).right(),
-            /*U+F5F2  */ Box {}.circle(MCommitLine).left(),
-            /*U+F5F3  */ Box {}.circle(Line::Light).left(),
-            /*U+F5F4  */ Box {}.circle(MCommitLine).horizontal(),
-            /*U+F5F5  */ Box {}.circle(Line::Light).horizontal(),
-            /*U+F5F6  */ Box {}.circle(MCommitLine).down(),
-            /*U+F5F7  */ Box {}.circle(Line::Light).down(),
-            /*U+F5F8  */ Box {}.circle(MCommitLine).up(),
-            /*U+F5F9  */ Box {}.circle(Line::Light).up(),
-            /*U+F5FA  */ Box {}.circle(MCommitLine).vertical(),
-            /*U+F5FB  */ Box {}.circle(Line::Light).vertical(),
-            /*U+F5FC  */ Box {}.circle(MCommitLine).right().down(),
-            /*U+F5FD  */ Box {}.circle(Line::Light).right().down(),
-            /*U+F5FE  */ Box {}.circle(MCommitLine).left().down(),
-            /*U+F5FF  */ Box {}.circle(Line::Light).left().down(),
-            /*U+F600  */ Box {}.circle(MCommitLine).right().up(),
-            /*U+F601  */ Box {}.circle(Line::Light).right().up(),
-            /*U+F602  */ Box {}.circle(MCommitLine).left().up(),
-            /*U+F603  */ Box {}.circle(Line::Light).left().up(),
-            /*U+F604  */ Box {}.circle(MCommitLine).vertical().right(),
-            /*U+F605  */ Box {}.circle(Line::Light).vertical().right(),
-            /*U+F606  */ Box {}.circle(MCommitLine).vertical().left(),
-            /*U+F607  */ Box {}.circle(Line::Light).vertical().left(),
-            /*U+F608  */ Box {}.circle(MCommitLine).horizontal().down(),
-            /*U+F609  */ Box {}.circle(Line::Light).horizontal().down(),
-            /*U+F60A  */ Box {}.circle(MCommitLine).horizontal().up(),
-            /*U+F60B  */ Box {}.circle(Line::Light).horizontal().up(),
-            /*U+F60C  */ Box {}.circle(MCommitLine).horizontal().vertical(),
-            /*U+F60D  */ Box {}.circle(Line::Light).horizontal().vertical(),
+            /*U+F5F0  */ Box {}.circle(MCommitLine).right(BranchLine),
+            /*U+F5F1  */ Box {}.circle(Line::Light).right(BranchLine),
+            /*U+F5F2  */ Box {}.circle(MCommitLine).left(BranchLine),
+            /*U+F5F3  */ Box {}.circle(Line::Light).left(BranchLine),
+            /*U+F5F4  */ Box {}.circle(MCommitLine).horizontal(BranchLine),
+            /*U+F5F5  */ Box {}.circle(Line::Light).horizontal(BranchLine),
+            /*U+F5F6  */ Box {}.circle(MCommitLine).down(BranchLine),
+            /*U+F5F7  */ Box {}.circle(Line::Light).down(BranchLine),
+            /*U+F5F8  */ Box {}.circle(MCommitLine).up(BranchLine),
+            /*U+F5F9  */ Box {}.circle(Line::Light).up(BranchLine),
+            /*U+F5FA  */ Box {}.circle(MCommitLine).vertical(BranchLine),
+            /*U+F5FB  */ Box {}.circle(Line::Light).vertical(BranchLine),
+            /*U+F5FC  */ Box {}.circle(MCommitLine).right(BranchLine).down(BranchLine),
+            /*U+F5FD  */ Box {}.circle(Line::Light).right(BranchLine).down(BranchLine),
+            /*U+F5FE  */ Box {}.circle(MCommitLine).left(BranchLine).down(BranchLine),
+            /*U+F5FF  */ Box {}.circle(Line::Light).left(BranchLine).down(BranchLine),
+            /*U+F600  */ Box {}.circle(MCommitLine).right(BranchLine).up(BranchLine),
+            /*U+F601  */ Box {}.circle(Line::Light).right(BranchLine).up(BranchLine),
+            /*U+F602  */ Box {}.circle(MCommitLine).left(BranchLine).up(BranchLine),
+            /*U+F603  */ Box {}.circle(Line::Light).left(BranchLine).up(BranchLine),
+            /*U+F604  */ Box {}.circle(MCommitLine).vertical(BranchLine).right(BranchLine),
+            /*U+F605  */ Box {}.circle(Line::Light).vertical(BranchLine).right(BranchLine),
+            /*U+F606  */ Box {}.circle(MCommitLine).vertical(BranchLine).left(BranchLine),
+            /*U+F607  */ Box {}.circle(Line::Light).vertical(BranchLine).left(BranchLine),
+            /*U+F608  */ Box {}.circle(MCommitLine).horizontal(BranchLine).down(BranchLine),
+            /*U+F609  */ Box {}.circle(Line::Light).horizontal(BranchLine).down(BranchLine),
+            /*U+F60A  */ Box {}.circle(MCommitLine).horizontal(BranchLine).up(BranchLine),
+            /*U+F60B  */ Box {}.circle(Line::Light).horizontal(BranchLine).up(BranchLine),
+            /*U+F60C  */ Box {}.circle(MCommitLine).horizontal(BranchLine).vertical(BranchLine),
+            /*U+F60D  */ Box {}.circle(Line::Light).horizontal(BranchLine).vertical(BranchLine),
         };
 
         // 
-        // │
+        // 
         // 
-        // │
-        // │
-        // │││
-        // │││
+        // 
+        // 
+        // 
+        // 
         // 
-        // ││
+        // 
         // 
-        // │││
-        // │
-        // ││ 
+        // 
+        // 
+        //  
         // 
-        // │
-        // 
+        // 
+        // 
 
         constexpr bool isBoxDrawing(char32_t codepoint)
         {
@@ -1717,10 +1718,11 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
     if (auto const dashed = box.get_dashed_vertical())
         return boxDashedVertical(dashed, size, lineThickness);
 
-    auto const nonDashLine = [](detail::Line line) {
+    using detail::Line;
+    auto const nonDashLine = [](Line line) {
         switch (line)
         {
-            using enum detail::Line;
+            using enum Line;
             case NoLine:
             case Light:
             case Double:
@@ -1749,47 +1751,64 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
     auto width = unbox<size_t>(size.width);
     auto yOffset = height / 2;
     auto xOffset = width / 2;
-    auto lightThickness = (unsigned) lineThickness;
-    auto heavyThickness = (unsigned) lineThickness * 2;
-    auto ss = box.diagonalval != detail::NoDiagonal      //
-                      || box.arcURval != detail::NoLine  //
-                      || box.arcULval != detail::NoLine  //
-                      || box.arcBLval != detail::NoLine  //
-                      || box.arcBRval != detail::NoLine  //
-                      || box.circleval != detail::NoLine //
-                  ? supersampling
-                  : 1U;
+    auto lightTh = (unsigned) lineThickness;
+    auto const ss = box.diagonalval != detail::NoDiagonal      //
+                            || box.arcURval != detail::NoLine  //
+                            || box.arcULval != detail::NoLine  //
+                            || box.arcBLval != detail::NoLine  //
+                            || box.arcBRval != detail::NoLine  //
+                            || box.circleval != detail::NoLine //
+                        ? supersampling
+                        : 1U;
 
-    auto const getZeros = [=](detail::Line value) -> std::pair<size_t, size_t> {
+    auto const getZeros = [=](detail::Line value) {
+        struct Center
+        {
+            size_t x0;
+            size_t x1;
+            size_t y0;
+            size_t y1;
+        };
         switch (value)
         {
             using enum detail::Line;
-            case NoLine: return { xOffset * ss, yOffset * ss };
-            case Light: return { (xOffset - lightThickness / 2) * ss, (yOffset - lightThickness / 2) * ss };
-            case Double: return { (xOffset - lightThickness / 2) * ss, (yOffset - lightThickness / 2) * ss };
-            case Heavy: return { (xOffset - lightThickness) * ss, (yOffset - lightThickness) * ss };
+            case NoLine: return Center(xOffset * ss, xOffset * ss, yOffset * ss, yOffset * ss);
+            case Light:
+                return Center { .x0 = (xOffset - lightTh / 2) * ss,
+                                .x1 = (xOffset - lightTh / 2 + lightTh) * ss,
+                                .y0 = (yOffset - lightTh / 2) * ss,
+                                .y1 = (yOffset - lightTh / 2 + lightTh) * ss };
+            case Double:
+                return Center { .x0 = (xOffset - lightTh / 2 - lightTh) * ss,
+                                .x1 = (xOffset - lightTh / 2 + 2 * lightTh) * ss,
+                                .y0 = (yOffset - lightTh / 2 - lightTh) * ss,
+                                .y1 = (yOffset - lightTh / 2 + 2 * lightTh) * ss };
+            case Heavy:
+                return Center { .x0 = (xOffset - lightTh) * ss,
+                                .x1 = (xOffset + lightTh) * ss,
+                                .y0 = (yOffset - lightTh) * ss,
+                                .y1 = (yOffset + lightTh) * ss };
             default:
+                // dashed lines are handled explictily
                 assert(false);
-                return { xOffset * ss, yOffset * ss }; // dashed lines are handled explictily
+                return Center(xOffset * ss, xOffset * ss, yOffset * ss, yOffset * ss);
         }
     };
     height *= ss;
     width *= ss;
     yOffset *= ss;
     xOffset *= ss;
-    lightThickness *= ss;
-    heavyThickness *= ss;
+    lightTh *= ss;
     auto image = atlas::Buffer(width * height, 0x00);
 
-    auto const getThickness = [=](detail::Line value) -> size_t {
+    auto const getThickness = [=](Line value) -> size_t {
         switch (value)
         {
-            using enum detail::Line;
-            case NoLine: return 0;
-            case Light: return lightThickness;
-            case Double: return lightThickness;
-            case Heavy: return heavyThickness;
-            default: assert(false); // dashed lines are handled explictily
+            case Line::NoLine: return 0;
+            case Line::Light: return lightTh;
+            case Line::Double: return lightTh * 3;
+            case Line::Heavy: return lightTh * 2;
+            default: assert(false); return 0; // dashed lines are handled explictily
         }
     };
 
@@ -1798,176 +1817,27 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             for (auto const xi: iota(x0, x1))
                 image[(yi * width) + xi] = value;
     };
+
     {
-        using detail::Line;
-        auto const is2Line = [](Line line) {
-            return line == Line::Double;
-        };
-        auto [xCenter0, yCenter0] = getZeros(Line::Light);
-        auto xCenter1 = xCenter0 + (lightThickness * 1);
-        auto yCenter1 = yCenter0 + (lightThickness * 1);
+        auto const [xRight, xLeft, yUp, yDown] = [=] {
+            auto getThickestZeros = [=](auto a, auto b) {
+                if (a == Line::Double or b == Line::Double)
+                    return getZeros(Line::Double);
+                if (a == Line::Heavy or b == Line::Heavy)
+                    return getZeros(Line::Heavy);
+                if (a == Line::Light or b == Line::Light)
+                    return getZeros(Line::Light);
+                return getZeros(Line::NoLine);
+            };
+            auto zH = getThickestZeros(box.upval, box.downval);
+            auto zV = getThickestZeros(box.rightval, box.leftval);
+            return std::make_tuple(zH.x0, zH.x1, zV.y0, zV.y1);
+        }();
 
-        {
-            auto const thickness = getThickness(box.rightval);
-            auto const [_, y0] = getZeros(box.rightval);
-            if (is2Line(box.rightval))
-            {
-                fillRect(xCenter1, width, y0 - thickness, y0);
-                fillRect(xCenter1, width, y0 + thickness, y0 + (2 * thickness));
-            }
-            else
-                fillRect(xCenter1, width, y0, y0 + thickness);
-        }
-        {
-            auto const thickness = getThickness(box.leftval);
-            auto const [_, y0] = getZeros(box.leftval);
-            if (is2Line(box.leftval))
-            {
-                fillRect(0U, xCenter0, y0 - thickness, y0);
-                fillRect(0U, xCenter0, y0 + thickness, y0 + (2 * thickness));
-            }
-            else
-                fillRect(0U, xCenter0, y0, y0 + thickness);
-        }
-        {
-            auto const thickness = getThickness(box.upval);
-            auto const [x0, _] = getZeros(box.upval);
-            if (is2Line(box.upval))
-            {
-                fillRect(x0 - thickness, x0, yCenter1, height);
-                fillRect(x0 + thickness, x0 + (2 * thickness), yCenter1, height);
-            }
-            else
-                fillRect(x0, x0 + thickness, yCenter1, height);
-        }
-        {
-            auto const thickness = getThickness(box.downval);
-            auto const [x0, _] = getZeros(box.downval);
-            if (is2Line(box.downval))
-            {
-                fillRect(x0 - thickness, x0, 0, yCenter0);
-                fillRect(x0 + thickness, x0 + (2 * thickness), 0, yCenter0);
-            }
-            else
-                fillRect(x0, x0 + thickness, 0, yCenter0);
-        }
-        // center fill
-        xCenter0 -= lightThickness;
-        xCenter1 += lightThickness;
-        yCenter0 -= lightThickness;
-        yCenter1 += lightThickness;
-
-        if ((is2Line(box.upval) or is2Line(box.downval)) and not is2Line(box.rightval))
-        { // center right edge
-            auto [x0, _] = getZeros(Line::Light);
-            x0 += lightThickness;
-            if (box.upval == box.downval || is2Line(box.leftval))
-                fillRect(x0, x0 + lightThickness, yCenter0, yCenter1);
-            else if (is2Line(box.upval))
-                fillRect(x0, x0 + lightThickness, yOffset, yCenter1);
-            else
-                fillRect(x0, x0 + lightThickness, yCenter0, yOffset);
-        }
-
-        if ((is2Line(box.rightval) or is2Line(box.leftval)) and not is2Line(box.upval))
-        { // center top edge
-            auto [_, y0] = getZeros(Line::Light);
-            y0 += lightThickness;
-            if (box.leftval == box.rightval || is2Line(box.downval))
-                fillRect(xCenter0, xCenter1, y0, y0 + lightThickness);
-            else if (is2Line(box.rightval))
-                fillRect(xOffset, xCenter1, y0, y0 + lightThickness);
-            else
-                fillRect(xCenter0, xOffset, y0, y0 + lightThickness);
-        }
-
-        if ((is2Line(box.upval) or is2Line(box.downval)) and not is2Line(box.leftval))
-        { // center left edge
-            auto [x0, _] = getZeros(Line::Light);
-            x0 -= lightThickness;
-            if (box.upval == box.downval || is2Line(box.rightval))
-                fillRect(x0, x0 + lightThickness, yCenter0, yCenter1);
-            else if (is2Line(box.upval))
-                fillRect(x0, x0 + lightThickness, yOffset, yCenter1);
-            else
-                fillRect(x0, x0 + lightThickness, yCenter0, yOffset);
-        }
-
-        if ((is2Line(box.rightval) or is2Line(box.leftval)) and not is2Line(box.downval))
-        { // center bottom edge
-            auto [_, y0] = getZeros(Line::Light);
-            y0 -= lightThickness;
-            if (box.leftval == box.rightval || is2Line(box.upval))
-                fillRect(xCenter0, xCenter1, y0, y0 + lightThickness);
-            else if (is2Line(box.rightval))
-                fillRect(xOffset, xCenter1, y0, y0 + lightThickness);
-            else
-                fillRect(xCenter0, xOffset, y0, y0 + lightThickness);
-        }
-
-        if (!is2Line(box.rightval)                           // extend right line
-            && !(is2Line(box.upval) && is2Line(box.downval)) // double straight vertical
-            && !(is2Line(box.leftval) && (is2Line(box.upval) || is2Line(box.downval)))) // double corner
-        {
-            auto const thickness = getThickness(box.rightval);
-            auto [_, y0] = getZeros(box.rightval);
-            if (is2Line(box.upval) || is2Line(box.downval))
-                fillRect(xCenter0, xCenter1, y0, y0 + thickness);
-            else
-            {
-                auto const offsetTh = std::max(getThickness(box.upval), getThickness(box.downval));
-                auto const x0 = xOffset - (offsetTh / 2);
-                fillRect(x0, xCenter1, y0, y0 + thickness);
-            }
-        }
-
-        if (!is2Line(box.upval)                                 // extend up line
-            && !(is2Line(box.leftval) && is2Line(box.rightval)) // double straight horizontal
-            && !(is2Line(box.downval) && (is2Line(box.leftval) || is2Line(box.rightval)))) // double corner
-        {
-            auto const thickness = getThickness(box.upval);
-            auto [x0, _] = getZeros(box.upval);
-            if (is2Line(box.leftval) || is2Line(box.rightval))
-                fillRect(x0, x0 + thickness, yCenter0, yCenter1);
-            else
-            {
-                auto const offsetTh = std::max(getThickness(box.leftval), getThickness(box.rightval));
-                auto const y0 = yOffset - (offsetTh / 2);
-                fillRect(x0, x0 + thickness, y0, yCenter1);
-            }
-        }
-
-        if (!is2Line(box.leftval)                            // extend left line
-            && !(is2Line(box.upval) && is2Line(box.downval)) // double straight vertical
-            && !(is2Line(box.rightval) && (is2Line(box.upval) || is2Line(box.downval)))) // double corner
-        {
-            auto const thickness = getThickness(box.leftval);
-            auto [_, y0] = getZeros(box.leftval);
-            if (is2Line(box.upval) || is2Line(box.downval))
-                fillRect(xCenter0, xCenter1, y0, y0 + thickness);
-            else
-            {
-                auto const offsetTh = std::max(getThickness(box.upval), getThickness(box.downval));
-                auto const x0 = xOffset - (offsetTh / 2);
-                fillRect(xCenter0, x0 + offsetTh, y0, y0 + thickness);
-            }
-        }
-
-        if (!is2Line(box.downval)                               // extend down line
-            && !(is2Line(box.leftval) && is2Line(box.rightval)) // double straight horizontal
-            && !(is2Line(box.upval) && (is2Line(box.leftval) || is2Line(box.rightval)))) // double corner
-        {
-            auto const thickness = getThickness(box.downval);
-            auto [x0, _] = getZeros(box.upval);
-            if (is2Line(box.leftval) || is2Line(box.rightval))
-                fillRect(x0, x0 + thickness, yCenter0, yCenter1);
-            else
-            {
-                auto const offsetTh = std::max(getThickness(box.leftval), getThickness(box.rightval));
-                auto const y0 = yOffset - (offsetTh / 2);
-                fillRect(x0, x0 + thickness, yCenter0, y0 + offsetTh);
-            }
-        }
+        fillRect(xRight, width, getZeros(box.rightval).y0, getZeros(box.rightval).y1, 0xFF);
+        fillRect(0U, xLeft, getZeros(box.leftval).y0, getZeros(box.leftval).y1, 0xFF);
+        fillRect(getZeros(box.upval).x0, getZeros(box.upval).x1, yUp, height, 0xFF);
+        fillRect(getZeros(box.downval).x0, getZeros(box.downval).x1, 0, yDown, 0xFF);
     }
 
     if (box.diagonalval != detail::NoDiagonal)
@@ -2066,13 +1936,57 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
     drawArc(Arc::UL, getThickness(box.arcULval), 0xFF);
     drawArc(Arc::BL, getThickness(box.arcBLval), 0xFF);
     drawArc(Arc::BR, getThickness(box.arcBRval), 0xFF);
-    if (false)
+
+    // erase double line empty center
     {
-        detail::drawArcLegacy(image, size, getThickness(box.arcURval), Arc::UR);
-        detail::drawArcLegacy(image, size, getThickness(box.arcULval), Arc::UL);
-        detail::drawArcLegacy(image, size, getThickness(box.arcBLval), Arc::BL);
-        detail::drawArcLegacy(image, size, getThickness(box.arcBRval), Arc::BR);
+        size_t xRight {};
+        size_t xLeft {};
+        size_t yUp {};
+        size_t yDown {};
+        if (box.leftval == box.rightval or box.upval == Line::Double or box.downval == Line::Double)
+        { // straight or corner
+            xRight = getZeros(Line::Light).x0;
+            xLeft = getZeros(Line::Light).x1;
+        }
+        else
+        {
+            auto maxLine = (box.upval == Line::Heavy or box.downval == Line::Heavy) //
+                               ? Line::Heavy
+                               : Line::Light;
+            xRight = getZeros(maxLine).x1;
+            xLeft = getZeros(maxLine).x0;
+        }
+        if (box.upval == box.downval or box.rightval == Line::Double or box.leftval == Line::Double)
+        { // straight or corner
+            yUp = getZeros(Line::Light).y0;
+            yDown = getZeros(Line::Light).y1;
+        }
+        else
+        {
+            auto maxLine = (box.rightval == Line::Heavy or box.leftval == Line::Heavy) //
+                               ? Line::Heavy
+                               : Line::Light;
+            yUp = getZeros(maxLine).y1;
+            yDown = getZeros(maxLine).y0;
+        }
+        if (box.rightval == Line::Double)
+            fillRect(xRight, width, getZeros(Line::Light).y0, getZeros(Line::Light).y1, 0x00);
+        if (box.leftval == Line::Double)
+            fillRect(0U, xLeft, getZeros(Line::Light).y0, getZeros(Line::Light).y1, 0x00);
+        if (box.upval == Line::Double)
+            fillRect(getZeros(Line::Light).x0, getZeros(Line::Light).x1, yUp, height, 0x00);
+        if (box.downval == Line::Double)
+            fillRect(getZeros(Line::Light).x0, getZeros(Line::Light).x1, 0, yDown, 0x00);
     }
+
+    if (box.arcURval == Line::Double)
+        drawArc(Arc::UR, getThickness(Line::Light), 0x00);
+    if (box.arcULval == Line::Double)
+        drawArc(Arc::UL, getThickness(Line::Light), 0x00);
+    if (box.arcBLval == Line::Double)
+        drawArc(Arc::BL, getThickness(Line::Light), 0x00);
+    if (box.arcBRval == Line::Double)
+        drawArc(Arc::BR, getThickness(Line::Light), 0x00);
 
     if (box.circleval != detail::Line::NoLine)
     {
@@ -2091,8 +2005,8 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
         switch (box.circleval)
         {
             case detail::Line::Double: {
-                auto space = 1.35 * lightThickness;
-                if (radius < 3 * lightThickness + space)
+                auto space = 1.35 * getThickness(Line::Light);
+                if (radius < 3. * getThickness(Line::Light) + space)
                 {
                     auto solidTh = radius - space;
                     if (solidTh <= 0)
@@ -2103,17 +2017,25 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
                 }
                 else
                 {
-                    fillCircle(radius - lightThickness, 0x00);
-                    fillCircle(radius - lightThickness - space, 0xFF);
+                    fillCircle(radius - getThickness(Line::Light), 0x00);
+                    fillCircle(radius - getThickness(Line::Light) - space, 0xFF);
                 }
                 break;
             }
             case detail::Line::Light: {
-                fillCircle(radius - lightThickness, 0x00);
+                fillCircle(radius - getThickness(Line::Light), 0x00);
                 break;
             }
             default: break;
         }
+    }
+
+    if (false)
+    {
+        detail::drawArcLegacy(image, size, getThickness(box.arcURval), Arc::UR);
+        detail::drawArcLegacy(image, size, getThickness(box.arcULval), Arc::UL);
+        detail::drawArcLegacy(image, size, getThickness(box.arcBLval), Arc::BL);
+        detail::drawArcLegacy(image, size, getThickness(box.arcBRval), Arc::BR);
     }
 
     return downsample(image, 1, size * ss, size);
