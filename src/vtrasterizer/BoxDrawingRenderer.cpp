@@ -515,72 +515,76 @@ namespace detail
         };
         static_assert(BoxDrawingDefinitions.size() == 0x80);
 
-        constexpr auto MCommitLine = Line::Double; // style for merge commit
-        constexpr auto BranchLine = Line::Double;
-        constexpr auto BranchDrawingDefinitions = std::array {
-            /*U+F5D0  */ Box {}.horizontal(BranchLine),
-            /*U+F5D1  */ Box {}.vertical(BranchLine),
-            /*U+F5D2  */ Box {}.horizontal(BranchLine),
-            /*U+F5D3  */ Box {}.horizontal(BranchLine),
-            /*U+F5D4  */ Box {}.vertical(BranchLine),
-            /*U+F5D5  */ Box {}.vertical(BranchLine),
-            /*U+F5D6  */ Box {}.arcBR(BranchLine),
-            /*U+F5D7  */ Box {}.arcBL(BranchLine),
-            /*U+F5D8  */ Box {}.arcUR(BranchLine),
-            /*U+F5D9  */ Box {}.arcUL(BranchLine),
-            /*U+F5DA  */ Box {}.vertical(BranchLine).arcUR(BranchLine),
-            /*U+F5DB  */ Box {}.vertical(BranchLine).arcBR(BranchLine),
-            /*U+F5DC  */ Box {}.arcUR(BranchLine).arcBR(BranchLine),
-            /*U+F5DD  */ Box {}.vertical(BranchLine).arcUL(BranchLine),
-            /*U+F5DE  */ Box {}.vertical(BranchLine).arcBL(BranchLine),
-            /*U+F5DF  */ Box {}.arcUL(BranchLine).arcBL(BranchLine),
-            /*U+F5E0  */ Box {}.horizontal(BranchLine).arcBL(BranchLine),
-            /*U+F5E1  */ Box {}.horizontal(BranchLine).arcBR(BranchLine),
-            /*U+F5E2  */ Box {}.arcBL(BranchLine).arcBR(BranchLine),
-            /*U+F5E3  */ Box {}.horizontal(BranchLine).arcUL(BranchLine),
-            /*U+F5E4  */ Box {}.horizontal(BranchLine).arcUR(BranchLine),
-            /*U+F5E5  */ Box {}.arcUR(BranchLine).arcUL(BranchLine),
-            /*U+F5E6  */ Box {}.vertical(BranchLine).arcUL(BranchLine).arcUR(BranchLine),
-            /*U+F5E7  */ Box {}.vertical(BranchLine).arcBL(BranchLine).arcBR(BranchLine),
-            /*U+F5E8  */ Box {}.horizontal(BranchLine).arcUL(BranchLine).arcBL(BranchLine),
-            /*U+F5E9  */ Box {}.horizontal(BranchLine).arcUR(BranchLine).arcBR(BranchLine),
-            /*U+F5EA  */ Box {}.vertical(BranchLine).arcUL(BranchLine).arcBR(BranchLine),
-            /*U+F5EB  */ Box {}.vertical(BranchLine).arcUR(BranchLine).arcBL(BranchLine),
-            /*U+F5EC  */ Box {}.horizontal(BranchLine).arcUL(BranchLine).arcBR(BranchLine),
-            /*U+F5ED  */ Box {}.horizontal(BranchLine).arcUR(BranchLine).arcBL(BranchLine),
-            /*U+F5EE  */ Box {}.circle(MCommitLine),
-            /*U+F5EF  */ Box {}.circle(Line::Light),
-            /*U+F5F0  */ Box {}.circle(MCommitLine).right(BranchLine),
-            /*U+F5F1  */ Box {}.circle(Line::Light).right(BranchLine),
-            /*U+F5F2  */ Box {}.circle(MCommitLine).left(BranchLine),
-            /*U+F5F3  */ Box {}.circle(Line::Light).left(BranchLine),
-            /*U+F5F4  */ Box {}.circle(MCommitLine).horizontal(BranchLine),
-            /*U+F5F5  */ Box {}.circle(Line::Light).horizontal(BranchLine),
-            /*U+F5F6  */ Box {}.circle(MCommitLine).down(BranchLine),
-            /*U+F5F7  */ Box {}.circle(Line::Light).down(BranchLine),
-            /*U+F5F8  */ Box {}.circle(MCommitLine).up(BranchLine),
-            /*U+F5F9  */ Box {}.circle(Line::Light).up(BranchLine),
-            /*U+F5FA  */ Box {}.circle(MCommitLine).vertical(BranchLine),
-            /*U+F5FB  */ Box {}.circle(Line::Light).vertical(BranchLine),
-            /*U+F5FC  */ Box {}.circle(MCommitLine).right(BranchLine).down(BranchLine),
-            /*U+F5FD  */ Box {}.circle(Line::Light).right(BranchLine).down(BranchLine),
-            /*U+F5FE  */ Box {}.circle(MCommitLine).left(BranchLine).down(BranchLine),
-            /*U+F5FF  */ Box {}.circle(Line::Light).left(BranchLine).down(BranchLine),
-            /*U+F600  */ Box {}.circle(MCommitLine).right(BranchLine).up(BranchLine),
-            /*U+F601  */ Box {}.circle(Line::Light).right(BranchLine).up(BranchLine),
-            /*U+F602  */ Box {}.circle(MCommitLine).left(BranchLine).up(BranchLine),
-            /*U+F603  */ Box {}.circle(Line::Light).left(BranchLine).up(BranchLine),
-            /*U+F604  */ Box {}.circle(MCommitLine).vertical(BranchLine).right(BranchLine),
-            /*U+F605  */ Box {}.circle(Line::Light).vertical(BranchLine).right(BranchLine),
-            /*U+F606  */ Box {}.circle(MCommitLine).vertical(BranchLine).left(BranchLine),
-            /*U+F607  */ Box {}.circle(Line::Light).vertical(BranchLine).left(BranchLine),
-            /*U+F608  */ Box {}.circle(MCommitLine).horizontal(BranchLine).down(BranchLine),
-            /*U+F609  */ Box {}.circle(Line::Light).horizontal(BranchLine).down(BranchLine),
-            /*U+F60A  */ Box {}.circle(MCommitLine).horizontal(BranchLine).up(BranchLine),
-            /*U+F60B  */ Box {}.circle(Line::Light).horizontal(BranchLine).up(BranchLine),
-            /*U+F60C  */ Box {}.circle(MCommitLine).horizontal(BranchLine).vertical(BranchLine),
-            /*U+F60D  */ Box {}.circle(Line::Light).horizontal(BranchLine).vertical(BranchLine),
-        };
+        auto getBranchBoxes()
+        {
+            auto mCommitLine = Line::Double; // style for merge commit
+            auto branchLine = Line::Double;
+            return std::array {
+                /*U+F5D0  */ Box {}.horizontal(branchLine),
+                /*U+F5D1  */ Box {}.vertical(branchLine),
+                /*U+F5D2  */ Box {}.horizontal(branchLine),
+                /*U+F5D3  */ Box {}.horizontal(branchLine),
+                /*U+F5D4  */ Box {}.vertical(branchLine),
+                /*U+F5D5  */ Box {}.vertical(branchLine),
+                /*U+F5D6  */ Box {}.arcBR(branchLine),
+                /*U+F5D7  */ Box {}.arcBL(branchLine),
+                /*U+F5D8  */ Box {}.arcUR(branchLine),
+                /*U+F5D9  */ Box {}.arcUL(branchLine),
+                /*U+F5DA  */ Box {}.vertical(branchLine).arcUR(branchLine),
+                /*U+F5DB  */ Box {}.vertical(branchLine).arcBR(branchLine),
+                /*U+F5DC  */ Box {}.arcUR(branchLine).arcBR(branchLine),
+                /*U+F5DD  */ Box {}.vertical(branchLine).arcUL(branchLine),
+                /*U+F5DE  */ Box {}.vertical(branchLine).arcBL(branchLine),
+                /*U+F5DF  */ Box {}.arcUL(branchLine).arcBL(branchLine),
+                /*U+F5E0  */ Box {}.horizontal(branchLine).arcBL(branchLine),
+                /*U+F5E1  */ Box {}.horizontal(branchLine).arcBR(branchLine),
+                /*U+F5E2  */ Box {}.arcBL(branchLine).arcBR(branchLine),
+                /*U+F5E3  */ Box {}.horizontal(branchLine).arcUL(branchLine),
+                /*U+F5E4  */ Box {}.horizontal(branchLine).arcUR(branchLine),
+                /*U+F5E5  */ Box {}.arcUR(branchLine).arcUL(branchLine),
+                /*U+F5E6  */ Box {}.vertical(branchLine).arcUL(branchLine).arcUR(branchLine),
+                /*U+F5E7  */ Box {}.vertical(branchLine).arcBL(branchLine).arcBR(branchLine),
+                /*U+F5E8  */ Box {}.horizontal(branchLine).arcUL(branchLine).arcBL(branchLine),
+                /*U+F5E9  */ Box {}.horizontal(branchLine).arcUR(branchLine).arcBR(branchLine),
+                /*U+F5EA  */ Box {}.vertical(branchLine).arcUL(branchLine).arcBR(branchLine),
+                /*U+F5EB  */ Box {}.vertical(branchLine).arcUR(branchLine).arcBL(branchLine),
+                /*U+F5EC  */ Box {}.horizontal(branchLine).arcUL(branchLine).arcBR(branchLine),
+                /*U+F5ED  */ Box {}.horizontal(branchLine).arcUR(branchLine).arcBL(branchLine),
+                /*U+F5EE  */ Box {}.circle(mCommitLine),
+                /*U+F5EF  */ Box {}.circle(Line::Light),
+                /*U+F5F0  */ Box {}.circle(mCommitLine).right(branchLine),
+                /*U+F5F1  */ Box {}.circle(Line::Light).right(branchLine),
+                /*U+F5F2  */ Box {}.circle(mCommitLine).left(branchLine),
+                /*U+F5F3  */ Box {}.circle(Line::Light).left(branchLine),
+                /*U+F5F4  */ Box {}.circle(mCommitLine).horizontal(branchLine),
+                /*U+F5F5  */ Box {}.circle(Line::Light).horizontal(branchLine),
+                /*U+F5F6  */ Box {}.circle(mCommitLine).down(branchLine),
+                /*U+F5F7  */ Box {}.circle(Line::Light).down(branchLine),
+                /*U+F5F8  */ Box {}.circle(mCommitLine).up(branchLine),
+                /*U+F5F9  */ Box {}.circle(Line::Light).up(branchLine),
+                /*U+F5FA  */ Box {}.circle(mCommitLine).vertical(branchLine),
+                /*U+F5FB  */ Box {}.circle(Line::Light).vertical(branchLine),
+                /*U+F5FC  */ Box {}.circle(mCommitLine).right(branchLine).down(branchLine),
+                /*U+F5FD  */ Box {}.circle(Line::Light).right(branchLine).down(branchLine),
+                /*U+F5FE  */ Box {}.circle(mCommitLine).left(branchLine).down(branchLine),
+                /*U+F5FF  */ Box {}.circle(Line::Light).left(branchLine).down(branchLine),
+                /*U+F600  */ Box {}.circle(mCommitLine).right(branchLine).up(branchLine),
+                /*U+F601  */ Box {}.circle(Line::Light).right(branchLine).up(branchLine),
+                /*U+F602  */ Box {}.circle(mCommitLine).left(branchLine).up(branchLine),
+                /*U+F603  */ Box {}.circle(Line::Light).left(branchLine).up(branchLine),
+                /*U+F604  */ Box {}.circle(mCommitLine).vertical(branchLine).right(branchLine),
+                /*U+F605  */ Box {}.circle(Line::Light).vertical(branchLine).right(branchLine),
+                /*U+F606  */ Box {}.circle(mCommitLine).vertical(branchLine).left(branchLine),
+                /*U+F607  */ Box {}.circle(Line::Light).vertical(branchLine).left(branchLine),
+                /*U+F608  */ Box {}.circle(mCommitLine).horizontal(branchLine).down(branchLine),
+                /*U+F609  */ Box {}.circle(Line::Light).horizontal(branchLine).down(branchLine),
+                /*U+F60A  */ Box {}.circle(mCommitLine).horizontal(branchLine).up(branchLine),
+                /*U+F60B  */ Box {}.circle(Line::Light).horizontal(branchLine).up(branchLine),
+                /*U+F60C  */ Box {}.circle(mCommitLine).horizontal(branchLine).vertical(branchLine),
+                /*U+F60D  */ Box {}.circle(Line::Light).horizontal(branchLine).vertical(branchLine),
+            };
+        }
+        auto branchDrawingDefinitions = getBranchBoxes();
 
         // 
         // 
@@ -602,18 +606,18 @@ namespace detail
         constexpr bool isBoxDrawing(char32_t codepoint)
         {
             bool standardBox = codepoint >= 0x2500 && codepoint <= 0x257F;
-            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint <= 0xF5D0 + BranchDrawingDefinitions.size();
+            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint <= 0xF5D0 + branchDrawingDefinitions.size();
             return standardBox || gitBranchBox;
         }
         constexpr auto getBoxDrawing(char32_t codepoint) -> std::optional<Box>
         {
             bool standardBox = codepoint >= 0x2500 && codepoint <= 0x257F;
-            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint <= 0xF5D0 + BranchDrawingDefinitions.size();
+            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint <= 0xF5D0 + branchDrawingDefinitions.size();
             if (not(standardBox || gitBranchBox))
                 return std::nullopt;
 
             auto box = standardBox ? BoxDrawingDefinitions[codepoint - 0x2500]
-                                   : BranchDrawingDefinitions[codepoint - 0xF5D0];
+                                   : branchDrawingDefinitions[codepoint - 0xF5D0];
             return box;
         }
 
@@ -1094,36 +1098,25 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
                                 FRAGMENT_SELECTOR_GLYPH_ALPHA) };
     }
 
-    auto const antialiasing = containsNonCanonicalLines(codepoint);
     atlas::Buffer pixels;
-    if (antialiasing)
-    {
-        auto const supersamplingFactor = []() {
-            auto constexpr EnvName = "SSA_FACTOR";
-            auto* const envValue = getenv(EnvName);
-            if (!envValue)
-                return 2;
-            auto const val = atoi(envValue);
-            if (!(val >= 1 && val <= 8))
-                return 1;
-            return val;
-        }();
-        auto tmp = buildBoxElements(codepoint, //
-                                    _gridMetrics.cellSize,
-                                    _gridMetrics.underline.thickness,
-                                    supersamplingFactor);
-        if (!tmp)
-            return nullopt;
-        pixels = *tmp;
-    }
-    else
-    {
-        auto tmp = buildBoxElements(codepoint, _gridMetrics.cellSize, _gridMetrics.underline.thickness);
-        if (!tmp)
-            return nullopt;
-        pixels = std::move(*tmp);
-    }
 
+    auto const supersamplingFactor = []() {
+        auto constexpr EnvName = "SSA_FACTOR";
+        auto* const envValue = getenv(EnvName);
+        if (!envValue)
+            return 2;
+        auto const val = atoi(envValue);
+        if (!(val >= 1 && val <= 8))
+            return 1;
+        return val;
+    }();
+    auto tmp = buildBoxElements(codepoint, //
+                                _gridMetrics.cellSize,
+                                _gridMetrics.underline.thickness,
+                                supersamplingFactor);
+    if (!tmp)
+        return nullopt;
+    pixels = *tmp;
     pixels = invertY(pixels, _gridMetrics.cellSize);
 
     return { createTileData(tileLocation,
@@ -1711,7 +1704,6 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
 {
 
     // catch all non-solid single-lines before the quad-render below
-
     if (auto const dashed = box.get_dashed_horizontal())
         return boxDashedHorizontal(dashed, size, lineThickness);
 
@@ -1818,53 +1810,6 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
                 image[(yi * width) + xi] = value;
     };
 
-    {
-        auto const [xRight, xLeft, yUp, yDown] = [=] {
-            auto getThickestZeros = [=](auto a, auto b) {
-                if (a == Line::Double or b == Line::Double)
-                    return getZeros(Line::Double);
-                if (a == Line::Heavy or b == Line::Heavy)
-                    return getZeros(Line::Heavy);
-                if (a == Line::Light or b == Line::Light)
-                    return getZeros(Line::Light);
-                return getZeros(Line::NoLine);
-            };
-            auto zH = getThickestZeros(box.upval, box.downval);
-            auto zV = getThickestZeros(box.rightval, box.leftval);
-            return std::make_tuple(zH.x0, zH.x1, zV.y0, zV.y1);
-        }();
-
-        fillRect(xRight, width, getZeros(box.rightval).y0, getZeros(box.rightval).y1, 0xFF);
-        fillRect(0U, xLeft, getZeros(box.leftval).y0, getZeros(box.leftval).y1, 0xFF);
-        fillRect(getZeros(box.upval).x0, getZeros(box.upval).x1, yUp, height, 0xFF);
-        fillRect(getZeros(box.downval).x0, getZeros(box.downval).x1, 0, yDown, 0xFF);
-    }
-
-    if (box.diagonalval != detail::NoDiagonal)
-    {
-        auto const a = static_cast<double>(height) / static_cast<double>(width);
-        auto const aInv = 1.0 / a;
-        using Diagonal = detail::Diagonal;
-        if (unsigned(box.diagonalval) & unsigned(Diagonal::Forward))
-        {
-            for (auto const y: iota(0u, height))
-            {
-                auto const x = int(double(y) * aInv);
-                for (auto const xi: iota(-int(lineThickness) / 2, int(lineThickness) / 2))
-                    image[(y * width) + (unsigned) max(0, min<int>(x + xi, width - 1))] = 0xFF;
-            }
-        }
-        if (unsigned(box.diagonalval) & unsigned(Diagonal::Backward))
-        {
-            for (auto const y: iota(0U, height))
-            {
-                auto const x = int(double(height - y - 1) * aInv);
-                for (auto const xi: iota(-int(lineThickness) / 2, int(lineThickness) / 2))
-                    image[(y * width) + (unsigned) max(0, min<int>(x + xi, width - 1))] = 0xFF;
-            }
-        }
-    }
-
     auto drawArc = [=, &image](Arc arc, size_t th, uint8_t value) {
         auto x0 = (xOffset / ss - th / ss / 2) * ss;
         auto y0 = (yOffset / ss - th / ss / 2) * ss;
@@ -1931,6 +1876,58 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
         if (arc == Arc::BL or arc == Arc::BR)
             fillRect(x0, x0 + th, 0, cy, value);
     };
+
+    if (box.diagonalval != detail::NoDiagonal)
+    {
+        auto const a = static_cast<double>(height) / static_cast<double>(width);
+        using Diagonal = detail::Diagonal;
+        if (unsigned(box.diagonalval) & unsigned(Diagonal::Forward))
+        {
+            for (auto const y: iota(0u, height))
+            {
+                auto x0 = static_cast<int>(std::round((double(y) - double(getThickness(Line::Light))) / a));
+                auto x1 = static_cast<int>(std::round((double(y) + double(getThickness(Line::Light))) / a));
+                x0 = std::clamp<int>(x0, 0, width);
+                x1 = std::clamp<int>(x1, 0, width);
+                for (auto const xi: iota(x0, x1))
+                    image[(y * width) + xi] = 0xFF;
+            }
+        }
+        if (unsigned(box.diagonalval) & unsigned(Diagonal::Backward))
+        {
+            for (auto const y: iota(0u, height))
+            {
+                auto x0 = static_cast<int>(std::round((double(y) + double(getThickness(Line::Light))) / a));
+                auto x1 = static_cast<int>(std::round((double(y) - double(getThickness(Line::Light))) / a));
+                x0 = width - std::clamp<int>(x0, 0, width);
+                x1 = width - std::clamp<int>(x1, 0, width);
+                for (auto const xi: iota(x0, x1))
+                    image[(y * width) + xi] = 0xFF;
+            }
+        }
+    }
+
+    {
+        auto const [xRight, xLeft, yUp, yDown] = [=] {
+            auto getThickestZeros = [=](auto a, auto b) {
+                if (a == Line::Double or b == Line::Double)
+                    return getZeros(Line::Double);
+                if (a == Line::Heavy or b == Line::Heavy)
+                    return getZeros(Line::Heavy);
+                if (a == Line::Light or b == Line::Light)
+                    return getZeros(Line::Light);
+                return getZeros(Line::NoLine);
+            };
+            auto zH = getThickestZeros(box.upval, box.downval);
+            auto zV = getThickestZeros(box.rightval, box.leftval);
+            return std::make_tuple(zH.x0, zH.x1, zV.y0, zV.y1);
+        }();
+
+        fillRect(xRight, width, getZeros(box.rightval).y0, getZeros(box.rightval).y1, 0xFF);
+        fillRect(0U, xLeft, getZeros(box.leftval).y0, getZeros(box.leftval).y1, 0xFF);
+        fillRect(getZeros(box.upval).x0, getZeros(box.upval).x1, yUp, height, 0xFF);
+        fillRect(getZeros(box.downval).x0, getZeros(box.downval).x1, 0, yDown, 0xFF);
+    }
 
     drawArc(Arc::UR, getThickness(box.arcURval), 0xFF);
     drawArc(Arc::UL, getThickness(box.arcULval), 0xFF);
