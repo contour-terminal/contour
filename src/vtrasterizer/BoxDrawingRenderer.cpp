@@ -518,7 +518,7 @@ namespace detail
         auto getBranchBoxes()
         {
             auto mCommitLine = Line::Double; // style for merge commit
-            auto branchLine = Line::Double;
+            auto branchLine = Line::Light;
             return std::array {
                 /*U+F5D0  */ Box {}.horizontal(branchLine),
                 /*U+F5D1  */ Box {}.vertical(branchLine),
@@ -1104,7 +1104,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
         auto constexpr EnvName = "SSA_FACTOR";
         auto* const envValue = getenv(EnvName);
         if (!envValue)
-            return 2;
+            return 4;
         auto const val = atoi(envValue);
         if (!(val >= 1 && val <= 8))
             return 1;
@@ -1702,6 +1702,7 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
 auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersampling)
     -> std::optional<atlas::Buffer>
 {
+    bool useLegacyArcs = true;
 
     // catch all non-solid single-lines before the quad-render below
     if (auto const dashed = box.get_dashed_horizontal())
@@ -1929,11 +1930,13 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
         fillRect(getZeros(box.downval).x0, getZeros(box.downval).x1, 0, yDown, 0xFF);
     }
 
-    drawArc(Arc::UR, getThickness(box.arcURval), 0xFF);
-    drawArc(Arc::UL, getThickness(box.arcULval), 0xFF);
-    drawArc(Arc::BL, getThickness(box.arcBLval), 0xFF);
-    drawArc(Arc::BR, getThickness(box.arcBRval), 0xFF);
-
+    if (not useLegacyArcs)
+    {
+        drawArc(Arc::UR, getThickness(box.arcURval), 0xFF);
+        drawArc(Arc::UL, getThickness(box.arcULval), 0xFF);
+        drawArc(Arc::BL, getThickness(box.arcBLval), 0xFF);
+        drawArc(Arc::BR, getThickness(box.arcBRval), 0xFF);
+    }
     // erase double line empty center
     {
         size_t xRight {};
@@ -1976,15 +1979,17 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             fillRect(getZeros(Line::Light).x0, getZeros(Line::Light).x1, 0, yDown, 0x00);
     }
 
-    if (box.arcURval == Line::Double)
-        drawArc(Arc::UR, getThickness(Line::Light), 0x00);
-    if (box.arcULval == Line::Double)
-        drawArc(Arc::UL, getThickness(Line::Light), 0x00);
-    if (box.arcBLval == Line::Double)
-        drawArc(Arc::BL, getThickness(Line::Light), 0x00);
-    if (box.arcBRval == Line::Double)
-        drawArc(Arc::BR, getThickness(Line::Light), 0x00);
-
+    if (not useLegacyArcs)
+    {
+        if (box.arcURval == Line::Double)
+            drawArc(Arc::UR, getThickness(Line::Light), 0x00);
+        if (box.arcULval == Line::Double)
+            drawArc(Arc::UL, getThickness(Line::Light), 0x00);
+        if (box.arcBLval == Line::Double)
+            drawArc(Arc::BL, getThickness(Line::Light), 0x00);
+        if (box.arcBRval == Line::Double)
+            drawArc(Arc::BR, getThickness(Line::Light), 0x00);
+    }
     if (box.circleval != detail::Line::NoLine)
     {
         auto fillCircle = [&](double radius, unsigned char value) {
@@ -2027,12 +2032,16 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
         }
     }
 
-    if (false)
+    if (useLegacyArcs)
     {
-        detail::drawArcLegacy(image, size, getThickness(box.arcURval), Arc::UR);
-        detail::drawArcLegacy(image, size, getThickness(box.arcULval), Arc::UL);
-        detail::drawArcLegacy(image, size, getThickness(box.arcBLval), Arc::BL);
-        detail::drawArcLegacy(image, size, getThickness(box.arcBRval), Arc::BR);
+        if (box.arcURval != Line::NoLine)
+            detail::drawArcLegacy(image, size * ss, getThickness(Line::Light), Arc::UR);
+        if (box.arcULval != Line::NoLine)
+            detail::drawArcLegacy(image, size * ss, getThickness(Line::Light), Arc::UL);
+        if (box.arcBLval != Line::NoLine)
+            detail::drawArcLegacy(image, size * ss, getThickness(Line::Light), Arc::BL);
+        if (box.arcBRval != Line::NoLine)
+            detail::drawArcLegacy(image, size * ss, getThickness(Line::Light), Arc::BR);
     }
 
     return downsample(image, 1, size * ss, size);
