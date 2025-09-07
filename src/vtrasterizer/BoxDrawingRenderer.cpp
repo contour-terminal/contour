@@ -1027,6 +1027,253 @@ namespace detail
             blockSextant(image, size, positions...);
             return image;
         }
+
+        struct Braile
+        {
+            // 0 3
+            // 1 4
+            // 2 5
+            // 6 7
+
+            static bool isBraile(char32_t codepoint)
+            {
+                return style != Style::Font and codepoint >= 0x2800 and codepoint <= 0x28FF;
+            }
+
+            enum class Style : uint8_t
+            {
+                Font,
+                Solid,
+                Circle,
+                EmptyCircle,
+                Square,
+                EmptySquare,
+                AASquare,
+                EmptyAASquare,
+            };
+            inline static Style style = Style::Circle;
+            static auto build(char32_t codepoint,
+                              ImageSize size,
+                              [[maybe_unused]] size_t th,
+                              [[maybe_unused]] size_t ss)
+            {
+                uint8_t value = codepoint - 0x2800;
+                switch (style)
+                {
+                    using enum Style;
+                    case Solid: return buildSolid(value, size);
+                    case Circle: [[fallthrough]];
+                    case EmptyCircle: return buildCircle(value, size, th, ss, style == EmptyCircle);
+                    case Square: [[fallthrough]];
+                    case EmptySquare: return buildSquare(value, size, th, 1, style == EmptySquare);
+                    case AASquare: [[fallthrough]];
+                    case EmptyAASquare: return buildSquare(value, size, th, ss, style == EmptyAASquare);
+                    case Font: assert(false); return atlas::Buffer(*size.width * *size.height);
+                }
+                assert(false);
+                return atlas::Buffer(*size.width * *size.height);
+            }
+            static auto buildSolid(uint8_t value, ImageSize size) -> atlas::Buffer
+            {
+                // 0 3
+                // 1 4
+                // 2 5
+                // 6 7
+                auto width = unbox<size_t>(size.width);
+                auto height = unbox<size_t>(size.height);
+
+                auto image = atlas::Buffer(width * height, 0x00);
+
+                auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1, uint8_t value) {
+                    for (auto const yi: iota(y0, y1))
+                        for (auto const xi: iota(x0, x1))
+                            image[(yi * width) + xi] = value;
+                };
+
+                auto xC = width / 2;
+                auto y0 = height / 4;
+                auto y1 = height / 2;
+                auto y2 = 3 * height / 4;
+
+                if (value & (1 << 0))
+                    fillRect(0, xC, y2, height, 0xFF);
+                if (value & (1 << 1))
+                    fillRect(0, xC, y1, y2, 0xFF);
+                if (value & (1 << 2))
+                    fillRect(0, xC, y0, y1, 0xFF);
+                if (value & (1 << 3))
+                    fillRect(xC, width, y2, height, 0xFF);
+                if (value & (1 << 4))
+                    fillRect(xC, width, y1, y2, 0xFF);
+                if (value & (1 << 5))
+                    fillRect(xC, width, y0, y1, 0xFF);
+                if (value & (1 << 6))
+                    fillRect(0, xC, 0, y0, 0xFF);
+                if (value & (1 << 7))
+                    fillRect(xC, width, 0, y0, 0xFF);
+                return image;
+            }
+            static auto buildSquare(uint8_t value, ImageSize size, size_t th, size_t ss, bool empty)
+                -> atlas::Buffer
+            {
+                // 0 3
+                // 1 4
+                // 2 5
+                // 6 7
+                size = size * ss;
+                th *= ss;
+                auto width = unbox<size_t>(size.width);
+                auto height = unbox<size_t>(size.height);
+                if (width / 2 <= th * 4)
+                    empty = false;
+                if (height / 4 <= th * 4)
+                    empty = false;
+                auto image = atlas::Buffer(width * height, 0x00);
+                auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1, uint8_t value) {
+                    for (auto const yi: iota(y0, y1))
+                        for (auto const xi: iota(x0, x1))
+                            image[(yi * width) + xi] = value;
+                };
+
+                auto x0 = th / 2;
+                auto x1 = (width / 2) - (th / 2);
+                auto x2 = x1 + th;
+                auto x3 = x0 + width - th;
+
+                auto y0 = th / 2;
+                auto y1 = (height / 4) - (th / 2);
+                auto y2 = y1 + th;
+                auto y3 = (height / 2) - (th / 2);
+                auto y4 = y3 + th;
+                auto y5 = (3 * height / 4) - (th / 2);
+                auto y6 = y5 + th;
+                auto y7 = y0 + height - th;
+
+                if (empty or (value & (1 << 0)))
+                    fillRect(x0, x1, y6, y7, 0xFF);
+                if (empty and not(value & (1 << 0)))
+                    fillRect(x0 + th, x1 - th, y6 + th, y7 - th, 0x00);
+                if (empty or (value & (1 << 1)))
+                    fillRect(x0, x1, y4, y5, 0xFF);
+                if (empty and not(value & (1 << 1)))
+                    fillRect(x0 + th, x1 - th, y4 + th, y5 - th, 0x00);
+                if (empty or (value & (1 << 2)))
+                    fillRect(x0, x1, y2, y3, 0xFF);
+                if (empty and not(value & (1 << 2)))
+                    fillRect(x0 + th, x1 - th, y2 + th, y3 - th, 0x00);
+
+                if (empty or (value & (1 << 3)))
+                    fillRect(x2, x3, y6, y7, 0xFF);
+                if (empty and not(value & (1 << 3)))
+                    fillRect(x2 + th, x3 - th, y6 + th, y7 - th, 0x00);
+                if (empty or (value & (1 << 4)))
+                    fillRect(x2, x3, y4, y5, 0xFF);
+                if (empty and not(value & (1 << 4)))
+                    fillRect(x2 + th, x3 - th, y4 + th, y5 - th, 0x00);
+                if (empty or (value & (1 << 5)))
+                    fillRect(x2, x3, y2, y3, 0xFF);
+                if (empty and not(value & (1 << 5)))
+                    fillRect(x2 + th, x3 - th, y2 + th, y3 - th, 0x00);
+
+                if (empty or (value & (1 << 6)))
+                    fillRect(x0, x1, y0, y1, 0xFF);
+                if (empty and not(value & (1 << 6)))
+                    fillRect(x0 + th, x1 - th, y0 + th, y1 - th, 0x00);
+                if (empty or (value & (1 << 7)))
+                    fillRect(x2, x3, y0, y1, 0xFF);
+                if (empty and not(value & (1 << 7)))
+                    fillRect(x2 + th, x3 - th, y0 + th, y3 - th, 0x00);
+                return downsample(image, 1, size, size / ss);
+            }
+
+            static auto buildCircle(uint8_t value, ImageSize size, size_t th, size_t ss, bool empty)
+                -> atlas::Buffer
+            {
+                // 0 3
+                // 1 4
+                // 2 5
+                // 6 7
+                auto width = unbox<size_t>(size.width);
+                auto height = unbox<size_t>(size.height);
+                if (width / 2 <= th * 4)
+                    empty = false;
+                if (height / 4 <= th * 4)
+                    empty = false;
+
+                width *= ss;
+                height *= ss;
+                th *= ss;
+                auto image = atlas::Buffer(width * height, 0x00);
+                auto r = static_cast<double>(std::min(width / 2, height / 4) - th) / 2;
+
+                auto const filCirc = [&](double x, double y, double radius, uint8_t value) {
+                    auto x0 = static_cast<size_t>(std::floor(x - radius));
+                    auto x1 = static_cast<size_t>(std::ceil(x + radius));
+                    x0 = std::clamp<size_t>(x0, 0, width);
+                    x1 = std::clamp<size_t>(x1, 0, width);
+
+                    auto y0 = static_cast<size_t>(std::floor(y - radius));
+                    auto y1 = static_cast<size_t>(std::ceil(y + radius));
+                    y0 = std::clamp<size_t>(y0, 0, height);
+                    y1 = std::clamp<size_t>(y1, 0, height);
+
+                    for (auto const yi: iota(y0, y1))
+                        for (auto const xi: iota(x0, x1))
+                        {
+                            auto dx = x - static_cast<double>(xi);
+                            auto dy = y - static_cast<double>(yi);
+                            if (dx * dx + dy * dy <= radius * radius)
+                                image[(yi * width) + xi] = value;
+                        }
+                };
+
+                auto x0 = static_cast<double>(width) / 4;
+                auto x1 = 3 * x0;
+
+                auto y0 = static_cast<double>(height) / 8;
+                auto y1 = y0 * 3;
+                auto y2 = y0 * 5;
+                auto y3 = y0 * 7;
+
+                if (empty or (value & (1 << 0)))
+                    filCirc(x0, y3, r, 0xFF);
+                if (empty and not(value & (1 << 0)))
+                    filCirc(x0, y3, r - th, 0x00);
+                if (empty or (value & (1 << 1)))
+                    filCirc(x0, y2, r, 0xFF);
+                if (empty and not(value & (1 << 1)))
+                    filCirc(x0, y2, r - th, 0x00);
+                if (empty or (value & (1 << 2)))
+                    filCirc(x0, y1, r, 0xFF);
+                if (empty and not(value & (1 << 2)))
+                    filCirc(x0, y1, r - th, 0x00);
+
+                if (empty or (value & (1 << 3)))
+                    filCirc(x1, y3, r, 0xFF);
+                if (empty and not(value & (1 << 3)))
+                    filCirc(x1, y3, r - th, 0x00);
+                if (empty or (value & (1 << 4)))
+                    filCirc(x1, y2, r, 0xFF);
+                if (empty and not(value & (1 << 4)))
+                    filCirc(x1, y2, r - th, 0x00);
+                if (empty or (value & (1 << 5)))
+                    filCirc(x1, y1, r, 0xFF);
+                if (empty and not(value & (1 << 5)))
+                    filCirc(x1, y1, r - th, 0x00);
+
+                if (empty or (value & (1 << 6)))
+                    filCirc(x0, y0, r, 0xFF);
+                if (empty and not(value & (1 << 6)))
+                    filCirc(x0, y0, r - th, 0x00);
+                if (empty or (value & (1 << 7)))
+                    filCirc(x1, y0, r, 0xFF);
+                if (empty and not(value & (1 << 7)))
+                    filCirc(x1, y0, r - th, 0x00);
+
+                return downsample(image, 1, size * ss, size);
+            }
+        };
+
         // }}}
     } // namespace
 } // namespace detail
@@ -1157,6 +1404,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
            || codepoint == 0xE0BC             // 
            || codepoint == 0xE0BE             // 
            || detail::isBoxDrawing(codepoint) //
+           || detail::Braile::isBraile(codepoint) //
         ;
 }
 
@@ -1186,6 +1434,9 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
             .getlineThickness(_gridMetrics.underline.thickness)
             .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
     };
+
+    if (detail::Braile::isBraile(codepoint))
+        return Braile::build(codepoint, size, _gridMetrics.underline.thickness, 4);
 
     // TODO: just check notcurses-info to get an idea what may be missing
     // clang-format off
