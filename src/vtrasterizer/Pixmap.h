@@ -79,7 +79,7 @@ enum class Inverted : uint8_t
     No,
     Yes
 };
-enum Arc : uint8_t
+enum class Arc : uint8_t
 {
     NoArc,
     BR,
@@ -313,10 +313,10 @@ struct std::formatter<vtrasterizer::Arc>: std::formatter<string_view>
         switch (value)
         {
             case Arc::NoArc: name = "NoArc"; break;
-            case Arc::BR: name = "TopLeft"; break;
-            case Arc::BL: name = "TopRight"; break;
-            case Arc::UR: name = "BottomLeft"; break;
-            case Arc::UL: name = "BottomRight"; break;
+            case Arc::BR: name = "BottomToRight"; break;
+            case Arc::BL: name = "BottomToLeft"; break;
+            case Arc::UR: name = "UpToRight"; break;
+            case Arc::UL: name = "UpToLeft"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
