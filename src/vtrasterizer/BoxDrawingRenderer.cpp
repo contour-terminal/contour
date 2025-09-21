@@ -9,7 +9,6 @@
 
 #include <array>
 #include <cstdint>
-#include <format>
 
 using namespace std::string_view_literals;
 
@@ -25,6 +24,8 @@ using std::string_view;
 using std::tuple;
 
 using crispy::point;
+
+namespace stdr = std::ranges;
 namespace stdv = ranges::views;
 
 namespace vtrasterizer
@@ -148,18 +149,12 @@ namespace detail
                                 .y = (unbox<int>(imageSize.height) / 2) + (int(thickness) / 2) - 1 },
                 arc);
 
-            // Close arc at open ends to filling works.
-            // bool const isLeft = arc == Arc::TopLeft || arc == Arc::BottomLeft;
-            // auto const xCorner = isLeft ? unbox<unsigned>(imageSize.width) : 0u;
-            // for (auto const i: iota(0, thickness))
-            //     gaps.at(unbox<size_t>(imageSize.height) / 2 - thickness/2 + i).push_back(xCorner);
-
             // fill gap
             for (size_t y = 0; y < gaps.size(); ++y)
             {
                 if (auto& gap = gaps[y]; !gap.empty())
                 {
-                    std::ranges::sort(gap);
+                    stdr::sort(gap);
                     for (auto const xi: stdv::iota(gap.front(), gap.back()))
                         buffer.at((y * unbox<size_t>(imageSize.width)) + xi) = 0xFF;
                 }
@@ -223,7 +218,7 @@ namespace detail
                     b.rect({ .x=BlockLeft-(2*Gap), .y=blockBottom+Gap  }, { .x=1,             .y=blockBottom+(2*Gap) }); // bottom line
                     b.rect({ .x=BlockLeft-(2*Gap), .y=BlockTop-(2*Gap) }, { .x=BlockLeft-Gap, .y=blockBottom+Gap });   // left bar
                     if (filledval)
-                        b.rect({ .x=BlockLeft,   .y=BlockTop },           { .x=1,             .y=blockBottom });
+                        b.rect({ .x=BlockLeft,     .y=BlockTop },         { .x=1,             .y=blockBottom });
                     break;
                 case Part::Middle:
                     b.rect({ .x=0, .y=BlockTop-(2*Gap) }, { .x=1, .y=BlockTop-Gap });      // top line
@@ -761,7 +756,6 @@ namespace detail
                         return pair { a(x), h };
                     else
                         return pair { b(x), h };
-                    ;
                 };
             }
         }
@@ -1907,6 +1901,7 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
     return image;
 }
 
+// NOLINTNEXTLINE(*complexity*)
 auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersampling)
     -> std::optional<atlas::Buffer>
 {
@@ -1995,11 +1990,11 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
                 return Center(xOffset * ss, xOffset * ss, yOffset * ss, yOffset * ss);
         }
     };
-    height *= ss;
-    width *= ss;
-    yOffset *= ss;
-    xOffset *= ss;
-    lightTh *= ss;
+    height *= static_cast<int>(ss);
+    width *= static_cast<int>(ss);
+    yOffset *= static_cast<int>(ss);
+    xOffset *= static_cast<int>(ss);
+    lightTh *= static_cast<int>(ss);
     auto image = atlas::Buffer(width * height, 0x00);
 
     auto const getThickness = [=](Line value) -> size_t {
@@ -2217,8 +2212,8 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             case detail::Line::Double: {
                 constexpr auto SpaceThicknessFactor = 1.35; // empirical value
                 constexpr auto MinThicknessFactor = 3.;     // 3 = 2x center + space + outer;
-                auto space = SpaceThicknessFactor * getThickness(Line::Light);
-                if (radius < MinThicknessFactor * getThickness(Line::Light) + space)
+                auto space = SpaceThicknessFactor * double(getThickness(Line::Light));
+                if (radius < MinThicknessFactor * double(getThickness(Line::Light)) + space)
                 {
                     auto solidTh = radius - space;
                     if (solidTh <= 0)
@@ -2229,13 +2224,13 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
                 }
                 else
                 {
-                    fillCircle(radius - getThickness(Line::Light), 0x00);
-                    fillCircle(radius - getThickness(Line::Light) - space, 0xFF);
+                    fillCircle(radius - double(getThickness(Line::Light)), 0x00);
+                    fillCircle(radius - double(getThickness(Line::Light)) - space, 0xFF);
                 }
                 break;
             }
             case detail::Line::Light: {
-                fillCircle(radius - getThickness(Line::Light), 0x00);
+                fillCircle(radius - double(getThickness(Line::Light)), 0x00);
                 break;
             }
             default: break;
@@ -2245,16 +2240,16 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
     if (useEllipticArcs)
     {
         if (box.arcURval != Line::NoLine)
-            detail::drawArcElliptic(image, size * ss, getThickness(Line::Light), Arc::UR);
+            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::UR);
         if (box.arcULval != Line::NoLine)
-            detail::drawArcElliptic(image, size * ss, getThickness(Line::Light), Arc::UL);
+            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::UL);
         if (box.arcBLval != Line::NoLine)
-            detail::drawArcElliptic(image, size * ss, getThickness(Line::Light), Arc::BL);
+            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::BL);
         if (box.arcBRval != Line::NoLine)
-            detail::drawArcElliptic(image, size * ss, getThickness(Line::Light), Arc::BR);
+            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::BR);
     }
 
-    return downsample(image, 1, size * ss, size);
+    return downsample(image, 1, size * double(ss), size);
 }
 
 optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
