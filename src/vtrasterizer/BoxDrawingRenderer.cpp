@@ -575,7 +575,8 @@ namespace detail
 
         constexpr bool isGitBranchDrawing(char32_t codepoint)
         {
-            bool gitBranchBox = codepoint >= 0xF5D0 && codepoint < 0xF5D0 + branchDrawingDefinitions.size();
+            bool const gitBranchBox =
+                codepoint >= 0xF5D0 && codepoint < 0xF5D0 + branchDrawingDefinitions.size();
             return gitBranchBox && branchDrawingDefinitions[0].rightval != Line::NoLine;
         }
         constexpr auto getBoxDrawing(char32_t codepoint) -> std::optional<Box>
@@ -584,9 +585,8 @@ namespace detail
             if (!(standardBox || isGitBranchDrawing(codepoint)))
                 return std::nullopt;
 
-            auto box = standardBox ? BoxDrawingDefinitions[codepoint - 0x2500]
-                                   : branchDrawingDefinitions[codepoint - 0xF5D0];
-            return box;
+            return standardBox ? BoxDrawingDefinitions[codepoint - 0x2500]
+                               : branchDrawingDefinitions[codepoint - 0xF5D0];
         }
 
         // {{{ block element construction
@@ -1021,7 +1021,7 @@ namespace detail
                               [[maybe_unused]] size_t th,
                               [[maybe_unused]] size_t ss)
             {
-                uint8_t value = codepoint - 0x2800;
+                uint8_t const value = codepoint - 0x2800;
                 switch (style)
                 {
                     using enum Style;
