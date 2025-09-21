@@ -782,6 +782,10 @@ struct Config
     ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings };
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle, documentation::GitDrawings>
         gitDrawings {};
+    ConfigEntry<vtrasterizer::BoxDrawingRenderer::ArcStyle, documentation::BoxArcStyle> boxArcStyle {};
+    ConfigEntry<vtrasterizer::BoxDrawingRenderer::BraileStyle, documentation::BraileStyle> braileStyle {
+        vtrasterizer::BoxDrawingRenderer::BraileStyle::Circle
+    };
 
     TerminalProfile* profile(std::string const& name) noexcept
     {
@@ -1005,6 +1009,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PermissionsConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::ArcStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::BraileStyle& where);
 
 
     void defaultSettings(vtpty::Process::ExecInfo& shell);
@@ -1310,6 +1315,35 @@ struct Writer
         auto const blinkingInterval = v.cursor.cursorBlinkInterval.count();
         return format(doc, shape, blinking, blinkingInterval);
     }
+
+    [[nodiscard]] std::string format(std::string_view doc, vtrasterizer::BoxDrawingRenderer::ArcStyle& v)
+    {
+        using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
+        switch (v)
+        {
+            case ArcStyle::Ellips: return format(doc, "ellips");
+            case ArcStyle::Round: return format(doc, "round");
+            default: assert(false); return format(doc, "round");
+        }
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, vtrasterizer::BoxDrawingRenderer::BraileStyle& v)
+    {
+        using BraileStyle = vtrasterizer::BoxDrawingRenderer::BraileStyle;
+        switch (v)
+        {
+            case BraileStyle::Font: return format(doc, "font");
+            case BraileStyle::Solid: return format(doc, "solid");
+            case BraileStyle::Circle: return format(doc, "circle");
+            case BraileStyle::CircleEmpty: return format(doc, "circle_empty");
+            case BraileStyle::Square: return format(doc, "square");
+            case BraileStyle::SquareEmpty: return format(doc, "square_empty");
+            case BraileStyle::AASquare: return format(doc, "aa_square");
+            case BraileStyle::AASquareEmpty: return format(doc, "aa_square_empty");
+            default: assert(false); return format(doc, "circle");
+        }
+    }
+
     [[nodiscard]] std::string format(std::string_view doc,
                                      vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& v)
     {
@@ -1341,7 +1375,7 @@ struct Writer
                 default: assert(false); return "solid";
             }
         }();
-        return format(doc, arc, branch, mergeCommit);
+        return format(doc, branch, arc, mergeCommit);
     }
 };
 

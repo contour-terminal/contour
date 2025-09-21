@@ -362,6 +362,11 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
         loadFromEntry("git_drawings", c.gitDrawings);
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
+        loadFromEntry("box_arc_style", c.boxArcStyle);
+        vtrasterizer::BoxDrawingRenderer::setArcStyle(c.boxArcStyle.value());
+        loadFromEntry("braile_style", c.braileStyle);
+        vtrasterizer::BoxDrawingRenderer::setBraileStyle(c.braileStyle.value());
+
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
         loadFromEntry("input_mapping", c.inputMappings);
     }
@@ -1468,7 +1473,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      vtrasterizer::BoxDrawingRenderer::ArcStyle& where)
 {
-
     using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
     if (auto const child = node[entry])
     {
@@ -1491,7 +1495,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where)
 {
-
     where = {};
     using BranchStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle::BranchStyle;
     using MergeCommitStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
@@ -1537,6 +1540,34 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             where.branchStyle = *branchStyle;
         if (auto const mcStyle = parseMCStyle(child["merge_commit_style"].as<std::string>()))
             where.mergeCommitStyle = *mcStyle;
+    }
+}
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::BoxDrawingRenderer::BraileStyle& where)
+{
+    using BraileStyle = vtrasterizer::BoxDrawingRenderer::BraileStyle;
+    if (auto const child = node[entry])
+    {
+        auto const lstyle = crispy::toLower(child.as<std::string>());
+        auto constexpr static Mappings = std::array {
+            std::pair { "font", BraileStyle::Font },                     //
+            std::pair { "solid", BraileStyle::Solid },                   //
+            std::pair { "", BraileStyle::Circle },                       //
+            std::pair { "circle", BraileStyle::Circle },                 //
+            std::pair { "cicle_empty", BraileStyle::CircleEmpty },       //
+            std::pair { "square", BraileStyle::SquareEmpty },            //
+            std::pair { "square_empty", BraileStyle::SquareEmpty },      //
+            std::pair { "aa_square", BraileStyle::AASquare },            //
+            std::pair { "aa_square_empty", BraileStyle::AASquareEmpty }, //
+        };
+        for (auto const& mapping: Mappings)
+            if (mapping.first == lstyle)
+            {
+                logger()("Loading entry: {}, value {}", entry, lstyle);
+                where = mapping.second;
+                return;
+            }
     }
 }
 

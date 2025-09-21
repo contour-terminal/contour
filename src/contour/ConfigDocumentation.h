@@ -1047,19 +1047,39 @@ constexpr StringLiteral DimColorsConfig {
     "{comment}     white:   {}\n"
 };
 
+constexpr StringLiteral BoxArcStyleConfig { "\n"
+                                            "{comment} Controls how arcs in box drawing charaters are drawn. "
+                                            "May be on of `round`, `ellips`. The default value is `round`.\n"
+                                            "box_arc_style: {}\n" };
+
+constexpr StringLiteral BraileStyleConfig {
+    "\n"
+    "{comment} Controls how Unicode Braile characters are rendered.\n "
+    "{comment} May be one of `font`, `solid`, `circle`, `circle_empty`, "
+    "`square`, `square_empty, `aa_square`, `aa_square_emtpy`.\n"
+    "{comment} The defaul value is `circle`.\n"
+    "{comment} `font` disables fpecial rendering and uses font characters.\n"
+    "{comment} `solid` splits character box into 8 rectangles without space between them."
+    "No antialiasing is used, some font sizes may result in differently sized \"dots\".\n"
+    "{comment} `circle<..>` and `<..>square<..>` groups use circle and square \"dots\" respectively.\n"
+    "{comment} `<..>_empty` draw non-filled \"dots\".\n"
+    "{comment} `square<..>` does not use antialiasing, which may result in differently sized \"dots\". "
+    "`aa_square<..>` uses antialiasing.\n"
+    "braile_style: {}\n"
+};
 constexpr StringLiteral GitDrawingsConfig {
     "\n"
     "{comment} Controls how git branch drawings are rendered.\n"
     "{comment} `branch_style` controls style of connecting branches. "
     "May be on of `none`,`thin`,`thick`,`double. The default value is `thin`.\n"
-    "{comment} `arc_style` controls style of arcs. May be one of `round`,`ellips`."
-    "{comment} `arc_style` has effect only if `branch_style` is `thin`. The default value is `round`.\n"
+    "{comment} `arc_style` controls style of arcs. May be one of `round`,`ellips`. "
+    "`arc_style` has effect only if `branch_style` is `thin`. The default value is `round`.\n"
     "{comment} `merge_commit_style` controls style of merge commits. May be one of `solid`,`bullet`. The "
     "default value is `bullet`.\n"
     "git_drawings: \n"
-    "     branch_style:       {}\n"
-    "     arc_style:          {}\n"
-    "     merge_commit_style: {}\n"
+    "    branch_style:       {}\n"
+    "    arc_style:          {}\n"
+    "    merge_commit_style: {}\n"
 };
 
 constexpr StringLiteral PlatformPluginWeb {
@@ -1821,5 +1841,7 @@ using NormalColors = DocumentationEntry<NormalColorsConfig, Dummy>;
 using BrightColors = DocumentationEntry<BrightColorsConfig, Dummy>;
 using DimColors = DocumentationEntry<DimColorsConfig, Dummy>;
 using GitDrawings = DocumentationEntry<GitDrawingsConfig, Dummy>;
+using BoxArcStyle = DocumentationEntry<BoxArcStyleConfig, Dummy>;
+using BraileStyle = DocumentationEntry<BraileStyleConfig, Dummy>;
 
 } // namespace contour::config::documentation
