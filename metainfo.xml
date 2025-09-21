@@ -124,6 +124,10 @@
           <li>Adds CenterCursor (`zz`) vi motion</li>
           <li>Adds ability to name tabs (#1690)</li>
           <li>Adds dynamic loading of conpty.dll to allow mouse mode on Windows 10</li>
+          <li>Adds git graph drawing glyphs</li>
+          <li>Fixes double line box drawing characters</li>
+          <li>Adds new arc style for box drawing characters</li>
+          <li>Adds multiple rendering options for braille characters</li>
         </ul>
       </description>
     </release>
