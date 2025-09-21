@@ -1047,6 +1047,21 @@ constexpr StringLiteral DimColorsConfig {
     "{comment}     white:   {}\n"
 };
 
+constexpr StringLiteral GitDrawingsConfig {
+    "\n"
+    "{comment} Controls how git branch drawings are rendered.\n"
+    "{comment} `branch_style` controls style of connecting branches. "
+    "May be on of `none`,`thin`,`thick`,`double. The default value is `thin`.\n"
+    "{comment} `arc_style` controls style of arcs. May be one of `round`,`ellips`."
+    "{comment} `arc_style` has effect only if `branch_style` is `thin`. The default value is `round`.\n"
+    "{comment} `merge_commit_style` controls style of merge commits. May be one of `solid`,`bullet`. The "
+    "default value is `bullet`.\n"
+    "git_drawings: \n"
+    "     branch_style:       {}\n"
+    "     arc_style:          {}\n"
+    "     merge_commit_style: {}\n"
+};
+
 constexpr StringLiteral PlatformPluginWeb {
     "option allows you to override the auto-detected platform plugin to be loaded. You can specify values "
     "like `auto`, `xcb`, `cocoa`, `direct2d`, or `winrt` to determine the platform plugin. The default value "
@@ -1805,5 +1820,6 @@ using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
 using NormalColors = DocumentationEntry<NormalColorsConfig, Dummy>;
 using BrightColors = DocumentationEntry<BrightColorsConfig, Dummy>;
 using DimColors = DocumentationEntry<DimColorsConfig, Dummy>;
+using GitDrawings = DocumentationEntry<GitDrawingsConfig, Dummy>;
 
 } // namespace contour::config::documentation

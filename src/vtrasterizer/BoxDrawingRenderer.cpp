@@ -504,10 +504,8 @@ namespace detail
         };
         static_assert(BoxDrawingDefinitions.size() == 0x80);
 
-        auto getBranchBoxes()
+        auto getBranchBoxes(const Line mergeCommitLine = Line::Double, const Line branchLine = Line::Light)
         {
-            auto mCommitLine = Line::Double; // style for merge commit
-            auto branchLine = Line::Light;
             return std::array {
                 /*U+F5D0  */ Box {}.horizontal(branchLine),
                 /*U+F5D1  */ Box {}.vertical(branchLine),
@@ -539,37 +537,37 @@ namespace detail
                 /*U+F5EB  */ Box {}.vertical(branchLine).arcUR(branchLine).arcBL(branchLine),
                 /*U+F5EC  */ Box {}.horizontal(branchLine).arcUL(branchLine).arcBR(branchLine),
                 /*U+F5ED  */ Box {}.horizontal(branchLine).arcUR(branchLine).arcBL(branchLine),
-                /*U+F5EE  */ Box {}.circle(mCommitLine),
+                /*U+F5EE  */ Box {}.circle(mergeCommitLine),
                 /*U+F5EF  */ Box {}.circle(Line::Light),
-                /*U+F5F0  */ Box {}.circle(mCommitLine).right(branchLine),
+                /*U+F5F0  */ Box {}.circle(mergeCommitLine).right(branchLine),
                 /*U+F5F1  */ Box {}.circle(Line::Light).right(branchLine),
-                /*U+F5F2  */ Box {}.circle(mCommitLine).left(branchLine),
+                /*U+F5F2  */ Box {}.circle(mergeCommitLine).left(branchLine),
                 /*U+F5F3  */ Box {}.circle(Line::Light).left(branchLine),
-                /*U+F5F4  */ Box {}.circle(mCommitLine).horizontal(branchLine),
+                /*U+F5F4  */ Box {}.circle(mergeCommitLine).horizontal(branchLine),
                 /*U+F5F5  */ Box {}.circle(Line::Light).horizontal(branchLine),
-                /*U+F5F6  */ Box {}.circle(mCommitLine).down(branchLine),
+                /*U+F5F6  */ Box {}.circle(mergeCommitLine).down(branchLine),
                 /*U+F5F7  */ Box {}.circle(Line::Light).down(branchLine),
-                /*U+F5F8  */ Box {}.circle(mCommitLine).up(branchLine),
+                /*U+F5F8  */ Box {}.circle(mergeCommitLine).up(branchLine),
                 /*U+F5F9  */ Box {}.circle(Line::Light).up(branchLine),
-                /*U+F5FA  */ Box {}.circle(mCommitLine).vertical(branchLine),
+                /*U+F5FA  */ Box {}.circle(mergeCommitLine).vertical(branchLine),
                 /*U+F5FB  */ Box {}.circle(Line::Light).vertical(branchLine),
-                /*U+F5FC  */ Box {}.circle(mCommitLine).right(branchLine).down(branchLine),
+                /*U+F5FC  */ Box {}.circle(mergeCommitLine).right(branchLine).down(branchLine),
                 /*U+F5FD  */ Box {}.circle(Line::Light).right(branchLine).down(branchLine),
-                /*U+F5FE  */ Box {}.circle(mCommitLine).left(branchLine).down(branchLine),
+                /*U+F5FE  */ Box {}.circle(mergeCommitLine).left(branchLine).down(branchLine),
                 /*U+F5FF  */ Box {}.circle(Line::Light).left(branchLine).down(branchLine),
-                /*U+F600  */ Box {}.circle(mCommitLine).right(branchLine).up(branchLine),
+                /*U+F600  */ Box {}.circle(mergeCommitLine).right(branchLine).up(branchLine),
                 /*U+F601  */ Box {}.circle(Line::Light).right(branchLine).up(branchLine),
-                /*U+F602  */ Box {}.circle(mCommitLine).left(branchLine).up(branchLine),
+                /*U+F602  */ Box {}.circle(mergeCommitLine).left(branchLine).up(branchLine),
                 /*U+F603  */ Box {}.circle(Line::Light).left(branchLine).up(branchLine),
-                /*U+F604  */ Box {}.circle(mCommitLine).vertical(branchLine).right(branchLine),
+                /*U+F604  */ Box {}.circle(mergeCommitLine).vertical(branchLine).right(branchLine),
                 /*U+F605  */ Box {}.circle(Line::Light).vertical(branchLine).right(branchLine),
-                /*U+F606  */ Box {}.circle(mCommitLine).vertical(branchLine).left(branchLine),
+                /*U+F606  */ Box {}.circle(mergeCommitLine).vertical(branchLine).left(branchLine),
                 /*U+F607  */ Box {}.circle(Line::Light).vertical(branchLine).left(branchLine),
-                /*U+F608  */ Box {}.circle(mCommitLine).horizontal(branchLine).down(branchLine),
+                /*U+F608  */ Box {}.circle(mergeCommitLine).horizontal(branchLine).down(branchLine),
                 /*U+F609  */ Box {}.circle(Line::Light).horizontal(branchLine).down(branchLine),
-                /*U+F60A  */ Box {}.circle(mCommitLine).horizontal(branchLine).up(branchLine),
+                /*U+F60A  */ Box {}.circle(mergeCommitLine).horizontal(branchLine).up(branchLine),
                 /*U+F60B  */ Box {}.circle(Line::Light).horizontal(branchLine).up(branchLine),
-                /*U+F60C  */ Box {}.circle(mCommitLine).horizontal(branchLine).vertical(branchLine),
+                /*U+F60C  */ Box {}.circle(mergeCommitLine).horizontal(branchLine).vertical(branchLine),
                 /*U+F60D  */ Box {}.circle(Line::Light).horizontal(branchLine).vertical(branchLine),
             };
         }
@@ -578,7 +576,7 @@ namespace detail
         constexpr bool isGitBranchDrawing(char32_t codepoint)
         {
             bool gitBranchBox = codepoint >= 0xF5D0 && codepoint < 0xF5D0 + branchDrawingDefinitions.size();
-            return gitBranchBox;
+            return gitBranchBox && branchDrawingDefinitions[0].rightval != Line::NoLine;
         }
         constexpr auto getBoxDrawing(char32_t codepoint) -> std::optional<Box>
         {
@@ -1014,18 +1012,10 @@ namespace detail
                 return style != Style::Font and codepoint >= 0x2800 and codepoint <= 0x28FF;
             }
 
-            enum class Style : uint8_t
-            {
-                Font,
-                Solid,
-                Circle,
-                EmptyCircle,
-                Square,
-                EmptySquare,
-                AASquare,
-                EmptyAASquare,
-            };
+            using Style = BoxDrawingRenderer::BraileStyle;
             inline static Style style = Style::Circle;
+            static void setStyle(Style newStyle) { style = newStyle; }
+
             static auto build(char32_t codepoint,
                               ImageSize size,
                               [[maybe_unused]] size_t th,
@@ -1037,11 +1027,11 @@ namespace detail
                     using enum Style;
                     case Solid: return buildSolid(value, size);
                     case Circle: [[fallthrough]];
-                    case EmptyCircle: return buildCircle(value, size, th, ss, style == EmptyCircle);
+                    case CircleEmpty: return buildCircle(value, size, th, ss, style == CircleEmpty);
                     case Square: [[fallthrough]];
-                    case EmptySquare: return buildSquare(value, size, th, 1, style == EmptySquare);
+                    case SquareEmpty: return buildSquare(value, size, th, 1, style == SquareEmpty);
                     case AASquare: [[fallthrough]];
-                    case EmptyAASquare: return buildSquare(value, size, th, ss, style == EmptyAASquare);
+                    case AASquareEmpty: return buildSquare(value, size, th, ss, style == AASquareEmpty);
                     case Font: assert(false); return atlas::Buffer(*size.width * *size.height);
                 }
                 assert(false);
@@ -1242,6 +1232,41 @@ namespace detail
     } // namespace
 } // namespace detail
 
+void BoxDrawingRenderer::setGitDrawingsStyle(BoxDrawingRenderer::GitDrawingsStyle newStyle)
+{
+    using GitBranchStyle = BoxDrawingRenderer::GitDrawingsStyle::BranchStyle;
+    using MergeCommitStyle = BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
+
+    if (arcStyle == ArcStyle::Ellips && newStyle.branchStyle != GitBranchStyle::Thin)
+    {
+        // log warning ??
+        newStyle.arcStyle = ArcStyle::Round;
+    }
+    auto mcLine = [&] {
+        switch (newStyle.mergeCommitStyle)
+        {
+            case MergeCommitStyle::Solid: return detail::Line::Heavy;
+            case MergeCommitStyle::Bullet: return detail::Line::Double;
+            default: assert(false); return detail::Line::Double;
+        }
+    }();
+    auto branchLine = [&] {
+        switch (newStyle.branchStyle)
+        {
+            case GitBranchStyle::Thin: return detail::Line::Light;
+            case GitBranchStyle::Thick: return detail::Line::Heavy;
+            case GitBranchStyle::Double: return detail::Line::Double;
+            case GitBranchStyle::None: return detail::Line::NoLine;
+            default: assert(false); return detail::Line::Light;
+        }
+    }();
+    gitArcStyle = newStyle.arcStyle;
+    detail::branchDrawingDefinitions = detail::getBranchBoxes(mcLine, branchLine);
+}
+void BoxDrawingRenderer::setBraileStyle(BoxDrawingRenderer::BraileStyle newStyle)
+{
+    detail::Braile::setStyle(newStyle);
+}
 void BoxDrawingRenderer::setRenderTarget(RenderTarget& renderTarget,
                                          DirectMappingAllocator& directMappingAllocator)
 {
@@ -1902,11 +1927,9 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
 }
 
 // NOLINTNEXTLINE(*complexity*)
-auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersampling)
+auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersampling, bool useEllipticArcs)
     -> std::optional<atlas::Buffer>
 {
-    bool useEllipticArcs = true;
-
     // catch all non-solid single-lines before the quad-render below
     if (auto const dashed = box.get_dashed_horizontal())
         return boxDashedHorizontal(dashed, size, lineThickness);
@@ -2260,7 +2283,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
     auto box = detail::getBoxDrawing(codepoint);
     if (not box)
         return std::nullopt;
-    auto image = buildBox(*box, size, lineThickness, supersampling);
+    auto lArcStyle = detail::isGitBranchDrawing(codepoint) ? gitArcStyle : arcStyle;
+    auto image = buildBox(*box, size, lineThickness, supersampling, lArcStyle == ArcStyle::Ellips);
     boxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
     return image;
 }

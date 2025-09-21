@@ -360,6 +360,8 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("on_mouse_select", c.onMouseSelection);
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
+        loadFromEntry("git_drawings", c.gitDrawings);
+        vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
         loadFromEntry("input_mapping", c.inputMappings);
     }
@@ -1460,6 +1462,81 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                 }
             }
         }
+    }
+}
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::BoxDrawingRenderer::ArcStyle& where)
+{
+
+    using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
+    if (auto const child = node[entry])
+    {
+        auto const lstyle = crispy::toLower(child.as<std::string>());
+        auto constexpr static Mappings = std::array {
+            std::pair { "", ArcStyle::Round },        //
+            std::pair { "round", ArcStyle::Round },   //
+            std::pair { "ellips", ArcStyle::Ellips }, //
+        };
+        for (auto const& mapping: Mappings)
+            if (mapping.first == lstyle)
+            {
+                logger()("Loading entry: arc_style, value {}", lstyle);
+                where = mapping.second;
+                return;
+            }
+    }
+}
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where)
+{
+
+    where = {};
+    using BranchStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle::BranchStyle;
+    using MergeCommitStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
+
+    auto const parseBranchStyle = [&](std::string const& style) -> std::optional<BranchStyle> {
+        auto const lstyle = crispy::toLower(style);
+        auto constexpr static Mappings = std::array {
+            std::pair { "", BranchStyle::None },         //
+            std::pair { "none", BranchStyle::None },     //
+            std::pair { "thin", BranchStyle::Thin },     //
+            std::pair { "double", BranchStyle::Double }, //
+            std::pair { "thick", BranchStyle::Thick },
+        };
+        for (auto const& mapping: Mappings)
+            if (mapping.first == lstyle)
+            {
+                logger()("Loading entry: branch_style, value {}", lstyle);
+                return mapping.second;
+            }
+        return std::nullopt;
+    };
+
+    auto const parseMCStyle = [&](std::string const& style) -> std::optional<MergeCommitStyle> {
+        auto const lstyle = crispy::toLower(style);
+        auto constexpr static Mappings = std::array {
+            std::pair { "", MergeCommitStyle::Bullet },       //
+            std::pair { "bullet", MergeCommitStyle::Bullet }, //
+            std::pair { "solid", MergeCommitStyle::Solid },   //
+        };
+        for (auto const& mapping: Mappings)
+            if (mapping.first == lstyle)
+            {
+                logger()("Loading entry: merge_commit_style, value {}", lstyle);
+                return mapping.second;
+            }
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        loadFromEntry(child, "arc_style", where.arcStyle);
+        if (auto const branchStyle = parseBranchStyle(child["branch_style"].as<std::string>()))
+            where.branchStyle = *branchStyle;
+        if (auto const mcStyle = parseMCStyle(child["merge_commit_style"].as<std::string>()))
+            where.mergeCommitStyle = *mcStyle;
     }
 }
 

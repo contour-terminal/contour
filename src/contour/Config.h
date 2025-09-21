@@ -20,6 +20,7 @@
 #include <vtpty/Process.h>
 #include <vtpty/SshSession.h>
 
+#include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/Decorator.h>
 #include <vtrasterizer/FontDescriptions.h>
 
@@ -779,6 +780,8 @@ struct Config
         colorschemes { { { "default", vtbackend::ColorPalette {} } } };
 
     ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings };
+    ConfigEntry<vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle, documentation::GitDrawings>
+        gitDrawings {};
 
     TerminalProfile* profile(std::string const& name) noexcept
     {
@@ -1000,6 +1003,8 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, BackgroundConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HyperlinkDecorationConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PermissionsConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::ArcStyle& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where);
 
 
     void defaultSettings(vtpty::Process::ExecInfo& shell);
@@ -1304,6 +1309,39 @@ struct Writer
         auto const blinking = v.cursor.cursorDisplay == vtbackend::CursorDisplay::Blink ? true : false;
         auto const blinkingInterval = v.cursor.cursorBlinkInterval.count();
         return format(doc, shape, blinking, blinkingInterval);
+    }
+    [[nodiscard]] std::string format(std::string_view doc,
+                                     vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& v)
+    {
+        using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
+        using DrawingStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle;
+        auto const arc = [&]() -> std::string_view {
+            switch (v.arcStyle)
+            {
+                case ArcStyle::Ellips: return "ellips";
+                case ArcStyle::Round: return "round";
+                default: assert(false); return "round";
+            }
+        }();
+        auto const branch = [&]() -> std::string_view {
+            switch (v.branchStyle)
+            {
+                case DrawingStyle::BranchStyle::None: return "none";
+                case DrawingStyle::BranchStyle::Thin: return "thin";
+                case DrawingStyle::BranchStyle::Double: return "double";
+                case DrawingStyle::BranchStyle::Thick: return "thick";
+                default: assert(false); return "thin";
+            }
+        }();
+        auto const mergeCommit = [&]() -> std::string_view {
+            switch (v.mergeCommitStyle)
+            {
+                case DrawingStyle::MergeCommitStyle::Solid: return "solid";
+                case DrawingStyle::MergeCommitStyle::Bullet: return "bullet";
+                default: assert(false); return "solid";
+            }
+        }();
+        return format(doc, arc, branch, mergeCommit);
     }
 };
 
