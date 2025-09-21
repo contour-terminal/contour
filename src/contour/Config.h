@@ -782,7 +782,9 @@ struct Config
     ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings };
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle, documentation::GitDrawings>
         gitDrawings {};
-    ConfigEntry<vtrasterizer::BoxDrawingRenderer::ArcStyle, documentation::BoxArcStyle> boxArcStyle {};
+    ConfigEntry<vtrasterizer::BoxDrawingRenderer::ArcStyle, documentation::BoxArcStyle> boxArcStyle {
+        vtrasterizer::BoxDrawingRenderer::ArcStyle::Round
+    };
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::BraileStyle, documentation::BraileStyle> braileStyle {
         vtrasterizer::BoxDrawingRenderer::BraileStyle::Circle
     };
