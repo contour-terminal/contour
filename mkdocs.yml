@@ -106,6 +106,7 @@ nav:
     - Status line: demo/statusline.md
     - Input modes: input-modes.md
     - Size indicator: demo/size_indicator.md
+    - Git branch drawings: demo/git-branch-drawings.md
   - VT sequence reference:
     - vt-sequence/index.md
   - VT extensions:

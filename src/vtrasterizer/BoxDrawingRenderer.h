@@ -24,6 +24,42 @@ namespace vtrasterizer
 class BoxDrawingRenderer: public Renderable
 {
   public:
+    enum class ArcStyle : uint8_t
+    {
+        Ellips,
+        Round,
+    };
+
+    struct GitDrawingsStyle
+    {
+        enum class MergeCommitStyle : uint8_t
+        {
+            Solid,
+            Bullet,
+        };
+        enum class BranchStyle : uint8_t
+        {
+            None,
+            Thin,
+            Double,
+            Thick,
+        };
+        ArcStyle arcStyle = ArcStyle::Round;
+        BranchStyle branchStyle = BranchStyle::Thin;
+        MergeCommitStyle mergeCommitStyle = MergeCommitStyle::Bullet;
+    };
+    enum class BraileStyle : uint8_t
+    {
+        Font,
+        Solid,
+        Circle,
+        CircleEmpty,
+        Square,
+        SquareEmpty,
+        AASquare,
+        AASquareEmpty,
+    };
+
     explicit BoxDrawingRenderer(GridMetrics const& gridMetrics): Renderable { gridMetrics } {}
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
@@ -41,6 +77,10 @@ class BoxDrawingRenderer: public Renderable
 
     void inspect(std::ostream& output) const override;
 
+    static void setBraileStyle(BraileStyle newStyle);
+    static void setGitDrawingsStyle(GitDrawingsStyle newStyle);
+    static void setArcStyle(ArcStyle newStyle) { arcStyle = newStyle; }
+
   private:
     AtlasTileAttributes const* getOrCreateCachedTileAttributes(char32_t codepoint);
 
@@ -50,8 +90,13 @@ class BoxDrawingRenderer: public Renderable
 
     [[nodiscard]] static std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
                                                                        ImageSize size,
-                                                                       int lineThickness);
+                                                                       int lineThickness,
+                                                                       size_t supersampling = 1);
     [[nodiscard]] std::optional<atlas::Buffer> buildElements(char32_t codepoint);
+
+    static inline ArcStyle arcStyle = ArcStyle::Round;
+    static inline ArcStyle gitArcStyle = ArcStyle::Round;
+    static inline BraileStyle braileStyle = BraileStyle::Font;
 };
 
 } // namespace vtrasterizer

@@ -42,7 +42,7 @@ In order to contribute to the website, it's best tested locally in an iterative 
 Have a recent Python right next to you, such as Python 3.11+ and install the module requirements:
 
 ```sh
-pip install docs/requirements.txt
+pip install -r docs/requirements.txt
 ```
 
 Use your editor of choice to change the content in `docs/` and Running

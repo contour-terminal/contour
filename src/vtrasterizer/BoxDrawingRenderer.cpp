@@ -5,13 +5,10 @@
 
 #include <crispy/logstore.h>
 
-#include <range/v3/view/filter.hpp>
 #include <range/v3/view/iota.hpp>
-#include <range/v3/view/zip.hpp>
 
 #include <array>
 #include <cstdint>
-#include <format>
 
 using namespace std::string_view_literals;
 
@@ -27,9 +24,9 @@ using std::string_view;
 using std::tuple;
 
 using crispy::point;
-using ranges::views::filter;
-using ranges::views::iota;
-using ranges::views::zip;
+
+namespace stdr = std::ranges;
+namespace stdv = ranges::views;
 
 namespace vtrasterizer
 {
@@ -46,26 +43,21 @@ namespace
     {
         atlas::Buffer dest;
         dest.resize(cellSize.area());
-        auto const pitch = cellSize.width.as<size_t>();
+        auto const width = cellSize.width.as<size_t>();
         auto const height = cellSize.height.as<size_t>();
+        auto const pitch = width;
 
-        for (size_t i = 0; i < cellSize.height.as<size_t>(); ++i)
-        {
-            for (size_t j = 0; j < cellSize.width.as<size_t>(); ++j)
-            {
+        for (auto i: stdv::iota(0U, height))
+            for (auto j: stdv::iota(0U, width))
                 dest[(i * pitch) + j] = image[((height - i - 1u) * pitch) + j];
-            }
-        }
         return dest;
     }
 } // namespace
 
 namespace detail
 {
-
     namespace
     {
-
         enum class Thickness : uint8_t
         {
             Light,
@@ -112,8 +104,11 @@ namespace detail
             Crossing = 0x03
         };
 
-        void drawArc(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
+        void drawArcElliptic(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
         {
+            if (thickness == 0)
+                return;
+
             // Used to record all the pixel coordinates that have been written to per scanline.
             //
             // The vector index represents the y-axis.
@@ -154,19 +149,13 @@ namespace detail
                                 .y = (unbox<int>(imageSize.height) / 2) + (int(thickness) / 2) - 1 },
                 arc);
 
-            // Close arc at open ends to filling works.
-            // bool const isLeft = arc == Arc::TopLeft || arc == Arc::BottomLeft;
-            // auto const xCorner = isLeft ? unbox<unsigned>(imageSize.width) : 0u;
-            // for (auto const i: iota(0, thickness))
-            //     gaps.at(unbox<size_t>(imageSize.height) / 2 - thickness/2 + i).push_back(xCorner);
-
             // fill gap
             for (size_t y = 0; y < gaps.size(); ++y)
             {
                 if (auto& gap = gaps[y]; !gap.empty())
                 {
-                    std::ranges::sort(gap);
-                    for (auto const xi: iota(gap.front(), gap.back()))
+                    stdr::sort(gap);
+                    for (auto const xi: stdv::iota(gap.front(), gap.back()))
                         buffer.at((y * unbox<size_t>(imageSize.width)) + xi) = 0xFF;
                 }
             }
@@ -225,24 +214,24 @@ namespace detail
                 switch (part)
                 {
                 case Part::Left:
-                    b.rect({ .x=BlockLeft-(2*Gap), .y=BlockTop-(2*Gap) },  { .x=1,             .y=BlockTop-Gap });      // top line
-                    b.rect({ .x=BlockLeft-(2*Gap), .y=blockBottom+Gap }, { .x=1,             .y=blockBottom+(2*Gap) }); // bottom line
-                    b.rect({ .x=BlockLeft-(2*Gap), .y=BlockTop-(2*Gap) },  { .x=BlockLeft-Gap, .y=blockBottom+Gap });   // left bar
+                    b.rect({ .x=BlockLeft-(2*Gap), .y=BlockTop-(2*Gap) }, { .x=1,             .y=BlockTop-Gap });      // top line
+                    b.rect({ .x=BlockLeft-(2*Gap), .y=blockBottom+Gap  }, { .x=1,             .y=blockBottom+(2*Gap) }); // bottom line
+                    b.rect({ .x=BlockLeft-(2*Gap), .y=BlockTop-(2*Gap) }, { .x=BlockLeft-Gap, .y=blockBottom+Gap });   // left bar
                     if (filledval)
-                        b.rect({ .x=BlockLeft,   .y=BlockTop },        { .x=1,             .y=blockBottom });
+                        b.rect({ .x=BlockLeft,     .y=BlockTop },         { .x=1,             .y=blockBottom });
                     break;
                 case Part::Middle:
-                    b.rect({ .x=0, .y=BlockTop-(2*Gap) },  { .x=1, .y=BlockTop-Gap });      // top line
-                    b.rect({ .x=0, .y=blockBottom+Gap }, { .x=1, .y=blockBottom+(2*Gap) }); // bottom line
+                    b.rect({ .x=0, .y=BlockTop-(2*Gap) }, { .x=1, .y=BlockTop-Gap });      // top line
+                    b.rect({ .x=0, .y=blockBottom+Gap },  { .x=1, .y=blockBottom+(2*Gap) }); // bottom line
                     if (filledval)
-                        b.rect({ .x=0,   .y=BlockTop },  { .x=1, .y=blockBottom });
+                        b.rect({ .x=0,   .y=BlockTop },   { .x=1, .y=blockBottom });
                     break;
                 case Part::Right:
-                    b.rect({ .x=0,              .y=BlockTop-(2*Gap) },  { .x=BlockRight+(2*Gap), .y=BlockTop-Gap });      // top line
-                    b.rect({ .x=0,              .y=blockBottom+Gap }, { .x=BlockRight+(2*Gap), .y=blockBottom+(2*Gap) }); // bottom line
-                    b.rect({ .x=BlockRight+Gap, .y=BlockTop-(2*Gap) },  { .x=BlockRight+(2*Gap), .y=blockBottom+Gap });   // left bar
+                    b.rect({ .x=0,              .y=BlockTop-(2*Gap) }, { .x=BlockRight+(2*Gap), .y=BlockTop-Gap });      // top line
+                    b.rect({ .x=0,              .y=blockBottom+Gap },  { .x=BlockRight+(2*Gap), .y=blockBottom+(2*Gap) }); // bottom line
+                    b.rect({ .x=BlockRight+Gap, .y=BlockTop-(2*Gap) }, { .x=BlockRight+(2*Gap), .y=blockBottom+Gap });   // left bar
                     if (filledval)
-                        b.rect({ .x=0,          .y=BlockTop },        { .x=BlockRight,       .y=blockBottom });
+                        b.rect({ .x=0,          .y=BlockTop },         { .x=BlockRight,       .y=blockBottom });
                     break;
                 }
                 // clang-format on
@@ -250,15 +239,21 @@ namespace detail
                 return b;
             }
         };
-
         struct Box
         {
             Line upval = NoLine;
             Line rightval = NoLine;
             Line downval = NoLine;
             Line leftval = NoLine;
+
             Diagonal diagonalval = NoDiagonal;
-            Arc arcval = NoArc;
+
+            Line arcURval = NoLine;
+            Line arcULval = NoLine;
+            Line arcBLval = NoLine;
+            Line arcBRval = NoLine;
+
+            Line circleval = NoLine;
 
             [[nodiscard]] constexpr Box up(Line value = Light)
             {
@@ -291,10 +286,28 @@ namespace detail
                 return b;
             }
 
-            [[nodiscard]] constexpr Box arc(Arc value)
+            [[nodiscard]] constexpr Box arcUR(Line line = Light)
             {
                 Box b(*this);
-                b.arcval = value;
+                b.arcURval = line;
+                return b;
+            }
+            [[nodiscard]] constexpr Box arcUL(Line line = Light)
+            {
+                Box b(*this);
+                b.arcULval = line;
+                return b;
+            }
+            [[nodiscard]] constexpr Box arcBL(Line line = Light)
+            {
+                Box b(*this);
+                b.arcBLval = line;
+                return b;
+            }
+            [[nodiscard]] constexpr Box arcBR(Line line = Light)
+            {
+                Box b(*this);
+                b.arcBRval = line;
                 return b;
             }
 
@@ -324,6 +337,13 @@ namespace detail
                 return b;
             }
 
+            [[nodiscard]] constexpr Box circle(Line value = Light)
+            {
+                Box b(*this);
+                b.circleval = value;
+                return b;
+            }
+
           private:
             [[nodiscard]] static constexpr optional<pair<uint8_t, Thickness>> getDashed(Line a,
                                                                                         Line b) noexcept
@@ -345,148 +365,229 @@ namespace detail
         };
 
         // U+2500 .. U+257F (128 box drawing characters)
+        constexpr auto BoxDrawingDefinitions = std::array<Box, 0x80> {
+            /*U+2500 ─ */ Box {}.horizontal(Light),
+            /*U+2501 ━ */ Box {}.horizontal(Heavy),
+            /*U+2502 │ */ Box {}.vertical(Light),
+            /*U+2503 ┃ */ Box {}.vertical(Heavy),
+            /*U+2504 ┄ */ Box {}.horizontal(Light3),
+            /*U+2505 ┅ */ Box {}.horizontal(Heavy3),
+            /*U+2506 ┆ */ Box {}.vertical(Light3),
+            /*U+2507 ┇ */ Box {}.vertical(Heavy3),
+            /*U+2508 ┈ */ Box {}.horizontal(Light4),
+            /*U+2509 ┉ */ Box {}.horizontal(Heavy4),
+            /*U+250A ┊ */ Box {}.vertical(Light4),
+            /*U+250B ┋ */ Box {}.vertical(Heavy4),
+            /*U+250C ┌ */ Box {}.right().down(),
+            /*U+250D ┍ */ Box {}.right(Heavy).down(Light),
+            /*U+250E ┎ */ Box {}.right(Light).down(Heavy),
+            /*U+250F ┏ */ Box {}.right(Heavy).down(Heavy),
 
-        constexpr auto BoxDrawingDefinitions = std::array<Box, 0x80> // {{{
-            {
-                Box {}.horizontal(Light),        // U+2500
-                Box {}.horizontal(Heavy),        // U+2501
-                Box {}.vertical(Light),          // U+2502
-                Box {}.vertical(Heavy),          // U+2503
-                Box {}.horizontal(Light3),       // U+2504
-                Box {}.horizontal(Heavy3),       // U+2505
-                Box {}.vertical(Light3),         // U+2506
-                Box {}.vertical(Heavy3),         // U+2507
-                Box {}.horizontal(Light4),       // U+2508
-                Box {}.horizontal(Heavy4),       // U+2509
-                Box {}.vertical(Light4),         // U+250A
-                Box {}.vertical(Heavy4),         // U+250B
-                Box {}.right().down(),           // U+250C
-                Box {}.right(Heavy).down(Light), // U+250D
-                Box {}.right(Light).down(Heavy), // U+250E
-                Box {}.right(Heavy).down(Heavy), // U+250F
+            /*U+2510 ┐ */ Box {}.down().left(),
+            /*U+2511 ┑ */ Box {}.down(Light).left(Heavy),
+            /*U+2512 ┒ */ Box {}.down(Heavy).left(Light),
+            /*U+2513 ┓ */ Box {}.down(Heavy).left(Heavy),
+            /*U+2514 └ */ Box {}.up().right(),
+            /*U+2515 ┕ */ Box {}.up(Light).right(Heavy),
+            /*U+2516 ┖ */ Box {}.up(Heavy).right(Light),
+            /*U+2517 ┗ */ Box {}.up(Heavy).right(Heavy),
+            /*U+2518 ┘ */ Box {}.up().left(),
+            /*U+2519 ┙ */ Box {}.up(Light).left(Heavy),
+            /*U+251A ┚ */ Box {}.up(Heavy).left(Light),
+            /*U+251B ┛ */ Box {}.up(Heavy).left(Heavy),
+            /*U+251C ├ */ Box {}.vertical().right(),
+            /*U+251D ┝ */ Box {}.vertical(Light).right(Heavy),
+            /*U+251E ┞ */ Box {}.up(Heavy).right(Light).down(Light),
+            /*U+251F ┟ */ Box {}.up(Light).right(Light).down(Heavy),
 
-                Box {}.down().left(),                      // U+2510
-                Box {}.down(Light).left(Heavy),            // U+2511
-                Box {}.down(Heavy).left(Light),            // U+2512
-                Box {}.down(Heavy).left(Heavy),            // U+2513
-                Box {}.up().right(),                       // U+2514
-                Box {}.up(Light).right(Heavy),             // U+2515
-                Box {}.up(Heavy).right(Light),             // U+2516
-                Box {}.up(Heavy).right(Heavy),             // U+2517
-                Box {}.up().left(),                        // U+2518
-                Box {}.up(Light).left(Heavy),              // U+2519
-                Box {}.up(Heavy).left(Light),              // U+251A
-                Box {}.up(Heavy).left(Heavy),              // U+251B
-                Box {}.vertical().right(),                 // U+251C
-                Box {}.vertical(Light).right(Heavy),       // U+251D
-                Box {}.up(Heavy).right(Light).down(Light), // U+251E
-                Box {}.up(Light).right(Light).down(Heavy), // U+251F
+            /*U+2520 ┠ */ Box {}.vertical(Heavy).right(Light),
+            /*U+2521 ┡ */ Box {}.up(Heavy).right(Heavy).down(Light),
+            /*U+2522 ┢ */ Box {}.up(Light).right(Heavy).down(Heavy),
+            /*U+2523 ┣ */ Box {}.up(Heavy).right(Heavy).down(Heavy),
+            /*U+2524 ┤ */ Box {}.vertical(Light).left(Light),
+            /*U+2525 ┥ */ Box {}.vertical(Light).left(Heavy),
+            /*U+2526 ┦ */ Box {}.up(Heavy).down(Light).left(Light),
+            /*U+2527 ┧ */ Box {}.up(Light).down(Heavy).left(Light),
+            /*U+2528 ┩ */ Box {}.up(Heavy).down(Heavy).left(Light),
+            /*U+2529 ┩ */ Box {}.up(Heavy).down(Light).left(Heavy),
+            /*U+252A ┪ */ Box {}.up(Light).down(Heavy).left(Heavy),
+            /*U+252B ┫ */ Box {}.up(Heavy).down(Heavy).left(Heavy),
+            /*U+252C ┬ */ Box {}.right(Light).down(Light).left(Light),
+            /*U+252D ┭ */ Box {}.right(Light).down(Light).left(Heavy),
+            /*U+252E ┮ */ Box {}.right(Heavy).down(Light).left(Light),
+            /*U+252F ┯ */ Box {}.right(Heavy).down(Light).left(Heavy),
 
-                Box {}.vertical(Heavy).right(Light),         // U+2520
-                Box {}.up(Heavy).right(Heavy).down(Light),   // U+2521
-                Box {}.up(Light).right(Heavy).down(Heavy),   // U+2522
-                Box {}.up(Heavy).right(Heavy).down(Heavy),   // U+2523
-                Box {}.vertical(Light).left(Light),          // U+2524
-                Box {}.vertical(Light).left(Heavy),          // U+2525
-                Box {}.up(Heavy).down(Light).left(Light),    // U+2526
-                Box {}.up(Light).down(Heavy).left(Light),    // U+2527
-                Box {}.up(Heavy).down(Heavy).left(Light),    // U+2528
-                Box {}.up(Heavy).down(Light).left(Heavy),    // U+2529
-                Box {}.up(Light).down(Heavy).left(Heavy),    // U+252A
-                Box {}.up(Heavy).down(Heavy).left(Heavy),    // U+252B
-                Box {}.right(Light).down(Light).left(Light), // U+252C
-                Box {}.right(Light).down(Light).left(Heavy), // U+252D
-                Box {}.right(Heavy).down(Light).left(Light), // U+252E
-                Box {}.right(Heavy).down(Light).left(Heavy), // U+252F
+            /*U+2530 ┰ */ Box {}.right(Light).down(Heavy).left(Light),
+            /*U+2531 ┱ */ Box {}.right(Light).down(Heavy).left(Heavy),
+            /*U+2532 ┲ */ Box {}.right(Heavy).down(Heavy).left(Light),
+            /*U+2533 ┳ */ Box {}.right(Heavy).down(Heavy).left(Heavy),
+            /*U+2534 ┴ */ Box {}.up(Light).right(Light).left(Light),
+            /*U+2535 ┵ */ Box {}.up(Light).right(Light).left(Heavy),
+            /*U+2536 ┶ */ Box {}.up(Light).right(Heavy).left(Light),
+            /*U+2537 ┷ */ Box {}.up(Light).right(Heavy).left(Heavy),
+            /*U+2538 ┸ */ Box {}.up(Heavy).right(Light).left(Light),
+            /*U+2539 ┹ */ Box {}.up(Heavy).right(Light).left(Heavy),
+            /*U+253A ┺ */ Box {}.up(Heavy).right(Heavy).left(Light),
+            /*U+253B ┻ */ Box {}.up(Heavy).right(Heavy).left(Heavy),
+            /*U+253C ┼ */ Box {}.up(Light).right(Light).down(Light).left(Light),
+            /*U+253D ┽ */ Box {}.up(Light).right(Light).down(Light).left(Heavy),
+            /*U+253E ┾ */ Box {}.up(Light).right(Heavy).down(Light).left(Light),
+            /*U+253F ┿ */ Box {}.up(Light).right(Heavy).down(Light).left(Heavy),
 
-                Box {}.right(Light).down(Heavy).left(Light),           // U+2530
-                Box {}.right(Light).down(Heavy).left(Heavy),           // U+2531
-                Box {}.right(Heavy).down(Heavy).left(Light),           // U+2532
-                Box {}.right(Heavy).down(Heavy).left(Heavy),           // U+2533
-                Box {}.up(Light).right(Light).left(Light),             // U+2534
-                Box {}.up(Light).right(Light).left(Heavy),             // U+2535
-                Box {}.up(Light).right(Heavy).left(Light),             // U+2536
-                Box {}.up(Light).right(Heavy).left(Heavy),             // U+2537
-                Box {}.up(Heavy).right(Light).left(Light),             // U+2538
-                Box {}.up(Heavy).right(Light).left(Heavy),             // U+2539
-                Box {}.up(Heavy).right(Heavy).left(Light),             // U+253A
-                Box {}.up(Heavy).right(Heavy).left(Heavy),             // U+253B
-                Box {}.up(Light).right(Light).down(Light).left(Light), // U+253C
-                Box {}.up(Light).right(Light).down(Light).left(Heavy), // U+253D
-                Box {}.up(Light).right(Heavy).down(Light).left(Light), // U+253E
-                Box {}.up(Light).right(Heavy).down(Light).left(Heavy), // U+253F
+            /*U+2540 ╀ */ Box {}.up(Heavy).right(Light).down(Light).left(Heavy),
+            /*U+2541 ╁ */ Box {}.up(Light).right(Light).down(Heavy).left(Light),
+            /*U+2542 ╂ */ Box {}.up(Heavy).right(Light).down(Heavy).left(Light),
+            /*U+2543 ╃ */ Box {}.up(Heavy).right(Light).down(Light).left(Heavy),
+            /*U+2544 ╄ */ Box {}.up(Heavy).right(Heavy).down(Light).left(Light),
+            /*U+2545 ╄ */ Box {}.up(Light).right(Light).down(Heavy).left(Heavy),
+            /*U+2546 ╆ */ Box {}.up(Light).right(Heavy).down(Heavy).left(Light),
+            /*U+2547 ╇ */ Box {}.up(Heavy).right(Heavy).down(Light).left(Heavy),
+            /*U+2548 ╈ */ Box {}.up(Light).right(Heavy).down(Heavy).left(Heavy),
+            /*U+2549 ╉ */ Box {}.up(Heavy).right(Light).down(Heavy).left(Heavy),
+            /*U+254A ╊ */ Box {}.up(Heavy).right(Heavy).down(Heavy).left(Light),
+            /*U+254B ╋ */ Box {}.up(Heavy).right(Heavy).down(Heavy).left(Heavy),
+            /*U+254C ╌ */ Box {}.horizontal(Light2),
+            /*U+254D ╍ */ Box {}.horizontal(Heavy2),
+            /*U+254E ╎ */ Box {}.vertical(Light2),
+            /*U+254F ╏ */ Box {}.vertical(Heavy2),
 
-                Box {}.up(Heavy).right(Light).down(Light).left(Heavy), // U+2540
-                Box {}.up(Light).right(Light).down(Heavy).left(Light), // U+2541
-                Box {}.up(Heavy).right(Light).down(Heavy).left(Light), // U+2542
-                Box {}.up(Heavy).right(Light).down(Light).left(Heavy), // U+2543
-                Box {}.up(Heavy).right(Heavy).down(Light).left(Light), // U+2544
-                Box {}.up(Light).right(Light).down(Heavy).left(Heavy), // U+2545
-                Box {}.up(Light).right(Heavy).down(Heavy).left(Light), // U+2546
-                Box {}.up(Heavy).right(Heavy).down(Light).left(Heavy), // U+2547
-                Box {}.up(Light).right(Heavy).down(Heavy).left(Heavy), // U+2548
-                Box {}.up(Heavy).right(Light).down(Heavy).left(Heavy), // U+2549
-                Box {}.up(Heavy).right(Heavy).down(Heavy).left(Light), // U+254A
-                Box {}.up(Heavy).right(Heavy).down(Heavy).left(Heavy), // U+254B
-                Box {}.horizontal(Light2),                             // U+254C
-                Box {}.horizontal(Heavy2),                             // U+254D
-                Box {}.vertical(Light2),                               // U+254E
-                Box {}.vertical(Heavy2),                               // U+254F
+            /*U+2550 ═ */ Box {}.horizontal(Double),
+            /*U+2551 ║ */ Box {}.vertical(Double),
+            /*U+2552 ╒ */ Box {}.right(Double).down(Light),
+            /*U+2553 ╓ */ Box {}.right(Light).down(Double),
+            /*U+2554 ╔ */ Box {}.right(Double).down(Double),
+            /*U+2555 ╕ */ Box {}.down(Light).left(Double),
+            /*U+2556 ╖ */ Box {}.down(Double).left(Light),
+            /*U+2557 ╗ */ Box {}.down(Double).left(Double),
+            /*U+2558 ╘ */ Box {}.up(Light).right(Double),
+            /*U+2559 ╙ */ Box {}.up(Double).right(Light),
+            /*U+255A ╚ */ Box {}.up(Double).right(Double),
+            /*U+255B ╛ */ Box {}.up(Light).left(Double),
+            /*U+255C ╜ */ Box {}.up(Double).left(Light),
+            /*U+255D ╝ */ Box {}.up(Double).left(Double),
+            /*U+255E ╞ */ Box {}.up(Light).right(Double).down(Light),
+            /*U+255F ╟ */ Box {}.up(Double).right(Light).down(Double),
 
-                Box {}.horizontal(Double),                   // U+2550
-                Box {}.vertical(Double),                     // U+2551
-                Box {}.right(Double).down(Light),            // U+2552
-                Box {}.right(Light).down(Double),            // U+2553
-                Box {}.right(Double).down(Double),           // U+2554
-                Box {}.down(Light).left(Double),             // U+2555
-                Box {}.down(Double).left(Light),             // U+2556
-                Box {}.down(Double).left(Double),            // U+2557
-                Box {}.up(Light).right(Double),              // U+2558
-                Box {}.up(Double).right(Light),              // U+2559
-                Box {}.up(Double).right(Double),             // U+255A
-                Box {}.up(Light).left(Double),               // U+255B
-                Box {}.up(Double).left(Light),               // U+255C
-                Box {}.up(Double).left(Double),              // U+255D
-                Box {}.up(Light).right(Double).down(Light),  // U+255E
-                Box {}.up(Double).right(Light).down(Double), // U+255F
+            /*U+2560 ╠ */ Box {}.vertical(Double).right(Double),
+            /*U+2561 ╡ */ Box {}.vertical(Light).left(Double),
+            /*U+2562 ╢ */ Box {}.vertical(Double).left(Light),
+            /*U+2563 ╣ */ Box {}.vertical(Double).left(Double),
+            /*U+2564 ╤ */ Box {}.horizontal(Double).down(Light),
+            /*U+2565 ╥ */ Box {}.horizontal(Light).down(Double),
+            /*U+2566 ╦ */ Box {}.horizontal(Double).down(Double),
+            /*U+2567 ╧ */ Box {}.horizontal(Double).up(Light),
+            /*U+2568 ╨ */ Box {}.horizontal(Light).up(Double),
+            /*U+2569 ╩ */ Box {}.horizontal(Double).up(Double),
+            /*U+256A ╪ */ Box {}.horizontal(Double).vertical(Light),
+            /*U+256B ╫ */ Box {}.horizontal(Light).vertical(Double),
+            /*U+256C ╬ */ Box {}.horizontal(Double).vertical(Double),
 
-                Box {}.vertical(Double).right(Double),      // U+2560
-                Box {}.vertical(Light).left(Double),        // U+2561
-                Box {}.vertical(Double).left(Light),        // U+2562
-                Box {}.vertical(Double).left(Double),       // U+2563
-                Box {}.horizontal(Double).down(Light),      // U+2564
-                Box {}.horizontal(Light).down(Double),      // U+2565
-                Box {}.horizontal(Double).down(Double),     // U+2566
-                Box {}.horizontal(Double).up(Light),        // U+2567
-                Box {}.horizontal(Light).up(Double),        // U+2568
-                Box {}.horizontal(Double).up(Double),       // U+2569
-                Box {}.horizontal(Double).vertical(Light),  // U+256A
-                Box {}.horizontal(Light).vertical(Double),  // U+256B
-                Box {}.horizontal(Double).vertical(Double), // U+256C
-                Box {}.arc(TopLeft),                        // U+256D
-                Box {}.arc(TopRight),                       // U+256E
-                Box {}.arc(BottomRight),                    // U+256F
-
-                Box {}.arc(BottomLeft),          // U+2570
-                Box {}.diagonal(Forward),        // U+2571
-                Box {}.diagonal(Backward),       // U+2572
-                Box {}.diagonal(Crossing),       // U+2573
-                Box {}.left(),                   // U+2574
-                Box {}.up(),                     // U+2575
-                Box {}.right(),                  // U+2576
-                Box {}.down(),                   // U+2577
-                Box {}.left(Heavy),              // U+2578
-                Box {}.up(Heavy),                // U+2579
-                Box {}.right(Heavy),             // U+257A
-                Box {}.down(Heavy),              // U+257B
-                Box {}.right(Heavy).left(Light), // U+257C
-                Box {}.up(Light).down(Heavy),    // U+257D
-                Box {}.right(Light).left(Heavy), // U+257E
-                Box {}.up(Heavy).down(Light),    // U+257F
-            };
-        // }}}
-
+            /*U+256D ╭ */ Box {}.arcBR(),
+            /*U+256E ╮ */ Box {}.arcBL(),
+            /*U+256F ╯ */ Box {}.arcUL(),
+            /*U+2570 ╰ */ Box {}.arcUR(),
+            /*U+2571 ╱ */ Box {}.diagonal(Forward),
+            /*U+2572 ╲ */ Box {}.diagonal(Backward),
+            /*U+2573 ╳ */ Box {}.diagonal(Crossing),
+            /*U+2574 ╴ */ Box {}.left(),
+            /*U+2575 ╵ */ Box {}.up(),
+            /*U+2576 ╶ */ Box {}.right(),
+            /*U+2577 ╷ */ Box {}.down(),
+            /*U+2578 ╸ */ Box {}.left(Heavy),
+            /*U+2579 ╹ */ Box {}.up(Heavy),
+            /*U+257A ╺ */ Box {}.right(Heavy),
+            /*U+257B ╻ */ Box {}.down(Heavy),
+            /*U+257C ╼ */ Box {}.right(Heavy).left(Light),
+            /*U+257D ╽ */ Box {}.up(Light).down(Heavy),
+            /*U+257E ╾ */ Box {}.right(Light).left(Heavy),
+            /*U+257F ╿ */ Box {}.up(Heavy).down(Light),
+        };
         static_assert(BoxDrawingDefinitions.size() == 0x80);
+
+        auto getBranchBoxes(const Line mergeCommitLine = Line::Double, const Line branchLine = Line::Light)
+        {
+            return std::array {
+                /*U+F5D0  */ Box {}.horizontal(branchLine),
+                /*U+F5D1  */ Box {}.vertical(branchLine),
+                /*U+F5D2  */ Box {}.horizontal(branchLine),
+                /*U+F5D3  */ Box {}.horizontal(branchLine),
+                /*U+F5D4  */ Box {}.vertical(branchLine),
+                /*U+F5D5  */ Box {}.vertical(branchLine),
+                /*U+F5D6  */ Box {}.arcBR(branchLine),
+                /*U+F5D7  */ Box {}.arcBL(branchLine),
+                /*U+F5D8  */ Box {}.arcUR(branchLine),
+                /*U+F5D9  */ Box {}.arcUL(branchLine),
+                /*U+F5DA  */ Box {}.vertical(branchLine).arcUR(branchLine),
+                /*U+F5DB  */ Box {}.vertical(branchLine).arcBR(branchLine),
+                /*U+F5DC  */ Box {}.arcUR(branchLine).arcBR(branchLine),
+                /*U+F5DD  */ Box {}.vertical(branchLine).arcUL(branchLine),
+                /*U+F5DE  */ Box {}.vertical(branchLine).arcBL(branchLine),
+                /*U+F5DF  */ Box {}.arcUL(branchLine).arcBL(branchLine),
+                /*U+F5E0  */ Box {}.horizontal(branchLine).arcBL(branchLine),
+                /*U+F5E1  */ Box {}.horizontal(branchLine).arcBR(branchLine),
+                /*U+F5E2  */ Box {}.arcBL(branchLine).arcBR(branchLine),
+                /*U+F5E3  */ Box {}.horizontal(branchLine).arcUL(branchLine),
+                /*U+F5E4  */ Box {}.horizontal(branchLine).arcUR(branchLine),
+                /*U+F5E5  */ Box {}.arcUR(branchLine).arcUL(branchLine),
+                /*U+F5E6  */ Box {}.vertical(branchLine).arcUL(branchLine).arcUR(branchLine),
+                /*U+F5E7  */ Box {}.vertical(branchLine).arcBL(branchLine).arcBR(branchLine),
+                /*U+F5E8  */ Box {}.horizontal(branchLine).arcUL(branchLine).arcBL(branchLine),
+                /*U+F5E9  */ Box {}.horizontal(branchLine).arcUR(branchLine).arcBR(branchLine),
+                /*U+F5EA  */ Box {}.vertical(branchLine).arcUL(branchLine).arcBR(branchLine),
+                /*U+F5EB  */ Box {}.vertical(branchLine).arcUR(branchLine).arcBL(branchLine),
+                /*U+F5EC  */ Box {}.horizontal(branchLine).arcUL(branchLine).arcBR(branchLine),
+                /*U+F5ED  */ Box {}.horizontal(branchLine).arcUR(branchLine).arcBL(branchLine),
+                /*U+F5EE  */ Box {}.circle(mergeCommitLine),
+                /*U+F5EF  */ Box {}.circle(Line::Light),
+                /*U+F5F0  */ Box {}.circle(mergeCommitLine).right(branchLine),
+                /*U+F5F1  */ Box {}.circle(Line::Light).right(branchLine),
+                /*U+F5F2  */ Box {}.circle(mergeCommitLine).left(branchLine),
+                /*U+F5F3  */ Box {}.circle(Line::Light).left(branchLine),
+                /*U+F5F4  */ Box {}.circle(mergeCommitLine).horizontal(branchLine),
+                /*U+F5F5  */ Box {}.circle(Line::Light).horizontal(branchLine),
+                /*U+F5F6  */ Box {}.circle(mergeCommitLine).down(branchLine),
+                /*U+F5F7  */ Box {}.circle(Line::Light).down(branchLine),
+                /*U+F5F8  */ Box {}.circle(mergeCommitLine).up(branchLine),
+                /*U+F5F9  */ Box {}.circle(Line::Light).up(branchLine),
+                /*U+F5FA  */ Box {}.circle(mergeCommitLine).vertical(branchLine),
+                /*U+F5FB  */ Box {}.circle(Line::Light).vertical(branchLine),
+                /*U+F5FC  */ Box {}.circle(mergeCommitLine).right(branchLine).down(branchLine),
+                /*U+F5FD  */ Box {}.circle(Line::Light).right(branchLine).down(branchLine),
+                /*U+F5FE  */ Box {}.circle(mergeCommitLine).left(branchLine).down(branchLine),
+                /*U+F5FF  */ Box {}.circle(Line::Light).left(branchLine).down(branchLine),
+                /*U+F600  */ Box {}.circle(mergeCommitLine).right(branchLine).up(branchLine),
+                /*U+F601  */ Box {}.circle(Line::Light).right(branchLine).up(branchLine),
+                /*U+F602  */ Box {}.circle(mergeCommitLine).left(branchLine).up(branchLine),
+                /*U+F603  */ Box {}.circle(Line::Light).left(branchLine).up(branchLine),
+                /*U+F604  */ Box {}.circle(mergeCommitLine).vertical(branchLine).right(branchLine),
+                /*U+F605  */ Box {}.circle(Line::Light).vertical(branchLine).right(branchLine),
+                /*U+F606  */ Box {}.circle(mergeCommitLine).vertical(branchLine).left(branchLine),
+                /*U+F607  */ Box {}.circle(Line::Light).vertical(branchLine).left(branchLine),
+                /*U+F608  */ Box {}.circle(mergeCommitLine).horizontal(branchLine).down(branchLine),
+                /*U+F609  */ Box {}.circle(Line::Light).horizontal(branchLine).down(branchLine),
+                /*U+F60A  */ Box {}.circle(mergeCommitLine).horizontal(branchLine).up(branchLine),
+                /*U+F60B  */ Box {}.circle(Line::Light).horizontal(branchLine).up(branchLine),
+                /*U+F60C  */ Box {}.circle(mergeCommitLine).horizontal(branchLine).vertical(branchLine),
+                /*U+F60D  */ Box {}.circle(Line::Light).horizontal(branchLine).vertical(branchLine),
+            };
+        }
+        auto branchDrawingDefinitions = getBranchBoxes();
+
+        constexpr bool isGitBranchDrawing(char32_t codepoint)
+        {
+            bool const gitBranchBox =
+                codepoint >= 0xF5D0 && codepoint < 0xF5D0 + branchDrawingDefinitions.size();
+            return gitBranchBox && branchDrawingDefinitions[0].rightval != Line::NoLine;
+        }
+        constexpr auto getBoxDrawing(char32_t codepoint) -> std::optional<Box>
+        {
+            auto const standardBox = codepoint >= 0x2500 && codepoint <= 0x257F;
+            if (!(standardBox || isGitBranchDrawing(codepoint)))
+                return std::nullopt;
+
+            return standardBox ? BoxDrawingDefinitions[codepoint - 0x2500]
+                               : branchDrawingDefinitions[codepoint - 0xF5D0];
+        }
 
         // {{{ block element construction
 
@@ -653,7 +754,6 @@ namespace detail
                         return pair { a(x), h };
                     else
                         return pair { b(x), h };
-                    ;
                 };
             }
         }
@@ -713,14 +813,12 @@ namespace detail
             auto const w = unbox(pixmap.size.width);
             auto const h = unbox(pixmap.size.height) - 1;
 
-            for (auto const y: ranges::views::iota(0u, unbox(pixmap.size.height)))
-            {
-                for (auto const x: ranges::views::iota(0u, unbox(pixmap.size.width)))
+            for (auto const y: stdv::iota(0u, unbox(pixmap.size.height)))
+                for (auto const x: stdv::iota(0u, unbox(pixmap.size.width)))
                 {
                     auto const [a, b] = p(int(x));
                     pixmap.buffer[(unsigned(h - y) * w) + x] = a <= int(y) && int(y) <= b ? set : unset;
                 }
-            }
         }
 
         template <Dir Direction, Inverted Inv = Inverted::No, int DivisorX = 2>
@@ -747,8 +845,8 @@ namespace detail
 
             auto const h = pixmap.size.height.as<unsigned>() - 1;
             auto const w = pixmap.size.width.as<unsigned>();
-            for (auto const y: ranges::views::iota(0u, pixmap.size.height.as<unsigned>()))
-                for (auto const x: ranges::views::iota(0u, pixmap.size.width.as<unsigned>()))
+            for (auto const y: stdv::iota(0u, pixmap.size.height.as<unsigned>()))
+                for (auto const x: stdv::iota(0u, pixmap.size.width.as<unsigned>()))
                     if (condition(int(x), int(y)))
                         pixmap.buffer.at((w * (h - y)) + x) = 0xFF;
         }
@@ -896,11 +994,279 @@ namespace detail
             blockSextant(image, size, positions...);
             return image;
         }
-        // }}}
 
+        struct Braile
+        {
+            // Unicode Braile characters (U+2800 - U+28FF) are 2x4 grid of dots.
+            //
+            // An 8-bit unsigned integer, used as an offset from the codepoint U+2800
+            // serves as a bitmastk for the dots.
+            // The mapping of bits to dot positions is:
+            // 0 3
+            // 1 4
+            // 2 5
+            // 6 7
+
+            static bool isBraile(char32_t codepoint)
+            {
+                return style != Style::Font and codepoint >= 0x2800 and codepoint <= 0x28FF;
+            }
+
+            using Style = BoxDrawingRenderer::BraileStyle;
+            inline static Style style = Style::Circle;
+            static void setStyle(Style newStyle) { style = newStyle; }
+
+            static auto build(char32_t codepoint,
+                              ImageSize size,
+                              [[maybe_unused]] size_t th,
+                              [[maybe_unused]] size_t ss)
+            {
+                uint8_t const value = codepoint - 0x2800;
+                switch (style)
+                {
+                    using enum Style;
+                    case Solid: return buildSolid(value, size);
+                    case Circle: [[fallthrough]];
+                    case CircleEmpty: return buildCircle(value, size, th, ss, style == CircleEmpty);
+                    case Square: [[fallthrough]];
+                    case SquareEmpty: return buildSquare(value, size, th, 1, style == SquareEmpty);
+                    case AASquare: [[fallthrough]];
+                    case AASquareEmpty: return buildSquare(value, size, th, ss, style == AASquareEmpty);
+                    case Font: assert(false); return atlas::Buffer(*size.width * *size.height);
+                }
+                assert(false);
+                return atlas::Buffer(*size.width * *size.height);
+            }
+            static auto buildSolid(uint8_t value, ImageSize size) -> atlas::Buffer
+            {
+                auto width = unbox<size_t>(size.width);
+                auto height = unbox<size_t>(size.height);
+
+                auto image = atlas::Buffer(width * height, 0x00);
+
+                auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1, uint8_t value) {
+                    for (auto const yi: stdv::iota(y0, y1))
+                        for (auto const xi: stdv::iota(x0, x1))
+                            image[(yi * width) + xi] = value;
+                };
+
+                auto xC = width / 2;
+                auto y0 = height / 4;
+                auto y1 = height / 2;
+                auto y2 = 3 * height / 4;
+
+                if (value & (1 << 0))
+                    fillRect(0, xC, y2, height, 0xFF);
+                if (value & (1 << 1))
+                    fillRect(0, xC, y1, y2, 0xFF);
+                if (value & (1 << 2))
+                    fillRect(0, xC, y0, y1, 0xFF);
+                if (value & (1 << 3))
+                    fillRect(xC, width, y2, height, 0xFF);
+                if (value & (1 << 4))
+                    fillRect(xC, width, y1, y2, 0xFF);
+                if (value & (1 << 5))
+                    fillRect(xC, width, y0, y1, 0xFF);
+                if (value & (1 << 6))
+                    fillRect(0, xC, 0, y0, 0xFF);
+                if (value & (1 << 7))
+                    fillRect(xC, width, 0, y0, 0xFF);
+                return image;
+            }
+            static auto buildSquare(uint8_t value, ImageSize size, size_t th, size_t ss, bool empty)
+                -> atlas::Buffer
+            {
+                size = size * static_cast<double>(ss);
+                th *= ss;
+                auto const width = unbox<size_t>(size.width);
+                auto const height = unbox<size_t>(size.height);
+                if (width / 2 <= th * 4)
+                    empty = false;
+                if (height / 4 <= th * 4)
+                    empty = false;
+                auto image = atlas::Buffer(width * height, 0x00);
+                auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1, uint8_t value) {
+                    for (auto const yi: stdv::iota(y0, y1))
+                        for (auto const xi: stdv::iota(x0, x1))
+                            image[(yi * width) + xi] = value;
+                };
+
+                auto const x0 = th / 2;
+                auto const x1 = (width / 2) - (th / 2);
+                auto const x2 = x1 + th;
+                auto const x3 = x0 + width - th;
+
+                auto const y0 = th / 2;
+                auto const y1 = (height / 4) - (th / 2);
+                auto const y2 = y1 + th;
+                auto const y3 = (height / 2) - (th / 2);
+                auto const y4 = y3 + th;
+                auto const y5 = (3 * height / 4) - (th / 2);
+                auto const y6 = y5 + th;
+                auto const y7 = y0 + height - th;
+
+                if (empty || (value & (1 << 0)))
+                    fillRect(x0, x1, y6, y7, 0xFF);
+                if (empty && !(value & (1 << 0)))
+                    fillRect(x0 + th, x1 - th, y6 + th, y7 - th, 0x00);
+                if (empty || (value & (1 << 1)))
+                    fillRect(x0, x1, y4, y5, 0xFF);
+                if (empty && !(value & (1 << 1)))
+                    fillRect(x0 + th, x1 - th, y4 + th, y5 - th, 0x00);
+                if (empty || (value & (1 << 2)))
+                    fillRect(x0, x1, y2, y3, 0xFF);
+                if (empty && !(value & (1 << 2)))
+                    fillRect(x0 + th, x1 - th, y2 + th, y3 - th, 0x00);
+
+                if (empty || (value & (1 << 3)))
+                    fillRect(x2, x3, y6, y7, 0xFF);
+                if (empty && !(value & (1 << 3)))
+                    fillRect(x2 + th, x3 - th, y6 + th, y7 - th, 0x00);
+                if (empty || (value & (1 << 4)))
+                    fillRect(x2, x3, y4, y5, 0xFF);
+                if (empty && !(value & (1 << 4)))
+                    fillRect(x2 + th, x3 - th, y4 + th, y5 - th, 0x00);
+                if (empty || (value & (1 << 5)))
+                    fillRect(x2, x3, y2, y3, 0xFF);
+                if (empty && !(value & (1 << 5)))
+                    fillRect(x2 + th, x3 - th, y2 + th, y3 - th, 0x00);
+
+                if (empty || (value & (1 << 6)))
+                    fillRect(x0, x1, y0, y1, 0xFF);
+                if (empty && !(value & (1 << 6)))
+                    fillRect(x0 + th, x1 - th, y0 + th, y1 - th, 0x00);
+                if (empty || (value & (1 << 7)))
+                    fillRect(x2, x3, y0, y1, 0xFF);
+                if (empty && !(value & (1 << 7)))
+                    fillRect(x2 + th, x3 - th, y0 + th, y1 - th, 0x00);
+                return downsample(image, 1, size, size / static_cast<double>(ss));
+            }
+
+            static auto buildCircle(uint8_t value, ImageSize size, size_t th, size_t ss, bool empty)
+                -> atlas::Buffer
+            {
+                auto width = unbox<size_t>(size.width);
+                auto height = unbox<size_t>(size.height);
+                if (width / 2 <= th * 4)
+                    empty = false;
+                if (height / 4 <= th * 4)
+                    empty = false;
+
+                width *= ss;
+                height *= ss;
+                th *= ss;
+                auto image = atlas::Buffer(width * height, 0x00);
+                auto r = static_cast<double>(std::min(width / 2, height / 4) - th) / 2;
+
+                auto const filCirc = [&](double x, double y, double radius, uint8_t value) {
+                    auto x0 = static_cast<size_t>(std::floor(x - radius));
+                    auto x1 = static_cast<size_t>(std::ceil(x + radius));
+                    x0 = std::clamp<size_t>(x0, 0, width);
+                    x1 = std::clamp<size_t>(x1, 0, width);
+
+                    auto y0 = static_cast<size_t>(std::floor(y - radius));
+                    auto y1 = static_cast<size_t>(std::ceil(y + radius));
+                    y0 = std::clamp<size_t>(y0, 0, height);
+                    y1 = std::clamp<size_t>(y1, 0, height);
+
+                    for (auto const yi: stdv::iota(y0, y1))
+                        for (auto const xi: stdv::iota(x0, x1))
+                        {
+                            auto dx = x - static_cast<double>(xi);
+                            auto dy = y - static_cast<double>(yi);
+                            if (dx * dx + dy * dy <= radius * radius)
+                                image[(yi * width) + xi] = value;
+                        }
+                };
+
+                auto const x0 = static_cast<double>(width) / 4;
+                auto const x1 = 3 * x0;
+
+                auto const y0 = static_cast<double>(height) / 8;
+                auto const y1 = y0 * 3;
+                auto const y2 = y0 * 5;
+                auto const y3 = y0 * 7;
+
+                auto const rIn = r - static_cast<double>(th);
+
+                if (empty || (value & (1 << 0)))
+                    filCirc(x0, y3, r, 0xFF);
+                if (empty && !(value & (1 << 0)))
+                    filCirc(x0, y3, rIn, 0x00);
+                if (empty || (value & (1 << 1)))
+                    filCirc(x0, y2, r, 0xFF);
+                if (empty && !(value & (1 << 1)))
+                    filCirc(x0, y2, rIn, 0x00);
+                if (empty || (value & (1 << 2)))
+                    filCirc(x0, y1, r, 0xFF);
+                if (empty && !(value & (1 << 2)))
+                    filCirc(x0, y1, rIn, 0x00);
+
+                if (empty || (value & (1 << 3)))
+                    filCirc(x1, y3, r, 0xFF);
+                if (empty && !(value & (1 << 3)))
+                    filCirc(x1, y3, rIn, 0x00);
+                if (empty || (value & (1 << 4)))
+                    filCirc(x1, y2, r, 0xFF);
+                if (empty && !(value & (1 << 4)))
+                    filCirc(x1, y2, rIn, 0x00);
+                if (empty || (value & (1 << 5)))
+                    filCirc(x1, y1, r, 0xFF);
+                if (empty && !(value & (1 << 5)))
+                    filCirc(x1, y1, rIn, 0x00);
+
+                if (empty || (value & (1 << 6)))
+                    filCirc(x0, y0, r, 0xFF);
+                if (empty && !(value & (1 << 6)))
+                    filCirc(x0, y0, rIn, 0x00);
+                if (empty || (value & (1 << 7)))
+                    filCirc(x1, y0, r, 0xFF);
+                if (empty && !(value & (1 << 7)))
+                    filCirc(x1, y0, rIn, 0x00);
+
+                return downsample(image, 1, size * static_cast<double>(ss), size);
+            }
+        };
+
+        // }}}
     } // namespace
 } // namespace detail
 
+void BoxDrawingRenderer::setGitDrawingsStyle(BoxDrawingRenderer::GitDrawingsStyle newStyle)
+{
+    using GitBranchStyle = BoxDrawingRenderer::GitDrawingsStyle::BranchStyle;
+    using MergeCommitStyle = BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
+
+    if (arcStyle == ArcStyle::Ellips && newStyle.branchStyle != GitBranchStyle::Thin)
+    {
+        // log warning ??
+        newStyle.arcStyle = ArcStyle::Round;
+    }
+    auto mcLine = [&] {
+        switch (newStyle.mergeCommitStyle)
+        {
+            case MergeCommitStyle::Solid: return detail::Line::Heavy;
+            case MergeCommitStyle::Bullet: return detail::Line::Double;
+            default: assert(false); return detail::Line::Double;
+        }
+    }();
+    auto branchLine = [&] {
+        switch (newStyle.branchStyle)
+        {
+            case GitBranchStyle::Thin: return detail::Line::Light;
+            case GitBranchStyle::Thick: return detail::Line::Heavy;
+            case GitBranchStyle::Double: return detail::Line::Double;
+            case GitBranchStyle::None: return detail::Line::NoLine;
+            default: assert(false); return detail::Line::Light;
+        }
+    }();
+    gitArcStyle = newStyle.arcStyle;
+    detail::branchDrawingDefinitions = detail::getBranchBoxes(mcLine, branchLine);
+}
+void BoxDrawingRenderer::setBraileStyle(BoxDrawingRenderer::BraileStyle newStyle)
+{
+    detail::Braile::setStyle(newStyle);
+}
 void BoxDrawingRenderer::setRenderTarget(RenderTarget& renderTarget,
                                          DirectMappingAllocator& directMappingAllocator)
 {
@@ -939,14 +1305,6 @@ bool BoxDrawingRenderer::render(vtbackend::LineOffset line,
     return true;
 }
 
-constexpr inline bool containsNonCanonicalLines(char32_t codepoint)
-{
-    if (codepoint < 0x2500 || codepoint > 0x257F)
-        return false;
-    auto const& box = detail::BoxDrawingDefinitions[codepoint - 0x2500];
-    return box.diagonalval != detail::NoDiagonal || box.arcval != NoArc;
-}
-
 auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation tileLocation)
     -> optional<TextureAtlas::TileCreateData>
 {
@@ -962,37 +1320,25 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
                                 FRAGMENT_SELECTOR_GLYPH_ALPHA) };
     }
 
-    auto const antialiasing = containsNonCanonicalLines(codepoint);
     atlas::Buffer pixels;
-    if (antialiasing)
-    {
-        auto const supersamplingFactor = []() {
-            auto constexpr EnvName = "SSA_FACTOR";
-            auto* const envValue = getenv(EnvName);
-            if (!envValue)
-                return 2;
-            auto const val = atoi(envValue);
-            if (!(val >= 1 && val <= 8))
-                return 1;
-            return val;
-        }();
-        auto const supersamplingSize = _gridMetrics.cellSize * supersamplingFactor;
-        auto const supersamplingLineThickness = _gridMetrics.underline.thickness * 2;
-        auto tmp = buildBoxElements(codepoint, supersamplingSize, supersamplingLineThickness);
-        if (!tmp)
-            return nullopt;
 
-        // pixels = downsample(*tmp, _gridMetrics.cellSize, supersamplingFactor);
-        pixels = downsample(*tmp, 1, supersamplingSize, _gridMetrics.cellSize);
-    }
-    else
-    {
-        auto tmp = buildBoxElements(codepoint, _gridMetrics.cellSize, _gridMetrics.underline.thickness);
-        if (!tmp)
-            return nullopt;
-        pixels = std::move(*tmp);
-    }
-
+    auto const supersamplingFactor = []() {
+        auto constexpr EnvName = "SSA_FACTOR";
+        auto* const envValue = getenv(EnvName);
+        if (!envValue)
+            return 4;
+        auto const val = atoi(envValue);
+        if (!(val >= 1 && val <= 8))
+            return 1;
+        return val;
+    }();
+    auto tmp = buildBoxElements(codepoint, //
+                                _gridMetrics.cellSize,
+                                _gridMetrics.underline.thickness,
+                                supersamplingFactor);
+    if (!tmp)
+        return nullopt;
+    pixels = *tmp;
     pixels = invertY(pixels, _gridMetrics.cellSize);
 
     return { createTileData(tileLocation,
@@ -1019,19 +1365,21 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
         return a <= codepoint && codepoint <= b;
     };
 
-    return ascending(0x23A1, 0x23A6)      // mathematical square brackets
-           || ascending(0x2500, 0x2590)   // box drawing, block elements
-           || ascending(0x2594, 0x259F)   // Terminal graphic characters
-           || ascending(0x1FB00, 0x1FBAF) // more block sextants
-           || ascending(0x1FBF0, 0x1FBF9) // digits
-           || ascending(0xEE00, 0xEE05)   // progress bar (Fira Code)
-           || codepoint == 0xE0B0         // 
-           || codepoint == 0xE0B2         // 
-           || codepoint == 0xE0B4         // 
-           || codepoint == 0xE0B6         // 
-           || codepoint == 0xE0BA         // 
-           || codepoint == 0xE0BC         // 
-           || codepoint == 0xE0BE         // 
+    return ascending(0x23A1, 0x23A6)                // mathematical square brackets
+           || ascending(0x2500, 0x2590)             // box drawing, block elements
+           || ascending(0x2594, 0x259F)             // Terminal graphic characters
+           || ascending(0x1FB00, 0x1FBAF)           // more block sextants
+           || ascending(0x1FBF0, 0x1FBF9)           // digits
+           || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
+           || detail::isGitBranchDrawing(codepoint) //
+           || detail::Braile::isBraile(codepoint)   //
+           || codepoint == 0xE0B0                   // 
+           || codepoint == 0xE0B2                   // 
+           || codepoint == 0xE0B4                   // 
+           || codepoint == 0xE0B6                   // 
+           || codepoint == 0xE0BA                   // 
+           || codepoint == 0xE0BC                   // 
+           || codepoint == 0xE0BE                   // 
         ;
 }
 
@@ -1061,6 +1409,9 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
             .getlineThickness(_gridMetrics.underline.thickness)
             .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
     };
+
+    if (detail::Braile::isBraile(codepoint))
+        return Braile::build(codepoint, size, _gridMetrics.underline.thickness, 4);
 
     // TODO: just check notcurses-info to get an idea what may be missing
     // clang-format off
@@ -1514,14 +1865,15 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0xEE03: return progressBar().left().filled();
         case 0xEE04: return progressBar().middle().filled();
         case 0xEE05: return progressBar().right().filled();
+        default: break;
     }
-    // clang-format off
+    // clang-format on
 
     return nullopt;
 }
 
-
-auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness){
+auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness)
+{
     auto const height = size.height;
     auto const width = size.width;
     auto const lightThickness = (unsigned) lineThickness;
@@ -1530,24 +1882,22 @@ auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness){
     auto const thickness = thicknessMode == detail::Thickness::Heavy ? heavyThickness : lightThickness;
     auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0x00);
 
-        auto const y0 = (*height / 2) - ((unsigned) thickness / 2);
-        auto const w = (unsigned) thickness;
-        auto const p = unbox<double>(width) / static_cast<double>(dashCount * 2.0);
+    auto const y0 = (*height / 2) - ((unsigned) thickness / 2);
+    auto const w = (unsigned) thickness;
+    auto const p = unbox<double>(width) / static_cast<double>(dashCount * 2.0);
 
-        auto x0 = round(p / 2.0);
-        for ([[maybe_unused]] auto const _: iota(0u, dashCount))
-        {
-            auto const x0l = static_cast<int>(round(x0));
-            for (auto const y: iota(y0, y0 + w))
-                for (auto const x: iota(x0l, x0l + static_cast<int>(p)))
-                    image[(y * unbox(width)) + unsigned(x)] = 0xFF;
-            x0 += unbox<double>(width) / static_cast<double>(dashCount);
-        }
+    auto x0 = round(p / 2.0);
+    for ([[maybe_unused]] auto const _: stdv::iota(0u, dashCount))
+    {
+        auto const x0l = static_cast<int>(round(x0));
+        for (auto const y: stdv::iota(y0, y0 + w))
+            for (auto const x: stdv::iota(x0l, x0l + static_cast<int>(p)))
+                image[(y * unbox(width)) + unsigned(x)] = 0xFF;
+        x0 += unbox<double>(width) / static_cast<double>(dashCount);
+    }
 
-        return image;
-
+    return image;
 }
-
 
 auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
 {
@@ -1564,11 +1914,11 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
     auto const p = unbox<double>(height) / static_cast<double>(dashCount * 2.0);
 
     auto y0 = round(p / 2.0);
-    for ([[maybe_unused]] auto const i: iota(0u, dashCount))
+    for ([[maybe_unused]] auto const i: stdv::iota(0u, dashCount))
     {
         auto const y0l = static_cast<unsigned>(round(y0));
-        for (auto const y: iota(y0l, y0l + static_cast<unsigned>(p)))
-            for (auto const x: iota(x0, x0 + w))
+        for (auto const y: stdv::iota(y0l, y0l + static_cast<unsigned>(p)))
+            for (auto const x: stdv::iota(x0, x0 + w))
                 image[(y * unbox(width)) + unsigned(x)] = 0xFF;
         y0 += unbox<double>(height) / static_cast<double>(dashCount);
     }
@@ -1576,176 +1926,366 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
     return image;
 }
 
-
-
-
-optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
-                                                             ImageSize size,
-                                                             int lineThickness)
+// NOLINTNEXTLINE(*complexity*)
+auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersampling, bool useEllipticArcs)
+    -> std::optional<atlas::Buffer>
 {
-    if (!(codepoint >= 0x2500 && codepoint <= 0x257F))
-        return nullopt;
-
-    auto box = detail::BoxDrawingDefinitions[codepoint - 0x2500];
-
-    auto const height = size.height;
-    auto const width = size.width;
-    auto const horizontalOffset = *height / 2;
-    auto const verticalOffset = *width / 2;
-    auto const lightThickness = (unsigned) lineThickness;
-    auto const heavyThickness = (unsigned) lineThickness * 2;
-
-    auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0x00);
-
     // catch all non-solid single-lines before the quad-render below
-
     if (auto const dashed = box.get_dashed_horizontal())
-    {
         return boxDashedHorizontal(dashed, size, lineThickness);
-    }
 
     if (auto const dashed = box.get_dashed_vertical())
-    {
         return boxDashedVertical(dashed, size, lineThickness);
-    }
 
-    // left & right
-    {
-        auto const left = tuple { box.leftval, 0u, *width / 2, true };
-        auto const right = tuple { box.rightval, *width / 2, *width, false };
-        auto const offset = horizontalOffset;
-
-        auto fillImage = [&](auto ymax, auto xmax, auto x0, auto y0){
-            for (auto const yi: iota(0u, ymax))
-                for (auto const xi: iota(0u, xmax))
-                    image[((y0 + yi) * unbox(width)) + x0 + xi] = 0xFF;
-        };
-        for (auto const& pq: { left, right })
+    using detail::Line;
+    auto const nonDashLine = [](Line line) {
+        switch (line)
         {
-            auto const lm = get<0>(pq);
-            auto const x0 = get<1>(pq);
-            auto const x1 = get<2>(pq);
-            switch (lm)
+            using enum Line;
+            case NoLine:
+            case Light:
+            case Double:
+            case Heavy: return true;
+            case Light2:
+            case Light3:
+            case Light4:
+            case Heavy2:
+            case Heavy3:
+            case Heavy4: return false;
+        }
+        assert(false);
+    };
+    auto const validLines = nonDashLine(box.rightval)    //
+                            && nonDashLine(box.leftval)  //
+                            && nonDashLine(box.upval)    //
+                            && nonDashLine(box.downval)  //
+                            && nonDashLine(box.arcURval) //
+                            && nonDashLine(box.arcULval) //
+                            && nonDashLine(box.arcBRval) //
+                            && nonDashLine(box.arcBLval);
+    if (not validLines)
+        return std::nullopt;
+
+    auto height = unbox<int>(size.height);
+    auto width = unbox<int>(size.width);
+    auto yOffset = height / 2;
+    auto xOffset = width / 2;
+    auto lightTh = lineThickness;
+    auto const ss = box.diagonalval != detail::NoDiagonal      //
+                            || box.arcURval != detail::NoLine  //
+                            || box.arcULval != detail::NoLine  //
+                            || box.arcBLval != detail::NoLine  //
+                            || box.arcBRval != detail::NoLine  //
+                            || box.circleval != detail::NoLine //
+                        ? supersampling
+                        : 1U;
+
+    auto const getZeros = [=](detail::Line value) {
+        struct Center
+        {
+            size_t x0;
+            size_t x1;
+            size_t y0;
+            size_t y1;
+        };
+        switch (value)
+        {
+            using enum detail::Line;
+            case NoLine: return Center(xOffset * ss, xOffset * ss, yOffset * ss, yOffset * ss);
+            case Light:
+                return Center { .x0 = (xOffset - lightTh / 2) * ss,
+                                .x1 = (xOffset - lightTh / 2 + lightTh) * ss,
+                                .y0 = (yOffset - lightTh / 2) * ss,
+                                .y1 = (yOffset - lightTh / 2 + lightTh) * ss };
+            case Double:
+                return Center { .x0 = (xOffset - lightTh / 2 - lightTh) * ss,
+                                .x1 = (xOffset - lightTh / 2 + 2 * lightTh) * ss,
+                                .y0 = (yOffset - lightTh / 2 - lightTh) * ss,
+                                .y1 = (yOffset - lightTh / 2 + 2 * lightTh) * ss };
+            case Heavy:
+                return Center { .x0 = (xOffset - lightTh) * ss,
+                                .x1 = (xOffset + lightTh) * ss,
+                                .y0 = (yOffset - lightTh) * ss,
+                                .y1 = (yOffset + lightTh) * ss };
+            default:
+                // dashed lines are handled explicitly
+                assert(false);
+                return Center(xOffset * ss, xOffset * ss, yOffset * ss, yOffset * ss);
+        }
+    };
+    height *= static_cast<int>(ss);
+    width *= static_cast<int>(ss);
+    yOffset *= static_cast<int>(ss);
+    xOffset *= static_cast<int>(ss);
+    lightTh *= static_cast<int>(ss);
+    auto image = atlas::Buffer(width * height, 0x00);
+
+    auto const getThickness = [=](Line value) -> size_t {
+        switch (value)
+        {
+            case Line::NoLine: return 0;
+            case Line::Light: return lightTh;
+            case Line::Double: return lightTh * 3;
+            case Line::Heavy: return lightTh * 2;
+            default: assert(false); return 0; // dashed lines are handled explicitly
+        }
+    };
+
+    auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1, uint8_t value = 0xFF) {
+        for (auto const yi: stdv::iota(y0, y1))
+            for (auto const xi: stdv::iota(x0, x1))
+                image[(yi * width) + xi] = value;
+    };
+
+    auto drawArc = [=, &image](Arc arc, size_t th, uint8_t value) {
+        auto const x0 = (xOffset / ss - th / ss / 2) * ss;
+        auto const y0 = (yOffset / ss - th / ss / 2) * ss;
+
+        auto const ro = static_cast<double>(std::min({ width - x0, height - y0, x0 + th, y0 + th }));
+        auto const ri = ro - static_cast<double>(th);
+
+        auto [dcx, dcy] = [=] {
+            switch (arc)
             {
-                case detail::NoLine: break;
-                case detail::Light: {
-                    auto const y0 = offset - (lightThickness / 2);
-                    // BoxDrawingLog()("{}: line:{}, x:{}..{}, y:{}..{}",
-                    //                 isFirst ? "left" : "right",
-                    //                 to_stringview(lm),
-                    //                 x0,
-                    //                 x1 - 1,
-                    //                 y0,
-                    //                 y0 + lightThickness - 1,
-                    //                 offset);
-                    fillImage(lightThickness, x1 - x0, x0, y0);
+                case (Arc::UR): return std::make_pair(double(x0) + ro, double(y0) + ro);
+                case (Arc::UL): return std::make_pair(double(x0) - ri, double(y0) + ro);
+                case (Arc::BL): return std::make_pair(double(x0) - ri, double(y0) - ri);
+                case (Arc::BR): return std::make_pair(double(x0) + ro, double(y0) - ri);
+                default: assert(false); return std::make_pair(0., 0.);
+            }
+        }();
+        auto const xQuadrant = [=](auto x) -> bool {
+            switch (arc)
+            {
+                case (Arc::UR): [[fallthrough]];
+                case (Arc::BR): return (x <= 0);
+                case (Arc::UL): [[fallthrough]];
+                case (Arc::BL): return (x >= 0);
+                default: return false;
+            }
+        };
+        auto const yQuadrant = [=](auto y) -> bool {
+            switch (arc)
+            {
+                case (Arc::UR): [[fallthrough]];
+                case (Arc::UL): return (y <= 0);
+                case (Arc::BL): [[fallthrough]];
+                case (Arc::BR): return (y >= 0);
+                default: return false;
+            }
+        };
 
-                    break;
-                }
-                case detail::Double: {
-                    auto y0 = offset - (lightThickness / 2) - lightThickness;
-                    fillImage(lightThickness, x1 - x0, x0, y0);
-
-                    y0 = offset + lightThickness / 2;
-                    fillImage(lightThickness, x1 - x0, x0, y0);
-                    break;
-                }
-                case detail::Heavy: {
-                    auto const y0 = offset - (heavyThickness / 2);
-                    fillImage(heavyThickness, x1 - x0, x0, y0);
-                    break;
-                }
-                case detail::Light2:
-                case detail::Light3:
-                case detail::Light4:
-                case detail::Heavy2:
-                case detail::Heavy3:
-                case detail::Heavy4:
-                    // handled above
-                    assert(false);
-                    return nullopt;
+        for (auto const yi: stdv::iota(0, height))
+        {
+            auto y = static_cast<double>(yi) - dcy + 0.5;
+            if (not yQuadrant(y))
+                continue;
+            y *= y;
+            for (auto const xi: stdv::iota(0, width))
+            {
+                auto x = static_cast<double>(xi) - dcx + 0.5;
+                if (not xQuadrant(x))
+                    continue;
+                x *= x;
+                if ((x + y) <= ro * ro and (x + y) >= ri * ri)
+                    image[(width * yi) + xi] = value;
             }
         }
-    }
+        auto const cx = dcx > static_cast<double>(width) ? width : static_cast<size_t>(dcx);
+        auto const cy = dcy > static_cast<double>(height) ? height : static_cast<size_t>(dcy);
 
-    // up & down
-    // XXX same as (left & right) but with x/y and w/h coords swapped. can we reuse that?
-    {
-        auto const up = tuple { box.downval, 0u, *height / 2, true };
-        auto const down = tuple { box.upval, *height / 2, *height, false };
-        auto const offset = verticalOffset;
-        auto fillImage = [&](auto ymax, auto xmax, auto x0, auto y0){
-            for (auto const yi: iota(0u, ymax))
-                for (auto const xi: iota(0u, xmax))
-                    image[((y0 + yi) * unbox(width)) + x0 + xi] = 0xFF;
-        };
-        for (auto const& pq: { up, down })
-        {
-            auto const lm = get<0>(pq);
-            auto const y0 = get<1>(pq);
-            auto const y1 = get<2>(pq);
-            // auto const isFirst = get<3>(pq);
-            switch (lm)
-            {
-                case detail::NoLine: break;
-                case detail::Light: {
-                    auto const x0 = offset - (lightThickness / 2);
-                    fillImage(y1 - y0, lightThickness, x0, y0);
-                    break;
-                }
-                case detail::Double: {
-                    auto x0 = offset - (lightThickness / 2) - lightThickness;
-                    fillImage(y1 - y0, lightThickness, x0, y0);
-
-                    x0 = offset - lightThickness / 2 + lightThickness;
-                    fillImage(y1 - y0, lightThickness, x0, y0);
-                    break;
-                }
-                case detail::Heavy: {
-                    auto const x0 = offset - ((lightThickness * 3) / 2);
-                    fillImage(y1 - y0, lightThickness * 3, x0, y0);
-                    break;
-                }
-                case detail::Light2:
-                case detail::Light3:
-                case detail::Light4:
-                case detail::Heavy2:
-                case detail::Heavy3:
-                case detail::Heavy4: assert(false && "Cases handled above already."); return nullopt;
-            }
-        }
-    }
+        if (arc == Arc::UR or arc == Arc::BR)
+            fillRect(cx, width, y0, y0 + th, value);
+        if (arc == Arc::UR or arc == Arc::UL)
+            fillRect(x0, x0 + th, cy, height, value);
+        if (arc == Arc::UL or arc == Arc::BL)
+            fillRect(0, cx, y0, y0 + th, value);
+        if (arc == Arc::BL or arc == Arc::BR)
+            fillRect(x0, x0 + th, 0, cy, value);
+    };
 
     if (box.diagonalval != detail::NoDiagonal)
     {
-        auto const a = height.as<double>() / width.as<double>();
-        auto const aInv = 1.0 / a;
+        auto const a = static_cast<double>(height) / static_cast<double>(width);
         using Diagonal = detail::Diagonal;
         if (unsigned(box.diagonalval) & unsigned(Diagonal::Forward))
         {
-            for (auto const y: iota(0u, height.as<unsigned>()))
+            for (auto const y: stdv::iota(0, height))
             {
-                auto const x = int(double(y) * aInv);
-                for (auto const xi: iota(-int(lineThickness) / 2, int(lineThickness) / 2))
-                    image[(y * unbox(width)) + (unsigned) max(0, min(x + xi, unbox<int>(width) - 1))] = 0xFF;
+                auto x0 = static_cast<int>(std::round((double(y) - double(getThickness(Line::Light))) / a));
+                auto x1 = static_cast<int>(std::round((double(y) + double(getThickness(Line::Light))) / a));
+                x0 = std::clamp<int>(x0, 0, width);
+                x1 = std::clamp<int>(x1, 0, width);
+                for (auto const xi: stdv::iota(x0, x1))
+                    image[(y * width) + xi] = 0xFF;
             }
         }
         if (unsigned(box.diagonalval) & unsigned(Diagonal::Backward))
         {
-            for (auto const y: iota(0u, height.as<unsigned>()))
+            for (auto const y: stdv::iota(0, height))
             {
-                auto const x = int(double(*height - y - 1) * aInv);
-                for (auto const xi: iota(-int(lineThickness) / 2, int(lineThickness) / 2))
-                    image[(y * unbox(width)) + (unsigned) max(0, min(x + xi, unbox<int>(width) - 1))] = 0xFF;
+                auto x0 = static_cast<int>(std::round((double(y) + double(getThickness(Line::Light))) / a));
+                auto x1 = static_cast<int>(std::round((double(y) - double(getThickness(Line::Light))) / a));
+                x0 = width - std::clamp<int>(x0, 0, width);
+                x1 = width - std::clamp<int>(x1, 0, width);
+                for (auto const xi: stdv::iota(x0, x1))
+                    image[(y * width) + xi] = 0xFF;
             }
         }
     }
 
-    if (box.arcval != NoArc)
-        detail::drawArc(image, size, lightThickness, box.arcval);
+    {
+        auto const [xRight, xLeft, yUp, yDown] = [=] {
+            auto getThickestZeros = [=](auto a, auto b) {
+                if (a == Line::Double or b == Line::Double)
+                    return getZeros(Line::Double);
+                if (a == Line::Heavy or b == Line::Heavy)
+                    return getZeros(Line::Heavy);
+                if (a == Line::Light or b == Line::Light)
+                    return getZeros(Line::Light);
+                return getZeros(Line::NoLine);
+            };
+            auto zH = getThickestZeros(box.upval, box.downval);
+            auto zV = getThickestZeros(box.rightval, box.leftval);
+            return std::make_tuple(zH.x0, zH.x1, zV.y0, zV.y1);
+        }();
 
+        fillRect(xRight, width, getZeros(box.rightval).y0, getZeros(box.rightval).y1, 0xFF);
+        fillRect(0U, xLeft, getZeros(box.leftval).y0, getZeros(box.leftval).y1, 0xFF);
+        fillRect(getZeros(box.upval).x0, getZeros(box.upval).x1, yUp, height, 0xFF);
+        fillRect(getZeros(box.downval).x0, getZeros(box.downval).x1, 0, yDown, 0xFF);
+    }
+
+    if (not useEllipticArcs)
+    {
+        drawArc(Arc::UR, getThickness(box.arcURval), 0xFF);
+        drawArc(Arc::UL, getThickness(box.arcULval), 0xFF);
+        drawArc(Arc::BL, getThickness(box.arcBLval), 0xFF);
+        drawArc(Arc::BR, getThickness(box.arcBRval), 0xFF);
+    }
+    // erase double line empty center
+    {
+        size_t xRight {};
+        size_t xLeft {};
+        size_t yUp {};
+        size_t yDown {};
+        if (box.leftval == box.rightval or box.upval == Line::Double or box.downval == Line::Double)
+        { // straight or corner
+            xRight = getZeros(Line::Light).x0;
+            xLeft = getZeros(Line::Light).x1;
+        }
+        else
+        {
+            auto maxLine = (box.upval == Line::Heavy or box.downval == Line::Heavy) //
+                               ? Line::Heavy
+                               : Line::Light;
+            xRight = getZeros(maxLine).x1;
+            xLeft = getZeros(maxLine).x0;
+        }
+        if (box.upval == box.downval or box.rightval == Line::Double or box.leftval == Line::Double)
+        { // straight or corner
+            yUp = getZeros(Line::Light).y0;
+            yDown = getZeros(Line::Light).y1;
+        }
+        else
+        {
+            auto maxLine = (box.rightval == Line::Heavy or box.leftval == Line::Heavy) //
+                               ? Line::Heavy
+                               : Line::Light;
+            yUp = getZeros(maxLine).y1;
+            yDown = getZeros(maxLine).y0;
+        }
+        if (box.rightval == Line::Double)
+            fillRect(xRight, width, getZeros(Line::Light).y0, getZeros(Line::Light).y1, 0x00);
+        if (box.leftval == Line::Double)
+            fillRect(0U, xLeft, getZeros(Line::Light).y0, getZeros(Line::Light).y1, 0x00);
+        if (box.upval == Line::Double)
+            fillRect(getZeros(Line::Light).x0, getZeros(Line::Light).x1, yUp, height, 0x00);
+        if (box.downval == Line::Double)
+            fillRect(getZeros(Line::Light).x0, getZeros(Line::Light).x1, 0, yDown, 0x00);
+    }
+
+    if (not useEllipticArcs)
+    {
+        if (box.arcURval == Line::Double)
+            drawArc(Arc::UR, getThickness(Line::Light), 0x00);
+        if (box.arcULval == Line::Double)
+            drawArc(Arc::UL, getThickness(Line::Light), 0x00);
+        if (box.arcBLval == Line::Double)
+            drawArc(Arc::BL, getThickness(Line::Light), 0x00);
+        if (box.arcBRval == Line::Double)
+            drawArc(Arc::BR, getThickness(Line::Light), 0x00);
+    }
+    if (box.circleval != detail::Line::NoLine)
+    {
+        auto fillCircle = [&](double radius, unsigned char value) {
+            for (auto const yi: stdv::iota(0, height))
+                for (auto const xi: stdv::iota(0, width))
+                {
+                    auto y = static_cast<double>(yi) - static_cast<double>(yOffset);
+                    auto x = static_cast<double>(xi) - static_cast<double>(xOffset);
+                    if ((x * x + y * y) <= radius * radius)
+                        image[(yi * width) + xi] = value;
+                }
+        };
+        auto radius = std::round(static_cast<double>(std::min(width, height)) / 2. * 0.75);
+        fillCircle(radius, 0xFF);
+        switch (box.circleval)
+        {
+            case detail::Line::Double: {
+                constexpr auto SpaceThicknessFactor = 1.35; // empirical value
+                constexpr auto MinThicknessFactor = 3.;     // 3 = 2x center + space + outer;
+                auto space = SpaceThicknessFactor * double(getThickness(Line::Light));
+                if (radius < MinThicknessFactor * double(getThickness(Line::Light)) + space)
+                {
+                    auto solidTh = radius - space;
+                    if (solidTh <= 0)
+                        break;
+                    auto inner = 2 * solidTh / 3;
+                    fillCircle(inner + space, 0x00);
+                    fillCircle(inner, 0xFF);
+                }
+                else
+                {
+                    fillCircle(radius - double(getThickness(Line::Light)), 0x00);
+                    fillCircle(radius - double(getThickness(Line::Light)) - space, 0xFF);
+                }
+                break;
+            }
+            case detail::Line::Light: {
+                fillCircle(radius - double(getThickness(Line::Light)), 0x00);
+                break;
+            }
+            default: break;
+        }
+    }
+
+    if (useEllipticArcs)
+    {
+        if (box.arcURval != Line::NoLine)
+            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::UR);
+        if (box.arcULval != Line::NoLine)
+            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::UL);
+        if (box.arcBLval != Line::NoLine)
+            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::BL);
+        if (box.arcBRval != Line::NoLine)
+            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::BR);
+    }
+
+    return downsample(image, 1, size * double(ss), size);
+}
+
+optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
+                                                             ImageSize size,
+                                                             int lineThickness,
+                                                             size_t supersampling)
+{
+    auto box = detail::getBoxDrawing(codepoint);
+    if (not box)
+        return std::nullopt;
+    auto lArcStyle = detail::isGitBranchDrawing(codepoint) ? gitArcStyle : arcStyle;
+    auto image = buildBox(*box, size, lineThickness, supersampling, lArcStyle == ArcStyle::Ellips);
     boxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
-
     return image;
 }
 
