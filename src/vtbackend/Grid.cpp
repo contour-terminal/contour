@@ -525,8 +525,8 @@ void Grid<Cell>::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttri
 
         rotateBuffersRight(n);
 
-        for (Line<Cell>& line: mainPage().subspan(0, unbox<size_t>(n)))
-            line.reset(defaultLineFlags(), defaultAttributes);
+        for (auto const i: ranges::views::iota(0, *n))
+            _lines[i].reset(defaultLineFlags(), defaultAttributes);
         return;
     }
 
