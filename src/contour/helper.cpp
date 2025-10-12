@@ -145,7 +145,7 @@ namespace
                                         session.getScrollX() > 0 ? VTMouseButton::WheelRight
                                                                  : VTMouseButton::WheelLeft,
                                         position);
-            session.resetScrollX();
+            session.resetScrollX(session.getScrollX() % unbox<int>(session.terminal().cellPixelSize().width));
         }
 
         if (std::abs(session.getScrollY()) > unbox<int>(session.terminal().cellPixelSize().height))
@@ -154,7 +154,8 @@ namespace
                                         session.getScrollY() > 0 ? VTMouseButton::WheelUp
                                                                  : VTMouseButton::WheelDown,
                                         position);
-            session.resetScrollY();
+            session.resetScrollY(session.getScrollY()
+                                 % unbox<int>(session.terminal().cellPixelSize().height));
         }
     }
 
@@ -431,26 +432,26 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 
     auto const modifiers = makeModifiers(event->modifiers());
 
+    auto const pixelPosition =
+        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale());
+
     // NOTE: Qt is playing some weird games with the mouse wheel events, i.e. if Alt is pressed
     //       it will send horizontal wheel events instead of vertical ones. We need to compensate
     //       for that here.
 
-    auto const scaledPixelDelta = session.display()->contentScale() * event->pixelDelta();
-    auto const pixelDelta = (modifiers & Modifier::Alt) ? transposed(scaledPixelDelta) : scaledPixelDelta;
-
-    auto const numDegrees =
-        ((modifiers & Modifier::Alt) ? transposed(event->angleDelta()) : event->angleDelta()) / 8;
-
-    auto const pixelPosition =
-        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale());
-
-    if (!pixelDelta.isNull())
+    if (!event->pixelDelta().isNull())
     {
+        auto const scaledPixelDelta = session.display()->contentScale() * event->pixelDelta();
+        auto const pixelDelta = (modifiers & Modifier::Alt) ? transposed(scaledPixelDelta) : scaledPixelDelta;
+
         sendWheelEventForDelta(pixelDelta, pixelPosition, modifiers, session);
         event->accept();
     }
-    else if (!numDegrees.isNull())
+    else if (!event->angleDelta().isNull())
     {
+        auto const numDegrees =
+            ((modifiers & Modifier::Alt) ? transposed(event->angleDelta()) : event->angleDelta()) / 8;
+
         auto const numSteps = numDegrees / 15;
         auto const cellSize = session.terminal().cellPixelSize();
         auto const scaledDelta = QPoint {
