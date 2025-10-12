@@ -29,8 +29,7 @@ namespace
             QString::fromStdString(std::format("#version {}\n", useOpenGLES() ? "300 es" : "330"));
 
         QFile file(shaderFilePath);
-        file.open(QFile::ReadOnly);
-        Require(file.isOpen());
+        Require(file.open(QFile::ReadOnly));
         auto const fileContents = file.readAll();
         return versionHeader + "#line 1\n" + fileContents;
     }
