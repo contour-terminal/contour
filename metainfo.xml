@@ -125,6 +125,7 @@
           <li>Adds ability to name tabs (#1690)</li>
           <li>Adds dynamic loading of conpty.dll to allow mouse mode on Windows 10</li>
           <li>Fix empty history jump (#1781)</li>
+          <li>Fixes crash on full screen scrolling</li>
         </ul>
       </description>
     </release>
