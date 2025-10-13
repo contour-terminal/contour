@@ -427,7 +427,7 @@ int ContourApp::integrationAction()
                                      shell);
             return EXIT_FAILURE;
         }
-        file.open(QFile::ReadOnly);
+        Require(file.open(QFile::ReadOnly));
         auto const contents = file.readAll();
         stream.write(contents.constData(), contents.size());
         return EXIT_SUCCESS;

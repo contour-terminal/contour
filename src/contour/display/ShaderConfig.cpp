@@ -68,16 +68,14 @@ ShaderConfig builtinShaderConfig(ShaderClass shaderClass)
     auto const makeConfig = [](ShaderClass shaderClass) -> ShaderConfig {
         auto const makeSource = [](QString const& filename) -> ShaderSource {
             QFile sharedDefinesFile(":/contour/vtrasterizer/shared_defines.h");
-            sharedDefinesFile.open(QFile::ReadOnly);
-            Require(sharedDefinesFile.isOpen());
+            Require(sharedDefinesFile.open(QFile::ReadOnly));
             auto const sharedDefines = sharedDefinesFile.readAll().toStdString() + "\n#line 1\n";
             auto const versionHeader = std::format("#version {}\n", useOpenGLES() ? "300 es" : "330");
 
             auto const shaderFilePath = ":/contour/display/shaders/" + filename;
 
             QFile file(shaderFilePath);
-            file.open(QFile::ReadOnly);
-            Require(file.isOpen());
+            Require(file.open(QFile::ReadOnly));
             auto const fileContents = file.readAll().toStdString();
 
             auto const fileHeader = versionHeader + sharedDefines;
