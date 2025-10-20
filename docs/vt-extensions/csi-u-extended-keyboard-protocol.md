@@ -51,7 +51,7 @@ Binary      | Decimal | short description
 
 Syntax: `CSI > {flags} u`
 
-By default, `flags` is set to `1`, but `flags` ben a a binary-or'd set of flags to enable.
+By default, `flags` is set to `1`, but `flags` can be a binary-OR'd set of flags to enable.
 
 Passing `0` will act like `1`.
 
