@@ -1,7 +1,7 @@
 ARG VERSION="24.04"
 FROM ubuntu:$VERSION AS builder
 ARG ARCH="x86_64"
-ARG QT_VERSION="6.9.1"
+ARG QT_VERSION="6.10.0"
 
 RUN apt-get update
 RUN apt-get install -y lsb-release software-properties-common gnupg
@@ -24,7 +24,7 @@ RUN chmod +x llvm.sh
 RUN ./llvm.sh 20
 
 WORKDIR /
-RUN wget -q https://download.qt.io/official_releases/qt/6.9/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz
+RUN wget https://download.qt.io/official_releases/qt/6.10/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz
 RUN tar xf qt-everywhere-src-$QT_VERSION.tar.xz
 RUN rm qt-everywhere-src-$QT_VERSION.tar.xz
 WORKDIR qt-everywhere-src-$QT_VERSION
