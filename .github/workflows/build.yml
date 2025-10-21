@@ -63,7 +63,7 @@ jobs:
     outputs:
       followup: ${{ steps.spelling.outputs.followup }}
     steps:
-      - uses: check-spelling/check-spelling@v0.0.24
+      - uses: check-spelling/check-spelling@v0.0.25
         name: Check spelling
         id: spellcheck
         with:
