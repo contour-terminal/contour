@@ -175,11 +175,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     int getScrollX() const noexcept { return _accumulatedScrollX; }
     void addScrollX(int v) noexcept { _accumulatedScrollX += v; }
-    void resetScrollX() noexcept { _accumulatedScrollX = 0; }
+    void resetScrollX(int value) noexcept { _accumulatedScrollX = value; }
 
     int getScrollY() const noexcept { return _accumulatedScrollY; }
     void addScrollY(int v) noexcept { _accumulatedScrollY += v; }
-    void resetScrollY() noexcept { _accumulatedScrollY = 0; }
+    void resetScrollY(int value) noexcept { _accumulatedScrollY = value; }
 
     QString title() const;
     void setTitle(QString const& value) { terminal().setWindowTitle(value.toStdString()); }
