@@ -2,24 +2,14 @@
 
 #include <gsl/span>
 
+#include <QtCore/QBuffer>
+#include <QtCore/QThread>
+#include <QtMultimedia/QAudioSink>
+
 #include <memory>
 
-#include <qbuffer.h>
-#include <qthread.h>
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #include <QtMultimedia/QAudioSink>
-#else
-    #include <QtMultimedia/QAudioOutput>
-#endif
 namespace contour
 {
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-using QtAudioSink = QAudioSink;
-#else
-using QtAudioSink = QAudioOutput;
-#endif
 
 class Audio: public QObject
 {
@@ -41,6 +31,6 @@ class Audio: public QObject
     QByteArray _byteArray;
     QBuffer _audioBuffer;
     QThread _soundThread;
-    std::unique_ptr<QtAudioSink> _audioSink;
+    std::unique_ptr<QAudioSink> _audioSink;
 };
 } // namespace contour

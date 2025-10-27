@@ -20,9 +20,7 @@ class TerminalSessionManager: public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count)
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
     QML_ELEMENT
-#endif
 
   public:
     TerminalSessionManager(ContourGuiApp& app);

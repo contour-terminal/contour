@@ -707,9 +707,8 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
             // Already in expected format
             break;
     }
-        // }}}
+    // }}}
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
     _textureAtlas.gpuTexture.setData(param.location.x.value,
                                      param.location.y.value,
                                      0, // z
@@ -720,17 +719,6 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
                                      QOpenGLTexture::PixelType::UInt8,
                                      bitmapData,
                                      &_transferOptions);
-#else
-    glTexSubImage2D(GL_TEXTURE_2D,
-                    0, // level of detail
-                    param.location.x.value,
-                    param.location.y.value,
-                    unbox<GLsizei>(param.bitmapSize.width),
-                    unbox<GLsizei>(param.bitmapSize.height),
-                    GL_RGBA,          // source format
-                    GL_UNSIGNED_BYTE, // source type
-                    bitmapData);
-#endif
 }
 
 void OpenGLRenderer::renderRectangle(int ix, int iy, Width width, Height height, RGBAColor color)

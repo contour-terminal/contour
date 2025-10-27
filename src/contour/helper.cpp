@@ -78,11 +78,7 @@ namespace
                                            config::WindowMargins margins,
                                            double dpr) noexcept
     {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         auto const position = event->position();
-#else
-        auto const position = event->pos();
-#endif
         auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
         auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
         return PixelCoordinate { .x = PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
@@ -93,11 +89,7 @@ namespace
                                            config::WindowMargins margins,
                                            double dpr) noexcept
     {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         auto const position = event->position();
-#else
-        auto const position = QPointF { static_cast<qreal>(event->x()), static_cast<qreal>(event->y()) };
-#endif
         auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
         auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
         return PixelCoordinate { .x = PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
@@ -108,11 +100,7 @@ namespace
                                            config::WindowMargins margins,
                                            double dpr) noexcept
     {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
         auto const position = event->position();
-#else
-        auto const position = event->posF();
-#endif
         auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
         auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
         return PixelCoordinate { .x = PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
@@ -492,11 +480,7 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
 
 void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     auto const position = event->position().toPoint();
-#else
-    auto const position = event->pos();
-#endif
     session.sendMouseMoveEvent(
         makeModifiers(event->modifiers()),
         makeMouseCellLocation(position.x(), position.y(), session),
