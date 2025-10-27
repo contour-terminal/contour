@@ -44,9 +44,7 @@ class TerminalDisplay: public QQuickItem
     Q_PROPERTY(TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
     Q_PROPERTY(QString profile READ profileName WRITE setProfileName NOTIFY profileNameChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
     QML_ELEMENT
-#endif
 
     TerminalSession* getSessionHelper() { return _session; }
 

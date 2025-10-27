@@ -17,11 +17,7 @@
 #endif
 
 #if defined(CONTOUR_FRONTEND_XCB)
-    #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-        #include <QtGui/QGuiApplication>
-    #else
-        #include <QtX11Extras/QX11Info>
-    #endif
+    #include <QtGui/QGuiApplication>
 #endif
 
 namespace BlurBehind
@@ -43,7 +39,6 @@ namespace
 
     xcb_connection_t* x11Connection()
     {
-    #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         if (!qApp)
             return nullptr;
 
@@ -52,9 +47,6 @@ namespace
             return nullptr;
 
         return native->connection();
-    #else
-        return QX11Info::connection();
-    #endif
     }
 
     optional<XcbPropertyInfo> queryXcbPropertyInfo(QWindow* window, string const& name)

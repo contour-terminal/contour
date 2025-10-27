@@ -4,20 +4,10 @@
 #include <crispy/assert.h>
 
 #include <QtCore/QtGlobal>
-
-#include <format>
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #include <QtGui/QSurfaceFormat>
-
-    #include <QtOpenGL/QOpenGLShaderProgram>
-#else
-    #include <QtGui/QOpenGLShaderProgram>
-    #include <QtGui/QSurfaceFormat>
-#endif
+#include <QtGui/QSurfaceFormat>
+#include <QtOpenGL/QOpenGLShaderProgram>
 
 #include <memory>
-#include <stdexcept>
 #include <string>
 
 namespace contour::display
