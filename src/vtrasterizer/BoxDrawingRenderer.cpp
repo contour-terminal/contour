@@ -1954,6 +1954,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             case Heavy4: return false;
         }
         assert(false);
+        return false;
     };
     auto const validLines = nonDashLine(box.rightval)    //
                             && nonDashLine(box.leftval)  //
