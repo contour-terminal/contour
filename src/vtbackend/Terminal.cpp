@@ -1622,12 +1622,6 @@ void Terminal::setMode(AnsiMode mode, bool enable)
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void Terminal::setMode(DECMode mode, bool enable)
 {
-    if (!isValidDECMode(static_cast<unsigned int>(mode)))
-    {
-        errorLog()("Attempt to {} invalid DEC mode: {}", mode, enable ? "set" : "reset");
-        return;
-    }
-
     if (_modes.frozen(mode))
     {
         if (_modes.enabled(mode) != enable)
