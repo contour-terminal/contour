@@ -777,11 +777,11 @@ jobs:
         with:
           name: contour-ubuntu2404-tests
           path: |
-            build/linux-debug/src/crispy/crispy_test
-            build/linux-debug/src/vtparser/vtparser_test
-            build/linux-debug/src/vtbackend/vtbackend_test
-            build/linux-debug/src/vtbackend/bench-headless
-            build/linux-debug/src/vtrasterizer/vtrasterizer_test
+            out/linux-debug/src/crispy/crispy_test
+            out/linux-debug/src/vtparser/vtparser_test
+            out/linux-debug/src/vtbackend/vtbackend_test
+            out/linux-debug/src/vtbackend/bench-headless
+            out/linux-debug/src/vtrasterizer/vtrasterizer_test
             test/images
           retention-days: 1
   # }}}
@@ -892,9 +892,9 @@ jobs:
           cpack --preset linux-release
           OS_VERSION=${{ matrix.os_version }}
           OS_VERSION=${OS_OVERRIDE/./_}
-          mv -v "./build/linux-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
+          mv -v "./out/linux-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
                 "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-          mv -v "./build/linux-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
+          mv -v "./out/linux-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
                 "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v4
@@ -933,13 +933,13 @@ jobs:
       - name: "install dependencies"
         run: ./scripts/ci-install-run-deps.sh valgrind
       - name: "test: crispy (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/linux-debug/src/crispy/crispy_test
+        run: valgrind --error-exitcode=64 ./out/linux-debug/src/crispy/crispy_test
       - name: "test: vtparser (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/linux-debug/src/vtparser/vtparser_test
+        run: valgrind --error-exitcode=64 ./out/linux-debug/src/vtparser/vtparser_test
       - name: "test: vtbackend (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/linux-debug/src/vtbackend/vtbackend_test
+        run: valgrind --error-exitcode=64 ./out/linux-debug/src/vtbackend/vtbackend_test
       - name: "test: vtrasterizer (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/linux-debug/src/vtrasterizer/vtrasterizer_test
+        run: valgrind --error-exitcode=64 ./out/linux-debug/src/vtrasterizer/vtrasterizer_test
   # }}}
   # {{{ Ubuntu 24.04: Test bench-headless
   test_ubuntu2404_bench_headless:
@@ -971,7 +971,7 @@ jobs:
       - name: "install dependencies"
         run: ./scripts/ci-install-run-deps.sh valgrind
       - name: "bench-headless: ${{ matrix.test_case }}"
-        run: valgrind --error-exitcode=64 ./build/linux-debug/src/vtbackend/bench-headless ${{ matrix.test_case }} size 1
+        run: valgrind --error-exitcode=64 ./out/linux-debug/src/vtbackend/bench-headless ${{ matrix.test_case }} size 1
   # }}}
   # {{{ Ubuntu check matrix
   check_ubuntu2404_matrix_test_matrix:
