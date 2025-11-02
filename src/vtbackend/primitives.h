@@ -743,7 +743,7 @@ constexpr bool isValidAnsiMode(unsigned int mode) noexcept
 std::string to_string(AnsiMode mode);
 std::string to_string(DECMode mode);
 
-constexpr unsigned toDECModeNum(DECMode m)
+constexpr unsigned toDECModeNum(DECMode m) noexcept
 {
     switch (m)
     {
@@ -801,15 +801,25 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         case 5: return DECMode::ReverseVideo;
         case 6: return DECMode::Origin;
         case 7: return DECMode::AutoWrap;
+        // TODO: Ps = 8  -> Auto-repeat Keys (DECARM), VT100.
         case 9: return DECMode::MouseProtocolX10;
         case 10: return DECMode::ShowToolbar;
         case 12: return DECMode::BlinkingCursor;
         case 19: return DECMode::PrinterExtend;
         case 25: return DECMode::VisibleCursor;
         case 30: return DECMode::ShowScrollbar;
+        // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
+        // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
         case 40: return DECMode::AllowColumns80to132;
+        // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
+        // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
+        // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
+        // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
         case 46: return DECMode::DebugLogging;
         case 47: return DECMode::UseAlternateScreen;
+        // TODO: Ps = 6 6  -> Application keypad (DECNKM), VT320.
+        // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the
+        // backarrowKey resource to "true".
         case 69: return DECMode::LeftRightMargin;
         case 80: return DECMode::NoSixelScrolling;
         case 1000: return DECMode::MouseProtocolNormalTracking;

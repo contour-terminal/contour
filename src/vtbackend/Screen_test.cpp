@@ -1456,10 +1456,10 @@ TEST_CASE("DeleteCharacters", "[screen]")
 
     SECTION("outside margin")
     {
-        mock.terminal.setMode(DECMode::LeftRightMargin, true);
-        mock.terminal.setLeftRightMargin(ColumnOffset(1), ColumnOffset(3));
-        screen.moveCursorTo(LineOffset(0), ColumnOffset(0));
-        screen.deleteCharacters(ColumnCount(1));
+        mock.writeToScreen(DECSM(toDECModeNum(DECMode::LeftRightMargin)));
+        mock.writeToScreen(DECSLRM(2, 4));
+        mock.writeToScreen(CUP(1, 1));
+        mock.writeToScreen(DCH(1));
         REQUIRE("12345\n67890\n" == screen.renderMainPageText());
     }
 
@@ -2603,54 +2603,54 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
 TEST_CASE("RequestMode", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = mock.terminal.primaryScreen();
+
+    constexpr auto AnsiInsertModeNum = toAnsiModeNum(AnsiMode::Insert);
 
     SECTION("ANSI modes: enabled")
     {
-        mock.terminal.setMode(AnsiMode::Insert, true); // IRM
-        screen.requestAnsiMode((unsigned) AnsiMode::Insert);
+        mock.writeToScreen(SM(AnsiInsertModeNum));
+        mock.writeToScreen(DECRQM_ANSI(AnsiInsertModeNum));
         REQUIRE(e(mock.terminal.peekInput())
                 == e(std::format("\033[{};1$y", toAnsiModeNum(AnsiMode::Insert))));
     }
 
     SECTION("ANSI modes: disabled")
     {
-        mock.terminal.setMode(AnsiMode::Insert, false); // IRM
-        screen.requestAnsiMode((unsigned) AnsiMode::Insert);
-        REQUIRE(e(mock.terminal.peekInput())
-                == e(std::format("\033[{};2$y", toAnsiModeNum(AnsiMode::Insert))));
+        mock.writeToScreen(RM(AnsiInsertModeNum));
+        mock.writeToScreen(DECRQM_ANSI(AnsiInsertModeNum));
+        REQUIRE(e(mock.terminal.peekInput()) == e(std::format("\033[{};2$y", AnsiInsertModeNum)));
     }
 
     SECTION("ANSI modes: unknown")
     {
-        auto const m = static_cast<AnsiMode>(1234);
-        mock.terminal.setMode(m, true); // DECOM
-        screen.requestAnsiMode((unsigned) m);
-        REQUIRE(e(mock.terminal.peekInput()) == e(std::format("\033[{};0$y", toAnsiModeNum(m))));
+        auto const m = 1234u;
+        mock.writeToScreen(SM(m));
+        mock.writeToScreen(DECRQM_ANSI(m));
+        REQUIRE(e(mock.terminal.peekInput()) == e(std::format("\033[{};0$y", m)));
     }
+
+    constexpr auto DecOriginModeNum = toDECModeNum(DECMode::Origin);
 
     SECTION("DEC modes: enabled")
     {
-        mock.terminal.setMode(DECMode::Origin, true); // DECOM
-        screen.requestDECMode((int) DECMode::Origin);
-        REQUIRE(e(mock.terminal.peekInput())
-                == e(std::format("\033[?{};1$y", toDECModeNum(DECMode::Origin))));
+        mock.writeToScreen(DECSM(DecOriginModeNum));
+        mock.writeToScreen(DECRQM(DecOriginModeNum));
+        REQUIRE(e(mock.terminal.peekInput()) == e(std::format("\033[?{};1$y", DecOriginModeNum)));
     }
 
     SECTION("DEC modes: disabled")
     {
-        mock.terminal.setMode(DECMode::Origin, false); // DECOM
-        screen.requestDECMode((int) DECMode::Origin);
-        REQUIRE(e(mock.terminal.peekInput())
-                == e(std::format("\033[?{};2$y", toDECModeNum(DECMode::Origin))));
+        mock.writeToScreen(DECRM(DecOriginModeNum));
+        mock.writeToScreen(DECRQM(DecOriginModeNum));
+        REQUIRE(e(mock.terminal.peekInput()) == e(std::format("\033[?{};2$y", DecOriginModeNum)));
     }
 
     SECTION("DEC modes: unknown")
     {
-        auto const m = static_cast<DECMode>(1234);
-        mock.terminal.setMode(m, true); // DECOM
-        screen.requestDECMode(static_cast<unsigned>(m));
-        REQUIRE(e(mock.terminal.peekInput()) == e(std::format("\033[?{};0$y", toDECModeNum(m))));
+        auto const m = std::numeric_limits<uint16_t>::max();
+        mock.writeToScreen(DECSM(m));
+        mock.writeToScreen(DECRQM(m));
+        REQUIRE(e(mock.terminal.peekInput()) == e(std::format("\033[?{};0$y", m)));
     }
 }
 

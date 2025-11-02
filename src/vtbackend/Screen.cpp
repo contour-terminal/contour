@@ -1754,9 +1754,7 @@ void Screen<Cell>::requestAnsiMode(unsigned int mode)
         return ModeResponse::NotRecognized;
     }(mode);
 
-    auto const code = toAnsiModeNum(static_cast<AnsiMode>(mode));
-
-    reply("\033[{};{}$y", code, static_cast<unsigned>(modeResponse));
+    reply("\033[{};{}$y", mode, static_cast<unsigned>(modeResponse));
 }
 
 template <CellConcept Cell>
@@ -2391,67 +2389,9 @@ namespace impl
             }
         }
 
-        optional<DECMode> toDECMode(unsigned value)
-        {
-            switch (value)
-            {
-                case 1: return DECMode::UseApplicationCursorKeys;
-                case 2: return DECMode::DesignateCharsetUSASCII;
-                case 3: return DECMode::Columns132;
-                case 4: return DECMode::SmoothScroll;
-                case 5: return DECMode::ReverseVideo;
-                case 6: return DECMode::Origin;
-                case 7: return DECMode::AutoWrap;
-                // TODO: Ps = 8  -> Auto-repeat Keys (DECARM), VT100.
-                case 9: return DECMode::MouseProtocolX10;
-                case 10: return DECMode::ShowToolbar;
-                case 12: return DECMode::BlinkingCursor;
-                case 19: return DECMode::PrinterExtend;
-                case 25: return DECMode::VisibleCursor;
-                case 30: return DECMode::ShowScrollbar;
-                // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
-                // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
-                // TODO: Ps = 4 0  -> Allow 80 -> 132 Mode, xterm.
-                case 40: return DECMode::AllowColumns80to132;
-                // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
-                // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
-                // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
-                // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
-                case 46: return DECMode::DebugLogging;
-                case 47: return DECMode::UseAlternateScreen;
-                // TODO: Ps = 6 6  -> Application keypad (DECNKM), VT320.
-                // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the
-                // backarrowKey resource to "true".
-                case 69: return DECMode::LeftRightMargin;
-                case 80: return DECMode::NoSixelScrolling;
-                case 1000: return DECMode::MouseProtocolNormalTracking;
-                case 1001: return DECMode::MouseProtocolHighlightTracking;
-                case 1002: return DECMode::MouseProtocolButtonTracking;
-                case 1003: return DECMode::MouseProtocolAnyEventTracking;
-                case 1004: return DECMode::FocusTracking;
-                case 1005: return DECMode::MouseExtended;
-                case 1006: return DECMode::MouseSGR;
-                case 1007: return DECMode::MouseAlternateScroll;
-                case 1015: return DECMode::MouseURXVT;
-                case 1016: return DECMode::MouseSGRPixels;
-                case 1047: return DECMode::UseAlternateScreen;
-                case 1048: return DECMode::SaveCursor;
-                case 1049: return DECMode::ExtendedAltScreen;
-                case 2004: return DECMode::BracketedPaste;
-                case 2026: return DECMode::BatchedRendering;
-                case 2027: return DECMode::Unicode;
-                case 2028: return DECMode::TextReflow;
-                case 2029: return DECMode::MousePassiveTracking;
-                case 2030: return DECMode::ReportGridCellSelection;
-                case 2031: return DECMode::ReportColorPaletteUpdated;
-                case 8452: return DECMode::SixelCursorNextToGraphic;
-                default: return nullopt;
-            }
-        }
-
         ApplyResult setModeDEC(Sequence const& seq, size_t modeIndex, bool enable, Terminal& term)
         {
-            if (auto const modeOpt = toDECMode(seq.param(modeIndex)); modeOpt.has_value())
+            if (auto const modeOpt = fromDECModeNum(seq.param(modeIndex)); modeOpt.has_value())
             {
                 term.setMode(modeOpt.value(), enable);
                 return ApplyResult::Ok;
@@ -3033,7 +2973,7 @@ namespace impl
         {
             vector<DECMode> modes;
             for (size_t i = 0; i < seq.parameterCount(); ++i)
-                if (optional<DECMode> mode = toDECMode(seq.param(i)); mode.has_value())
+                if (optional<DECMode> mode = fromDECModeNum(seq.param(i)); mode.has_value())
                     modes.push_back(mode.value());
             terminal.saveModes(modes);
             return ApplyResult::Ok;
@@ -3043,7 +2983,7 @@ namespace impl
         {
             vector<DECMode> modes;
             for (size_t i = 0; i < seq.parameterCount(); ++i)
-                if (optional<DECMode> mode = toDECMode(seq.param(i)); mode.has_value())
+                if (optional<DECMode> mode = fromDECModeNum(seq.param(i)); mode.has_value())
                     modes.push_back(mode.value());
             terminal.restoreModes(modes);
             return ApplyResult::Ok;
