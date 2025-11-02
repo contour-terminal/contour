@@ -154,4 +154,5 @@ cuu
 dcl
 dcs
 fbterm
+stty
 zellij
