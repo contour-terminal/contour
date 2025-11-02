@@ -1762,11 +1762,11 @@ void Screen<Cell>::requestAnsiMode(unsigned int mode)
 template <CellConcept Cell>
 void Screen<Cell>::requestDECMode(unsigned int mode)
 {
-    auto const modeEnum = fromDECModeNum(mode);
-
-    auto const modeResponse = [&]() -> ModeResponse {
+    auto const modeResponse = [this, mode]() -> ModeResponse {
+        auto const modeEnum = fromDECModeNum(mode);
         if (modeEnum.has_value())
         {
+            auto const modeEnum = fromDECModeNum(mode);
             if (_terminal->isModeEnabled(modeEnum.value()))
                 return ModeResponse::Set;
             else

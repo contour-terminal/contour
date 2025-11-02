@@ -833,8 +833,8 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         case 2030: return DECMode::ReportGridCellSelection;
         case 2031: return DECMode::ReportColorPaletteUpdated;
         case 8452: return DECMode::SixelCursorNextToGraphic;
+        default: return std::nullopt;
     }
-    return std::nullopt;
 }
 
 constexpr bool isValidDECMode(unsigned int mode) noexcept
