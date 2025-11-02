@@ -3,7 +3,10 @@
 
 #include <contour/Actions.h>
 #include <contour/ConfigDocumentation.h>
-#include <contour/display/ShaderConfig.h>
+
+#if defined(CONTOUR_FRONTEND_GUI)
+    #include <contour/display/ShaderConfig.h>
+#endif
 
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>

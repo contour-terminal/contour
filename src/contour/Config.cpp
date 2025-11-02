@@ -361,11 +361,13 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
         loadFromEntry("git_drawings", c.gitDrawings);
+#if defined(CONTOUR_FRONTEND_GUI)
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         loadFromEntry("box_arc_style", c.boxArcStyle);
         vtrasterizer::BoxDrawingRenderer::setArcStyle(c.boxArcStyle.value());
         loadFromEntry("braile_style", c.braileStyle);
         vtrasterizer::BoxDrawingRenderer::setBraileStyle(c.braileStyle.value());
+#endif
 
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
         loadFromEntry("input_mapping", c.inputMappings);
