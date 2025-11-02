@@ -14,16 +14,9 @@
 
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #include <QtOpenGL/QOpenGLPixelTransferOptions>
-    #include <QtOpenGL/QOpenGLShaderProgram>
-    #include <QtOpenGL/QOpenGLTexture>
-#else
-    #include <QtGui/QOpenGLPixelTransferOptions>
-    #include <QtGui/QOpenGLShaderProgram>
-    #include <QtGui/QOpenGLTexture>
-#endif
-
+#include <QtOpenGL/QOpenGLPixelTransferOptions>
+#include <QtOpenGL/QOpenGLShaderProgram>
+#include <QtOpenGL/QOpenGLTexture>
 #include <QtQuick/QQuickWindow>
 
 #include <chrono>

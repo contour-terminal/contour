@@ -693,10 +693,8 @@ void TerminalDisplay::paint()
 
     try
     {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
         window()->beginExternalCommands();
         auto const _ = gsl::finally([this]() { window()->endExternalCommands(); });
-#endif
 
         [[maybe_unused]] auto const lastState = _state.fetchAndClear();
 
@@ -1111,10 +1109,8 @@ void TerminalDisplay::copyToClipboard(std::string_view data)
 
 void TerminalDisplay::inspect()
 {
-// Ensure we're invoked on GUI thread when calling doDumpState().
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
+    // Ensure we're invoked on GUI thread when calling doDumpState().
     QMetaObject::invokeMethod(this, &TerminalDisplay::doDumpState, Qt::QueuedConnection);
-#endif
 }
 
 void TerminalDisplay::doDumpState()

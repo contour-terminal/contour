@@ -5,13 +5,9 @@
 #include <crispy/logstore.h>
 #include <crispy/times.h>
 
-#include <cmath>
+#include <QtMultimedia/QMediaDevices>
 
-#include <qbuffer.h>
-#include <qthread.h>
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #include <QtMultimedia/QMediaDevices>
-#endif
+#include <cmath>
 
 using namespace contour;
 
@@ -45,16 +41,8 @@ Audio::Audio()
     f.setSampleRate(44100);
     f.setChannelCount(1);
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     f.setSampleFormat(QAudioFormat::Int16);
     QAudioDevice const info(QMediaDevices::defaultAudioOutput());
-#else
-    f.setSampleSize(16);
-    f.setCodec("audio/pcm");
-    f.setByteOrder(QAudioFormat::LittleEndian);
-    f.setSampleType(QAudioFormat::SignedInt);
-    QAudioDeviceInfo const info(QAudioDeviceInfo::defaultOutputDevice());
-#endif
 
     if (!info.isFormatSupported(f))
     {
@@ -62,11 +50,11 @@ Audio::Audio()
         return;
     }
 
-    _audioSink = std::make_unique<QtAudioSink>(f);
+    _audioSink = std::make_unique<QAudioSink>(f);
 
     _audioSink->moveToThread(&_soundThread);
 
-    connect(_audioSink.get(), &QtAudioSink::stateChanged, this, &Audio::handleStateChanged);
+    connect(_audioSink.get(), &QAudioSink::stateChanged, this, &Audio::handleStateChanged);
     qRegisterMetaType<std::vector<int>>();
     connect(this, &Audio::play, this, &Audio::handlePlayback);
     _soundThread.start();
