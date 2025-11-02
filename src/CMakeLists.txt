@@ -11,6 +11,4 @@ add_subdirectory(vtparser)
 add_subdirectory(vtbackend)
 add_subdirectory(vtrasterizer)
 
-if(CONTOUR_FRONTEND_GUI)
-    add_subdirectory(contour)
-endif()
+add_subdirectory(contour)

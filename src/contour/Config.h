@@ -3,7 +3,10 @@
 
 #include <contour/Actions.h>
 #include <contour/ConfigDocumentation.h>
-#include <contour/display/ShaderConfig.h>
+
+#if defined(CONTOUR_FRONTEND_GUI)
+    #include <contour/display/ShaderConfig.h>
+#endif
 
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
@@ -1566,11 +1569,11 @@ struct std::formatter<vtbackend::Opacity>: formatter<float>
 };
 
 template <>
-struct std::formatter<crispy::strong_hashtable_size>: formatter<uint>
+struct std::formatter<crispy::strong_hashtable_size>: formatter<unsigned>
 {
     auto format(crispy::strong_hashtable_size value, auto& ctx) const
     {
-        return formatter<uint>::format(value.value, ctx);
+        return formatter<unsigned>::format(value.value, ctx);
     }
 };
 
@@ -1617,11 +1620,11 @@ struct std::formatter<vtbackend::StatusDisplayType>: formatter<std::string_view>
 };
 
 template <>
-struct std::formatter<crispy::lru_capacity>: formatter<uint>
+struct std::formatter<crispy::lru_capacity>: formatter<unsigned>
 {
     auto format(crispy::lru_capacity value, auto& ctx) const
     {
-        return formatter<uint>::format(value.value, ctx);
+        return formatter<unsigned>::format(value.value, ctx);
     }
 };
 
