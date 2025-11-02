@@ -173,13 +173,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return true;
     }
 
-    int getScrollX() const noexcept { return _accumulatedScrollX; }
-    void addScrollX(int v) noexcept { _accumulatedScrollX += v; }
-    void resetScrollX(int value) noexcept { _accumulatedScrollX = value; }
-
-    int getScrollY() const noexcept { return _accumulatedScrollY; }
-    void addScrollY(int v) noexcept { _accumulatedScrollY += v; }
-    void resetScrollY(int value) noexcept { _accumulatedScrollY = value; }
+    void addToAccumulatedScroll(crispy::point pixelDelta, crispy::point angleDelta) noexcept;
+    std::tuple<vtbackend::LineOffset, vtbackend::ColumnOffset> consumeScroll() noexcept;
 
     QString title() const;
     void setTitle(QString const& value) { terminal().setWindowTitle(value.toStdString()); }
@@ -461,8 +456,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
 
-    int _accumulatedScrollX;
-    int _accumulatedScrollY;
+    crispy::point _accumulatedPixelScroll;
+    crispy::point _accumulatedAngleScroll;
 
     vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;

@@ -5,7 +5,7 @@
             "name": "contour-common",
             "hidden": true,
             "description": "Common settings for all configurations",
-            "binaryDir": "${sourceDir}/build/${presetName}",
+            "binaryDir": "${sourceDir}/out/${presetName}",
             "cacheVariables": {
                 "CONTOUR_INSTALL_TOOLS": "ON",
                 "CONTOUR_TESTING": "ON",

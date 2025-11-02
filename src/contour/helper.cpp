@@ -113,37 +113,40 @@ namespace
         return QPoint { p.y(), p.x() };
     }
 
-    void sendWheelEventForDelta(QPoint const& delta,
-                                PixelCoordinate const& position,
-                                vtbackend::Modifiers modifiers,
-                                TerminalSession& session)
+    void sendWheelEvent(crispy::point const& pixelDelta,
+                        crispy::point const& angleDelta,
+                        PixelCoordinate const& currentMousePixelPosition,
+                        vtbackend::Modifiers modifiers,
+                        TerminalSession& session)
     {
         using VTMouseButton = vtbackend::MouseButton;
 
-        session.addScrollX(delta.x());
-        session.addScrollY(delta.y());
+        session.addToAccumulatedScroll(pixelDelta, angleDelta);
+        auto const [linesScroll, columnsScroll] = session.consumeScroll();
 
-        inputLog()("[{}] Accumulate scroll with current value {}",
+        inputLog()("[{}] Accumulate scroll with by value {} pixelDelta / {} angleDelta, {} lines, {} columns "
+                   "(against {})",
                    modifiers,
-                   crispy::point { .x = session.getScrollX(), .y = session.getScrollY() });
+                   pixelDelta,
+                   angleDelta,
+                   linesScroll,
+                   columnsScroll,
+                   session.terminal().cellPixelSize());
 
-        if (std::abs(session.getScrollX()) > unbox<int>(session.terminal().cellPixelSize().width))
+        auto const horizontalScrollEvent =
+            columnsScroll.as<int>() > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
+
+        for (int i = 0; i < std::abs(columnsScroll.as<int>()); ++i)
         {
-            session.sendMousePressEvent(modifiers,
-                                        session.getScrollX() > 0 ? VTMouseButton::WheelRight
-                                                                 : VTMouseButton::WheelLeft,
-                                        position);
-            session.resetScrollX(session.getScrollX() % unbox<int>(session.terminal().cellPixelSize().width));
+            session.sendMousePressEvent(modifiers, horizontalScrollEvent, currentMousePixelPosition);
         }
 
-        if (std::abs(session.getScrollY()) > unbox<int>(session.terminal().cellPixelSize().height))
+        auto const verticalScrollEvent =
+            linesScroll.as<int>() > 0 ? VTMouseButton::WheelUp : VTMouseButton::WheelDown;
+
+        for (int i = 0; i < std::abs(linesScroll.as<int>()); ++i)
         {
-            session.sendMousePressEvent(modifiers,
-                                        session.getScrollY() > 0 ? VTMouseButton::WheelUp
-                                                                 : VTMouseButton::WheelDown,
-                                        position);
-            session.resetScrollY(session.getScrollY()
-                                 % unbox<int>(session.terminal().cellPixelSize().height));
+            session.sendMousePressEvent(modifiers, verticalScrollEvent, currentMousePixelPosition);
         }
     }
 
@@ -416,6 +419,9 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
 void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 {
+    if (event->pixelDelta().isNull() && event->angleDelta().isNull())
+        return;
+
     using vtbackend::Modifier;
 
     auto const modifiers = makeModifiers(event->modifiers());
@@ -427,28 +433,31 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     //       it will send horizontal wheel events instead of vertical ones. We need to compensate
     //       for that here.
 
-    if (!event->pixelDelta().isNull())
-    {
+    auto const pixelDelta = [&]() -> crispy::point {
+        if (event->pixelDelta().isNull())
+            return { .x = 0, .y = 0 };
+
         auto const scaledPixelDelta = session.display()->contentScale() * event->pixelDelta();
-        auto const pixelDelta = (modifiers & Modifier::Alt) ? transposed(scaledPixelDelta) : scaledPixelDelta;
+        auto const x = scaledPixelDelta.x();
+        auto const y = scaledPixelDelta.y();
+        if (modifiers & Modifier::Alt)
+            return { .x = y, .y = x };
+        else
+            return { .x = x, .y = y };
+    }();
 
-        sendWheelEventForDelta(pixelDelta, pixelPosition, modifiers, session);
-        event->accept();
-    }
-    else if (!event->angleDelta().isNull())
-    {
+    auto const angleDelta = [&]() -> crispy::point {
+        if (event->angleDelta().isNull())
+            return { .x = 0, .y = 0 };
+
         auto const numDegrees =
-            ((modifiers & Modifier::Alt) ? transposed(event->angleDelta()) : event->angleDelta()) / 8;
+            ((modifiers & Modifier::Alt) ? transposed(event->angleDelta()) : event->angleDelta());
 
-        auto const numSteps = numDegrees / 15;
-        auto const cellSize = session.terminal().cellPixelSize();
-        auto const scaledDelta = QPoint {
-            numSteps.x() * unbox<int>(cellSize.width),
-            numSteps.y() * unbox<int>(cellSize.height),
-        };
-        sendWheelEventForDelta(scaledDelta, pixelPosition, modifiers, session);
-        event->accept();
-    }
+        return { .x = numDegrees.x(), .y = numDegrees.y() };
+    }();
+
+    sendWheelEvent(pixelDelta, angleDelta, pixelPosition, modifiers, session);
+    event->accept();
 }
 
 void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)

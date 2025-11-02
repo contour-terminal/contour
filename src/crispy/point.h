@@ -2,7 +2,6 @@
 #pragma once
 
 #include <format>
-#include <ostream>
 
 namespace crispy
 {
@@ -11,6 +10,9 @@ struct [[nodiscard]] point
 {
     int x {};
     int y {};
+
+    constexpr bool operator!() const noexcept { return x == 0 && y == 0; }
+    constexpr operator bool() const noexcept { return x != 0 || y != 0; }
 };
 
 template <typename T>
@@ -26,6 +28,30 @@ constexpr point operator*(point p, double s) noexcept
     };
 }
 
+constexpr point operator/(point p, double s) noexcept
+{
+    return point {
+        .x = static_cast<int>(static_cast<double>(p.x) / s),
+        .y = static_cast<int>(static_cast<double>(p.y) / s),
+    };
+}
+
+constexpr point operator*(point a, point b) noexcept
+{
+    return point {
+        .x = a.x * b.x,
+        .y = a.y * b.y,
+    };
+}
+
+constexpr point operator/(point a, point b) noexcept
+{
+    return point {
+        .x = a.x / b.x,
+        .y = a.y / b.y,
+    };
+}
+
 constexpr point operator+(point a, point b) noexcept
 {
     return point { .x = a.x + b.x, .y = a.y + b.y };
@@ -35,6 +61,13 @@ constexpr point& operator+=(point& a, point b) noexcept
 {
     a.x += b.x;
     a.y += b.y;
+    return a;
+}
+
+constexpr point& operator-=(point& a, point b) noexcept
+{
+    a.x -= b.x;
+    a.y -= b.y;
     return a;
 }
 
