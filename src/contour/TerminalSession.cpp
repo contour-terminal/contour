@@ -234,8 +234,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _profile { *_config.profile(_profileName) },
     _app { app },
     _currentColorPreference { app.colorPreference() },
-    _accumulatedScrollX { 0 },
-    _accumulatedScrollY { 0 },
+    _accumulatedPixelScroll {},
+    _accumulatedAngleScroll {},
     _terminal { *this,
                 std::move(pty),
                 createSettingsFromConfig(_config, _profile, _currentColorPreference),
@@ -802,6 +802,50 @@ void TerminalSession::requestWindowResize(Width width, Height height)
 
     sessionLog()("Application request to resize window: {}x{} pixels", width, height);
     _display->post([this, width, height]() { _display->resizeWindow(width, height); });
+}
+
+void TerminalSession::addToAccumulatedScroll(crispy::point pixelDelta, crispy::point angleDelta) noexcept
+{
+    if (angleDelta && !pixelDelta)
+        _accumulatedPixelScroll = {};
+    else
+        _accumulatedPixelScroll += pixelDelta;
+
+    _accumulatedAngleScroll += angleDelta;
+}
+
+std::tuple<LineOffset, ColumnOffset> TerminalSession::consumeScroll() noexcept
+{
+    if (_accumulatedPixelScroll)
+    {
+        auto const pixelStepSize = crispy::point {
+            .x = _display->cellSize().width.as<int>(),
+            .y = _display->cellSize().height.as<int>(),
+        };
+        auto const pixelSteps = _accumulatedPixelScroll / pixelStepSize;
+
+        if (pixelSteps)
+        {
+            _accumulatedPixelScroll -= pixelSteps * pixelStepSize;
+            _accumulatedAngleScroll = {};
+
+            return {
+                LineOffset::cast_from(pixelSteps.y),
+                ColumnOffset::cast_from(pixelSteps.x),
+            };
+        }
+    }
+
+    auto const angleStepSize = double { 8 * 5 };
+    auto const angleSteps = _accumulatedAngleScroll / angleStepSize;
+
+    _accumulatedAngleScroll -= angleSteps * angleStepSize;
+    _accumulatedPixelScroll = {};
+
+    return {
+        LineOffset::cast_from(angleSteps.y),
+        ColumnOffset::cast_from(angleSteps.x),
+    };
 }
 
 QString TerminalSession::title() const
