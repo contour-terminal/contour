@@ -130,6 +130,7 @@
           <li>Fixes double line box drawing characters</li>
           <li>Adds new arc style for box drawing characters</li>
           <li>Adds multiple rendering options for braille characters</li>
+          <li>Bugfix DECRQM (Dec Request Mode) response (#1797)</li>
         </ul>
       </description>
     </release>

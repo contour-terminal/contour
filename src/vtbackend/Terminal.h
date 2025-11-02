@@ -85,14 +85,11 @@ class Modes
 
     [[nodiscard]] bool frozen(DECMode mode) const noexcept
     {
-        assert(isValidDECMode(static_cast<unsigned int>(mode)));
         return _decFrozen.test(static_cast<size_t>(mode));
     }
 
     void freeze(DECMode mode)
     {
-        assert(isValidDECMode(static_cast<unsigned int>(mode)));
-
         if (mode == DECMode::BatchedRendering)
         {
             errorLog()("Attempt to freeze batched rendering. Ignoring.");
@@ -105,7 +102,6 @@ class Modes
 
     void unfreeze(DECMode mode)
     {
-        assert(isValidDECMode(static_cast<unsigned int>(mode)));
         _decFrozen.set(static_cast<size_t>(mode), false);
         terminalLog()("Unfreezing permanently-{} DEC mode {}.", mode, enabled(mode));
     }

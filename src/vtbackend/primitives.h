@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <variant>
@@ -742,7 +743,7 @@ constexpr bool isValidAnsiMode(unsigned int mode) noexcept
 std::string to_string(AnsiMode mode);
 std::string to_string(DECMode mode);
 
-constexpr unsigned toDECModeNum(DECMode m)
+constexpr unsigned toDECModeNum(DECMode m) noexcept
 {
     switch (m)
     {
@@ -789,53 +790,66 @@ constexpr unsigned toDECModeNum(DECMode m)
     return static_cast<unsigned>(m);
 }
 
+constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
+{
+    switch (modeNum)
+    {
+        case 1: return DECMode::UseApplicationCursorKeys;
+        case 2: return DECMode::DesignateCharsetUSASCII;
+        case 3: return DECMode::Columns132;
+        case 4: return DECMode::SmoothScroll;
+        case 5: return DECMode::ReverseVideo;
+        case 6: return DECMode::Origin;
+        case 7: return DECMode::AutoWrap;
+        // TODO: Ps = 8  -> Auto-repeat Keys (DECARM), VT100.
+        case 9: return DECMode::MouseProtocolX10;
+        case 10: return DECMode::ShowToolbar;
+        case 12: return DECMode::BlinkingCursor;
+        case 19: return DECMode::PrinterExtend;
+        case 25: return DECMode::VisibleCursor;
+        case 30: return DECMode::ShowScrollbar;
+        // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
+        // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
+        case 40: return DECMode::AllowColumns80to132;
+        // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
+        // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
+        // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
+        // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
+        case 46: return DECMode::DebugLogging;
+        case 47: return DECMode::UseAlternateScreen;
+        // TODO: Ps = 6 6  -> Application keypad (DECNKM), VT320.
+        // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the
+        // backarrowKey resource to "true".
+        case 69: return DECMode::LeftRightMargin;
+        case 80: return DECMode::NoSixelScrolling;
+        case 1000: return DECMode::MouseProtocolNormalTracking;
+        case 1001: return DECMode::MouseProtocolHighlightTracking;
+        case 1002: return DECMode::MouseProtocolButtonTracking;
+        case 1003: return DECMode::MouseProtocolAnyEventTracking;
+        case 1004: return DECMode::FocusTracking;
+        case 1005: return DECMode::MouseExtended;
+        case 1006: return DECMode::MouseSGR;
+        case 1007: return DECMode::MouseAlternateScroll;
+        case 1015: return DECMode::MouseURXVT;
+        case 1016: return DECMode::MouseSGRPixels;
+        case 1048: return DECMode::SaveCursor;
+        case 1049: return DECMode::ExtendedAltScreen;
+        case 1070: return DECMode::UsePrivateColorRegisters;
+        case 2004: return DECMode::BracketedPaste;
+        case 2026: return DECMode::BatchedRendering;
+        case 2027: return DECMode::Unicode;
+        case 2028: return DECMode::TextReflow;
+        case 2029: return DECMode::MousePassiveTracking;
+        case 2030: return DECMode::ReportGridCellSelection;
+        case 2031: return DECMode::ReportColorPaletteUpdated;
+        case 8452: return DECMode::SixelCursorNextToGraphic;
+        default: return std::nullopt;
+    }
+}
+
 constexpr bool isValidDECMode(unsigned int mode) noexcept
 {
-    switch (static_cast<DECMode>(mode))
-    {
-        case DECMode::UseApplicationCursorKeys:
-        case DECMode::DesignateCharsetUSASCII:
-        case DECMode::Columns132:
-        case DECMode::SmoothScroll:
-        case DECMode::ReverseVideo:
-        case DECMode::MouseProtocolX10:
-        case DECMode::MouseProtocolNormalTracking:
-        case DECMode::MouseProtocolHighlightTracking:
-        case DECMode::MouseProtocolButtonTracking:
-        case DECMode::MouseProtocolAnyEventTracking:
-        case DECMode::SaveCursor:
-        case DECMode::ExtendedAltScreen:
-        case DECMode::Origin:
-        case DECMode::AutoWrap:
-        case DECMode::PrinterExtend:
-        case DECMode::LeftRightMargin:
-        case DECMode::ShowToolbar:
-        case DECMode::BlinkingCursor:
-        case DECMode::VisibleCursor:
-        case DECMode::ShowScrollbar:
-        case DECMode::AllowColumns80to132:
-        case DECMode::DebugLogging:
-        case DECMode::UseAlternateScreen:
-        case DECMode::BracketedPaste:
-        case DECMode::FocusTracking:
-        case DECMode::NoSixelScrolling:
-        case DECMode::UsePrivateColorRegisters:
-        case DECMode::MouseExtended:
-        case DECMode::MouseSGR:
-        case DECMode::MouseURXVT:
-        case DECMode::MouseSGRPixels:
-        case DECMode::MouseAlternateScroll:
-        case DECMode::MousePassiveTracking:
-        case DECMode::ReportGridCellSelection:
-        case DECMode::ReportColorPaletteUpdated:
-        case DECMode::BatchedRendering:
-        case DECMode::Unicode:
-        case DECMode::TextReflow:
-        case DECMode::SixelCursorNextToGraphic:
-            //.
-            return true;
-    }
-    return false;
+    return fromDECModeNum(mode).has_value();
 }
 
 constexpr DynamicColorName getChangeDynamicColorCommand(unsigned value)
