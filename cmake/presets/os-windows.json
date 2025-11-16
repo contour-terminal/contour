@@ -16,7 +16,7 @@
             },
             "cacheVariables": {
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
-                "CMAKE_PREFIX_PATH": "C:/Qt/6.6.1/msvc2019_64",
+                "CMAKE_PREFIX_PATH": "C:/Qt/6.10.0/msvc2022_64",
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_SYSTEM_VERSION": "10",
                 "CMAKE_VERBOSE_MAKEFILE": "ON",
