@@ -24,7 +24,9 @@ message(STATUS "Qt components: ${QT_COMPONENTS}")
 
 find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 
-add_subdirectory(display)
+if(CONTOUR_FRONTEND_GUI)
+    add_subdirectory(display)
+endif()
 
 if(APPLE)
     #set(CMAKE_INSTALL_RPATH "@executable_path")
@@ -35,29 +37,32 @@ if(APPLE)
     find_package(Qt6 COMPONENTS Core Quick REQUIRED)
 endif()
 
+set(_header_files
+    Actions.h
+    CaptureScreen.h
+    Config.h
+    ContourApp.h
+)
 set(_source_files
-    CaptureScreen.cpp CaptureScreen.h
+    Actions.cpp
+    CaptureScreen.cpp
+    Config.cpp
+    ContourApp.cpp
     main.cpp
 )
 
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND _header_files
-        Actions.h
         Audio.h
         BlurBehind.h
-        Config.h
-        ContourApp.h
         ContourGuiApp.h
         TerminalSession.h
         TerminalSessionManager.h
         helper.h
     )
     list(APPEND _source_files
-        Actions.cpp
         Audio.cpp
         BlurBehind.cpp
-        Config.cpp
-        ContourApp.cpp
         ContourGuiApp.cpp
         TerminalSession.cpp
         TerminalSessionManager.cpp
@@ -167,10 +172,9 @@ endif()
 
 target_link_libraries(contour
     PRIVATE
-    ContourTerminalDisplay
     crispy::core
     vtbackend
-    vtrasterizer
+    Qt6::Core
     ${YAML_CPP_LIBRARIES}
 )
 
@@ -181,7 +185,8 @@ if(CONTOUR_FRONTEND_GUI)
     endif()
     target_link_libraries(contour
         PRIVATE
-        Qt6::Core
+        vtrasterizer
+        ContourTerminalDisplay
         Qt6::Core5Compat
         Qt6::Multimedia
         Qt6::Network

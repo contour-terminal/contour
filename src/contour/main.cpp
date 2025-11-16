@@ -1,5 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
+
+#if defined(CONTOUR_FRONTEND_GUI)
+    #include <contour/ContourGuiApp.h>
+#else
+    #include <contour/ContourApp.h>
+#endif
+
+#include <QtCore/QByteArray>
+#include <QtCore/QString>
+
+#if __has_include(<QtCore/QtLogging>)
+    #include <QtCore/QtLogging>
+#endif
 
 #if defined(_WIN32)
     #include <cstdio>

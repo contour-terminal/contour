@@ -30,5 +30,12 @@ endif()
 
 target_include_directories(ContourTerminalDisplay PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/../..")
 target_link_libraries(ContourTerminalDisplay vtrasterizer)
-target_link_libraries(ContourTerminalDisplay Qt6::Core Qt6::Gui Qt6::OpenGL Qt6::Multimedia Qt6::Quick Qt6::QuickControls2)
+target_link_libraries(ContourTerminalDisplay
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Multimedia
+    Qt6::OpenGL
+    Qt6::Quick
+    Qt6::QuickControls2
+)
 set_target_properties(ContourTerminalDisplay PROPERTIES AUTOMOC ON)
