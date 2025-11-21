@@ -349,10 +349,8 @@ void ViCommands::executeYank(ViMotion motion, unsigned count)
             break;
         }
         default: {
-            auto const [from, to] = translateToCellRange(motion, count);
-            // motion is inclusive but for yank we want to exclude the last cell which is the first cell of
-            // the next word
-            executeYank(from, { .line = to.line, .column = to.column - 1 });
+            auto const [from, to] = translateToCellRange(motion, count).ordered();
+            executeYank(from, to);
         }
         break;
     }

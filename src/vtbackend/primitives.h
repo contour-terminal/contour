@@ -175,6 +175,7 @@ constexpr CellLocation operator-(CellLocation c, ColumnOffset x) noexcept
 {
     return CellLocation { .line = c.line, .column = c.column - x };
 }
+
 // Constructs a top-left and bottom-right coordinate-pair from given input.
 constexpr std::pair<CellLocation, CellLocation> orderedPoints(CellLocation a, CellLocation b) noexcept
 {
@@ -196,6 +197,12 @@ struct CellLocationRange
 {
     CellLocation first;
     CellLocation second;
+
+    [[nodiscard]] CellLocationRange ordered() const noexcept
+    {
+        auto [a, b] = orderedPoints(first, second);
+        return CellLocationRange { .first = a, .second = b };
+    }
 
     [[nodiscard]] bool contains(CellLocation location) const noexcept
     {
