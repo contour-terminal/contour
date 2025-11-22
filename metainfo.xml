@@ -107,7 +107,6 @@
     <release version="0.6.2" urgency="medium" type="development">
       <description>
         <ul>
-          <li>Drop Qt5 support</li>
           <li>Fixes insert mode / default status line colorscheme loading (#1737)</li>
           <li>Fixes `CancelSelection` default binding with escape (#1710)</li>
           <li>Fixes `CreateTab` to sometimes spawn more than one tab (#1695)</li>
@@ -117,6 +116,9 @@
           <li>Fixes crash on scaling down some symbols during font size change</li>
           <li>Fixes mouse scrolling speed being too slow</li>
           <li>Fixes crash in vi normal mode when using `y0` (#1801)</li>
+          <li>Fixes empty history jump (#1781)</li>
+          <li>Fixes double line box drawing characters</li>
+          <li>Fixes DECRQM (DEC Request Mode) response (#1797)</li>
           <li>Enables customizing predefined color palette (#1763)</li>
           <li>Ensure inserting new tabs happens right next to the currently active tab (#1695)</li>
           <li>Allow glyphs to underflow if they are not bigger than the cell size (#1603)</li>
@@ -126,12 +128,10 @@
           <li>Adds CenterCursor (`zz`) vi motion</li>
           <li>Adds ability to name tabs (#1690)</li>
           <li>Adds dynamic loading of conpty.dll to allow mouse mode on Windows 10</li>
-          <li>Fix empty history jump (#1781)</li>
           <li>Adds git graph drawing glyphs</li>
-          <li>Fixes double line box drawing characters</li>
           <li>Adds new arc style for box drawing characters</li>
           <li>Adds multiple rendering options for braille characters</li>
-          <li>Bugfix DECRQM (Dec Request Mode) response (#1797)</li>
+          <li>Drop Qt5 support</li>
         </ul>
       </description>
     </release>
