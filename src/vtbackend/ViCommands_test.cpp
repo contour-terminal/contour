@@ -208,3 +208,15 @@ TEST_CASE("ViCommands:modeChanged", "[vi]")
     }
 }
 // NOLINTEND(misc-const-correctness)
+
+TEST_CASE("yank", "[vi]")
+{
+    auto mock = setupMockTerminal(
+        "Hello World", vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
+
+    mock.sendCharSequence("3l"); // Move cursor to second 'l'
+    REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 3_columnOffset);
+    mock.sendCharSequence("y0");
+
+    CHECK(mock.clipboardData == "Hell");
+}

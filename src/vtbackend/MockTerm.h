@@ -69,8 +69,12 @@ class MockTerm: public Terminal::NullEvents
     std::string windowTitle;
     Terminal terminal;
 
+    std::string clipboardData;
+
     // Events overrides
     void setWindowTitle(std::string_view title) override { windowTitle = title; }
+
+    void copyToClipboard(std::string_view data) override { clipboardData = data; }
 
     static vtbackend::Settings createSettings(PageSize pageSize,
                                               LineCount maxHistoryLineCount,

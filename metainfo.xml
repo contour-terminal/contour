@@ -116,6 +116,7 @@
           <li>Fixes handling of multiple windows and tabs (#1725)</li>
           <li>Fixes crash on scaling down some symbols during font size change</li>
           <li>Fixes mouse scrolling speed being too slow</li>
+          <li>Fixes crash in vi normal mode when using `y0` (#1801)</li>
           <li>Enables customizing predefined color palette (#1763)</li>
           <li>Ensure inserting new tabs happens right next to the currently active tab (#1695)</li>
           <li>Allow glyphs to underflow if they are not bigger than the cell size (#1603)</li>
