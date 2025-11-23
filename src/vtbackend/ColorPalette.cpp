@@ -83,9 +83,7 @@ bool defaultColorPalettes(std::string const& colorPaletteName, ColorPalette& pal
 
     // TODO add dim colors, do we need to adapt them to each of color palettes?
     std::map<std::string, std::function<void()>> const definedColorPalettes = {
-        { "contour",
-          [&]() {
-          } },
+        { "contour", [&]() {} },
         { "monokai",
           [&]() {
               // Monokai dark colors

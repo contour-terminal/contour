@@ -17,16 +17,12 @@ VTWriter::VTWriter(Writer writer): _writer { std::move(writer) }
 }
 
 VTWriter::VTWriter(std::ostream& output):
-    VTWriter { [&](char const* d, size_t n) {
-        output.write(d, static_cast<std::streamsize>(n));
-    } }
+    VTWriter { [&](char const* d, size_t n) { output.write(d, static_cast<std::streamsize>(n)); } }
 {
 }
 
 VTWriter::VTWriter(std::vector<char>& output):
-    VTWriter { [&](char const* d, size_t n) {
-        output.insert(output.end(), d, d + n);
-    } }
+    VTWriter { [&](char const* d, size_t n) { output.insert(output.end(), d, d + n); } }
 {
 }
 

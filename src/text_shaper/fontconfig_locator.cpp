@@ -149,10 +149,7 @@ struct fontconfig_locator::private_tag
     }
 };
 
-fontconfig_locator::fontconfig_locator():
-    _d { new private_tag(), [](private_tag* p) {
-            delete p;
-        } }
+fontconfig_locator::fontconfig_locator(): _d { new private_tag(), [](private_tag* p) { delete p; } }
 {
 }
 

@@ -157,9 +157,7 @@ Terminal::Terminal(Events& eventListener,
     _effectiveImageCanvasSize { _settings.maxImageSize },
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
                                                              _maxSixelColorRegisters) },
-    _imagePool { [this](Image const* image) {
-        discardImage(*image);
-    } },
+    _imagePool { [this](Image const* image) { discardImage(*image); } },
     _hyperlinks { .cache = HyperlinkCache { 1024 } },
     _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
     _parser { std::ref(_sequenceBuilder) },

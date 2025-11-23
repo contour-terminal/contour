@@ -553,9 +553,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         return;
 
     _textRendererEvents.onBeforeRenderingText();
-    auto _ = crispy::finally { [&]() noexcept {
-        _textRendererEvents.onAfterRenderingText();
-    } };
+    auto _ = crispy::finally { [&]() noexcept { _textRendererEvents.onAfterRenderingText(); } };
 
     auto const hash = hashTextAndStyle(codepoints, style);
     text::shape_result const& glyphPositions =

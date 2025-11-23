@@ -114,10 +114,7 @@ struct directwrite_locator::Private
     }
 };
 
-directwrite_locator::directwrite_locator():
-    _d { new Private(), [](Private* p) {
-            delete p;
-        } }
+directwrite_locator::directwrite_locator(): _d { new Private(), [](Private* p) { delete p; } }
 {
 }
 
