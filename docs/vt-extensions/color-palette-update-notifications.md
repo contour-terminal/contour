@@ -64,7 +64,7 @@ in order to see how to implement this in your own application.
 | ✅       | Helix                | since [`23a647a`](https://github.com/helix-editor/helix/commit/23a647aee81a69f356b018bdaa49b634b9499cec)|
 | not yet  | WezTerm              | see tracker: [wezterm#6454](https://github.com/wez/wezterm/issues/6454)                             |
 | not yet  | Zellij               | see tracker: [zellij#3831](https://github.com/zellij-org/zellij/issues/3831)                        |
-| not yet  | VTE                  | see tracker: [vte#2740](https://gitlab.gnome.org/GNOME/vte/-/issues/2740)                           |
+| ✅       | VTE                  | since [`0.82.0`](https://gitlab.gnome.org/GNOME/vte/-/commits/0.82.0?ref_type=tags)                 |
 | not yet  | Vim                  | see tracker: [vim#17251](https://github.com/vim/vim/issues/17251)                                   |
 | not yet  | Nushell              | see tracker: [nushell#15227](https://github.com/nushell/nushell/issues/15227)                       |
 
