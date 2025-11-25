@@ -322,9 +322,7 @@ struct SshSession::Private
 SshSession::SshSession(SshHostConfig config):
     _config { std::move(config) },
     _ptySlave { std::make_unique<SshPtySlave>() },
-    _p { new Private(), [](Private* p) {
-            delete p;
-        } }
+    _p { new Private(), [](Private* p) { delete p; } }
 {
     libssh2_init(0); // TODO: call only once?
 

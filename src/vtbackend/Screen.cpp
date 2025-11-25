@@ -470,9 +470,7 @@ void Screen<Cell>::writeText(string_view text, size_t cellCount)
 
     // Do not log individual characters, as we already logged the whole string above
     _logCharTrace = false;
-    auto const _ = crispy::finally { [&]() {
-        _logCharTrace = true;
-    } };
+    auto const _ = crispy::finally { [&]() { _logCharTrace = true; } };
 #endif
 
     assert(cellCount <= static_cast<size_t>(pageSize().columns.value - _cursor.position.column.value));

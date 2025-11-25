@@ -553,9 +553,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         return;
 
     _textRendererEvents.onBeforeRenderingText();
-    auto _ = crispy::finally { [&]() noexcept {
-        _textRendererEvents.onAfterRenderingText();
-    } };
+    auto _ = crispy::finally { [&]() noexcept { _textRendererEvents.onAfterRenderingText(); } };
 
     auto const hash = hashTextAndStyle(codepoints, style);
     text::shape_result const& glyphPositions =
@@ -777,6 +775,14 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         Require(rowCount <= unbox(glyph.bitmapSize.height));
         auto const pixelCount =
             rowCount * unbox<size_t>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
+        if (static_cast<size_t>(pixelCount) > glyph.bitmap.size())
+        {
+            errorLog()("TextRenderer: Glyph bitmap size: {}, dimensions: {}, pixelCount: {}",
+                       glyph.bitmap.size(),
+                       glyph.bitmapSize,
+                       pixelCount);
+            return nullopt;
+        }
         Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());
         rasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.bitmapSize.height += vtbackend::Height::cast_from(yMin);

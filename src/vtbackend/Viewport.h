@@ -21,8 +21,7 @@ class Viewport
     using ModifyEvent = std::function<void()>;
 
     explicit Viewport(Terminal& term, ModifyEvent onModify = {}):
-        _terminal { &term }, _modified { onModify ? std::move(onModify) : []() {
-        } }
+        _terminal { &term }, _modified { onModify ? std::move(onModify) : []() {} }
     {
     }
 

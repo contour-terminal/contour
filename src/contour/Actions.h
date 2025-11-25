@@ -288,8 +288,7 @@ namespace documentation
 #if defined(__clang__) && __clang_major__ >= 19
 constexpr
 #endif
-    inline auto
-    getDocumentation()
+    inline auto getDocumentation()
 {
     return std::array {
         std::tuple { Action { CancelSelection {} }, documentation::CancelSelection },

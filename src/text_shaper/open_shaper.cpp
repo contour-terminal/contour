@@ -487,9 +487,7 @@ struct open_shaper::private_open_shaper // {{{
     }
 
     private_open_shaper(DPI dpi, font_locator& locator):
-        ftCleanup { [this]() {
-            FT_Done_FreeType(ft);
-        } },
+        ftCleanup { [this]() { FT_Done_FreeType(ft); } },
         locator { &locator },
         dpi { dpi },
         hbBuf(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
