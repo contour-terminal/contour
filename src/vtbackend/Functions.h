@@ -517,7 +517,7 @@ constexpr inline auto CHA         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto CHT         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'I', VTType::VT100, documentation::CHT);
 constexpr inline auto CNL         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'E', VTType::VT100, documentation::CNL);
 constexpr inline auto CPL         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'F', VTType::VT100, documentation::CPL);
-constexpr inline auto CSIUENHCE   = detail::CSI('=', 1, 2, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUENHCE);
+constexpr inline auto CSIUENHCE   = detail::CSI('=', 0, 2, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUENHCE);
 constexpr inline auto CSIUENTER   = detail::CSI('>', 0, 1, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUENTER);
 constexpr inline auto CSIULEAVE   = detail::CSI('<', 0, 1, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIULEAVE);
 constexpr inline auto CSIUQUERY   = detail::CSI('?', 0, 0, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUQUERY);

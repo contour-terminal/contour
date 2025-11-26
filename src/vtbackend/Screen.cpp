@@ -3636,10 +3636,9 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         }
         case CSIUENHCE: {
-            auto const flags = KeyboardEventFlags::from_value(seq.param_or(0, 1));
+            // Defaulting flags to 0. (Seems not to be documented by the spec, but Fish shell is doing that!)
+            auto const flags = KeyboardEventFlags::from_value(seq.param_or(0, 0));
             auto const mode = seq.param_or(1, 1);
-            if (_terminal->keyboardProtocol().stackDepth() <= 1)
-                return ApplyResult::Invalid;
             switch (mode)
             {
                 case 1: _terminal->keyboardProtocol().flags() = flags; return ApplyResult::Ok;
