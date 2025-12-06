@@ -107,6 +107,10 @@
     <release version="0.6.2" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Security: Fixed Out-of-Bounds Write in `SequenceParameterBuilder` (CWE-787)</li>
+          <li>Security: Fixed SSH Trust-On-First-Use (TOFU) vulnerability (CWE-295) with interactive host key verification</li>
+          <li>Security: Fixed potential Integer Overflow in parameter parsing (CWE-190)</li>
+          <li>Security: Fixed sensitive data exposure in debug logs (CWE-532)</li>
           <li>Fixes insert mode / default status line colorscheme loading (#1737)</li>
           <li>Fixes `CancelSelection` default binding with escape (#1710)</li>
           <li>Fixes `CreateTab` to sometimes spawn more than one tab (#1695)</li>

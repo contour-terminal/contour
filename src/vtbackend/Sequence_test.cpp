@@ -124,3 +124,30 @@ TEST_CASE("SequenceParameterBuilder.complex.2")
     INFO(parameters.subParameterBitString());
     CHECK(parameters.str() == "0;12::34:56;7;89");
 }
+
+TEST_CASE("SequenceParameterBuilder.max_parameters_exceeded")
+{
+    auto parameters = SequenceParameters {};
+    auto builder = SequenceParameterBuilder { parameters };
+
+    // Fill up to 16 parameters: "1;2;...;16"
+    for (int i = 1; i <= 16; ++i)
+    {
+        if (i > 1)
+            builder.nextParameter();
+        builder.apply(i);
+    }
+
+    // Try to add a 17th parameter: ";17"
+    // This should be ignored (or merged) and NOT cause an OOB write.
+    builder.nextParameter();
+    builder.apply(17);
+
+    builder.fixiate();
+
+    CHECK(parameters.count() == 16);
+
+    // Verify behavior: since advancement was blocked, the value '17' was appended to the last parameter '16'.
+    // 16 -> 1617
+    CHECK(parameters.at(15) == 1617);
+}

@@ -502,11 +502,19 @@ void SshSession::processState()
             }
             case State::VerifyHostKey: {
                 if (!verifyHostKey())
+                {
+                    if (_state == State::VerifyHostKeyWaitForInput)
+                        return;
+
                     setState(State::Failure);
+                }
                 else
                     setState(State::AuthenticateAgent);
                 break;
             }
+            case State::VerifyHostKeyWaitForInput:
+                // See handlePreAuthenticationPasswordInput()
+                return;
             case State::AuthenticateAgent: {
                 authenticateWithAgent();
                 break;
@@ -814,6 +822,11 @@ int SshSession::write(std::string_view buf)
         handlePreAuthenticationPasswordInput(buf, State::AuthenticatePrivateKey);
         return static_cast<int>(buf.size()); // Make the caller believe that we have written all bytes.
     }
+    else if (_state == State::VerifyHostKeyWaitForInput)
+    {
+        handlePreAuthenticationPasswordInput(buf, State::VerifyHostKey);
+        return static_cast<int>(buf.size()); // Make the caller believe that we have written all bytes.
+    }
     else if (_state != State::Operational)
     {
         sshLog()("Ignoring write() call in state: {}", _state);
@@ -839,13 +852,22 @@ int SshSession::write(std::string_view buf)
 
     if (ptyOutLog)
     {
-        if (rv >= 0)
-            ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf.data(), buf.data() + rv)); // NOLINT
+        bool const sensitive =
+            _state >= State::AuthenticatePrivateKeyStart && _state <= State::AuthenticatePassword;
+        if (sensitive)
+        {
+            ptyOutLog()("Sending {} bytes: (hidden in auth state)", rv);
+        }
+        else
+        {
+            if (rv >= 0)
+                ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf.data(), buf.data() + rv)); // NOLINT
 
-        if (0 <= rv && static_cast<size_t>(rv) < buf.size())
-            ptyOutLog()("Partial write. {} bytes written and {} bytes left.",
-                        rv,
-                        buf.size() - static_cast<size_t>(rv));
+            if (0 <= rv && static_cast<size_t>(rv) < buf.size())
+                ptyOutLog()("Partial write. {} bytes written and {} bytes left.",
+                            rv,
+                            buf.size() - static_cast<size_t>(rv));
+        }
     }
 
     return static_cast<int>(rv);
@@ -1073,7 +1095,7 @@ bool SshSession::verifyHostKey()
     libssh2_knownhost* knownHost = nullptr;
     rc = libssh2_knownhost_checkp(knownHosts,
                                   _config.hostname.c_str(),
-                                  0, // _port,
+                                  _config.port,
                                   hostkeyRaw,
                                   hostkeyLength,
                                   LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType,
@@ -1086,29 +1108,80 @@ bool SshSession::verifyHostKey()
             return true;
         case LIBSSH2_KNOWNHOST_CHECK_MISMATCH:
             logError("Host key verification failed. Host key mismatch.");
+            injectRead("\r\n\033[31;1mWARNING: POTENTIAL SECURITY BREACH!\033[m\r\n"
+                       "The host key for this server has changed. It is possible that "
+                       "someone is doing something nasty!\r\n"
+                       "Someone could be eavesdropping on you right now (man-in-the-middle attack).\r\n"
+                       "It is also possible that a host key has just been changed.\r\n"
+                       "Connection aborted.\r\n");
             return false;
         case LIBSSH2_KNOWNHOST_CHECK_NOTFOUND: {
-            // TODO: Ask user whether to add host key to known_hosts file
-            auto const comment =
-                std::format("{}@{}:{} (added by Contour)", _config.username, _config.hostname, _config.port);
-            auto const typeMask = LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType;
-            libssh2_knownhost_addc(knownHosts,
-                                   _config.hostname.c_str(),
-                                   nullptr /* salt */,
-                                   hostkeyRaw,
-                                   hostkeyLength,
-                                   comment.data(),
-                                   comment.size(),
-                                   typeMask,
-                                   nullptr /* store */);
-            rc = libssh2_knownhost_writefile(
-                knownHosts, _config.knownHostsFile.string().c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
-            if (rc != LIBSSH2_ERROR_NONE)
+            if (!_injectedWrite.empty())
             {
-                logErrorWithDetails(rc, "Failed to write known_hosts file");
-                return false;
+                // We've got a user response.
+                auto const trim = [](std::string_view s) {
+                    auto const start = s.find_first_not_of(" \t\r\n");
+                    if (start == std::string_view::npos)
+                        return std::string_view {};
+                    auto const end = s.find_last_not_of(" \t\r\n");
+                    return s.substr(start, end - start + 1);
+                };
+                auto const response = trim(_injectedWrite);
+                _injectedWrite.clear();
+                if (response == "yes")
+                {
+                    auto const comment = std::format(
+                        "{}@{}:{} (added by Contour)", _config.username, _config.hostname, _config.port);
+                    auto const typeMask =
+                        LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType;
+                    libssh2_knownhost_addc(knownHosts,
+                                           _config.hostname.c_str(),
+                                           nullptr /* salt */,
+                                           hostkeyRaw,
+                                           hostkeyLength,
+                                           comment.data(),
+                                           comment.size(),
+                                           typeMask,
+                                           nullptr /* store */);
+                    rc = libssh2_knownhost_writefile(
+                        knownHosts, _config.knownHostsFile.string().c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+                    if (rc != LIBSSH2_ERROR_NONE)
+                    {
+                        logErrorWithDetails(rc, "Failed to write known_hosts file");
+                        return false;
+                    }
+                    injectRead("\r\nHost key verified and added.\r\n");
+                    return true;
+                }
+                else
+                {
+                    injectRead("\r\nHost key verification failed. Connection aborted.\r\n");
+                    return false;
+                }
             }
-            return true;
+            // Ask user whether to add host key to known_hosts file
+            char const* const fingerprint = libssh2_hostkey_hash(_p->sshSession, LIBSSH2_HOSTKEY_HASH_SHA256);
+
+            auto fingerprintHex = std::string {};
+            if (fingerprint)
+            {
+                // SHA256 is 32 bytes
+                for (int i = 0; i < 32; ++i)
+                    fingerprintHex += std::format("{:02X}:", (unsigned char) fingerprint[i]);
+                if (!fingerprintHex.empty())
+                    fingerprintHex.pop_back();
+            }
+            else
+                fingerprintHex = "UNKNOWN";
+
+            auto const message = std::format("\r\nThe authenticity of host '{}' cannot be established.\r\n"
+                                             "Fingerprint: {}\r\n"
+                                             "Are you sure you want to continue connecting (yes/no)? ",
+                                             _config.hostname,
+                                             fingerprintHex);
+            injectRead(message);
+            setState(State::VerifyHostKeyWaitForInput);
+            return false;
         }
         case LIBSSH2_KNOWNHOST_CHECK_FAILURE: {
             logErrorWithDetails(rc, "Host key verification failed");
