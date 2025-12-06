@@ -128,7 +128,7 @@ class SequenceParameterBuilder
 
     void nextParameter()
     {
-        if (_currentParameter != _parameters->_values.end())
+        if (std::next(_currentParameter) != _parameters->_values.end())
         {
             ++_currentParameter;
             *_currentParameter = 0;
@@ -138,7 +138,7 @@ class SequenceParameterBuilder
 
     void nextSubParameter()
     {
-        if (_currentParameter != _parameters->_values.end())
+        if (std::next(_currentParameter) != _parameters->_values.end())
         {
             ++_currentParameter;
             *_currentParameter = 0;
@@ -148,7 +148,11 @@ class SequenceParameterBuilder
 
     constexpr void multiplyBy10AndAdd(uint8_t value) noexcept
     {
-        *_currentParameter = static_cast<uint16_t>((*_currentParameter * 10) + value);
+        unsigned const newValue = (*_currentParameter * 10) + value;
+        if (newValue > 0xFFFF)
+            *_currentParameter = 0xFFFF;
+        else
+            *_currentParameter = static_cast<uint16_t>(newValue);
     }
 
     constexpr void apply(uint16_t value) noexcept

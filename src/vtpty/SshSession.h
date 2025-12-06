@@ -78,6 +78,7 @@ class SshSession final: public Pty
         Connect,                            // connect to SSH server (usually TCP/IPv4 or TCP/IPv6)
         Handshake,                          // SSH handshake
         VerifyHostKey,                      // verify host key against known_hosts file
+        VerifyHostKeyWaitForInput,          // wait for user confirmation of host key
         AuthenticateAgent,                  // authenticate with SSH agent
         AuthenticatePrivateKeyStart,        // start private key authentication
         AuthenticatePrivateKeyRequest,      // request private key's password
@@ -103,6 +104,13 @@ class SshSession final: public Pty
   private:
     bool connect(std::string_view host, int port);
     void logErrorWithDetails(int libssl2ErrorCode, std::string_view message) const;
+
+    /// Verifies the remote host key against the known_hosts file.
+    ///
+    /// If the host key is not found, the user is prompted to accept it.
+    /// If the host key does not match, the connection is aborted.
+    ///
+    /// @return true if the host key is verified, false otherwise.
     bool verifyHostKey();
     bool authenticateWithAgent();
     void authenticateWithPrivateKey();
@@ -185,6 +193,7 @@ struct std::formatter<vtpty::SshSession::State>: std::formatter<std::string_view
             case vtpty::SshSession::State::Connect: name = "Connect"; break;
             case vtpty::SshSession::State::Handshake: name = "Handshake"; break;
             case vtpty::SshSession::State::VerifyHostKey: name = "VerifyHostKey"; break;
+            case vtpty::SshSession::State::VerifyHostKeyWaitForInput: name = "VerifyHostKeyWaitForInput"; break;
             case vtpty::SshSession::State::AuthenticateAgent: name = "AuthenticateAgent"; break;
             case vtpty::SshSession::State::AuthenticatePrivateKeyStart: name = "AuthenticatePrivateKeyStart"; break;
             case vtpty::SshSession::State::AuthenticatePrivateKeyRequest: name = "AuthenticatePrivateKeyRequest"; break;
