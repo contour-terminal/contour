@@ -835,7 +835,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         loadFromEntry(child, "user", where.username);
         loadFromEntry(child, "private_key", where.privateKeyFile);
         loadFromEntry(child, "public_key", where.publicKeyFile);
-        loadFromEntry(child, "known_hosts", where.publicKeyFile);
+        loadFromEntry(child, "known_hosts", where.knownHostsFile);
         loadFromEntry(child, "forward_agent", where.forwardAgent);
     }
 }

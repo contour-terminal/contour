@@ -121,6 +121,7 @@
           <li>Fixes DECRQM (DEC Request Mode) response (#1797)</li>
           <li>Fixes Precondition failure when rendering vertically overflowing glyphs (#1805)</li>
           <li>Fixes fish-shell keyboard input protocol behaviour; acting as if it would be broken on e.g. control keys (weird handling of CSIu input protocol)</li>
+          <li>Fixes `ssh.known_hosts` configuration loading incorrectly mapping to `ssh.public_key_file`</li>
           <li>Enables customizing predefined color palette (#1763)</li>
           <li>Ensure inserting new tabs happens right next to the currently active tab (#1695)</li>
           <li>Allow glyphs to underflow if they are not bigger than the cell size (#1603)</li>
