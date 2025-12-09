@@ -72,6 +72,9 @@ class TerminalSessionManager: public QAbstractListModel
     contour::TerminalSession* activateSession(TerminalSession* session, bool isNewSession = false);
     std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> cwd);
 
+    void requestSshHostkeyVerification(vtpty::SshHostkeyVerificationRequest const& request,
+                                       vtpty::SshHostkeyVerificationResponseCallback const& response);
+
     void tryFindSessionForDisplayOrClose();
 
     [[nodiscard]] std::optional<std::size_t> getSessionIndexOf(TerminalSession* session) const noexcept

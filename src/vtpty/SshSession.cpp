@@ -83,7 +83,7 @@ namespace
     constexpr auto MaxPasswordTries = 3;
 
     template <typename T>
-    std::string_view libssl2ErrorString(T rc)
+    constexpr std::string_view libssl2ErrorString(T rc) noexcept
     {
         switch (rc)
         {
@@ -152,6 +152,150 @@ namespace
             default: return "Unknown error";
         }
     }
+
+    constexpr int hostkeyTypeToKnownHostType(int type) noexcept
+    {
+        switch (type)
+        {
+#if defined(LIBSSH2_HOSTKEY_TYPE_RSA)
+            case LIBSSH2_HOSTKEY_TYPE_RSA: return LIBSSH2_KNOWNHOST_KEY_SSHRSA;
+#endif
+#if defined(LIBSSH2_HOSTKEY_TYPE_DSS)
+            case LIBSSH2_HOSTKEY_TYPE_DSS: return LIBSSH2_KNOWNHOST_KEY_SSHDSS;
+#endif
+#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_256)
+            case LIBSSH2_HOSTKEY_TYPE_ECDSA_256: return LIBSSH2_KNOWNHOST_KEY_ECDSA_256;
+#endif
+#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_384)
+            case LIBSSH2_HOSTKEY_TYPE_ECDSA_384: return LIBSSH2_KNOWNHOST_KEY_ECDSA_384;
+#endif
+#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_521)
+            case LIBSSH2_HOSTKEY_TYPE_ECDSA_521: return LIBSSH2_KNOWNHOST_KEY_ECDSA_521;
+#endif
+#if defined(LIBSSH2_HOSTKEY_TYPE_ED25519)
+            case LIBSSH2_HOSTKEY_TYPE_ED25519: return LIBSSH2_KNOWNHOST_KEY_ED25519;
+#endif
+            default: return LIBSSH2_KNOWNHOST_KEY_UNKNOWN;
+        }
+    }
+
+    constexpr std::string_view hostkeyTypeToString(int hostkeyType) noexcept
+    {
+        switch (hostkeyType)
+        {
+#if defined(LIBSSH2_HOSTKEY_TYPE_RSA)
+            case LIBSSH2_HOSTKEY_TYPE_RSA: return "RSA";
+#endif
+#if defined(LIBSSH2_HOSTKEY_TYPE_DSS)
+            case LIBSSH2_HOSTKEY_TYPE_DSS: return "DSA";
+#endif
+#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_256)
+            case LIBSSH2_HOSTKEY_TYPE_ECDSA_256: return "ECDSA-256";
+#endif
+#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_384)
+            case LIBSSH2_HOSTKEY_TYPE_ECDSA_384: return "ECDSA-384";
+#endif
+#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_521)
+            case LIBSSH2_HOSTKEY_TYPE_ECDSA_521: return "ECDSA-521";
+#endif
+#if defined(LIBSSH2_HOSTKEY_TYPE_ED25519)
+            case LIBSSH2_HOSTKEY_TYPE_ED25519: return "ED25519";
+#endif
+            default: return "UNKNOWN";
+        }
+    }
+
+    /// Retrieves the host key information from the given SSH session.
+    ///
+    /// @param session The SSH session to retrieve the host key from.
+    /// @return A tuple containing the known host type and the raw host key data.
+    SshHostkey getHostkey(LIBSSH2_SESSION* session)
+    {
+        int hostkeyType = 0;
+        size_t hostkeyLength = 0;
+        char const* const hostkeyRaw = libssh2_session_hostkey(session, &hostkeyLength, &hostkeyType);
+        std::vector<char> hostkeyData;
+        if (hostkeyRaw && hostkeyLength > 0)
+            hostkeyData.assign(hostkeyRaw, hostkeyRaw + hostkeyLength);
+        return { .type = hostkeyType, .data = hostkeyData };
+    }
+
+    SshHostkeyHash getHostkeyHash(LIBSSH2_SESSION* session)
+    {
+        auto constexpr KeyType = LIBSSH2_HOSTKEY_HASH_SHA256;
+        auto constexpr FingerprintLength = 32;
+        char const* const fingerprint = libssh2_hostkey_hash(session, KeyType);
+        return SshHostkeyHash(KeyType, fingerprint, FingerprintLength);
+    }
+
+    struct SshKnownhostsFile
+    {
+        LIBSSH2_KNOWNHOSTS* handle = nullptr;
+
+        explicit SshKnownhostsFile(LIBSSH2_SESSION* session): handle { libssh2_knownhost_init(session) } {}
+
+        ~SshKnownhostsFile()
+        {
+            if (handle)
+                libssh2_knownhost_free(handle);
+        }
+
+        // NOLINTNEXTLINE(readability-make-member-function-const)
+        std::optional<std::string> readFromFile(std::filesystem::path const& path)
+        {
+            int const rc =
+                libssh2_knownhost_readfile(handle, path.string().c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+            if (rc < 0)
+                return std::string(libssl2ErrorString(rc));
+            return std::nullopt;
+        }
+
+        struct SshKnownhostKey
+        {
+            int status;
+            std::string key;
+        };
+
+        [[nodiscard]] SshKnownhostKey checkHostkey(SshHostConfig const& host, SshHostkey const& hostkey) const
+        {
+            libssh2_knownhost* knownHost = nullptr;
+            auto const knownhostType = hostkeyTypeToKnownHostType(hostkey.type);
+            auto const rc = libssh2_knownhost_checkp(handle,
+                                                     host.hostname.c_str(),
+                                                     host.port,
+                                                     hostkey.data.data(),
+                                                     hostkey.data.size(),
+                                                     LIBSSH2_KNOWNHOST_TYPE_PLAIN
+                                                         | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType,
+                                                     &knownHost);
+            switch (rc)
+            {
+                case LIBSSH2_KNOWNHOST_CHECK_MATCH: return { .status = rc, .key = knownHost->key };
+                case LIBSSH2_KNOWNHOST_CHECK_MISMATCH: return { .status = rc, .key = knownHost->key };
+                case LIBSSH2_KNOWNHOST_CHECK_NOTFOUND: return { .status = rc, .key = ""s };
+                default: return { .status = rc, .key = ""s };
+            }
+        }
+
+        /// Adds the host key to the known_hosts file.
+        [[nodiscard]] int addToFile(SshHostConfig const& host, SshHostkey const& hostkey) const
+        {
+            auto const knownhostType = hostkeyTypeToKnownHostType(hostkey.type);
+            auto const comment = host.toKnownhostComment();
+            auto const typeMask = LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType;
+            libssh2_knownhost_addc(handle,
+                                   host.hostname.c_str(),
+                                   nullptr /* salt */,
+                                   hostkey.data.data(),
+                                   hostkey.data.size(),
+                                   comment.data(),
+                                   comment.size(),
+                                   typeMask,
+                                   nullptr /* store */);
+            return libssh2_knownhost_writefile(
+                handle, host.knownHostsFile.string().c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+        }
+    };
 } // namespace
 // }}}
 
@@ -239,6 +383,14 @@ std::string SshHostConfig::toConfigString(std::string const& host) const
     return result;
 }
 
+std::string SshHostConfig::toKnownhostComment() const
+{
+    if (port > 0 && port != 22)
+        return std::format("{}@{}:{} (added by Contour)", username, hostname, port);
+    else
+        return std::format("{}@{} (added by Contour)", username, hostname);
+}
+
 crispy::result<SshHostConfigMap> loadSshConfig(std::filesystem::path const& configPath)
 {
     std::ifstream file(configPath);
@@ -319,8 +471,9 @@ struct SshSession::Private
     socket_handle sshSocket;
 };
 
-SshSession::SshSession(SshHostConfig config):
+SshSession::SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallback hostkeyRequestCallback):
     _config { std::move(config) },
+    _hostkeyRequestCallback { std::move(hostkeyRequestCallback) },
     _ptySlave { std::make_unique<SshPtySlave>() },
     _p { new Private(), [](Private* p) { delete p; } }
 {
@@ -497,22 +650,45 @@ void SshSession::processState()
                     return;
                 }
 
-                setState(State::VerifyHostKey);
+                setState(State::VerifyHostkey);
                 break;
             }
-            case State::VerifyHostKey: {
-                if (!verifyHostKey())
+            case State::VerifyHostkey: {
+                switch (verifyHostkey())
                 {
-                    if (_state == State::VerifyHostKeyWaitForInput)
-                        return;
-
-                    setState(State::Failure);
+                    case HostkeyVerificationStatus::Skipped:
+                        logInfoWithInject(
+                            "Skipping host key verification, because no known_hosts file was specified.");
+                        setState(State::AuthenticateAgent);
+                        break;
+                    case HostkeyVerificationStatus::Verified:
+                        logInfo("Host key verified.");
+                        setState(State::AuthenticateAgent);
+                        break;
+                    case HostkeyVerificationStatus::FailedWithMismatch:
+                        // TODO candidate of a future logErrorWithInject()
+                        logInfoWithInject("Host key mismatch. Connection aborted.");
+                        setState(State::Failure);
+                        break;
+                    case HostkeyVerificationStatus::FailedByUserTrust:
+                        // TODO candidate of a future logErrorWithInject()
+                        logInfoWithInject("Host key Host key verification failed. Connection aborted.");
+                        setState(State::Failure);
+                        break;
+                    case HostkeyVerificationStatus::FailedToReadKnownHosts:
+                        // TODO candidate of a future logErrorWithInject()
+                        logInfoWithInject("Failed to read known_hosts file \"{}\".",
+                                          _config.knownHostsFile.string());
+                        setState(State::Failure);
+                        break;
+                    case HostkeyVerificationStatus::WaitingForUserConfirmation:
+                        logInfoWithInject("Waiting for user confirmation for host key.");
+                        setState(State::VerifyHostkeyWaitForInput);
+                        break;
                 }
-                else
-                    setState(State::AuthenticateAgent);
                 break;
             }
-            case State::VerifyHostKeyWaitForInput:
+            case State::VerifyHostkeyWaitForInput:
                 // See handlePreAuthenticationPasswordInput()
                 return;
             case State::AuthenticateAgent: {
@@ -783,7 +959,7 @@ void SshSession::wakeupReader()
 
 void SshSession::handlePreAuthenticationPasswordInput(std::string_view buf, State next)
 {
-    sshLog()("({}) Handling pre-authentication input: \"{}\"", crispy::threadName(), crispy::escape(buf));
+    // sshLog()("({}) Handling pre-authentication input: \"{}\"", crispy::threadName(), crispy::escape(buf));
     if (buf.empty())
         return;
 
@@ -822,9 +998,9 @@ int SshSession::write(std::string_view buf)
         handlePreAuthenticationPasswordInput(buf, State::AuthenticatePrivateKey);
         return static_cast<int>(buf.size()); // Make the caller believe that we have written all bytes.
     }
-    else if (_state == State::VerifyHostKeyWaitForInput)
+    else if (_state == State::VerifyHostkeyWaitForInput)
     {
-        handlePreAuthenticationPasswordInput(buf, State::VerifyHostKey);
+        handlePreAuthenticationPasswordInput(buf, State::VerifyHostkey);
         return static_cast<int>(buf.size()); // Make the caller believe that we have written all bytes.
     }
     else if (_state != State::Operational)
@@ -1039,73 +1215,26 @@ bool SshSession::connect(std::string_view host, int port)
     return false;
 }
 
-bool SshSession::verifyHostKey()
+SshSession::HostkeyVerificationStatus SshSession::verifyHostkey()
 {
     if (_config.knownHostsFile.empty())
-    {
-        logInfo("Skipping host key verification, because no known_hosts file was specified.");
-        return true;
-    }
+        return HostkeyVerificationStatus::Skipped;
 
-    LIBSSH2_KNOWNHOSTS* knownHosts = libssh2_knownhost_init(_p->sshSession);
-    if (!knownHosts)
-    {
-        logError("Failed to initialize known_hosts file.");
-        return false;
-    }
+    auto knownhostFile = SshKnownhostsFile { _p->sshSession };
 
-    auto const _ = crispy::finally([&]() { libssh2_knownhost_free(knownHosts); });
+    if (auto const error = knownhostFile.readFromFile(_config.knownHostsFile); error.has_value())
+        return HostkeyVerificationStatus::FailedToReadKnownHosts;
 
-    int rc = libssh2_knownhost_readfile(
-        knownHosts, _config.knownHostsFile.string().c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
-    if (rc < 0)
-    {
-        auto const filePath = _config.knownHostsFile.string();
-        logError("Failed to read known_hosts file \"{}\". {}", filePath, libssl2ErrorString(rc));
-        return false;
-    }
+    auto const hostkey = getHostkey(_p->sshSession);
 
-    int hostkeyType = 0;
-    size_t hostkeyLength = 0;
-    char const* hostkeyRaw = libssh2_session_hostkey(_p->sshSession, &hostkeyLength, &hostkeyType);
-    int knownhostType = LIBSSH2_KNOWNHOST_KEY_UNKNOWN;
-    switch (hostkeyType)
-    {
-#if defined(LIBSSH2_HOSTKEY_TYPE_RSA)
-        case LIBSSH2_HOSTKEY_TYPE_RSA: knownhostType = LIBSSH2_KNOWNHOST_KEY_SSHRSA; break;
-#endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_DSS)
-        case LIBSSH2_HOSTKEY_TYPE_DSS: knownhostType = LIBSSH2_KNOWNHOST_KEY_SSHDSS; break;
-#endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_256)
-        case LIBSSH2_HOSTKEY_TYPE_ECDSA_256: knownhostType = LIBSSH2_KNOWNHOST_KEY_ECDSA_256; break;
-#endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_384)
-        case LIBSSH2_HOSTKEY_TYPE_ECDSA_384: knownhostType = LIBSSH2_KNOWNHOST_KEY_ECDSA_384; break;
-#endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_521)
-        case LIBSSH2_HOSTKEY_TYPE_ECDSA_521: knownhostType = LIBSSH2_KNOWNHOST_KEY_ECDSA_521; break;
-#endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ED25519)
-        case LIBSSH2_HOSTKEY_TYPE_ED25519: knownhostType = LIBSSH2_KNOWNHOST_KEY_ED25519; break;
-#endif
-        default: logError("Unknown host key type: {}", hostkeyType); return false;
-    }
-
-    libssh2_knownhost* knownHost = nullptr;
-    rc = libssh2_knownhost_checkp(knownHosts,
-                                  _config.hostname.c_str(),
-                                  _config.port,
-                                  hostkeyRaw,
-                                  hostkeyLength,
-                                  LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType,
-                                  &knownHost);
+    auto const [rc, knownhostKey] = knownhostFile.checkHostkey(_config, hostkey);
 
     switch (rc)
     {
         case LIBSSH2_KNOWNHOST_CHECK_MATCH:
-            logInfo("Host key verification succeeded ({}).", knownHost->key);
-            return true;
+            logInfo(
+                "Host key verification succeeded ({} {}).", hostkeyTypeToString(hostkey.type), knownhostKey);
+            return HostkeyVerificationStatus::Verified;
         case LIBSSH2_KNOWNHOST_CHECK_MISMATCH:
             logError("Host key verification failed. Host key mismatch.");
             injectRead("\r\n\033[31;1mWARNING: POTENTIAL SECURITY BREACH!\033[m\r\n"
@@ -1114,84 +1243,58 @@ bool SshSession::verifyHostKey()
                        "Someone could be eavesdropping on you right now (man-in-the-middle attack).\r\n"
                        "It is also possible that a host key has just been changed.\r\n"
                        "Connection aborted.\r\n");
-            return false;
-        case LIBSSH2_KNOWNHOST_CHECK_NOTFOUND: {
-            if (!_injectedWrite.empty())
-            {
-                // We've got a user response.
-                auto const trim = [](std::string_view s) {
-                    auto const start = s.find_first_not_of(" \t\r\n");
-                    if (start == std::string_view::npos)
-                        return std::string_view {};
-                    auto const end = s.find_last_not_of(" \t\r\n");
-                    return s.substr(start, end - start + 1);
-                };
-                auto const response = trim(_injectedWrite);
-                _injectedWrite.clear();
-                if (response == "yes")
-                {
-                    auto const comment = std::format(
-                        "{}@{}:{} (added by Contour)", _config.username, _config.hostname, _config.port);
-                    auto const typeMask =
-                        LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType;
-                    libssh2_knownhost_addc(knownHosts,
-                                           _config.hostname.c_str(),
-                                           nullptr /* salt */,
-                                           hostkeyRaw,
-                                           hostkeyLength,
-                                           comment.data(),
-                                           comment.size(),
-                                           typeMask,
-                                           nullptr /* store */);
-                    rc = libssh2_knownhost_writefile(
-                        knownHosts, _config.knownHostsFile.string().c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
-                    if (rc != LIBSSH2_ERROR_NONE)
-                    {
-                        logErrorWithDetails(rc, "Failed to write known_hosts file");
-                        return false;
-                    }
-                    injectRead("\r\nHost key verified and added.\r\n");
-                    return true;
-                }
-                else
-                {
-                    injectRead("\r\nHost key verification failed. Connection aborted.\r\n");
-                    return false;
-                }
-            }
+            return HostkeyVerificationStatus::FailedWithMismatch;
+        case LIBSSH2_KNOWNHOST_CHECK_NOTFOUND:
             // Ask user whether to add host key to known_hosts file
-            char const* const fingerprint = libssh2_hostkey_hash(_p->sshSession, LIBSSH2_HOSTKEY_HASH_SHA256);
+            _hostkeyRequestCallback(
+                SshHostkeyVerificationRequest {
+                    .hostname = _config.hostname,
+                    .port = _config.port,
+                    .hostkeyHash = getHostkeyHash(_p->sshSession),
+                },
+                [this](bool accepted) { hostkeyVerificationResultCallback(accepted); });
 
-            auto fingerprintHex = std::string {};
-            if (fingerprint)
-            {
-                // SHA256 is 32 bytes
-                for (int i = 0; i < 32; ++i)
-                    fingerprintHex += std::format("{:02X}:", (unsigned char) fingerprint[i]);
-                if (!fingerprintHex.empty())
-                    fingerprintHex.pop_back();
-            }
+            if (!_hostkeyVerified.has_value())
+                return HostkeyVerificationStatus::WaitingForUserConfirmation;
+            else if (_hostkeyVerified.value())
+                return HostkeyVerificationStatus::Verified;
             else
-                fingerprintHex = "UNKNOWN";
-
-            auto const message = std::format("\r\nThe authenticity of host '{}' cannot be established.\r\n"
-                                             "Fingerprint: {}\r\n"
-                                             "Are you sure you want to continue connecting (yes/no)? ",
-                                             _config.hostname,
-                                             fingerprintHex);
-            injectRead(message);
-            setState(State::VerifyHostKeyWaitForInput);
-            return false;
-        }
-        case LIBSSH2_KNOWNHOST_CHECK_FAILURE: {
+                return HostkeyVerificationStatus::FailedByUserTrust;
+        case LIBSSH2_KNOWNHOST_CHECK_FAILURE:
             logErrorWithDetails(rc, "Host key verification failed");
-            return false;
-        }
-        default: {
+            return HostkeyVerificationStatus::FailedToReadKnownHosts;
+        default:
             logErrorWithDetails(rc, "Unhandled error code in host key verification");
-            return false;
+            return HostkeyVerificationStatus::FailedToReadKnownHosts;
+    }
+}
+
+void SshSession::hostkeyVerificationResultCallback(bool accepted)
+{
+    // TODO move this outside callback lambda into verifyHostkey() itself
+    _hostkeyVerified = accepted;
+    if (accepted)
+    {
+        auto knownhostsFile = SshKnownhostsFile { _p->sshSession };
+        knownhostsFile.readFromFile(_config.knownHostsFile);
+        auto const hostkey = getHostkey(_p->sshSession);
+        auto const rc = knownhostsFile.addToFile(_config, hostkey);
+
+        if (rc != LIBSSH2_ERROR_NONE)
+        {
+            logErrorWithDetails(rc, "Failed to write known_hosts file");
+            logInfoWithInject("Host key verified, but failed to write known_hosts file.");
+        }
+        else
+        {
+            logInfoWithInject("Host key verified and added.");
         }
     }
+    else
+    {
+        logInfoWithInject("Host key verification failed. Connection aborted.");
+    }
+    setState(State::VerifyHostkeyWaitForInput);
 }
 
 void SshSession::logErrorWithDetails(int libssl2ErrorCode, std::string_view message) const
@@ -1307,7 +1410,8 @@ void SshSession::authenticateWithPrivateKey()
 void SshSession::authenticateWithPassword()
 {
     auto const password = std::move(_injectedWrite);
-    _injectedWrite = {};
+    std::ranges::fill(_injectedWrite, '\0');
+    _injectedWrite.clear();
 
     int const rc = libssh2_userauth_password_ex(_p->sshSession,
                                                 _config.username.data(),
