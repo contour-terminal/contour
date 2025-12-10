@@ -16,7 +16,7 @@
 :material-check-bold:{.check-mark}  256-color and Truecolor support <br/>
 :material-check-bold:{.check-mark}  Key binding customization <br/>
 :material-check-bold:{.check-mark}  Color Schemes <br/>
-:material-check-bold:{.check-mark}  Profiles (grouped customization of: color scheme, login shell, and related behaviours) <br/>
+:material-check-bold:{.check-mark}  Profiles (grouped customization of: color scheme, login shell, and related behaviors) <br/>
 :material-check-bold:{.check-mark}  [Synchronized rendering](vt-extensions/synchronized-output.md) (via `SM ? 2026` / `RM ? 2026`) <br/>
 :material-check-bold:{.check-mark}  Text reflow (configurable via `SM ? 2028` / `RM ? 2028`) <br/>
 :material-check-bold:{.check-mark}  Clickable hyperlinks via [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda) <br/>

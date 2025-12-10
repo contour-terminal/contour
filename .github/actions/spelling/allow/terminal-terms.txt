@@ -118,6 +118,7 @@ Smol
 Smulx
 TEs
 TMUX
+Tektronix
 UTF
 VTEs
 WHEELDOWN
@@ -155,4 +156,5 @@ dcl
 dcs
 fbterm
 stty
+undercurl
 zellij

@@ -32,7 +32,6 @@ DATAROOTDIR
 DBus
 DCCACHE
 DCMAKE
-DNDEBUG
 DCODE
 DCONTOUR
 DEFGHIJKL
@@ -42,6 +41,7 @@ DISTDIR
 DLIBTERMINAL
 DLIBUNICODE
 DMACDEPLOYQT
+DNDEBUG
 DNOMINMAX
 DPEDANTIC
 DQt
@@ -111,6 +111,7 @@ Neundorf
 OBJCXX
 OESC
 OPENSSH
+OR'd
 OSTYPE
 OSx
 OTH
@@ -194,6 +195,7 @@ ZAxis
 acion
 acrylicblur
 adb
+aee
 aera
 afef
 aixterm
@@ -227,7 +229,9 @@ backgrounded
 backtab
 bashhub
 basline
+bdaa
 behing
+bigobj
 bindir
 binutils
 bithacks
@@ -255,6 +259,7 @@ capturebuffer
 cardridge
 ccache
 cdir
+cec
 charcell
 charwidth
 checkp
@@ -533,6 +538,7 @@ keysyms
 khlp
 khome
 kich
+kio
 kmous
 kmscon
 knownhost
@@ -545,6 +551,7 @@ kservices
 kund
 kwin
 landingpage
+launchable
 ldd
 ldv
 lefticus
@@ -860,6 +867,7 @@ sensetive
 seperated
 sequencially
 serr
+servicemenus
 sessioni
 setab
 setaf
@@ -964,6 +972,7 @@ ultimatively
 ultrablack
 ultrabold
 ultralight
+uncategorized
 undefind
 unexpectly
 uniblock
@@ -1079,10 +1088,3 @@ yim
 yiw
 ypixel
 zsync
-servicemenus
-kio
-bigobj
-aee
-bdaa
-cec
-OR'd

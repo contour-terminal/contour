@@ -33,7 +33,7 @@ using namespace vtbackend::test;
 // - [x] Synchronized output (?2026)
 // - [x] Blinking cursor visiblity over time and on input events
 // - [ ] double click word selection
-// - [ ] tripple click line selection
+// - [ ] triple click line selection
 // - [ ] rectangular block selection
 // - [ ] text selection with bypassing enabled application mouse protocol
 // - [ ] extractLastMarkRange

@@ -717,7 +717,7 @@ TEST_CASE("Grid.reflow.shrink_many_grow_many", "[grid]")
     }
 }
 
-TEST_CASE("Grid.reflow.tripple", "[grid]")
+TEST_CASE("Grid.reflow.triple", "[grid]")
 {
     // Tests reflowing text upon shrink/grow across more than two (e.g. three) wrapped lines.
     auto grid = setupGrid8x2();

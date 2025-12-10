@@ -759,7 +759,7 @@ class Grid
     [[nodiscard]] bool cellEmptyOrContainsOneOf(CellLocation position,
                                                 std::u32string_view delimiters) const noexcept;
 
-    // Lineary extracts the text of a given grid cell range.
+    // Linearly extracts the text of a given grid cell range.
     [[nodiscard]] std::u32string extractText(CellLocationRange range) const noexcept;
 
     // Conditionally extends the cell location forward if the grid cell at the given location holds a wide

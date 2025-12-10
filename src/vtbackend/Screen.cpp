@@ -3384,7 +3384,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
             auto const right = std::min(seq.param_or(4, unbox(size.columns)), unbox(size.columns));
 
             // internal indices starts at 0, for DECFRA they start from 1
-            // we need to adjust it and then make shure they are in bounds
+            // we need to adjust it and then make sure they are in bounds
             fillArea(ch, std::max(0, unbox(top) - 1), std::max(0, unbox(left) - 1), bottom - 1, right - 1);
         }
         break;

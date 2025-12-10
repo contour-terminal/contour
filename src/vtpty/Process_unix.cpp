@@ -60,7 +60,7 @@ namespace
 
     [[nodiscard]] char** createArgv(string const& arg0, vector<string> const& args, size_t startIndex = 0)
     {
-        // Factor out in order to avoid false-positive by static analysers.
+        // Factor out in order to avoid false-positive by static analyzers.
         auto const argCount = args.size() - startIndex;
         assert(startIndex <= args.size());
 

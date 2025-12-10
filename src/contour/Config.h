@@ -788,8 +788,8 @@ struct Config
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::ArcStyle, documentation::BoxArcStyle> boxArcStyle {
         vtrasterizer::BoxDrawingRenderer::ArcStyle::Round
     };
-    ConfigEntry<vtrasterizer::BoxDrawingRenderer::BraileStyle, documentation::BraileStyle> braileStyle {
-        vtrasterizer::BoxDrawingRenderer::BraileStyle::Circle
+    ConfigEntry<vtrasterizer::BoxDrawingRenderer::BrailleStyle, documentation::BrailleStyle> brailleStyle {
+        vtrasterizer::BoxDrawingRenderer::BrailleStyle::Circle
     };
 
     TerminalProfile* profile(std::string const& name) noexcept
@@ -1014,7 +1014,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PermissionsConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::ArcStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::BraileStyle& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::BrailleStyle& where);
 
 
     void defaultSettings(vtpty::Process::ExecInfo& shell);
@@ -1326,25 +1326,25 @@ struct Writer
         using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
         switch (v)
         {
-            case ArcStyle::Ellips: return format(doc, "ellips");
+            case ArcStyle::Elliptic: return format(doc, "elliptic");
             case ArcStyle::Round: return format(doc, "round");
             default: assert(false); return format(doc, "round");
         }
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, vtrasterizer::BoxDrawingRenderer::BraileStyle& v)
+    [[nodiscard]] std::string format(std::string_view doc, vtrasterizer::BoxDrawingRenderer::BrailleStyle& v)
     {
-        using BraileStyle = vtrasterizer::BoxDrawingRenderer::BraileStyle;
+        using BrailleStyle = vtrasterizer::BoxDrawingRenderer::BrailleStyle;
         switch (v)
         {
-            case BraileStyle::Font: return format(doc, "font");
-            case BraileStyle::Solid: return format(doc, "solid");
-            case BraileStyle::Circle: return format(doc, "circle");
-            case BraileStyle::CircleEmpty: return format(doc, "circle_empty");
-            case BraileStyle::Square: return format(doc, "square");
-            case BraileStyle::SquareEmpty: return format(doc, "square_empty");
-            case BraileStyle::AASquare: return format(doc, "aa_square");
-            case BraileStyle::AASquareEmpty: return format(doc, "aa_square_empty");
+            case BrailleStyle::Font: return format(doc, "font");
+            case BrailleStyle::Solid: return format(doc, "solid");
+            case BrailleStyle::Circle: return format(doc, "circle");
+            case BrailleStyle::CircleEmpty: return format(doc, "circle_empty");
+            case BrailleStyle::Square: return format(doc, "square");
+            case BrailleStyle::SquareEmpty: return format(doc, "square_empty");
+            case BrailleStyle::AASquare: return format(doc, "aa_square");
+            case BrailleStyle::AASquareEmpty: return format(doc, "aa_square_empty");
             default: assert(false); return format(doc, "circle");
         }
     }
@@ -1357,7 +1357,7 @@ struct Writer
         auto const arc = [&]() -> std::string_view {
             switch (v.arcStyle)
             {
-                case ArcStyle::Ellips: return "ellips";
+                case ArcStyle::Elliptic: return "elliptic";
                 case ArcStyle::Round: return "round";
                 default: assert(false); return "round";
             }

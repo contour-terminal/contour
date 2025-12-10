@@ -138,7 +138,7 @@ class buffer_object: public std::enable_shared_from_this<buffer_object<T>>
  * buffer_object_pool manages reusable buffer_object objects.
  *
  * buffer_object objects that are about to be disposed
- * are not gettings its resources deleted but ownership moved
+ * are not getting its resources deleted but ownership moved
  * back to buffer_object_pool.
  */
 template <BufferObjectElementType T>

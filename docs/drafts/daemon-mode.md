@@ -23,7 +23,7 @@ Let's implement a terminal multiplexing server that `Contour` can connect to.
 
 - standalone executable only linking to the absolutely necessary libraries (such as libterminal, but not Qt)
 - should support binary upgrade
-- server protocol must be specced (see below?)
+- server protocol must be specified (see below?)
 
 ...
 

@@ -25,8 +25,8 @@ using std::tuple;
 
 using crispy::point;
 
-namespace stdr = std::ranges;
-namespace stdv = ranges::views;
+namespace Ranges = std::ranges;
+namespace Views = ranges::views;
 
 namespace vtrasterizer
 {
@@ -47,8 +47,8 @@ namespace
         auto const height = cellSize.height.as<size_t>();
         auto const pitch = width;
 
-        for (auto i: stdv::iota(0U, height))
-            for (auto j: stdv::iota(0U, width))
+        for (auto i: Views::iota(0U, height))
+            for (auto j: Views::iota(0U, width))
                 dest[(i * pitch) + j] = image[((height - i - 1u) * pitch) + j];
         return dest;
     }
@@ -154,8 +154,8 @@ namespace detail
             {
                 if (auto& gap = gaps[y]; !gap.empty())
                 {
-                    stdr::sort(gap);
-                    for (auto const xi: stdv::iota(gap.front(), gap.back()))
+                    Ranges::sort(gap);
+                    for (auto const xi: Views::iota(gap.front(), gap.back()))
                         buffer.at((y * unbox<size_t>(imageSize.width)) + xi) = 0xFF;
                 }
             }
@@ -813,8 +813,8 @@ namespace detail
             auto const w = unbox(pixmap.size.width);
             auto const h = unbox(pixmap.size.height) - 1;
 
-            for (auto const y: stdv::iota(0u, unbox(pixmap.size.height)))
-                for (auto const x: stdv::iota(0u, unbox(pixmap.size.width)))
+            for (auto const y: Views::iota(0u, unbox(pixmap.size.height)))
+                for (auto const x: Views::iota(0u, unbox(pixmap.size.width)))
                 {
                     auto const [a, b] = p(int(x));
                     pixmap.buffer[(unsigned(h - y) * w) + x] = a <= int(y) && int(y) <= b ? set : unset;
@@ -845,8 +845,8 @@ namespace detail
 
             auto const h = pixmap.size.height.as<unsigned>() - 1;
             auto const w = pixmap.size.width.as<unsigned>();
-            for (auto const y: stdv::iota(0u, pixmap.size.height.as<unsigned>()))
-                for (auto const x: stdv::iota(0u, pixmap.size.width.as<unsigned>()))
+            for (auto const y: Views::iota(0u, pixmap.size.height.as<unsigned>()))
+                for (auto const x: Views::iota(0u, pixmap.size.width.as<unsigned>()))
                     if (condition(int(x), int(y)))
                         pixmap.buffer.at((w * (h - y)) + x) = 0xFF;
         }
@@ -995,24 +995,24 @@ namespace detail
             return image;
         }
 
-        struct Braile
+        struct Braille
         {
-            // Unicode Braile characters (U+2800 - U+28FF) are 2x4 grid of dots.
+            // Unicode Braille characters (U+2800 - U+28FF) are 2x4 grid of dots.
             //
             // An 8-bit unsigned integer, used as an offset from the codepoint U+2800
-            // serves as a bitmastk for the dots.
+            // serves as a bitmask for the dots.
             // The mapping of bits to dot positions is:
             // 0 3
             // 1 4
             // 2 5
             // 6 7
 
-            static bool isBraile(char32_t codepoint)
+            static bool isBraille(char32_t codepoint)
             {
                 return style != Style::Font and codepoint >= 0x2800 and codepoint <= 0x28FF;
             }
 
-            using Style = BoxDrawingRenderer::BraileStyle;
+            using Style = BoxDrawingRenderer::BrailleStyle;
             inline static Style style = Style::Circle;
             static void setStyle(Style newStyle) { style = newStyle; }
 
@@ -1045,8 +1045,8 @@ namespace detail
                 auto image = atlas::Buffer(width * height, 0x00);
 
                 auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1, uint8_t value) {
-                    for (auto const yi: stdv::iota(y0, y1))
-                        for (auto const xi: stdv::iota(x0, x1))
+                    for (auto const yi: Views::iota(y0, y1))
+                        for (auto const xi: Views::iota(x0, x1))
                             image[(yi * width) + xi] = value;
                 };
 
@@ -1086,8 +1086,8 @@ namespace detail
                     empty = false;
                 auto image = atlas::Buffer(width * height, 0x00);
                 auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1, uint8_t value) {
-                    for (auto const yi: stdv::iota(y0, y1))
-                        for (auto const xi: stdv::iota(x0, x1))
+                    for (auto const yi: Views::iota(y0, y1))
+                        for (auto const xi: Views::iota(x0, x1))
                             image[(yi * width) + xi] = value;
                 };
 
@@ -1169,8 +1169,8 @@ namespace detail
                     y0 = std::clamp<size_t>(y0, 0, height);
                     y1 = std::clamp<size_t>(y1, 0, height);
 
-                    for (auto const yi: stdv::iota(y0, y1))
-                        for (auto const xi: stdv::iota(x0, x1))
+                    for (auto const yi: Views::iota(y0, y1))
+                        for (auto const xi: Views::iota(x0, x1))
                         {
                             auto dx = x - static_cast<double>(xi);
                             auto dy = y - static_cast<double>(yi);
@@ -1237,7 +1237,7 @@ void BoxDrawingRenderer::setGitDrawingsStyle(BoxDrawingRenderer::GitDrawingsStyl
     using GitBranchStyle = BoxDrawingRenderer::GitDrawingsStyle::BranchStyle;
     using MergeCommitStyle = BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
 
-    if (arcStyle == ArcStyle::Ellips && newStyle.branchStyle != GitBranchStyle::Thin)
+    if (arcStyle == ArcStyle::Elliptic && newStyle.branchStyle != GitBranchStyle::Thin)
     {
         // log warning ??
         newStyle.arcStyle = ArcStyle::Round;
@@ -1263,9 +1263,9 @@ void BoxDrawingRenderer::setGitDrawingsStyle(BoxDrawingRenderer::GitDrawingsStyl
     gitArcStyle = newStyle.arcStyle;
     detail::branchDrawingDefinitions = detail::getBranchBoxes(mcLine, branchLine);
 }
-void BoxDrawingRenderer::setBraileStyle(BoxDrawingRenderer::BraileStyle newStyle)
+void BoxDrawingRenderer::setBrailleStyle(BoxDrawingRenderer::BrailleStyle newStyle)
 {
-    detail::Braile::setStyle(newStyle);
+    detail::Braille::setStyle(newStyle);
 }
 void BoxDrawingRenderer::setRenderTarget(RenderTarget& renderTarget,
                                          DirectMappingAllocator& directMappingAllocator)
@@ -1372,7 +1372,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
            || ascending(0x1FBF0, 0x1FBF9)           // digits
            || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
            || detail::isGitBranchDrawing(codepoint) //
-           || detail::Braile::isBraile(codepoint)   //
+           || detail::Braille::isBraille(codepoint) //
            || codepoint == 0xE0B0                   // 
            || codepoint == 0xE0B2                   // 
            || codepoint == 0xE0B4                   // 
@@ -1410,8 +1410,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
             .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
     };
 
-    if (detail::Braile::isBraile(codepoint))
-        return Braile::build(codepoint, size, _gridMetrics.underline.thickness, 4);
+    if (detail::Braille::isBraille(codepoint))
+        return Braille::build(codepoint, size, _gridMetrics.underline.thickness, 4);
 
     // TODO: just check notcurses-info to get an idea what may be missing
     // clang-format off
@@ -1887,11 +1887,11 @@ auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness)
     auto const p = unbox<double>(width) / static_cast<double>(dashCount * 2.0);
 
     auto x0 = round(p / 2.0);
-    for ([[maybe_unused]] auto const _: stdv::iota(0u, dashCount))
+    for ([[maybe_unused]] auto const _: Views::iota(0u, dashCount))
     {
         auto const x0l = static_cast<int>(round(x0));
-        for (auto const y: stdv::iota(y0, y0 + w))
-            for (auto const x: stdv::iota(x0l, x0l + static_cast<int>(p)))
+        for (auto const y: Views::iota(y0, y0 + w))
+            for (auto const x: Views::iota(x0l, x0l + static_cast<int>(p)))
                 image[(y * unbox(width)) + unsigned(x)] = 0xFF;
         x0 += unbox<double>(width) / static_cast<double>(dashCount);
     }
@@ -1914,11 +1914,11 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
     auto const p = unbox<double>(height) / static_cast<double>(dashCount * 2.0);
 
     auto y0 = round(p / 2.0);
-    for ([[maybe_unused]] auto const i: stdv::iota(0u, dashCount))
+    for ([[maybe_unused]] auto const i: Views::iota(0u, dashCount))
     {
         auto const y0l = static_cast<unsigned>(round(y0));
-        for (auto const y: stdv::iota(y0l, y0l + static_cast<unsigned>(p)))
-            for (auto const x: stdv::iota(x0, x0 + w))
+        for (auto const y: Views::iota(y0l, y0l + static_cast<unsigned>(p)))
+            for (auto const x: Views::iota(x0, x0 + w))
                 image[(y * unbox(width)) + unsigned(x)] = 0xFF;
         y0 += unbox<double>(height) / static_cast<double>(dashCount);
     }
@@ -2033,8 +2033,8 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
     };
 
     auto const fillRect = [&](size_t x0, size_t x1, size_t y0, size_t y1, uint8_t value = 0xFF) {
-        for (auto const yi: stdv::iota(y0, y1))
-            for (auto const xi: stdv::iota(x0, x1))
+        for (auto const yi: Views::iota(y0, y1))
+            for (auto const xi: Views::iota(x0, x1))
                 image[(yi * width) + xi] = value;
     };
 
@@ -2076,13 +2076,13 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             }
         };
 
-        for (auto const yi: stdv::iota(0, height))
+        for (auto const yi: Views::iota(0, height))
         {
             auto y = static_cast<double>(yi) - dcy + 0.5;
             if (not yQuadrant(y))
                 continue;
             y *= y;
-            for (auto const xi: stdv::iota(0, width))
+            for (auto const xi: Views::iota(0, width))
             {
                 auto x = static_cast<double>(xi) - dcx + 0.5;
                 if (not xQuadrant(x))
@@ -2111,25 +2111,25 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
         using Diagonal = detail::Diagonal;
         if (unsigned(box.diagonalval) & unsigned(Diagonal::Forward))
         {
-            for (auto const y: stdv::iota(0, height))
+            for (auto const y: Views::iota(0, height))
             {
                 auto x0 = static_cast<int>(std::round((double(y) - double(getThickness(Line::Light))) / a));
                 auto x1 = static_cast<int>(std::round((double(y) + double(getThickness(Line::Light))) / a));
                 x0 = std::clamp<int>(x0, 0, width);
                 x1 = std::clamp<int>(x1, 0, width);
-                for (auto const xi: stdv::iota(x0, x1))
+                for (auto const xi: Views::iota(x0, x1))
                     image[(y * width) + xi] = 0xFF;
             }
         }
         if (unsigned(box.diagonalval) & unsigned(Diagonal::Backward))
         {
-            for (auto const y: stdv::iota(0, height))
+            for (auto const y: Views::iota(0, height))
             {
                 auto x0 = static_cast<int>(std::round((double(y) + double(getThickness(Line::Light))) / a));
                 auto x1 = static_cast<int>(std::round((double(y) - double(getThickness(Line::Light))) / a));
                 x0 = width - std::clamp<int>(x0, 0, width);
                 x1 = width - std::clamp<int>(x1, 0, width);
-                for (auto const xi: stdv::iota(x0, x1))
+                for (auto const xi: Views::iota(x0, x1))
                     image[(y * width) + xi] = 0xFF;
             }
         }
@@ -2220,8 +2220,8 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
     if (box.circleval != detail::Line::NoLine)
     {
         auto fillCircle = [&](double radius, unsigned char value) {
-            for (auto const yi: stdv::iota(0, height))
-                for (auto const xi: stdv::iota(0, width))
+            for (auto const yi: Views::iota(0, height))
+                for (auto const xi: Views::iota(0, width))
                 {
                     auto y = static_cast<double>(yi) - static_cast<double>(yOffset);
                     auto x = static_cast<double>(xi) - static_cast<double>(xOffset);
@@ -2285,7 +2285,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
     if (not box)
         return std::nullopt;
     auto lArcStyle = detail::isGitBranchDrawing(codepoint) ? gitArcStyle : arcStyle;
-    auto image = buildBox(*box, size, lineThickness, supersampling, lArcStyle == ArcStyle::Ellips);
+    auto image = buildBox(*box, size, lineThickness, supersampling, lArcStyle == ArcStyle::Elliptic);
     boxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
     return image;
 }

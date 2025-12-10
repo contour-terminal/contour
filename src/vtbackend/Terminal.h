@@ -1069,7 +1069,7 @@ class Terminal
     std::unique_ptr<vtpty::Pty> _pty;
     // }}}
 
-    // {{{ mouse related state (helpers for detecting double/tripple clicks)
+    // {{{ mouse related state (helpers for detecting double/triple clicks)
     std::chrono::steady_clock::time_point _lastClick {};
     unsigned int _speedClicks = 0;
     vtbackend::CellLocation _currentMousePosition {}; // current mouse position

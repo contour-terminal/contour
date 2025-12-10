@@ -26,7 +26,7 @@ class BoxDrawingRenderer: public Renderable
   public:
     enum class ArcStyle : uint8_t
     {
-        Ellips,
+        Elliptic,
         Round,
     };
 
@@ -48,7 +48,7 @@ class BoxDrawingRenderer: public Renderable
         BranchStyle branchStyle = BranchStyle::Thin;
         MergeCommitStyle mergeCommitStyle = MergeCommitStyle::Bullet;
     };
-    enum class BraileStyle : uint8_t
+    enum class BrailleStyle : uint8_t
     {
         Font,
         Solid,
@@ -77,7 +77,7 @@ class BoxDrawingRenderer: public Renderable
 
     void inspect(std::ostream& output) const override;
 
-    static void setBraileStyle(BraileStyle newStyle);
+    static void setBrailleStyle(BrailleStyle newStyle);
     static void setGitDrawingsStyle(GitDrawingsStyle newStyle);
     static void setArcStyle(ArcStyle newStyle) { arcStyle = newStyle; }
 
@@ -96,7 +96,7 @@ class BoxDrawingRenderer: public Renderable
 
     static inline ArcStyle arcStyle = ArcStyle::Round;
     static inline ArcStyle gitArcStyle = ArcStyle::Round;
-    static inline BraileStyle braileStyle = BraileStyle::Font;
+    static inline BrailleStyle brailleStyle = BrailleStyle::Font;
 };
 
 } // namespace vtrasterizer
