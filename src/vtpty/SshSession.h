@@ -9,6 +9,7 @@
 #include <crispy/result.h>
 
 #include <condition_variable>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -32,12 +33,73 @@ struct SshHostConfig
 
     [[nodiscard]] std::string toString() const;
     [[nodiscard]] std::string toConfigString(std::string const& host = {}) const;
+    [[nodiscard]] std::string toKnownhostComment() const;
 };
 
 using SshHostConfigMap = std::map<std::string, SshHostConfig>;
 
 crispy::result<SshHostConfigMap> loadSshConfig(std::filesystem::path const& configPath);
 crispy::result<SshHostConfigMap> loadSshConfig();
+
+/// SSH Host Key information.
+///
+/// This structure holds the SSH host key type and its raw binary data.
+struct SshHostkey
+{
+    /// key type, e.g., LIBSSH2_HOSTKEY_TYPE_RSA
+    int type;
+
+    /// raw binary key data
+    std::vector<char> data;
+};
+
+struct SshHostkeyHash
+{
+    int keyType;
+
+    /// raw binary fingerprint data
+    std::vector<char> fingerprint;
+
+    explicit SshHostkeyHash(int keyType, char const* data, size_t length):
+        keyType { keyType }, fingerprint { data ? data : "", data ? data + length : nullptr }
+    {
+    }
+
+    [[nodiscard]] std::string toString() const
+    {
+        std::string result;
+        for (size_t i = 0; i < fingerprint.size(); ++i)
+        {
+            result += std::format("{:02X}", static_cast<unsigned char>(fingerprint[i]));
+            if (i + 1 < fingerprint.size())
+                result += ":";
+        }
+        return result;
+    }
+};
+
+/// SSH Host Key Verification Request.
+///
+/// This structure is used to request user verification of the SSH host key
+/// during the SSH handshake process.
+struct SshHostkeyVerificationRequest
+{
+    /// Hostname (and possibly port) of the SSH server to connect to.
+    std::string hostname;
+
+    /// Port of the SSH server to connect to.
+    int port;
+
+    /// Host key hash information.
+    SshHostkeyHash hostkeyHash;
+};
+
+/// Callback type for responding to host key verification requests.
+using SshHostkeyVerificationResponseCallback = std::function<void(bool accepted)>;
+
+/// Callback type for host key verification requests.
+using SshHostkeyVerificationRequestCallback = std::function<void(
+    SshHostkeyVerificationRequest const& request, SshHostkeyVerificationResponseCallback const& response)>;
 
 /// SSH Login session.
 class SshSession final: public Pty
@@ -51,7 +113,7 @@ class SshSession final: public Pty
     using ExitStatus = std::variant<NormalExit, SignalExit>;
     using Environment = std::map<std::string, std::string>;
 
-    explicit SshSession(SshHostConfig config);
+    explicit SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallback hostkeyRequestCallback);
     ~SshSession() override;
 
     void start() override;
@@ -77,7 +139,8 @@ class SshSession final: public Pty
         Started,                            // start() has been called
         Connect,                            // connect to SSH server (usually TCP/IPv4 or TCP/IPv6)
         Handshake,                          // SSH handshake
-        VerifyHostKey,                      // verify host key against known_hosts file
+        VerifyHostkey,                      // verify host key against known_hosts file
+        VerifyHostkeyWaitForInput,          // wait for user confirmation of host key
         AuthenticateAgent,                  // authenticate with SSH agent
         AuthenticatePrivateKeyStart,        // start private key authentication
         AuthenticatePrivateKeyRequest,      // request private key's password
@@ -103,7 +166,27 @@ class SshSession final: public Pty
   private:
     bool connect(std::string_view host, int port);
     void logErrorWithDetails(int libssl2ErrorCode, std::string_view message) const;
-    bool verifyHostKey();
+
+    enum class HostkeyVerificationStatus : uint8_t
+    {
+        Skipped,
+        FailedWithMismatch,
+        FailedToReadKnownHosts,
+        FailedByUserTrust,
+        Verified,
+        WaitingForUserConfirmation,
+    };
+
+    /// Verifies the remote host key against the known_hosts file.
+    ///
+    /// If the host key is not found, the user is prompted to accept it.
+    /// If the host key does not match, the connection is aborted.
+    ///
+    /// @return true if the host key is verified, false otherwise.
+    [[nodiscard]] HostkeyVerificationStatus verifyHostkey();
+
+    void hostkeyVerificationResultCallback(bool accepted);
+
     bool authenticateWithAgent();
     void authenticateWithPrivateKey();
     void authenticateWithPassword();
@@ -148,6 +231,8 @@ class SshSession final: public Pty
     }
 
     SshHostConfig _config;
+    std::optional<bool> _hostkeyVerified = std::nullopt;
+    SshHostkeyVerificationRequestCallback _hostkeyRequestCallback;
 
     PageSize _pageSize { .lines = LineCount(24), .columns = ColumnCount(80) };
     std::optional<ImageSize> _pixels = std::nullopt;
@@ -184,7 +269,8 @@ struct std::formatter<vtpty::SshSession::State>: std::formatter<std::string_view
             case vtpty::SshSession::State::Started: name = "Started"; break;
             case vtpty::SshSession::State::Connect: name = "Connect"; break;
             case vtpty::SshSession::State::Handshake: name = "Handshake"; break;
-            case vtpty::SshSession::State::VerifyHostKey: name = "VerifyHostKey"; break;
+            case vtpty::SshSession::State::VerifyHostkey: name = "VerifyHostkey"; break;
+            case vtpty::SshSession::State::VerifyHostkeyWaitForInput: name = "VerifyHostkeyWaitForInput"; break;
             case vtpty::SshSession::State::AuthenticateAgent: name = "AuthenticateAgent"; break;
             case vtpty::SshSession::State::AuthenticatePrivateKeyStart: name = "AuthenticatePrivateKeyStart"; break;
             case vtpty::SshSession::State::AuthenticatePrivateKeyRequest: name = "AuthenticatePrivateKeyRequest"; break;

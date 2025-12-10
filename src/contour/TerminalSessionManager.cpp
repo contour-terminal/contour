@@ -33,13 +33,28 @@ std::unique_ptr<vtpty::Pty> TerminalSessionManager::createPty(std::optional<std:
     auto const& profile = _app.config().profile(_app.profileName());
 #if defined(VTPTY_LIBSSH2)
     if (!profile->ssh.value().hostname.empty())
-        return make_unique<vtpty::SshSession>(profile->ssh.value());
+        return make_unique<vtpty::SshSession>(
+            profile->ssh.value(),
+            std::bind(&TerminalSessionManager::requestSshHostkeyVerification,
+                      this,
+                      std::placeholders::_1,
+                      std::placeholders::_2));
 #endif
     if (cwd)
         profile->shell.value().workingDirectory = std::filesystem::path(cwd.value());
     return make_unique<vtpty::Process>(profile->shell.value(),
                                        vtpty::createPty(profile->terminalSize.value(), nullopt),
                                        profile->escapeSandbox.value());
+}
+
+void TerminalSessionManager::requestSshHostkeyVerification(
+    vtpty::SshHostkeyVerificationRequest const& request,
+    vtpty::SshHostkeyVerificationResponseCallback const& response)
+{
+    (void) request;
+
+    // TODO: implement SSH host key verification dialog
+    response(true);
 }
 
 TerminalSession* TerminalSessionManager::createSessionInBackground()
@@ -364,7 +379,6 @@ void TerminalSessionManager::currentSessionIsTerminated()
 {
     managerLog()("got notified that session is terminated, number of existing sessions: _sessions.size(): {}",
                  _sessions.size());
-    return;
 }
 
 void TerminalSessionManager::removeSession(TerminalSession& thatSession)

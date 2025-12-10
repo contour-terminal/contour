@@ -77,6 +77,36 @@ namespace
         while (dup2(a, b) == -1 && (errno == EBUSY || errno == EINTR))
             ;
     }
+
+    void closeAllFileDescriptorsAbove(int keepFd)
+    {
+#if defined(__linux__) || defined(__FreeBSD__)
+        if (close_range(keepFd + 1, ~0U, 0) == 0)
+            return;
+#endif
+
+#if defined(__linux__)
+        try
+        {
+            for (auto const& entry: fs::directory_iterator("/proc/self/fd"))
+            {
+                int const fd = std::stoi(entry.path().filename().string());
+                if (fd > keepFd)
+                    ::close(fd);
+            }
+            return;
+        }
+        catch (...) // NOLINT(bugprone-empty-catch)
+        {
+            // ignore
+        }
+#endif
+
+        // Fallback: close up to sysconf(_SC_OPEN_MAX)
+        int const maxFd = static_cast<int>(sysconf(_SC_OPEN_MAX));
+        for (int i = keepFd + 1; i < maxFd; ++i)
+            ::close(i);
+    }
 } // anonymous namespace
 
 struct Process::Private
@@ -205,11 +235,7 @@ void Process::start()
                 }
             }
 
-            // maybe close any leaked/inherited file descriptors from parent process
-            // TODO: But be a little bit more clever in iterating only over those that are actually still
-            // open.
-            for (int i = StdoutFastPipeFd + 1; i < 256; ++i)
-                ::close(i);
+            closeAllFileDescriptorsAbove(StdoutFastPipeFd);
 
             // reset signal(s) to default that may have been changed in the parent process.
             signal(SIGPIPE, SIG_DFL);

@@ -37,3 +37,5 @@ cerrno
 consolas
 coretext
 fbo
+knownhosts
+sysconf
