@@ -184,10 +184,11 @@ struct MouseConfig
 struct IndicatorConfig
 {
     std::string left { " {InputMode:Bold,Color=#FFFF00}"
-                       "{SearchPrompt:Left= │ }"
                        "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
-                       "{ProtectedMode:Bold,Left= │ }" };
-    std::string middle { "{Tabs:ActiveColor=#FFFF00}" };
+                       "{Tabs:ActiveColor=#FFFF00,Left= │ }"
+                       "{ProtectedMode:Bold,Left= │ }"
+                       "{SearchPrompt:Left= │ }" };
+    std::string middle { "« {Title} »" };
     std::string right { "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}" };
 };
 
