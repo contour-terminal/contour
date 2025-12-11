@@ -1,0 +1,105 @@
+{
+    "version": "0.2",
+    "language": "en",
+    "dictionaryDefinitions": [
+        {
+            "name": "my-allow",
+            "path": ".github/actions/spelling/allow/allow.txt",
+            "addWords": true
+        },
+        {
+            "name": "my-english",
+            "path": ".github/actions/spelling/my-english.txt",
+            "addWords": true
+        },
+        {
+            "name": "my-expect",
+            "path": ".github/actions/spelling/expect.txt",
+            "addWords": true
+        },
+        {
+            "name": "my-names",
+            "path": ".github/actions/spelling/allow/names.txt",
+            "addWords": true
+        },
+        {
+            "name": "my-patterns",
+            "path": ".github/actions/spelling/allow/patterns.txt",
+            "addWords": true
+        },
+        {
+            "name": "my-api-terms",
+            "path": ".github/actions/spelling/allow/api-terms.txt",
+            "addWords": true
+        },
+        {
+            "name": "my-qt-terms",
+            "path": ".github/actions/spelling/allow/qt-terms.txt",
+            "addWords": true
+        },
+        {
+            "name": "my-terminal-caps",
+            "path": ".github/actions/spelling/allow/terminal-caps.txt",
+            "addWords": true
+        },
+        {
+            "name": "my-terminal-terms",
+            "path": ".github/actions/spelling/allow/terminal-terms.txt",
+            "addWords": true
+        },
+        {
+            "name": "my-uncategorized",
+            "path": ".github/actions/spelling/allow/uncategorized.txt",
+            "addWords": true
+        }
+    ],
+    "words": [
+    ],
+    "ignorePaths": [
+        "node_modules",
+        "build",
+        "out",
+        "sandbox",
+        "cmake",
+        "_deps",
+        ".git",
+        "*.log",
+        "*.lock",
+        "*.desktop",
+        "compile_commands.json",
+        "*.sixel"
+    ],
+    "patterns": [
+        {
+            "name": "cpp-includes",
+            "pattern": "#include\\s+<[^>]+>"
+        }
+    ],
+    "dictionaries": [
+        "bash",
+        "cmake",
+        "cpp",
+        "css",
+        "docker",
+        "en_US",
+        "fonts",
+        "html",
+        "markdown",
+        "my-allow",
+        "my-expect",
+        "my-english",
+        "my-api-terms",
+        "my-names",
+        "my-patterns",
+        "my-qt-terms",
+        "my-terminal-caps",
+        "my-terminal-terms",
+        "my-uncategorized",
+        "node",
+        "powershell",
+        "python",
+        "softwareTerms",
+        "typescript",
+        "npm"
+    ]
+}

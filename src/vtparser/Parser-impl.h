@@ -376,7 +376,7 @@ constexpr ParserTable ParserTable::get() // {{{
     }
 
     // TODO: verify the above is correct (programatically as much as possible)
-    // TODO: see if we can reduce the preassure on L2 caches (is this even an issue?)
+    // TODO: see if we can reduce the pressure on L2 caches (is this even an issue?)
 
     return t;
 } // }}}

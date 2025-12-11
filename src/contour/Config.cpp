@@ -365,8 +365,8 @@ void YAMLConfigReader::load(Config& c)
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         loadFromEntry("box_arc_style", c.boxArcStyle);
         vtrasterizer::BoxDrawingRenderer::setArcStyle(c.boxArcStyle.value());
-        loadFromEntry("braile_style", c.braileStyle);
-        vtrasterizer::BoxDrawingRenderer::setBraileStyle(c.braileStyle.value());
+        loadFromEntry("braille_style", c.brailleStyle);
+        vtrasterizer::BoxDrawingRenderer::setBrailleStyle(c.brailleStyle.value());
 #endif
 
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
@@ -1478,16 +1478,16 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
     if (auto const child = node[entry])
     {
-        auto const lstyle = crispy::toLower(child.as<std::string>());
+        auto const styleName = crispy::toLower(child.as<std::string>());
         auto constexpr static Mappings = std::array {
-            std::pair { "", ArcStyle::Round },        //
-            std::pair { "round", ArcStyle::Round },   //
-            std::pair { "ellips", ArcStyle::Ellips }, //
+            std::pair { "", ArcStyle::Round },
+            std::pair { "round", ArcStyle::Round },
+            std::pair { "elliptic", ArcStyle::Elliptic },
         };
         for (auto const& mapping: Mappings)
-            if (mapping.first == lstyle)
+            if (mapping.first == styleName)
             {
-                logger()("Loading entry: arc_style, value {}", lstyle);
+                logger()("Loading entry: arc_style, value {}", styleName);
                 where = mapping.second;
                 return;
             }
@@ -1502,7 +1502,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     using MergeCommitStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
 
     auto const parseBranchStyle = [&](std::string const& style) -> std::optional<BranchStyle> {
-        auto const lstyle = crispy::toLower(style);
+        auto const styleName = crispy::toLower(style);
         auto constexpr static Mappings = std::array {
             std::pair { "", BranchStyle::None },         //
             std::pair { "none", BranchStyle::None },     //
@@ -1511,25 +1511,25 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             std::pair { "thick", BranchStyle::Thick },
         };
         for (auto const& mapping: Mappings)
-            if (mapping.first == lstyle)
+            if (mapping.first == styleName)
             {
-                logger()("Loading entry: branch_style, value {}", lstyle);
+                logger()("Loading entry: branch_style, value {}", styleName);
                 return mapping.second;
             }
         return std::nullopt;
     };
 
     auto const parseMCStyle = [&](std::string const& style) -> std::optional<MergeCommitStyle> {
-        auto const lstyle = crispy::toLower(style);
+        auto const styleName = crispy::toLower(style);
         auto constexpr static Mappings = std::array {
             std::pair { "", MergeCommitStyle::Bullet },       //
             std::pair { "bullet", MergeCommitStyle::Bullet }, //
             std::pair { "solid", MergeCommitStyle::Solid },   //
         };
         for (auto const& mapping: Mappings)
-            if (mapping.first == lstyle)
+            if (mapping.first == styleName)
             {
-                logger()("Loading entry: merge_commit_style, value {}", lstyle);
+                logger()("Loading entry: merge_commit_style, value {}", styleName);
                 return mapping.second;
             }
         return std::nullopt;
@@ -1546,27 +1546,27 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtrasterizer::BoxDrawingRenderer::BraileStyle& where)
+                                     vtrasterizer::BoxDrawingRenderer::BrailleStyle& where)
 {
-    using BraileStyle = vtrasterizer::BoxDrawingRenderer::BraileStyle;
+    using BrailleStyle = vtrasterizer::BoxDrawingRenderer::BrailleStyle;
     if (auto const child = node[entry])
     {
-        auto const lstyle = crispy::toLower(child.as<std::string>());
+        auto const styleName = crispy::toLower(child.as<std::string>());
         auto constexpr static Mappings = std::array {
-            std::pair { "font", BraileStyle::Font },                     //
-            std::pair { "solid", BraileStyle::Solid },                   //
-            std::pair { "", BraileStyle::Circle },                       //
-            std::pair { "circle", BraileStyle::Circle },                 //
-            std::pair { "cicle_empty", BraileStyle::CircleEmpty },       //
-            std::pair { "square", BraileStyle::SquareEmpty },            //
-            std::pair { "square_empty", BraileStyle::SquareEmpty },      //
-            std::pair { "aa_square", BraileStyle::AASquare },            //
-            std::pair { "aa_square_empty", BraileStyle::AASquareEmpty }, //
+            std::pair { "font", BrailleStyle::Font },                     //
+            std::pair { "solid", BrailleStyle::Solid },                   //
+            std::pair { "", BrailleStyle::Circle },                       //
+            std::pair { "circle", BrailleStyle::Circle },                 //
+            std::pair { "circle_empty", BrailleStyle::CircleEmpty },      //
+            std::pair { "square", BrailleStyle::SquareEmpty },            //
+            std::pair { "square_empty", BrailleStyle::SquareEmpty },      //
+            std::pair { "aa_square", BrailleStyle::AASquare },            //
+            std::pair { "aa_square_empty", BrailleStyle::AASquareEmpty }, //
         };
         for (auto const& mapping: Mappings)
-            if (mapping.first == lstyle)
+            if (mapping.first == styleName)
             {
-                logger()("Loading entry: {}, value {}", entry, lstyle);
+                logger()("Loading entry: {}, value {}", entry, styleName);
                 where = mapping.second;
                 return;
             }

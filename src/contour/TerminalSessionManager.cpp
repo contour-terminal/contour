@@ -60,7 +60,7 @@ void TerminalSessionManager::requestSshHostkeyVerification(
 TerminalSession* TerminalSessionManager::createSessionInBackground()
 {
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
-    // The GuiApp *or* (Global)Config could be made a global to be accessable from within QML.
+    // The GuiApp *or* (Global)Config could be made a global to be accessible from within QML.
 
     if (!_activeDisplay)
     {

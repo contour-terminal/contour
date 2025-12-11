@@ -55,3 +55,6 @@ QVector
 QWheel
 QWindow
 Qunused
+Q_INVOKABLE
+qmlRegisterUncreatableType
+Key_Exclam

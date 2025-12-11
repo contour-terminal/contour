@@ -1047,25 +1047,27 @@ constexpr StringLiteral DimColorsConfig {
     "{comment}     white:   {}\n"
 };
 
-constexpr StringLiteral BoxArcStyleConfig { "\n"
-                                            "{comment} Controls how arcs in box drawing charaters are drawn. "
-                                            "May be on of `round`, `ellips`. The default value is `round`.\n"
-                                            "box_arc_style: {}\n" };
-
-constexpr StringLiteral BraileStyleConfig {
+constexpr StringLiteral BoxArcStyleConfig {
     "\n"
-    "{comment} Controls how Unicode Braile characters are rendered.\n "
+    "{comment} Controls how arcs in box drawing characters are drawn. "
+    "May be on of `round`, `ellips`. The default value is `round`.\n"
+    "box_arc_style: {}\n"
+};
+
+constexpr StringLiteral BrailleStyleConfig {
+    "\n"
+    "{comment} Controls how Unicode Braille characters are rendered.\n "
     "{comment} May be one of `font`, `solid`, `circle`, `circle_empty`, "
     "`square`, `square_empty, `aa_square`, `aa_square_emtpy`.\n"
-    "{comment} The defaul value is `circle`.\n"
-    "{comment} `font` disables fpecial rendering and uses font characters.\n"
+    "{comment} The default value is `circle`.\n"
+    "{comment} `font` disables special rendering and uses font characters.\n"
     "{comment} `solid` splits character box into 8 rectangles without space between them."
     "No antialiasing is used, some font sizes may result in differently sized \"dots\".\n"
     "{comment} `circle<..>` and `<..>square<..>` groups use circle and square \"dots\" respectively.\n"
     "{comment} `<..>_empty` draw non-filled \"dots\".\n"
     "{comment} `square<..>` does not use antialiasing, which may result in differently sized \"dots\". "
     "`aa_square<..>` uses antialiasing.\n"
-    "braile_style: {}\n"
+    "braille_style: {}\n"
 };
 constexpr StringLiteral GitDrawingsConfig {
     "\n"
@@ -1842,6 +1844,6 @@ using BrightColors = DocumentationEntry<BrightColorsConfig, Dummy>;
 using DimColors = DocumentationEntry<DimColorsConfig, Dummy>;
 using GitDrawings = DocumentationEntry<GitDrawingsConfig, Dummy>;
 using BoxArcStyle = DocumentationEntry<BoxArcStyleConfig, Dummy>;
-using BraileStyle = DocumentationEntry<BraileStyleConfig, Dummy>;
+using BrailleStyle = DocumentationEntry<BrailleStyleConfig, Dummy>;
 
 } // namespace contour::config::documentation

@@ -29,7 +29,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 - ✅ 256-color and Truecolor support
 - ✅ Key binding customization
 - ✅ Color Schemes
-- ✅ Profiles (grouped customization of: color scheme, login shell, and related behaviours)
+- ✅ Profiles (grouped customization of: color scheme, login shell, and related behaviors)
 - ✅ [Synchronized rendering](https://contour-terminal.org/vt-extensions/synchronized-output/) (via `SM ? 2026` / `RM ? 2026`)
 - ✅ Text reflow (configurable via `SM ? 2028` / `RM ? 2028`)
 - ✅ Clickable hyperlinks via [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda)

@@ -71,7 +71,7 @@ enum class State : uint8_t
      *
      * It then recognises other parameter characters until an intermediate or final character
      * appears. Further occurrences of the private-marker characters 3C-3F or the character 3A,
-     * which has no standardised meaning, will cause transition to the csi ignore state.
+     * which has no standardized meaning, will cause transition to the csi ignore state.
      */
     CSI_Param,
 
@@ -109,7 +109,7 @@ enum class State : uint8_t
      * dependent on the control function. This state is only used to recognise the first
      * character of the control string, mirroring the csi entry state.
      *
-     * C0 controls other than CAN, SUB and ESC are not executed while recognising the first part
+     * C0 controls other than CAN, SUB and ESC are not executed while recognizing the first part
      * of a device control string.
      */
     DCS_Entry,
@@ -135,7 +135,7 @@ enum class State : uint8_t
      * strings into the main parser. When a final character has been recognised in a device
      * control string, this state will establish a channel to a handler for the appropriate
      * control function, and then pass all subsequent characters through to this alternate
-     * handler, until the data string is terminated (usually by recognising the ST control
+     * handler, until the data string is terminated (usually by recognizing the ST control
      * function).
      *
      * This state has an exit action so that the control function handler can be informed when

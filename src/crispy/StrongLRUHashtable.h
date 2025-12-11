@@ -228,7 +228,7 @@ class strong_lru_hashtable
     // This entry is not inserted into the LRU-chain yet.
     [[nodiscard]] uint32_t allocateEntry(strong_hash const& hash, uint32_t* slot);
 
-    // Relinks the given entry to the front of the LRU-chain.
+    // Re-links the given entry to the front of the LRU-chain.
     void linkToLRUChainHead(uint32_t entryIndex) noexcept;
 
     // Unlinks given entry from LRU chain without touching the entry itself.

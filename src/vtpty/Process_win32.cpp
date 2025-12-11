@@ -139,7 +139,7 @@ namespace
 
     char** createArgv(string const& arg0, vector<string> const& args, size_t i = 0)
     {
-        auto const argCount = args.size(); // factor out in order to avoid false-positive by static analysers.
+        auto const argCount = args.size(); // factor out in order to avoid false-positive by static analyzers.
         char** argv = new char*[argCount + 2 - i];
         argv[0] = const_cast<char*>(arg0.c_str());
         for (size_t i = 0; i < argCount; ++i)

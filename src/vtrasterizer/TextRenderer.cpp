@@ -32,7 +32,7 @@
 
 ### How emoji are rendered
 
-    U+1F600 is the standard smily, a single grapheme cluster.
+    U+1F600 is the standard smiley, a single grapheme cluster.
     It has an east asian width of 2.
     Text shaping yields 1 glyph position with x-advance being twice as large (2 grid cells).
     The glyph renders with overlarge width.
