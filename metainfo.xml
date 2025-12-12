@@ -139,6 +139,7 @@
           <li>Adds git graph drawing glyphs</li>
           <li>Adds new arc style for box drawing characters</li>
           <li>Adds multiple rendering options for braille characters</li>
+          <li>Adds configuration action ToggleInputMethodHandling to allow toggling IME (input method editor) handling (#1813)</li>
           <li>Drop Qt5 support</li>
         </ul>
       </description>

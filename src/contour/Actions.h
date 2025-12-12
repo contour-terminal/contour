@@ -71,6 +71,7 @@ struct SearchReverse{};
 struct SendChars{ std::string chars; };
 struct ToggleAllKeyMaps{};
 struct ToggleFullscreen{};
+struct ToggleInputMethodHandling {};
 struct ToggleInputProtection{};
 struct ToggleStatusLine{};
 struct ToggleTitleBar{};
@@ -134,6 +135,7 @@ using Action = std::variant<CancelSelection,
                             SendChars,
                             ToggleAllKeyMaps,
                             ToggleFullscreen,
+                            ToggleInputMethodHandling,
                             ToggleInputProtection,
                             ToggleStatusLine,
                             ToggleTitleBar,
@@ -245,6 +247,9 @@ namespace documentation
                                                          "keybind will be preserved when disabling all "
                                                          "others)." };
     constexpr inline std::string_view ToggleFullscreen { "Enables/disables full screen mode." };
+    constexpr inline std::string_view ToggleInputMethodHandling {
+        "Enables/disables IME (input method editor) handling."
+    };
     constexpr inline std::string_view ToggleInputProtection { "Enables/disables terminal input protection." };
     constexpr inline std::string_view ToggleStatusLine {
         "Shows/hides the VT320 compatible Indicator status line."
@@ -333,6 +338,7 @@ constexpr
         std::tuple { Action { SendChars {} }, documentation::SendChars },
         std::tuple { Action { ToggleAllKeyMaps {} }, documentation::ToggleAllKeyMaps },
         std::tuple { Action { ToggleFullscreen {} }, documentation::ToggleFullscreen },
+        std::tuple { Action { ToggleInputMethodHandling {} }, documentation::ToggleInputMethodHandling },
         std::tuple { Action { ToggleInputProtection {} }, documentation::ToggleInputProtection },
         std::tuple { Action { ToggleStatusLine {} }, documentation::ToggleStatusLine },
         std::tuple { Action { ToggleTitleBar {} }, documentation::ToggleTitleBar },
@@ -415,6 +421,7 @@ DECLARE_ACTION_FMT(SearchReverse)
 DECLARE_ACTION_FMT(SendChars)
 DECLARE_ACTION_FMT(ToggleAllKeyMaps)
 DECLARE_ACTION_FMT(ToggleFullscreen)
+DECLARE_ACTION_FMT(ToggleInputMethodHandling)
 DECLARE_ACTION_FMT(ToggleInputProtection)
 DECLARE_ACTION_FMT(ToggleStatusLine)
 DECLARE_ACTION_FMT(ToggleTitleBar)
@@ -507,6 +514,7 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(SendChars);
         HANDLE_ACTION(ToggleAllKeyMaps);
         HANDLE_ACTION(ToggleFullscreen);
+        HANDLE_ACTION(ToggleInputMethodHandling);
         HANDLE_ACTION(ToggleInputProtection);
         HANDLE_ACTION(ToggleStatusLine);
         HANDLE_ACTION(ToggleTitleBar);

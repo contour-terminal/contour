@@ -141,6 +141,7 @@ class TerminalDisplay: public QQuickItem
     void setBlurBehind(bool enable);
     void toggleFullScreen();
     void toggleTitleBar();
+    void toggleInputMethodEditorHandling();
     void setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover);
 
     // terminal events
