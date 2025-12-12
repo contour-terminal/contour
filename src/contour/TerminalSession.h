@@ -351,6 +351,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::SendChars const& event);
     bool operator()(actions::ToggleAllKeyMaps);
     bool operator()(actions::ToggleFullscreen);
+    bool operator()(actions::ToggleInputMethodHandling);
     bool operator()(actions::ToggleInputProtection);
     bool operator()(actions::ToggleStatusLine);
     bool operator()(actions::ToggleTitleBar);

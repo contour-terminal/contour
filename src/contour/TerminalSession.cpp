@@ -1466,6 +1466,13 @@ bool TerminalSession::operator()(actions::ToggleFullscreen)
     return true;
 }
 
+bool TerminalSession::operator()(actions::ToggleInputMethodHandling)
+{
+    if (_display)
+        _display->toggleInputMethodEditorHandling();
+    return true;
+}
+
 bool TerminalSession::operator()(actions::ToggleInputProtection)
 {
     terminal().setAllowInput(!terminal().allowInput());

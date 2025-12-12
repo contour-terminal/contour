@@ -519,6 +519,12 @@ const InputMappings defaultInputMappings {
     .charMappings {
         CharInputMapping {
             .modes { vtbackend::MatchModes {} },
+            .modifiers { vtbackend::Modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                                | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+            .input = ',',
+            .binding = { { actions::ToggleInputMethodHandling {} } } },
+        CharInputMapping {
+            .modes { vtbackend::MatchModes {} },
             .modifiers { vtbackend::Modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
                                                 | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
             .input = '-',

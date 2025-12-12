@@ -1366,6 +1366,13 @@ void TerminalDisplay::toggleTitleBar()
     window()->setFlag(Qt::FramelessWindowHint, !currentlyFrameless);
 }
 
+void TerminalDisplay::toggleInputMethodEditorHandling()
+{
+    auto const enabled = !static_cast<bool>(flags() & Flag::ItemAcceptsInputMethod);
+    displayLog()("{} IME (input method editor) handling", enabled ? "Enabling" : "Disabling");
+    setFlag(Flag::ItemAcceptsInputMethod, enabled);
+}
+
 void TerminalDisplay::setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover)
 {
     _renderer->setHyperlinkDecoration(normal, hover);

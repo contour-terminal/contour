@@ -792,6 +792,7 @@ constexpr StringLiteral InputMappingsConfig {
     "preserved "
     "when disabling all others).\n"
     "{comment} - ToggleFullScreen  Enables/disables full screen mode.\n"
+    "{comment} - ToggleInputMethodHandling Enables/disables IME (input method editor) handling.\n"
     "{comment} - ToggleInputProtection Enables/disables terminal input protection.\n"
     "{comment} - ToggleStatusLine  Shows/hides the VT320 compatible Indicator status line.\n"
     "{comment} - ToggleTitleBar    Shows/Hides titlebar\n"

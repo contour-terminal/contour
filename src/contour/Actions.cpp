@@ -70,6 +70,7 @@ optional<Action> fromString(string const& name)
         mapAction<actions::SendChars>("SendChars"),
         mapAction<actions::ToggleAllKeyMaps>("ToggleAllKeyMaps"),
         mapAction<actions::ToggleFullscreen>("ToggleFullscreen"),
+        mapAction<actions::ToggleInputMethodHandling>("ToggleInputMethodHandling"),
         mapAction<actions::ToggleInputProtection>("ToggleInputProtection"),
         mapAction<actions::ToggleStatusLine>("ToggleStatusLine"),
         mapAction<actions::ToggleTitleBar>("ToggleTitleBar"),
