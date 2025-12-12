@@ -379,10 +379,12 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         return true;
     }
 
-#if defined(__apple__)
-    if (0x20 <= key && key < 0x80 && (modifiers.alt() && session.profile().optionKeyAsAlt.value()))
+#if defined(__APPLE__)
+    if (0x20 <= key && key < 0x80
+        && (modifiers.test(Modifier::Alt) && session.profile().optionKeyAsAlt.value()))
     {
-        auto const ch = static_cast<char32_t>(modifiers.shift() ? std::toupper(key) : std::tolower(key));
+        bool const shiftPressed = modifiers.test(Modifier::Shift) ^ modifiers.test(Modifier::CapsLock);
+        auto const ch = static_cast<char32_t>(shiftPressed ? std::toupper(key) : std::tolower(key));
         session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
         event->accept();
         return true;
