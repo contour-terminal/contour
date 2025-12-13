@@ -296,51 +296,7 @@ endfunction()
 #    set(CMAKE_INSTALL_PREFIX "/${CMAKE_BUNDLE_NAME}.app/Contents")
 # endif(APPLE)
 
-macro(bundle_install_qt_plugin _qt_plugin_name _qt_plugins_var)
-    # Qt6 provides the plugins as individual packages that need to be found.
-    set(_install_prefix "contour.app/Contents/")
-    find_package(Qt${INSTALLED_QT_VERSION}${_qt_plugin} QUIET PATHS ${Qt${INSTALLED_QT_VERSION}${_qtComponent}_DIR})
-    if(TARGET "${_qt_plugin_name}")
-        get_target_property(_qt_plugin_path "${_qt_plugin_name}" LOCATION)
-    else()
-        _qt_get_plugin_name_with_version("Qt::${_qt_plugin_name}" _qt_plugin_with_version_name)
-        if(TARGET "${_qt_plugin_with_version_name}")
-            get_target_property(_qt_plugin_path "${_qt_plugin_with_version_name}" LOCATION)
-        else()
-            message(STATUS "Qt ${_qt_plugin_name}: Ignoring")
-            return()
-        endif()
-    endif()
-    if(EXISTS "${_qt_plugin_path}")
-        get_filename_component(_qt_plugin_file "${_qt_plugin_path}" NAME)
-        get_filename_component(_qt_plugin_type "${_qt_plugin_path}" PATH)
-        get_filename_component(_qt_plugin_type "${_qt_plugin_type}" NAME)
-        get_filename_component(_qt_plugin_ext "${_qt_plugin_path}" EXT)
-        if("${_qt_plugin_ext}" STREQUAL ".dylib")
-            set(_qt_plugin_dir "PlugIns")
-            set(_qt_plugin_dest "${_install_prefix}${_qt_plugin_dir}/${_qt_plugin_type}")
-            message(STATUS "Qt ${_qt_plugin_name}: Installing from ${_qt_plugin_path}")
-            install(FILES "${_qt_plugin_path}" DESTINATION "${_qt_plugin_dest}")
-            set(${_qt_plugins_var} "${${_qt_plugins_var}};\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_qt_plugin_dest}/${_qt_plugin_file}")
-        else()
-            message(STATUS "Qt ${_qt_plugin_name}: Ignoring '${_qt_plugin_path}'")
-        endif()
-    endif()
-endmacro()
 
-# _qtComponents  - in-variable name, list of Qt components (like Gui, Qml, Widgets) to install
-# _plugins_var   - out-variable name, list variable that will contain all the libraries to maybe carry over
-macro(bundle_install_qt_plugins_for_component _qtComponent _plugins_var)
-    get_target_property(_qt_module_plugins Qt${INSTALLED_QT_VERSION}::${_qtComponent} ${_plugins_var})
-    if(NOT _qt_module_plugins)
-        message(STATUS "Qt ${_qtComponent}: no plugins to install")
-    else()
-        message(STATUS "Qt ${_qtComponent}: collecting ...")
-        foreach(_qt_plugin IN LISTS _qt_module_plugins)
-            bundle_install_qt_plugin("${_qt_plugin}" "${_plugins_var}")
-        endforeach()
-    endif()
-endmacro()
 
 # get_property(_Qt_Core_LOCATION TARGET Qt${INSTALLED_QT_VERSION}::Core PROPERTY LOCATION)
 # get_filename_component(Qt_BIN_DIR "${_Qt_Core_LOCATION}" PATH)
@@ -380,6 +336,7 @@ elseif(APPLE)
 
     qt_import_qml_plugins(contour)
 
+    set(CPACK_COMPONENTS_ALL_IN_ONE_INSTALL TRUE)
     include(InstallRequiredSystemLibraries)
 
     # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
@@ -388,11 +345,7 @@ elseif(APPLE)
     set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
     set(INSTALL_CMAKE_DIR "${App_Contents}/Resources")
 
-    # NB: This is mostly based on code from CMake's QtDialog/CMakeLists.txt
-    # TODO: Minimize the number of plugins installed to the required ones.
-    foreach(_qt_comp IN LISTS QT_COMPONENTS)
-        bundle_install_qt_plugins_for_component("${_qt_comp}" QT_PLUGINS)
-    endforeach()
+
 
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
@@ -411,39 +364,7 @@ elseif(APPLE)
     # file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" "[Paths]\nPlugins = PlugIns\n")
     # install(FILES "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" DESTINATION "${INSTALL_CMAKE_DIR}")
 
-    # {{{ create vars for fixup_bundle call
-    set(BUNDLE_APP "\${CMAKE_INSTALL_PREFIX}/${APP_NAME}.app")        # Note Mac specific extension .app
 
-    # LIBS_SEARCH_DIRS will contain a list of directories to look for dependencies to include into the bundle.
-    set(LIBS_SEARCH_DIRS
-        "/opt/homebrew/lib"
-        "/usr/local/lib"
-        "/usr/lib"
-        "/lib"
-    )
-
-    # Path used for searching by FIND_XXX(), with appropriate suffixes added
-    if(CMAKE_PREFIX_PATH)
-        foreach(dir ${CMAKE_PREFIX_PATH})
-            if (IS_DIRECTORY "${dir}/bin")
-                list(APPEND LIBS_SEARCH_DIRS "${dir}/bin")
-            endif()
-            if (IS_DIRECTORY "${dir}/lib")
-                list(APPEND LIBS_SEARCH_DIRS "${dir}/lib")
-            endif()
-        endforeach()
-    endif()
-
-    # some debug printing
-    list(SORT QT_PLUGINS)
-    list(REMOVE_DUPLICATES QT_PLUGINS)
-    foreach(_plugin ${QT_PLUGINS})
-        message(STATUS "Qt Plugin: ${_plugin}")
-    endforeach()
-    foreach(_dir ${LIBS_SEARCH_DIRS})
-        message(STATUS "Library Search Dir: ${_dir}")
-    endforeach()
-    # }}}
 
     set(CODE_SIGN_CERTIFICATE_ID "-" CACHE STRING "macOS Code signature ID") # TODO: Use proper ID on CI
     include(DeployQt)  # Just to get access to ${MACDEPLOYQT_EXECUTABLE}
@@ -469,48 +390,12 @@ elseif(APPLE)
     install(CODE "
         execute_process(
             WORKING_DIRECTORY \"${_macdeployqt_path}/..\" # is this specific working dir really required? (others believe so)
-            COMMAND ${MACDEPLOYQT_EXECUTABLE} \"${CMAKE_CURRENT_BINARY_DIR}/contour.app\"
+            COMMAND ${MACDEPLOYQT_EXECUTABLE} \"\${CMAKE_INSTALL_PREFIX}/contour.app\"
                     -always-overwrite
                     -verbose=1
                     -no-strip
                     -qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui
                     \"-codesign=${CODE_SIGN_CERTIFICATE_ID}\"
-        )
-
-        # Recursively iterate through all plugins and populate PLUGIN_PATHS to be passed to fixup_bundle.
-
-        message(STATUS \"Globbing into RELATIVE \${CMAKE_CURRENT_BINARY_DIR} for \${CMAKE_SHARED_LIBRARY_SUFFIX} files (\${CMAKE_INSTALL_PREFIX})\")
-        file(GLOB_RECURSE PLUGIN_PATHS
-            \"\${CMAKE_INSTALL_PREFIX}/contour.app/Contents/PlugIns/*${CMAKE_SHARED_LIBRARY_SUFFIX}\"
-            \"\${CMAKE_INSTALL_PREFIX}/contour.app/Contents/Resources/*${CMAKE_SHARED_LIBRARY_SUFFIX}\"
-        )
-        foreach(_plugin \${PLUGIN_PATHS})
-            message(STATUS \"CPack Qt Plugin: \${_plugin}\")
-        endforeach()
-
-        include(BundleUtilities)
-        fixup_bundle(
-            \"${BUNDLE_APP}\"
-            \"\${PLUGIN_PATHS}\"
-            \"${LIBS_SEARCH_DIRS}\"
-        )
-
-        # Post-fix libqcocoa.dylib platform plugin's rpath,
-        # The already provided rpath (@loader_path/../../../../lib) does not work
-        # in a bundled app.
-        # execute_process(
-        #     COMMAND install_name_tool
-        #         -add_rpath @loader_path/../../Frameworks
-        #         \"${BUNDLE_APP}/Contents/PlugIns/platforms/libqcocoa.dylib\"
-        # )
-        # ^^^
-        # Should not be needed, because of fixup_bundle to PLUGIN_PATHS...
-        # But for some reason, I cannot get it to work.
-
-        # Ensure code signature
-        execute_process(
-            WORKING_DIRECTORY \"${CMAKE_CURRENT_BINARY_DIR}\"
-            COMMAND codesign --force --deep --sign \"${CODE_SIGN_CERTIFICATE_ID}\" \"${BUNDLE_APP}\"
         )
     ")
 else()
