@@ -395,7 +395,17 @@ elseif(APPLE)
                     -verbose=1
                     -no-strip
                     -qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui
-                    \"-codesign=${CODE_SIGN_CERTIFICATE_ID}\"
+        )
+        execute_process(
+            COMMAND codesign
+                --force
+                --verbose
+                --deep
+                --options=runtime
+                --timestamp
+                --entitlements \"${PROJECT_SOURCE_DIR}/support/macOS/entitlements.plist\"
+                --sign \"${CODE_SIGN_CERTIFICATE_ID}\"
+                \"\${CMAKE_INSTALL_PREFIX}/contour.app\"
         )
     ")
 else()
