@@ -514,7 +514,7 @@ jobs:
           echo QTVER=6 >> "$GITHUB_OUTPUT"
           # Please read the following link on how to use MacOS code signing on Github CI:
           # https://docs.github.com/en/actions/deployment/deploying-xcode-applications/installing-an-apple-certificate-on-macos-runners-for-xcode-development
-          echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
+          echo "CODE_SIGN_CERTIFICATE_ID=8E5F2A99BDA77EC0A0DE747F29D0BD42A25725F3" >> "$GITHUB_OUTPUT"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: Install the Apple certificate and provisioning profile
