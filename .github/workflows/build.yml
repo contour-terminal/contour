@@ -678,7 +678,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cxx: [20]
+        cxx: [23]
         build_type: ["RelWithDebInfo"]
         compiler:
           [
@@ -772,7 +772,7 @@ jobs:
       - name: "tests"
         run: cmake --build --preset linux-debug --target test
       - name: "Upload unit tests"
-        if: ${{ matrix.compiler == 'GCC 14' && matrix.cxx == '20' && matrix.runner == 'ubuntu-24.04'}}
+        if: ${{ matrix.compiler == 'GCC 14' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04'}}
         uses: actions/upload-artifact@v4
         with:
           name: contour-ubuntu2404-tests
@@ -870,7 +870,6 @@ jobs:
       - name: "cmake"
         run: |
           # TODO: turn on -Werror again, that requires some code changes.
-          CMAKE_CXX_STANDARD=20
           EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS"
           EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_PACKAGE_TERMINFO=OFF"
           BUILD_DIR="build" \
