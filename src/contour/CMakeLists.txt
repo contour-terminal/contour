@@ -18,7 +18,7 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 # {{{ Setup QT_COMPONENTS
 # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
 # NB: Widgets is rquired for SystemTrayIcon's fallback implementation
-set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets OpenGL OpenGLWidgets Core5Compat)
+set(QT_COMPONENTS Core Gui DBus Qml Quick QuickControls2 QuickTemplates2 DBus Network Multimedia Widgets OpenGL OpenGLWidgets Core5Compat)
 # }}}
 
 message(STATUS "Qt components: ${QT_COMPONENTS}")
@@ -189,12 +189,14 @@ if(CONTOUR_FRONTEND_GUI)
         vtrasterizer
         ContourTerminalDisplay
         Qt6::Core5Compat
+        Qt6::DBus
         Qt6::Multimedia
         Qt6::Network
         Qt6::OpenGL
         Qt6::Qml
         Qt6::QuickControls2
         Qt6::Widgets
+        Qt6::QuickTemplates2
     )
 
     if(OPENBSD)
@@ -405,7 +407,22 @@ elseif(APPLE)
                     -verbose=1
                     -no-strip
                     -qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui
-                    \"-codesign=${CODE_SIGN_CERTIFICATE_ID}\"
+        )
+        # -codesign=\"${CODE_SIGN_CERTIFICATE_ID}\"
+        # MacDeployQt's -codesign=XXX option is simply executing codesign.
+        # So we can do it safely ourself as follows:
+        execute_process(
+            COMMAND codesign
+                --force
+                --verbose
+                --deep
+                --options=runtime
+                --timestamp
+                --strict
+                --preserve-metadata=identifier,entitlements
+                --entitlements \"${PROJECT_SOURCE_DIR}/support/macOS/entitlements.plist\"
+                --sign \"${CODE_SIGN_CERTIFICATE_ID}\"
+                \"${CMAKE_INSTALL_PREFIX}/contour.app\"
         )
     ")
 else()
