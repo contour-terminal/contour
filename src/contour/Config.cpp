@@ -417,6 +417,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "scrollbar", where.scrollbar);
         loadFromEntry(child, "mouse", where.mouse);
         loadFromEntry(child, "permissions", where.permissions);
+        loadFromEntry(child, "input_method_editor", where.inputMethodEditor);
         loadFromEntry(child, "highlight_word_and_matches_on_double_click", where.highlightDoubleClickedWord);
         loadFromEntry(child, "font", where.fonts);
         loadFromEntry(child, "draw_bold_text_with_bright_colors", where.drawBoldTextWithBrightColors);

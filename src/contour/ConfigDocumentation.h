@@ -421,6 +421,13 @@ constexpr StringLiteral HighlightTimeoutConfig {
     "\n"
 };
 
+constexpr StringLiteral InputMethodEditorSupportConfig {
+    "{comment} Enables Input Method Editor (IME) support.\n"
+    "{comment} This is enabled by default.\n"
+    "input_method_editor: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral HighlightDoubleClickerWordConfig {
     "{comment} If enabled, and you double-click on a word in the primary screen,\n"
     "{comment} all other words matching this word will be highlighted as well.\n"
@@ -1840,6 +1847,7 @@ using WordHighlightCurrent = DocumentationEntry<WordHighlightCurrentConfig, Dumm
 using WordHighlight = DocumentationEntry<WordHighlightConfig, Dummy>;
 using IndicatorStatusLine = DocumentationEntry<IndicatorStatusLineConfig, Dummy>;
 using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
+using InputMethodEditorSupport = DocumentationEntry<InputMethodEditorSupportConfig, Dummy>;
 using NormalColors = DocumentationEntry<NormalColorsConfig, Dummy>;
 using BrightColors = DocumentationEntry<BrightColorsConfig, Dummy>;
 using DimColors = DocumentationEntry<DimColorsConfig, Dummy>;
