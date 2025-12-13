@@ -14,7 +14,7 @@
             },
             "cacheVariables": {
                 "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF",
-                "CODE_SIGN_CERTIFICATE_ID": "Developer ID Application: Christian Parpart (6T525MU9UR)",
+                "CODE_SIGN_CERTIFICATE_ID": "8E5F2A99BDA77EC0A0DE747F29D0BD42A25725F3",
                 "CMAKE_PREFIX_PATH": "/opt/homebrew/opt/qt"
             }
         },
