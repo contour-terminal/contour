@@ -22,6 +22,7 @@
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
+#include <expected>
 #include <fstream>
 
 #include <libssh2.h>
@@ -179,7 +180,7 @@ namespace
         }
     }
 
-    constexpr std::string_view hostkeyTypeToString(int hostkeyType) noexcept
+    constexpr std::expected<std::string_view, int> hostkeyTypeToString(int hostkeyType) noexcept
     {
         switch (hostkeyType)
         {
@@ -201,7 +202,7 @@ namespace
 #if defined(LIBSSH2_HOSTKEY_TYPE_ED25519)
             case LIBSSH2_HOSTKEY_TYPE_ED25519: return "ED25519";
 #endif
-            default: return "UNKNOWN";
+            default: return std::unexpected { hostkeyType };
         }
     }
 
@@ -1232,8 +1233,9 @@ SshSession::HostkeyVerificationStatus SshSession::verifyHostkey()
     switch (rc)
     {
         case LIBSSH2_KNOWNHOST_CHECK_MATCH:
-            logInfo(
-                "Host key verification succeeded ({} {}).", hostkeyTypeToString(hostkey.type), knownhostKey);
+            logInfo("Host key verification succeeded ({} {}).",
+                    hostkeyTypeToString(hostkey.type).value_or(std::format("TYPE-{}", hostkey.type)),
+                    knownhostKey);
             return HostkeyVerificationStatus::Verified;
         case LIBSSH2_KNOWNHOST_CHECK_MISMATCH:
             logError("Host key verification failed. Host key mismatch.");
