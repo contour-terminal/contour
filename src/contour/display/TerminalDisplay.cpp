@@ -306,6 +306,10 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     QObject::connect(newSession, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
 
+    auto const imeEnabled = profile().inputMethodEditor.value();
+    setFlag(Flag::ItemAcceptsInputMethod, imeEnabled);
+    displayLog()("IME enabled: {}", imeEnabled);
+
     _session->start();
 
     window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar.value());

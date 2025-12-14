@@ -422,6 +422,7 @@ struct TerminalProfile
     ConfigEntry<ScrollBarConfig, documentation::Scrollbar> scrollbar {};
     ConfigEntry<MouseConfig, documentation::Mouse> mouse { true };
     ConfigEntry<PermissionsConfig, documentation::Permissions> permissions {};
+    ConfigEntry<bool, documentation::InputMethodEditorSupport> inputMethodEditor { true };
     ConfigEntry<bool, documentation::HighlightDoubleClickerWord> highlightDoubleClickedWord { true };
     ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont };
     ConfigEntry<bool, documentation::DrawBoldTextWithBrightColors> drawBoldTextWithBrightColors { false };
