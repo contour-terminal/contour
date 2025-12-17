@@ -133,6 +133,8 @@ jobs:
     name: "Check clang-tidy"
     runs-on: ubuntu-24.04
     if: github.ref != 'refs/heads/master'
+    env:
+      CLANG_VERSION: 20
     steps:
     - uses: actions/checkout@v4
     - name: ccache
@@ -157,13 +159,18 @@ jobs:
       run: |
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 20
-        sudo apt-get install clang-tidy-20
+        sudo ./llvm.sh ${CLANG_VERSION}
+        sudo apt-get install clang-tidy-${CLANG_VERSION}
     - name: "cmake"
       run: |
-        cmake --preset linux-debug -B build -G Ninja \
-        -D CMAKE_CXX_COMPILER="clang++-20" \
-        -D ENABLE_TIDY=ON -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-20
+        cmake \
+              --preset linux-debug \
+              -B build \
+              -G Ninja \
+              -D CONTOUR_WAYLAND=OFF \
+              -D CMAKE_CXX_COMPILER="clang++-${CLANG_VERSION}" \
+              -D ENABLE_TIDY=ON \
+              -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-${CLANG_VERSION}
     - name: "build"
       run: cmake --build build
 
@@ -764,6 +771,7 @@ jobs:
               -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}" \
               -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS}" \
               -DCMAKE_INSTALL_PREFIX="/usr" \
+              -DCONTOUR_WAYLAND=OFF \
               -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
               -DPEDANTIC_COMPILER_WERROR=OFF \
               --preset linux-debug
@@ -878,6 +886,7 @@ jobs:
                                -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD \
                                -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_TESTING=ON \
+                               -DCONTOUR_WAYLAND=OFF \
                                -DPEDANTIC_COMPILER_WERROR=OFF \
                                " \
             ./scripts/ci-prepare-contour.sh

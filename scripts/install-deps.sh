@@ -275,7 +275,12 @@ install_deps_ubuntu()
             qt6-base-dev-tools
             qt6-declarative-dev
             qt6-multimedia-dev
+            qt6-multimedia-dev
             qt6-qpa-plugins
+            qt6-wayland-dev
+            qt6-wayland-dev-tools
+            libwayland-dev
+            wayland-protocols
         "
     else
         packages="$packages
@@ -411,6 +416,8 @@ install_deps_arch()
             qt6-multimedia \
             qt6-shadertools \
             qt6-wayland \
+            wayland \
+            wayland-protocols \
         "
     else
         packages="$packages \
@@ -461,7 +468,11 @@ install_deps_suse()
             qt6-qt5compat-devel
             qt6-qt5compat-imports
             qt6-quick-devel
+            qt6-quick-devel
             qt6-quickcontrols2-devel
+            qt6-wayland-devel
+            wayland-devel
+            wayland-protocols-devel
         "
     else
         packages="$packages
@@ -509,8 +520,11 @@ install_deps_fedora()
             qt6-qtbase-gui
             qt6-qtdeclarative-devel
             qt6-qtmultimedia-devel
-            qt6-qtwayland
+            qt6-qtmultimedia-devel
+            qt6-qtwayland-devel
             qt6-qtquickcontrols2-devel
+            wayland-devel
+            wayland-protocols-devel
         "
     else
         packages="$packages

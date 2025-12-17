@@ -1,0 +1,4 @@
+libwayland
+qplatformwindow
+qwayland
+qwaylandwindow
