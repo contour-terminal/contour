@@ -9,6 +9,7 @@ elseif(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 endif()
 
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
+option(CONTOUR_WAYLAND "Enables Wayland specific code paths." ON)
 
 NumberToHex(${PROJECT_VERSION_MAJOR} HEX_MAJOR)
 NumberToHex(${PROJECT_VERSION_MINOR} HEX_MINOR)
@@ -204,6 +205,16 @@ if(CONTOUR_FRONTEND_GUI)
     if(CONTOUR_BUILD_STATIC)
         qt_import_qml_plugins(contour)
     endif()
+
+    if(LINUX AND CONTOUR_WAYLAND)
+        find_package(Qt6 COMPONENTS WaylandClient WaylandClientPrivate)
+        target_compile_definitions(contour PRIVATE CONTOUR_WAYLAND)
+        target_link_libraries(contour PRIVATE Qt6::WaylandClient Qt6::WaylandClientPrivate)
+        qt6_generate_wayland_protocol_client_sources(contour FILES "${CMAKE_CURRENT_SOURCE_DIR}/protocols/blur.xml")
+        # Explicitly add the generated protocol source code to the target, as the macro sometimes fails to do so.
+        target_sources(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/wayland-blur-protocol.c")
+        target_sources(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/qwayland-blur.cpp")
+    endif()
 endif()
 # }}}
 
@@ -222,7 +233,6 @@ if(NOT(WIN32) AND CONTOUR_PACKAGE_TERMINFO)
         TARGET contour POST_BUILD
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         COMMAND contour generate terminfo to ${terminfo_file} && ${TIC} -x -o "${terminfo_basedir}" "${terminfo_file}"
-        DEPENDS "${terminfo_file}"
         COMMENT "Compiling ${terminfo_file}"
         BYPRODUCTS "${terminfo_file}"
         VERBATIM

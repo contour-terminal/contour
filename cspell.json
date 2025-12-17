@@ -23,6 +23,11 @@
             "addWords": true
         },
         {
+            "name": "my-linux",
+            "path": ".github/actions/spelling/allow/linux-terms.txt",
+            "addWords": true
+        },
+        {
             "name": "my-patterns",
             "path": ".github/actions/spelling/allow/patterns.txt",
             "addWords": true
@@ -89,7 +94,7 @@
         "my-expect",
         "my-english",
         "my-api-terms",
-        "my-names",
+        "my-linux",
         "my-patterns",
         "my-qt-terms",
         "my-terminal-caps",
