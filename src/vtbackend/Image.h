@@ -166,6 +166,13 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     ImageSize _cellSize;                 //!< number of pixels in X and Y dimension one grid cell has to fill.
 };
 
+std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,
+                                           ImageAlignment alignmentPolicy,
+                                           ImageResize resizePolicy,
+                                           RGBAColor defaultColor,
+                                           GridSize cellSpan,
+                                           ImageSize cellSize);
+
 /// An ImageFragment holds a graphical image that ocupies one full grid cell.
 class ImageFragment
 {

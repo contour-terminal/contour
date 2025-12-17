@@ -128,6 +128,7 @@ if(LIBTERMINAL_TESTING)
         Grid_test.cpp
         Line_test.cpp
         Screen_test.cpp
+        Image_test.cpp
         Sequence_test.cpp
         Terminal_test.cpp
         SixelParser_test.cpp
