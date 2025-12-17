@@ -1826,7 +1826,7 @@ void Screen<Cell>::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
     auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : CellLocation {};
 
     auto const alignmentPolicy = ImageAlignment::TopStart;
-    auto const resizePolicy = ImageResize::NoResize;
+    auto const resizePolicy = ImageResize::ResizeToFit;
 
     auto const imageOffset = PixelCoordinate {};
     auto const imageSize = pixelSize;

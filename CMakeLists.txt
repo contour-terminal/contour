@@ -39,6 +39,10 @@ if(DEFINED MSVC)
     add_compile_options(/bigobj)
 endif()
 
+if(APPLE)
+    # add -fexperimental-library option for libc++
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexperimental-library")
+endif()
 
 # CMAKE_BUILD_TYPE check for None
 if(CMAKE_BUILD_TYPE STREQUAL "None")

@@ -143,6 +143,8 @@
           <li>Adds configuration option `input_method_editor` to profile settings to opt-out of IME (Input Method Editor) support (#1817)</li>
           <li>Adds background blur support for KDE Plasma on Wayland (for Qt 6.5.0 and newer)</li>
           <li>Drop Qt5 support</li>
+          <li>Fixes assertion when displaying Sixel images</li>
+          <li>Fixes Sixel image scaling to respect the grid cell size (including font resize related glitches)</li>
         </ul>
       </description>
     </release>

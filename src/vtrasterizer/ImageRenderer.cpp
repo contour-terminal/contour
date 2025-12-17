@@ -91,15 +91,15 @@ Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttri
     //                   * fragment.rasterizedImage().cellSize().height.value;
     auto const key = ImageFragmentKey { .imageId = fragment.rasterizedImage().image().id(),
                                         .offset = fragment.offset(),
-                                        .size = fragment.rasterizedImage().cellSize() };
+                                        .size = _cellSize };
     auto const hash = crispy::strong_hash::compute(key);
 
     return textureAtlas().get_or_try_emplace(
         hash, [&](atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
             return createTileData(tileLocation,
-                                  fragment.data(),
+                                  fragment.rasterizedImage().fragment(fragment.offset(), _cellSize),
                                   atlas::Format::RGBA,
-                                  fragment.rasterizedImage().cellSize(),
+                                  _cellSize,
                                   _cellSize,
                                   RenderTileAttributes::X { 0 },
                                   RenderTileAttributes::Y { 0 },
