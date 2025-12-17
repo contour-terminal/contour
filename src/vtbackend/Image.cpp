@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <utility>
 
 using std::copy;
 using std::make_shared;
@@ -48,69 +49,117 @@ ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
 {
 }
 
-Image::Data RasterizedImage::fragment(CellLocation pos) const
+Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize) const
 {
-    // TODO: respect alignment hint
-    // TODO: respect resize hint
+    auto const cellSize = targetCellSize.area() > 0 ? targetCellSize : _cellSize;
+    auto const gridWidth = unbox<int>(_cellSpan.columns) * unbox<int>(cellSize.width);
+    auto const gridHeight = unbox<int>(_cellSpan.lines) * unbox<int>(cellSize.height);
 
-    auto const xOffset = pos.column * unbox<int>(_cellSize.width);
-    auto const yOffset = pos.line * unbox<int>(_cellSize.height);
-    auto const pixelOffset = CellLocation { .line = yOffset, .column = xOffset };
+    auto const imageWidth = unbox<int>(_image->width());
+    auto const imageHeight = unbox<int>(_image->height());
+
+    auto const [paramWidth,
+                paramHeight] = [this, imageWidth, imageHeight, gridWidth, gridHeight]() { // Target Size
+        switch (_resizePolicy)
+        {
+            case ImageResize::NoResize: return std::pair { imageWidth, imageHeight };
+            case ImageResize::ResizeToFit: {
+                auto const scale =
+                    std::min(static_cast<double>(gridWidth) / static_cast<double>(imageWidth),
+                             static_cast<double>(gridHeight) / static_cast<double>(imageHeight));
+                return std::pair { static_cast<int>(imageWidth * scale),
+                                   static_cast<int>(imageHeight * scale) };
+            }
+            case ImageResize::ResizeToFill: {
+                auto const scale =
+                    std::max(static_cast<double>(gridWidth) / static_cast<double>(imageWidth),
+                             static_cast<double>(gridHeight) / static_cast<double>(imageHeight));
+                return std::pair { static_cast<int>(imageWidth * scale),
+                                   static_cast<int>(imageHeight * scale) };
+            }
+            case ImageResize::StretchToFill: return std::pair { gridWidth, gridHeight };
+        }
+        return std::pair { imageWidth, imageHeight };
+    }();
+
+    auto const [xOffset, yOffset] = [this, gridWidth, gridHeight, paramWidth, paramHeight]() { // TopLeft
+        switch (_alignmentPolicy)
+        {
+            case ImageAlignment::TopStart: return std::pair { 0, 0 };
+            case ImageAlignment::TopCenter: return std::pair { (gridWidth - paramWidth) / 2, 0 };
+            case ImageAlignment::TopEnd: return std::pair { gridWidth - paramWidth, 0 };
+            case ImageAlignment::MiddleStart: return std::pair { 0, (gridHeight - paramHeight) / 2 };
+            case ImageAlignment::MiddleCenter:
+                return std::pair { (gridWidth - paramWidth) / 2, (gridHeight - paramHeight) / 2 };
+            case ImageAlignment::MiddleEnd:
+                return std::pair { gridWidth - paramWidth, (gridHeight - paramHeight) / 2 };
+            case ImageAlignment::BottomStart: return std::pair { 0, gridHeight - paramHeight };
+            case ImageAlignment::BottomCenter:
+                return std::pair { (gridWidth - paramWidth) / 2, gridHeight - paramHeight };
+            case ImageAlignment::BottomEnd:
+                return std::pair { gridWidth - paramWidth, gridHeight - paramHeight };
+        }
+        return std::pair { 0, 0 };
+    }();
+
+    // The pixel offset of the top-left corner of the current cell in the global grid system
+    auto const cellX = unbox<int>(pos.column) * unbox<int>(cellSize.width);
+    auto const cellY = unbox<int>(pos.line) * unbox<int>(cellSize.height);
 
     Image::Data fragData;
-    fragData.resize(_cellSize.area() * 4); // RGBA
-    auto const availableWidth =
-        min(unbox<int>(_image->width()) - unbox(pixelOffset.column), unbox<int>(_cellSize.width));
-    auto const availableHeight =
-        min(unbox<int>(_image->height()) - unbox(pixelOffset.line), unbox<int>(_cellSize.height));
-
-    // auto const availableSize = Size{availableWidth, availableHeight};
-    // std::cout << std::format(
-    //     "RasterizedImage.fragment({}): pixelOffset={}, cellSize={}/{}\n",
-    //     pos,
-    //     pixelOffset,
-    //     _cellSize,
-    //     availableSize
-    // );
-
-    // auto const fitsWidth = pixelOffset.column + _cellSize.width < _image.get().width();
-    // auto const fitsHeight = pixelOffset.line + _cellSize.height < _image.get().height();
-    // if (!fitsWidth || !fitsHeight)
-    //     std::cout << std::format("ImageFragment: out of bounds{}{} ({}x{}); {}\n",
-    //             fitsWidth ? "" : " (width)",
-    //             fitsHeight ? "" : " (height)",
-    //             availableWidth,
-    //             availableHeight,
-    //             *this);
-
-    // TODO: if input format is (RGB | PNG), transform to RGBA
-
+    fragData.resize(cellSize.area() * 4); // RGBA
     auto* target = fragData.data();
 
-    for (int y = 0; y < availableHeight; ++y)
+    // Iterate over every pixel in the CELL
+    for (int y = 0; y < unbox<int>(cellSize.height); ++y)
     {
-        auto const startOffset = static_cast<size_t>(
-            ((pixelOffset.line + y) * unbox<int>(_image->width()) + unbox(pixelOffset.column)) * 4);
-        const auto* const source = &_image->data()[startOffset];
-        target = copy(source, source + (static_cast<ptrdiff_t>(availableWidth) * 4), target);
-
-        // fill vertical gap on right
-        for (int x = availableWidth; x < unbox<int>(_cellSize.width); ++x)
+        for (int x = 0; x < unbox<int>(cellSize.width); ++x)
         {
-            *target++ = _defaultColor.red();
-            *target++ = _defaultColor.green();
-            *target++ = _defaultColor.blue();
-            *target++ = _defaultColor.alpha();
-        }
-    }
+            // Global coordinate of the pixel we are rendering
+            auto const globalX = cellX + x;
+            auto const globalY = cellY + y;
 
-    // fill horizontal gap at the bottom
-    for (auto y = availableHeight * unbox<int>(_cellSize.width); std::cmp_less(y, int(_cellSize.area())); ++y)
-    {
-        *target++ = _defaultColor.red();
-        *target++ = _defaultColor.green();
-        *target++ = _defaultColor.blue();
-        *target++ = _defaultColor.alpha();
+            // Check if this global pixel is within the image's target rectangle
+            if (globalX >= xOffset && globalX < xOffset + paramWidth && globalY >= yOffset
+                && globalY < yOffset + paramHeight)
+            {
+                // Map global coordinate to source image coordinate
+                // globalX - xOffset is the x-coordinate relative to the image's top-left
+                // Then scale it back to the source image size
+                // We use integer arithmetic carefully or double? Image is unlikely to be > 2B pixels.
+                // Using double for precision in scaling mapping.
+                auto const sourceX = static_cast<int>((globalX - xOffset) * static_cast<double>(imageWidth)
+                                                      / static_cast<double>(paramWidth));
+                auto const sourceY = static_cast<int>((globalY - yOffset) * static_cast<double>(imageHeight)
+                                                      / static_cast<double>(paramHeight));
+
+                auto const sourceIndex = (static_cast<size_t>(sourceY) * static_cast<size_t>(imageWidth)
+                                          + static_cast<size_t>(sourceX))
+                                         * 4;
+                if (sourceIndex + 4 <= _image->data().size())
+                {
+                    const auto* const source = &_image->data()[sourceIndex];
+                    *target++ = source[0];
+                    *target++ = source[1];
+                    *target++ = source[2];
+                    *target++ = source[3];
+                }
+                else
+                {
+                    *target++ = _defaultColor.red();
+                    *target++ = _defaultColor.green();
+                    *target++ = _defaultColor.blue();
+                    *target++ = _defaultColor.alpha();
+                }
+            }
+            else
+            {
+                *target++ = _defaultColor.red();
+                *target++ = _defaultColor.green();
+                *target++ = _defaultColor.blue();
+                *target++ = _defaultColor.alpha();
+            }
+        }
     }
 
     return fragData;

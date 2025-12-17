@@ -151,7 +151,11 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     ImageSize cellSize() const noexcept { return _cellSize; }
 
     /// @returns an RGBA buffer for a grid cell at given coordinate @p pos of the rasterized image.
-    Image::Data fragment(CellLocation pos) const;
+    ///
+    /// @param pos            0-based cell location inside the rasterized image.
+    /// @param targetCellSize Optional target cell size in pixels; if not given, the cell size
+    ///                       as given at construction time is used.
+    Image::Data fragment(CellLocation pos, ImageSize targetCellSize = {}) const;
 
   private:
     std::shared_ptr<Image const> _image; //!< Reference to the Image to be rasterized.
