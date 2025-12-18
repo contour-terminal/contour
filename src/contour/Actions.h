@@ -4,9 +4,11 @@
 #include <crispy/assert.h>
 #include <crispy/utils.h>
 
+#include <array>
 #include <format>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <variant>
 
 namespace contour::actions
@@ -290,10 +292,7 @@ namespace documentation
     constexpr inline std::string_view SetTabName { "Set the name of the current tab" };
 } // namespace documentation
 
-#if defined(__clang__) && __clang_major__ >= 19
-constexpr
-#endif
-    inline auto getDocumentation()
+constexpr inline auto getDocumentation()
 {
     return std::array {
         std::tuple { Action { CancelSelection {} }, documentation::CancelSelection },
@@ -362,7 +361,7 @@ constexpr
 }
 
 #if defined(__clang__) && __clang_major__ >= 19
-static_assert(getDocumentation().size() == std::variant_size_v<Action>);
+static_assert(std::tuple_size_v<decltype(getDocumentation())> == std::variant_size_v<Action>);
 #endif
 
 } // namespace contour::actions
