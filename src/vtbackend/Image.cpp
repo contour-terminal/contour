@@ -136,6 +136,7 @@ constexpr TopLeft computeTargetTopLeftOffset(ImageAlignment alignmentPolicy,
     std::unreachable();
 }
 
+#if defined(VTBACKEND_SIMD_FOUND)
 namespace
 {
     struct SimdContext
@@ -154,7 +155,6 @@ namespace
 
     void fillFragmentSimd(int& x, uint8_t*& target, SimdContext const& context, int globalY, bool yInBounds)
     {
-#if defined(VTBACKEND_SIMD_FOUND)
         using float_v = simd::native_simd<float>;
         using int_v = simd::rebind_simd_t<int, float_v>;
         constexpr int SimdWidth = float_v::size();
@@ -243,9 +243,9 @@ namespace
                 }
             }
         }
-#endif
     }
 } // namespace
+#endif
 
 Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize) const
 {
