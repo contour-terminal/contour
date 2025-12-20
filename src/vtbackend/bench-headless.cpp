@@ -109,7 +109,6 @@ class ContourHeadlessBench: public crispy::app
 #if defined(CONTOUR_BUILD_WITH_MIMALLOC)
             Project { "mimalloc", "", "" },
 #endif
-            Project { "range-v3", "Boost Software License 1.0", "https://github.com/ericniebler/range-v3" },
             Project { "yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp" },
             Project { "termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro" },
             Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });

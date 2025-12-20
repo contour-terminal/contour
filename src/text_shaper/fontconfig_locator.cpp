@@ -5,11 +5,10 @@
 #include <crispy/assert.h>
 #include <crispy/utils.h>
 
-#include <range/v3/view/drop.hpp>
-#include <range/v3/view/iota.hpp>
-
 #include <fontconfig/fontconfig.h>
 
+#include <algorithm>
+#include <ranges>
 #include <string_view>
 #include <variant>
 
@@ -272,7 +271,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
                        // find font in the fallback list and add it
                        for (auto&& fallbackFont: list.fallbackFonts)
                        {
-                           for (auto i: ranges::views::ints(1, fs->nfont))
+                           for (auto i: std::views::iota(1, fs->nfont))
                            {
                                FcPattern* font = fs->fonts[i];
 
@@ -299,7 +298,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
                        }
                    },
                    [&](std::monostate) {
-                       for (auto i: ranges::views::ints(1, fs->nfont))
+                       for (auto i: std::views::iota(1, fs->nfont))
                            addFont(fs->fonts[i]);
                    },
                },

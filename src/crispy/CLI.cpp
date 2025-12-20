@@ -4,13 +4,11 @@
 #include <crispy/logstore.h>
 #include <crispy/times.h>
 
-#include <range/v3/view/enumerate.hpp>
-#include <range/v3/view/iota.hpp>
-
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <deque>
+#include <ranges>
 #include <sstream>
 
 #if 0 // !defined(NDEBUG)
@@ -98,7 +96,7 @@ namespace // {{{ helper
     auto namePrefix(parse_context const& context, char delim = '.') -> string // {{{
     {
         string output;
-        for (auto const&& [i, cmd]: ranges::views::enumerate(context.currentCommand))
+        for (size_t i = 0; i < context.currentCommand.size(); ++i)
         {
             command const* v = context.currentCommand.at(i);
             if (i != 0)
@@ -444,7 +442,7 @@ namespace // {{{ helper
         string_view_list output;
         output.resize(static_cast<unsigned>(argc));
 
-        for (auto const i: ranges::views::iota(0u, static_cast<unsigned>(argc)))
+        for (auto const i: std::views::iota(0u, static_cast<unsigned>(argc)))
             output[i] = argv[i];
 
         return output;

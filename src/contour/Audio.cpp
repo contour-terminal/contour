@@ -15,7 +15,14 @@ namespace
 {
 constexpr double SampleRate = 44100;
 
-constexpr double square_wave(double x) noexcept
+// On Windows, this cannot be constexpr just yet, because std::fmod is not constexpr in MSVC (yet).
+#if !defined(_WIN32)
+    #define CONSTEXPR_UNLESS_MSVC constexpr
+#else
+    #define CONSTEXPR_UNLESS_MSVC
+#endif
+
+CONSTEXPR_UNLESS_MSVC double square_wave(double x) noexcept
 {
     x = std::fmod(x, 2);
     return std::isgreater(x, 1) ? -1 : 1;

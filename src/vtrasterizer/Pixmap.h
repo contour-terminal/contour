@@ -7,12 +7,11 @@
 
 #include <crispy/point.h>
 
-#include <range/v3/view/iota.hpp>
-
 #include <algorithm>
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <ranges>
 
 namespace vtrasterizer
 {
@@ -287,8 +286,8 @@ inline void Pixmap::paintOverThick(int x, int y, uint8_t intensity, int sx, int 
 template <typename F>
 Pixmap& Pixmap::fill(F const& filler)
 {
-    for (auto const y: ::ranges::views::iota(0, unbox<int>(size.height)))
-        for (auto const x: ::ranges::views::iota(0, unbox<int>(size.width)))
+    for (auto const y: std::views::iota(0, unbox<int>(size.height)))
+        for (auto const x: std::views::iota(0, unbox<int>(size.width)))
             paint(x, y, static_cast<uint8_t>(filler(x, y)));
     return *this;
 }

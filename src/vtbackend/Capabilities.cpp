@@ -3,13 +3,10 @@
 
 #include <crispy/escape.h>
 
-#include <range/v3/action/sort.hpp>
-#include <range/v3/action/transform.hpp>
-#include <range/v3/algorithm/copy.hpp>
-#include <range/v3/view/concat.hpp>
-#include <range/v3/view/transform.hpp>
-
+#include <algorithm>
+#include <array>
 #include <sstream>
+#include <vector>
 
 using std::nullopt;
 using std::optional;
@@ -68,13 +65,7 @@ using String = Cap<std::string_view>;
 
 namespace
 {
-    template <typename T, typename... Ts>
-    constexpr auto defineCapabilities(T element, Ts... elements)
-    {
-        return std::array<T, 1 + sizeof...(Ts)>({ element, elements... });
-    }
-
-    constexpr inline auto BooleanCaps = defineCapabilities(
+    constexpr inline auto BooleanCaps = std::array {
         Boolean { "Su"_tcap, "Su"sv, true },    // supports extended underline styling (such as undercurl)
         Boolean { "am"_tcap, "am"sv, true },    // terminal has automatic margins
         Boolean { "hs"_tcap, "hs"sv, true },    // has extra status line (has_status_line)
@@ -88,22 +79,22 @@ namespace
         Boolean { "NP"_tcap, "npc"sv, true },   // pad character does not exist
         Boolean { "5i"_tcap, "mc5i"sv, true },  // printer will not echo on screen
         Boolean { "YD"_tcap, "xvpa"sv, true },  // only positive motion for vpa/mvpa caps
-        Boolean { "Tc"_tcap, "Tc"sv, true }     // RGB color support (introduced by Tmux in 2016)
-    );
+        Boolean { "Tc"_tcap, "Tc"sv, true },    // RGB color support (introduced by Tmux in 2016)
+    };
 
     constexpr inline auto Int16Max = std::numeric_limits<int16_t>::max();
 
-    constexpr inline auto NumericalCaps = defineCapabilities(
+    constexpr inline auto NumericalCaps = std::array {
         Numeric { "co"_tcap, "cols"sv, 80 },         // number of columns in a line
         Numeric { "it"_tcap, "it"sv, 8 },            // tabs initially every # spaces
         Numeric { "Co"_tcap, "colors"sv, Int16Max }, // maximum number of colors on screen
         Numeric { "pa"_tcap, "pairs"sv, Int16Max },  // maximum number of color-pairs on the screen
-        Numeric { "li"_tcap, "lines"sv, 24 }         // default number of lines in a terminal
-    );
+        Numeric { "li"_tcap, "lines"sv, 24 },        // default number of lines in a terminal
+    };
 
     constexpr auto inline Undefined = Code {};
     // clang-format off
-    constexpr inline auto StringCaps = defineCapabilities( // {{{
+    constexpr inline auto StringCaps = std::array { // {{{
         String { "TN"_tcap, ""sv, "xterm-256color"sv },    // termcap/terminfo name (xterm extension)
         String { "ac"_tcap, "acsc"sv, "``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~"sv }, // graphics charset pairs, based on vt100
         String { "bl"_tcap, "bel"sv, "^G"sv },                               // The audible bell character
@@ -395,8 +386,8 @@ namespace
 
         // Synchronized Output.
         // Terminfo extension as introduced by tmux.
-        String { Undefined, "Sync"sv, "Sync=\033[?2026%?%p1%{1}%-%tl%eh"sv }
-    ); // }}}
+        String { Undefined, "Sync"sv, "Sync=\033[?2026%?%p1%{1}%-%tl%eh"sv },
+    }; // }}}
     // clang-format on
 } // namespace
 
@@ -480,25 +471,27 @@ optional<Code> StaticDatabase::codeFromName(string_view name) const
 
 string StaticDatabase::terminfo() const
 {
-    using namespace ranges;
+    auto booleans = std::vector(BooleanCaps.begin(), BooleanCaps.end());
+    auto numbers = std::vector(NumericalCaps.begin(), NumericalCaps.end());
+    auto strings = std::vector(StringCaps.begin(), StringCaps.end());
 
-    auto booleans = copy(BooleanCaps);
-    auto numbers = copy(NumericalCaps);
-    auto strings = copy(StringCaps);
+    std::ranges::sort(booleans);
+    std::ranges::sort(numbers);
+    std::ranges::sort(strings);
 
     std::stringstream output;
 
     output << "contour|Contour Terminal Emulator,\n";
 
-    for (auto const& cap: move(booleans) | actions::sort)
+    for (auto const& cap: booleans)
         if (!cap.name.empty() && cap.value)
             output << "    " << cap.name << ",\n";
 
-    for (auto const& cap: move(numbers) | actions::sort)
+    for (auto const& cap: numbers)
         if (!cap.name.empty())
             output << "    " << cap.name << "#" << cap.value << ",\n";
 
-    for (auto const& cap: move(strings) | actions::sort)
+    for (auto const& cap: strings)
         if (!cap.name.empty())
             output << "    " << cap.name << "=" << crispy::escape(cap.value, crispy::numeric_escape::Octal)
                    << ",\n";

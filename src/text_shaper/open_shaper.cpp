@@ -10,12 +10,10 @@
 #include <libunicode/convert.h>
 #include <libunicode/ucd_fmt.h>
 
-#include <range/v3/algorithm/any_of.hpp>
-#include <range/v3/view/enumerate.hpp>
-#include <range/v3/view/iota.hpp>
-
+#include <algorithm>
 #include <limits>
 #include <optional>
+#include <ranges>
 #include <string>
 
 // clang-format off
@@ -41,7 +39,6 @@
 #include <unordered_map>
 #include <utility>
 
-using ranges::views::iota;
 using std::get;
 using std::holds_alternative;
 using std::invalid_argument;
@@ -62,6 +59,7 @@ using std::u32string_view;
 using std::unique_ptr;
 using std::unordered_map;
 using std::vector;
+using std::views::iota;
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
@@ -317,9 +315,12 @@ namespace
         if (!missingGlyph)
             return;
 
-        for (auto&& [i, gpos]: ranges::views::enumerate(result))
+        for (size_t i = 0; i < result.size(); ++i)
+        {
+            auto& gpos = result[i];
             if (glyphMissing(gpos))
                 gpos.glyph.index = glyph_index { missingGlyph };
+        }
     }
 
     void prepareBuffer(hb_buffer_t* hbBuf,
@@ -438,7 +439,9 @@ struct open_shaper::private_open_shaper // {{{
             i != fontPathAndSizeToKeyMapping.end())
             return i->second;
 
-        if (ranges::any_of(blacklistedSources, [&](auto const& a) { return a == sourceId; }))
+        if (std::any_of(blacklistedSources.begin(), blacklistedSources.end(), [&](auto const& a) {
+                return a == sourceId;
+            }))
             return nullopt;
 
         auto ftFacePtrOpt = loadFace(source, fontSize, dpi, ft);
@@ -676,8 +679,12 @@ void open_shaper::shape(font_key font,
         logMessage.append([=]() { auto s = ostringstream(); s << presentation; return s.str(); }());
         // clang-format on
         logMessage.append("):");
-        for (auto [i, codepoint]: ranges::views::enumerate(codepoints))
+        size_t i = 0;
+        for (auto const codepoint: codepoints)
+        {
             logMessage.append(" {}:U+{:x}", clusters[i], static_cast<unsigned>(codepoint));
+            ++i;
+        }
         logMessage.append("\n");
         logMessage.append("Using font: key={}, path=\"{}\"\n", font, identifierOf(fontInfo.primary));
     }

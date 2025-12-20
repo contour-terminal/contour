@@ -5,8 +5,7 @@
 
 #include <crispy/logstore.h>
 
-#include <range/v3/view/iota.hpp>
-
+#include <ranges>
 #include <utility>
 #include <vector>
 
@@ -15,7 +14,7 @@ using std::min;
 using std::tuple;
 using std::vector;
 
-using ranges::views::iota;
+using std::views::iota;
 
 namespace text
 {
@@ -34,32 +33,31 @@ namespace
             return (4 * i * unbox(outputSize.width)) + (j * 4) + component;
         };
 
-        for (auto const i: ::ranges::views::iota(size_t { 0 }, unbox(outputSize.height)))
+        for (auto const i: iota(size_t { 0 }, unbox(outputSize.height)))
         {
-            for (auto const j: ::ranges::views::iota(size_t { 0 }, unbox(outputSize.width)))
+            for (auto const j: iota(size_t { 0 }, unbox(outputSize.width)))
             {
                 //  calculate area average
                 std::array<unsigned int, NumComponents> components { {} };
                 unsigned int count = 0;
-                for (auto const y:
-                     ::ranges::views::iota(min(i * factor, unbox<size_t>(inputSize.height)),
-                                           min((i + 1) * factor, unbox<size_t>(inputSize.height))))
+                for (auto const y: iota(min(i * factor, unbox<size_t>(inputSize.height)),
+                                        min((i + 1) * factor, unbox<size_t>(inputSize.height))))
                 {
                     uint8_t const* p =
                         inputBitmap.data() + (y * unbox<size_t>(inputSize.width) * 4) + (j * factor * 4);
                     for ([[maybe_unused]] auto const _:
-                         ::ranges::views::iota(min(j * factor, unbox<size_t>(inputSize.width)),
-                                               min((j + 1) * factor, unbox<size_t>(inputSize.width))))
+                         iota(min(j * factor, unbox<size_t>(inputSize.width)),
+                              min((j + 1) * factor, unbox<size_t>(inputSize.width))))
                     {
                         ++count;
-                        for (auto const componentIndex: ::ranges::views::iota(size_t { 0 }, NumComponents))
+                        for (auto const componentIndex: iota(size_t { 0 }, NumComponents))
                             components[componentIndex] += *(p++);
                     }
                 }
 
                 if (count)
                 {
-                    for (auto const componentIndex: ::ranges::views::iota(size_t { 0 }, NumComponents))
+                    for (auto const componentIndex: iota(size_t { 0 }, NumComponents))
                         ret[index(i, j, componentIndex)] =
                             static_cast<uint8_t>(components[componentIndex] / count);
                 }

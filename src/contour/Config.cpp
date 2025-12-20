@@ -2262,7 +2262,7 @@ std::string createForProfile(Config const& c)
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& vEntry) {
             auto v = vEntry.value();
             auto args = std::string { "[" };
-            args.append(v.arguments | ::ranges::views::join(", ") | ::ranges::to<std::string>);
+            args.append(v.arguments | crispy::views::join_with(", "sv));
             args.append("]");
 
             doc.append(writer.process(writer.whichDoc(vEntry), name, v.program, args, [&]() -> std::string {

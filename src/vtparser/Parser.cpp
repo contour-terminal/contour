@@ -2,16 +2,15 @@
 #include <vtparser/Parser.h>
 #include <vtparser/ParserEvents.h>
 
-#include <range/v3/view/enumerate.hpp>
+#include <crispy/utils.h>
 
 #include <format>
 #include <map>
 #include <ostream>
+#include <ranges>
 
 namespace vtparser
 {
-
-using ranges::views::enumerate;
 
 auto fillTransitions()
 {
@@ -21,9 +20,9 @@ auto fillTransitions()
     ParserTable const& table = ParserTable::get();
     // (State, Byte) -> State
     auto transitions = std::map<Transition, RangeSet> {};
-    for ([[maybe_unused]] auto const&& [sourceState, sourceTransitions]: enumerate(table.transitions))
+    for (auto const [sourceState, sourceTransitions]: crispy::views::enumerate(table.transitions))
     {
-        for (auto const [i, targetState]: enumerate(sourceTransitions))
+        for (auto const [i, targetState]: crispy::views::enumerate(sourceTransitions))
         {
             auto const ch = static_cast<uint8_t>(i);
             if (targetState != State::Undefined)
@@ -77,7 +76,7 @@ void parserTableDot(std::ostream& os) // {{{
         os << std::format(R"(  "{}" -> "{}" )", sourceState, targetStateName);
         os << "[";
         os << "label=\"";
-        for (auto const&& [rangeCount, u]: enumerate(t.second))
+        for (auto const [rangeCount, u]: crispy::views::enumerate(t.second))
         {
             if (rangeCount)
             {

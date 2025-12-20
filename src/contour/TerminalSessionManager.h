@@ -7,6 +7,8 @@
 #include <QtCore/QAbstractListModel>
 #include <QtQml/QQmlEngine>
 
+#include <algorithm>
+#include <ranges>
 #include <unordered_map>
 #include <vector>
 
@@ -94,14 +96,15 @@ class TerminalSessionManager: public QAbstractListModel
     {
         if (auto* displayState = _displayStates[_activeDisplay].currentSession; displayState)
             displayState->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
-                .tabs = std::ranges::transform_view(_sessions,
-                                                    [](auto* session) {
-                                                        return vtbackend::TabsInfo::Tab {
-                                                            .name = session->name(),
-                                                            .color = vtbackend::RGBColor { 0, 0, 0 },
-                                                        };
-                                                    })
-                        | ranges::to<std::vector>(),
+                .tabs =
+                    [&]() {
+                        std::vector<vtbackend::TabsInfo::Tab> tabs;
+                        tabs.reserve(_sessions.size());
+                        for (auto* session: _sessions)
+                            tabs.push_back(
+                                { .name = session->name(), .color = vtbackend::RGBColor { 0, 0, 0 } });
+                        return tabs;
+                    }(),
                 .activeTabPosition =
                     1 + getSessionIndexOf(_displayStates[_activeDisplay].currentSession).value_or(0),
             });

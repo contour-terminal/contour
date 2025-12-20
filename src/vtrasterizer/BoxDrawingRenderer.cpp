@@ -5,10 +5,9 @@
 
 #include <crispy/logstore.h>
 
-#include <range/v3/view/iota.hpp>
-
 #include <array>
 #include <cstdint>
+#include <ranges>
 
 using namespace std::string_view_literals;
 
@@ -26,7 +25,8 @@ using std::tuple;
 using crispy::point;
 
 namespace Ranges = std::ranges;
-namespace Views = ranges::views;
+namespace Ranges = std::ranges;
+namespace Views = std::views;
 
 namespace vtrasterizer
 {

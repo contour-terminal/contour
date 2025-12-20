@@ -24,7 +24,6 @@ add_library(text_shaper STATIC ${text_shaper_SRC})
 set_target_properties(text_shaper PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 
 set(TEXT_SHAPER_LIBS unicode::unicode boxed-cpp::boxed-cpp)
-list(APPEND TEXT_SHAPER_LIBS range-v3::range-v3)
 list(APPEND TEXT_SHAPER_LIBS Microsoft.GSL::GSL)
 
 if(APPLE)

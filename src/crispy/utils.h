@@ -3,9 +3,6 @@
 #include <crispy/defines.h>
 #include <crispy/escape.h>
 
-#include <range/v3/view/iota.hpp>
-#include <range/v3/view/transform.hpp>
-
 #include <algorithm>
 #include <filesystem>
 #include <format>
@@ -13,6 +10,7 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -31,15 +29,123 @@ namespace views
     template <typename T>
     auto as()
     {
-        return ranges::views::transform([](auto in) { return T(in); });
+        return std::views::transform([](auto in) { return T(in); });
     }
 
     template <typename T>
     auto iota_as(int n)
     {
-        return ranges::views::ints(0, n) | as<T>();
+        return std::views::iota(0, n) | as<T>();
     }
+
+    namespace detail
+    {
+        template <typename Range>
+        std::string join_with_impl(Range&& range, std::string_view separator)
+        {
+            std::string result;
+            auto it = std::begin(std::forward<Range>(range));
+            auto const end = std::end(std::forward<Range>(range));
+
+            if (it != end)
+            {
+                result += *it;
+                ++it;
+            }
+
+            for (; it != end; ++it)
+            {
+                result += separator;
+                result += *it;
+            }
+            return result;
+        }
+
+        struct join_with_fn
+        {
+            std::string_view separator;
+
+            template <typename R>
+            friend auto operator|(R&& r, join_with_fn const& self)
+            {
+                return join_with_impl(std::forward<R>(r), self.separator);
+            }
+        };
+    } // namespace detail
+
+    inline auto join_with(std::string_view sep)
+    {
+        return detail::join_with_fn { sep };
+    }
+
+    template <typename Range>
+    auto join_with(Range&& range, std::string_view sep)
+    {
+        return detail::join_with_impl(std::forward<Range>(range), sep);
+    }
+    template <typename Range>
+    struct enumerate_view_sentinel
+    {
+        using sentinel = std::ranges::sentinel_t<Range>;
+        sentinel end;
+
+        friend constexpr bool operator==(std::ranges::iterator_t<Range> const& it,
+                                         enumerate_view_sentinel const& s)
+        {
+            return it == s.end;
+        }
+    };
+
+    template <typename Range>
+    struct enumerate_view
+    {
+        Range range;
+
+        struct iterator
+        {
+            using range_iterator = std::ranges::iterator_t<Range>;
+            using range_reference = std::ranges::range_reference_t<Range>;
+            using difference_type = std::ptrdiff_t;
+            using value_type = std::pair<size_t, std::ranges::range_value_t<Range>>;
+
+            size_t index;
+            range_iterator current;
+
+            constexpr auto operator*() const
+            {
+                return std::pair<size_t, range_reference> { index, *current };
+            }
+
+            constexpr iterator& operator++()
+            {
+                ++index;
+                ++current;
+                return *this;
+            }
+
+            constexpr bool operator!=(iterator const& other) const { return current != other.current; }
+            constexpr bool operator==(iterator const& other) const { return current == other.current; }
+            constexpr bool operator!=(std::ranges::sentinel_t<Range> const& s) const { return current != s; }
+            constexpr bool operator==(std::ranges::sentinel_t<Range> const& s) const { return current == s; }
+        };
+
+        constexpr auto begin() { return iterator { 0, std::begin(range) }; }
+        constexpr auto end() { return std::end(range); }
+    };
+
+    struct enumerate_fn
+    {
+        template <typename Range>
+        constexpr auto operator()(Range&& range) const
+        {
+            return enumerate_view<Range> { std::forward<Range>(range) };
+        }
+    };
+
+    constexpr inline enumerate_fn enumerate; // NOLINT(readability-identifier-naming)
 } // namespace views
+
+using views::join_with;
 
 constexpr std::string_view trimRight(std::string_view value) noexcept
 {

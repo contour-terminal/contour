@@ -11,10 +11,9 @@
 
 #include <libunicode/convert.h>
 
-#include <range/v3/view/iota.hpp>
-
 #include <catch2/catch_test_macros.hpp>
 
+#include <ranges>
 #include <string_view>
 
 using crispy::escape;

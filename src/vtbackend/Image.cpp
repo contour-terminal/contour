@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <ranges>
 #include <utility>
 
 // clang-format off
@@ -286,7 +287,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
 #endif
 
     // Iterate over every pixel in the CELL
-    for (int const y: ranges::views::iota(0, unbox<int>(cellSize.height)))
+    for (int const y: std::views::iota(0, unbox<int>(cellSize.height)))
     {
         auto const globalY = cellY + y;
         bool const yInBounds = (globalY >= yOffset) && (globalY < (yOffset + paramHeight));

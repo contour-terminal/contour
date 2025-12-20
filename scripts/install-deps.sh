@@ -11,15 +11,13 @@ fi
 # being invoked.
 #
 # set this as environment variable to ON to activate this mode.
-if [ x$PREPARE_ONLY_EMBEDS = x ]
-then
+if [ x$PREPARE_ONLY_EMBEDS = x ]; then
     PREPARE_ONLY_EMBEDS=OFF
 fi
 
 # if SYSDEP_ASSUME_YES=ON is set, then system package managers are attempted
 # to install packages automatically, i.e. without confirmation.
-if [ x$SYSDEP_ASSUME_YES = xON ]
-then
+if [ x$SYSDEP_ASSUME_YES = xON ]; then
     SYSDEP_ASSUME_YES='-y'
 else
     unset SYSDEP_ASSUME_YES
@@ -32,8 +30,7 @@ SYSDEPS_DIST_DIR="$SYSDEPS_BASE_DIR/distfiles"
 SYSDEPS_SRC_DIR="$SYSDEPS_BASE_DIR/sources"
 SYSDEPS_CMAKE_FILE="$SYSDEPS_SRC_DIR/CMakeLists.txt"
 
-fetch_and_unpack()
-{
+fetch_and_unpack() {
     NAME=$1
     DISTFILE=$2
     URL=$3
@@ -42,11 +39,11 @@ fetch_and_unpack()
     FULL_DISTFILE="$SYSDEPS_DIST_DIR/$DISTFILE"
 
     if ! test -f "$FULL_DISTFILE"; then
-        if command -v curl > /tmp/word 2>&1; then
+        if command -v curl >/tmp/word 2>&1; then
             curl -L -o "$FULL_DISTFILE" "$URL"
-        elif command -v wget > /tmp/word 2>&1; then
+        elif command -v wget >/tmp/word 2>&1; then
             wget -O "$FULL_DISTFILE" "$URL"
-        elif command -v fetch > /tmp/word 2>&1; then
+        elif command -v fetch >/tmp/word 2>&1; then
             # FreeBSD
             fetch -o "$FULL_DISTFILE" "$URL"
         else
@@ -65,32 +62,29 @@ fetch_and_unpack()
     fi
 
     if test x$MACRO = x; then
-        echo "add_subdirectory($NAME EXCLUDE_FROM_ALL)" >> $SYSDEPS_CMAKE_FILE
+        echo "add_subdirectory($NAME EXCLUDE_FROM_ALL)" >>$SYSDEPS_CMAKE_FILE
     else
-        echo "macro(ContourThirdParties_Embed_$MACRO)" >> $SYSDEPS_CMAKE_FILE
-        echo "    add_subdirectory(\${ContourThirdParties_SRCDIR}/$NAME EXCLUDE_FROM_ALL)" >> $SYSDEPS_CMAKE_FILE
-        echo "endmacro()" >> $SYSDEPS_CMAKE_FILE
+        echo "macro(ContourThirdParties_Embed_$MACRO)" >>$SYSDEPS_CMAKE_FILE
+        echo "    add_subdirectory(\${ContourThirdParties_SRCDIR}/$NAME EXCLUDE_FROM_ALL)" >>$SYSDEPS_CMAKE_FILE
+        echo "endmacro()" >>$SYSDEPS_CMAKE_FILE
     fi
 }
 
-fetch_and_unpack_Catch2()
-{
+fetch_and_unpack_Catch2() {
     fetch_and_unpack \
         Catch2-3.4.0 \
         Catch2-3.4.0.tar.gz \
         https://github.com/catchorg/Catch2/archive/refs/tags/v3.4.0.tar.gz
 }
 
-fetch_and_unpack_gsl()
-{
+fetch_and_unpack_gsl() {
     fetch_and_unpack \
         GSL-3.1.0 \
         gsl-3.1.0.tar.gz \
         https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.tar.gz
 }
 
-fetch_and_unpack_termbenchpro()
-{
+fetch_and_unpack_termbenchpro() {
     local termbench_pro_git_sha="f6c37988e6481b48a8b8acaf1575495e018e9747"
     fetch_and_unpack \
         termbench-pro-$termbench_pro_git_sha \
@@ -99,8 +93,7 @@ fetch_and_unpack_termbenchpro()
         termbench_pro
 }
 
-fetch_and_unpack_boxed()
-{
+fetch_and_unpack_boxed() {
     local boxed_cpp_version="1.4.3"
     fetch_and_unpack \
         boxed-cpp-$boxed_cpp_version \
@@ -109,8 +102,7 @@ fetch_and_unpack_boxed()
         boxed_cpp
 }
 
-fetch_and_unpack_libunicode()
-{
+fetch_and_unpack_libunicode() {
     if test x$LIBUNICODE_SRC_DIR = x; then
         local libunicode_git_sha="817cb5900acdf6f60e2344a4c8f1f39262878a4b"
         fetch_and_unpack \
@@ -121,14 +113,13 @@ fetch_and_unpack_libunicode()
     else
         echo "Hard linking external libunicode source directory to: $LIBUNICODE_SRC_DIR"
         MACRO="libunicode"
-        echo "macro(ContourThirdParties_Embed_$MACRO)" >> $SYSDEPS_CMAKE_FILE
-        echo "    add_subdirectory($LIBUNICODE_SRC_DIR libunicode EXCLUDE_FROM_ALL)" >> $SYSDEPS_CMAKE_FILE
-        echo "endmacro()" >> $SYSDEPS_CMAKE_FILE
+        echo "macro(ContourThirdParties_Embed_$MACRO)" >>$SYSDEPS_CMAKE_FILE
+        echo "    add_subdirectory($LIBUNICODE_SRC_DIR libunicode EXCLUDE_FROM_ALL)" >>$SYSDEPS_CMAKE_FILE
+        echo "endmacro()" >>$SYSDEPS_CMAKE_FILE
     fi
 }
 
-fetch_and_unpack_reflection_cpp()
-{
+fetch_and_unpack_reflection_cpp() {
     local reflection_cpp_git_sha="02484cd9ec16d7efc252ab8fd1f85d7264192418"
     fetch_and_unpack \
         reflection-cpp-$reflection_cpp_git_sha \
@@ -137,24 +128,14 @@ fetch_and_unpack_reflection_cpp()
         reflection_cpp
 }
 
-fetch_and_unpack_yaml_cpp()
-{
+fetch_and_unpack_yaml_cpp() {
     fetch_and_unpack \
         yaml-cpp-0.8.0 \
         yaml-cpp-0.8.0.tar.gz \
         https://github.com/jbeder/yaml-cpp/archive/refs/tags/0.8.0.tar.gz
 }
 
-fetch_and_unpack_range()
-{
-    fetch_and_unpack \
-        range-v3-0.12.0 \
-        range-v3-0.12.0.tar.gz \
-        https://github.com/ericniebler/range-v3/archive/refs/tags/0.12.0.tar.gz
-}
-
-fetch_and_unpack_libutempter()
-{
+fetch_and_unpack_libutempter() {
     local libutempter_version="1.2.1"
     fetch_and_unpack \
         libutempter-$libutempter_version \
@@ -176,11 +157,10 @@ add_library(utempter STATIC
 target_include_directories(utempter PUBLIC \${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(utempter PUBLIC
 "LIBEXECDIR=\"/usr/local/lib\"")" \
-    > "$SYSDEPS_BASE_DIR/sources/libutempter-$libutempter_version/CMakeLists.txt"
+        >"$SYSDEPS_BASE_DIR/sources/libutempter-$libutempter_version/CMakeLists.txt"
 }
 
-prepare_fetch_and_unpack()
-{
+prepare_fetch_and_unpack() {
     mkdir -p "${SYSDEPS_BASE_DIR}"
     mkdir -p "${SYSDEPS_DIST_DIR}"
     mkdir -p "${SYSDEPS_SRC_DIR}"
@@ -190,8 +170,7 @@ prepare_fetch_and_unpack()
 }
 # }}}
 
-install_deps_popos()
-{
+install_deps_popos() {
     local packages="
         build-essential
         cmake
@@ -218,13 +197,12 @@ install_deps_popos()
         qtmultimedia5-dev
     "
 
-    RELEASE=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
+    RELEASE=$(grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"')
 
-    local NAME=`grep ^NAME /etc/os-release | cut -d= -f2 | cut -f1 | tr -d '"'`
+    local NAME=$(grep ^NAME /etc/os-release | cut -d= -f2 | cut -f1 | tr -d '"')
 
     fetch_and_unpack_libunicode
     fetch_and_unpack_gsl
-    fetch_and_unpack_range
     fetch_and_unpack_Catch2
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
@@ -233,8 +211,7 @@ install_deps_popos()
     # sudo snap install --classic powershell
 }
 
-install_deps_ubuntu()
-{
+install_deps_ubuntu() {
     fetch_and_unpack_libunicode
     local packages="
         build-essential
@@ -298,13 +275,13 @@ install_deps_ubuntu()
         "
     fi
 
-    RELEASE=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
+    RELEASE=$(grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"')
 
-    local NAME=`grep ^NAME /etc/os-release | cut -d= -f2 | cut -f1 | tr -d '"'`
+    local NAME=$(grep ^NAME /etc/os-release | cut -d= -f2 | cut -f1 | tr -d '"')
 
     if [ ! "${NAME}" = "Debian GNU/Linux" ]; then
         # We cannot use [[ nor < here because that's not in /bin/sh.
-        if [ "$RELEASE" = "22.04" ] || [ "$RELEASE" = "22.10"  ]; then
+        if [ "$RELEASE" = "22.04" ] || [ "$RELEASE" = "22.10" ]; then
             packages="$packages"
         fi
         if [ "$RELEASE" = "23.04" ]; then
@@ -314,14 +291,12 @@ install_deps_ubuntu()
 
     fetch_and_unpack_gsl
     case $RELEASE in
-        "20.04" | "22.04" | "23.04")
-            # Older Ubuntu's don't have a recent enough fmt / range-v3, so supply it.
-            fetch_and_unpack_range
-            fetch_and_unpack_Catch2
-            ;;
-        *)
-            packages="$packages librange-v3-dev catch2"
-            ;;
+    "20.04" | "22.04" | "23.04")
+        fetch_and_unpack_Catch2
+        ;;
+    *)
+        packages="$packages catch2"
+        ;;
     esac
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
@@ -330,8 +305,7 @@ install_deps_ubuntu()
     # sudo snap install --classic powershell
 }
 
-install_deps_FreeBSD()
-{
+install_deps_FreeBSD() {
     fetch_and_unpack_libunicode
     fetch_and_unpack_Catch2
 
@@ -353,20 +327,16 @@ install_deps_FreeBSD()
         qt6-declarative \
         qt6-multimedia \
         qt6-tools \
-        range-v3 \
         xcb \
         yaml-cpp
     "
 }
 
-
-install_deps_OpenBSD()
-{
+install_deps_OpenBSD() {
 
     fetch_and_unpack_Catch2
     fetch_and_unpack_gsl
     fetch_and_unpack_yaml_cpp
-    fetch_and_unpack_range
     fetch_and_unpack_libunicode
     fetch_and_unpack_libutempter
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
@@ -386,8 +356,7 @@ install_deps_OpenBSD()
     "
 }
 
-install_deps_arch()
-{
+install_deps_arch() {
     fetch_and_unpack_libunicode
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
@@ -403,7 +372,6 @@ install_deps_arch()
         microsoft-gsl \
         ninja \
         pkg-config \
-        range-v3 \
         libutempter \
         yaml-cpp \
     "
@@ -430,8 +398,7 @@ install_deps_arch()
     sudo pacman -S -y --needed $packages
 }
 
-install_deps_suse()
-{
+install_deps_suse() {
     fetch_and_unpack_libunicode
     fetch_and_unpack_gsl
 
@@ -452,7 +419,6 @@ install_deps_suse()
         ncurses-devel
         ninja
         pkgconf
-        range-v3-devel
         yaml-cpp-devel
     "
 
@@ -487,9 +453,8 @@ install_deps_suse()
     sudo zypper install $SYSDEP_ASSUME_YES $packages
 }
 
-install_deps_fedora()
-{
-    local os_version=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
+install_deps_fedora() {
+    local os_version=$(grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"')
 
     local packages="
         catch-devel
@@ -503,7 +468,6 @@ install_deps_fedora()
         libxcb-devel
         ninja-build
         pkgconf
-        range-v3-devel
         libutempter-devel
         yaml-cpp-devel
     "
@@ -539,9 +503,7 @@ install_deps_fedora()
     sudo dnf install $SYSDEP_ASSUME_YES $packages
 }
 
-
-install_deps_darwin()
-{
+install_deps_darwin() {
     fetch_and_unpack_libunicode
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
@@ -557,65 +519,62 @@ install_deps_darwin()
         pkg-config \
         qt$QTVER \
         libssh2 \
-        range-v3 \
         yaml-cpp
 }
 
-main()
-{
+main() {
     if test x$OS_OVERRIDE != x; then
         # In CI, we need to be able to fetch embedd-setups for different OSes.
         ID=$OS_OVERRIDE
     elif test -f /etc/os-release; then
-        ID=`grep ^ID= /etc/os-release | cut -d= -f2`
+        ID=$(grep ^ID= /etc/os-release | cut -d= -f2)
     else
-        ID=`uname -s`
+        ID=$(uname -s)
     fi
 
     # Strip double-quotes, as used by opensuse for interesting reason.
-    ID=`echo $ID | tr -d '"'`
+    ID=$(echo $ID | tr -d '"')
 
     prepare_fetch_and_unpack
 
     case "$ID" in
-        arch|manjaro)
-            install_deps_arch
-            ;;
-        opensuse*)
-            install_deps_suse
-            ;;
-        fedora)
-            install_deps_fedora
-            ;;
-        pop)
-            install_deps_popos
-            ;;
-        ubuntu|neon)
-            install_deps_ubuntu
-            ;;
-        debian)
-            install_deps_ubuntu
-            ;;
-        Darwin)
-            install_deps_darwin
-            ;;
-        FreeBSD|freebsd)
-            install_deps_FreeBSD
-            ;;
-        OpenBSD|openbsd)
-            install_deps_OpenBSD
-            ;;
-        *)
-            fetch_and_unpack_Catch2
-            fetch_and_unpack_gsl
-            fetch_and_unpack_yaml_cpp
-            fetch_and_unpack_range
-            fetch_and_unpack_libunicode
-            fetch_and_unpack_libutempter
-            echo "OS $ID not supported."
-            echo "Please install the remaining dependencies manually."
-            echo "Most importantly: Qt, freetype, harfbuzz (including development headers)."
-            ;;
+    arch | manjaro)
+        install_deps_arch
+        ;;
+    opensuse*)
+        install_deps_suse
+        ;;
+    fedora)
+        install_deps_fedora
+        ;;
+    pop)
+        install_deps_popos
+        ;;
+    ubuntu | neon)
+        install_deps_ubuntu
+        ;;
+    debian)
+        install_deps_ubuntu
+        ;;
+    Darwin)
+        install_deps_darwin
+        ;;
+    FreeBSD | freebsd)
+        install_deps_FreeBSD
+        ;;
+    OpenBSD | openbsd)
+        install_deps_OpenBSD
+        ;;
+    *)
+        fetch_and_unpack_Catch2
+        fetch_and_unpack_gsl
+        fetch_and_unpack_yaml_cpp
+        fetch_and_unpack_libunicode
+        fetch_and_unpack_libutempter
+        echo "OS $ID not supported."
+        echo "Please install the remaining dependencies manually."
+        echo "Most importantly: Qt, freetype, harfbuzz (including development headers)."
+        ;;
     esac
 
     fetch_and_unpack_boxed

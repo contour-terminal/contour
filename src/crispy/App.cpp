@@ -3,8 +3,6 @@
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
-#include <range/v3/view/enumerate.hpp>
-
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -272,7 +270,7 @@ void app::customizeLogStoreOutput()
         auto result = string {};
 
         auto const lines = crispy::split(msg.text(), '\n');
-        for (auto const [i, line]: ranges::views::enumerate(lines))
+        for (auto const [i, line]: crispy::views::enumerate(lines))
         {
             if (i != 0)
                 result += "        ";
@@ -316,7 +314,7 @@ void app::customizeLogStoreOutput()
 
         auto result = string {};
         auto const lines = crispy::split(msg.text(), '\n');
-        for (auto const [i, line]: ranges::views::enumerate(lines))
+        for (auto const [i, line]: crispy::views::enumerate(lines))
         {
             if (i != 0)
                 result += "        ";
