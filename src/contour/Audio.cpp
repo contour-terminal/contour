@@ -15,8 +15,7 @@ namespace
 {
 constexpr double SampleRate = 44100;
 
-// TODO make this function constexpr when we switch to c++23
-double square_wave(double x) noexcept
+constexpr double square_wave(double x) noexcept
 {
     x = std::fmod(x, 2);
     return std::isgreater(x, 1) ? -1 : 1;
