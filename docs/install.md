@@ -22,8 +22,11 @@ sudo dnf install contour-terminal
 
 ## Arch Linux
 
-Please use the AUR, at [https://aur.archlinux.org/packages/contour-git](https://aur.archlinux.org/packages/contour).
+Use the official [package](https://archlinux.org/packages/extra/x86_64/contour/)
 
+```sh
+sudo pacman -S contour-terminal
+```
 ## Ubuntu Linux
 
 Please download Contour for Ubuntu Linux (the `.deb` files) from our official [release](https://github.com/contour-terminal/contour/releases) page,
