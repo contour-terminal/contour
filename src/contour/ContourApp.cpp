@@ -125,7 +125,6 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
         Project { "HarfBuzz", "Old MIT", "https://harfbuzz.github.io/" },
         // Project{"Catch2", "BSL-1.0", "https://github.com/catchorg/Catch2"},
         Project { "libunicode", "Apache-2.0", "https://github.com/contour-terminal/libunicode" },
-        Project { "range-v3", "Boost Software License 1.0", "https://github.com/ericniebler/range-v3" },
         Project { "yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp" },
         Project { "termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro" },
         Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });

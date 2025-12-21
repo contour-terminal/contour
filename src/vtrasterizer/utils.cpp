@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/utils.h>
 
-#include <range/v3/view/iota.hpp>
-
 #include <algorithm> // max?
 #include <cassert>
+#include <ranges>
 
 namespace vtrasterizer
 {
@@ -103,13 +102,13 @@ vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
             {
                 uint8_t const* p = bitmap.data() + (y * *size.width * numComponents) + (sc * numComponents);
                 for (auto x = sc; x < min(sc + factor, size.width.as<unsigned>()); x++, count++)
-                    for (auto const k: ::ranges::views::iota(0u, numComponents))
+                    for (auto const k: std::views::iota(0u, numComponents))
                         values.at(k) += *(p++);
             }
 
             if (count)
             {
-                for (auto const i: ::ranges::views::iota(0u, values.size()))
+                for (auto const i: std::views::iota(0u, values.size()))
                     d[i] = static_cast<uint8_t>(values[i] / count);
             }
         }
@@ -129,19 +128,19 @@ vector<uint8_t> downsample(vector<uint8_t> const& sourceBitmap,
         auto sourceY = destY * factor;
         auto sourceX = destX * factor;
         auto total = 0u;
-        for (auto const y: ::ranges::views::iota(sourceY, sourceY + factor))
+        for (auto const y: std::views::iota(sourceY, sourceY + factor))
         {
             auto const offset = sourceWidth * y;
-            for (auto const x: ::ranges::views::iota(sourceX, sourceX + factor))
+            for (auto const x: std::views::iota(sourceX, sourceX + factor))
                 total += sourceBitmap[offset + x];
         }
         return unsigned(double(total) / double(factor * factor));
     };
 
-    for (auto const y: ::ranges::views::iota(0u, *targetSize.height))
+    for (auto const y: std::views::iota(0u, *targetSize.height))
     {
         auto const offset = *targetSize.width * y;
-        for (auto const x: ::ranges::views::iota(0u, *targetSize.width))
+        for (auto const x: std::views::iota(0u, *targetSize.width))
             targetBitmap[offset + x] =
                 (uint8_t) min(255u, unsigned(targetBitmap[offset + x]) + averageIntensityInSrc(x, y));
     }

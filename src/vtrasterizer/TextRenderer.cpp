@@ -124,27 +124,8 @@ Making use of reserved glyph slots
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/point.h>
 
-#include <range/v3/view/iota.hpp>
-
-#if defined(_WIN32)
-    #include <text_shaper/directwrite_locator.h>
-#endif
-
-#if defined(__APPLE__)
-    #include <text_shaper/coretext_locator.h>
-#endif
-
-#include <crispy/algorithm.h>
-#include <crispy/assert.h>
-#include <crispy/range.h>
-
-#include <libunicode/convert.h>
-#include <libunicode/utf8_grapheme_segmenter.h>
-
-#include <range/v3/algorithm/copy.hpp>
-#include <range/v3/view/enumerate.hpp>
-
 #include <algorithm>
+#include <ranges>
 
 using crispy::point;
 using crispy::strong_hash;
@@ -344,7 +325,7 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
                         tileCreateData.metadata.targetSize,
                         targetSize);
 
-    for (auto const rowIndex: ranges::views::iota(uintptr_t { 0 }, unbox<uintptr_t>(targetSize.height)))
+    for (auto const rowIndex: std::views::iota(uintptr_t { 0 }, unbox<uintptr_t>(targetSize.height)))
     {
         uint8_t* targetRow = slicedBitmap.data() + (rowIndex * targetPitch);
         uint8_t const* sourceRow = tileCreateData.bitmap.data() + (rowIndex * sourcePitch);
@@ -886,12 +867,14 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
         // clang-format on
 
         msg.append(" (");
-        for (auto const [i, codepoint]: ranges::views::enumerate(codepoints))
+        size_t i = 0;
+        for (auto const codepoint: codepoints)
         {
             if (i)
                 msg.append(" ");
             auto const cluster = clusters[i];
             msg.append("U+{:04X}/{}", unsigned(codepoint), cluster);
+            ++i;
         }
         msg.append(")\n");
 

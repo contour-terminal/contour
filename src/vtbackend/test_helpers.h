@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -124,7 +125,7 @@ void logScreenText(Screen<T> const& screen, std::string const& headline = "")
     else
         UNSCOPED_INFO(headline + ":");
 
-    for (auto const line: ::ranges::views::iota(0, *screen.pageSize().lines))
+    for (auto const line: std::views::iota(0, *screen.pageSize().lines))
         UNSCOPED_INFO(std::format("[{}] \"{}\"", line, screen.grid().lineText(LineOffset::cast_from(line))));
 }
 

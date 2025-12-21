@@ -46,7 +46,7 @@ if(MSVC)
     target_compile_definitions(crispy-core PUBLIC NOMINMAX)
 endif()
 
-set(CRISPY_CORE_LIBS range-v3::range-v3 unicode::unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp reflection-cpp::reflection-cpp)
+set(CRISPY_CORE_LIBS unicode::unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp reflection-cpp::reflection-cpp)
 
 # if compiler is not MSVC
 if(NOT MSVC)
@@ -137,7 +137,7 @@ if(CRISPY_TESTING)
         sort_test.cpp
         times_test.cpp
     )
-target_link_libraries(crispy_test range-v3::range-v3 Catch2::Catch2WithMain crispy::core)
+target_link_libraries(crispy_test Catch2::Catch2WithMain crispy::core)
     add_test(crispy_test ./crispy_test)
 endif()
 message(STATUS "[crispy] Compile unit tests: ${CRISPY_TESTING}")

@@ -8,14 +8,11 @@
 
 #include <libunicode/convert.h>
 
-#include <range/v3/range/conversion.hpp>
-#include <range/v3/view/join.hpp>
-#include <range/v3/view/transform.hpp>
-
 #include <chrono>
 #include <cstdio>
 #include <format>
 #include <optional>
+#include <ranges>
 
 using namespace std::string_view_literals;
 
@@ -311,9 +308,16 @@ struct VTSerializer
         auto const cellText = vt.currentScreen().cellTextAt(currentMousePosition);
         auto const cellText32 = unicode::convert_to<char32_t>(std::string_view(cellText));
 
-        return ranges::views::transform(
-                   cellText32, [](char32_t ch) { return std::format("U+{:04X}", static_cast<uint32_t>(ch)); })
-               | ranges::views::join(" ") | ranges::to<std::string>;
+        std::string result;
+        bool first = true;
+        for (char32_t ch: cellText32)
+        {
+            if (!first)
+                result += " ";
+            result += std::format("U+{:04X}", static_cast<uint32_t>(ch));
+            first = false;
+        }
+        return result;
     }
 
     std::string visit(StatusLineDefinitions::CellTextUtf8 const&)

@@ -8,16 +8,13 @@
 
 #include <libunicode/convert.h>
 
-#include <range/v3/range/conversion.hpp>
-#include <range/v3/view/join.hpp>
-#include <range/v3/view/transform.hpp>
-
 #include <gsl/span>
 #include <gsl/span_ext>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <format>
+#include <ranges>
 #include <string_view>
 #include <variant>
 
@@ -111,9 +108,9 @@ struct std::formatter<TextClusterGroup>: formatter<std::string>
             std::format("TextClusterGroup {{ codepoints: \"{}\", @{}, clusters={}, style: {}, color: {} }}",
                         crispy::escape(unicode::convert_to<char>(std::u32string_view(group.codepoints))),
                         group.initialPenPosition,
-                        group.clusters
-                            | ::ranges::views::transform([](int cluster) { return std::to_string(cluster); })
-                            | ::ranges::views::join(", ") | ::ranges::to<std::string>(),
+                        group.clusters | std::views::transform([](int cluster) {
+                            return std::to_string(cluster);
+                        }) | crispy::views::join_with(", "),
                         group.style,
                         group.color),
             ctx);

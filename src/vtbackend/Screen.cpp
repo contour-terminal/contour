@@ -22,12 +22,11 @@
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/word_segmenter.h>
 
-#include <range/v3/view/iota.hpp>
-
 #include <algorithm>
 #include <cassert>
 #include <iostream>
 #include <iterator>
+#include <ranges>
 #include <sstream>
 #include <string_view>
 #include <tuple>
@@ -73,6 +72,7 @@ using std::string_view;
 using std::tuple;
 using std::unique_ptr;
 using std::vector;
+using std::views::iota;
 
 namespace vtbackend
 {
@@ -623,7 +623,7 @@ std::string Screen<Cell>::screenshot(function<string(LineOffset)> const& postLin
     auto result = std::stringstream {};
     auto writer = VTWriter(result);
 
-    for (int const line: ::ranges::views::iota(0, *pageSize().lines))
+    for (int const line: iota(0, *pageSize().lines))
     {
         writer.write(_grid.lineAt(LineOffset(line)));
         if (postLine)
@@ -953,8 +953,7 @@ void Screen<Cell>::clearToEndOfScreen()
 {
     clearToEndOfLine();
 
-    for (auto const lineOffset:
-         ::ranges::views::iota(unbox(_cursor.position.line) + 1, unbox(pageSize().lines)))
+    for (auto const lineOffset: iota(unbox(_cursor.position.line) + 1, unbox(pageSize().lines)))
     {
         Line<Cell>& line = _grid.lineAt(LineOffset::cast_from(lineOffset));
         line.reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
@@ -966,7 +965,7 @@ void Screen<Cell>::clearToBeginOfScreen()
 {
     clearToBeginOfLine();
 
-    for (auto const lineOffset: ::ranges::views::iota(0, *_cursor.position.line))
+    for (auto const lineOffset: iota(0, *_cursor.position.line))
     {
         Line<Cell>& line = _grid.lineAt(LineOffset::cast_from(lineOffset));
         line.reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
@@ -1088,7 +1087,7 @@ void Screen<Cell>::selectiveEraseToEndOfScreen()
     auto const lineStart = unbox(_cursor.position.line) + 1;
     auto const lineEnd = unbox(pageSize().lines);
 
-    for (auto const lineOffset: ::ranges::views::iota(lineStart, lineEnd))
+    for (auto const lineOffset: iota(lineStart, lineEnd))
         selectiveEraseLine(LineOffset::cast_from(lineOffset));
 }
 
@@ -1097,14 +1096,14 @@ void Screen<Cell>::selectiveEraseToBeginOfScreen()
 {
     selectiveEraseToBeginOfLine();
 
-    for (auto const lineOffset: ::ranges::views::iota(0, *_cursor.position.line))
+    for (auto const lineOffset: iota(0, *_cursor.position.line))
         selectiveEraseLine(LineOffset::cast_from(lineOffset));
 }
 
 template <CellConcept Cell>
 void Screen<Cell>::selectiveEraseScreen()
 {
-    for (auto const lineOffset: ::ranges::views::iota(0, *pageSize().lines))
+    for (auto const lineOffset: iota(0, *pageSize().lines))
         selectiveEraseLine(LineOffset::cast_from(lineOffset));
 }
 // }}}

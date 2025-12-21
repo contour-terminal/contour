@@ -28,13 +28,13 @@ namespace
         switch (orientation)
         {
             case Orientation::Horizontal:
-                for (auto const y: ranges::views::iota(base.value - 1, base.value + 1))
-                    for (auto const x: ranges::views::iota(from.value, to.value))
+                for (auto const y: std::views::iota(base.value - 1, base.value + 1))
+                    for (auto const x: std::views::iota(from.value, to.value))
                         pixmap.paint(x, y);
                 break;
             case Orientation::Vertical:
-                for (auto const y: ranges::views::iota(from.value, to.value))
-                    for (auto const x: ranges::views::iota(base.value - 1, base.value + 1))
+                for (auto const y: std::views::iota(from.value, to.value))
+                    for (auto const x: std::views::iota(base.value - 1, base.value + 1))
                         pixmap.paint(x, y);
                 break;
         }
@@ -60,15 +60,15 @@ Pixmap& Pixmap::line(Ratio rFrom, Ratio rTo)
     if (from.x != to.x)
     {
         auto const f = linearEq(from, to);
-        for (auto const x: ranges::views::iota(0, unbox<int>(size.width)))
+        for (auto const x: std::views::iota(0, unbox<int>(size.width)))
             if (auto const y = f(x); from.y <= y && y <= to.y)
-                for (auto const i: ranges::views::iota(-z, z))
+                for (auto const i: std::views::iota(-z, z))
                     paint(x, y + i);
     }
     else
     {
-        for (auto const y: ranges::views::iota(from.y, to.y))
-            for (auto const i: ranges::views::iota(-z, z))
+        for (auto const y: std::views::iota(from.y, to.y))
+            for (auto const i: std::views::iota(-z, z))
                 paint(from.x, y + i);
     }
     return *this;

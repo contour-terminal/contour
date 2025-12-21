@@ -99,7 +99,6 @@ target_link_libraries(vtbackend PUBLIC
     Microsoft.GSL::GSL
     Threads::Threads
     crispy::core
-    range-v3::range-v3
     unicode::unicode
     vtparser
     vtpty

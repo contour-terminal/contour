@@ -42,11 +42,6 @@
 #include <yaml-cpp/ostream_wrapper.h>
 #include <yaml-cpp/yaml.h>
 
-#include <range/v3/range/conversion.hpp>
-#include <range/v3/view/concat.hpp>
-#include <range/v3/view/join.hpp>
-#include <range/v3/view/transform.hpp>
-
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -55,6 +50,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <regex>
 #include <set>
 #include <string>
@@ -391,14 +387,12 @@ struct TerminalProfile
         .program =
             []() {
                 auto const program = vtpty::Process::loginShell(true);
-                return program                    // NB: sadly can't be a temporary
-                       | ranges::views::join(' ') //
-                       | ranges::to<std::string>();
+                return program | crispy::views::join_with(std::string_view(" "));
             }(),
         .arguments = {},
         .workingDirectory = "",
         .env = {},
-    } };
+    } }; // namespace contour::config
     ConfigEntry<vtpty::SshHostConfig, documentation::SshHostConfig> ssh {};
     ConfigEntry<bool, documentation::EscapeSandbox> escapeSandbox { true };
     ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
@@ -1115,8 +1109,8 @@ struct Writer
     {
 
         auto result = std::string { "[" };
-        result.append(v | ranges::views::transform([](auto f) { return std::format("{}", f); })
-                      | ranges::views::join(", ") | ranges::to<std::string>);
+        result.append(v | std::views::transform([](auto f) { return std::format("{}", f); })
+                      | crispy::views::join_with(std::string_view(", ")));
         result.append("]");
         return result;
     }
@@ -1168,7 +1162,7 @@ struct Writer
     [[nodiscard]] std::string format(std::string_view doc, vtpty::Process::ExecInfo const& v)
     {
         auto args = std::string { "[" };
-        args.append(v.arguments | ranges::views::join(", ") | ranges::to<std::string>);
+        args.append(v.arguments | crispy::views::join_with(std::string_view(", ")));
         args.append("]");
         return format(doc, v.program, args, [&]() -> std::string {
             auto fromConfig = v.workingDirectory.string();
@@ -1642,7 +1636,7 @@ struct std::formatter<std::set<std::basic_string<char>>>: formatter<std::string_
     auto format(std::set<std::basic_string<char>> value, auto& ctx) const
     {
         auto result = std::string {};
-        result.append(value | ::ranges::views::join(", ") | ::ranges::to<std::string>);
+        result.append(value | crispy::views::join_with(std::string_view(", ")));
         return formatter<std::string_view>::format(result, ctx);
     }
 };

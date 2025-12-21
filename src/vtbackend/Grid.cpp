@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <format>
 #include <iostream>
+#include <ranges>
 
 using std::max;
 using std::min;
@@ -44,7 +45,7 @@ namespace detail
         Lines<Cell> lines;
         lines.reserve(totalLineCount);
 
-        for ([[maybe_unused]] auto const _: ranges::views::iota(0u, totalLineCount))
+        for ([[maybe_unused]] auto const _: std::views::iota(0u, totalLineCount))
             lines.emplace_back(
                 defaultLineFlags,
                 TrivialLineBuffer { .displayWidth = pageSize.columns, .textAttributes = initialSGR });
@@ -369,7 +370,7 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
     {
         auto const linesToAllocate = unbox(linesCountToScrollUp - linesAvailable);
 
-        for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToAllocate))
+        for ([[maybe_unused]] auto const _: std::views::iota(0, linesToAllocate))
         {
             _lines.emplace_back(defaultLineFlags(),
                                 TrivialLineBuffer { .displayWidth = _pageSize.columns,
@@ -537,7 +538,7 @@ void Grid<Cell>::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttri
         auto b = std::next(begin(_lines), *margin.vertical.to + 1 - *n);
         auto c = std::next(begin(_lines), *margin.vertical.to + 1);
         std::rotate(a, b, c);
-        for (auto const i: ranges::views::iota(*margin.vertical.from, *margin.vertical.from + *n))
+        for (auto const i: std::views::iota(*margin.vertical.from, *margin.vertical.from + *n))
             _lines[i].reset(defaultLineFlags(), defaultAttributes);
     }
     else
@@ -626,7 +627,7 @@ CellLocation Grid<Cell>::growLines(LineCount newHeight, CellLocation cursor)
     auto const currentTotalLineCount = LineCount::cast_from(_lines.size());
     auto const linesToFill = max(0, *newTotalLineCount - *currentTotalLineCount);
 
-    for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToFill))
+    for ([[maybe_unused]] auto const _: std::views::iota(0, linesToFill))
         _lines.emplace_back(
             wrappableFlag,
             TrivialLineBuffer { .displayWidth = _pageSize.columns, .textAttributes = GraphicsAttributes {} });
@@ -1017,7 +1018,7 @@ std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid)
         grid.zero_index());
 
     for (int const lineOffset:
-         ranges::views::iota(-unbox(grid.historyLineCount()), unbox(grid.pageSize().lines)))
+         std::views::iota(-unbox(grid.historyLineCount()), unbox(grid.pageSize().lines)))
     {
         vtbackend::Line<Cell> const& lineAttribs = grid.lineAt(LineOffset(lineOffset));
 

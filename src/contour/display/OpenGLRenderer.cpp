@@ -13,8 +13,6 @@
 #include <crispy/defines.h>
 #include <crispy/utils.h>
 
-#include <range/v3/all.hpp>
-
 #include <QtCore/QtGlobal>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
