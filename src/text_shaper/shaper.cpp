@@ -116,7 +116,7 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::
     output.position.y =
         unbox<int>(output.bitmapSize.height) + unbox<int>(boundingBox.height - output.bitmapSize.height) / 4;
 
-    return { output, factor };
+    return { output, static_cast<float>(factor) };
 }
 
 } // namespace text
