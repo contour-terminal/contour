@@ -164,12 +164,12 @@ int app::licenseAction()
 {
     auto const& store = crispy::cli::about::store();
     auto const titleWidth = std::accumulate(
-        store.begin(), store.end(), 0u, [](size_t a, auto const& b) { return std::max(a, b.title.size()); });
-    auto const licenseWidth = std::accumulate(store.begin(), store.end(), 0u, [](size_t a, auto const& b) {
+        store.begin(), store.end(), 0zu, [](size_t a, auto const& b) { return std::max(a, b.title.size()); });
+    auto const licenseWidth = std::accumulate(store.begin(), store.end(), 0zu, [](size_t a, auto const& b) {
         return std::max(a, b.license.size());
     });
     auto const urlWidth = std::accumulate(
-        store.begin(), store.end(), 0u, [](size_t a, auto const& b) { return std::max(a, b.url.size()); });
+        store.begin(), store.end(), 0zu, [](size_t a, auto const& b) { return std::max(a, b.url.size()); });
 
     constexpr auto Horiz = "\u2550"sv;
     constexpr auto Vert = "\u2502"sv;

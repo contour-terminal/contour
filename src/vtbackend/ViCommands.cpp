@@ -126,9 +126,9 @@ namespace
         for (auto const& pair: Pairs)
         {
             if (input == pair.first)
-                return { { pair.second, true } };
+                return { { static_cast<char>(pair.second), true } };
             if (input == pair.second)
-                return { { pair.first, false } };
+                return { { static_cast<char>(pair.first), false } };
         }
 
         return std::nullopt;
