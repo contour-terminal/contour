@@ -104,11 +104,11 @@ fetch_and_unpack_boxed() {
 
 fetch_and_unpack_libunicode() {
     if test x$LIBUNICODE_SRC_DIR = x; then
-        local libunicode_git_sha="817cb5900acdf6f60e2344a4c8f1f39262878a4b"
+        local libunicode_version="0.7.0"
         fetch_and_unpack \
-            libunicode-$libunicode_git_sha \
-            libunicode-$libunicode_git_sha.tar.gz \
-            https://github.com/contour-terminal/libunicode/archive/$libunicode_git_sha.tar.gz \
+            libunicode-$libunicode_version \
+            libunicode-$libunicode_version.tar.gz \
+            https://github.com/contour-terminal/libunicode/archive/refs/tags/v${libunicode_version}.tar.gz \
             libunicode
     else
         echo "Hard linking external libunicode source directory to: $LIBUNICODE_SRC_DIR"
@@ -120,11 +120,11 @@ fetch_and_unpack_libunicode() {
 }
 
 fetch_and_unpack_reflection_cpp() {
-    local reflection_cpp_git_sha="02484cd9ec16d7efc252ab8fd1f85d7264192418"
+    local reflection_cpp_version="0.4.0"
     fetch_and_unpack \
-        reflection-cpp-$reflection_cpp_git_sha \
-        reflection-cpp-$reflection_cpp_git_sha.tar.gz \
-        https://github.com/contour-terminal/reflection-cpp/archive/$reflection_cpp_git_sha.tar.gz \
+        reflection-cpp-$reflection_cpp_version \
+        reflection-cpp-$reflection_cpp_version.tar.gz \
+        https://github.com/contour-terminal/reflection-cpp/archive/refs/tags/v${reflection_cpp_version}.tar.gz \
         reflection_cpp
 }
 

@@ -10,22 +10,22 @@ class ThirdParty {
     [string] $Macro
 }
 
-$libunicode_git_sha="817cb5900acdf6f60e2344a4c8f1f39262878a4b"
-$reflection_cpp_git_sha="02484cd9ec16d7efc252ab8fd1f85d7264192418"
+$libunicode_version="0.7.0"
+$reflection_cpp_version="0.4.0"
 
 # Take care, order matters, at least as much as dependencies are of concern.
 $ThirdParties =
 @(
     [ThirdParty]@{
-        Folder  = "reflection-cpp-${reflection_cpp_git_sha}";
-        Archive = "reflection-cpp-${reflection_cpp_git_sha}.zip";
-        URI     = "https://github.com/contour-terminal/reflection-cpp/archive/${reflection_cpp_git_sha}.zip";
+        Folder  = "reflection-cpp-${reflection_cpp_version}";
+        Archive = "reflection-cpp-${reflection_cpp_version}.zip";
+        URI     = "https://github.com/contour-terminal/reflection-cpp/archive/refs/tags/v${reflection_cpp_version}.zip";
         Macro   = "reflection_cpp"
     };
     [ThirdParty]@{
-        Folder  = "libunicode-${libunicode_git_sha}";
-        Archive = "libunicode-${libunicode_git_sha}.zip";
-        URI     = "https://github.com/contour-terminal/libunicode/archive/${libunicode_git_sha}.zip";
+        Folder  = "libunicode-${libunicode_version}";
+        Archive = "libunicode-${libunicode_version}.zip";
+        URI     = "https://github.com/contour-terminal/libunicode/archive/refs/tags/v${libunicode_version}.zip";
         Macro   = "libunicode"
     };
     [ThirdParty]@{
