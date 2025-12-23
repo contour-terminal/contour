@@ -279,11 +279,16 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     }
 
   protected:
+    /// Maps a function key to its corresponding VT sequences based on different modes and modifiers.
     struct FunctionKeyMapping
     {
+        /// Standard VT sequence.
         std::string_view std {};
+        /// VT sequence when modifiers are pressed.
         std::string_view mods {};
+        /// VT sequence when Application Cursor Keys mode is enabled.
         std::string_view appCursor {};
+        /// VT sequence when Application Keypad mode is enabled.
         std::string_view appKeypad {};
     };
 

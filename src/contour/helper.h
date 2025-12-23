@@ -103,7 +103,7 @@ constexpr inline vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModi
 
     Modifiers modifiers {};
 
-    if (qtModifiers & Qt::KeypadModifier)
+    if (qtModifiers & Qt::GroupSwitchModifier)
         modifiers |= Modifier::NumLock;
 
     if (qtModifiers & Qt::AltModifier)
