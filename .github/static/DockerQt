@@ -1,7 +1,7 @@
 ARG VERSION="24.04"
-FROM ubuntu:$VERSION AS builder
+FROM ubuntu:$VERSION
 ARG ARCH="x86_64"
-ARG QT_VERSION="6.10.0"
+ARG QT_VERSION="6.8.3"
 
 RUN apt-get update
 RUN apt-get install -y lsb-release software-properties-common gnupg
@@ -24,16 +24,16 @@ RUN chmod +x llvm.sh
 RUN ./llvm.sh 20
 
 WORKDIR /
-RUN wget https://download.qt.io/official_releases/qt/6.10/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz
+RUN wget https://download.qt.io/official_releases/qt/6.8/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz
 RUN tar xf qt-everywhere-src-$QT_VERSION.tar.xz
 RUN rm qt-everywhere-src-$QT_VERSION.tar.xz
 WORKDIR qt-everywhere-src-$QT_VERSION
 RUN cmake -S . -B build -G Ninja \
        -D CMAKE_CXX_COMPILER=clang++-20 \
        -D CMAKE_C_COMPILER=clang-20 \
-       -D CMAKE_INSTALL_PREFIX=\/usr \
        -D QT_BUILD_SUBMODULES='qtbase;qt5compat;qtmultimedia;qtdeclarative' \
        -D BUILD_qtbase=ON \
+       -D BUILD_qtquick3d=OFF \
        # -D BUILD_qt5compat=ON \
        # -D BUILD_qtmultimedia=ON \
        # -D BUILD_qtdeclarative=ON \
@@ -44,21 +44,15 @@ RUN cmake -S . -B build -G Ninja \
        -D QT_FEATURE_gif=OFF \
        -D QT_FEATURE_harfbuzz=OFF \
        -D QT_FEATURE_freetype=OFF \
+       -D QT_FEATURE_backtrace=OFF \
+       -D QT_FEATURE_openxr=OFF \
+       -D QT_FEATURE_icu=OFF \
        -D BUILD_SHARED_LIBS=OFF \
-       -D INPUT_icu=no \
        -D INPUT_pcre=system \
-       -D INPUT_glib=no \
-       -D INPUT_fontconfig=no \
-       -D INPUT_optimize_size=yes \
-       -D QT_USE_CCACHE=OFF \
        -D CMAKE_BUILD_TYPE=Release
-
-RUN cmake --build build --parallel 6
-RUN cmake --build build --target install
+RUN cat /qt-everywhere-src-$QT_VERSION/build/config.summary
+RUN cmake --build build --parallel
+RUN cmake --install build
 WORKDIR /
 RUN ln -s /bin/clang-20 /bin/clang
 RUN ln -s /bin/clang++-20 /bin/clang++
-
-FROM ubuntu:$VERSION
-
-COPY --from=builder /usr /usr
