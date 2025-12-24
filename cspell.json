@@ -18,6 +18,11 @@
             "addWords": true
         },
         {
+            "name": "my-cpack",
+            "path": ".github/actions/spelling/allow/cpack.txt",
+            "addWords": true
+        },
+        {
             "name": "my-names",
             "path": ".github/actions/spelling/allow/names.txt",
             "addWords": true
