@@ -128,6 +128,7 @@
           <li>Fixes `ssh.known_hosts` configuration loading incorrectly mapping to `ssh.public_key_file`</li>
           <li>Fixes `option_as_alt` configuration option not working (#1812)</li>
           <li>Enables customizing predefined color palette (#1763)</li>
+          <li>Enables Sixel support on Windows</li>
           <li>Ensure inserting new tabs happens right next to the currently active tab (#1695)</li>
           <li>Allow glyphs to underflow if they are not bigger than the cell size (#1603)</li>
           <li>Adds `MoveTabToLeft` and `MoveTabToRight` actions to move tabs around (#1695)</li>

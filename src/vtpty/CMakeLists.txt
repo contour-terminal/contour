@@ -86,3 +86,48 @@ target_include_directories(vtpty PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 target_link_libraries(vtpty PUBLIC ${vtpty_LIBRARIES})
+
+if(WIN32)
+    set(OPENCONSOLE_VERSION "1.24.3504.0")
+    set(OPENCONSOLE_VERSION_ALT "1.24.251216004-preview")
+    #set(OPENCONSOLE_VERSION "1.23.13503.0")
+    #set(OPENCONSOLE_VERSION_ALT "1.23.251216003")
+    set(OPENCONSOLE_URL "https://github.com/microsoft/terminal/releases/download/v${OPENCONSOLE_VERSION}/Microsoft.Windows.Console.ConPTY.${OPENCONSOLE_VERSION_ALT}.nupkg")
+    set(OPENCONSOLE_DEST "${CMAKE_BINARY_DIR}/_deps/OpenConsole-${OPENCONSOLE_VERSION}")
+    set(OPENCONSOLE_ZIP "${OPENCONSOLE_DEST}/OpenConsole.zip")
+
+    set(arch "x64")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM")
+        set(arch "arm")
+    endif()
+    set(OPENCONSOLE_EXE "${OPENCONSOLE_DEST}/build/native/runtimes/${arch}/OpenConsole.exe")
+    set(CONPTY_DLL "${OPENCONSOLE_DEST}/runtimes/win-${arch}/native/Conpty.dll")
+
+    if(NOT EXISTS "${OPENCONSOLE_EXE}")
+        file(MAKE_DIRECTORY "${OPENCONSOLE_DEST}")
+        message(STATUS "[vtpty] Downloading OpenConsole ConPTY v${OPENCONSOLE_VERSION}...")
+        file(DOWNLOAD "${OPENCONSOLE_URL}" "${OPENCONSOLE_ZIP}" SHOW_PROGRESS)
+        message(STATUS "[vtpty] Extracting OpenConsole ConPTY...")
+        execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf "${OPENCONSOLE_ZIP}" WORKING_DIRECTORY "${OPENCONSOLE_DEST}")
+    endif()
+
+    if(NOT DEFINED CMAKE_INSTALL_BINDIR)
+        set(CMAKE_INSTALL_BINDIR bin)
+    endif()
+
+    install(FILES "${OPENCONSOLE_EXE}" DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT contour)
+    install(FILES "${CONPTY_DLL}" DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT contour)
+
+    if(CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+        add_custom_command(TARGET vtpty POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${OPENCONSOLE_EXE}"
+            "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/"
+        )
+        add_custom_command(TARGET vtpty POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CONPTY_DLL}"
+            "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/"
+        )
+    endif()
+endif()
