@@ -330,6 +330,9 @@ if(WIN32)
             PATTERN "CMakeFiles" EXCLUDE
             PATTERN "*_autogen" EXCLUDE
             PATTERN "*.h" EXCLUDE
+            PATTERN "*_test.*" EXCLUDE
+            PATTERN "*.pdb" EXCLUDE
+            PATTERN "unicode_tablegen.exe" EXCLUDE
             PATTERN "*"
     )
 elseif(APPLE)

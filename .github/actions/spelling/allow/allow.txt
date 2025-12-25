@@ -9,4 +9,5 @@ lowerCamelCase
 macOS
 nupkg
 nushell
+tablegen
 zypper
