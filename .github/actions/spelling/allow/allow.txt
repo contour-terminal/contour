@@ -1,4 +1,5 @@
 FreeBSD
+OPENCONSOLE
 OpenBSD
 UpperCamelCase
 copy'n'paste
@@ -6,5 +7,6 @@ lazygit
 leiserfg
 lowerCamelCase
 macOS
+nupkg
 nushell
 zypper
