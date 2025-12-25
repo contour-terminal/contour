@@ -1,5 +1,5 @@
 <CPackWiXPatch>
-  <CPackWiXFragment Id="#PRODUCTFEATURE">
+  <CPackWiXFragment Id="CM_C_contour_path">
     <Component Id="CM_C_contour_path" Guid="*" Directory="INSTALL_ROOT">
       <Environment Id="UpdatePath" Name="PATH" Value="[INSTALL_ROOT]bin" Permanent="no" Part="last" Action="set" System="yes" />
       <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="PathEnv" Type="integer" Value="1" KeyPath="yes"/>
