@@ -134,7 +134,7 @@ if(LIBTERMINAL_TESTING)
         ViCommands_test.cpp
     )
     target_link_libraries(vtbackend_test Catch2::Catch2WithMain vtbackend)
-    add_test(vtbackend_test ./vtbackend_test)
+    add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
 
     if (LIBTERMINAL_BUILD_BENCH_HEADLESS)
         add_executable(bench-headless bench-headless.cpp)
