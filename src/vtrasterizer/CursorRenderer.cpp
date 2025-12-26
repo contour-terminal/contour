@@ -174,7 +174,9 @@ void CursorRenderer::render(crispy::point pos, int columnWidth, vtbackend::RGBCo
         auto const tileIndex = _directMapping.toTileIndex(directMappingIndex);
         auto const x = pos.x + (int(i) * unbox<int>(_gridMetrics.cellSize.width));
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
-        renderTile({ int(x) }, { pos.y }, color, tileAttributes);
+        auto tileAttributesCopy = tileAttributes;
+
+        renderTile({ int(x) }, { pos.y }, color, tileAttributesCopy);
     }
 }
 

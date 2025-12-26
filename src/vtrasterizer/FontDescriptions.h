@@ -2,6 +2,7 @@
 
 #include <text_shaper/font.h>
 
+#include <crispy/flags.h>
 #include <crispy/point.h>
 
 namespace vtrasterizer
@@ -56,6 +57,16 @@ inline bool operator!=(FontDescriptions const& a, FontDescriptions const& b) noe
     return !(a == b);
 }
 
+enum class TextSizeFlag : uint8_t
+{
+    Normal = 0x00,
+    DoubleHeightTop = 0x01,
+    DoubleHeightBottom = 0x02,
+    DoubleWidth = 0x04,
+};
+
+using TextSizeFlags = crispy::flags<TextSizeFlag>;
+
 enum class TextStyle : uint8_t
 {
     Invalid = 0x00,
@@ -91,6 +102,23 @@ struct std::formatter<vtrasterizer::TextStyle>: std::formatter<std::string_view>
             case vtrasterizer::TextStyle::Bold: name = "Bold"; break;
             case vtrasterizer::TextStyle::Italic: name = "Italic"; break;
             case vtrasterizer::TextStyle::BoldItalic: name = "BoldItalic"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtrasterizer::TextSizeFlag>: std::formatter<std::string_view>
+{
+    auto format(vtrasterizer::TextSizeFlag value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtrasterizer::TextSizeFlag::Normal: name = "Normal"; break;
+            case vtrasterizer::TextSizeFlag::DoubleHeightTop: name = "DoubleHeightTop"; break;
+            case vtrasterizer::TextSizeFlag::DoubleHeightBottom: name = "DoubleHeightBottom"; break;
+            case vtrasterizer::TextSizeFlag::DoubleWidth: name = "DoubleWidth"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

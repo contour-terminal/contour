@@ -295,7 +295,7 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     terminal.refreshRenderBuffer();
 #endif // }}}
 
-    optional<vtbackend::RenderCursor> cursorOpt;
+    auto cursorOpt = optional<vtbackend::RenderCursor> { std::nullopt };
     _imageRenderer.beginFrame();
     _textRenderer.beginFrame();
     _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());

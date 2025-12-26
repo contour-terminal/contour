@@ -80,11 +80,6 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     /// transformed into a RenderCell.
     void renderCell(vtbackend::RenderCell const& cell);
 
-    void renderCell(vtbackend::CellLocation position,
-                    std::u32string_view graphemeCluster,
-                    TextStyle textStyle,
-                    vtbackend::RGBColor foregroundColor);
-
     void renderLine(vtbackend::RenderLine const& renderLine);
 
     /// Must be invoked when rendering the terminal's text has finished for this frame.
@@ -97,11 +92,13 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                          gsl::span<unsigned> clusters,
                          vtbackend::CellLocation initialPenPosition,
                          TextStyle style,
-                         vtbackend::RGBColor color) override;
+                         vtbackend::RGBColor color,
+                         vtbackend::LineFlags flags) override;
 
     bool renderBoxDrawingCell(vtbackend::CellLocation position,
                               char32_t codepoint,
-                              vtbackend::RGBColor foregroundColor) override;
+                              vtbackend::RGBColor foregroundColor,
+                              vtbackend::LineFlags flags) override;
 
     /// Gets the text shaping result of the current text cluster group
     text::shape_result const& getOrCreateCachedGlyphPositions(crispy::strong_hash hash,

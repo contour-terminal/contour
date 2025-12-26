@@ -120,8 +120,8 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
     auto tileData = TextureAtlas::TileCreateData {};
     // NB: To be filled below: bitmapSize, bitmap.
     tileData.bitmapFormat = atlas::Format::Red;
-    tileData.metadata.x = {};
-    tileData.metadata.y = {};
+    tileData.metadata.x.value = 0;
+    tileData.metadata.y.value = 0;
 
     auto const create = [this, tileLocation](ImageSize bitmapSize,
                                              auto createBitmap) -> TextureAtlas::TileCreateData {
@@ -299,13 +299,15 @@ void DecorationRenderer::renderDecoration(Decorator decoration,
     for (auto i = vtbackend::ColumnCount(0); i < columnCount; ++i)
     {
         auto const tileIndex = _directMapping.toTileIndex(static_cast<uint32_t>(decoration));
-        auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
-        auto const tileData = createTileData(decoration, tileLocation);
+        // auto const tileLocation = _textureAtlas->tileLocation(tileIndex); // unused
+        // auto const tileData = createTileData(decoration, tileLocation); // unused?
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
+        auto tileAttributesCopy = tileAttributes;
+
         renderTile({ pos.x + (unbox(i) * unbox<int>(_gridMetrics.cellSize.width)) },
                    { pos.y - unbox<int>(tileAttributes.bitmapSize.height) },
                    color,
-                   tileAttributes);
+                   tileAttributesCopy);
     }
 }
 

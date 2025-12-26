@@ -41,11 +41,11 @@ namespace views
     namespace detail
     {
         template <typename Range>
-        std::string join_with_impl(Range&& range, std::string_view separator)
+        std::string join_with_impl(Range const& range, std::string_view separator)
         {
             std::string result;
-            auto it = std::begin(std::forward<Range>(range));
-            auto const end = std::end(std::forward<Range>(range));
+            auto it = std::begin(range);
+            auto const end = std::end(range);
 
             if (it != end)
             {
@@ -377,7 +377,7 @@ constexpr std::optional<T> to_integer(std::basic_string_view<C> text) noexcept
 }
 
 template <std::size_t Base = 10, typename T = unsigned, typename C>
-constexpr std::optional<T> to_integer(std::basic_string<C> text) noexcept
+constexpr std::optional<T> to_integer(std::basic_string<C> const& text) noexcept
 {
     return to_integer<Base, T, C>(std::basic_string_view<C>(text));
 }

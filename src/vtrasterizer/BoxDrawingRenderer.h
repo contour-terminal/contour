@@ -3,6 +3,7 @@
 
 #include <vtbackend/Color.h>
 
+#include <vtrasterizer/FontDescriptions.h>
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/RenderTarget.h>
 #include <vtrasterizer/TextureAtlas.h>
@@ -67,6 +68,7 @@ class BoxDrawingRenderer: public Renderable
     [[nodiscard]] bool render(vtbackend::LineOffset line,
                               vtbackend::ColumnOffset column,
                               char32_t codepoint,
+                              vtbackend::LineFlags flags,
                               vtbackend::RGBColor color);
 
     void inspect(std::ostream& output) const override;
@@ -76,17 +78,24 @@ class BoxDrawingRenderer: public Renderable
     static void setArcStyle(ArcStyle newStyle) { arcStyle = newStyle; }
 
   private:
-    AtlasTileAttributes const* getOrCreateCachedTileAttributes(char32_t codepoint);
+    AtlasTileAttributes const* getOrCreateCachedTileAttributes(char32_t codepoint,
+                                                               vtbackend::LineFlags flags,
+                                                               int subIndex = 0);
 
     using Renderable::createTileData;
-    [[nodiscard]] std::optional<TextureAtlas::TileCreateData> createTileData(
-        char32_t codepoint, atlas::TileLocation tileLocation);
+    [[nodiscard]] std::optional<TextureAtlas::TileCreateData> createTileData(char32_t codepoint,
+                                                                             vtbackend::LineFlags flags,
+                                                                             atlas::TileLocation tileLocation,
+                                                                             int subIndex);
 
     [[nodiscard]] static std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
                                                                        ImageSize size,
                                                                        int lineThickness,
                                                                        size_t supersampling = 1);
-    [[nodiscard]] std::optional<atlas::Buffer> buildElements(char32_t codepoint);
+
+    [[nodiscard]] std::optional<atlas::Buffer> buildElements(char32_t codepoint,
+                                                             ImageSize size,
+                                                             int lineThickness);
 
     static inline ArcStyle arcStyle = ArcStyle::Round;
     static inline ArcStyle gitArcStyle = ArcStyle::Round;

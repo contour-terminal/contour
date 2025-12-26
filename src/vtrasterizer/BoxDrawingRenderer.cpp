@@ -1283,79 +1283,162 @@ void BoxDrawingRenderer::clearCache()
 bool BoxDrawingRenderer::render(vtbackend::LineOffset line,
                                 vtbackend::ColumnOffset column,
                                 char32_t codepoint,
+                                vtbackend::LineFlags flags,
                                 vtbackend::RGBColor color)
 {
-    Renderable::AtlasTileAttributes const* data = getOrCreateCachedTileAttributes(codepoint);
-    if (!data)
-        return false;
+    auto const width = flags & vtbackend::LineFlag::DoubleWidth ? 2 : 1;
+    for (int i = 0; i < width; ++i)
+    {
+        Renderable::AtlasTileAttributes const* data = getOrCreateCachedTileAttributes(codepoint, flags, i);
+        if (!data)
+            return false;
 
-    auto const pos = _gridMetrics.map(line, column);
-    auto const x = pos.x;
-    auto const y = pos.y;
+        auto const pos = _gridMetrics.map(line, column);
+        auto const x = pos.x + (i * unbox<int>(_gridMetrics.cellSize.width));
+        auto const y = pos.y;
 
-    auto renderTile = atlas::RenderTile {};
-    renderTile.x = atlas::RenderTile::X { x };
-    renderTile.y = atlas::RenderTile::Y { y };
-    renderTile.bitmapSize = data->bitmapSize;
-    renderTile.color = atlas::normalize(color);
-    renderTile.normalizedLocation = data->metadata.normalizedLocation;
-    renderTile.tileLocation = data->location;
+        auto renderTile = atlas::RenderTile {};
+        renderTile.x = atlas::RenderTile::X { x };
+        renderTile.y = atlas::RenderTile::Y { y };
+        renderTile.bitmapSize = data->bitmapSize;
+        renderTile.color = atlas::normalize(color);
+        renderTile.normalizedLocation = data->metadata.normalizedLocation;
+        renderTile.tileLocation = data->location;
 
-    textureScheduler().renderTile(renderTile);
+        textureScheduler().renderTile(renderTile);
+    }
     return true;
 }
 
-auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation tileLocation)
-    -> optional<TextureAtlas::TileCreateData>
+auto BoxDrawingRenderer::createTileData(char32_t codepoint,
+                                        vtbackend::LineFlags flags,
+                                        atlas::TileLocation tileLocation,
+                                        int subIndex) -> optional<TextureAtlas::TileCreateData>
 {
-    if (optional<atlas::Buffer> image = buildElements(codepoint))
-    {
-        *image = invertY(*image, _gridMetrics.cellSize);
-        return { createTileData(tileLocation,
-                                std::move(*image),
-                                atlas::Format::Red,
-                                _gridMetrics.cellSize,
-                                RenderTileAttributes::X { 0 },
-                                RenderTileAttributes::Y { 0 },
-                                FRAGMENT_SELECTOR_GLYPH_ALPHA) };
-    }
+    // The texture atlas expects tiles of fixed size (cellSize).
+    auto const pixelWidth = _gridMetrics.cellSize.width;
+    auto const pixelHeight = _gridMetrics.cellSize.height;
+    auto const size = ImageSize { pixelWidth, pixelHeight };
+
+    // Determine logical dimensions of the full glyph (before slicing 1x1 tile).
+    auto const isDoubleWidth = flags.test(vtbackend::LineFlag::DoubleWidth);
+    auto const isDoubleHeight = (flags
+                                 & vtbackend::LineFlags { vtbackend::LineFlag::DoubleHeightTop,
+                                                          vtbackend::LineFlag::DoubleHeightBottom })
+                                    .any();
+
+    auto const logicalWidth = isDoubleWidth ? vtbackend::Width::cast_from(unbox(pixelWidth) * 2) : pixelWidth;
+    auto const logicalHeight =
+        isDoubleHeight ? vtbackend::Height::cast_from(unbox(pixelHeight) * 2) : pixelHeight;
+
+    auto const effectiveSize = ImageSize { logicalWidth, logicalHeight };
+
+    // Line thickness should be scaled if the logical size implies scaling?
+    // For DoubleWidth, vertical lines should be 2x thick if we want them to look "bold" or standard
+    // thickness? User complaint "not applied correctly" with 1x rendering suggests we need full resolution.
+    // Creating a 2xW buffer allows drawing 2x thick lines correctly distributed across Left/Right tiles.
+    auto const lineThickness =
+        isDoubleWidth ? _gridMetrics.underline.thickness * 2 : _gridMetrics.underline.thickness;
 
     atlas::Buffer pixels;
 
-    auto const supersamplingFactor = []() {
-        auto constexpr EnvName = "SSA_FACTOR";
-        auto* const envValue = getenv(EnvName);
-        if (!envValue)
-            return 4;
-        auto const val = atoi(envValue);
-        if (!(val >= 1 && val <= 8))
-            return 1;
-        return val;
-    }();
-    auto tmp = buildBoxElements(codepoint, //
-                                _gridMetrics.cellSize,
-                                _gridMetrics.underline.thickness,
-                                supersamplingFactor);
-    if (!tmp)
-        return nullopt;
-    pixels = *tmp;
-    pixels = invertY(pixels, _gridMetrics.cellSize);
+    if (optional<atlas::Buffer> image = buildElements(codepoint, effectiveSize, lineThickness))
+    {
+        pixels = std::move(*image);
+    }
+    else
+    {
+        auto const supersamplingFactor = []() {
+            auto constexpr EnvName = "SSA_FACTOR";
+            auto* const envValue = getenv(EnvName);
+            if (!envValue)
+                return 4;
+            auto const val = atoi(envValue);
+            if (!(val >= 1 && val <= 8))
+                return 1;
+            return val;
+        }();
+
+        auto tmp = buildBoxElements(codepoint, //
+                                    effectiveSize,
+                                    lineThickness,
+                                    supersamplingFactor);
+        if (!tmp)
+            return nullopt;
+        pixels = *tmp;
+    }
+
+    // Slice the specific 1x1 tile requested (subIndex at X, DoubleHeight flag at Y).
+    auto const rowSize = unbox<size_t>(effectiveSize.width); // Stride of the large buffer
+    auto const targetWidth = unbox<size_t>(size.width);
+    auto const targetHeight = unbox<size_t>(size.height);
+    auto sliced = atlas::Buffer(targetWidth * targetHeight);
+
+    // Calculate Source offsets
+    // X Offset: subIndex * cellSize.width
+    // Y Offset:
+    //   DoubleHeightTop    -> Top Half? or Bottom Half?
+    //   User reports "swapped".
+    //   Assumption: buildElements is Bottom-Up? Or InvertY confusion.
+    //   If we use Slice-First strategy:
+    //     Visual Top = 0..H (Top-Down semantics).
+    //     Visual Bottom = H..2H.
+    //   If User says swapped, let's trying using Visual Bottom for Top Flag.
+    auto const srcXBase = subIndex * targetWidth;
+    auto srcYBase = size_t { 0 };
+
+    if (flags & vtbackend::LineFlag::DoubleHeightTop)
+    {
+        // User requested swap: Use Bottom Half (H..2H) for Top Flag.
+        srcYBase = targetHeight;
+    }
+    else if (flags & vtbackend::LineFlag::DoubleHeightBottom)
+    {
+        // User requested swap: Use Top Half (0..H) for Bottom Flag.
+        srcYBase = 0;
+    }
+    // Else (Single Height): srcYBase = 0.
+
+    // Perform Copy (2D Slice)
+    for (size_t y = 0; y < targetHeight; ++y)
+    {
+        auto const srcOffset = (srcYBase + y) * rowSize + srcXBase;
+        auto const dstOffset = y * targetWidth;
+        std::copy_n(pixels.data() + srcOffset, targetWidth, sliced.data() + dstOffset);
+    }
+    pixels = std::move(sliced);
+
+    // Flip Y-axis to match OpenGL texture coordinates (0,0 is bottom-left).
+    pixels = invertY(pixels, size);
 
     return { createTileData(tileLocation,
                             std::move(pixels),
                             atlas::Format::Red,
-                            _gridMetrics.cellSize,
+                            size,
                             RenderTileAttributes::X { 0 },
                             RenderTileAttributes::Y { 0 },
                             FRAGMENT_SELECTOR_GLYPH_ALPHA) };
 }
 
-Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTileAttributes(char32_t codepoint)
+Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTileAttributes(
+    char32_t codepoint, vtbackend::LineFlags flags, int subIndex)
 {
+    auto const flagsMask = vtbackend::LineFlags { vtbackend::LineFlag::DoubleWidth,
+                                                  vtbackend::LineFlag::DoubleHeightTop,
+                                                  vtbackend::LineFlag::DoubleHeightBottom };
+    auto const cacheKeyFlags = (flags & flagsMask).value();
+    // Pack codepoint, flags, and subIndex into a single 32-bit key.
+    // Codepoint: 21 bits
+    // Flags: 3 bits (masked above) - effectively 8 bits storage
+    // subIndex: 1 bit (0 or 1)
+    // Layout: [Codepoint 21][Flags 8][SubIndex 1] -> 30 bits used.
+    auto const cacheKey = (static_cast<uint32_t>(codepoint) << 9)
+                          | (static_cast<uint32_t>(cacheKeyFlags) << 1) | static_cast<uint32_t>(subIndex);
     return textureAtlas().get_or_try_emplace(
-        crispy::strong_hash { 31, 13, 8, static_cast<uint32_t>(codepoint) },
-        [this, codepoint](atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
-            return createTileData(codepoint, tileLocation);
+        crispy::strong_hash { 31, 13, 8, cacheKey },
+        [this, codepoint, flags, subIndex](
+            atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
+            return createTileData(codepoint, flags, tileLocation, subIndex);
         });
 }
 
@@ -1383,11 +1466,11 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
         ;
 }
 
-optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
+optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
+                                                          ImageSize size,
+                                                          int lineThickness)
 {
     using namespace detail;
-
-    auto const size = _gridMetrics.cellSize;
 
     auto const ud = [=](Ratio a, Ratio b) {
         return upperDiagonalMosaic(size, a, b);
@@ -1395,23 +1478,23 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     auto const ld = [=](Ratio a, Ratio b) {
         return lowerDiagonalMosaic(size, a, b);
     };
-    auto const lineArt = [size, this]() {
+    auto const lineArt = [size, lineThickness]() {
         auto b = blockElement<2>(size);
-        b.getlineThickness(_gridMetrics.underline.thickness);
+        b.getlineThickness(lineThickness);
         return b;
     };
     auto const progressBar = [size, this]() {
         return ProgressBar { .size = size, .underlinePosition = _gridMetrics.underline.position };
     };
-    auto const segmentArt = [size, this]() {
+    auto const segmentArt = [size, lineThickness, this]() {
         auto constexpr AntiAliasingSamplingFactor = 1;
         return blockElement<AntiAliasingSamplingFactor>(size)
-            .getlineThickness(_gridMetrics.underline.thickness)
+            .getlineThickness(lineThickness)
             .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
     };
 
     if (detail::Braille::isBraille(codepoint))
-        return Braille::build(codepoint, size, _gridMetrics.underline.thickness, 4);
+        return Braille::build(codepoint, size, lineThickness, 4);
 
     // TODO: just check notcurses-info to get an idea what may be missing
     // clang-format off

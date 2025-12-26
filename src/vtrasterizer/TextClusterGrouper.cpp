@@ -38,13 +38,15 @@ void TextClusterGrouper::beginFrame() noexcept
 void TextClusterGrouper::renderLine(std::string_view text,
                                     vtbackend::LineOffset lineOffset,
                                     vtbackend::RGBColor foregroundColor,
-                                    TextStyle style)
+                                    TextStyle style,
+                                    vtbackend::LineFlags flags)
 {
     if (text.empty())
         return;
 
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(text);
     auto columnOffset = vtbackend::ColumnOffset(0);
+    auto const columnScale = flags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;
 
     _initialPenPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };
 
@@ -52,13 +54,15 @@ void TextClusterGrouper::renderLine(std::string_view text,
     {
         auto const gridPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };
         auto const width = graphemeClusterWidth(graphemeCluster);
-        renderCell(gridPosition, graphemeCluster, style, foregroundColor);
+        renderCell(gridPosition, graphemeCluster, foregroundColor, style, flags);
 
         for (int i = 1; std::cmp_less(i, width); ++i)
-            renderCell(vtbackend::CellLocation { .line = gridPosition.line, .column = columnOffset + i },
+            renderCell(vtbackend::CellLocation { .line = gridPosition.line,
+                                                 .column = columnOffset + i * columnScale },
                        U" ",
+                       foregroundColor,
                        style,
-                       foregroundColor);
+                       flags);
 
         columnOffset += vtbackend::ColumnOffset::cast_from(width);
     }
@@ -69,8 +73,9 @@ void TextClusterGrouper::renderLine(std::string_view text,
 
 void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
                                     std::u32string_view graphemeCluster,
+                                    vtbackend::RGBColor foregroundColor,
                                     TextStyle style,
-                                    vtbackend::RGBColor foregroundColor)
+                                    vtbackend::LineFlags flags)
 {
     if (_forceUpdateInitialPenPosition)
     {
@@ -84,7 +89,8 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
 
     if (isBoxDrawingCharacter)
     {
-        auto const success = _events.renderBoxDrawingCell(position, graphemeCluster[0], foregroundColor);
+        auto const success =
+            _events.renderBoxDrawingCell(position, graphemeCluster[0], foregroundColor, flags);
         if (success)
         {
             flushTextClusterGroup();
@@ -93,14 +99,15 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
         }
     }
 
-    appendCellTextToClusterGroup(graphemeCluster, style, foregroundColor);
+    appendCellTextToClusterGroup(graphemeCluster, style, foregroundColor, flags);
 }
 
 void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepoints,
                                                       TextStyle style,
-                                                      vtbackend::RGBColor color)
+                                                      vtbackend::RGBColor color,
+                                                      vtbackend::LineFlags flags)
 {
-    bool const attribsChanged = color != _color || style != _style;
+    bool const attribsChanged = color != _color || style != _style || flags != _lineFlags;
     bool const cellIsEmpty = codepoints.empty() || codepoints[0] == 0x20;
     bool const textStartsNewCluster = _cellCount == 0 && !cellIsEmpty;
 
@@ -110,6 +117,7 @@ void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepo
             flushTextClusterGroup(); // also increments text start position
         _color = color;
         _style = style;
+        _lineFlags = flags;
     }
 
     if (!cellIsEmpty)
@@ -136,7 +144,8 @@ void TextClusterGrouper::flushTextClusterGroup()
                                 gsl::span(_clusters.data(), _clusters.size()),
                                 _initialPenPosition,
                                 _style,
-                                _color);
+                                _color,
+                                _lineFlags);
     }
 
     resetAndMovePenForward(vtbackend::ColumnOffset::cast_from(_cellCount));

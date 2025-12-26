@@ -74,8 +74,12 @@ struct RenderTileAttributes
     // - FRAGMENT_SELECTOR_GLYPH_LCD
     uint32_t fragmentShaderSelector = FRAGMENT_SELECTOR_IMAGE_BGRA;
 
+    // Tile location inside the texture atlas.
     atlas::NormalizedTileLocation normalizedLocation {};
 
+    // Size of the bitmap inside the tile.
+    // This may be smaller than the grid cell size and is a hint for the target surface renderer
+    // to correctly scale the bitmap.
     ImageSize targetSize {};
 };
 

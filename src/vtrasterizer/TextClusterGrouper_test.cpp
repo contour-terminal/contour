@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/test_helpers.h>
 
+#include <vtrasterizer/FontDescriptions.h>
 #include <vtrasterizer/TextClusterGrouper.h>
 
 #include <crispy/escape.h>
@@ -43,8 +44,9 @@ struct TextClusterGroup
     std::u32string codepoints {};
     std::vector<int> clusters {};
     vtbackend::CellLocation initialPenPosition {};
-    TextStyle style {};
     vtbackend::RGBColor color {};
+    TextStyle style {};
+    vtbackend::LineFlags flags = vtbackend::LineFlag::None;
 
 #if defined(__APPLE__)
     // NB: Don't use default implementation for operator<=>,
@@ -53,7 +55,7 @@ struct TextClusterGroup
     {
         return codepoints == other.codepoints && clusters == other.clusters
                && initialPenPosition == other.initialPenPosition && style == other.style
-               && color == other.color;
+               && color == other.color && flags == other.flags;
     }
 #else
     auto operator<=>(TextClusterGroup const&) const = default;
@@ -65,6 +67,7 @@ struct BoxDrawingCell
     vtbackend::CellLocation position {};
     char32_t codepoint {};
     vtbackend::RGBColor foregroundColor {};
+    vtbackend::LineFlags flags = vtbackend::LineFlag::None;
 
     auto operator<=>(BoxDrawingCell const&) const = default;
 };
@@ -84,11 +87,14 @@ struct FrameWriter
 
     ~FrameWriter() { grouper.endFrame(); }
 
-    FrameWriter& write(std::u32string_view textCluster, TextStyle style, vtbackend::RGBColor color)
+    FrameWriter& write(std::u32string_view textCluster,
+                       vtbackend::RGBColor color,
+                       TextStyle style,
+                       vtbackend::LineFlags flags)
     {
         for (auto const codepoint: textCluster)
         {
-            grouper.renderCell(penPosition, std::u32string_view(&codepoint, 1), style, color);
+            grouper.renderCell(penPosition, std::u32string_view(&codepoint, 1), color, style, flags);
             ++penPosition.column;
         }
         return *this;
@@ -112,7 +118,8 @@ struct std::formatter<TextClusterGroup>: formatter<std::string>
                             return std::to_string(cluster);
                         }) | crispy::views::join_with(", "),
                         group.style,
-                        group.color),
+                        group.color,
+                        group.flags),
             ctx);
     }
 };
@@ -157,21 +164,30 @@ struct EventRecorder final: public TextClusterGrouper::Events
                          gsl::span<unsigned> clusters,
                          vtbackend::CellLocation initialPenPosition,
                          TextStyle style,
-                         vtbackend::RGBColor color) override
+                         vtbackend::RGBColor color,
+                         vtbackend::LineFlags flags) override
     {
-        events.emplace_back(TextClusterGroup { .codepoints = std::u32string(codepoints),
-                                               .clusters = to_vector<int>(clusters),
-                                               .initialPenPosition = initialPenPosition,
-                                               .style = style,
-                                               .color = color });
+        events.emplace_back(TextClusterGroup {
+            .codepoints = std::u32string(codepoints),
+            .clusters = to_vector<int>(clusters),
+            .initialPenPosition = initialPenPosition,
+            .color = color,
+            .style = style,
+            .flags = flags,
+        });
     }
 
     bool renderBoxDrawingCell(vtbackend::CellLocation position,
                               char32_t codepoint,
-                              vtbackend::RGBColor foregroundColor) override
+                              vtbackend::RGBColor foregroundColor,
+                              vtbackend::LineFlags flags) override
     {
         events.emplace_back(BoxDrawingCell {
-            .position = position, .codepoint = codepoint, .foregroundColor = foregroundColor });
+            .position = position,
+            .codepoint = codepoint,
+            .foregroundColor = foregroundColor,
+            .flags = flags,
+        });
         return true;
     }
 };
@@ -203,7 +219,8 @@ TEST_CASE("TextClusterGrouper.renderLine")
     auto grouper = TextClusterGrouper(recorder);
 
     grouper.beginFrame();
-    grouper.renderLine("Hello, World!", LineOffset(0), RGBColor { 0xF0, 0x80, 0x40 }, TextStyle::Regular);
+    grouper.renderLine(
+        "Hello, World!", LineOffset(0), RGBColor { 0xF0, 0x80, 0x40 }, TextStyle::Regular, LineFlag::None);
     grouper.endFrame();
 
     REQUIRE(recorder.events.size() == 2);
@@ -235,7 +252,8 @@ TEST_CASE("TextClusterGrouper.renderLine.DoubleWhitespace")
     auto grouper = TextClusterGrouper(recorder);
 
     grouper.beginFrame();
-    grouper.renderLine("Hello,  World!", LineOffset(0), RGBColor { 0xF0, 0x80, 0x40 }, TextStyle::Regular);
+    grouper.renderLine(
+        "Hello,  World!", LineOffset(0), RGBColor { 0xF0, 0x80, 0x40 }, TextStyle::Regular, LineFlag::None);
     grouper.endFrame();
 
     REQUIRE(recorder.events.size() == 2);
@@ -263,21 +281,27 @@ TEST_CASE("TextClusterGrouper.SplitAtColorChange")
     auto grouper = TextClusterGrouper(recorder);
 
     FrameWriter(grouper)
-        .write(U"template", TextStyle::Bold, 0x102030_rgb)
-        .write(U"...", TextStyle::Bold, 0x405060_rgb);
+        .write(U"template", 0x102030_rgb, TextStyle::Bold, LineFlag::None)
+        .write(U"...", 0x405060_rgb, TextStyle::Bold, LineFlag::None);
 
     REQUIRE(recorder.events.size() == 2);
 
     CHECK(std::get<TextClusterGroup>(recorder.events[0])
-          == TextClusterGroup { .codepoints = U"template",
-                                .clusters = { 0, 1, 2, 3, 4, 5, 6, 7 },
-                                .initialPenPosition = {},
-                                .style = TextStyle::Bold,
-                                .color = 0x102030_rgb });
+          == TextClusterGroup {
+              .codepoints = U"template",
+              .clusters = { 0, 1, 2, 3, 4, 5, 6, 7 },
+              .initialPenPosition = {},
+              .color = 0x102030_rgb,
+              .style = TextStyle::Bold,
+              .flags = vtbackend::LineFlag::None,
+          });
     CHECK(std::get<TextClusterGroup>(recorder.events[1])
-          == TextClusterGroup { .codepoints = U"...",
-                                .clusters = { 0, 1, 2 },
-                                .initialPenPosition = CellLocation { LineOffset(0), ColumnOffset(8) },
-                                .style = TextStyle::Bold,
-                                .color = 0x405060_rgb });
+          == TextClusterGroup {
+              .codepoints = U"...",
+              .clusters = { 0, 1, 2 },
+              .initialPenPosition = CellLocation { LineOffset(0), ColumnOffset(8) },
+              .color = 0x405060_rgb,
+              .style = TextStyle::Bold,
+              .flags = vtbackend::LineFlag::None,
+          });
 }

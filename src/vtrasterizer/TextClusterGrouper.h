@@ -29,11 +29,13 @@ class TextClusterGrouper
                                      gsl::span<unsigned> clusters,
                                      vtbackend::CellLocation initialPenPosition,
                                      TextStyle style,
-                                     vtbackend::RGBColor color) = 0;
+                                     vtbackend::RGBColor color,
+                                     vtbackend::LineFlags flags) = 0;
 
         virtual bool renderBoxDrawingCell(vtbackend::CellLocation position,
                                           char32_t codepoint,
-                                          vtbackend::RGBColor foregroundColor) = 0;
+                                          vtbackend::RGBColor foregroundColor,
+                                          vtbackend::LineFlags flags) = 0;
     };
 
     explicit TextClusterGrouper(Events& events);
@@ -50,13 +52,15 @@ class TextClusterGrouper
 
     void renderCell(vtbackend::CellLocation position,
                     std::u32string_view graphemeCluster,
+                    vtbackend::RGBColor foregroundColor,
                     TextStyle style,
-                    vtbackend::RGBColor foregroundColor);
+                    vtbackend::LineFlags flags);
 
     void renderLine(std::string_view text,
                     vtbackend::LineOffset lineOffset,
                     vtbackend::RGBColor foregroundColor,
-                    TextStyle style);
+                    TextStyle style,
+                    vtbackend::LineFlags flags);
 
     /// Must be invoked when rendering the terminal's text has finished for this frame.
     void endFrame();
@@ -66,7 +70,8 @@ class TextClusterGrouper
     /// at the end of the currently filled line.
     void appendCellTextToClusterGroup(std::u32string_view codepoints,
                                       TextStyle style,
-                                      vtbackend::RGBColor color);
+                                      vtbackend::RGBColor color,
+                                      vtbackend::LineFlags flags);
 
     void flushTextClusterGroup();
 
@@ -88,6 +93,7 @@ class TextClusterGrouper
 
     // uniform text color for this text group
     vtbackend::RGBColor _color {};
+    vtbackend::LineFlags _lineFlags = vtbackend::LineFlag::None;
 
     // codepoints within this text group with
     // uniform unicode properties (script, language, direction).

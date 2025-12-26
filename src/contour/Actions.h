@@ -468,6 +468,7 @@ struct std::formatter<contour::actions::SwitchToTab>: std::formatter<std::string
 template <>
 struct std::formatter<contour::actions::Action>: std::formatter<std::string>
 {
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)
     auto format(contour::actions::Action const& _action, auto& ctx) const
     {
         std::string name = "Unknown action";

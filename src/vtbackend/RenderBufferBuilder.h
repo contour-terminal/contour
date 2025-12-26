@@ -38,7 +38,7 @@ class RenderBufferBuilder
     ///
     /// @see renderTrivialLine
     void renderCell(Cell const& cell, LineOffset line, ColumnOffset column);
-    void startLine(LineOffset line) noexcept;
+    void startLine(LineOffset line, LineFlags flags) noexcept;
     void endLine() noexcept;
 
     /// Renders a trivial line.
@@ -49,7 +49,7 @@ class RenderBufferBuilder
     /// with their grid cells are to be rendered using renderCell().
     ///
     /// @see renderCell
-    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset);
+    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset, LineFlags flags);
 
     /// This call is guaranteed to be invoked when the the full page has been rendered.
     void finish() noexcept {}
@@ -63,6 +63,7 @@ class RenderBufferBuilder
                                                            std::u32string graphemeCluster,
                                                            ColumnCount width,
                                                            CellFlags flags,
+                                                           LineFlags lineFlags,
                                                            RGBColor fg,
                                                            RGBColor bg,
                                                            Color ul,
@@ -72,6 +73,7 @@ class RenderBufferBuilder
     [[nodiscard]] static RenderCell makeRenderCellExplicit(ColorPalette const& colorPalette,
                                                            char32_t codepoint,
                                                            CellFlags flags,
+                                                           LineFlags lineFlags,
                                                            RGBColor fg,
                                                            RGBColor bg,
                                                            Color ul,
@@ -82,6 +84,7 @@ class RenderBufferBuilder
     [[nodiscard]] static RenderCell makeRenderCell(ColorPalette const& colorPalette,
                                                    HyperlinkStorage const& hyperlinks,
                                                    Cell const& cell,
+                                                   LineFlags lineFlags,
                                                    RGBColor fg,
                                                    RGBColor bg,
                                                    LineOffset line,
@@ -137,6 +140,9 @@ class RenderBufferBuilder
 
     // Offset into the search pattern that has been already matched.
     size_t _searchPatternOffset = 0;
+
+    // Current line flags being rendered.
+    LineFlags _currentLineFlags = LineFlag::None;
 };
 
 } // namespace vtbackend
