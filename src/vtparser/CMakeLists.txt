@@ -24,5 +24,5 @@ if(VTPARSER_TESTING)
         Parser_test.cpp
     )
     target_link_libraries(vtparser_test vtparser Catch2::Catch2WithMain)
-    add_test(vtparser_test ./vtparser_test)
+    add_test(NAME vtparser_test COMMAND $<TARGET_FILE:vtparser_test>)
 endif()

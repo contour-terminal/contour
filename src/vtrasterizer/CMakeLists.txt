@@ -49,7 +49,7 @@ if(CONTOUR_TESTING)
     add_executable(vtrasterizer_test)
     target_sources(vtrasterizer_test PRIVATE ${_test_files})
     target_link_libraries(vtrasterizer_test vtrasterizer Catch2::Catch2WithMain)
-    add_test(vtrasterizer_test ./vtrasterizer_test)
+    add_test(NAME vtrasterizer_test COMMAND $<TARGET_FILE:vtrasterizer_test>)
 endif()
 
 message(STATUS "[vtrasterizer] Compile unit tests: ${CONTOUR_TESTINGG}")

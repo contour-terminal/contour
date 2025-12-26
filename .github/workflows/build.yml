@@ -651,7 +651,7 @@ jobs:
       - name: "Build"
         run: cmake --build --preset windows-cl-release
       - name: "Test"
-        run: ctest --preset windows-cl-release
+        run: ctest --preset windows-cl-release --build-config RelWithDebInfo
       - name: "Create Package(s)"
         shell: powershell
         run: |

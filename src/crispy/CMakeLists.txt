@@ -138,6 +138,6 @@ if(CRISPY_TESTING)
         times_test.cpp
     )
 target_link_libraries(crispy_test Catch2::Catch2WithMain crispy::core)
-    add_test(crispy_test ./crispy_test)
+    add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)
 endif()
 message(STATUS "[crispy] Compile unit tests: ${CRISPY_TESTING}")

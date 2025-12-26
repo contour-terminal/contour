@@ -330,6 +330,9 @@ if(WIN32)
             PATTERN "CMakeFiles" EXCLUDE
             PATTERN "*_autogen" EXCLUDE
             PATTERN "*.h" EXCLUDE
+            PATTERN "*_test.*" EXCLUDE
+            PATTERN "*.pdb" EXCLUDE
+            PATTERN "unicode_tablegen.exe" EXCLUDE
             PATTERN "*"
     )
 elseif(APPLE)
@@ -463,7 +466,25 @@ else()
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
 endif()
 
-include(CPack)
+
+
+include(CPackComponent)
+
+if(WIN32)
+    cpack_add_component(contour_path
+        DISPLAY_NAME "Add to PATH"
+        DESCRIPTION "Adds the contour executable to the system PATH."
+    )
+    set(CPACK_COMPONENTS_ALL Unspecified contour contour_path)
+
+    # Workaround for WIX0091: Install a dummy file to ensure component is not empty
+    # to avoid "Duplicate Component with identifier 'CM_C_EMPTY_INSTALL_ROOT'"
+    install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt"
+        DESTINATION bin
+        COMPONENT contour_path
+        RENAME LICENSE.contour_path.txt
+    )
+endif()
 
 if(UNIX)
     # CPackDeb is broken. If no components are used, it does not create a ddeb...
@@ -472,3 +493,5 @@ if(UNIX)
         REQUIRED
     )
 endif()
+
+include(CPack)
