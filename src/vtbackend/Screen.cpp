@@ -3689,6 +3689,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case DUMPSTATE: inspect(); break;
+        case SEMA: /* TODO */ break;
 
         // hooks
         case DECSIXEL: _terminal->hookParser(hookSixel(seq)); break;

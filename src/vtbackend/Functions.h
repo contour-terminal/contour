@@ -152,6 +152,7 @@ constexpr inline auto RCOLORHIGHLIGHTFG = FunctionDocumentation { .mnemonic = "R
 constexpr inline auto RCOLORMOUSEBG = FunctionDocumentation { .mnemonic = "RCOLORMOUSEBG", .comment = "Reset mouse background color." };
 constexpr inline auto RCOLORMOUSEFG = FunctionDocumentation { .mnemonic = "RCOLORMOUSEFG", .comment = "Reset mouse foreground color." };
 constexpr inline auto RCOLPAL = FunctionDocumentation { .mnemonic = "RCOLPAL", .comment = "Reset color full palette or entry" };
+constexpr inline auto SEMA = FunctionDocumentation { .mnemonic = "SEMA", .comment = "Semantic block / shell integration" };
 constexpr inline auto SETCOLPAL = FunctionDocumentation { .mnemonic = "SETCOLPAL", .comment = "Set/Query color palette" };
 constexpr inline auto SETCWD = FunctionDocumentation { .mnemonic = "SETCWD", .comment = "Set current working directory" };
 constexpr inline auto SETFONT = FunctionDocumentation { .mnemonic = "SETFONT", .comment = "Get or set font." };
@@ -615,6 +616,7 @@ constexpr inline auto RCOLORHIGHLIGHTFG = detail::OSC(119, VTExtension::XTerm, d
 constexpr inline auto RCOLORMOUSEBG     = detail::OSC(114, VTExtension::XTerm, documentation::RCOLORMOUSEBG);
 constexpr inline auto RCOLORMOUSEFG     = detail::OSC(113, VTExtension::XTerm, documentation::RCOLORMOUSEFG);
 constexpr inline auto RCOLPAL           = detail::OSC(104, VTExtension::XTerm, documentation::RCOLPAL);
+constexpr inline auto SEMA              = detail::OSC(133, VTExtension::Unknown, documentation::SEMA);
 constexpr inline auto SETCOLPAL         = detail::OSC(4, VTExtension::XTerm, documentation::SETCOLPAL);
 constexpr inline auto SETCWD            = detail::OSC(7, VTExtension::XTerm, documentation::SETCWD);
 constexpr inline auto SETFONT           = detail::OSC(50, VTExtension::XTerm, documentation::SETFONT);
@@ -764,6 +766,7 @@ constexpr static auto allFunctionsArray() noexcept
         COLORCURSOR,
         COLORMOUSEFG,
         COLORMOUSEBG,
+        SEMA,
         SETFONT,
         SETFONTALL,
         CLIPBOARD,
