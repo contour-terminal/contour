@@ -146,53 +146,53 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
 {
     crispy::ignore_unused(region);
 
-    // ... platform checks ...
-    if (QGuiApplication::platformName() != "wayland")
-        return;
-
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    static auto activeBlurs = std::map<QWindow*, std::unique_ptr<QtWayland::org_kde_kwin_blur>> {};
-
-    if (auto* blurManager = kwinBlurManager(); blurManager && blurManager->isActive())
+    if (QGuiApplication::platformName() == "wayland")
     {
-        if (auto* platformWindow = window->handle())
+        static auto activeBlurs = std::map<QWindow*, std::unique_ptr<QtWayland::org_kde_kwin_blur>> {};
+
+        if (auto* blurManager = kwinBlurManager(); blurManager && blurManager->isActive())
         {
-            if (auto* waylandWindow = static_cast<QtWaylandClient::QWaylandWindow*>(platformWindow))
+            if (auto* platformWindow = window->handle())
             {
-                if (auto* surface = waylandWindow->surface())
+                if (auto* waylandWindow = static_cast<QtWaylandClient::QWaylandWindow*>(platformWindow))
                 {
-                    if (enable)
+                    if (auto* surface = waylandWindow->surface())
                     {
-                        if (activeBlurs.find(window) == activeBlurs.end())
+                        if (enable)
                         {
-                            auto* rawBlur = blurManager->create(surface);
-                            activeBlurs[window] = std::make_unique<QtWayland::org_kde_kwin_blur>(rawBlur);
-                            QObject::connect(window, &QWindow::destroyed, [window]() {
-                                auto it = activeBlurs.find(window);
-                                if (it != activeBlurs.end())
-                                {
-                                    it->second->release();
-                                    activeBlurs.erase(it);
-                                }
-                            });
+                            if (activeBlurs.find(window) == activeBlurs.end())
+                            {
+                                auto* rawBlur = blurManager->create(surface);
+                                activeBlurs[window] = std::make_unique<QtWayland::org_kde_kwin_blur>(rawBlur);
+                                QObject::connect(window, &QWindow::destroyed, [window]() {
+                                    auto it = activeBlurs.find(window);
+                                    if (it != activeBlurs.end())
+                                    {
+                                        it->second->release();
+                                        activeBlurs.erase(it);
+                                    }
+                                });
+                            }
+                            auto& blur = *activeBlurs[window];
+                            blur.set_region(nullptr);
+                            blur.commit();
                         }
-                        auto& blur = *activeBlurs[window];
-                        blur.set_region(nullptr);
-                        blur.commit();
-                    }
-                    else
-                    {
-                        auto it = activeBlurs.find(window);
-                        if (it != activeBlurs.end())
+                        else
                         {
-                            it->second->release();
-                            activeBlurs.erase(it);
+                            auto it = activeBlurs.find(window);
+                            if (it != activeBlurs.end())
+                            {
+                                it->second->release();
+                                activeBlurs.erase(it);
+                            }
+                            blurManager->unset(surface);
                         }
-                        blurManager->unset(surface);
                     }
                 }
             }
         }
+        return;
     }
 #endif
 
@@ -214,8 +214,11 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
             unsetPropertyX11(window, "kwin_blur");
             unsetPropertyX11(window, "_MUTTER_HINTS");
         }
+        return;
     }
-#elif defined(_WIN32) // {{{
+#endif
+
+#if defined(_WIN32) // {{{
     // Awesome hack with the noteworty links:
     // * https://gist.github.com/ethanhs/0e157e4003812e99bf5bc7cb6f73459f (used as code template)
     // * https://github.com/riverar/sample-win32-acrylicblur/blob/master/MainWindow.xaml.cs
@@ -224,6 +227,37 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
 
     if (HWND hwnd = (HWND) window->winId(); hwnd != nullptr)
     {
+        // 1. Attempt DWM-based blur (Windows 11+)
+        const HMODULE hDwm = LoadLibrary(TEXT("dwmapi.dll"));
+        if (hDwm)
+        {
+            typedef HRESULT(WINAPI * P_DwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
+            const auto pDwmSetWindowAttribute =
+                (P_DwmSetWindowAttribute) GetProcAddress(hDwm, "DwmSetWindowAttribute");
+
+            if (pDwmSetWindowAttribute)
+            {
+                const DWORD DWMWA_SYSTEMBACKDROP_TYPE = 38;
+                const DWORD DWMSBT_NONE = 1;
+                const DWORD DWMSBT_TRANSIENTWINDOW = 3; // Acrylic
+                const DWORD DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+                BOOL dark = TRUE;
+                pDwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+
+                DWORD backdropType = enable ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE;
+                HRESULT hr = pDwmSetWindowAttribute(
+                    hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
+                if (SUCCEEDED(hr))
+                {
+                    FreeLibrary(hDwm);
+                    return;
+                }
+            }
+            FreeLibrary(hDwm);
+        }
+
+        // 2. Fallback to undocumented SetWindowCompositionAttribute (Windows 10)
         const HINSTANCE hModule = LoadLibrary(TEXT("user32.dll"));
         if (hModule)
         {
@@ -245,9 +279,9 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
             struct ACCENTPOLICY
             {
                 AcceptState nAccentState;
-                int nFlags;
-                int nColor;
-                int nAnimationId;
+                UINT nFlags;
+                COLORREF nColor;
+                LONG nAnimationId;
             };
             struct WINCOMPATTRDATA
             {
@@ -260,8 +294,10 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
                 (pSetWindowCompositionAttribute) GetProcAddress(hModule, "SetWindowCompositionAttribute");
             if (SetWindowCompositionAttribute)
             {
-                auto const policy = enable ? ACCENTPOLICY { ACCENT_ENABLE_BLURBEHIND, 0, 0, 0 }
-                                           : ACCENTPOLICY { ACCENT_DISABLED, 0, 0, 0 };
+                // Use a dark semi-transparent tint (0x99000000) for Acrylic to be visible.
+                auto const policy = enable
+                                        ? ACCENTPOLICY { ACCENT_ENABLE_ACRYLICBLURBEHIND, 0, 0x99000000, 0 }
+                                        : ACCENTPOLICY { ACCENT_DISABLED, 0, 0, 0 };
                 auto const data = WINCOMPATTRDATA { WCA_ACCENT_POLICY, &policy, sizeof(ACCENTPOLICY) };
                 BOOL rs = SetWindowCompositionAttribute(hwnd, &data);
                 if (!rs)
@@ -270,11 +306,10 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
             FreeLibrary(hModule);
         }
     }
-    // }}}
-#else
+#endif // }}}
+
     // Get me working on other platforms/compositors (such as OSX, Gnome, ...), please.
     crispy::ignore_unused(window, enable);
-#endif
 }
 
 } // namespace BlurBehind
