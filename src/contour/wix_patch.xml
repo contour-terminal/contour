@@ -5,4 +5,10 @@
       <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="PathEnv" Type="integer" Value="1" KeyPath="yes"/>
     </Component>
   </CPackWiXFragment>
+  <CPackWiXFragment Id="#PRODUCT">
+    <CustomAction Id="LaunchApplication" Directory="INSTALL_ROOT" ExeCommand="&quot;[INSTALL_ROOT]bin\contour.exe&quot;" Return="asyncNoWait" Impersonate="yes" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+    </UI>
+  </CPackWiXFragment>
 </CPackWiXPatch>

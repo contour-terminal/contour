@@ -615,6 +615,8 @@ jobs:
   windows:
     name: "Windows"
     runs-on: windows-latest
+    env:
+      CMAKE_PRESET: "windows-cl-release"
     steps:
       - uses: actions/checkout@v4
       - name: Run sccache-cache
@@ -645,24 +647,35 @@ jobs:
       - name: "Check cmake version"
         run: cmake --version
       - name: "Generate build files"
-        run: cmake --preset windows-cl-release
+        run: cmake --preset ${{ env.CMAKE_PRESET }}
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
       - name: "Build"
-        run: cmake --build --preset windows-cl-release
+        run: cmake --build --preset ${{ env.CMAKE_PRESET }}
       - name: "Test"
-        run: ctest --preset windows-cl-release --build-config RelWithDebInfo
+        run: ctest --preset ${{ env.CMAKE_PRESET }} --build-config RelWithDebInfo
+      - name: "Install Wix Toolset"
+        run: |
+          # Use this to list all available versions
+          # dotnet tool search --global wix --detail
+          # or at URL: https://www.nuget.org/packages/wix#versions-body-tab
+          dotnet tool install --global wix --version 4.0.6
+          echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
       - name: "Create Package(s)"
         shell: powershell
         run: |
-          cpack --preset windows-cl-release -V
-          #type "_CPack_Packages/win64/WIX/wix.log"
+          cpack --preset ${{ env.CMAKE_PRESET }} -V
+          if ($LASTEXITCODE -ne 0) {
+            echo "CPack failed. Dumping wix.log..."
+            type "out/build/${{ env.CMAKE_PRESET }}/_CPack_Packages/win64/WIX/wix.log"
+            exit $LASTEXITCODE
+          }
       - name: inspect
         run: Get-ChildItem -Recurse
       - name: "Rename package(s)"
         run: |
-          mv "out\build\windows-cl-release\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
-          mv "out\build\windows-cl-release\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
+          mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
+          mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
       - name: "Inspect again"
         run: Get-ChildItem
       - name: "Uploading MSI to artifact store"
