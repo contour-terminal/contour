@@ -2,6 +2,7 @@ ARG VERSION="24.04"
 FROM yaraslaut/static_qt:$VERSION
 #FROM qt_static:$VERSION
 ARG ARCH="x86_64"
+ARG QT_VERSION="6.8.3"
 
 RUN apt-get update
 RUN apt-get install -y xutils-dev pkg-config binutils gettext autoconf libtool make git
@@ -19,6 +20,6 @@ RUN LD_LIBRARY_PATH=/usr/local/lib cmake -S . -B build -G Ninja \
     -D CMAKE_CXX_COMPILER=clang++\
     -D CMAKE_C_COMPILER=clang \
     -D CMAKE_CXX_FLAGS="-I/contour/build/_deps/yaml-cpp-src/include" \
-    -D Qt6_DIR=/usr/local/Qt-6.8.3/lib/cmake/Qt6
+    -D Qt6_DIR=/usr/local/Qt-$QT_VERSION/lib/cmake/Qt6
 RUN cmake --build build --verbose
 RUN ldd ./build/src/contour/contour
