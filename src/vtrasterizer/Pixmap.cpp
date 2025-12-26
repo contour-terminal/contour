@@ -91,7 +91,7 @@ Pixmap& Pixmap::halfFilledCircleLeft()
         putpixel(x, y + (h / 2));
     };
     auto const radius = crispy::point { .x = w, .y = h / 2 };
-    drawEllipseArc(putAbove, size, radius, Arc::UL);
+    drawEllipseArc(putAbove, size, radius, Arc::UR);
     drawEllipseArc(putBelow, size, radius, Arc::BR);
     return *this;
 }
