@@ -154,13 +154,14 @@ std::string StandardKeyboardInputGenerator::selectNumpad(Modifiers modifiers,
     if (modifiers.contains(Modifier::NumLock))
         return select(modifiers, { .std = mapping.std, .mods = mapping.std, .appKeypad = mapping.std });
 
-    return select(modifiers, mapping);
+    return select(modifiers.without(Modifier::NumLock), mapping);
 }
 
 std::string StandardKeyboardInputGenerator::select(Modifiers modifiers, FunctionKeyMapping mapping) const
 {
-    if (modifiers && !mapping.mods.empty())
-        return crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(modifiers));
+    if (modifiers.without(Modifier::NumLock) && !mapping.mods.empty())
+        return crispy::replace(
+            mapping.mods, "{}"sv, makeVirtualTerminalParam(modifiers.without(Modifier::NumLock)));
 
     auto const prefix = modifiers.contains(Modifier::Alt) ? "\033" : ""s;
 
