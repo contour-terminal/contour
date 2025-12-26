@@ -39,32 +39,32 @@
         },
         {
             "name": "linux-release",
-            "displayName": "Linux 64-bit",
+            "displayName": "Linux 64-bit Release",
             "inherits": ["linux-common", "linux-common-release"]
         },
         {
             "name": "linux-debug",
-            "displayName": "Linux 64-bit",
+            "displayName": "Linux 64-bit Debug",
             "inherits": ["linux-common", "debug"]
         },
         {
             "name": "linux-clang-release",
-            "displayName": "Linux 64-bit (Clang)",
+            "displayName": "Linux 64-bit (Clang) Release",
             "inherits": ["linux-clang", "linux-common-release"]
         },
         {
             "name": "linux-clang-debug",
-            "displayName": "Linux 64-bit (Clang)",
+            "displayName": "Linux 64-bit (Clang) Debug",
             "inherits": ["linux-clang", "debug"]
         },
         {
             "name": "linux-gcc-release",
-            "displayName": "Linux 64-bit (GCC)",
+            "displayName": "Linux 64-bit (GCC) Release",
             "inherits": ["linux-gcc", "linux-common-release"]
         },
         {
             "name": "linux-gcc-debug",
-            "displayName": "Linux 64-bit (GCC)",
+            "displayName": "Linux 64-bit (GCC) Debug",
             "inherits": ["linux-gcc", "debug"]
         }
     ],
