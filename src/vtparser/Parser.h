@@ -724,7 +724,7 @@ inline std::pair<int, size_t> extractCodePrefix(T const& data) noexcept
     size_t i = 0;
 
     while (i < data.size() && isdigit(data[i]))
-        code = code * 10 + (int) (data[i++] - '0');
+        code = (code * 10) + (int) ((data[i++] - '0'));
 
     if (i == 0 && !data.empty() && data[0] != ';')
     {

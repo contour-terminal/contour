@@ -30,6 +30,8 @@ set(_source_files
 
 set(_test_files
     TextClusterGrouper_test.cpp
+    BoxDrawingRenderer_test.cpp
+    TextRenderer_test.cpp
 )
 
 source_group(Sources FILES ${_source_files})
@@ -48,7 +50,7 @@ if(CONTOUR_TESTING)
     enable_testing()
     add_executable(vtrasterizer_test)
     target_sources(vtrasterizer_test PRIVATE ${_test_files})
-    target_link_libraries(vtrasterizer_test vtrasterizer Catch2::Catch2WithMain)
+    target_link_libraries(vtrasterizer_test vtrasterizer Catch2::Catch2)
     add_test(NAME vtrasterizer_test COMMAND $<TARGET_FILE:vtrasterizer_test>)
 endif()
 

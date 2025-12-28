@@ -53,6 +53,8 @@ struct TextRendererEvents
 /// Text Rendering Pipeline
 class TextRenderer: public Renderable, public TextClusterGrouper::Events
 {
+    friend class TextRendererTest;
+
   public:
     TextRenderer(GridMetrics const& gridMetrics,
                  text::shaper& textShaper,

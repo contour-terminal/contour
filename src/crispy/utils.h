@@ -223,20 +223,20 @@ std::string joinHumanReadableQuoted(std::vector<T> const& list, U sep = ", ")
 }
 
 template <typename T, typename Callback>
-constexpr inline bool split(std::basic_string_view<T> text, T delimiter, Callback&& callback)
+constexpr inline bool split(std::basic_string_view<T> text, T delimiter, Callback const& callback)
 {
     size_t a = 0;
     size_t b = 0;
     while ((b = text.find(delimiter, a)) != std::basic_string_view<T>::npos)
     {
-        if (!(std::forward<Callback>(callback)(text.substr(a, b - a))))
+        if (!(callback(text.substr(a, b - a))))
             return false;
 
         a = b + 1;
     }
 
     if (a < text.size())
-        return std::forward<Callback>(callback)(text.substr(a));
+        return callback(text.substr(a));
 
     return true;
 }
