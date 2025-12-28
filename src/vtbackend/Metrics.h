@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/Sequence.h>
+
 #include <algorithm>
 #include <map>
 #include <string>
@@ -24,7 +26,7 @@ struct Metrics
         for (auto const& [name, freq]: sequences)
             vec.emplace_back(name, freq);
 
-        std::sort(vec.begin(), vec.end(), [](auto const& a, auto const& b) {
+        std::ranges::sort(vec, [](auto const& a, auto const& b) {
             if (a.second > b.second)
                 return true;
             if (a.second == b.second)

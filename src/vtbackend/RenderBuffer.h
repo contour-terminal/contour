@@ -5,6 +5,7 @@
 #include <vtbackend/Color.h>
 #include <vtbackend/Grid.h>
 #include <vtbackend/Image.h>
+#include <vtbackend/Line.h>
 #include <vtbackend/primitives.h>
 
 #include <vtrasterizer/RenderTarget.h>
@@ -26,6 +27,7 @@ struct RenderAttributes
     RGBColor backgroundColor {};
     RGBColor decorationColor {};
     CellFlags flags {};
+    LineFlags lineFlags = LineFlag::None;
 };
 
 /**
@@ -55,6 +57,7 @@ struct RenderLine
     ColumnCount displayWidth;
     RenderAttributes textAttributes;
     RenderAttributes fillAttributes;
+    LineFlags flags = LineFlag::None;
 };
 
 struct RenderCursor

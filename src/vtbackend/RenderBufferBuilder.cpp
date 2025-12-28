@@ -152,6 +152,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
                                                              u32string graphemeCluster,
                                                              ColumnCount width,
                                                              CellFlags flags,
+                                                             LineFlags lineFlags,
                                                              RGBColor fg,
                                                              RGBColor bg,
                                                              Color ul,
@@ -163,6 +164,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
     renderCell.attributes.foregroundColor = fg;
     renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(colorPalette, fg, ul, flags);
     renderCell.attributes.flags = flags;
+    renderCell.attributes.lineFlags = lineFlags;
     renderCell.position.line = line;
     renderCell.position.column = column;
     renderCell.width = unbox<uint8_t>(width);
@@ -174,6 +176,7 @@ template <CellConcept Cell>
 RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const& colorPalette,
                                                              char32_t codepoint,
                                                              CellFlags flags,
+                                                             LineFlags lineFlags,
                                                              RGBColor fg,
                                                              RGBColor bg,
                                                              Color ul,
@@ -185,6 +188,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
     renderCell.attributes.foregroundColor = fg;
     renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(colorPalette, fg, ul, flags);
     renderCell.attributes.flags = flags;
+    renderCell.attributes.lineFlags = lineFlags;
     renderCell.position.line = line;
     renderCell.position.column = column;
     renderCell.width = 1;
@@ -197,6 +201,7 @@ template <CellConcept Cell>
 RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& colorPalette,
                                                      HyperlinkStorage const& hyperlinks,
                                                      Cell const& screenCell,
+                                                     LineFlags lineFlags,
                                                      RGBColor fg,
                                                      RGBColor bg,
                                                      LineOffset line,
@@ -207,6 +212,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& colorPa
     renderCell.attributes.foregroundColor = fg;
     renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(colorPalette, fg, screenCell);
     renderCell.attributes.flags = screenCell.flags();
+    renderCell.attributes.lineFlags = lineFlags;
     renderCell.position.line = line;
     renderCell.position.column = column;
     renderCell.width = screenCell.width();
@@ -285,6 +291,7 @@ RenderAttributes RenderBufferBuilder<Cell>::createRenderAttributes(
     renderAttributes.decorationColor = CellUtil::makeUnderlineColor(
         _terminal->colorPalette(), fg, graphicsAttributes.underlineColor, graphicsAttributes.flags);
     renderAttributes.flags = graphicsAttributes.flags;
+    renderAttributes.lineFlags = _currentLineFlags;
     return renderAttributes;
 }
 
@@ -301,6 +308,7 @@ RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& 
     renderLine.text = lineBuffer.text.view();
     renderLine.textAttributes = createRenderAttributes(gridPosition, lineBuffer.textAttributes);
     renderLine.fillAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
+    renderLine.flags = _currentLineFlags;
 
     return renderLine;
 }
@@ -322,18 +330,22 @@ bool RenderBufferBuilder<Cell>::gridLineContainsCursor(LineOffset lineOffset) co
 }
 
 template <CellConcept Cell>
-void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset)
+void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
+                                                  LineOffset lineOffset,
+                                                  LineFlags flags)
 {
     // if (lineBuffer.text.size())
-    //     std::cout << std::format("Rendering trivial line {:2} 0..{}/{} ({} bytes): \"{}\"\n",
+    //     std::cout << std::format("Rendering trivial line {:2} 0..{}/{} ({} bytes): \"{}\" (flags: {})\n",
     //                lineOffset.value,
     //                lineBuffer.usedColumns,
     //                lineBuffer.displayWidth,
     //                lineBuffer.text.size(),
-    //                lineBuffer.text.view());
+    //                lineBuffer.text.view(),
+    //                flags);
 
     // No need to call isCursorLine(lineOffset) because lines containing a cursor are always inflated.
     _useCursorlineColoring = false;
+    _currentLineFlags = flags;
 
     auto const frontIndex = _output->cells.size();
 
@@ -374,15 +386,17 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
         auto const pos = CellLocation { .line = lineOffset, .column = columnOffset };
         auto const gridPosition = _terminal->viewport().translateScreenToGridCoordinate(pos);
         auto renderAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
+        auto const scale = _currentLineFlags.test(LineFlag::DoubleWidth) ? 2 : 1;
 
         _output->cells.emplace_back(makeRenderCellExplicit(_terminal->colorPalette(),
                                                            char32_t { 0 },
                                                            lineBuffer.fillAttributes.flags,
+                                                           _currentLineFlags,
                                                            renderAttributes.foregroundColor,
                                                            renderAttributes.backgroundColor,
                                                            lineBuffer.fillAttributes.underlineColor,
                                                            _baseLine + lineOffset,
-                                                           columnOffset));
+                                                           columnOffset * scale));
     }
     // }}}
 
@@ -471,9 +485,10 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
 }
 
 template <CellConcept Cell>
-void RenderBufferBuilder<Cell>::startLine(LineOffset line) noexcept
+void RenderBufferBuilder<Cell>::startLine(LineOffset line, LineFlags flags) noexcept
 {
     _lineNr = line;
+    _currentLineFlags = flags;
     _prevWidth = 0;
     _prevHasCursor = false;
 
@@ -524,16 +539,19 @@ ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPositio
         //            unicode::convert_to<char>(u32string_view(graphemeCluster)).size(),
         //            unicode::convert_to<char>(u32string_view(graphemeCluster)));
 
-        _output->cells.emplace_back(
-            makeRenderCellExplicit(_terminal->colorPalette(),
-                                   graphemeCluster,
-                                   width,
-                                   textAttributes.flags,
-                                   fg,
-                                   bg,
-                                   textAttributes.underlineColor,
-                                   _baseLine + screenPosition.line,
-                                   screenPosition.column + ColumnOffset::cast_from(columnCountRendered)));
+        auto const scale = _currentLineFlags.test(LineFlag::DoubleWidth) ? 2 : 1;
+
+        _output->cells.emplace_back(makeRenderCellExplicit(
+            _terminal->colorPalette(),
+            graphemeCluster,
+            width,
+            textAttributes.flags,
+            _currentLineFlags,
+            fg,
+            bg,
+            textAttributes.underlineColor,
+            _baseLine + screenPosition.line,
+            (screenPosition.column + ColumnOffset::cast_from(columnCountRendered)) * scale));
 
         // Span filling cells for preciding wide glyphs to get the background color properly painted.
         for (auto i = ColumnCount(1); i < width; ++i)
@@ -543,11 +561,12 @@ ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPositio
                 U" ", // {}
                 ColumnCount(1),
                 textAttributes.flags,
+                _currentLineFlags,
                 fg,
                 bg,
                 textAttributes.underlineColor,
                 _baseLine + screenPosition.line,
-                screenPosition.column + ColumnOffset::cast_from(columnCountRendered + i)));
+                (screenPosition.column + ColumnOffset::cast_from(columnCountRendered + i)) * scale));
         }
 
         columnCountRendered += ColumnCount::cast_from(width);
@@ -605,14 +624,22 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset li
     if (tryRenderInputMethodEditor(screenPosition, gridPosition))
         return;
 
-    auto /*const*/ [fg, bg] = makeColorsForCell(
+    auto const [fg, bg] = makeColorsForCell(
         gridPosition, screenCell.flags(), screenCell.foregroundColor(), screenCell.backgroundColor());
 
     _prevWidth = screenCell.width();
     _prevHasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
-    _output->cells.emplace_back(makeRenderCell(
-        _terminal->colorPalette(), _terminal->hyperlinks(), screenCell, fg, bg, _baseLine + line, column));
+    auto const displayColumn = _currentLineFlags.test(LineFlag::DoubleWidth) ? column * 2 : column;
+
+    _output->cells.emplace_back(makeRenderCell(_terminal->colorPalette(),
+                                               _terminal->hyperlinks(),
+                                               screenCell,
+                                               _currentLineFlags,
+                                               fg,
+                                               bg,
+                                               _baseLine + line,
+                                               displayColumn));
 
     if (column == ColumnOffset(0))
         _output->cells.back().groupStart = true;

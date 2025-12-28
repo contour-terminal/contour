@@ -45,14 +45,14 @@ struct TextRenderBuilder
 {
     std::string text;
 
-    void startLine(LineOffset lineOffset);
+    void startLine(LineOffset lineOffset, LineFlags flags);
     void renderCell(PrimaryScreenCell const& cell, LineOffset lineOffset, ColumnOffset columnOffset);
     void endLine();
-    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset);
+    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset, LineFlags flags);
     void finish();
 };
 
-void TextRenderBuilder::startLine(LineOffset lineOffset)
+void TextRenderBuilder::startLine(LineOffset lineOffset, LineFlags /*flags*/)
 {
     if (!*lineOffset)
         text.clear();
@@ -68,7 +68,9 @@ void TextRenderBuilder::endLine()
     text += '\n';
 }
 
-void TextRenderBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset)
+void TextRenderBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
+                                          LineOffset lineOffset,
+                                          LineFlags /*flags*/)
 {
     if (!*lineOffset)
         text.clear();

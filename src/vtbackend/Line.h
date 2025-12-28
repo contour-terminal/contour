@@ -18,6 +18,7 @@
 #include <gsl/span_ext>
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <variant>
 #include <vector>
@@ -31,8 +32,9 @@ enum class LineFlag : uint8_t
     Wrappable = 0x0001,
     Wrapped = 0x0002,
     Marked = 0x0004,
-    // TODO: DoubleWidth  = 0x0010,
-    // TODO: DoubleHeight = 0x0020,
+    DoubleWidth = 0x0010,
+    DoubleHeightTop = 0x0020,
+    DoubleHeightBottom = 0x0040,
 };
 
 using LineFlags = crispy::flags<LineFlag>;
@@ -233,7 +235,8 @@ class Line
         return inflatedBuffer().at(unbox<size_t>(column)).width();
     }
 
-    [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(_flags); }
+    [[nodiscard]] LineFlags flags() const noexcept { return _flags; }
+    [[nodiscard]] LineFlags& flags() noexcept { return _flags; }
 
     [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlag::Marked); }
     void setMarked(bool enable) { setFlag(LineFlag::Marked, enable); }
@@ -277,6 +280,9 @@ class Line
     [[nodiscard]] std::string toUtf8() const;
     [[nodiscard]] std::string toUtf8Trimmed() const;
     [[nodiscard]] std::string toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const;
+
+    /// Ensures that this line is stored in an inflated state.
+    void ensureInflatedBuffer();
 
     // Returns a reference to this mutable grid-line buffer.
     //
@@ -449,10 +455,16 @@ class Line
 };
 
 template <CellConcept Cell>
-inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
+inline void Line<Cell>::ensureInflatedBuffer()
 {
     if (auto trivialbuffer = std::get_if<TrivialBuffer>(&_storage))
         _storage = inflate<Cell>(*trivialbuffer);
+}
+
+template <CellConcept Cell>
+inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
+{
+    ensureInflatedBuffer();
     return std::get<InflatedBuffer>(_storage);
 }
 
@@ -469,10 +481,13 @@ struct std::formatter<vtbackend::LineFlags>: formatter<std::string>
 {
     auto format(const vtbackend::LineFlags flags, auto& ctx) const
     {
-        static const std::array<std::pair<vtbackend::LineFlags, std::string_view>, 3> nameMap = {
+        static const std::array<std::pair<vtbackend::LineFlags, std::string_view>, 6> nameMap = {
             std::pair { vtbackend::LineFlag::Wrappable, std::string_view("Wrappable") },
             std::pair { vtbackend::LineFlag::Wrapped, std::string_view("Wrapped") },
             std::pair { vtbackend::LineFlag::Marked, std::string_view("Marked") },
+            std::pair { vtbackend::LineFlag::DoubleWidth, std::string_view("DoubleWidth") },
+            std::pair { vtbackend::LineFlag::DoubleHeightTop, std::string_view("DoubleHeightTop") },
+            std::pair { vtbackend::LineFlag::DoubleHeightBottom, std::string_view("DoubleHeightBottom") },
         };
         std::string s;
         for (auto const& mapping: nameMap)

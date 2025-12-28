@@ -1028,7 +1028,7 @@ void Screen<Cell>::selectiveEraseLine(LineOffset line)
         return;
     }
 
-    currentLine().reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
+    currentLine().reset(currentLine().flags(), _cursor.graphicsRendition);
 
     auto const left = ColumnOffset(0);
     auto const right = boxed_cast<ColumnOffset>(pageSize().columns - 1);
@@ -1183,7 +1183,7 @@ void Screen<Cell>::clearToBeginOfLine()
 template <CellConcept Cell>
 void Screen<Cell>::clearLine()
 {
-    currentLine().reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
+    currentLine().reset(currentLine().flags(), _cursor.graphicsRendition);
 
     auto const line = _cursor.position.line;
     auto const left = ColumnOffset(0);
@@ -3271,6 +3271,18 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case SCS_G1_USASCII: designateCharset(CharsetTable::G1, CharsetId::USASCII); break;
         case DECALN: screenAlignmentPattern(); break;
         case DECBI: backIndex(); break;
+        case DECDHL_Top:
+            configureCurrentLineSize({ LineFlag::DoubleWidth, LineFlag::DoubleHeightTop });
+            break;
+        case DECDHL_Bottom:
+            configureCurrentLineSize({ LineFlag::DoubleWidth, LineFlag::DoubleHeightBottom });
+            break;
+        case DECDWL: //.
+            configureCurrentLineSize({ LineFlag::DoubleWidth });
+            break;
+        case DECSWL: //.
+            configureCurrentLineSize({});
+            break;
         case DECFI: forwardIndex(); break;
         case DECKPAM: applicationKeypadMode(true); break;
         case DECKPNM: applicationKeypadMode(false); break;
@@ -3689,6 +3701,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case DUMPSTATE: inspect(); break;
+        case SEMA: /* TODO */ break;
 
         // hooks
         case DECSIXEL: _terminal->hookParser(hookSixel(seq)); break;
@@ -3699,6 +3712,40 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         default: return ApplyResult::Unsupported;
     }
     return ApplyResult::Ok;
+}
+
+// @brief Configures the current line's size attributes, used for DECDHL and related sequences.
+template <CellConcept Cell>
+void Screen<Cell>::configureCurrentLineSize(LineFlags enabled)
+{
+    auto constexpr LineSizeAttributes = LineFlags {
+        LineFlag::DoubleHeightTop,
+        LineFlag::DoubleHeightBottom,
+        LineFlag::DoubleWidth,
+    };
+
+    Require(enabled.without(LineSizeAttributes).none());
+
+    auto& line = currentLine();
+
+    line.flags().disable(LineSizeAttributes);
+    line.flags().enable(LineSizeAttributes.intersect(enabled));
+
+    // See:
+    //     https://vt100.net/docs/vt510-rm/DECDHL.html
+    //     https://vt100.net/docs/vt510-rm/DECDWL.html
+    // The spec says:
+    // """
+    // If the line was single width and single height,
+    // then all characters to the right of the screen's center are lost.
+    // """
+    // However, xterm seems to retain them, so we do nothing here.
+    //
+    // if (enabled.intersect(LineSizeAttributes).any())
+    //     clearToEndOfLine();
+
+    if (enabled.intersect(LineSizeAttributes).any())
+        line.ensureInflatedBuffer();
 }
 
 template <CellConcept Cell>

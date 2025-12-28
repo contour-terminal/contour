@@ -16,14 +16,13 @@
 
     #include <sys/select.h>
 
+    #include <fcntl.h>
     #include <unistd.h>
 #endif
 
 #if defined(__linux__)
     #include <sys/epoll.h>
     #include <sys/eventfd.h>
-#else
-    #include <fcntl.h>
 #endif
 
 namespace crispy
@@ -63,7 +62,7 @@ class posix_read_selector
         assert(fd >= 0);
         assert(std::count(_fds.begin(), _fds.end(), fd) == 0);
         _fds.push_back(fd);
-        std::sort(_fds.begin(), _fds.end());
+        std::ranges::sort(_fds);
     }
 
     [[nodiscard]] size_t size() const noexcept { return _fds.size(); }
@@ -71,7 +70,8 @@ class posix_read_selector
     void cancel_read(int fd) noexcept
     {
         assert(std::count(_fds.begin(), _fds.end(), fd) == 1);
-        _fds.erase(std::remove(_fds.begin(), _fds.end(), fd), _fds.end());
+        auto gc = std::ranges::remove(_fds, fd);
+        _fds.erase(gc.begin(), gc.end());
     }
 
     void wakeup() noexcept
@@ -100,8 +100,7 @@ class posix_read_selector
         for (auto const fd: _fds)
         {
             FD_SET(fd, &_reader);
-            if (fd > maxfd)
-                maxfd = fd;
+            maxfd = std::max(maxfd, fd);
         }
 
         auto tv = std::unique_ptr<timeval>();
@@ -265,7 +264,7 @@ inline std::optional<int> epoll_read_selector::wait_one(
         }
 
         bool piped = false;
-        for (size_t i = 0; i < static_cast<size_t>(result); ++i)
+        for (auto const i: std::views::iota(0zu, static_cast<size_t>(result)))
         {
             if (events[i].data.fd == _eventFd)
             {

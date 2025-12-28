@@ -884,11 +884,11 @@ template <typename RendererT>
             auto const cellFlags = line.trivialBuffer().textAttributes.flags;
             hints.containsBlinkingCells = hints.containsBlinkingCells || (cellFlags & CellFlag::Blinking)
                                           || (cellFlags & CellFlag::RapidBlinking);
-            render.renderTrivialLine(line.trivialBuffer(), y);
+            render.renderTrivialLine(line.trivialBuffer(), y, line.flags());
         }
         else
         {
-            render.startLine(y);
+            render.startLine(y, line.flags());
             for (Cell const& cell: line.cells())
             {
                 hints.containsBlinkingCells = hints.containsBlinkingCells

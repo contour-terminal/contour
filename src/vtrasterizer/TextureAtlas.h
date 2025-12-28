@@ -133,9 +133,9 @@ struct ConfigureAtlas
 struct UploadTile
 {
     TileLocation location;
-    Buffer bitmap; // texture data to be uploaded
     vtbackend::ImageSize bitmapSize;
     Format bitmapFormat;
+    Buffer bitmap;        // texture data to be uploaded
     int rowAlignment = 1; // byte-alignment per row
 };
 
@@ -556,12 +556,13 @@ auto TextureAtlas<Metadata>::constructTile(CreateTileDataFn createTileData, uint
 
     TileCreateData& tileCreateData = *tileCreateDataOpt;
 
-    auto tileUpload = UploadTile {};
-    tileUpload.location = tileLocation;
-    tileUpload.bitmapSize = tileCreateData.bitmapSize;
-    tileUpload.bitmapFormat = tileCreateData.bitmapFormat;
-    tileUpload.bitmap = std::move(tileCreateData.bitmap);
-    _backend.uploadTile(std::move(tileUpload));
+    _backend.uploadTile(UploadTile {
+        .location = tileLocation,
+        .bitmapSize = tileCreateData.bitmapSize,
+        .bitmapFormat = tileCreateData.bitmapFormat,
+        .bitmap = std::move(tileCreateData.bitmap),
+        .rowAlignment = 1,
+    });
 
     auto instance = TileAttributes<Metadata> {};
     instance.location = tileLocation;

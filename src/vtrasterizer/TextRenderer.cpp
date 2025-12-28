@@ -351,7 +351,7 @@ void TextRenderer::initializeDirectMapping()
     _directMappedGlyphKeyToTileIndex.clear();
     _directMappedGlyphKeyToTileIndex.resize(LastReservedChar + 1);
 
-    for (char32_t codepoint = FirstReservedChar; codepoint <= LastReservedChar; ++codepoint)
+    for (char32_t const codepoint: std::views::iota(FirstReservedChar, LastReservedChar + 1))
     {
         if (optional<text::glyph_position> gposOpt = _textShaper.shape(_fonts.regular, codepoint))
         {
@@ -415,7 +415,8 @@ void TextRenderer::renderLine(vtbackend::RenderLine const& renderLine)
     _textClusterGrouper.renderLine(renderLine.text,
                                    renderLine.lineOffset,
                                    renderLine.textAttributes.foregroundColor,
-                                   makeTextStyle(renderLine.textAttributes.flags));
+                                   makeTextStyle(renderLine.textAttributes.flags),
+                                   renderLine.flags);
 }
 
 void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
@@ -432,19 +433,12 @@ void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
 
     _textClusterGrouper.renderCell(cell.position,
                                    cell.codepoints,
+                                   cell.attributes.foregroundColor,
                                    makeTextStyle(cell.attributes.flags),
-                                   cell.attributes.foregroundColor);
+                                   cell.attributes.lineFlags);
 
     if (cell.groupEnd)
         _textClusterGrouper.forceGroupEnd();
-}
-
-void TextRenderer::renderCell(vtbackend::CellLocation position,
-                              std::u32string_view graphemeCluster,
-                              TextStyle textStyle,
-                              vtbackend::RGBColor foregroundColor)
-{
-    _textClusterGrouper.renderCell(position, graphemeCluster, textStyle, foregroundColor);
 }
 
 void TextRenderer::endFrame()
@@ -516,19 +510,75 @@ void TextRenderer::renderRasterizedGlyph(crispy::point pen,
 
 bool TextRenderer::renderBoxDrawingCell(vtbackend::CellLocation position,
                                         char32_t codepoint,
-                                        vtbackend::RGBColor foregroundColor)
+                                        vtbackend::RGBColor foregroundColor,
+                                        vtbackend::LineFlags flags)
 {
     if (_fontDescriptions.builtinBoxDrawing)
-        return _boxDrawingRenderer.render(position.line, position.column, codepoint, foregroundColor);
+        return _boxDrawingRenderer.render(position.line, position.column, codepoint, flags, foregroundColor);
 
     return false;
+}
+
+crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
+                                    GridMetrics const& gridMetrics,
+                                    int glyphHeight,
+                                    int glyphBearingY,
+                                    crispy::point pen) noexcept
+{
+    using vtbackend::LineFlag;
+
+    if (lineFlags.test(LineFlag::DoubleHeightTop))
+    {
+        auto const lineHeight = unbox<int>(gridMetrics.cellSize.height);
+        pen.y += lineHeight - glyphBearingY;
+    }
+    else if (lineFlags.test(LineFlag::DoubleHeightBottom))
+    {
+        pen.y += glyphHeight - glyphBearingY;
+    }
+
+    return pen;
+}
+
+Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
+    vtbackend::LineFlags lineFlags, Renderable::AtlasTileAttributes const& originalAttributes)
+{
+    using vtbackend::LineFlag;
+    using vtbackend::Width;
+
+    auto attributesCopy = originalAttributes;
+
+    auto const currentWidth = unbox(attributesCopy.metadata.targetSize.width);
+
+    if (lineFlags.test(LineFlag::DoubleHeightTop))
+    {
+        attributesCopy.metadata.targetSize.width = Width::cast_from(currentWidth * 2);
+        attributesCopy.metadata.x.value *= 2;
+        attributesCopy.metadata.normalizedLocation.height /= 2.0f;
+    }
+    else if (lineFlags.test(LineFlag::DoubleHeightBottom))
+    {
+        attributesCopy.metadata.targetSize.width = Width::cast_from(currentWidth * 2);
+        attributesCopy.metadata.x.value *= 2;
+        attributesCopy.metadata.normalizedLocation.y +=
+            attributesCopy.metadata.normalizedLocation.height / 2.0f;
+        attributesCopy.metadata.normalizedLocation.height /= 2.0f;
+    }
+    else if (lineFlags.test(LineFlag::DoubleWidth))
+    {
+        attributesCopy.metadata.targetSize.width = Width::cast_from(currentWidth * 2);
+        attributesCopy.metadata.x.value *= 2;
+    }
+
+    return attributesCopy;
 }
 
 void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                    gsl::span<unsigned> clusters,
                                    vtbackend::CellLocation initialPenPosition,
                                    TextStyle style,
-                                   vtbackend::RGBColor color)
+                                   vtbackend::RGBColor color,
+                                   vtbackend::LineFlags lineFlags)
 {
     if (codepoints.empty())
         return;
@@ -541,47 +591,88 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         getOrCreateCachedGlyphPositions(hash, codepoints, clusters, style);
     crispy::point pen = _gridMetrics.mapBottomLeft(initialPenPosition);
 
+    using vtbackend::LineFlag;
+
+    auto const advanceScale = lineFlags.test(LineFlag::DoubleWidth) ? 2 : 1;
+
     for (auto const& glyphPosition: glyphPositions)
     {
         if (auto const* attributes = ensureRasterizedIfDirectMapped(glyphPosition.glyph))
         {
-            auto const pen1 = applyGlyphPositionToPen(pen, *attributes, glyphPosition);
-            renderRasterizedGlyph(pen1, color, *attributes);
-            pen.x += unbox<decltype(pen.x)>(_gridMetrics.cellSize.width);
+            auto const attributesCopy = adjustTileAttributesForLineFlags(lineFlags, *attributes);
+            auto pen1 = applyGlyphPositionToPen(pen, attributesCopy, glyphPosition);
+            pen1 = adjustPenForLineFlags(lineFlags,
+                                         _gridMetrics,
+                                         unbox<int>(attributes->bitmapSize.height),
+                                         attributes->metadata.y.value,
+                                         pen1);
+
+            renderRasterizedGlyph(pen1, color, attributesCopy);
+            pen.x += static_cast<decltype(pen.x)>(unbox(_gridMetrics.cellSize.width) * advanceScale);
             continue;
         }
 
         auto const hash = hashGlyphKeyAndPresentation(glyphPosition.glyph, glyphPosition.presentation);
-
         AtlasTileAttributes const* attributes =
             getOrCreateRasterizedMetadata(hash, glyphPosition.glyph, glyphPosition.presentation);
 
         if (attributes)
         {
-            auto const pen1 = applyGlyphPositionToPen(pen, *attributes, glyphPosition);
-            renderRasterizedGlyph(pen1, color, *attributes);
+            auto const attributesCopy = adjustTileAttributesForLineFlags(lineFlags, *attributes);
+            auto pen1 = applyGlyphPositionToPen(pen, attributesCopy, glyphPosition);
+            pen1 = adjustPenForLineFlags(lineFlags,
+                                         _gridMetrics,
+                                         unbox<int>(attributes->bitmapSize.height),
+                                         attributes->metadata.y.value,
+                                         pen1);
+
+            renderRasterizedGlyph(pen1, color, attributesCopy);
 
             auto xOffset = unbox(textureAtlas().tileSize().width);
             while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(hash * xOffset))
             {
-                renderTile(atlas::RenderTile::X { pen1.x + int(xOffset) },
+                auto subAttribsCopy = *subAttribs;
+                auto const subWidth = unbox(subAttribsCopy.metadata.targetSize.width)
+                                          ? unbox(subAttribsCopy.metadata.targetSize.width)
+                                          : unbox(subAttribsCopy.bitmapSize.width);
+
+                if (lineFlags.test(LineFlag::DoubleHeightTop))
+                {
+                    subAttribsCopy.metadata.targetSize.width = vtbackend::Width::cast_from(subWidth * 2);
+                    subAttribsCopy.metadata.x.value *= 2;
+                    subAttribsCopy.metadata.normalizedLocation.height /= 2.0f;
+                }
+                else if (lineFlags.test(LineFlag::DoubleHeightBottom))
+                {
+                    subAttribsCopy.metadata.targetSize.width = vtbackend::Width::cast_from(subWidth * 2);
+                    subAttribsCopy.metadata.x.value *= 2;
+                    subAttribsCopy.metadata.normalizedLocation.y +=
+                        subAttribsCopy.metadata.normalizedLocation.height / 2.0f;
+                    subAttribsCopy.metadata.normalizedLocation.height /= 2.0f;
+                }
+                else if (lineFlags.test(LineFlag::DoubleWidth))
+                {
+                    subAttribsCopy.metadata.targetSize.width = vtbackend::Width::cast_from(subWidth * 2);
+                    subAttribsCopy.metadata.x.value *= 2;
+                }
+
+                auto const drawXOffset =
+                    lineFlags.test(LineFlag::DoubleWidth) ? (int(xOffset) * 2) : int(xOffset);
+
+                renderTile(atlas::RenderTile::X { pen1.x + drawXOffset },
                            atlas::RenderTile::Y { pen1.y },
                            color,
-                           *subAttribs);
+                           subAttribsCopy);
                 xOffset += unbox(textureAtlas().tileSize().width);
             }
         }
 
         if (glyphPosition.advance.x)
         {
-
             auto numberOfCellsToAdvance =
                 std::rint(glyphPosition.advance.x / unbox<double>(_gridMetrics.cellSize.width));
-            // Only advance horizontally, as we're (guess what) a terminal. :-)
-            // Only advance in fixed-width steps.
-            // Only advance if there harfbuzz told us to.
-            pen.x +=
-                static_cast<decltype(pen.x)>(numberOfCellsToAdvance * (unbox(_gridMetrics.cellSize.width)));
+            pen.x += static_cast<decltype(pen.x)>(numberOfCellsToAdvance
+                                                  * (unbox(_gridMetrics.cellSize.width)) * advanceScale);
         }
     }
 }

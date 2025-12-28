@@ -86,6 +86,12 @@ class flags
 
     [[nodiscard]] constexpr bool none() const noexcept { return _value == 0; }
     [[nodiscard]] constexpr bool any() const noexcept { return _value != 0; }
+
+    [[nodiscard]] constexpr bool any(flags<flag_type> other) const noexcept
+    {
+        return (_value & other.value()) != 0;
+    }
+
     [[nodiscard]] constexpr bool operator!() const noexcept { return _value == 0; }
     [[nodiscard]] constexpr explicit operator bool() const noexcept { return _value != 0; }
 
@@ -107,6 +113,11 @@ class flags
     [[nodiscard]] constexpr flags<flag_type> with(flags<flag_type> other) const noexcept
     {
         return flags<flag_type>::from_value(_value | other.value());
+    }
+
+    [[nodiscard]] constexpr flags<flag_type> intersect(flags<flag_type> other) const noexcept
+    {
+        return flags<flag_type>::from_value(_value & other.value());
     }
 
     [[nodiscard]] constexpr flags<flag_type> without(flags<flag_type> other) const noexcept

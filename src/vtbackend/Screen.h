@@ -155,6 +155,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     using StaticDatabase::numericCapability;
     [[nodiscard]] unsigned numericCapability(capabilities::Code cap) const override;
 
+    [[nodiscard]] LineFlags lineFlags(LineOffset line) const noexcept { return _grid.lineAt(line).flags(); }
+
     // {{{ SequenceHandler overrides
     void writeText(char32_t codepoint) override;
     void writeText(std::string_view text, size_t cellCount) override;
@@ -604,6 +606,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
   private:
     void writeTextInternal(char32_t codepoint);
+
+    void configureCurrentLineSize(LineFlags enabled);
 
     /// Attempts to emplace the given character sequence into the current cursor position, assuming
     /// that the current line is either empty or trivial and the input character sequence is contiguous.

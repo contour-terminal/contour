@@ -5,7 +5,6 @@
 
 #include <crispy/algorithm.h>
 
-#include <algorithm>
 #include <iostream>
 
 namespace vtrasterizer
@@ -25,12 +24,15 @@ void BackgroundRenderer::setRenderTarget(RenderTarget& renderTarget,
 
 void BackgroundRenderer::renderLine(vtbackend::RenderLine const& line)
 {
+    auto const scale = line.flags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;
+
     if (line.textAttributes.backgroundColor != _defaultColor)
     {
         auto const position =
             vtbackend::CellLocation { .line = line.lineOffset, .column = vtbackend::ColumnOffset(0) };
         auto const pos = _gridMetrics.mapTopLeft(position);
-        auto const width = _gridMetrics.cellSize.width * vtbackend::Width::cast_from(line.usedColumns);
+        auto const width =
+            _gridMetrics.cellSize.width * vtbackend::Width::cast_from(line.usedColumns * scale);
 
         renderTarget().renderRectangle(pos.x,
                                        pos.y,
@@ -41,12 +43,13 @@ void BackgroundRenderer::renderLine(vtbackend::RenderLine const& line)
 
     if (line.fillAttributes.backgroundColor != _defaultColor)
     {
-        auto const position =
-            vtbackend::CellLocation { .line = line.lineOffset,
-                                      .column = boxed_cast<vtbackend::ColumnOffset>(line.usedColumns) };
+        auto const position = vtbackend::CellLocation {
+            .line = line.lineOffset,
+            .column = boxed_cast<vtbackend::ColumnOffset>(line.usedColumns * scale),
+        };
         auto const pos = _gridMetrics.mapTopLeft(position);
-        auto const width =
-            _gridMetrics.cellSize.width * vtbackend::Width::cast_from(line.displayWidth - line.usedColumns);
+        auto const width = _gridMetrics.cellSize.width
+                           * vtbackend::Width::cast_from((line.displayWidth - line.usedColumns) * scale);
 
         renderTarget().renderRectangle(pos.x,
                                        pos.y,
@@ -62,10 +65,12 @@ void BackgroundRenderer::renderCell(vtbackend::RenderCell const& cell)
         return;
 
     auto const pos = _gridMetrics.mapTopLeft(cell.position);
+    auto const scale = cell.attributes.lineFlags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;
 
     renderTarget().renderRectangle(pos.x,
                                    pos.y,
-                                   _gridMetrics.cellSize.width * vtbackend::Width::cast_from(cell.width),
+                                   _gridMetrics.cellSize.width
+                                       * vtbackend::Width::cast_from(cell.width * scale),
                                    _gridMetrics.cellSize.height,
                                    vtbackend::RGBAColor(cell.attributes.backgroundColor, _opacity));
 }

@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <format>
 #include <optional>
 #include <string>
@@ -152,6 +153,7 @@ constexpr inline auto RCOLORHIGHLIGHTFG = FunctionDocumentation { .mnemonic = "R
 constexpr inline auto RCOLORMOUSEBG = FunctionDocumentation { .mnemonic = "RCOLORMOUSEBG", .comment = "Reset mouse background color." };
 constexpr inline auto RCOLORMOUSEFG = FunctionDocumentation { .mnemonic = "RCOLORMOUSEFG", .comment = "Reset mouse foreground color." };
 constexpr inline auto RCOLPAL = FunctionDocumentation { .mnemonic = "RCOLPAL", .comment = "Reset color full palette or entry" };
+constexpr inline auto SEMA = FunctionDocumentation { .mnemonic = "SEMA", .comment = "Semantic block / shell integration" };
 constexpr inline auto SETCOLPAL = FunctionDocumentation { .mnemonic = "SETCOLPAL", .comment = "Set/Query color palette" };
 constexpr inline auto SETCWD = FunctionDocumentation { .mnemonic = "SETCWD", .comment = "Set current working directory" };
 constexpr inline auto SETFONT = FunctionDocumentation { .mnemonic = "SETFONT", .comment = "Get or set font." };
@@ -449,6 +451,7 @@ namespace detail // {{{
 // }}}
 
 // clang-format off
+// NOLINTBEGIN(readability-identifier-naming)
 
 // C0
 constexpr inline auto EOT = detail::C0('\x04', "EOT", "End of Transmission");
@@ -489,11 +492,15 @@ constexpr inline auto LS0 = detail::C0('\x0F', "LS0", "Shift In; Maps G0 into GL
 // ESC functions
 constexpr inline auto DECALN  = detail::ESC('#', '8', VTType::VT100, { .mnemonic = "DECALN", .comment = "Screen Alignment Pattern"});
 constexpr inline auto DECBI   = detail::ESC(std::nullopt, '6', VTType::VT100, { .mnemonic = "DECBI", .comment = "Back Index"});
+constexpr inline auto DECDHL_Bottom = detail::ESC('#', '4', VTType::VT100, { .mnemonic = "DECDHL_Bottom", .comment = "Double-Height Line (Bottom Half)" });
+constexpr inline auto DECDHL_Top = detail::ESC('#', '3', VTType::VT100, { .mnemonic = "DECDHL_Top", .comment = "Double-Height Line (Top Half)" });
+constexpr inline auto DECDWL  = detail::ESC('#', '6', VTType::VT100, { .mnemonic = "DECDWL", .comment = "Double-Width Line" });
 constexpr inline auto DECFI   = detail::ESC(std::nullopt, '9', VTType::VT100, { .mnemonic = "DECFI", .comment = "Forward Index"});
 constexpr inline auto DECKPAM = detail::ESC(std::nullopt, '=', VTType::VT100, { .mnemonic = "DECKPAM", .comment = "Keypad Application Mode"});
 constexpr inline auto DECKPNM = detail::ESC(std::nullopt, '>', VTType::VT100, { .mnemonic = "DECKPNM", .comment = "Keypad Numeric Mode"});
 constexpr inline auto DECRS   = detail::ESC(std::nullopt, '8', VTType::VT100, { .mnemonic = "DECRS", .comment = "Restore Cursor"});
 constexpr inline auto DECSC   = detail::ESC(std::nullopt, '7', VTType::VT100, { .mnemonic = "DECSC", .comment = "Save Cursor"});
+constexpr inline auto DECSWL  = detail::ESC('#', '5', VTType::VT100, { .mnemonic = "DECSWL", .comment = "Single-Width Line" });
 constexpr inline auto HTS     = detail::ESC(std::nullopt, 'H', VTType::VT100, { .mnemonic = "HTS", .comment = "Horizontal Tab Set"});
 constexpr inline auto IND     = detail::ESC(std::nullopt, 'D', VTType::VT100, { .mnemonic = "IND", .comment = "Index"});
 constexpr inline auto NEL     = detail::ESC(std::nullopt, 'E', VTType::VT100, { .mnemonic = "NEL", .comment = "Next Line"});
@@ -615,6 +622,7 @@ constexpr inline auto RCOLORHIGHLIGHTFG = detail::OSC(119, VTExtension::XTerm, d
 constexpr inline auto RCOLORMOUSEBG     = detail::OSC(114, VTExtension::XTerm, documentation::RCOLORMOUSEBG);
 constexpr inline auto RCOLORMOUSEFG     = detail::OSC(113, VTExtension::XTerm, documentation::RCOLORMOUSEFG);
 constexpr inline auto RCOLPAL           = detail::OSC(104, VTExtension::XTerm, documentation::RCOLPAL);
+constexpr inline auto SEMA              = detail::OSC(133, VTExtension::Unknown, documentation::SEMA);
 constexpr inline auto SETCOLPAL         = detail::OSC(4, VTExtension::XTerm, documentation::SETCOLPAL);
 constexpr inline auto SETCWD            = detail::OSC(7, VTExtension::XTerm, documentation::SETCWD);
 constexpr inline auto SETFONT           = detail::OSC(50, VTExtension::XTerm, documentation::SETFONT);
@@ -624,9 +632,10 @@ constexpr inline auto SETTITLE          = detail::OSC(0, VTExtension::XTerm, doc
 constexpr inline auto SETWINTITLE       = detail::OSC(2, VTExtension::XTerm, documentation::SETWINTITLE);
 constexpr inline auto SETXPROP          = detail::OSC(3, VTExtension::XTerm, documentation::SETXPROP);
 
-constexpr inline auto CaptureBufferCode = 314;
-
+// NOLINTEND(readability-identifier-naming)
 // clang-format on
+
+constexpr inline auto CaptureBufferCode = 314;
 
 // HACK to get older compiler work (GCC 9.4)
 constexpr static auto allFunctionsArray() noexcept
@@ -647,11 +656,15 @@ constexpr static auto allFunctionsArray() noexcept
         // ESC
         DECALN,
         DECBI,
+        DECDHL_Bottom,
+        DECDHL_Top,
+        DECDWL,
         DECFI,
         DECKPAM,
         DECKPNM,
         DECRS,
         DECSC,
+        DECSWL,
         HTS,
         IND,
         NEL,
@@ -764,6 +777,7 @@ constexpr static auto allFunctionsArray() noexcept
         COLORCURSOR,
         COLORMOUSEFG,
         COLORMOUSEBG,
+        SEMA,
         SETFONT,
         SETFONTALL,
         CLIPBOARD,
@@ -800,7 +814,7 @@ inline auto allFunctions() noexcept
 class SupportedSequences
 {
 
-  private:
+  public:
     [[nodiscard]] constexpr auto begin() noexcept { return _supportedSequences.data(); }
 
     [[nodiscard]] constexpr auto end() noexcept { return begin() + _lastIndex; }
@@ -809,7 +823,6 @@ class SupportedSequences
 
     [[nodiscard]] constexpr auto cend() const noexcept { return cbegin() + _lastIndex; }
 
-  public:
     [[nodiscard]] constexpr gsl::span<Function const> allSequences() const noexcept
     {
         return gsl::span<Function const>(cbegin(), _supportedSequences.size());
@@ -837,7 +850,7 @@ class SupportedSequences
 
     CRISPY_CONSTEXPR void disableSequence(Function seq) noexcept
     {
-        auto* seqIter = std::find(begin(), end(), seq);
+        Function* seqIter = std::ranges::find(*this, seq);
         if (seqIter != end())
         {
             // Move the disabled sequence to the end of array, keep the rest of active sequences sorted
