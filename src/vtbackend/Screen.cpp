@@ -1146,7 +1146,7 @@ void Screen<Cell>::clearToEndOfLine()
     }
 
     Cell* i = &at(_cursor.position);
-    Cell* e = i + unbox(pageSize().columns) - unbox(_cursor.position.column);
+    Cell const* e = i + unbox(pageSize().columns) - unbox(_cursor.position.column);
     while (i != e)
     {
         i->reset(_cursor.graphicsRendition);
@@ -1165,7 +1165,7 @@ template <CellConcept Cell>
 void Screen<Cell>::clearToBeginOfLine()
 {
     Cell* i = &at(_cursor.position.line, ColumnOffset(0));
-    Cell* e = i + unbox(_cursor.position.column) + 1;
+    Cell const* e = i + unbox(_cursor.position.column) + 1;
     while (i != e)
     {
         i->reset(_cursor.graphicsRendition);
@@ -2806,7 +2806,7 @@ namespace impl
                 if (!(ch >= '0' && ch <= '9'))
                     return 0;
 
-                out = out * 10 + (ch - '0');
+                out = (out * 10) + (ch - '0');
             }
             return out;
         }
@@ -2886,7 +2886,7 @@ namespace impl
             // Only setting clipboard contents is supported, not reading.
             auto const& params = seq.intermediateCharacters();
             if (auto const splits = crispy::split(params, ';');
-                splits.size() == 2 && (splits[0] == "c" || splits[0] == ""))
+                splits.size() == 2 && (splits[0] == "c" || splits[0].empty()))
             {
                 terminal.copyToClipboard(crispy::base64::decode(splits[1]));
                 return ApplyResult::Ok;
