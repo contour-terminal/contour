@@ -1,58 +1,78 @@
-ARG VERSION="24.04"
-FROM ubuntu:$VERSION
-ARG ARCH="x86_64"
-ARG QT_VERSION="6.8.3"
+ARG VERSION=24.04
+ARG ARCH=x86_64
+ARG QT_VERSION=6.8.3
 
-RUN apt-get update
-RUN apt-get install -y lsb-release software-properties-common gnupg
-RUN apt-get install -y wget ninja-build ccache g++-14 gcc-14
+FROM ubuntu:${VERSION} AS qt-builder
 
-# QT DEPS
-RUN apt-get install -y libgl-dev libglu-dev  libx11-xcb-dev libxkbcommon-x11-dev libpcre2-dev libz-dev libfreetype6-dev libpng-dev libjpeg-dev libsqlite3-dev libharfbuzz-dev libb2-dev libdouble-conversion-dev libfontconfig1-dev
-RUN apt-get install -y "libxcb*-dev"
+ARG ARCH
+ARG QT_VERSION
 
-WORKDIR /
-RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.30.4/cmake-3.30.4-linux-$ARCH.sh
+ENV DEBIAN_FRONTEND=noninteractive
 
-# cmake bin
-RUN sh /cmake-3.30.4-linux-$ARCH.sh --skip-license --prefix=/usr
-RUN rm /cmake-3.30.4-linux-$ARCH.sh
+RUN apt-get update && apt-get install -y \
+    lsb-release software-properties-common gnupg \
+    wget ninja-build ccache \
+    gcc-14 g++-14 \
+    libgl-dev libglu-dev \
+    libx11-xcb-dev libxkbcommon-x11-dev \
+    libpcre2-dev libz-dev libfreetype6-dev \
+    libpng-dev libjpeg-dev libsqlite3-dev \
+    libharfbuzz-dev libb2-dev \
+    libdouble-conversion-dev libfontconfig1-dev \
+    libxcb*-dev \
+ && rm -rf /var/lib/apt/lists/*
+RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.30.4/cmake-3.30.4-linux-${ARCH}.sh \
+ && sh cmake-3.30.4-linux-${ARCH}.sh --skip-license --prefix=/usr \
+ && rm cmake-3.30.4-linux-${ARCH}.sh
 
-# Install compilers
-RUN wget -q https://apt.llvm.org/llvm.sh
-RUN chmod +x llvm.sh
-RUN ./llvm.sh 20
+RUN wget -q https://apt.llvm.org/llvm.sh \
+ && chmod +x llvm.sh \
+ && ./llvm.sh 20 \
+ && rm llvm.sh
 
-WORKDIR /
-RUN wget https://download.qt.io/official_releases/qt/6.8/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz
-RUN tar xf qt-everywhere-src-$QT_VERSION.tar.xz
-RUN rm qt-everywhere-src-$QT_VERSION.tar.xz
-WORKDIR qt-everywhere-src-$QT_VERSION
+WORKDIR /build
+
+RUN wget -q https://download.qt.io/official_releases/qt/6.8/${QT_VERSION}/single/qt-everywhere-src-${QT_VERSION}.tar.xz \
+ && tar xf qt-everywhere-src-${QT_VERSION}.tar.xz \
+ && rm qt-everywhere-src-${QT_VERSION}.tar.xz
+
+WORKDIR /build/qt-everywhere-src-${QT_VERSION}
+
 RUN cmake -S . -B build -G Ninja \
-       -D CMAKE_CXX_COMPILER=clang++-20 \
-       -D CMAKE_C_COMPILER=clang-20 \
-       -D QT_BUILD_SUBMODULES='qtbase;qt5compat;qtmultimedia;qtdeclarative' \
-       -D BUILD_qtbase=ON \
-       -D BUILD_qtquick3d=OFF \
-       # -D BUILD_qt5compat=ON \
-       # -D BUILD_qtmultimedia=ON \
-       # -D BUILD_qtdeclarative=ON \
-       -D QT_FEATURE_zstd=OFF \
-       -D QT_FEATURE_png=OFF \
-       -D QT_FEATURE_jpeg=OFF \
-       -D QT_FEATURE_ico=OFF \
-       -D QT_FEATURE_gif=OFF \
-       -D QT_FEATURE_harfbuzz=OFF \
-       -D QT_FEATURE_freetype=OFF \
-       -D QT_FEATURE_backtrace=OFF \
-       -D QT_FEATURE_openxr=OFF \
-       -D QT_FEATURE_icu=OFF \
-       -D BUILD_SHARED_LIBS=OFF \
-       -D INPUT_pcre=system \
-       -D CMAKE_BUILD_TYPE=Release
-RUN cat /qt-everywhere-src-$QT_VERSION/build/config.summary
-RUN cmake --build build --parallel
-RUN cmake --install build
-WORKDIR /
-RUN ln -s /bin/clang-20 /bin/clang
-RUN ln -s /bin/clang++-20 /bin/clang++
+    -D CMAKE_INSTALL_PREFIX=/opt/qt \
+    -D CMAKE_CXX_COMPILER=clang++-20 \
+    -D CMAKE_C_COMPILER=clang-20 \
+    -D QT_BUILD_SUBMODULES='qtbase;qt5compat;qtmultimedia;qtdeclarative' \
+    -D BUILD_qtquick3d=OFF \
+    -D QT_FEATURE_zstd=OFF \
+    -D QT_FEATURE_png=OFF \
+    -D QT_FEATURE_jpeg=OFF \
+    -D QT_FEATURE_ico=OFF \
+    -D QT_FEATURE_gif=OFF \
+    -D QT_FEATURE_harfbuzz=OFF \
+    -D QT_FEATURE_freetype=OFF \
+    -D QT_FEATURE_backtrace=OFF \
+    -D QT_FEATURE_openxr=OFF \
+    -D QT_FEATURE_icu=OFF \
+    -D BUILD_SHARED_LIBS=OFF \
+    -D INPUT_pcre=system \
+    -D CMAKE_BUILD_TYPE=Release
+
+RUN cmake --build build --parallel \
+ && cmake --install build
+
+FROM ubuntu:${VERSION} AS qt-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Only runtime deps (NO -dev)
+RUN apt-get update && apt-get install -y \
+    libgl1 \
+    libx11-6 \
+    libxkbcommon0 \
+    libfontconfig1 \
+    libfreetype6 \
+    libsqlite3-0 \
+    libzstd1 \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=qt-builder /opt/qt /opt/qt

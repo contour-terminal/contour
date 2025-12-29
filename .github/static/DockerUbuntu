@@ -2,14 +2,19 @@ ARG VERSION="24.04"
 FROM yaraslaut/static_qt:$VERSION
 #FROM qt_static:$VERSION
 ARG ARCH="x86_64"
-ARG QT_VERSION="6.8.3"
 
-RUN apt-get update
-RUN apt-get install -y xutils-dev pkg-config binutils gettext autoconf libtool make git
+RUN apt-get update && apt-get install -y \
+    lsb-release software-properties-common gnupg \
+    wget gcc g++ \
+    build-essential cmake debhelper extra-cmake-modules \
+    g++ libc6-dev make ninja-build git zlib1g-dev libx11-xcb-dev \
+    build-essential pkg-config libxcb-render-util0-dev libfontconfig1-dev \
+    libxcb-*-dev libglib2.0-dev libgl1-mesa-dev libxkbcommon-x11-dev \
+    libdouble-conversion-dev libb2-dev libharfbuzz-dev
 
 WORKDIR /
 COPY . /contour
-RUN LD_LIBRARY_PATH=/usr/local/lib CC=clang CXX=clang++ sh /contour/scripts/install-static.sh
+RUN LD_LIBRARY_PATH=/usr/local/lib sh /contour/scripts/install-static.sh
 
 WORKDIR /contour
 RUN LD_LIBRARY_PATH=/usr/local/lib cmake -S . -B build -G Ninja \
@@ -17,9 +22,7 @@ RUN LD_LIBRARY_PATH=/usr/local/lib cmake -S . -B build -G Ninja \
     -D CONTOUR_USE_CPM=ON \
     -D CONTOUR_WITH_UTEMPTER=OFF \
     -D CONTOUR_WAYLAND=OFF \
-    -D CMAKE_CXX_COMPILER=clang++\
-    -D CMAKE_C_COMPILER=clang \
     -D CMAKE_CXX_FLAGS="-I/contour/build/_deps/yaml-cpp-src/include" \
-    -D Qt6_DIR=/usr/local/Qt-$QT_VERSION/lib/cmake/Qt6
+    -D Qt6_DIR=/opt/qt/lib/cmake/Qt6
 RUN cmake --build build --verbose
 RUN ldd ./build/src/contour/contour
