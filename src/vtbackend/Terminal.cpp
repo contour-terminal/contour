@@ -162,7 +162,8 @@ Terminal::Terminal(Events& eventListener,
     _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
     _parser { std::ref(_sequenceBuilder) },
     _viCommands { *this },
-    _inputHandler { _viCommands, ViMode::Insert }
+    _inputHandler { _viCommands, ViMode::Insert },
+    _shellIntegration { std::make_unique<NullShellIntegration>() }
 {
     _savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
 

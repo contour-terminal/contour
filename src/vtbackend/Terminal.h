@@ -12,6 +12,7 @@
 #include <vtbackend/Sequence.h>
 #include <vtbackend/SequenceBuilder.h>
 #include <vtbackend/Settings.h>
+#include <vtbackend/ShellIntegration.h>
 #include <vtbackend/StatusLineBuilder.h>
 #include <vtbackend/ViCommands.h>
 #include <vtbackend/ViInputHandler.h>
@@ -561,6 +562,13 @@ class Terminal
     void pushColorPalette(size_t slot);
     void popColorPalette(size_t slot);
     void reportColorPaletteStack();
+
+    [[nodiscard]] ShellIntegration& shellIntegration() noexcept { return *_shellIntegration; }
+    [[nodiscard]] ShellIntegration const& shellIntegration() const noexcept { return *_shellIntegration; }
+    void setShellIntegration(std::unique_ptr<ShellIntegration> newShellIntegration)
+    {
+        _shellIntegration = std::move(newShellIntegration);
+    }
 
     [[nodiscard]] ScreenBase& currentScreen() noexcept { return *_currentScreen; }
     [[nodiscard]] ScreenBase const& currentScreen() const noexcept { return *_currentScreen; }
@@ -1231,6 +1239,8 @@ class Terminal
 
     ViCommands _viCommands;
     ViInputHandler _inputHandler;
+
+    std::unique_ptr<ShellIntegration> _shellIntegration;
 };
 
 } // namespace vtbackend

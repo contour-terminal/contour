@@ -200,6 +200,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void clearToBeginOfScreen();
     void clearToEndOfScreen();
     void clearScreen();
+    void setMark();
 
     // DECSEL
     void selectiveEraseToBeginOfLine();
@@ -257,7 +258,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void index();        // IND
     void reverseIndex(); // RI
 
-    void setMark();
     void setScrollSpeed(int speed);      // DECSSCLS
     void deviceStatusReport();           // DSR
     void reportCursorPosition();         // CPR
@@ -641,6 +641,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
+
+    void processShellIntegration(Sequence const& seq);
 
     gsl::not_null<Terminal*> _terminal;
     gsl::not_null<Settings*> _settings;

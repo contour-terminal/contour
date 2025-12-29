@@ -1722,12 +1722,6 @@ void Screen<Cell>::setGraphicsRendition(GraphicsRendition rendition)
         _cursor.graphicsRendition.flags = CellUtil::makeCellFlags(rendition, _cursor.graphicsRendition.flags);
 }
 
-template <CellConcept Cell>
-void Screen<Cell>::setMark()
-{
-    currentLine().setMarked(true);
-}
-
 enum class ModeResponse : uint8_t
 { // TODO: respect response 0, 3, 4.
     NotRecognized = 0,
@@ -3227,6 +3221,67 @@ void Screen<Cell>::processSequence(Sequence const& seq)
 }
 
 template <CellConcept Cell>
+void Screen<Cell>::setMark()
+{
+    currentLine().setMarked(true);
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::processShellIntegration(Sequence const& seq)
+{
+    auto const& cmd = seq.intermediateCharacters();
+    if (cmd.empty())
+        return;
+
+    auto const forEachKeyValue = []<typename Callback>(std::string_view text, Callback&& callback) {
+        crispy::for_each_key_value(
+            crispy::for_each_key_value_params {
+                .text = text,
+                .entryDelimiter = ';',
+                .assignmentDelimiter = '=',
+            },
+            std::forward<Callback>(callback));
+    };
+
+    switch (cmd[0])
+    {
+        case 'A': {
+            setMark();
+            bool clickEvents = false;
+            auto const params = seq.intermediateCharacters().substr(1);
+            forEachKeyValue(params, [&](std::string_view key, std::string_view value) {
+                if (key == "click_events" && value == "1")
+                    clickEvents = true;
+            });
+            _terminal->shellIntegration().promptStart(clickEvents);
+            break;
+        }
+        case 'B': {
+            _terminal->shellIntegration().promptEnd();
+            break;
+        }
+        case 'C': {
+            std::optional<std::string> commandLine;
+            auto const params = seq.intermediateCharacters().substr(1);
+            forEachKeyValue(params, [&](std::string_view key, std::string_view value) {
+                if (key == "cmdline_url")
+                    commandLine = crispy::unescapeURL(value);
+            });
+            _terminal->shellIntegration().commandOutputStart(commandLine);
+            break;
+        }
+        case 'D': {
+            auto const exitCode = (cmd.size() > 2 && cmd[1] == ';')
+                                      ? crispy::to_integer<10, int>(cmd.substr(2)).value_or(0)
+                                      : 0;
+            _terminal->shellIntegration().commandFinished(exitCode);
+            break;
+        }
+        default: break;
+    }
+}
+
+template <CellConcept Cell>
 void Screen<Cell>::applyAndLog(Function const& function, Sequence const& seq)
 {
     auto const result = apply(function, seq);
@@ -3562,10 +3617,14 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
             });
             return r;
         }
-        break;
         case SCOSC: saveCursor(); break;
         case SD: scrollDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
-        case SETMARK: setMark(); break;
+        case SETMARK:
+            // TODO: deprecated. Remove in some future version.
+            // Users should migrate to OSC 133.
+            errorLog()("CSI > M is deprecated. Use OSC 133 instead.");
+            setMark();
+            break;
         case SGR: return impl::applySGR(*this, seq, 0, seq.parameterCount());
         case SGRRESTORE: restoreGraphicsRendition(); return ApplyResult::Ok;
         case SGRSAVE: saveGraphicsRendition(); return ApplyResult::Ok;
@@ -3701,7 +3760,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case DUMPSTATE: inspect(); break;
-        case SEMA: /* TODO */ break;
+        case SEMA: processShellIntegration(seq); break;
 
         // hooks
         case DECSIXEL: _terminal->hookParser(hookSixel(seq)); break;
