@@ -26,3 +26,5 @@ nushell
 tablegen
 zypper
 openxr
+libglib
+libzstd
