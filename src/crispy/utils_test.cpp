@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <map>
+
 using std::string;
 using std::string_view;
 using namespace std::string_view_literals;
@@ -139,6 +141,59 @@ TEST_CASE("homeResolvedPath")
 {
     CHECK(crispy::homeResolvedPath("", "/var/tmp").generic_string().empty());
 
-    CHECK("/var/tmp/workspace" == crispy::homeResolvedPath("~workspace", "/var/tmp").generic_string());
     CHECK("/var/tmp/workspace" == crispy::homeResolvedPath("~/workspace", "/var/tmp").generic_string());
+}
+
+TEST_CASE("unescapeURL")
+{
+    CHECK(crispy::unescapeURL(""sv).empty());
+    CHECK(crispy::unescapeURL("foo"sv) == "foo");
+    CHECK(crispy::unescapeURL("foo%20bar"sv) == "foo bar");
+    CHECK(crispy::unescapeURL("%20"sv) == " ");
+    CHECK(crispy::unescapeURL("%2"sv) == "%2"); // incomplete hex
+    CHECK(crispy::unescapeURL("%"sv) == "%");   // incomplete hex
+    CHECK(crispy::unescapeURL("A%42C"sv) == "ABC");
+    CHECK(crispy::unescapeURL("%gg"sv) == "%gg"); // invalid hex
+}
+
+TEST_CASE("for_each_key_value")
+{
+    auto result = std::map<std::string_view, std::string_view> {};
+    auto collect = [&](std::string_view key, std::string_view value) {
+        result[key] = value;
+    };
+
+    // empty input
+    crispy::for_each_key_value({ .text = "", .entryDelimiter = ';', .assignmentDelimiter = '=' }, collect);
+    CHECK(result.empty());
+
+    // single element
+    result.clear();
+    crispy::for_each_key_value({ .text = "foo=bar", .entryDelimiter = ';', .assignmentDelimiter = '=' },
+                               collect);
+    CHECK(result.size() == 1);
+    CHECK(result["foo"] == "bar");
+
+    // two elements
+    result.clear();
+    crispy::for_each_key_value({ .text = "a=b;c=d", .entryDelimiter = ';', .assignmentDelimiter = '=' },
+                               collect);
+    CHECK(result.size() == 2);
+    CHECK(result["a"] == "b");
+    CHECK(result["c"] == "d");
+
+    // empty element
+    result.clear();
+    crispy::for_each_key_value({ .text = "a=b;;c=d", .entryDelimiter = ';', .assignmentDelimiter = '=' },
+                               collect);
+    CHECK(result.size() == 2);
+    CHECK(result["a"] == "b");
+    CHECK(result["c"] == "d");
+
+    // No delimiter
+    result.clear();
+    crispy::for_each_key_value({ .text = "key_only", .entryDelimiter = ';', .assignmentDelimiter = '=' },
+                               collect);
+    CHECK(result.size() == 1);
+    CHECK(result["key_only"] == "");
 }

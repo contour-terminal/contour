@@ -130,6 +130,7 @@ if(LIBTERMINAL_TESTING)
         Image_test.cpp
         Sequence_test.cpp
         Terminal_test.cpp
+        ShellIntegration_test.cpp
         SixelParser_test.cpp
         ViCommands_test.cpp
     )

@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -223,7 +224,9 @@ std::string joinHumanReadableQuoted(std::vector<T> const& list, U sep = ", ")
 }
 
 template <typename T, typename Callback>
-constexpr inline bool split(std::basic_string_view<T> text, T delimiter, Callback const& callback)
+constexpr bool split(std::basic_string_view<T> text,
+                     T delimiter,
+                     Callback const& callback) noexcept(noexcept(callback(std::basic_string_view<T> {})))
 {
     size_t a = 0;
     size_t b = 0;
@@ -438,6 +441,60 @@ inline std::optional<unsigned> fromHexDigit(char value)
     if ('A' <= value && value <= 'F')
         return 10 + value - 'A';
     return std::nullopt;
+}
+
+inline std::string unescapeURL(std::string_view input)
+{
+    std::string result;
+    result.reserve(input.size());
+    for (size_t i = 0; i < input.size(); ++i)
+    {
+        if (input[i] == '%' && i + 2 < input.size())
+        {
+            auto const h1 = crispy::fromHexDigit(input[i + 1]);
+            auto const h2 = crispy::fromHexDigit(input[i + 2]);
+            if (h1.has_value() && h2.has_value())
+            {
+                result.push_back(static_cast<char>((h1.value() << 4) | h2.value()));
+                i += 2;
+                continue;
+            }
+        }
+        result.push_back(input[i]);
+    }
+    return result;
+}
+
+struct for_each_key_value_params
+{
+    std::string_view text;
+    char entryDelimiter;
+    char assignmentDelimiter;
+
+    template <typename Callback>
+        requires std::is_invocable_v<Callback, std::string_view, std::string_view>
+    void operator()(Callback const& callback) noexcept(noexcept(callback(std::string_view {},
+                                                                         std::string_view {})))
+    {
+        split(text, entryDelimiter, [&](std::string_view keyValuePair) {
+            auto const assignmentSeparator = keyValuePair.find(assignmentDelimiter);
+            if (assignmentSeparator != std::string_view::npos)
+                callback(keyValuePair.substr(0, assignmentSeparator),
+                         keyValuePair.substr(assignmentSeparator + 1));
+            else if (!keyValuePair.empty())
+                callback(keyValuePair, std::string_view {});
+            return true;
+        });
+    }
+};
+
+template <typename Callback>
+    requires std::is_invocable_v<Callback, std::string_view, std::string_view>
+constexpr void for_each_key_value(for_each_key_value_params params,
+                                  Callback&& callback) noexcept(noexcept(callback(std::string_view {},
+                                                                                  std::string_view {})))
+{
+    params(std::forward<Callback>(callback));
 }
 
 template <typename T>

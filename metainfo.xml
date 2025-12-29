@@ -147,6 +147,7 @@
           <li>Adds configuration option `input_method_editor` to profile settings to opt-out of IME (Input Method Editor) support (#1817)</li>
           <li>Adds background blur support for KDE Plasma on Wayland (for Qt 6.5.0 and newer)</li>
           <li>Adds VT sequences for double width / double height lines, `DECDHL`, `DECDWL`, `DECSWL` (#137)</li>
+          <li>Adds VT sequence extension OSC 133 shell integration (#793)</li>
           <li>Drop Qt5 support</li>
         </ul>
       </description>
