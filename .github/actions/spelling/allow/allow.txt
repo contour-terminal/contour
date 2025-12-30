@@ -1,4 +1,6 @@
+AABBGGRR
 BBX
+COLRv
 DWIDTH
 ENDCHAR
 ENDFONT
@@ -12,6 +14,7 @@ STARTCHAR
 STARTFONT
 STARTPROPERTIES
 SWIDTH
+Unpremultiply
 UpperCamelCase
 XBase
 YBase
@@ -19,12 +22,14 @@ bdf
 copy'n'paste
 lazygit
 leiserfg
+libcairo
+libglib
+libzstd
 lowerCamelCase
 macOS
 nupkg
 nushell
+openxr
+ppem
 tablegen
 zypper
-openxr
-libglib
-libzstd

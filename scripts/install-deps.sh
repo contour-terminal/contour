@@ -179,6 +179,7 @@ install_deps_popos() {
         extra-cmake-modules
         g++
         libc6-dev
+        libcairo2-dev
         libfontconfig1-dev
         libfreetype6-dev
         libharfbuzz-dev
@@ -221,6 +222,7 @@ install_deps_ubuntu() {
         extra-cmake-modules
         g++
         libc6-dev
+        libcairo2-dev
         libfontconfig1-dev
         libfreetype6-dev
         libharfbuzz-dev
@@ -313,6 +315,7 @@ install_deps_FreeBSD() {
 
     # NB: catch2 (as name "catch") is available in pkg, but it's not version >= 3.0.0.
     su root -c "pkg install $SYSDEP_ASSUME_YES \
+        cairo \
         cmake \
         fontconfig \
         freetype2 \
@@ -342,6 +345,7 @@ install_deps_OpenBSD() {
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     su root -c "pkg_add -DI \
+        cairo \
         cmake \
         harfbuzz \
         libssh2 \
@@ -361,6 +365,7 @@ install_deps_arch() {
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     packages="
+        cairo \
         catch2 \
         cmake \
         extra-cmake-modules \
@@ -407,6 +412,7 @@ install_deps_suse() {
 
     local packages="
         Catch2-devel
+        cairo-devel
         cmake
         extra-cmake-modules
         fontconfig-devel
@@ -457,6 +463,7 @@ install_deps_fedora() {
     local os_version=$(grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"')
 
     local packages="
+        cairo-devel
         catch-devel
         cmake
         extra-cmake-modules
@@ -510,15 +517,16 @@ install_deps_darwin() {
 
     # NB: Also available in brew: mimalloc
     HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install $SYSDEP_ASSUME_YES \
+        cairo \
         catch2 \
         cpp-gsl \
         fmt \
         fontconfig \
         freetype \
         harfbuzz \
+        libssh2 \
         pkg-config \
         qt$QTVER \
-        libssh2 \
         yaml-cpp
 }
 
