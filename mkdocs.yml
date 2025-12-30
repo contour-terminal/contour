@@ -121,6 +121,7 @@ nav:
     - vt-extensions/font-settings.md
     - vt-extensions/line-reflow-mode.md
     - vt-extensions/save-and-restore-sgr-attributes.md
+    - vt-extensions/osc-133-shell-integration.md
   - Internals:
     - internals/index.md
     - internals/CODING_STYLE.md

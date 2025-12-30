@@ -1,8 +1,6 @@
 # OSC 133 - Shell Integration
 
-This documentation describes the OSC 133 sequence used for shell integration, often referred to as FinalTerm or VSCode shell integration.
-
-**Proposal:** [VSCode Shell Integration](https://code.visualstudio.com/docs/terminal/shell-integration)
+This documentation describes the OSC 133 sequence used for shell integration, inspired by FinalTerm.
 
 ## Sequence Specification
 
