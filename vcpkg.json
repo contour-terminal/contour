@@ -23,6 +23,7 @@
                 "freetype",
                 "fontconfig"
             ]
-        }
+        },
+        "pkgconf"
     ]
 }

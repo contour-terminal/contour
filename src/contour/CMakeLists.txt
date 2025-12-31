@@ -18,7 +18,7 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 # {{{ Setup QT_COMPONENTS
 # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
 # NB: Widgets is rquired for SystemTrayIcon's fallback implementation
-set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets OpenGL OpenGLWidgets Core5Compat)
+set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets OpenGL OpenGLWidgets)
 # }}}
 
 message(STATUS "Qt components: ${QT_COMPONENTS}")
@@ -188,7 +188,6 @@ if(CONTOUR_FRONTEND_GUI)
         PRIVATE
         vtrasterizer
         ContourTerminalDisplay
-        Qt6::Core5Compat
         Qt6::Multimedia
         Qt6::Network
         Qt6::OpenGL

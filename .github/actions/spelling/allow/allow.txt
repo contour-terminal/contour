@@ -18,6 +18,7 @@ Unpremultiply
 UpperCamelCase
 XBase
 YBase
+aea
 bdf
 copy'n'paste
 lazygit

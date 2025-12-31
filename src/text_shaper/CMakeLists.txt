@@ -62,9 +62,10 @@ elseif("${CMAKE_SYSTEM_NAME}" MATCHES "Linux" OR "${CMAKE_SYSTEM_NAME}" MATCHES 
     list(APPEND TEXT_SHAPER_LIBS Fontconfig::Fontconfig)
 elseif("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     # installed via vcpkg
+    find_package(PkgConfig REQUIRED)
     find_package(harfbuzz CONFIG REQUIRED)
     find_package(Freetype REQUIRED)
-    find_package(cairo CONFIG REQUIRED)
+    # find_package(cairo CONFIG REQUIRED) -- unavailable in vcpkg for cairo
     pkg_check_modules(Cairo REQUIRED IMPORTED_TARGET cairo-ft)
     list(APPEND TEXT_SHAPER_LIBS PkgConfig::Cairo)
     list(APPEND TEXT_SHAPER_LIBS harfbuzz harfbuzz::harfbuzz)
