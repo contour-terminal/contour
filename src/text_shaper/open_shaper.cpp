@@ -10,19 +10,16 @@
 #include <libunicode/convert.h>
 #include <libunicode/ucd_fmt.h>
 
-#include <algorithm>
-#include <limits>
-#include <optional>
-#include <ranges>
-#include <string>
+#if __has_include(<cairo-ft.h>)
+    #include <cairo-ft.h>
+    #define CONTOUR_HAS_CAIRO 1
+#endif
 
-// clang-format off
 #include <ft2build.h>
 #include FT_BITMAP_H
 #include FT_ERRORS_H
 #include FT_FREETYPE_H
 #include FT_LCD_FILTER_H
-// clang-format on
 
 #if __has_include(<fontconfig/fontconfig.h>)
     #include <fontconfig/fontconfig.h>
@@ -33,8 +30,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <optional>
+#include <ranges>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -80,6 +81,147 @@ struct FontInfo // NOLINT(readability-identifier-naming)
 }
 
 } // namespace
+
+#if defined(CONTOUR_HAS_CAIRO)
+void cleanup_cairo_font_face(void*)
+{
+    // No-op destructor callback: the FT_Face lifetime is managed elsewhere.
+}
+
+std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
+                                                         text::glyph_key glyph,
+                                                         text::render_mode /*mode*/)
+{
+    // 1. Setup Cairo surface
+    auto width = static_cast<int>(ceil(static_cast<double>(ftFace->glyph->metrics.width) / 64.0));
+    auto height = static_cast<int>(ceil(static_cast<double>(ftFace->glyph->metrics.height) / 64.0));
+
+    // If FreeType doesn't report metrics (e.g. some COLRv1 fonts?), measure with Cairo.
+    if (width <= 0 || height <= 0)
+    {
+        auto* dummySurface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+        auto* cr = cairo_create(dummySurface);
+
+        auto* fontFace = cairo_ft_font_face_create_for_ft_face(ftFace, 0);
+        cairo_font_face_set_user_data(fontFace, nullptr, ftFace, cleanup_cairo_font_face);
+        cairo_set_font_face(cr, fontFace);
+        cairo_set_font_size(cr, static_cast<double>(ftFace->size->metrics.y_ppem));
+
+        // Options
+        auto* options = cairo_font_options_create();
+        cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_BEST);
+        cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_NONE);
+        cairo_font_options_set_color_palette(options, 0);
+        cairo_set_font_options(cr, options);
+        cairo_font_options_destroy(options);
+
+        auto cairoGlyph = cairo_glyph_t { .index = glyph.index.value, .x = 0, .y = 0 };
+        auto extents = cairo_text_extents_t {};
+        cairo_glyph_extents(cr, &cairoGlyph, 1, &extents);
+
+        width = static_cast<int>(ceil(extents.width));
+        height = static_cast<int>(ceil(extents.height));
+
+        cairo_font_face_destroy(fontFace);
+        cairo_destroy(cr);
+        cairo_surface_destroy(dummySurface);
+
+        if (width <= 0 || height <= 0)
+            return std::nullopt;
+    }
+
+    auto const stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
+    auto buffer = std::vector<uint8_t>(static_cast<size_t>(stride * height));
+
+    auto surface =
+        cairo_image_surface_create_for_data(buffer.data(), CAIRO_FORMAT_ARGB32, width, height, stride);
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS)
+    {
+        cairo_surface_destroy(surface);
+        return std::nullopt;
+    }
+
+    auto cr = cairo_create(surface);
+
+    // 2. Create/Set Cairo Font Face
+    auto* fontFace = cairo_ft_font_face_create_for_ft_face(ftFace, 0);
+    cairo_font_face_set_user_data(fontFace, nullptr, ftFace, cleanup_cairo_font_face);
+    cairo_set_font_face(cr, fontFace);
+
+    // 3. Set Size (points)
+    cairo_set_font_size(cr, static_cast<double>(ftFace->size->metrics.y_ppem)); // Set to pixel size
+
+    // Check Status
+    if (cairo_status(cr) != CAIRO_STATUS_SUCCESS || cairo_font_face_status(fontFace) != CAIRO_STATUS_SUCCESS)
+    {
+        cairo_font_face_destroy(fontFace);
+        cairo_destroy(cr);
+        cairo_surface_destroy(surface);
+        return std::nullopt;
+    }
+
+    // 4. Set Options
+    auto* options = cairo_font_options_create();
+    cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_BEST);
+    cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_NONE);
+    cairo_font_options_set_color_palette(options, 0);
+    cairo_set_font_options(cr, options);
+    cairo_font_options_destroy(options);
+
+    // 5. Render Glyph
+    auto cairoGlyph = cairo_glyph_t { .index = glyph.index.value, .x = 0, .y = 0 };
+
+    auto extents = cairo_text_extents_t {};
+    cairo_glyph_extents(cr, &cairoGlyph, 1, &extents);
+
+    cairoGlyph.x = -extents.x_bearing;
+    cairoGlyph.y = -extents.y_bearing;
+
+    cairo_show_glyphs(cr, &cairoGlyph, 1);
+    cairo_surface_flush(surface);
+
+    // 6. Copy to output
+    auto output = text::rasterized_glyph {};
+    output.bitmapSize.width = vtbackend::Width::cast_from(width);
+    output.bitmapSize.height = vtbackend::Height::cast_from(height);
+    output.position.x = static_cast<int>(floor(extents.x_bearing));
+    output.position.y = static_cast<int>(floor(-extents.y_bearing));
+    output.format = text::bitmap_format::rgba;
+    output.bitmap = std::move(buffer);
+
+    size_t const pixelCount = static_cast<size_t>(width * height);
+    auto* pixels = reinterpret_cast<uint32_t*>(output.bitmap.data());
+    for (size_t i = 0; i < pixelCount; ++i)
+    {
+        uint32_t const p = pixels[i];
+        uint8_t const a = (p >> 24) & 0xff;
+        if (a > 0)
+        {
+            uint8_t r = (p >> 16) & 0xff;
+            uint8_t g = (p >> 8) & 0xff;
+            uint8_t b = (p >> 0) & 0xff;
+
+            // Unpremultiply
+            if (a < 255)
+            {
+                r = static_cast<uint8_t>(static_cast<int>(r) * 255 / static_cast<int>(a));
+                g = static_cast<uint8_t>(static_cast<int>(g) * 255 / static_cast<int>(a));
+                b = static_cast<uint8_t>(static_cast<int>(b) * 255 / static_cast<int>(a));
+            }
+
+            // Re-pack as RGBA (byte order: R G B A -> LE int: 0xAABBGGRR)
+            pixels[i] = (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(b) << 16)
+                        | (static_cast<uint32_t>(g) << 8) | (static_cast<uint32_t>(r));
+        }
+    }
+
+    cairo_font_face_destroy(fontFace);
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+
+    return output;
+}
+#endif // CONTOUR_HAS_CAIRO
 
 namespace std
 {
@@ -264,28 +406,33 @@ namespace
         if (FT_Error const ec = FT_Select_Charmap(ftFace, FT_ENCODING_UNICODE); ec != FT_Err_Ok)
             errorLog()("FT_Select_Charmap failed. Ignoring; {}", ftErrorStr(ec));
 
+        bool sizeSet = false;
         if (FT_HAS_COLOR(ftFace))
         {
-            auto const strikeIndexOpt = ftBestStrikeIndex(ftFace, fontSize.pt, dpi);
-            if (!strikeIndexOpt.has_value())
-            {
-                FT_Done_Face(ftFace);
-                return nullopt;
-            }
+            if (FT_Palette_Select(ftFace, 0, nullptr) != FT_Err_Ok)
+                rasterizerLog()("Failed to select default palette for font {}.", ftFace->family_name);
 
-            auto const strikeIndex = strikeIndexOpt.value();
-            FT_Error const ec = FT_Select_Size(ftFace, strikeIndex);
-            if (ec != FT_Err_Ok)
-                errorLog()(
-                    "Failed to FT_Select_Size(index={}, source {}): {}", strikeIndex, source, ftErrorStr(ec));
-            else
-                rasterizerLog()("Picked color font's strike index {} ({}x{}) from {}\n",
-                                strikeIndex,
-                                ftFace->available_sizes[strikeIndex].width,
-                                ftFace->available_sizes[strikeIndex].height,
-                                source);
+            auto const strikeIndexOpt = ftBestStrikeIndex(ftFace, fontSize.pt, dpi);
+            if (strikeIndexOpt.has_value())
+            {
+                auto const strikeIndex = strikeIndexOpt.value();
+                FT_Error const ec = FT_Select_Size(ftFace, strikeIndex);
+                if (ec != FT_Err_Ok)
+                    errorLog()("Failed to FT_Select_Size(index={}, source {}): {}",
+                               strikeIndex,
+                               source,
+                               ftErrorStr(ec));
+                else
+                    rasterizerLog()("Picked color font's strike index {} ({}x{}) from {}\n",
+                                    strikeIndex,
+                                    ftFace->available_sizes[strikeIndex].width,
+                                    ftFace->available_sizes[strikeIndex].height,
+                                    source);
+                sizeSet = true;
+            }
         }
-        else
+
+        if (!sizeSet)
         {
             auto const size = static_cast<FT_F26Dot6>(ceil(fontSize.pt * 64.0));
 
@@ -739,7 +886,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
     auto const font = glyph.font;
     auto* ftFace = _d->fontKeyToHbFontInfoMapping.at(font).ftFace.get();
     auto const glyphIndex = glyph.index;
-    auto const flags = static_cast<FT_Int32>(ftRenderFlag(mode) | (FT_HAS_COLOR(ftFace) ? FT_LOAD_COLOR : 0));
+    auto const flags = static_cast<FT_Int32>(FT_HAS_COLOR(ftFace) ? FT_LOAD_COLOR : ftRenderFlag(mode));
 
     FT_Error ec = FT_Load_Glyph(ftFace, glyphIndex.value, flags);
     if (ec != FT_Err_Ok)
@@ -761,10 +908,25 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
         }
     }
 
-    // NB: colored fonts are bitmap fonts, they do not need rendering
-    if (!FT_HAS_COLOR(ftFace))
+    // NB: color bitmap fonts (like Noto Color Emoji) are bitmap fonts, they do not need rendering
+    // But vector color fonts (like Noto COLRv1) do.
+    if (FT_HAS_COLOR(ftFace))
     {
-        if (FT_Render_Glyph(ftFace->glyph, ftRenderMode(mode)) != FT_Err_Ok)
+        if (ftFace->glyph->format != FT_GLYPH_FORMAT_BITMAP)
+        {
+#if defined(CONTOUR_HAS_CAIRO)
+            if (auto result = rasterizeWithCairo(ftFace, glyph, mode))
+                return result;
+            // If Cairo fails, fall through to FreeType rendering (which might produce outlines or empty
+            // bitmaps)
+#endif
+        }
+    }
+
+    if (ftFace->glyph->format != FT_GLYPH_FORMAT_BITMAP)
+    {
+        auto const renderMode = FT_HAS_COLOR(ftFace) ? FT_RENDER_MODE_NORMAL : ftRenderMode(mode);
+        if (FT_Render_Glyph(ftFace->glyph, renderMode) != FT_Err_Ok)
         {
             rasterizerLog()("Failed to rasterize glyph {}.", glyph);
             return nullopt;
@@ -853,7 +1015,6 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
         case FT_PIXEL_MODE_BGRA: {
             auto const width = output.bitmapSize.width;
             auto const height = output.bitmapSize.height;
-            // rasterizerLog()("rasterize.RGBA: {} + {}\n", output.bitmapSize, output.position);
 
             output.format = bitmap_format::rgba;
             output.bitmap.resize(output.bitmapSize.area() * 4);
