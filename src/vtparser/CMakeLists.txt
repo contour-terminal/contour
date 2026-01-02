@@ -25,4 +25,8 @@ if(VTPARSER_TESTING)
     )
     target_link_libraries(vtparser_test vtparser Catch2::Catch2WithMain)
     add_test(NAME vtparser_test COMMAND $<TARGET_FILE:vtparser_test>)
+
+    if(NOT WIN32)
+        target_compile_options(vtparser_test PRIVATE -Wno-c2y-extensions)
+    endif()
 endif()

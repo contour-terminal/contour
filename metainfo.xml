@@ -130,6 +130,7 @@
           <li>Fixes assertion when displaying Sixel images</li>
           <li>Fixes Sixel image scaling to respect the grid cell size (including font resize related glitches)</li>
           <li>Fixes Blur support on Windows 11</li>
+          <li>Fixes Sixel image regression</li>
           <li>Enables customizing predefined color palette (#1763)</li>
           <li>Enables Sixel support on Windows</li>
           <li>Ensure inserting new tabs happens right next to the currently active tab (#1695)</li>

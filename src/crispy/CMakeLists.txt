@@ -137,7 +137,12 @@ if(CRISPY_TESTING)
         sort_test.cpp
         times_test.cpp
     )
-target_link_libraries(crispy_test Catch2::Catch2WithMain crispy::core)
+    target_link_libraries(crispy_test Catch2::Catch2WithMain crispy::core)
     add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)
+
+    if(NOT WIN32)
+        target_compile_options(crispy_test PRIVATE -Wno-c2y-extensions)
+    endif()
+
 endif()
 message(STATUS "[crispy] Compile unit tests: ${CRISPY_TESTING}")
