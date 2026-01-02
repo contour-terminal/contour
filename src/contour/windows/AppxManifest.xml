@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 com rescap">
+
+  <Identity
+    Name="Contour.Terminal"
+    Publisher="@CONTOUR_SIGN_CODE_PUBLISHER@"
+    Version="@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.@CONTOUR_VERSION_TWEAK@" />
+
+  <Properties>
+    <DisplayName>Contour Terminal</DisplayName>
+    <PublisherDisplayName>@CONTOUR_SIGN_CODE_PUBLISHER@</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.22000.0" />
+  </Dependencies>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+
+  <Applications>
+    <Application Id="ContourTerminal" Executable="contour.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Contour Terminal"
+        Description="Contour Terminal Emulator"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+      </uap:VisualElements>
+      <Extensions>
+        <!-- Register as a Default Terminal candidate -->
+        <uap3:Extension Category="windows.appExtension">
+          <uap3:AppExtension Name="com.microsoft.windows.terminal.host"
+                             Id="ContourTerminalExtension"
+                             DisplayName="Contour Terminal"
+                             Description="Contour Terminal Extension"
+                             PublicFolder="Public">
+            <uap3:Properties>
+              <!-- This CLSID must match CLSID_ContourTerminalHandoff in TerminalHandoff.h -->
+              <Clsid>{B178D323-E77D-4C67-AF21-AE2B81F269F0}</Clsid>
+            </uap3:Properties>
+          </uap3:AppExtension>
+        </uap3:Extension>
+        <uap3:Extension Category="windows.appExtension">
+           <uap3:AppExtension Name="com.microsoft.windows.console.host"
+                              Id="ContourConsole"
+                              DisplayName="Contour Console"
+                              Description="Contour Console Extension"
+                              PublicFolder="Public">
+             <uap3:Properties>
+               <!-- This CLSID must match CLSID_ContourTerminalHandoff in TerminalHandoff.h -->
+               <Clsid>{B178D323-E77D-4C67-AF21-AE2B81F269F0}</Clsid>
+             </uap3:Properties>
+           </uap3:AppExtension>
+         </uap3:Extension>
+
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer Executable="contour.exe" DisplayName="Contour Terminal">
+              <com:Class Id="B178D323-E77D-4C67-AF21-AE2B81F269F0" DisplayName="Contour Terminal Handoff" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>
