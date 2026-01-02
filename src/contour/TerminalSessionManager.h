@@ -30,6 +30,7 @@ class TerminalSessionManager: public QAbstractListModel
     contour::TerminalSession* createSessionInBackground();
 
     Q_INVOKABLE contour::TerminalSession* createSession();
+    contour::TerminalSession* createSessionWithPty(std::unique_ptr<vtpty::Pty> pty);
 
     void switchToPreviousTab();
     void switchToTabLeft();
