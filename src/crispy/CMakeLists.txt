@@ -139,6 +139,10 @@ if(CRISPY_TESTING)
     )
     target_link_libraries(crispy_test Catch2::Catch2WithMain crispy::core)
     add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)
-    target_compile_options(crispy_test PRIVATE -Wno-c2y-extensions)
+
+    if(NOT WIN32)
+        target_compile_options(crispy_test PRIVATE -Wno-c2y-extensions)
+    endif()
+
 endif()
 message(STATUS "[crispy] Compile unit tests: ${CRISPY_TESTING}")

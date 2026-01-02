@@ -47,12 +47,13 @@ target_include_directories(vtrasterizer PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE
 target_link_libraries(vtrasterizer PUBLIC vtbackend crispy::core text_shaper)
 
 if(CONTOUR_TESTING)
-    enable_testing()
     add_executable(vtrasterizer_test)
     target_sources(vtrasterizer_test PRIVATE ${_test_files})
     target_link_libraries(vtrasterizer_test vtrasterizer Catch2::Catch2)
     add_test(NAME vtrasterizer_test COMMAND $<TARGET_FILE:vtrasterizer_test>)
-    target_compile_options(vtrasterizer_test PRIVATE -Wno-c2y-extensions)
+    if(NOT WIN32)
+        target_compile_options(vtrasterizer_test PRIVATE -Wno-c2y-extensions)
+    endif()
 endif()
 
 message(STATUS "[vtrasterizer] Compile unit tests: ${CONTOUR_TESTINGG}")
