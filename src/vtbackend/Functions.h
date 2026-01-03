@@ -162,6 +162,7 @@ constexpr inline auto SETICON = FunctionDocumentation { .mnemonic = "SETICON", .
 constexpr inline auto SETTITLE = FunctionDocumentation { .mnemonic = "SETTITLE", .comment = "Change Window & Icon Title" };
 constexpr inline auto SETWINTITLE = FunctionDocumentation { .mnemonic = "SETWINTITLE", .comment = "Change Window Title" };
 constexpr inline auto SETXPROP = FunctionDocumentation { .mnemonic = "SETXPROP", .comment = "Set X11 property" };
+constexpr inline auto SCREENSHOT = FunctionDocumentation { .mnemonic = "SCREENSHOT", .comment = "Screenshot of the screen" };
 
 } // namespace documentation
 
@@ -631,6 +632,7 @@ constexpr inline auto SETICON           = detail::OSC(1, VTExtension::XTerm, doc
 constexpr inline auto SETTITLE          = detail::OSC(0, VTExtension::XTerm, documentation::SETTITLE);
 constexpr inline auto SETWINTITLE       = detail::OSC(2, VTExtension::XTerm, documentation::SETWINTITLE);
 constexpr inline auto SETXPROP          = detail::OSC(3, VTExtension::XTerm, documentation::SETXPROP);
+constexpr inline auto SCREENSHOT        = detail::OSC(533, VTExtension::Contour, documentation::SCREENSHOT);
 
 // NOLINTEND(readability-identifier-naming)
 // clang-format on
@@ -769,6 +771,7 @@ constexpr static auto allFunctionsArray() noexcept
         SETTITLE,
         SETWINTITLE,
         SETXPROP,
+        SCREENSHOT,
         SETCOLPAL,
         SETCWD,
         HYPERLINK,
