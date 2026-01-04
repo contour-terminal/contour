@@ -638,10 +638,18 @@ jobs:
           version: "6.9.*"
           #version: "5.15.*"
           modules: qtmultimedia qt5compat qtshadertools
+      - name: "Setup vcpkg binary caching"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - name: "vcpkg: Install dependencies"
         run: |
-          git clone https://github.com/microsoft/vcpkg.git ${{ runner.workspace }}\vcpkg
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git ${{ runner.workspace }}\vcpkg
           ${{ runner.workspace }}\vcpkg\bootstrap-vcpkg.bat
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
       - name: "Install cmake"
         uses: lukka/get-cmake@v3.29.0
       - name: "Check cmake version"

@@ -24,6 +24,7 @@ appleclang
 bdf
 clangcl
 copy'n'paste
+gha
 lazygit
 leiserfg
 libcairo
