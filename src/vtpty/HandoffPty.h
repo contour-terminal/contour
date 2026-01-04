@@ -49,7 +49,8 @@ class HandoffPty: public Pty
     HANDLE _hClient;
     std::wstring _title;
 
-    HANDLE _hWakeup; // Event for canceling read
+    HANDLE _hWakeup;    // Event for canceling read
+    HANDLE _hExitEvent; // Event signaled when PTY is closed/EOF
     bool _closed = false;
     PtySlaveDummy _slave;
     PageSize _pageSize;

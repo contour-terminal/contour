@@ -57,8 +57,11 @@ namespace fs = std::filesystem;
 
 static DWORD g_comRegistrationId = 0;
 
+void SimpleFileLogger(std::string const& msg); // Forward declaration
+
 static void RegisterCOMServer()
 {
+    SimpleFileLogger("Registering COM Server...");
     static TerminalHandoffFactory factory;
     HRESULT hr = CoRegisterClassObject(CLSID_ContourTerminalHandoff,
                                        &factory,
@@ -67,7 +70,12 @@ static void RegisterCOMServer()
                                        &g_comRegistrationId);
     if (FAILED(hr))
     {
+        SimpleFileLogger(std::format("Failed to register COM Class Object: {:x}", (unsigned) hr));
         std::cerr << "Failed to register COM Class Object: " << hr << std::endl;
+    }
+    else
+    {
+        SimpleFileLogger("COM Server registered successfully.");
     }
 }
 
@@ -75,6 +83,7 @@ static void UnregisterCOMServer()
 {
     if (g_comRegistrationId != 0)
     {
+        SimpleFileLogger("Revoking COM Class Object.");
         CoRevokeClassObject(g_comRegistrationId);
         g_comRegistrationId = 0;
     }
@@ -90,9 +99,11 @@ void ContourHandleHandoff(HANDLE hInput,
                           HANDLE hClient,
                           std::wstring const& title)
 {
+    SimpleFileLogger("ContourHandleHandoff invoked.");
     auto* app = contour::ContourGuiApp::instance();
     if (app)
     {
+        SimpleFileLogger("App instance found, dispatching newWindowWithHandoff.");
         // Dispatch to main thread
         QMetaObject::invokeMethod(
             app, [app, hInput, hOutput, hSignal, hReference, hServer, hClient, title]() {
@@ -101,6 +112,7 @@ void ContourHandleHandoff(HANDLE hInput,
     }
     else
     {
+        SimpleFileLogger("App instance NOT found during handoff.");
         CloseHandle(hInput);
         CloseHandle(hOutput);
         CloseHandle(hSignal);
@@ -200,6 +212,11 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
                 CLI::option {
                     "display", CLI::value { ""s }, "Sets the X11 display to connect to.", "DISPLAY_ID" },
 #endif
+                CLI::option {
+                    CLI::option_name { "embedding" },
+                    CLI::value { false },
+                    "COM Embedding flag (internal use only).",
+                },
                 CLI::option {
                     CLI::option_name { 'e', "execute" },
                     CLI::value { ""s },
@@ -539,7 +556,8 @@ int ContourGuiApp::terminalGuiAction()
     for (int i = 0; i < _argc; ++i)
     {
         std::string_view arg = _argv[i];
-        if (arg == "-embedding" || arg == "/embedding" || arg == "-Embedding" || arg == "/Embedding")
+        if (arg == "--embedding" || arg == "-embedding" || arg == "/embedding" || arg == "-Embedding"
+            || arg == "/Embedding")
         {
             isEmbedding = true;
             break;
@@ -549,6 +567,8 @@ int ContourGuiApp::terminalGuiAction()
 
     if (!isEmbedding)
         newWindow();
+    else
+        QApplication::setQuitOnLastWindowClosed(false);
 
     if (auto const& bell = config().profile().bell.value().sound; bell == "off")
     {
@@ -608,21 +628,34 @@ void ContourGuiApp::newWindowWithHandoff(void* hInput,
                                          std::wstring const& title)
 {
 #if defined(_WIN32)
-    HANDLE input = static_cast<HANDLE>(hInput);
-    HANDLE output = static_cast<HANDLE>(hOutput);
-    HANDLE signal = static_cast<HANDLE>(hSignal);
-    HANDLE reference = static_cast<HANDLE>(hReference);
-    HANDLE server = static_cast<HANDLE>(hServer);
-    HANDLE client = static_cast<HANDLE>(hClient);
+    SimpleFileLogger(
+        std::format("newWindowWithHandoff called. in:{:p} out:{:p} sig:{:p} ref:{:p} srv:{:p} cli:{:p}",
+                    hInput,
+                    hOutput,
+                    hSignal,
+                    hReference,
+                    hServer,
+                    hClient));
+
+    HANDLE input = (hInput == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hInput);
+    HANDLE output = (hOutput == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hOutput);
+    HANDLE signal = (hSignal == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hSignal);
+    HANDLE reference = (hReference == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hReference);
+    HANDLE server = (hServer == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hServer);
+    HANDLE client = (hClient == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hClient);
 
     // Allow creation explicitly
     _sessionManager.allowCreation();
 
+    SimpleFileLogger("Creating HandoffPty...");
     // Create HandoffPty
     auto pty = std::make_unique<vtpty::HandoffPty>(input, output, signal, reference, server, client, title);
 
+    SimpleFileLogger("Invoking createSessionWithPty...");
     // Create session (this will activate it and create window/tab via session manager)
     _sessionManager.createSessionWithPty(std::move(pty));
+    newWindow();
+    SimpleFileLogger("createSessionWithPty returned. Window created.");
 #else
     (void) hInput;
     (void) hOutput;
