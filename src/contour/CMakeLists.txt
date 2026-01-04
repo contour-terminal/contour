@@ -117,7 +117,7 @@ source_group(Headers FILES ${_header_files})
 source_group(Resources FILES ${_qt_resources})
 source_group(QML FILES ${_qml_files})
 
-add_executable(contour)
+add_executable(contour WIN32)
 target_sources(contour PRIVATE ${_source_files} ${_header_files} ${_qt_resources} ${_qml_files})
 
 set_target_properties(contour PROPERTIES AUTOMOC ON)

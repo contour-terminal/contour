@@ -3,9 +3,31 @@
 
 #include <crispy/utils.h>
 
+#include <format>
+#include <fstream>
 #include <iostream>
+#include <mutex>
 
 using namespace std;
+
+namespace
+{
+void SimpleFileLogger(std::string_view message)
+{
+    static std::mutex mtx;
+    std::lock_guard lock(mtx);
+    char tmpPath[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, tmpPath))
+    {
+        std::string path = std::string(tmpPath) + "contour_debug.txt";
+        std::ofstream logFile(path, std::ios::app);
+        if (logFile)
+        {
+            logFile << "[" << GetCurrentProcessId() << "] " << message << std::endl;
+        }
+    }
+}
+} // namespace
 
 namespace vtpty
 {
@@ -25,7 +47,15 @@ HandoffPty::HandoffPty(HANDLE hInputWrite,
     _hClient(hClient),
     _title(title)
 {
+    SimpleFileLogger(std::format("HandoffPty ctor: in={:p} out={:p} sig={:p} ref={:p} srv={:p} cli={:p}",
+                                 _hInputWrite,
+                                 _hOutputRead,
+                                 _hSignal,
+                                 _hReference,
+                                 _hServer,
+                                 _hClient));
     _hWakeup = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+    _hExitEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
     _readOverlapped.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
     _writeOverlapped.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
 
@@ -36,14 +66,17 @@ HandoffPty::HandoffPty(HANDLE hInputWrite,
 
 HandoffPty::~HandoffPty()
 {
+    SimpleFileLogger("HandoffPty dtor");
     close();
     CloseHandle(_hWakeup);
+    CloseHandle(_hExitEvent);
     CloseHandle(_readOverlapped.hEvent);
     CloseHandle(_writeOverlapped.hEvent);
 }
 
 void HandoffPty::start()
 {
+    SimpleFileLogger("HandoffPty::start");
     // Nothing to do
 }
 
@@ -56,7 +89,9 @@ void HandoffPty::close()
 {
     if (_closed)
         return;
+    SimpleFileLogger("HandoffPty::close");
     _closed = true;
+    SetEvent(_hExitEvent);
 
     auto const closeAndInvalidate = [](HANDLE& handle) {
         if (handle != INVALID_HANDLE_VALUE)
@@ -83,7 +118,9 @@ void HandoffPty::close()
 
 void HandoffPty::waitForClosed()
 {
-    // Not strictly implemented, we assume close happens.
+    SimpleFileLogger("HandoffPty::waitForClosed (waiting)");
+    WaitForSingleObject(_hExitEvent, INFINITE);
+    SimpleFileLogger("HandoffPty::waitForClosed (done)");
 }
 
 bool HandoffPty::isClosed() const noexcept
@@ -133,6 +170,8 @@ std::optional<Pty::ReadResult> HandoffPty::read(crispy::buffer_object<char>& sto
                 else
                 {
                     // Error
+                    std::cout << "HandoffPty::read failed (OVERLAPPED): " << GetLastError() << "\n";
+                    SetEvent(_hExitEvent);
                     if (GetLastError() == ERROR_BROKEN_PIPE)
                         return std::nullopt; // EOF
                     return std::nullopt;
@@ -152,10 +191,12 @@ std::optional<Pty::ReadResult> HandoffPty::read(crispy::buffer_object<char>& sto
         }
         else if (err == ERROR_BROKEN_PIPE)
         {
+            SetEvent(_hExitEvent);
             return std::nullopt; // EOF
         }
         else
         {
+            SetEvent(_hExitEvent);
             return std::nullopt;
         }
     }
@@ -199,6 +240,8 @@ int HandoffPty::write(std::string_view buf)
                 return static_cast<int>(bytesWritten);
             }
         }
+        std::cout << "HandoffPty::write failed: " << GetLastError() << "\n";
+        SimpleFileLogger(std::format("HandoffPty::write failed: {}", GetLastError()));
         return -1;
     }
     return static_cast<int>(bytesWritten);
