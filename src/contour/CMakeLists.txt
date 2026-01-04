@@ -11,6 +11,12 @@ endif()
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_WAYLAND "Enables Wayland specific code paths." ON)
 
+if(WIN32)
+    option(CONTOUR_SIGN_CODE_CERTIFICATE "Path to the certificate file (.pfx) to sign the executable with using signtool. If empty, a self-signed certificate will be generated." "")
+    option(CONTOUR_SIGN_CODE_PASSWORD "Password for the certificate file." "")
+    set(CONTOUR_SIGN_CODE_PUBLISHER "CN=Contour Terminal Self-Signed" CACHE STRING "Publisher DN for the AppxManifest and Self-Signed Certificate")
+endif()
+
 NumberToHex(${PROJECT_VERSION_MAJOR} HEX_MAJOR)
 NumberToHex(${PROJECT_VERSION_MINOR} HEX_MINOR)
 NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
@@ -72,7 +78,29 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 
 if(WIN32)
-    list(APPEND _source_files contour.rc)
+    list(APPEND _source_files
+        contour.rc
+        windows/TerminalHandoff.cpp
+        windows/TerminalHandoff.h
+        windows/ITerminalHandoff.h
+        windows/AppxManifest.xml
+        windows/register_package.ps1
+    )
+endif()
+
+# Install the AppxManifest and registration script to the bin directory
+if(WIN32)
+    if(DEFINED ENV{GITHUB_RUN_NUMBER})
+        set(CONTOUR_VERSION_TWEAK "$ENV{GITHUB_RUN_NUMBER}")
+    else()
+        set(CONTOUR_VERSION_TWEAK "0")
+    endif()
+
+
+    configure_file(windows/AppxManifest.xml AppxManifest.xml @ONLY)
+    set(AppxManifest "${CMAKE_CURRENT_BINARY_DIR}/AppxManifest.xml")
+    install(FILES "${AppxManifest}" DESTINATION bin)
+    install(FILES "windows/register_package.ps1" DESTINATION bin)
 endif()
 
 set(_qt_resources resources.qrc)
@@ -89,7 +117,7 @@ source_group(Headers FILES ${_header_files})
 source_group(Resources FILES ${_qt_resources})
 source_group(QML FILES ${_qml_files})
 
-add_executable(contour)
+add_executable(contour WIN32)
 target_sources(contour PRIVATE ${_source_files} ${_header_files} ${_qt_resources} ${_qml_files})
 
 set_target_properties(contour PROPERTIES AUTOMOC ON)
@@ -129,6 +157,168 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     target_compile_definitions(contour PRIVATE CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 # }}}
+
+if (WIN32)
+    # Set up the certificate
+    if(NOT CONTOUR_SIGN_CODE_CERTIFICATE)
+        set(CONTOUR_SIGN_CODE_CERTIFICATE "${CMAKE_CURRENT_BINARY_DIR}/contour_dev.pfx")
+        add_custom_command(
+            OUTPUT "${CONTOUR_SIGN_CODE_CERTIFICATE}"
+            COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
+                "$cert = New-SelfSignedCertificate -Type Custom -Subject '${CONTOUR_SIGN_CODE_PUBLISHER}' -KeyUsage DigitalSignature -FriendlyName 'Contour Code Signing' -CertStoreLocation 'Cert:\\CurrentUser\\My' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}') ; $pwd = ConvertTo-SecureString -String '${CONTOUR_SIGN_CODE_PASSWORD}' -Force -AsPlainText ; Export-PfxCertificate -Cert $cert -FilePath '${CONTOUR_SIGN_CODE_CERTIFICATE}' -Password $pwd"
+            COMMENT "Generating self-signed code signing certificate: ${CONTOUR_SIGN_CODE_CERTIFICATE}"
+            VERBATIM
+        )
+        add_custom_target(generate_pfx DEPENDS "${CONTOUR_SIGN_CODE_CERTIFICATE}")
+        add_dependencies(contour generate_pfx)
+    endif()
+
+    find_program(SIGNTOOL_EXECUTABLE signtool PATHS
+        "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64"
+        "C:/Program Files (x86)/Windows Kits/10/bin/10.0.19041.0/x64"
+        "C:/Program Files (x86)/Windows Kits/10/bin/x64"
+    )
+
+    if(NOT SIGNTOOL_EXECUTABLE)
+        message(WARNING "signtool not found. Code signing will be disabled.")
+    endif()
+
+    add_custom_command(TARGET contour POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:contour>/Assets
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${AppxManifest}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/windows/register_package.ps1"
+            $<TARGET_FILE_DIR:contour>
+        # Copy and rename assets to match the AppxManifest expectations
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-512.png" $<TARGET_FILE_DIR:contour>/Assets/StoreLogo.png
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-128.png" $<TARGET_FILE_DIR:contour>/Assets/Square150x150Logo.png
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-64.png"  $<TARGET_FILE_DIR:contour>/Assets/Square44x44Logo.png
+        COMMENT "Copying AppxManifest.xml, registration scripts, and Assets to output directory"
+    )
+
+    if(SIGNTOOL_EXECUTABLE)
+        add_custom_command(TARGET contour POST_BUILD
+            COMMAND "${SIGNTOOL_EXECUTABLE}" sign /f "${CONTOUR_SIGN_CODE_CERTIFICATE}" /p "${CONTOUR_SIGN_CODE_PASSWORD}" /fd SHA256 /v "$<TARGET_FILE:contour>"
+            COMMENT "Signing contour.exe and AppxManifest.xml with ${CONTOUR_SIGN_CODE_CERTIFICATE}"
+            VERBATIM
+        )
+    endif()
+
+    add_custom_target(install_certificate
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
+            "$pwd = ConvertTo-SecureString -String '${CONTOUR_SIGN_CODE_PASSWORD}' -Force -AsPlainText; Import-PfxCertificate -FilePath '${CONTOUR_SIGN_CODE_CERTIFICATE}' -CertStoreLocation 'Cert:\\LocalMachine\\TrustedPeople' -Password $pwd"
+        COMMENT "Installing code signing certificate to TrustedPeople store (requires Admin)"
+        VERBATIM
+    )
+
+    add_custom_target(register_package
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
+            "Add-AppxPackage -Register '$<TARGET_FILE_DIR:contour>/AppxManifest.xml' -ForceApplicationShutdown"
+        COMMENT "Registering Contour Appx Package"
+        VERBATIM
+    )
+
+    add_custom_target(unregister_package
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
+            "Get-AppxPackage -Name 'Contour.Terminal' | Remove-AppxPackage -ErrorAction SilentlyContinue"
+        COMMENT "Unregistering Contour Appx Package"
+        VERBATIM
+    )
+
+    if(SIGNTOOL_EXECUTABLE AND CONTOUR_SIGN_CODE_CERTIFICATE)
+        install(CODE "
+            message(STATUS \"Signing installed executable: \${CMAKE_INSTALL_PREFIX}/bin/contour.exe\")
+            execute_process(
+                COMMAND \"${SIGNTOOL_EXECUTABLE}\" sign /f \"${CONTOUR_SIGN_CODE_CERTIFICATE}\" /p \"${CONTOUR_SIGN_CODE_PASSWORD}\" /fd SHA256 /v \"\${CMAKE_INSTALL_PREFIX}/bin/contour.exe\"
+                RESULT_VARIABLE _sign_result
+                OUTPUT_VARIABLE _sign_output
+                ERROR_VARIABLE _sign_output
+            )
+            if(NOT _sign_result EQUAL 0)
+                message(WARNING \"Failed to sign installed executable: \${_sign_output}\")
+            else()
+                message(STATUS \"\${_sign_output}\")
+            endif()
+        ")
+    endif()
+
+    # --- Patch OpenConsole.exe with Contour's CLSID ---
+    # vtpty downloads OpenConsole.exe from Windows Terminal releases.
+    # We need to patch it to use Contour's CLSID for console handoff registration.
+    find_program(PYTHON_EXECUTABLE python REQUIRED)
+
+    # Reference the OpenConsole.exe that vtpty downloads
+    set(OPENCONSOLE_SOURCE "${CMAKE_BINARY_DIR}/_deps/OpenConsole-1.24.3504.0/build/native/runtimes/x64/OpenConsole.exe")
+    set(CONTOUR_OPENCONSOLE "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/OpenConsole.exe")
+
+    add_custom_command(
+        OUTPUT "${CONTOUR_OPENCONSOLE}"
+        COMMAND "${PYTHON_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../patch_openconsole.py"
+                "${OPENCONSOLE_SOURCE}" "${CONTOUR_OPENCONSOLE}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../patch_openconsole.py" vtpty
+        COMMENT "Patching OpenConsole.exe with Contour's CLSID..."
+        VERBATIM
+    )
+
+    add_custom_target(PatchOpenConsole ALL DEPENDS "${CONTOUR_OPENCONSOLE}")
+    add_dependencies(contour PatchOpenConsole)
+
+    install(FILES "${CONTOUR_OPENCONSOLE}" DESTINATION bin)
+
+    # --- ContourProxy DLL for COM Marshaling ---
+    # Find MIDL compiler
+    find_program(MIDL_COMPILER midl REQUIRED) # Should be available in VS command prompt
+
+    set(PROXY_IDL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/windows")
+    set(PROXY_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/proxy_gen")
+    file(MAKE_DIRECTORY "${PROXY_BINARY_DIR}")
+
+    # Helper function to compile IDL
+    function(add_midl_target IDL_FILE BASE_NAME)
+        add_custom_command(
+            OUTPUT
+                "${PROXY_BINARY_DIR}/${BASE_NAME}_p.c"
+                "${PROXY_BINARY_DIR}/${BASE_NAME}_i.c"
+                "${PROXY_BINARY_DIR}/${BASE_NAME}.h"
+                # dlldata.c is handled manually/separately, but standard midl invocation might touch it if /dlldata is used.
+                # We use individual compilation so we don't use /dlldata here.
+            COMMAND "${MIDL_COMPILER}" /env x64 /Oicf /h "${PROXY_BINARY_DIR}/${BASE_NAME}.h" /iid "${PROXY_BINARY_DIR}/${BASE_NAME}_i.c" /proxy "${PROXY_BINARY_DIR}/${BASE_NAME}_p.c" "${PROXY_IDL_DIR}/${IDL_FILE}"
+            DEPENDS "${PROXY_IDL_DIR}/${IDL_FILE}"
+            WORKING_DIRECTORY "${PROXY_BINARY_DIR}"
+            COMMENT "Compiling ${IDL_FILE} with MIDL"
+            VERBATIM
+        )
+    endfunction()
+
+    add_midl_target("ITerminalHandoff.idl" "ITerminalHandoff")
+    add_midl_target("IConsoleHandoff.idl" "IConsoleHandoff")
+
+    # The manual dlldata.c
+    set(PROXY_SOURCES
+        "${PROXY_IDL_DIR}/ContourProxy_dlldata.c"
+        "${PROXY_BINARY_DIR}/ITerminalHandoff_p.c"
+        "${PROXY_BINARY_DIR}/ITerminalHandoff_i.c"
+        "${PROXY_BINARY_DIR}/IConsoleHandoff_p.c"
+        "${PROXY_BINARY_DIR}/IConsoleHandoff_i.c"
+        "${PROXY_IDL_DIR}/contour_proxy.def" # We will create this
+    )
+
+    add_library(ContourProxy SHARED ${PROXY_SOURCES})
+    target_include_directories(ContourProxy PRIVATE "${PROXY_BINARY_DIR}")
+    target_link_libraries(ContourProxy PRIVATE rpcrt4 kernel32 user32 advapi32 ole32 oleaut32 uuid)
+    target_compile_definitions(ContourProxy PRIVATE
+        REGISTER_PROXY_DLL
+        _WIN32_WINNT=0x0A00 # Win10+
+        WIN32_LEAN_AND_MEAN
+    )
+
+    # Use a .def file to export DllGetClassObject etc.
+    # Creating it on the fly if not exists? Or write it now.
+    # We will write it in next step, but reference it here.
+
+    install(TARGETS ContourProxy DESTINATION bin)
+
+endif()
 
 # {{{ platform specific target set_target_properties
 if(WIN32)
@@ -282,6 +472,9 @@ if(WIN32)
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "Contour Terminal Emulator ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
     set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/wix_patch.xml")
     set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Contour")
+
+    # Allow CPack to sign the uninstaller/MSI if we configured signing?
+    # CPack WIX Generator has its own signing hooks, but for now we focus on the EXE built by CMake.
 endif()
 if(APPLE)
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")

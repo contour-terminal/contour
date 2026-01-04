@@ -46,6 +46,83 @@ using namespace std::string_literals;
 
 namespace fs = std::filesystem;
 
+#if defined(_WIN32)
+    #include <contour/windows/TerminalHandoff.h>
+
+    #include <vtpty/HandoffPty.h>
+
+    #include <iostream>
+
+    #include <Windows.h>
+
+static DWORD g_comRegistrationId = 0;
+
+void SimpleFileLogger(std::string const& msg); // Forward declaration
+
+static void RegisterCOMServer()
+{
+    SimpleFileLogger("Registering COM Server...");
+    static TerminalHandoffFactory factory;
+    HRESULT hr = CoRegisterClassObject(CLSID_ContourTerminalHandoff,
+                                       &factory,
+                                       CLSCTX_LOCAL_SERVER,
+                                       REGCLS_MULTIPLEUSE,
+                                       &g_comRegistrationId);
+    if (FAILED(hr))
+    {
+        SimpleFileLogger(std::format("Failed to register COM Class Object: {:x}", (unsigned) hr));
+        std::cerr << "Failed to register COM Class Object: " << hr << std::endl;
+    }
+    else
+    {
+        SimpleFileLogger("COM Server registered successfully.");
+    }
+}
+
+static void UnregisterCOMServer()
+{
+    if (g_comRegistrationId != 0)
+    {
+        SimpleFileLogger("Revoking COM Class Object.");
+        CoRevokeClassObject(g_comRegistrationId);
+        g_comRegistrationId = 0;
+    }
+}
+
+// Global handler called from TerminalHandoff COM object
+// Defined outside namespace to match forward declaration in TerminalHandoff.cpp
+void ContourHandleHandoff(HANDLE hInput,
+                          HANDLE hOutput,
+                          HANDLE hSignal,
+                          HANDLE hReference,
+                          HANDLE hServer,
+                          HANDLE hClient,
+                          std::wstring const& title)
+{
+    SimpleFileLogger("ContourHandleHandoff invoked.");
+    auto* app = contour::ContourGuiApp::instance();
+    if (app)
+    {
+        SimpleFileLogger("App instance found, dispatching newWindowWithHandoff.");
+        // Dispatch to main thread
+        QMetaObject::invokeMethod(
+            app, [app, hInput, hOutput, hSignal, hReference, hServer, hClient, title]() {
+                app->newWindowWithHandoff(hInput, hOutput, hSignal, hReference, hServer, hClient, title);
+            });
+    }
+    else
+    {
+        SimpleFileLogger("App instance NOT found during handoff.");
+        CloseHandle(hInput);
+        CloseHandle(hOutput);
+        CloseHandle(hSignal);
+        CloseHandle(hReference);
+        CloseHandle(hServer);
+        CloseHandle(hClient);
+    }
+}
+#endif
+
 namespace CLI = crispy::cli;
 
 namespace contour
@@ -62,6 +139,20 @@ int ContourGuiApp::run(int argc, char const* argv[])
 {
     _argc = argc;
     _argv = argv;
+
+#if defined(_WIN32)
+    // Initialize COM for this thread (required before any COM operations)
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(hr))
+    {
+        SimpleFileLogger(std::format("CoInitializeEx failed: {:x}", (unsigned) hr));
+        return -1;
+    }
+
+    // Register COM server IMMEDIATELY for -Embedding mode
+    // This must happen before Qt initialization so OpenConsole can call ITerminalHandoff3
+    RegisterCOMServer();
+#endif
 
     return ContourApp::run(argc, argv);
 }
@@ -135,6 +226,11 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
                 CLI::option {
                     "display", CLI::value { ""s }, "Sets the X11 display to connect to.", "DISPLAY_ID" },
 #endif
+                CLI::option {
+                    CLI::option_name { "embedding" },
+                    CLI::value { false },
+                    "COM Embedding flag (internal use only).",
+                },
                 CLI::option {
                     CLI::option_name { 'e', "execute" },
                     CLI::value { ""s },
@@ -436,7 +532,6 @@ int ContourGuiApp::terminalGuiAction()
         sessionsManager().updateColorPreference(_colorPreference);
     });
 #endif
-
     // Enforce OpenGL over any other. As much as I'd love to provide other backends, too.
     // We currently only support OpenGL.
     // If anyone feels happy about it, I'd love to at least provide Vulkan. ;-)
@@ -465,7 +560,24 @@ int ContourGuiApp::terminalGuiAction()
     // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
 
     // Spawn initial window.
-    newWindow();
+    bool isEmbedding = false;
+#if defined(_WIN32)
+    for (int i = 0; i < _argc; ++i)
+    {
+        std::string_view arg = _argv[i];
+        if (arg == "--embedding" || arg == "-embedding" || arg == "/embedding" || arg == "-Embedding"
+            || arg == "/Embedding")
+        {
+            isEmbedding = true;
+            break;
+        }
+    }
+#endif
+
+    if (!isEmbedding)
+        newWindow();
+    else
+        QApplication::setQuitOnLastWindowClosed(false);
 
     if (auto const& bell = config().profile().bell.value().sound; bell == "off")
     {
@@ -481,6 +593,10 @@ int ContourGuiApp::terminalGuiAction()
     }
 
     auto rv = QApplication::exec();
+
+#if defined(_WIN32)
+    UnregisterCOMServer();
+#endif
 
     if (_exitStatus.has_value())
     {
@@ -511,6 +627,58 @@ int ContourGuiApp::terminalGuiAction()
     // printf("\r%s", TBC);
     return rv;
 }
+
+void ContourGuiApp::newWindowWithHandoff(void* hInput,
+                                         void* hOutput,
+                                         void* hSignal,
+                                         void* hReference,
+                                         void* hServer,
+                                         void* hClient,
+                                         std::wstring const& title)
+{
+#if defined(_WIN32)
+    SimpleFileLogger(
+        std::format("newWindowWithHandoff called. in:{:p} out:{:p} sig:{:p} ref:{:p} srv:{:p} cli:{:p}",
+                    hInput,
+                    hOutput,
+                    hSignal,
+                    hReference,
+                    hServer,
+                    hClient));
+
+    HANDLE input = (hInput == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hInput);
+    HANDLE output = (hOutput == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hOutput);
+    HANDLE signal = (hSignal == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hSignal);
+    HANDLE reference = (hReference == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hReference);
+    HANDLE server = (hServer == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hServer);
+    HANDLE client = (hClient == INVALID_HANDLE_VALUE) ? nullptr : static_cast<HANDLE>(hClient);
+
+    // Allow creation explicitly
+    _sessionManager.allowCreation();
+
+    SimpleFileLogger("Creating HandoffPty...");
+    // Create HandoffPty
+    auto pty = std::make_unique<vtpty::HandoffPty>(input, output, signal, reference, server, client, title);
+
+    SimpleFileLogger("Invoking createSessionWithPty...");
+    // Create session (this will activate it and create window/tab via session manager)
+    _sessionManager.createSessionWithPty(std::move(pty));
+    newWindow();
+    SimpleFileLogger("createSessionWithPty returned. Window created.");
+#else
+    (void) hInput;
+    (void) hOutput;
+    (void) hSignal;
+    (void) hReference;
+    (void) hServer;
+    (void) hClient;
+    (void) title;
+#endif
+}
+
+// ... (Existing implementations)
+
+// ... (Around line 350, inside terminalGuiAction)
 
 void ContourGuiApp::setupQCoreApplication()
 {
