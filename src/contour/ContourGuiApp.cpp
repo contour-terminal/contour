@@ -140,6 +140,20 @@ int ContourGuiApp::run(int argc, char const* argv[])
     _argc = argc;
     _argv = argv;
 
+#if defined(_WIN32)
+    // Initialize COM for this thread (required before any COM operations)
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(hr))
+    {
+        SimpleFileLogger(std::format("CoInitializeEx failed: {:x}", (unsigned) hr));
+        return -1;
+    }
+
+    // Register COM server IMMEDIATELY for -Embedding mode
+    // This must happen before Qt initialization so OpenConsole can call ITerminalHandoff3
+    RegisterCOMServer();
+#endif
+
     return ContourApp::run(argc, argv);
 }
 
@@ -518,11 +532,6 @@ int ContourGuiApp::terminalGuiAction()
         sessionsManager().updateColorPreference(_colorPreference);
     });
 #endif
-
-#if defined(_WIN32)
-    RegisterCOMServer();
-#endif
-
     // Enforce OpenGL over any other. As much as I'd love to provide other backends, too.
     // We currently only support OpenGL.
     // If anyone feels happy about it, I'd love to at least provide Vulkan. ;-)

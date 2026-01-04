@@ -242,28 +242,28 @@ if (WIN32)
         ")
     endif()
 
-    # --- Custom OpenConsole Patching ---
+    # --- Patch OpenConsole.exe with Contour's CLSID ---
+    # vtpty downloads OpenConsole.exe from Windows Terminal releases.
+    # We need to patch it to use Contour's CLSID for console handoff registration.
     find_program(PYTHON_EXECUTABLE python REQUIRED)
-    find_program(OPENCONSOLE_EXECUTABLE OpenConsole PATHS "${CMAKE_BINARY_DIR}/bin" "${CMAKE_CURRENT_BINARY_DIR}" NO_DEFAULT_PATH)
-    if (NOT OPENCONSOLE_EXECUTABLE)
-        # Fallback search or assume it's in the bin dir if not found immediately (during configure it might not be there yet)
-        set(OPENCONSOLE_EXECUTABLE "${CMAKE_BINARY_DIR}/bin/OpenConsole.exe")
-    endif()
 
-    set(CONTOUR_OPENCONSOLE "${CMAKE_BINARY_DIR}/bin/ContourOpenConsole.exe")
+    # Reference the OpenConsole.exe that vtpty downloads
+    set(OPENCONSOLE_SOURCE "${CMAKE_BINARY_DIR}/_deps/OpenConsole-1.24.3504.0/build/native/runtimes/x64/OpenConsole.exe")
+    set(CONTOUR_OPENCONSOLE "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/OpenConsole.exe")
+
     add_custom_command(
         OUTPUT "${CONTOUR_OPENCONSOLE}"
-        COMMAND "${PYTHON_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../patch_openconsole.py" "${OPENCONSOLE_EXECUTABLE}" "${CONTOUR_OPENCONSOLE}"
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../patch_openconsole.py"
-        COMMENT "Patching OpenConsole.exe to create ContourOpenConsole.exe"
+        COMMAND "${PYTHON_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../patch_openconsole.py"
+                "${OPENCONSOLE_SOURCE}" "${CONTOUR_OPENCONSOLE}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../patch_openconsole.py" vtpty
+        COMMENT "Patching OpenConsole.exe with Contour's CLSID..."
         VERBATIM
     )
-    add_custom_target(ContourOpenConsole DEPENDS "${CONTOUR_OPENCONSOLE}")
-    # Ensure patching happens before packaging/install
-    add_dependencies(contour ContourOpenConsole)
 
-    install(PROGRAMS "${CONTOUR_OPENCONSOLE}" DESTINATION bin)
+    add_custom_target(PatchOpenConsole ALL DEPENDS "${CONTOUR_OPENCONSOLE}")
+    add_dependencies(contour PatchOpenConsole)
 
+    install(FILES "${CONTOUR_OPENCONSOLE}" DESTINATION bin)
 
     # --- ContourProxy DLL for COM Marshaling ---
     # Find MIDL compiler
