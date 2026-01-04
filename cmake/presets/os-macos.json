@@ -1,12 +1,17 @@
 {
     "version": 6,
-    "include": [ "common.json" ],
+    "include": [
+        "common.json"
+    ],
     "configurePresets": [
         {
-            "name": "macos-common",
-            "inherits": "contour-common",
+            "name": "appleclang-debug",
+            "displayName": "Clang Debug",
+            "inherits": [
+                "contour-common",
+                "debug"
+            ],
             "generator": "Ninja",
-            "hidden": true,
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
@@ -19,33 +24,44 @@
             }
         },
         {
-            "name": "macos-debug",
-            "displayName": "MacOS - Debug",
-            "inherits": ["macos-common", "debug"]
-        },
-        {
-            "name": "macos-release",
-            "displayName": "MacOS - Release",
-            "inherits": ["macos-common", "release"]
+            "name": "appleclang-release",
+            "displayName": "Clang Release",
+            "inherits": [
+                "contour-common",
+                "release"
+            ],
+            "generator": "Ninja",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "cacheVariables": {
+                "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF",
+                "CODE_SIGN_CERTIFICATE_ID": "Developer ID Application: Christian Parpart (6T525MU9UR)",
+                "CMAKE_PREFIX_PATH": "/opt/homebrew/opt/qt"
+            }
         }
     ],
     "buildPresets": [
         {
-            "name": "macos-debug",
-            "displayName": "MacOS/X - Debug",
-            "configurePreset": "macos-debug"
+            "name": "appleclang-debug",
+            "displayName": "AppleClang - Debug",
+            "configurePreset": "appleclang-debug"
         },
         {
-            "name": "macos-release",
-            "displayName": "MacOS/X - Release",
-            "configurePreset": "macos-release"
+            "name": "appleclang-release",
+            "displayName": "AppleClang - Release",
+            "configurePreset": "appleclang-release"
         }
     ],
     "testPresets": [
         {
-            "name": "macos-debug",
-            "configurePreset": "macos-debug",
-            "output": {"outputOnFailure": true},
+            "name": "appleclang-debug",
+            "configurePreset": "appleclang-debug",
+            "output": {
+                "outputOnFailure": true
+            },
             "execution": {
                 "noTestsAction": "error",
                 "stopOnFailure": true
@@ -54,9 +70,11 @@
     ],
     "packagePresets": [
         {
-            "name": "macos-release",
-            "configurePreset": "macos-release",
-            "generators": [ "DragNDrop" ]
+            "name": "appleclang-release",
+            "configurePreset": "appleclang-release",
+            "generators": [
+                "DragNDrop"
+            ]
         }
     ]
 }

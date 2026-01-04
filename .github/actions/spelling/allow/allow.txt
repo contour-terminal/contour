@@ -20,7 +20,9 @@ UpperCamelCase
 XBase
 YBase
 aea
+appleclang
 bdf
+clangcl
 copy'n'paste
 lazygit
 leiserfg
