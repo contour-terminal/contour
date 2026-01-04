@@ -78,8 +78,8 @@
             <com:ExeServer Executable="contour.exe" DisplayName="Contour Terminal">
               <com:Class Id="B178D323-E77D-4C67-AF21-AE2B81F269F0" DisplayName="Contour Terminal Handoff" />
             </com:ExeServer>
-            <!-- OpenConsole.exe handles the Driver Handoff (IConsoleHandoff) -->
-            <com:ExeServer Executable="ContourOpenConsole.exe" DisplayName="Contour OpenConsole">
+            <!-- OpenConsole.exe handles the Console Handoff (IConsoleHandoff) -->
+            <com:ExeServer Executable="OpenConsole.exe" DisplayName="Contour OpenConsole">
               <com:Class Id="F00DCAFE-0000-0000-0000-000000000001" DisplayName="Contour Console Handoff" />
             </com:ExeServer>
           </com:ComServer>
