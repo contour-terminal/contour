@@ -644,7 +644,16 @@ jobs:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-      - name: "vcpkg: Install dependencies"
+      - name: "Cache vcpkg"
+        uses: actions/cache@v4
+        id: vcpkg-cache
+        with:
+          path: ${{ runner.workspace }}/vcpkg
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+      - name: "vcpkg: Clone and bootstrap"
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/microsoft/vcpkg.git ${{ runner.workspace }}\vcpkg
           ${{ runner.workspace }}\vcpkg\bootstrap-vcpkg.bat
