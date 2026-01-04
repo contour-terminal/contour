@@ -83,6 +83,42 @@
                 "value": "x64",
                 "strategy": "external"
             }
+        },
+        {
+            "name": "windows-msvc-ninja-debug",
+            "inherits": [
+                "windows-common",
+                "debug"
+            ],
+            "displayName": "Windows (MSVC+Ninja) Debug",
+            "description": "Using MSVC compiler with Ninja generator",
+            "generator": "Ninja",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "toolset": {
+                "value": "host=x64",
+                "strategy": "external"
+            }
+        },
+        {
+            "name": "windows-msvc-ninja-release",
+            "inherits": [
+                "windows-common",
+                "release"
+            ],
+            "displayName": "Windows (MSVC+Ninja) Release",
+            "description": "Using MSVC compiler with Ninja generator",
+            "generator": "Ninja",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "toolset": {
+                "value": "host=x64",
+                "strategy": "external"
+            }
         }
     ],
     "buildPresets": [
@@ -108,6 +144,18 @@
             "name": "clangcl-release",
             "displayName": "x64 (ClangCL) RelWithDebInfo",
             "configurePreset": "clangcl-release",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "windows-msvc-ninja-debug",
+            "displayName": "x64 (MSVC+Ninja) Debug",
+            "configurePreset": "windows-msvc-ninja-debug",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-msvc-ninja-release",
+            "displayName": "x64 (MSVC+Ninja) RelWithDebInfo",
+            "configurePreset": "windows-msvc-ninja-release",
             "configuration": "RelWithDebInfo"
         }
     ],
@@ -149,6 +197,20 @@
                 "Debug"
             ],
             "configurePreset": "msvc-debug"
+        },
+        {
+            "name": "windows-msvc-ninja-debug",
+            "configurations": [
+                "Debug"
+            ],
+            "configurePreset": "windows-msvc-ninja-debug"
+        },
+        {
+            "name": "windows-msvc-ninja-release",
+            "configurations": [
+                "RelWithDebInfo"
+            ],
+            "configurePreset": "windows-msvc-ninja-release"
         }
     ]
 }

@@ -64,23 +64,43 @@ HRESULT STDMETHODCALLTYPE TerminalHandoff::QueryInterface(REFIID riid, void** pp
         AddRef();
         return S_OK;
     }
-    if (IsEqualIID(riid, IID_ITerminalHandoff3))
+
+    // ITerminalHandoff (V1) {59D55CCE-FC8A-48B4-ACE8-0A9286C6557F}
+    static const IID IID_ITerminalHandoffV1_Real = {
+        0x59D55CCE, 0xFC8A, 0x48B4, { 0xAC, 0xE8, 0x0A, 0x92, 0x86, 0xC6, 0x55, 0x7F }
+    };
+    if (IsEqualIID(riid, IID_ITerminalHandoffV1_Real))
     {
+        SimpleFileLogger("TerminalHandoff::QueryInterface: Accepting ITerminalHandoff (V1)");
+        *ppvObject = static_cast<ITerminalHandoffV1*>(this);
+        AddRef();
+        return S_OK;
+    }
+
+    // ITerminalHandoff3 (V3) {6F23DA90-15C5-4203-9DB0-64E73F1B1B00}
+    // Also matches ITerminalHandoff3 interface layout (HANDLE* for in/out)
+    static const IID IID_ITerminalHandoff3_Real = {
+        0x6F23DA90, 0x15C5, 0x4203, { 0x9D, 0xB0, 0x64, 0xE7, 0x3F, 0x1B, 0x1B, 0x00 }
+    };
+
+    if (IsEqualIID(riid, IID_ITerminalHandoff3) || IsEqualIID(riid, IID_ITerminalHandoff3_Real))
+    {
+        SimpleFileLogger("TerminalHandoff::QueryInterface: Accepting ITerminalHandoff3 (V3)");
         *ppvObject = static_cast<ITerminalHandoff3*>(this);
         AddRef();
         return S_OK;
     }
-    // {E686C757-9A35-4A1C-B3CE-0BCC8B5C69F4} - Likely ITerminalHandoff or ITerminalHandoff2
-    static const IID IID_UnknownHandoff = {
+
+    // Explicitly Log and Reject IConsoleHandoff {E686C757...}
+    static const IID IID_IConsoleHandoff = {
         0xE686C757, 0x9A35, 0x4A1C, { 0xB3, 0xCE, 0x0B, 0xCC, 0x8B, 0x5C, 0x69, 0xF4 }
     };
-    if (IsEqualIID(riid, IID_UnknownHandoff))
+    if (IsEqualIID(riid, IID_IConsoleHandoff))
     {
-        SimpleFileLogger("TerminalHandoff::QueryInterface: Accepting IID_UnknownHandoff (E686C757...) as "
-                         "ITerminalHandoffV1");
-        *ppvObject = static_cast<ITerminalHandoffV1*>(this);
-        AddRef();
-        return S_OK;
+        SimpleFileLogger(
+            "TerminalHandoff::QueryInterface: Rejecting IConsoleHandoff (E686C...) - Wrong Interface!");
+        *ppvObject = nullptr;
+        return E_NOINTERFACE;
     }
 
     if (IsEqualIID(riid, IID_IMarshal))
@@ -117,135 +137,52 @@ HRESULT STDMETHODCALLTYPE TerminalHandoff::EstablishPtyHandoff(HANDLE* in,
                                                                HANDLE client,
                                                                const TERMINAL_STARTUP_INFO* startupInfo)
 {
-    SimpleFileLogger("TerminalHandoff::EstablishPtyHandoff called!");
-    // Generate unique pipe names
-    static std::atomic<int> pipeCounter { 0 };
-    int id = pipeCounter++;
-    DWORD pid = GetCurrentProcessId();
-
-    // Pipe In: Server writes (Outbound), Client reads.
-    std::wstring pipeInName = std::format(L"\\\\.\\pipe\\contour_in_{}_{}", pid, id);
-    HANDLE hInWrite = CreateNamedPipeW(pipeInName.c_str(),
-                                       PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED,
-                                       PIPE_TYPE_BYTE | PIPE_WAIT,
-                                       1,
-                                       4096,
-                                       4096,
-                                       0,
-                                       nullptr);
-
-    if (hInWrite == INVALID_HANDLE_VALUE)
-    {
-        SimpleFileLogger(
-            std::format("EstablishPtyHandoff: Failed to create Pipe In Write. Error: {}", GetLastError()));
-        return E_FAIL;
-    }
-
-    HANDLE hInRead = CreateFileW(pipeInName.c_str(),
-                                 GENERIC_READ,
-                                 0, // No sharing? or FILE_SHARE_READ?
-                                 nullptr,
-                                 OPEN_EXISTING,
-                                 0, // Default attributes
-                                 nullptr);
-
-    if (hInRead == INVALID_HANDLE_VALUE)
-    {
-        SimpleFileLogger(
-            std::format("EstablishPtyHandoff: Failed to open Pipe In Read. Error: {}", GetLastError()));
-        CloseHandle(hInWrite);
-        return E_FAIL;
-    }
-
-    // Pipe Out: Server reads (Inbound), Client writes.
-    std::wstring pipeOutName = std::format(L"\\\\.\\pipe\\contour_out_{}_{}", pid, id);
-    HANDLE hOutRead = CreateNamedPipeW(pipeOutName.c_str(),
-                                       PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
-                                       PIPE_TYPE_BYTE | PIPE_WAIT,
-                                       1,
-                                       4096,
-                                       4096,
-                                       0,
-                                       nullptr);
-
-    if (hOutRead == INVALID_HANDLE_VALUE)
-    {
-        SimpleFileLogger(
-            std::format("EstablishPtyHandoff: Failed to create Pipe Out Read. Error: {}", GetLastError()));
-        CloseHandle(hInRead);
-        CloseHandle(hInWrite);
-        return E_FAIL;
-    }
-
-    HANDLE hOutWrite = CreateFileW(pipeOutName.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-
-    if (hOutWrite == INVALID_HANDLE_VALUE)
-    {
-        SimpleFileLogger(
-            std::format("EstablishPtyHandoff: Failed to open Pipe Out Write. Error: {}", GetLastError()));
-        CloseHandle(hOutRead);
-        CloseHandle(hInRead);
-        CloseHandle(hInWrite);
-        return E_FAIL;
-    }
-
-    SimpleFileLogger("EstablishPtyHandoff: Pipes created successfully.");
-
-    SimpleFileLogger(
-        std::format("EstablishPtyHandoff: Pointers - in: {:p}, out: {:p}", (void*) in, (void*) out));
+    SimpleFileLogger("TerminalHandoff::EstablishPtyHandoff (V3) called!");
 
     if (!in || !out)
-    {
-        SimpleFileLogger("EstablishPtyHandoff: 'in' or 'out' pointer is NULL! Returning E_POINTER.");
-        CloseHandle(hInRead);
-        CloseHandle(hInWrite);
-        CloseHandle(hOutRead);
-        CloseHandle(hOutWrite);
         return E_POINTER;
+
+    // Create In Pipe (Server Write, Client Read)
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE }; // Inheritable
+    HANDLE hInRead, hInWrite;
+    if (!CreatePipe(&hInRead, &hInWrite, &sa, 0))
+    {
+        SimpleFileLogger("EstablishPtyHandoff: Failed to create IN pipe.");
+        return E_FAIL;
     }
 
+    // Create Out Pipe (Server Read, Client Write)
+    HANDLE hOutRead, hOutWrite;
+    if (!CreatePipe(&hOutRead, &hOutWrite, &sa, 0))
+    {
+        SimpleFileLogger("EstablishPtyHandoff: Failed to create OUT pipe.");
+        CloseHandle(hInRead);
+        CloseHandle(hInWrite);
+        return E_FAIL;
+    }
+
+    // Assign to [out] params.
+    // The COM stub will duplicate these handles for the caller and close the originals on our side.
     *in = hInRead;
     *out = hOutWrite;
 
-    // Pass the server-side handles to Contour app logic.
-    // Ensure we duplicate or detach logic such that if this function returns, the handles are handled
-    // correctly. The wrapper ContourHandleHandoff should take ownership.
+    // We KEEP Server ends (InWrite, OutRead) for our usage.
+    // Pass them to Contour handoff logic.
 
     HANDLE hSignalDup = duplicateHandle(signal);
     HANDLE hReferenceDup = duplicateHandle(reference);
     HANDLE hServerDup = duplicateHandle(server);
-    HANDLE hClientDup = INVALID_HANDLE_VALUE;
+    HANDLE hClientDup = duplicateHandle(client);
 
-    DuplicateHandle(GetCurrentProcess(),
-                    client,
-                    GetCurrentProcess(),
-                    &hClientDup,
-                    PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_SET_INFORMATION | SYNCHRONIZE,
-                    FALSE,
-                    0);
-
-    if (hClientDup == INVALID_HANDLE_VALUE)
-        hClientDup = duplicateHandle(client);
-
-    SimpleFileLogger(std::format("EstablishPtyHandoff: Checking startupInfo: {:p}", (void*) startupInfo));
     std::wstring title;
-    if (startupInfo)
-    {
-        SimpleFileLogger("EstablishPtyHandoff: startupInfo is valid.");
-        if (startupInfo->pszTitle)
-        {
-            SimpleFileLogger(
-                std::format("EstablishPtyHandoff: Title ptr: {:p}", (void*) startupInfo->pszTitle));
-            title = startupInfo->pszTitle;
-        }
-    }
-    else
-    {
-        SimpleFileLogger("EstablishPtyHandoff: startupInfo is NULL.");
-    }
+    if (startupInfo && startupInfo->pszTitle)
+        title = startupInfo->pszTitle;
 
     SimpleFileLogger("TerminalHandoff: Calling ContourHandleHandoff...");
+
+    // NOTE: 'hInWrite' is what I write to (Client Input). 'hOutRead' is where I read from (Client Output).
     ContourHandleHandoff(hInWrite, hOutRead, hSignalDup, hReferenceDup, hServerDup, hClientDup, title);
+
     SimpleFileLogger("TerminalHandoff: ContourHandleHandoff returned.");
 
     return S_OK;
