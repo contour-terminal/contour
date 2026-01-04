@@ -49,6 +49,7 @@
             </uap3:Properties>
           </uap3:AppExtension>
         </uap3:Extension>
+
         <uap3:Extension Category="windows.appExtension">
            <uap3:AppExtension Name="com.microsoft.windows.console.host"
                               Id="ContourConsole"
@@ -56,16 +57,30 @@
                               Description="Contour Console Extension"
                               PublicFolder="Public">
              <uap3:Properties>
-               <!-- This CLSID must match CLSID_ContourTerminalHandoff in TerminalHandoff.h -->
-               <Clsid>{B178D323-E77D-4C67-AF21-AE2B81F269F0}</Clsid>
+               <!-- This CLSID maps to OpenConsole.exe which handles IConsoleHandoff -->
+                <Clsid>{F00DCAFE-0000-0000-0000-000000000001}</Clsid>
              </uap3:Properties>
            </uap3:AppExtension>
          </uap3:Extension>
+
+        <com:Extension Category="windows.comInterface">
+          <com:ComInterface>
+            <!-- Proxy Stub for Handoff Interfaces (implemented in ContourProxy.dll) -->
+            <com:ProxyStub Id="B178D323-E77D-4C67-AF21-AE2B81F269F1" DisplayName="Contour Proxy Stub" Path="ContourProxy.dll" />
+
+            <!-- ITerminalHandoff3 -->
+            <com:Interface Id="6F23DA90-15C5-4203-9DB0-64E73F1B1B00" ProxyStubClsid="B178D323-E77D-4C67-AF21-AE2B81F269F1" />
+          </com:ComInterface>
+        </com:Extension>
 
         <com:Extension Category="windows.comServer">
           <com:ComServer>
             <com:ExeServer Executable="contour.exe" DisplayName="Contour Terminal">
               <com:Class Id="B178D323-E77D-4C67-AF21-AE2B81F269F0" DisplayName="Contour Terminal Handoff" />
+            </com:ExeServer>
+            <!-- OpenConsole.exe handles the Driver Handoff (IConsoleHandoff) -->
+            <com:ExeServer Executable="ContourOpenConsole.exe" DisplayName="Contour OpenConsole">
+              <com:Class Id="F00DCAFE-0000-0000-0000-000000000001" DisplayName="Contour Console Handoff" />
             </com:ExeServer>
           </com:ComServer>
         </com:Extension>

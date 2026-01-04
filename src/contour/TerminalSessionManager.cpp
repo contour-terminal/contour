@@ -239,6 +239,11 @@ void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
 
 TerminalSession* TerminalSessionManager::createSession()
 {
+    if (auto* session = _displayStates[nullptr].currentSession; session)
+    {
+        managerLog()("createSession: returning pending session {}({})", session->id(), (void*) session);
+        return activateSession(session, true);
+    }
     return activateSession(createSessionInBackground(), true /*force resize on before display-attach*/);
 }
 

@@ -241,6 +241,83 @@ if (WIN32)
             endif()
         ")
     endif()
+
+    # --- Custom OpenConsole Patching ---
+    find_program(PYTHON_EXECUTABLE python REQUIRED)
+    find_program(OPENCONSOLE_EXECUTABLE OpenConsole PATHS "${CMAKE_BINARY_DIR}/bin" "${CMAKE_CURRENT_BINARY_DIR}" NO_DEFAULT_PATH)
+    if (NOT OPENCONSOLE_EXECUTABLE)
+        # Fallback search or assume it's in the bin dir if not found immediately (during configure it might not be there yet)
+        set(OPENCONSOLE_EXECUTABLE "${CMAKE_BINARY_DIR}/bin/OpenConsole.exe")
+    endif()
+
+    set(CONTOUR_OPENCONSOLE "${CMAKE_BINARY_DIR}/bin/ContourOpenConsole.exe")
+    add_custom_command(
+        OUTPUT "${CONTOUR_OPENCONSOLE}"
+        COMMAND "${PYTHON_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../patch_openconsole.py" "${OPENCONSOLE_EXECUTABLE}" "${CONTOUR_OPENCONSOLE}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../patch_openconsole.py"
+        COMMENT "Patching OpenConsole.exe to create ContourOpenConsole.exe"
+        VERBATIM
+    )
+    add_custom_target(ContourOpenConsole DEPENDS "${CONTOUR_OPENCONSOLE}")
+    # Ensure patching happens before packaging/install
+    add_dependencies(contour ContourOpenConsole)
+
+    install(PROGRAMS "${CONTOUR_OPENCONSOLE}" DESTINATION bin)
+
+
+    # --- ContourProxy DLL for COM Marshaling ---
+    # Find MIDL compiler
+    find_program(MIDL_COMPILER midl REQUIRED) # Should be available in VS command prompt
+
+    set(PROXY_IDL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/windows")
+    set(PROXY_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/proxy_gen")
+    file(MAKE_DIRECTORY "${PROXY_BINARY_DIR}")
+
+    # Helper function to compile IDL
+    function(add_midl_target IDL_FILE BASE_NAME)
+        add_custom_command(
+            OUTPUT
+                "${PROXY_BINARY_DIR}/${BASE_NAME}_p.c"
+                "${PROXY_BINARY_DIR}/${BASE_NAME}_i.c"
+                "${PROXY_BINARY_DIR}/${BASE_NAME}.h"
+                # dlldata.c is handled manually/separately, but standard midl invocation might touch it if /dlldata is used.
+                # We use individual compilation so we don't use /dlldata here.
+            COMMAND "${MIDL_COMPILER}" /env x64 /Oicf /h "${PROXY_BINARY_DIR}/${BASE_NAME}.h" /iid "${PROXY_BINARY_DIR}/${BASE_NAME}_i.c" /proxy "${PROXY_BINARY_DIR}/${BASE_NAME}_p.c" "${PROXY_IDL_DIR}/${IDL_FILE}"
+            DEPENDS "${PROXY_IDL_DIR}/${IDL_FILE}"
+            WORKING_DIRECTORY "${PROXY_BINARY_DIR}"
+            COMMENT "Compiling ${IDL_FILE} with MIDL"
+            VERBATIM
+        )
+    endfunction()
+
+    add_midl_target("ITerminalHandoff.idl" "ITerminalHandoff")
+    add_midl_target("IConsoleHandoff.idl" "IConsoleHandoff")
+
+    # The manual dlldata.c
+    set(PROXY_SOURCES
+        "${PROXY_IDL_DIR}/ContourProxy_dlldata.c"
+        "${PROXY_BINARY_DIR}/ITerminalHandoff_p.c"
+        "${PROXY_BINARY_DIR}/ITerminalHandoff_i.c"
+        "${PROXY_BINARY_DIR}/IConsoleHandoff_p.c"
+        "${PROXY_BINARY_DIR}/IConsoleHandoff_i.c"
+        "${PROXY_IDL_DIR}/contour_proxy.def" # We will create this
+    )
+
+    add_library(ContourProxy SHARED ${PROXY_SOURCES})
+    target_include_directories(ContourProxy PRIVATE "${PROXY_BINARY_DIR}")
+    target_link_libraries(ContourProxy PRIVATE rpcrt4 kernel32 user32 advapi32 ole32 oleaut32 uuid)
+    target_compile_definitions(ContourProxy PRIVATE
+        REGISTER_PROXY_DLL
+        _WIN32_WINNT=0x0A00 # Win10+
+        WIN32_LEAN_AND_MEAN
+    )
+
+    # Use a .def file to export DllGetClassObject etc.
+    # Creating it on the fly if not exists? Or write it now.
+    # We will write it in next step, but reference it here.
+
+    install(TARGETS ContourProxy DESTINATION bin)
+
 endif()
 
 # {{{ platform specific target set_target_properties
