@@ -55,25 +55,25 @@ if(${PEDANTIC_COMPILER})
         #try_add_compile_options(-Wsign-conversion)
         try_add_compile_options(-Wsuggest-destructor-override)
         try_add_compile_options(-pedantic)
+
+        if(${PEDANTIC_COMPILER_WERROR})
+            try_add_compile_options(-Werror)
+
+            # Don't complain here. That's needed for bitpacking (codepoint_properties) in libunicode dependency.
+            try_add_compile_options(-Wno-error=c++20-extensions)
+            try_add_compile_options(-Wno-c++20-extensions)
+
+            # Not sure how to work around these.
+            try_add_compile_options(-Wno-error=class-memaccess)
+            try_add_compile_options(-Wno-class-memaccess)
+
+            # TODO: Should be addressed.
+            try_add_compile_options(-Wno-error=missing-declarations)
+            try_add_compile_options(-Wno-missing-declarations)
+        endif()
     else()
         message(STATUS "Enabling pedantic compiler options: unsupported platform")
     endif()
 else()
     message(STATUS "Enabling pedantic compiler options: no")
-endif()
-
-if(${PEDANTIC_COMPILER_WERROR})
-    try_add_compile_options(-Werror)
-
-    # Don't complain here. That's needed for bitpacking (codepoint_properties) in libunicode dependency.
-    try_add_compile_options(-Wno-error=c++20-extensions)
-    try_add_compile_options(-Wno-c++20-extensions)
-
-    # Not sure how to work around these.
-    try_add_compile_options(-Wno-error=class-memaccess)
-    try_add_compile_options(-Wno-class-memaccess)
-
-    # TODO: Should be addressed.
-    try_add_compile_options(-Wno-error=missing-declarations)
-    try_add_compile_options(-Wno-missing-declarations)
 endif()

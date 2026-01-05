@@ -6,10 +6,9 @@
     "configurePresets": [
         {
             "name": "windows-common",
-            "inherits": "contour-common",
-            "displayName": "Windows - common settings",
             "hidden": true,
-            "toolset": "host=x64",
+            "inherits": "contour-common",
+            "generator": "Ninja",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "condition": {
                 "type": "equals",
@@ -18,89 +17,103 @@
             },
             "cacheVariables": {
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
-                "CMAKE_PREFIX_PATH": "C:/Qt/6.10.1/msvc2022_64",
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_SYSTEM_VERSION": "10",
-                "CMAKE_VERBOSE_MAKEFILE": "ON",
                 "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
                 "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF"
             }
         },
         {
-            "name": "windows-cl-debug",
+            "name": "msvc-debug",
             "inherits": [
                 "windows-common",
                 "debug"
             ],
-            "displayName": "Windows (MSVC) Debug",
-            "description": "Using MSVC compiler (64-bit)"
+            "displayName": "MSVC Debug",
+            "description": "Using MSVC compiler (64-bit)",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "cl",
+                "CMAKE_CXX_COMPILER": "cl"
+            }
         },
         {
-            "name": "windows-cl-release",
+            "name": "msvc-release",
             "inherits": [
                 "windows-common",
                 "release"
             ],
-            "displayName": "Windows (MSVC) Release",
-            "description": "Using MSVC compiler (64-bit)"
+            "displayName": "MSVC Release",
+            "description": "Using MSVC compiler (64-bit)",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "cl",
+                "CMAKE_CXX_COMPILER": "cl"
+            }
         },
         {
-            "name": "windows-clang-common",
+            "name": "clangcl-debug",
             "inherits": [
-                "windows-common"
-            ],
-            "hidden": true,
-            "toolset": "ClangCL,host=x64"
-        },
-        {
-            "name": "windows-clang-debug",
-            "inherits": [
-                "windows-clang-common",
+                "windows-common",
                 "debug"
             ],
-            "displayName": "Windows (ClangCL) Debug",
-            "description": "Using Clang compiler (64-bit)"
+            "displayName": "ClangCL Debug",
+            "description": "Using ClangCL compiler (64-bit)",
+            "toolset": {
+                "value": "ClangCL,host=x64",
+                "strategy": "external"
+            },
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            }
         },
         {
-            "name": "windows-clang-release",
+            "name": "clangcl-release",
             "inherits": [
-                "windows-clang-common",
+                "windows-common",
                 "release"
             ],
-            "displayName": "Windows (ClangCL) Release",
-            "description": "Using Clang compiler (64-bit)"
+            "displayName": "ClangCL Release",
+            "description": "Using ClangCL compiler (64-bit)",
+            "toolset": {
+                "value": "ClangCL,host=x64",
+                "strategy": "external"
+            },
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            }
         }
     ],
     "buildPresets": [
         {
-            "name": "windows-cl-debug",
+            "name": "msvc-debug",
             "displayName": "x64 (MSVC) Debug",
-            "configurePreset": "windows-cl-debug",
+            "configurePreset": "msvc-debug",
             "configuration": "Debug"
         },
         {
-            "name": "windows-cl-release",
+            "name": "msvc-release",
             "displayName": "x64 (MSVC) RelWithDebInfo",
-            "configurePreset": "windows-cl-release",
+            "configurePreset": "msvc-release",
             "configuration": "RelWithDebInfo"
         },
         {
-            "name": "windows-clang-debug",
-            "displayName": "x64 (Clang) Debug",
-            "configurePreset": "windows-clang-debug",
+            "name": "clangcl-debug",
+            "displayName": "x64 (ClangCL) Debug",
+            "configurePreset": "clangcl-debug",
             "configuration": "Debug"
         },
         {
-            "name": "windows-clang-release",
-            "displayName": "x64 (Clang) RelWithDebInfo",
-            "configurePreset": "windows-clang-release",
+            "name": "clangcl-release",
+            "displayName": "x64 (ClangCL) RelWithDebInfo",
+            "configurePreset": "clangcl-release",
             "configuration": "RelWithDebInfo"
         }
     ],
     "testPresets": [
         {
-            "name": "windows-cl-debug",
-            "configurePreset": "windows-cl-debug",
+            "name": "msvc-debug",
+            "configurePreset": "msvc-debug",
             "output": {
                 "outputOnFailure": true
             },
@@ -110,8 +123,8 @@
             }
         },
         {
-            "name": "windows-cl-release",
-            "configurePreset": "windows-cl-release",
+            "name": "msvc-release",
+            "configurePreset": "msvc-release",
             "output": {
                 "outputOnFailure": true
             },
@@ -123,11 +136,18 @@
     ],
     "packagePresets": [
         {
-            "name": "windows-cl-release",
+            "name": "msvc-release",
             "configurations": [
                 "RelWithDebInfo"
             ],
-            "configurePreset": "windows-cl-release"
+            "configurePreset": "msvc-release"
+        },
+        {
+            "name": "msvc-debug",
+            "configurations": [
+                "Debug"
+            ],
+            "configurePreset": "msvc-debug"
         }
     ]
 }

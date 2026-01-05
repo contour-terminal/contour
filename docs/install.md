@@ -68,17 +68,17 @@ can be installed via the system package manager.
 
 #### Compile
 
-You can use cmake presets to compile contour. The full list of available presets can be seen using `cmake --list-presets`. To compile release build for linux or MacOs use `linux-release` or `macos-release` accordingly. FreeBSD users can use `linux-release` or configure cmake manually.
+You can use cmake presets to compile contour. The full list of available presets can be seen using `cmake --list-presets`. To compile release build for linux `clang-release` or `gcc-release`, or `appleclang-release` on macOS accordingly.
 
 ```sh
-cmake --preset linux-release 
-cmake --build --preset linux-release
+cmake --preset clang-release
+cmake --build --preset clang-release
 
 # Optionally, if you want to install from source
-cmake --build --preset linux-release --target install
+cmake --build --preset clang-release --target install
 ```
 
-Please mind, if you want to install into a system root, e.g. `/usr/local`, you may need to prefix
+Please note, if you want to install into a system root, e.g. `/usr/local`, you may need to prefix
 the install command with `sudo`.
 
 Also, ensure that the terminfo file is correctly resolved, as the terminfo library

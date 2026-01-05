@@ -8,7 +8,7 @@ CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-RelWithDebInfo}"
 prepare_build_ubuntu()
 {
    cmake \
-       --preset linux-release \
+       --preset gcc-release \
        -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
       ${EXTRA_CMAKE_FLAGS}
 }

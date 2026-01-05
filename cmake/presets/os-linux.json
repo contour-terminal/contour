@@ -1,86 +1,109 @@
 {
     "version": 6,
-    "include": [ "common.json" ],
+    "include": [
+        "common.json"
+    ],
     "configurePresets": [
         {
-            "name": "linux-common",
-            "hidden": true,
-            "inherits": "contour-common",
+            "name": "gcc-debug",
+            "displayName": "GCC Debug",
+            "inherits": [
+                "contour-common",
+                "debug"
+            ],
             "generator": "Ninja",
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
                 "rhs": "Linux"
-            }
-        },
-        {
-            "name": "linux-common-release",
-            "hidden": true,
-            "inherits": "release",
-            "cacheVariables": {
-                "CMAKE_INSTALL_PREFIX": "/usr/local"
-            }
-        },
-        {
-            "name": "linux-clang",
-            "hidden": true,
-            "inherits": "linux-common",
-            "cacheVariables": {
-                "CMAKE_CXX_COMPILER": "clang++"
-            }
-        },
-        {
-            "name": "linux-gcc",
-            "hidden": true,
-            "inherits": "linux-common",
+            },
             "cacheVariables": {
                 "CMAKE_CXX_COMPILER": "g++"
             }
         },
         {
-            "name": "linux-release",
-            "displayName": "Linux 64-bit Release",
-            "inherits": ["linux-common", "linux-common-release"]
+            "name": "gcc-release",
+            "displayName": "GCC Release",
+            "inherits": [
+                "contour-common",
+                "release"
+            ],
+            "generator": "Ninja",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "cacheVariables": {
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_INSTALL_PREFIX": "/usr/local"
+            }
         },
         {
-            "name": "linux-debug",
-            "displayName": "Linux 64-bit Debug",
-            "inherits": ["linux-common", "debug"]
+            "name": "clang-debug",
+            "displayName": "Clang Debug",
+            "inherits": [
+                "contour-common",
+                "debug"
+            ],
+            "generator": "Ninja",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "cacheVariables": {
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
         },
         {
-            "name": "linux-clang-release",
-            "displayName": "Linux 64-bit (Clang) Release",
-            "inherits": ["linux-clang", "linux-common-release"]
-        },
-        {
-            "name": "linux-clang-debug",
-            "displayName": "Linux 64-bit (Clang) Debug",
-            "inherits": ["linux-clang", "debug"]
-        },
-        {
-            "name": "linux-gcc-release",
-            "displayName": "Linux 64-bit (GCC) Release",
-            "inherits": ["linux-gcc", "linux-common-release"]
-        },
-        {
-            "name": "linux-gcc-debug",
-            "displayName": "Linux 64-bit (GCC) Debug",
-            "inherits": ["linux-gcc", "debug"]
+            "name": "clang-release",
+            "displayName": "Clang Release",
+            "inherits": [
+                "contour-common",
+                "release"
+            ],
+            "generator": "Ninja",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "cacheVariables": {
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_INSTALL_PREFIX": "/usr/local"
+            }
         }
     ],
     "buildPresets": [
-        { "name": "linux-debug", "displayName": "Linux 64-bit - Debug", "configurePreset": "linux-debug" },
-        { "name": "linux-release", "displayName": "Linux 64-bit - RelWithDebInfo", "configurePreset": "linux-release" },
-        { "name": "linux-clang-debug", "displayName": "Linux 64-bit - Clang - Debug", "configurePreset": "linux-clang-debug" },
-        { "name": "linux-clang-release", "displayName": "Linux 64-bit - Clang - RelWithDebInfo", "configurePreset": "linux-clang-release" },
-        { "name": "linux-gcc-debug", "displayName": "Linux 64-bit - GCC - Debug", "configurePreset": "linux-gcc-debug" },
-        { "name": "linux-gcc-release", "displayName": "Linux 64-bit - GCC - RelWithDebInfo", "configurePreset": "linux-gcc-release" }
+        {
+            "name": "gcc-debug",
+            "displayName": "GCC - Debug",
+            "configurePreset": "gcc-debug"
+        },
+        {
+            "name": "gcc-release",
+            "displayName": "GCC - RelWithDebInfo",
+            "configurePreset": "gcc-release"
+        },
+        {
+            "name": "clang-debug",
+            "displayName": "Clang - Debug",
+            "configurePreset": "clang-debug"
+        },
+        {
+            "name": "clang-release",
+            "displayName": "Clang - RelWithDebInfo",
+            "configurePreset": "clang-release"
+        }
     ],
     "testPresets": [
         {
-            "name": "linux-clang-debug",
-            "configurePreset": "linux-clang-debug",
-            "output": {"outputOnFailure": true},
+            "name": "clang-debug",
+            "configurePreset": "clang-debug",
+            "output": {
+                "outputOnFailure": true
+            },
             "execution": {
                 "noTestsAction": "error",
                 "stopOnFailure": true
@@ -89,9 +112,12 @@
     ],
     "packagePresets": [
         {
-            "name": "linux-release",
-            "configurePreset": "linux-release",
-            "generators": [ "DEB" ]
+            "name": "gcc-release",
+            "configurePreset": "gcc-release",
+            "generators": [
+                "DEB"
+            ]
         }
     ]
 }
+

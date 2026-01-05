@@ -20,8 +20,11 @@ UpperCamelCase
 XBase
 YBase
 aea
+appleclang
 bdf
+clangcl
 copy'n'paste
+gha
 lazygit
 leiserfg
 libcairo
@@ -34,4 +37,5 @@ nushell
 openxr
 ppem
 tablegen
+vswhere
 zypper

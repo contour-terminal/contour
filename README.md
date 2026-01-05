@@ -105,14 +105,14 @@ can be insalled via the system package manager.
 
 #### Compile
 
-You can use cmake presets to compile contour. The full list of available presets can be seen using `cmake --list-presets`. To compile release build for linux or MacOs use `linux-release` or `macos-release` accordingly. FreeBSD and OpenBSD users can use `linux-release` or configure cmake manually.
+You can use cmake presets to compile contour. The full list of available presets can be seen using `cmake --list-presets`. To compile release build for linux `clang-release` or `gcc-release`, or `appleclang-release` on macOS accordingly.
 
 ```sh
-cmake --preset linux-release
-cmake --build --preset linux-release
+cmake --preset clang-release
+cmake --build --preset clang-release
 
 # Optionally, if you want to install from source
-cmake --build --preset linux-release --target install
+cmake --build --preset clang-release --target install
 ```
 
 #### Windows 10 or newer
