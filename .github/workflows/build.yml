@@ -664,13 +664,28 @@ jobs:
       - name: "Check cmake version"
         run: cmake --version
       - name: "Generate build files"
-        run: cmake --preset ${{ env.CMAKE_PRESET }}
+        shell: pwsh
+        run: |
+          $vsPath = &"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          Import-Module "$vsPath\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
+          cmake --preset ${{ env.CMAKE_PRESET }}
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
       - name: "Build"
-        run: cmake --build --preset ${{ env.CMAKE_PRESET }}
+        shell: pwsh
+        run: |
+          $vsPath = &"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          Import-Module "$vsPath\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
+          cmake --build --preset ${{ env.CMAKE_PRESET }}
       - name: "Test"
-        run: ctest --preset ${{ env.CMAKE_PRESET }} --build-config RelWithDebInfo
+        shell: pwsh
+        run: |
+          $vsPath = &"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          Import-Module "$vsPath\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
+          ctest --preset ${{ env.CMAKE_PRESET }} --build-config RelWithDebInfo
       - name: "Install Wix Toolset"
         run: |
           # Use this to list all available versions

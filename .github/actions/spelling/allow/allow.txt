@@ -37,4 +37,5 @@ nushell
 openxr
 ppem
 tablegen
+vswhere
 zypper
