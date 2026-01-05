@@ -702,14 +702,10 @@ jobs:
             type "out/build/${{ env.CMAKE_PRESET }}/_CPack_Packages/win64/WIX/wix.log"
             exit $LASTEXITCODE
           }
-      - name: inspect
-        run: Get-ChildItem -Recurse
       - name: "Rename package(s)"
         run: |
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-      - name: "Inspect again"
-        run: Get-ChildItem
       - name: "Uploading MSI to artifact store"
         uses: actions/upload-artifact@v4
         with:
