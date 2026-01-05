@@ -25,6 +25,7 @@ bdf
 clangcl
 copy'n'paste
 gha
+ilammy
 lazygit
 leiserfg
 libcairo

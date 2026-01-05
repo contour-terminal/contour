@@ -617,6 +617,7 @@ jobs:
     runs-on: windows-latest
     env:
       CMAKE_PRESET: "msvc-release"
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
     steps:
       - uses: actions/checkout@v4
       - name: Run sccache-cache
@@ -663,12 +664,10 @@ jobs:
         uses: lukka/get-cmake@v3.29.0
       - name: "Check cmake version"
         run: cmake --version
+      - uses: ilammy/msvc-dev-cmd@v1
       - name: "Generate build files"
         shell: pwsh
         run: |
-          $vsPath = &"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          Import-Module "$vsPath\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
-          Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
           cmake --preset ${{ env.CMAKE_PRESET }}
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
