@@ -617,6 +617,7 @@ jobs:
     runs-on: windows-latest
     env:
       CMAKE_PRESET: "msvc-release"
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
     steps:
       - uses: actions/checkout@v4
       - name: Run sccache-cache
@@ -663,28 +664,20 @@ jobs:
         uses: lukka/get-cmake@v3.29.0
       - name: "Check cmake version"
         run: cmake --version
+      - uses: ilammy/msvc-dev-cmd@v1
       - name: "Generate build files"
         shell: pwsh
         run: |
-          $vsPath = &"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          Import-Module "$vsPath\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
-          Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
           cmake --preset ${{ env.CMAKE_PRESET }}
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
       - name: "Build"
         shell: pwsh
         run: |
-          $vsPath = &"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          Import-Module "$vsPath\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
-          Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
           cmake --build --preset ${{ env.CMAKE_PRESET }}
       - name: "Test"
         shell: pwsh
         run: |
-          $vsPath = &"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          Import-Module "$vsPath\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
-          Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
           ctest --preset ${{ env.CMAKE_PRESET }} --build-config RelWithDebInfo
       - name: "Install Wix Toolset"
         run: |
@@ -702,14 +695,10 @@ jobs:
             type "out/build/${{ env.CMAKE_PRESET }}/_CPack_Packages/win64/WIX/wix.log"
             exit $LASTEXITCODE
           }
-      - name: inspect
-        run: Get-ChildItem -Recurse
       - name: "Rename package(s)"
         run: |
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-      - name: "Inspect again"
-        run: Get-ChildItem
       - name: "Uploading MSI to artifact store"
         uses: actions/upload-artifact@v4
         with:

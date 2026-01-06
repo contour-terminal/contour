@@ -20,7 +20,8 @@
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_SYSTEM_VERSION": "10",
                 "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-                "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF"
+                "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF",
+                "ENABLE_CCACHE": "OFF"
             }
         },
         {
