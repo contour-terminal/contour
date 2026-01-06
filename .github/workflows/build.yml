@@ -615,9 +615,12 @@ jobs:
   windows:
     name: "Windows"
     runs-on: windows-latest
+    permissions:
+      contents: read
+      packages: write
     env:
       CMAKE_PRESET: "msvc-release"
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
     steps:
       - uses: actions/checkout@v4
       - name: Run sccache-cache
@@ -639,12 +642,14 @@ jobs:
           version: "6.9.*"
           #version: "5.15.*"
           modules: qtmultimedia qt5compat qtshadertools
-      - name: "Setup vcpkg binary caching"
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: "Setup NuGet for vcpkg caching"
+        shell: bash
+        run: |
+          dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --name GitHub \
+            --username "${{ github.repository_owner }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}" \
+            --store-password-in-clear-text
       - name: "Cache vcpkg"
         uses: actions/cache@v4
         id: vcpkg-cache
@@ -658,8 +663,9 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/microsoft/vcpkg.git ${{ runner.workspace }}\vcpkg
           ${{ runner.workspace }}\vcpkg\bootstrap-vcpkg.bat
+          ${{ runner.workspace }}\vcpkg\vcpkg.exe fetch nuget
         env:
-          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+          VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
       - name: "Install cmake"
         uses: lukka/get-cmake@v3.29.0
       - name: "Check cmake version"
