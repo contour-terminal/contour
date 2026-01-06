@@ -31,7 +31,10 @@ concurrency:
 
 env:
   CTEST_OUTPUT_ON_FAILURE: 1
-  SCCACHE_GHA_ENABLED: "true"
+  # Sccache GitHub Actions cache backend - currently disabled due to service reliability
+  # See https://github.com/mozilla/sccache/blob/main/docs/GHA.md for documentation
+  SCCACHE_GHA_ENABLED: "false"
+  SCCACHE_GHA_VERSION: "20260106-1"
 
 jobs:
 
@@ -615,13 +618,45 @@ jobs:
   windows:
     name: "Windows"
     runs-on: windows-latest
+    permissions:
+      contents: read
+      packages: write
     env:
       CMAKE_PRESET: "msvc-release"
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
     steps:
       - uses: actions/checkout@v4
       - name: Run sccache-cache
+        if: env.SCCACHE_GHA_ENABLED == 'true'
         uses: mozilla-actions/sccache-action@v0.0.3
+        continue-on-error: true
+        id: sccache
+      - name: "Verify sccache is operational"
+        if: env.SCCACHE_GHA_ENABLED == 'true'
+        id: verify_sccache
+        shell: pwsh
+        run: |
+          # If GHA cache is disabled, force local disk cache
+          # Otherwise, allow the sccache-action's default configuration
+          if ($env:SCCACHE_GHA_ENABLED -eq "false") {
+            Write-Host "GHA cache disabled, forcing local disk cache"
+            echo "SCCACHE_GHA_ENABLED=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "SCCACHE_DIR=$env:LOCALAPPDATA\Mozilla\sccache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $env:SCCACHE_GHA_ENABLED = ""
+            $env:SCCACHE_DIR = "$env:LOCALAPPDATA\Mozilla\sccache"
+          }
+
+          # Quick test to ensure sccache is working
+          sccache --show-stats
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Sccache is operational"
+            echo "sccache_enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            Write-Host "::warning::Sccache failed, disabling compile caching"
+            echo "sccache_enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            echo "CMAKE_C_COMPILER_LAUNCHER=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
       - name: setup environment
         shell: powershell
         id: set_vars
@@ -639,12 +674,14 @@ jobs:
           version: "6.9.*"
           #version: "5.15.*"
           modules: qtmultimedia qt5compat qtshadertools
-      - name: "Setup vcpkg binary caching"
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: "Setup NuGet for vcpkg caching"
+        shell: bash
+        run: |
+          dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --name GitHub \
+            --username "${{ github.repository_owner }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}" \
+            --store-password-in-clear-text
       - name: "Cache vcpkg"
         uses: actions/cache@v4
         id: vcpkg-cache
@@ -653,13 +690,24 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-
+      - name: "Upgrade NuGet"
+        run: |
+          choco upgrade nuget.commandline -y
       - name: "vcpkg: Clone and bootstrap"
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/microsoft/vcpkg.git ${{ runner.workspace }}\vcpkg
           ${{ runner.workspace }}\vcpkg\bootstrap-vcpkg.bat
+          ${{ runner.workspace }}\vcpkg\vcpkg.exe fetch nuget
         env:
-          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+          VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
+      - name: "vcpkg: Install dependencies"
+        shell: pwsh
+        run: |
+          ${{ runner.workspace }}\vcpkg\vcpkg.exe install --triplet x64-windows
+        env:
+          VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
+          VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
       - name: "Install cmake"
         uses: lukka/get-cmake@v3.29.0
       - name: "Check cmake version"
@@ -675,6 +723,11 @@ jobs:
         shell: pwsh
         run: |
           cmake --build --preset ${{ env.CMAKE_PRESET }}
+      - name: "Show sccache statistics"
+        if: steps.verify_sccache.outputs.sccache_enabled == 'true'
+        shell: pwsh
+        run: |
+          sccache --show-stats
       - name: "Test"
         shell: pwsh
         run: |
