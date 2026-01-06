@@ -658,6 +658,9 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-
+      - name: "Upgrade NuGet"
+        run: |
+          choco upgrade nuget.commandline -y
       - name: "vcpkg: Clone and bootstrap"
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         run: |
@@ -665,6 +668,13 @@ jobs:
           ${{ runner.workspace }}\vcpkg\bootstrap-vcpkg.bat
           ${{ runner.workspace }}\vcpkg\vcpkg.exe fetch nuget
         env:
+          VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
+      - name: "vcpkg: Install dependencies"
+        shell: pwsh
+        run: |
+          ${{ runner.workspace }}\vcpkg\vcpkg.exe install --triplet x64-windows
+        env:
+          VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
           VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
       - name: "Install cmake"
         uses: lukka/get-cmake@v3.29.0
