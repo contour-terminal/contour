@@ -1004,6 +1004,9 @@ jobs:
         run: |
           sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
           sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
+      - name: "Verify installation"
+        run: |
+          contour version
   # }}}
   # {{{ Ubuntu 24.04: test via valgrind
   test_ubuntu2404_valgrind:
