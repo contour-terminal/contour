@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     g++ libc6-dev make ninja-build git zlib1g-dev libx11-xcb-dev \
     build-essential pkg-config libxcb-render-util0-dev libfontconfig1-dev \
     libxcb-*-dev libglib2.0-dev libgl1-mesa-dev libxkbcommon-x11-dev \
-    libdouble-conversion-dev libb2-dev libharfbuzz-dev
+    libdouble-conversion-dev libb2-dev libharfbuzz-dev libcairo2-dev
 
 WORKDIR /
 COPY . /contour
