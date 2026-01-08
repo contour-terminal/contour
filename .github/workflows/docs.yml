@@ -37,7 +37,7 @@ jobs:
       - name: "create build directory"
         run: mkdir build
       - name: "Install-contour"
-        run: cmake --preset gcc-debug -B build -G Ninja
+        run: cmake --preset gcc-debug -B build -G Ninja -D CONTOUR_WAYLAND=OFF
       - name: "build"
         run: cmake --build build
       - name: "create vt-sequence directory"
