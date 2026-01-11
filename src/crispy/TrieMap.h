@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <variant>
