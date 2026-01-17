@@ -3,6 +3,8 @@
 #include <vtbackend/Line.h>
 #include <vtbackend/primitives.h>
 
+#include <crispy/logstore.h>
+
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/utf8.h>
 #include <libunicode/width.h>
@@ -158,6 +160,13 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 {
     static constexpr char32_t ReplacementCharacter { 0xFFFD };
 
+    // Handle invalid displayWidth - return minimal valid buffer
+    if (unbox(input.displayWidth) <= 0)
+    {
+        errorLog()("inflate: Invalid displayWidth {}. Returning empty buffer.", input.displayWidth);
+        return InflatedLineBuffer<Cell> {};
+    }
+
     auto columns = InflatedLineBuffer<Cell> {};
     columns.reserve(unbox<size_t>(input.displayWidth));
 
@@ -212,9 +221,30 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
         --gapPending;
     }
 
-    assert(columns.size() == unbox<size_t>(input.usedColumns));
-    assert(unbox(input.displayWidth) > 0);
+    // Handle mismatch between actual columns and expected usedColumns:
+    // - If we have fewer columns than expected, pad with empty cells using textAttributes
+    // - If we have more columns than expected, truncate to displayWidth
+    if (columns.size() < unbox<size_t>(input.usedColumns))
+    {
+        errorLog()(
+            "inflate: Column count mismatch. Expected {} columns but got {}. Padding with empty cells.",
+            input.usedColumns,
+            columns.size());
+        while (columns.size() < unbox<size_t>(input.usedColumns)
+               && columns.size() < unbox<size_t>(input.displayWidth))
+        {
+            columns.emplace_back(Cell { input.textAttributes });
+        }
+    }
+    else if (columns.size() > unbox<size_t>(input.displayWidth))
+    {
+        errorLog()("inflate: Column count {} exceeds displayWidth {}. Truncating.",
+                   columns.size(),
+                   input.displayWidth);
+        columns.resize(unbox<size_t>(input.displayWidth));
+    }
 
+    // Fill remaining columns up to displayWidth with fill attributes
     while (columns.size() < unbox<size_t>(input.displayWidth))
         columns.emplace_back(Cell { input.fillAttributes });
 

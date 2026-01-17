@@ -83,7 +83,8 @@ namespace
         for (auto const& mapping: FontWeightMappings)
             if (mapping.first == weight)
                 return mapping.second;
-        crispy::fatal("Implementation error. font weight cannot be mapped.");
+        crispy::fatalLog()("Implementation error. font weight cannot be mapped.");
+        return FC_WEIGHT_NORMAL;
     }
 
     constexpr int fcSlant(font_slant slant) noexcept

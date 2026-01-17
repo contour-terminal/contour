@@ -46,6 +46,18 @@ using fail_handler_t = std::function<void(std::string_view, std::string_view, st
 
 #endif
 
+/// This method prints an error message and then terminates the program.
+[[noreturn]] inline void todo(std::string_view message = {})
+{
+    std::cerr << std::format("TODO: We have reached some code that is missing an implementation.\n");
+    if (!message.empty())
+        std::cerr << std::format("{}\n", message);
+    std::abort();
+}
+
+auto const inline fatalLog =
+    logstore::category("fatal", "Fatal error Logger", logstore::category::state::Enabled);
+
 namespace detail
 {
     inline fail_handler_t& fail_handler() noexcept
@@ -54,22 +66,21 @@ namespace detail
         return storage;
     }
 
-    [[noreturn]] inline void fail(std::string_view text,
-                                  std::string_view message,
-                                  std::string_view file,
-                                  int line) noexcept
+    inline void fail(std::string_view text,
+                     std::string_view message,
+                     std::string_view file,
+                     int line) noexcept
     {
         try
         {
             if (fail_handler())
                 fail_handler()(text, message, file, line);
             else
-                std::cerr << std::format("[{}:{}] {} {}\n", file, line, message, text);
+                fatalLog()(std::format("[{}:{}] {} {}\n", file, line, message, text));
         }
         catch (...) // NOLINT(bugprone-empty-catch)
         {
         }
-        std::abort();
     }
 } // namespace detail
 
@@ -80,28 +91,6 @@ namespace detail
 inline void set_fail_handler(fail_handler_t handler)
 {
     detail::fail_handler() = std::move(handler);
-}
-
-/// This method prints an error message and then terminates the program.
-[[noreturn]] inline void todo(std::string_view message = {})
-{
-    std::cerr << std::format("TODO: We have reached some code that is missing an implementation.\n");
-    if (!message.empty())
-        std::cerr << std::format("{}\n", message);
-    std::abort();
-}
-
-[[noreturn]] inline void fatal(std::string_view message,
-                               logstore::source_location location = logstore::source_location::current())
-{
-    auto static fatalLog =
-        logstore::category("fatal", "Fatal error Logger", logstore::category::state::Enabled);
-
-    if (!message.empty())
-        fatalLog(location)("Fatal error. {}", message);
-    else
-        fatalLog(location)("Fatal error.");
-    std::abort();
 }
 
 #define Require(cond)                                                                \
