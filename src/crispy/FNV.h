@@ -46,12 +46,13 @@ class fnv
     /// The value is treated as a sequence of bytes and hashed byte-wise.
     /// This overload explicitly excludes std::string and std::string_view,
     /// which are handled by dedicated overloads.
-    template <typename V,
-              typename = std::enable_if_t<
-                  std::is_trivially_copyable_v<V> &&
-                  !std::is_same_v<V, std::string> &&
-                  !std::is_same_v<V, std::string_view>>>
+    template <typename V>
     constexpr U operator()(U memory, V const& value) const noexcept
+    requires(
+        std::is_trivially_copyable_v<V> &&
+        !std::same_as<V, std::string> &&
+        !std::same_as<V, std::string_view>
+    )
     {
         auto const* bytes =
             reinterpret_cast<unsigned char const*>(&value);
@@ -64,11 +65,11 @@ class fnv
     ///
     /// Each character in @p str is hashed sequentially before applying
     /// the remaining values in @p moreValues.
-    template <typename Dummy = T, typename... V,
-              typename = std::enable_if_t<std::is_same_v<Dummy, char>>>
+    template <typename... V>
     constexpr U operator()(U memory,
                            std::string_view str,
                            V... moreValues) const noexcept
+    requires(std::same_as<T, char>)
     {
         for (auto const ch: str)
             memory = (*this)(memory, ch);
@@ -79,9 +80,8 @@ class fnv
     /// Builds the FNV hash for a string view (char only).
     ///
     /// Hashes all characters in @p str starting from the given memory value.
-    template <typename Dummy = T,
-              typename = std::enable_if_t<std::is_same_v<Dummy, char>>>
     constexpr U operator()(U memory, std::string_view str) const noexcept
+    requires(std::same_as<T, char>)
     {
         for (auto const ch: str)
             memory = (*this)(memory, ch);
@@ -104,9 +104,8 @@ class fnv
     /// Builds the FNV hash for a std::string (char only).
     ///
     /// Hashes the string's character data sequentially.
-    template <typename Dummy = T,
-              typename = std::enable_if_t<std::is_same_v<Dummy, char>>>
     constexpr U operator()(std::string const& str) const noexcept
+    requires(std::same_as<T, char>)
     {
         return (*this)(str.data(), str.data() + str.size());
     }
