@@ -59,7 +59,7 @@ class ContourGuiApp: public QObject, public ContourApp
         if (const auto* const profile = config().profile(profileName()))
             return *profile;
         displayLog()("Failed to access config profile.");
-        Require(false);
+        std::abort();
     }
 
     [[nodiscard]] bool liveConfig() const noexcept { return _config.live.value(); }
