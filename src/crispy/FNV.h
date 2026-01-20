@@ -41,8 +41,29 @@ class fnv
         return (*this)((*this)(memory, value), moreValues...);
     }
 
+    /// Incrementally hashes a trivially copyable value.
+    ///
+    /// The value is treated as a sequence of bytes and hashed byte-wise.
+    /// This overload explicitly excludes std::string and std::string_view,
+    /// which are handled by dedicated overloads.
+    template <typename V>
+    constexpr U operator()(U memory, V const& value) const noexcept
+        requires(std::is_trivially_copyable_v<V> && !std::same_as<V, std::string>
+                 && !std::same_as<V, std::string_view>)
+    {
+        auto const* bytes = reinterpret_cast<unsigned char const*>(&value);
+        for (std::size_t i = 0; i < sizeof(V); ++i)
+            memory = (*this)(memory, bytes[i]);
+        return memory;
+    }
+
+    /// Incrementally hashes a string view and additional values (char only).
+    ///
+    /// Each character in @p str is hashed sequentially before applying
+    /// the remaining values in @p moreValues.
     template <typename... V>
-    constexpr U operator()(U memory, std::basic_string_view<T> str, V... moreValues) const noexcept
+    constexpr U operator()(U memory, std::string_view str, V... moreValues) const noexcept
+        requires(std::same_as<T, char>)
     {
         for (auto const ch: str)
             memory = (*this)(memory, ch);
@@ -50,7 +71,11 @@ class fnv
     }
 
     /// Builds the FNV hash between [_begin, _end)
-    constexpr U operator()(U memory, std::basic_string_view<T> str) const noexcept
+    /// Builds the FNV hash for a string view (char only).
+    ///
+    /// Hashes all characters in @p str starting from the given memory value.
+    constexpr U operator()(U memory, std::string_view str) const noexcept
+        requires(std::same_as<T, char>)
     {
         for (auto const ch: str)
             memory = (*this)(memory, ch);
@@ -70,7 +95,11 @@ class fnv
     constexpr U operator()(T const* data, size_t len) const noexcept { return (*this)(data, data + len); }
 
     /// Builds the FNV hash between [_begin, _begin + len)
-    constexpr U operator()(std::basic_string<T> const& str) const noexcept
+    /// Builds the FNV hash for a std::string (char only).
+    ///
+    /// Hashes the string's character data sequentially.
+    constexpr U operator()(std::string const& str) const noexcept
+        requires(std::same_as<T, char>)
     {
         return (*this)(str.data(), str.data() + str.size());
     }
