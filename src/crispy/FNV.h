@@ -48,14 +48,10 @@ class fnv
     /// which are handled by dedicated overloads.
     template <typename V>
     constexpr U operator()(U memory, V const& value) const noexcept
-    requires(
-        std::is_trivially_copyable_v<V> &&
-        !std::same_as<V, std::string> &&
-        !std::same_as<V, std::string_view>
-    )
+        requires(std::is_trivially_copyable_v<V> && !std::same_as<V, std::string>
+                 && !std::same_as<V, std::string_view>)
     {
-        auto const* bytes =
-            reinterpret_cast<unsigned char const*>(&value);
+        auto const* bytes = reinterpret_cast<unsigned char const*>(&value);
         for (std::size_t i = 0; i < sizeof(V); ++i)
             memory = (*this)(memory, bytes[i]);
         return memory;
@@ -66,10 +62,8 @@ class fnv
     /// Each character in @p str is hashed sequentially before applying
     /// the remaining values in @p moreValues.
     template <typename... V>
-    constexpr U operator()(U memory,
-                           std::string_view str,
-                           V... moreValues) const noexcept
-    requires(std::same_as<T, char>)
+    constexpr U operator()(U memory, std::string_view str, V... moreValues) const noexcept
+        requires(std::same_as<T, char>)
     {
         for (auto const ch: str)
             memory = (*this)(memory, ch);
@@ -81,7 +75,7 @@ class fnv
     ///
     /// Hashes all characters in @p str starting from the given memory value.
     constexpr U operator()(U memory, std::string_view str) const noexcept
-    requires(std::same_as<T, char>)
+        requires(std::same_as<T, char>)
     {
         for (auto const ch: str)
             memory = (*this)(memory, ch);
@@ -105,7 +99,7 @@ class fnv
     ///
     /// Hashes the string's character data sequentially.
     constexpr U operator()(std::string const& str) const noexcept
-    requires(std::same_as<T, char>)
+        requires(std::same_as<T, char>)
     {
         return (*this)(str.data(), str.data() + str.size());
     }
