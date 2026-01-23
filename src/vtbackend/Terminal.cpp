@@ -199,7 +199,7 @@ void Terminal::setLastMarkRangeOffset(LineOffset value) noexcept
     _settings.copyLastMarkRangeOffset = value;
 }
 
-std::optional<vtpty::Pty::ReadResult> Terminal::readFromPty()
+std::optional<Terminal::PtyReadResult> Terminal::readFromPty()
 {
     auto const timeout =
 #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
@@ -220,7 +220,16 @@ std::optional<vtpty::Pty::ReadResult> Terminal::readFromPty()
         _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
     }
 
-    return _pty->read(*_currentPtyBuffer, timeout, _ptyReadBufferSize);
+    // Capture the buffer pointer BEFORE the read call. This is critical to avoid
+    // a race condition where another thread could change _currentPtyBuffer during
+    // or after the read operation.
+    auto const bufferUsedForReading = _currentPtyBuffer;
+
+    auto result = _pty->read(*bufferUsedForReading, timeout, _ptyReadBufferSize);
+    if (!result)
+        return std::nullopt;
+
+    return PtyReadResult { .readResult = *result, .buffer = bufferUsedForReading };
 }
 
 void Terminal::setExecutionMode(ExecutionMode mode)
@@ -265,9 +274,9 @@ bool Terminal::processInputOnce()
     }
     // clang-format on
 
-    auto const readResult = readFromPty();
+    auto const ptyReadResult = readFromPty();
 
-    if (!readResult)
+    if (!ptyReadResult)
     {
         terminalLog()("PTY read failed. {}", strerror(errno));
         if (errno == EINTR || errno == EAGAIN)
@@ -276,8 +285,9 @@ bool Terminal::processInputOnce()
         _pty->close();
         return false;
     }
-    string_view const buf = readResult->data;
-    _usingStdoutFastPipe = readResult->fromStdoutFastPipe;
+
+    string_view const buf = ptyReadResult->readResult.data;
+    _usingStdoutFastPipe = ptyReadResult->readResult.fromStdoutFastPipe;
 
     if (buf.empty())
     {
@@ -288,7 +298,13 @@ bool Terminal::processInputOnce()
 
     {
         auto const _ = std::lock_guard { *this };
+        // Use the buffer that readFromPty() actually read into, not _currentPtyBuffer
+        // which might have been changed by another thread (e.g., writeToScreen()).
+        // This is critical to ensure buffer_fragment in TrivialLineBuffer holds
+        // the correct buffer reference.
+        _parsingBuffer = ptyReadResult->buffer;
         _parser.parseFragment(buf);
+        _parsingBuffer.reset();
     }
 
     if (!_modes.enabled(DECMode::BatchedRendering))
@@ -1044,7 +1060,10 @@ void Terminal::writeToScreen(string_view vtStream)
             auto const chunk =
                 vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
             vtStream.remove_prefix(chunk.size());
+            // Set parsingBuffer to ensure buffer_fragment holds the correct buffer reference.
+            _parsingBuffer = _currentPtyBuffer;
             _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
+            _parsingBuffer.reset();
         }
     }
 

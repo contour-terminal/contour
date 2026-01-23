@@ -107,7 +107,8 @@
     <release version="0.6.3" urgency="medium" type="development">
       <description>
         <ul>
-          <li> ... </li>
+          <li>Fixes text rendering artifacts and corruption when rapidly outputting content</li>
+          <li>Fixes garbled or missing characters when displaying Unicode text</li>
         </ul>
       </description>
     </release>

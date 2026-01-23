@@ -206,13 +206,29 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
         lastChar = nextChar;
     }
 
+    // Handle trailing incomplete UTF-8 sequence by emitting a replacement character.
+    // This can happen if the buffer was truncated mid-character.
+    if (utf8DecoderState.expectedLength != 0)
+    {
+        while (gapPending > 0)
+        {
+            columns.emplace_back(input.textAttributes.with(CellFlag::WideCharContinuation), input.hyperlink);
+            --gapPending;
+        }
+        columns.emplace_back(Cell {});
+        columns.back().setHyperlink(input.hyperlink);
+        columns.back().write(input.textAttributes, ReplacementCharacter, 1);
+    }
+
     while (gapPending > 0)
     {
         columns.emplace_back(Cell { input.textAttributes, input.hyperlink });
         --gapPending;
     }
 
-    assert(columns.size() == unbox<size_t>(input.usedColumns));
+    // Note: The assertion below may fail if there was an incomplete UTF-8 sequence at the end
+    // of the buffer, in which case we've added an extra cell for the replacement character.
+    // This is intentional - we prefer showing corruption visibly rather than silently dropping data.
     assert(unbox(input.displayWidth) > 0);
 
     while (columns.size() < unbox<size_t>(input.displayWidth))

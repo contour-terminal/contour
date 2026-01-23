@@ -857,6 +857,14 @@ class Terminal
         return _currentPtyBuffer;
     }
 
+    /// Returns the buffer currently being parsed by parseFragment().
+    /// This is used to ensure buffer_fragment holds the correct buffer reference
+    /// when creating TrivialLineBuffer entries during parsing.
+    [[nodiscard]] crispy::buffer_object_ptr<char> parsingBuffer() const noexcept
+    {
+        return _parsingBuffer ? _parsingBuffer : _currentPtyBuffer;
+    }
+
     [[nodiscard]] vtbackend::SelectionHelper& selectionHelper() noexcept { return _selectionHelper; }
 
     [[nodiscard]] Selection::OnSelectionUpdated selectionUpdatedHelper()
@@ -1050,7 +1058,12 @@ class Terminal
     }
 
     // Reads from PTY.
-    [[nodiscard]] std::optional<vtpty::Pty::ReadResult> readFromPty();
+    struct PtyReadResult
+    {
+        vtpty::Pty::ReadResult readResult;
+        crispy::buffer_object_ptr<char> buffer; // The buffer that was read into
+    };
+    [[nodiscard]] std::optional<PtyReadResult> readFromPty();
 
     // Writes partially or all input data to the PTY buffer object and returns a string view to it.
     [[nodiscard]] std::string_view lockedWriteToPtyBuffer(std::string_view data);
@@ -1073,6 +1086,8 @@ class Terminal
     // {{{ PTY and PTY read buffer management
     crispy::buffer_object_pool<char> _ptyBufferPool;
     crispy::buffer_object_ptr<char> _currentPtyBuffer;
+    crispy::buffer_object_ptr<char>
+        _parsingBuffer; // Buffer currently being parsed (set during parseFragment)
     size_t _ptyReadBufferSize;
     std::unique_ptr<vtpty::Pty> _pty;
     // }}}

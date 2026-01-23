@@ -235,3 +235,76 @@ TEST_CASE("Line.inflate.Unicode.FamilyEmoji", "[Line]")
     REQUIRE(cell.backgroundColor() == fillSGR.backgroundColor);
     REQUIRE(cell.underlineColor() == fillSGR.underlineColor);
 }
+
+TEST_CASE("Line.inflate.IncompleteUtf8", "[Line]")
+{
+    // Test that incomplete UTF-8 sequences at the end of a TrivialLineBuffer
+    // are handled gracefully by emitting a replacement character (U+FFFD).
+    // This can happen when PTY data is split mid-character.
+
+    // Create a buffer with "ABC" followed by the first 2 bytes of a 3-byte UTF-8 sequence.
+    // The box-drawing character "│" (U+2502) is encoded as E2 94 82 in UTF-8.
+    // We'll include only E2 94 (incomplete).
+    auto pool = buffer_object_pool<char>(32);
+    auto bufferObject = pool.allocateBufferObject();
+
+    // "ABC" + first 2 bytes of box-drawing character (incomplete UTF-8)
+    auto const incompleteText = "ABC\xE2\x94"sv;
+    bufferObject->writeAtEnd(incompleteText);
+    auto const bufferFragment = bufferObject->ref(0, incompleteText.size());
+
+    auto sgr = GraphicsAttributes {};
+    // usedColumns = 4 because we expect: A, B, C, and replacement char for incomplete UTF-8
+    auto const trivial = TrivialLineBuffer { .displayWidth = ColumnCount(10),
+                                             .textAttributes = sgr,
+                                             .fillAttributes = sgr,
+                                             .hyperlink = HyperlinkId {},
+                                             .usedColumns = ColumnCount(4),
+                                             .text = bufferFragment };
+
+    auto const inflated = inflate<Cell>(trivial);
+
+    // Should have 10 cells (displayWidth)
+    CHECK(inflated.size() == 10);
+
+    // First 3 cells should be A, B, C
+    CHECK(inflated[0].codepoint(0) == U'A');
+    CHECK(inflated[1].codepoint(0) == U'B');
+    CHECK(inflated[2].codepoint(0) == U'C');
+
+    // Fourth cell should be the replacement character (U+FFFD) for the incomplete UTF-8
+    CHECK(inflated[3].codepoint(0) == U'\uFFFD');
+
+    // Remaining cells should be empty (fill)
+    for (size_t i = 4; i < 10; ++i)
+    {
+        INFO(std::format("cell {} should be empty", i));
+        CHECK(inflated[i].codepointCount() == 0);
+    }
+}
+
+TEST_CASE("Line.inflate.IncompleteUtf8.SingleByte", "[Line]")
+{
+    // Test with just the first byte of a multi-byte UTF-8 sequence.
+    auto pool = buffer_object_pool<char>(32);
+    auto bufferObject = pool.allocateBufferObject();
+
+    // "X" + first byte of a 3-byte UTF-8 sequence (E2 starts U+2000-U+2FFF range)
+    auto const incompleteText = "X\xE2"sv;
+    bufferObject->writeAtEnd(incompleteText);
+    auto const bufferFragment = bufferObject->ref(0, incompleteText.size());
+
+    auto sgr = GraphicsAttributes {};
+    auto const trivial = TrivialLineBuffer { .displayWidth = ColumnCount(5),
+                                             .textAttributes = sgr,
+                                             .fillAttributes = sgr,
+                                             .hyperlink = HyperlinkId {},
+                                             .usedColumns = ColumnCount(2),
+                                             .text = bufferFragment };
+
+    auto const inflated = inflate<Cell>(trivial);
+
+    CHECK(inflated.size() == 5);
+    CHECK(inflated[0].codepoint(0) == U'X');
+    CHECK(inflated[1].codepoint(0) == U'\uFFFD'); // Replacement char for incomplete sequence
+}

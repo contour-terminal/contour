@@ -432,6 +432,13 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     if (_state != State::Ground)
         return { ProcessKind::FallbackToFSM, 0 };
 
+    // If we have pending incomplete UTF-8 from a previous parse call, fall back to FSM.
+    // This is necessary because unicode::scan_text assumes contiguous memory when
+    // continuing an incomplete sequence, but parse calls can span different buffers.
+    // The FSM's printUtf8Byte function correctly handles cross-buffer UTF-8 sequences.
+    if (_scanState.utf8.expectedLength != 0)
+        return { ProcessKind::FallbackToFSM, 0 };
+
     auto const maxCharCount = _eventListener.maxBulkTextSequenceWidth();
     if (!maxCharCount)
         return { ProcessKind::FallbackToFSM, 0 };
@@ -456,16 +463,22 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     assert(_scanState.next <= chunk.data() + chunk.size());
 
     auto const text = std::string_view { subStart, byteCount };
+
+    // Always print the complete text portion (subStart to subEnd), even if there's
+    // incomplete UTF-8 at the end. The incomplete bytes are between subEnd and
+    // _scanState.next and will be completed on the next parse call.
+    // BUG FIX: Previously, when utf8.expectedLength != 0, the entire text was
+    // skipped but bytes were still consumed, causing text corruption.
+    if (!text.empty())
+        _eventListener.print(text, cellCount);
+
     if (_scanState.utf8.expectedLength == 0)
     {
-        if (!text.empty())
-            _eventListener.print(text, cellCount);
-
         // This optimization is for the `cat`-people.
         // It further optimizes the throughput performance by bypassing
         // the FSM for the `(TEXT LF+)+`-case.
         //
-        // As of bench-headless, the performance incrrease is about 50x.
+        // As of bench-headless, the performance increase is about 50x.
         if (input != end && *input == '\n')
             _eventListener.execute(*input++);
     }

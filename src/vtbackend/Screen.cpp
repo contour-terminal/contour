@@ -389,7 +389,7 @@ string_view Screen<Cell>::tryEmplaceChars(string_view chars, size_t cellCount) n
         if (currentLine().empty())
         {
             auto const numberOfBytesEmplaced = emplaceCharsIntoCurrentLine(chars, cellCount);
-            _terminal->currentPtyBuffer()->advanceHotEndUntil(chars.data() + numberOfBytesEmplaced);
+            _terminal->parsingBuffer()->advanceHotEndUntil(chars.data() + numberOfBytesEmplaced);
             chars.remove_prefix(numberOfBytesEmplaced);
             assert(chars.empty());
         }
@@ -404,7 +404,7 @@ string_view Screen<Cell>::tryEmplaceChars(string_view chars, size_t cellCount) n
         lineBuffer.text.growBy(chars.size());
         lineBuffer.usedColumns += ColumnCount::cast_from(cellCount);
         advanceCursorAfterWrite(ColumnCount::cast_from(cellCount));
-        _terminal->currentPtyBuffer()->advanceHotEndUntil(chars.data() + chars.size());
+        _terminal->parsingBuffer()->advanceHotEndUntil(chars.data() + chars.size());
         chars.remove_prefix(chars.size());
         return chars;
     }
@@ -424,13 +424,21 @@ size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view chars, size_t cellC
     {
         // Only use fastpath if the currently line hasn't been inflated already.
         // Because we might lose prior-written textual/SGR information otherwise.
-        line.setBuffer(
-            TrivialLineBuffer { line.trivialBuffer().displayWidth,
-                                _cursor.graphicsRendition,
-                                line.trivialBuffer().fillAttributes,
-                                _cursor.hyperlink,
-                                ColumnCount::cast_from(cellCount),
-                                crispy::buffer_fragment { _terminal->currentPtyBuffer(), chars } });
+#if !defined(NDEBUG)
+        // Verify buffer_fragment will reference the correct buffer.
+        // This assertion catches race conditions where _currentPtyBuffer was changed
+        // by another thread between readFromPty() and this point.
+        auto const parsingBuf = _terminal->parsingBuffer();
+        assert(parsingBuf && "parsingBuffer must be set during parsing");
+        assert(parsingBuf->begin() <= chars.data() && chars.data() + chars.size() <= parsingBuf->end()
+               && "chars must be within parsingBuffer");
+#endif
+        line.setBuffer(TrivialLineBuffer { line.trivialBuffer().displayWidth,
+                                           _cursor.graphicsRendition,
+                                           line.trivialBuffer().fillAttributes,
+                                           _cursor.hyperlink,
+                                           ColumnCount::cast_from(cellCount),
+                                           crispy::buffer_fragment { _terminal->parsingBuffer(), chars } });
         advanceCursorAfterWrite(ColumnCount::cast_from(cellCount));
     }
     else
@@ -443,6 +451,41 @@ size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view chars, size_t cellC
         }
     }
     return chars.size();
+}
+
+template <CellConcept Cell>
+bool Screen<Cell>::isContiguousToCurrentLine(std::string_view continuationChars) const noexcept
+{
+#if defined(_MSC_VER)
+    return false;
+#else
+    // MSVC does not like comparison of this iterator, most likely bug on msvc side since they are of the same
+    // type can be checked with std::equality_comparable_with<std::string_view::iterator,
+    // decltype(line.trivialBuffer().text.view())::iterator>
+    auto const& line = currentLine();
+    if (!line.isTrivialBuffer())
+        return false;
+
+    auto const& lineBuffer = line.trivialBuffer();
+
+    // Check 1: Memory addresses must be contiguous
+    if (lineBuffer.text.view().end() != continuationChars.begin())
+        return false;
+
+    // Check 2: The continuation chars must be from the SAME buffer object as the line's existing text.
+    // This is critical to prevent corruption when growBy() extends the span - we must ensure
+    // the extended region is actually within the same buffer.
+    auto const parsingBuf = _terminal->parsingBuffer();
+    if (!parsingBuf || lineBuffer.text.owner() != parsingBuf)
+        return false;
+
+    // Check 3: Verify the continuation would stay within the buffer bounds
+    auto const* newEndPtr = continuationChars.data() + continuationChars.size();
+    if (newEndPtr > parsingBuf->end())
+        return false;
+
+    return true;
+#endif
 }
 
 template <CellConcept Cell>

@@ -537,4 +537,85 @@ TEST_CASE("Terminal.TextSelection_wrapped_line", "[terminal]")
     CHECK(mock.terminal.extractSelectionText().empty());
 }
 
+TEST_CASE("Terminal.ParsingBuffer", "[terminal]")
+{
+    // Test that parsingBuffer() returns the correct buffer during parsing.
+    // When _parsingBuffer is not set, it should fall back to currentPtyBuffer().
+
+    auto mock = MockTerm { ColumnCount { 10 }, LineCount { 3 } };
+    auto& terminal = mock.terminal;
+
+    // Initially, parsingBuffer() should return currentPtyBuffer() since _parsingBuffer is not set
+    CHECK(terminal.parsingBuffer() == terminal.currentPtyBuffer());
+
+    // Write some text - this will exercise the parsing path
+    mock.writeToScreen("Hello");
+
+    // After parsing completes, parsingBuffer() should still return currentPtyBuffer()
+    // because _parsingBuffer is reset after each parse
+    CHECK(terminal.parsingBuffer() == terminal.currentPtyBuffer());
+}
+
+TEST_CASE("Terminal.TrivialLineBufferIntegrity", "[terminal]")
+{
+    // Test that TrivialLineBuffer correctly stores text when written through terminal.
+    // This tests the fast path where text is stored directly in a buffer_fragment.
+
+    auto mock = MockTerm { ColumnCount { 20 }, LineCount { 3 } };
+    auto& terminal = mock.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    // Write a simple ASCII string that should use the TrivialLineBuffer fast path
+    mock.writeToScreen("ABCDEFGHIJ");
+
+    terminal.tick(ClockBase + chrono::seconds(1));
+    terminal.ensureFreshRenderBuffer();
+
+    // Verify the text was stored correctly
+    auto const& line = terminal.primaryScreen().currentLine();
+
+    // The line should be in trivial buffer form for simple ASCII text
+    if (line.isTrivialBuffer())
+    {
+        auto const& trivialBuffer = line.trivialBuffer();
+        CHECK(trivialBuffer.text.view() == "ABCDEFGHIJ");
+        CHECK(trivialBuffer.usedColumns == ColumnCount(10));
+    }
+    else
+    {
+        // If not trivial, verify via inflated content
+        CHECK(line.toUtf8().substr(0, 10) == "ABCDEFGHIJ");
+    }
+}
+
+TEST_CASE("Terminal.BoxDrawingCharacters", "[terminal]")
+{
+    // Test that box-drawing characters (3-byte UTF-8) are handled correctly.
+    // This is a regression test for the corruption seen in `tree /` output.
+
+    auto mock = MockTerm { ColumnCount { 20 }, LineCount { 5 } };
+    auto& terminal = mock.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    // Write a line with box-drawing characters similar to tree output
+    // "│── file" using box drawing chars
+    mock.writeToScreen("\xE2\x94\x82\xE2\x94\x80\xE2\x94\x80 file\r\n");
+    mock.writeToScreen("\xE2\x94\x9C\xE2\x94\x80\xE2\x94\x80 dir\r\n");
+
+    terminal.tick(ClockBase + chrono::seconds(1));
+    terminal.ensureFreshRenderBuffer();
+
+    // Verify the text contains the expected content
+    auto const line0 = terminal.primaryScreen().grid().lineAt(LineOffset(0)).toUtf8();
+    auto const line1 = terminal.primaryScreen().grid().lineAt(LineOffset(1)).toUtf8();
+
+    // Check that box-drawing characters are present (not corrupted to replacement chars)
+    CHECK(line0.find("\xE2\x94\x82") != std::string::npos); // │
+    CHECK(line1.find("\xE2\x94\x9C") != std::string::npos); // ├
+    CHECK(line0.find("file") != std::string::npos);
+    CHECK(line1.find("dir") != std::string::npos);
+}
+
 // NOLINTEND(misc-const-correctness)
