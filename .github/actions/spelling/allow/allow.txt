@@ -24,6 +24,7 @@ appleclang
 bdf
 clangcl
 copy'n'paste
+copyable
 gha
 ilammy
 lazygit
