@@ -35,12 +35,14 @@
 #include <atomic>
 #include <bitset>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <deque>
 #include <format>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <numbers>
 #include <stack>
 #include <string_view>
 #include <utility>
@@ -735,8 +737,11 @@ class Terminal
     }
 
     bool isHighlighted(CellLocation cell) const noexcept;
-    bool blinkState() const noexcept { return _slowBlinker.state; }
-    bool rapidBlinkState() const noexcept { return _rapidBlinker.state; }
+    float blinkState() const noexcept { return _slowBlinker.opacity(_currentTime, _settings.blinkStyle); }
+    float rapidBlinkState() const noexcept
+    {
+        return _rapidBlinker.opacity(_currentTime, _settings.blinkStyle);
+    }
 
     /// Sets or resets to a new selection.
     void setSelector(std::unique_ptr<Selection> selector);
@@ -1047,16 +1052,6 @@ class Terminal
                && _inputHandler.mode() == ViMode::Insert;
     }
 
-    template <typename BlinkerState>
-    [[nodiscard]] std::pair<bool, std::chrono::steady_clock::time_point> nextBlinkState(
-        BlinkerState blinker, std::chrono::steady_clock::time_point lastBlink) const noexcept
-    {
-        auto const passed = std::chrono::duration_cast<std::chrono::milliseconds>(_currentTime - lastBlink);
-        if (passed < blinker.interval)
-            return { blinker.state, lastBlink };
-        return { !blinker.state, _currentTime };
-    }
-
     // Reads from PTY.
     struct PtyReadResult
     {
@@ -1104,15 +1099,42 @@ class Terminal
     // {{{ blinking state helpers
     mutable std::chrono::steady_clock::time_point _lastCursorBlink;
     mutable unsigned _cursorBlinkState = 1;
+
+    /// Computes blink opacity based on the configured BlinkStyle.
     struct BlinkerState
     {
-        bool state = false;
-        std::chrono::milliseconds interval {};
+        std::chrono::milliseconds period {};
+
+        /// Returns opacity in [0, 1] based on the given blink style.
+        [[nodiscard]] float opacity(std::chrono::steady_clock::time_point now,
+                                    BlinkStyle style) const noexcept
+        {
+            auto const elapsed = std::chrono::duration<float>(now.time_since_epoch());
+            auto const p = std::chrono::duration<float>(period);
+            auto const smooth =
+                (1.0f + std::cos(2.0f * std::numbers::pi_v<float> * elapsed.count() / p.count())) / 2.0f;
+            switch (style)
+            {
+                case BlinkStyle::Classic: return smooth >= 0.5f ? 1.0f : 0.0f;
+                case BlinkStyle::Smooth: return smooth;
+                case BlinkStyle::Linger: return std::pow(smooth, 1.0f / 3.0f);
+            }
+            return smooth;
+        }
+
+        /// Returns the time until the next classic toggle transition.
+        [[nodiscard]] std::chrono::milliseconds nextToggleIn(
+            std::chrono::steady_clock::time_point now) const noexcept
+        {
+            using namespace std::chrono;
+            auto const elapsed = duration_cast<milliseconds>(now.time_since_epoch());
+            auto const halfPeriod = period / 2;
+            auto const inPeriod = elapsed % period;
+            return (inPeriod < halfPeriod) ? (halfPeriod - inPeriod) : (period - inPeriod);
+        }
     };
-    mutable BlinkerState _slowBlinker { .state = false, .interval = std::chrono::milliseconds { 500 } };
-    mutable BlinkerState _rapidBlinker { .state = false, .interval = std::chrono::milliseconds { 300 } };
-    mutable std::chrono::steady_clock::time_point _lastBlink;
-    mutable std::chrono::steady_clock::time_point _lastRapidBlink;
+    BlinkerState _slowBlinker { .period = std::chrono::milliseconds { 1000 } };
+    BlinkerState _rapidBlinker { .period = std::chrono::milliseconds { 600 } };
     // }}}
 
     // {{{ Displays this terminal manages

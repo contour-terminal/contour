@@ -421,6 +421,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "highlight_word_and_matches_on_double_click", where.highlightDoubleClickedWord);
         loadFromEntry(child, "font", where.fonts);
         loadFromEntry(child, "draw_bold_text_with_bright_colors", where.drawBoldTextWithBrightColors);
+        loadFromEntry(child, "blink_style", where.blinkStyle);
         if (child["cursor"])
         {
             loadFromEntry(child["cursor"], "shape", where.modeInsert.value().cursor.cursorShape);
@@ -2142,6 +2143,30 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     if (auto const child = node[entry])
     {
         auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::BlinkStyle& where)
+{
+    auto parse = [&](std::string const& key) -> std::optional<vtbackend::BlinkStyle> {
+        auto const upperKey = crispy::toUpper(key);
+        logger()("Loading entry: {}, value {}", entry, upperKey);
+        if (upperKey == "CLASSIC")
+            return vtbackend::BlinkStyle::Classic;
+        if (upperKey == "SMOOTH")
+            return vtbackend::BlinkStyle::Smooth;
+        if (upperKey == "LINGER")
+            return vtbackend::BlinkStyle::Linger;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parse(child.as<std::string>());
         if (opt.has_value())
             where = opt.value();
     }

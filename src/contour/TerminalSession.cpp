@@ -139,6 +139,7 @@ namespace
         settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
         settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
         settings.cursorDisplay = profile.modeInsert.value().cursor.cursorDisplay;
+        settings.blinkStyle = profile.blinkStyle.value();
         settings.smoothLineScrolling = profile.smoothLineScrolling.value();
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
@@ -1771,6 +1772,7 @@ void TerminalSession::configureTerminal()
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
     _terminal.inputHandler().setSearchModeSwitch(_profile.searchModeSwitch.value());
     _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
+    _terminal.settings().blinkStyle = _profile.blinkStyle.value();
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)

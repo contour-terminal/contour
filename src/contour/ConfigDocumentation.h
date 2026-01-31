@@ -1803,6 +1803,34 @@ using Fonts = DocumentationEntry<FontsConfig, FontsWeb>;
 using Permissions = DocumentationEntry<PermissionsConfig, PermissionsWeb>;
 using DrawBoldTextWithBrightColors =
     DocumentationEntry<DrawBoldTextWithBrightColorsConfig, DrawBoldTextWithBrightColorsWeb>;
+constexpr StringLiteral BlinkStyleConfig {
+    "{comment} Determines the visual style of cell blink animation (SGR 5/6).\n"
+    "{comment}\n"
+    "{comment} Valid values are:\n"
+    "{comment}  - classic: Abrupt on/off toggle.\n"
+    "{comment}  - smooth:  Continuous cosine-based pulse.\n"
+    "{comment}  - linger:  Like smooth but stays visible longer.\n"
+    "blink_style: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral BlinkStyleWeb {
+    "Determines the visual style of cell blink animation (SGR attributes 5 and 6).\n"
+    "\n"
+    "Valid values are:\n"
+    "- `classic` - abrupt on/off toggle\n"
+    "- `smooth` - continuous cosine-based pulse\n"
+    "- `linger` - like smooth but stays visible longer\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    blink_style: smooth\n"
+    "```\n"
+    "\n"
+};
+
+using BlinkStyle = DocumentationEntry<BlinkStyleConfig, BlinkStyleWeb>;
 using Colors = DocumentationEntry<ColorsConfig, ColorsWeb>;
 using ModalCursorScrollOff = DocumentationEntry<ModalCursorScrollOffConfig, ModalCursorScrollOffWeb>;
 using ModeInsert = DocumentationEntry<ModeInsertConfig, ModeInsertWeb>;
