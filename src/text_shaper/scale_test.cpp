@@ -2,6 +2,7 @@
 
 #include <text_shaper/shaper.h>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 using namespace text;
@@ -36,6 +37,7 @@ TEST_CASE("scale non-integer ratio RGBA", "[scale]")
     ImageSize targetSize { Width(66), Height(66) };
     auto [scaled, factor] = scale(glyph, targetSize);
 
+    CHECK(factor == Catch::Approx(1.515f).epsilon(0.01f));
     CHECK(scaled.bitmapSize.width == Width(66));
     CHECK(scaled.bitmapSize.height == Height(66));
 

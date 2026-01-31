@@ -38,38 +38,38 @@ namespace
         auto const wOut = unbox<size_t>(outputSize.width);
         auto const hOut = unbox<size_t>(outputSize.height);
 
-        for (size_t y = 0; y < hOut; ++y)
+        for (size_t const y: std::views::iota(size_t { 0 }, hOut))
         {
             auto const sourceRowTop = static_cast<double>(y) * ratio;
             auto const sourceRowBottom = static_cast<double>(y + 1) * ratio;
-            auto const rowStart = static_cast<size_t>(floor(sourceRowTop));
-            auto const rowEnd = min(static_cast<size_t>(ceil(sourceRowBottom)), hIn);
+            auto const rowStart = static_cast<size_t>(std::floor(sourceRowTop));
+            auto const rowEnd = min(static_cast<size_t>(std::ceil(sourceRowBottom)), hIn);
 
-            for (size_t x = 0; x < wOut; ++x)
+            for (size_t const x: std::views::iota(size_t { 0 }, wOut))
             {
                 auto const sourceColumnLeft = static_cast<double>(x) * ratio;
                 auto const sourceColumnRight = static_cast<double>(x + 1) * ratio;
-                auto const colStart = static_cast<size_t>(floor(sourceColumnLeft));
-                auto const colEnd = min(static_cast<size_t>(ceil(sourceColumnRight)), wIn);
+                auto const colStart = static_cast<size_t>(std::floor(sourceColumnLeft));
+                auto const colEnd = min(static_cast<size_t>(std::ceil(sourceColumnRight)), wIn);
 
                 std::array<double, NumComponents> sums {};
                 double totalWeight = 0.0;
 
-                for (size_t i = rowStart; i < rowEnd; ++i)
+                for (size_t const i: std::views::iota(rowStart, rowEnd))
                 {
                     double const weightY = min(static_cast<double>(i + 1), sourceRowBottom)
                                            - max(static_cast<double>(i), sourceRowTop);
 
                     auto const* const rowPtr = inputBitmap.data() + (i * wIn * NumComponents);
 
-                    for (size_t j = colStart; j < colEnd; ++j)
+                    for (size_t const j: std::views::iota(colStart, colEnd))
                     {
                         double const weightX = min(static_cast<double>(j + 1), sourceColumnRight)
                                                - max(static_cast<double>(j), sourceColumnLeft);
                         double const weight = weightY * weightX;
 
                         auto const* const pixelPtr = rowPtr + (j * NumComponents);
-                        for (size_t c = 0; c < NumComponents; ++c)
+                        for (size_t const c: std::views::iota(size_t { 0 }, NumComponents))
                         {
                             sums[c] += static_cast<double>(pixelPtr[c]) * weight;
                         }
@@ -121,7 +121,9 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::
         case bitmap_format::rgba:
             dest = scaleDown<4>(bitmap.bitmap, bitmap.bitmapSize, newSize, ratio);
             break;
-        case bitmap_format::rgb: dest = scaleDown<3>(bitmap.bitmap, bitmap.bitmapSize, newSize, ratio); break;
+        case bitmap_format::rgb: //
+            dest = scaleDown<3>(bitmap.bitmap, bitmap.bitmapSize, newSize, ratio);
+            break;
         case bitmap_format::alpha_mask:
             dest = scaleDown<1>(bitmap.bitmap, bitmap.bitmapSize, newSize, ratio);
             break;
@@ -133,7 +135,7 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::
     output.position = bitmap.position;
     output.bitmap = std::move(dest);
 
-    // Center the glyph in the bounding box.
+    // Horizontally center the glyph and position it slightly below vertical center for visual balance.
     output.position.x = unbox<int>(boundingBox.width - output.bitmapSize.width) / 2;
     output.position.y =
         unbox<int>(output.bitmapSize.height) + unbox<int>(boundingBox.height - output.bitmapSize.height) / 4;
