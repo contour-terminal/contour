@@ -17,12 +17,10 @@
 
 #include <cstdint>
 #include <format>
-#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
-#include <utility>
 #include <vector>
 
 namespace text
@@ -53,11 +51,11 @@ constexpr size_t pixel_size(bitmap_format format) noexcept
 
 struct rasterized_glyph
 {
-    glyph_index index;
-    vtbackend::ImageSize bitmapSize; // Glyph bitmap size in pixels.
-    crispy::point position;          // top-left position of the bitmap, relative to the basline's origin.
-    bitmap_format format;
-    std::vector<uint8_t> bitmap;
+    glyph_index index {};               // Glyph index.
+    vtbackend::ImageSize bitmapSize {}; // Glyph bitmap size in pixels.
+    crispy::point position {};          // top-left position of the bitmap, relative to the baseline's origin.
+    bitmap_format format {};            // Bitmap pixel format.
+    std::vector<uint8_t> bitmap {};     // Raw bitmap data.
 
     [[nodiscard]] bool valid() const
     {
