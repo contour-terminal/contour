@@ -819,9 +819,11 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
 
         // Assume colored (RGBA) bitmap glyphs to be emoji.
         // At least on macOS, the emoji font reports bad positioning, so we simply center them ourself.
+        // Center horizontally within the emoji bounding box (numCells * cellWidth).
         glyph.position.x = unbox<int>(emojiBoundingBox.width - glyph.bitmapSize.width) / 2;
-        glyph.position.y = unbox<int>(emojiBoundingBox.height)
-                           - max(0, unbox<int>(emojiBoundingBox.height - glyph.bitmapSize.height) / 2);
+        // Center vertically within the full cell height, accounting for the baseline offset.
+        glyph.position.y = (unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2
+                           - _gridMetrics.baseline;
     }
 
     // y-position relative to cell-bottom of glyphs top.
