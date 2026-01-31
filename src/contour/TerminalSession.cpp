@@ -289,6 +289,27 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
         _terminal.setRefreshRate(_display->refreshRate());
     }
 
+    // Ensure max image size is based on the actual display dimensions,
+    // not just the (possibly zero) config default.
+    // This is needed because configureDisplay() is only called from createRenderer(),
+    // which only runs once for the first session.
+    {
+        auto const dpr = _display->contentScale();
+        auto const qActualScreenSize = _display->window()->screen()->size() * dpr;
+        auto const actualScreenSize = ImageSize { Width::cast_from(qActualScreenSize.width()),
+                                                  Height::cast_from(qActualScreenSize.height()) };
+        auto const configuredMaxImageSize = _config.images.value().maxImageSize;
+        auto const _ = std::scoped_lock { _terminal };
+        // clang-format off
+        auto const maxImageSize = ImageSize {
+            .width = unbox(configuredMaxImageSize.width) == 0 ? actualScreenSize.width : configuredMaxImageSize.width,
+            .height = unbox(configuredMaxImageSize.height) == 0 ? actualScreenSize.height : configuredMaxImageSize.height,
+        };
+        // clang-format on
+
+        _terminal.setMaxImageSize(maxImageSize, maxImageSize);
+    }
+
     {
         auto const _ = std::scoped_lock { _onClosedMutex };
         if (_onClosedHandled)

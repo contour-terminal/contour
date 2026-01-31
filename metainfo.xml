@@ -108,6 +108,7 @@
       <description>
         <ul>
           <li>Fixes glyph scaling and vertical centering of colored emoji</li>
+          <li>Fixes Sixel images not rendering on non-first tabs</li>
           <li>Fixes text rendering artifacts and corruption when rapidly outputting content</li>
           <li>Fixes garbled or missing characters when displaying Unicode text</li>
         </ul>
