@@ -81,7 +81,7 @@ message(STATUS "[text_shaper] Libraries: ${TEXT_SHAPER_LIBS}")
 
 if(CONTOUR_TESTING)
     enable_testing()
-    add_executable(text_shaper_test test_main.cpp open_shaper_test.cpp)
+    add_executable(text_shaper_test test_main.cpp open_shaper_test.cpp scale_test.cpp)
     target_link_libraries(text_shaper_test PRIVATE text_shaper Catch2::Catch2 Microsoft.GSL::GSL unicode::unicode boxed-cpp::boxed-cpp crispy::core)
     add_test(NAME text_shaper_test COMMAND $<TARGET_FILE:text_shaper_test>)
     if(NOT WIN32)
