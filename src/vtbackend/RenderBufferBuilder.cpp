@@ -144,7 +144,50 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
 
     auto const cellWidth = _terminal->currentScreen().cellWidthAt(*_cursorPosition);
 
-    return RenderCursor { .position = cursorScreenPosition, .shape = shape, .width = cellWidth };
+    // Resolve cursor color from the cell under the cursor, using the same logic as makeColorsForCell
+    // for Block cursor inversion. This ensures the cursor color reflects actual cell content rather
+    // than only palette defaults.
+    auto const resolvedCursorColor = [&]() -> RGBColor {
+        auto const& colorPalette = _terminal->colorPalette();
+        auto const cellFlags = _terminal->currentScreen().cellFlagsAt(*_cursorPosition);
+        // Access the cell through the typed screen to obtain foreground/background colors.
+        auto const [cellFg, cellBg] = [&]() -> std::pair<Color, Color> {
+            if (_terminal->isPrimaryScreen())
+            {
+                auto const& cell = _terminal->primaryScreen().at(*_cursorPosition);
+                return { cell.foregroundColor(), cell.backgroundColor() };
+            }
+            else
+            {
+                auto const& cell = _terminal->alternateScreen().at(*_cursorPosition);
+                return { cell.foregroundColor(), cell.backgroundColor() };
+            }
+        }();
+        auto const sgrColors = CellUtil::makeColors(colorPalette,
+                                                    cellFlags,
+                                                    _reverseVideo,
+                                                    cellFg,
+                                                    cellBg,
+                                                    _terminal->blinkState(),
+                                                    _terminal->rapidBlinkState());
+        if (holds_alternative<CellForegroundColor>(colorPalette.cursor.color))
+            return sgrColors.foreground;
+        if (holds_alternative<CellBackgroundColor>(colorPalette.cursor.color))
+            return sgrColors.background;
+        return get<RGBColor>(colorPalette.cursor.color);
+    }();
+
+    // Pre-compute animation progress so that makeColorsForCell() sees the correct value
+    // during cell rendering. Without this, animationProgress defaults to 1.0f and the
+    // Block cursor cell inversion fires at the destination while the CursorRenderer also
+    // draws an animated cursor at the interpolated position — producing a double/stretched cursor.
+    auto const animProgress = _terminal->cursorAnimationProgress(cursorScreenPosition);
+
+    return RenderCursor { .position = cursorScreenPosition,
+                          .shape = shape,
+                          .width = cellWidth,
+                          .animationProgress = animProgress,
+                          .cursorColor = resolvedCursorColor };
 }
 
 template <CellConcept Cell>

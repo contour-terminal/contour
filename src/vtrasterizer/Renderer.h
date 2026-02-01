@@ -145,8 +145,6 @@ class Renderer
 
     GridMetrics _gridMetrics;
 
-    vtbackend::ColorPalette const& _colorPalette;
-
     std::mutex _imageDiscardLock;                       //!< Lock guard for accessing _discardImageQueue.
     std::vector<vtbackend::ImageId> _discardImageQueue; //!< List of images to be discarded.
 

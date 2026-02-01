@@ -429,7 +429,7 @@ struct TerminalProfile
         std::chrono::milliseconds { 250 }
     };
     ConfigEntry<std::chrono::milliseconds, documentation::CursorMotionAnimationDuration>
-        cursorMotionAnimationDuration { std::chrono::milliseconds { 100 } };
+        cursorMotionAnimationDuration { std::chrono::milliseconds { 80 } };
     ConfigEntry<InputModeConfig, documentation::ModeInsert> modeInsert { CursorConfig {
         .cursorShape = vtbackend::CursorShape::Bar,
         .cursorDisplay = vtbackend::CursorDisplay::Steady,

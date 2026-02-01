@@ -16,8 +16,6 @@
 #include <memory>
 
 using std::array;
-using std::get;
-using std::holds_alternative;
 using std::initializer_list;
 using std::make_unique;
 using std::move;
@@ -131,7 +129,6 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
     _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
     //.
-    _colorPalette { colorPalette },
     _backgroundRenderer { _gridMetrics, colorPalette.defaultBackground },
     _imageRenderer { _gridMetrics, cellSize() },
     _textRenderer { _gridMetrics, *_textShaper, _fontDescriptions, _fonts, _imageRenderer },
@@ -311,14 +308,6 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     if (cursorOpt)
     {
         auto const cursor = *cursorOpt;
-        auto const cursorColor = [&]() {
-            if (holds_alternative<vtbackend::CellForegroundColor>(_colorPalette.cursor.color))
-                return _colorPalette.defaultForeground;
-            else if (holds_alternative<vtbackend::CellBackgroundColor>(_colorPalette.cursor.color))
-                return _colorPalette.defaultBackground;
-            else
-                return get<vtbackend::RGBColor>(_colorPalette.cursor.color);
-        }();
 
         auto const isAnimating = cursor.animateFrom.has_value() && cursor.animationProgress < 1.0f;
         if (isAnimating)
@@ -331,14 +320,18 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
                 .x = fromPixel.x + static_cast<int>(t * static_cast<float>(toPixel.x - fromPixel.x)),
                 .y = fromPixel.y + static_cast<int>(t * static_cast<float>(toPixel.y - fromPixel.y)),
             };
+            // Interpolate cursor color between source and target cell colors
+            auto const color = cursor.animateFromColor
+                                   ? vtbackend::mix(cursor.cursorColor, *cursor.animateFromColor, t)
+                                   : cursor.cursorColor;
             _cursorRenderer.setShape(cursor.shape);
-            _cursorRenderer.render(interpolated, cursor.width, cursorColor);
+            _cursorRenderer.render(interpolated, cursor.width, color);
         }
         else if (cursor.shape != vtbackend::CursorShape::Block)
         {
             // Normal non-block cursor rendering (Block handled via cell color inversion)
             _cursorRenderer.setShape(cursor.shape);
-            _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursorColor);
+            _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursor.cursorColor);
         }
     }
 

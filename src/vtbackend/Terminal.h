@@ -679,6 +679,19 @@ class Terminal
                && (cursorDisplay() == CursorDisplay::Steady || _cursorBlinkState);
     }
 
+    /// Returns the predicted animation progress for a cursor at the given screen position.
+    /// Used by RenderBufferBuilder to pre-set animationProgress before cell rendering,
+    /// so that Block cursor cell inversion is suppressed during animation.
+    [[nodiscard]] float cursorAnimationProgress(CellLocation cursorScreenPosition) const noexcept
+    {
+        if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
+            return _cursorMotion.progress(_currentTime);
+        if (cursorScreenPosition != _cursorMotion.toPosition
+            && _settings.cursorMotionAnimationDuration.count() > 0)
+            return 0.0f;
+        return 1.0f;
+    }
+
     bool isBlinkOnScreen() const noexcept { return _lastRenderPassHints.containsBlinkingCells; }
 
     std::chrono::steady_clock::time_point lastCursorBlink() const noexcept { return _lastCursorBlink; }
@@ -1185,8 +1198,10 @@ class Terminal
         CellLocation fromPosition {};
         CellLocation toPosition {};
         int fromWidth = 1;
+        RGBColor fromColor {}; ///< Cursor color at the animation source position.
+        RGBColor toColor {};   ///< Cursor color at the animation target position.
         std::chrono::steady_clock::time_point startTime {};
-        std::chrono::milliseconds duration { 100 };
+        std::chrono::milliseconds duration { 80 };
 
         /// Returns animation progress in [0, 1] with ease-out cubic easing.
         [[nodiscard]] float progress(std::chrono::steady_clock::time_point now) const noexcept

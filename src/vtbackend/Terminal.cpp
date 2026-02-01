@@ -531,6 +531,12 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // Cursor motion animation: detect position change and inject animation data.
     if (output.cursor.has_value())
     {
+        // Effective animation duration: at least 3 frames at the current refresh rate
+        // to guarantee visible interpolation.
+        constexpr auto MinFrames = 3;
+        auto const effectiveDuration =
+            std::max(_settings.cursorMotionAnimationDuration, _refreshInterval.value * MinFrames);
+
         auto const& cursorPos = output.cursor->position;
         if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
         {
@@ -550,13 +556,16 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                          * static_cast<float>((*_cursorMotion.toPosition.column
                                                                - *_cursorMotion.fromPosition.column))));
                 _cursorMotion.fromPosition = CellLocation { .line = fromLine, .column = fromCol };
+                _cursorMotion.fromColor = mix(_cursorMotion.toColor, _cursorMotion.fromColor, p);
                 _cursorMotion.toPosition = cursorPos;
+                _cursorMotion.toColor = output.cursor->cursorColor;
                 _cursorMotion.startTime = _currentTime;
-                _cursorMotion.duration = _settings.cursorMotionAnimationDuration;
+                _cursorMotion.duration = effectiveDuration;
             }
             // Inject animation data
             output.cursor->animateFrom = _cursorMotion.fromPosition;
             output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
+            output.cursor->animateFromColor = _cursorMotion.fromColor;
         }
         else if (cursorPos != _cursorMotion.toPosition && _settings.cursorMotionAnimationDuration.count() > 0)
         {
@@ -564,16 +573,20 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
             _cursorMotion.active = true;
             _cursorMotion.fromPosition = _cursorMotion.toPosition; // previous target
             _cursorMotion.fromWidth = output.cursor->width;
+            _cursorMotion.fromColor = _cursorMotion.toColor; // previous target's color
             _cursorMotion.toPosition = cursorPos;
+            _cursorMotion.toColor = output.cursor->cursorColor;
             _cursorMotion.startTime = _currentTime;
-            _cursorMotion.duration = _settings.cursorMotionAnimationDuration;
+            _cursorMotion.duration = effectiveDuration;
 
             output.cursor->animateFrom = _cursorMotion.fromPosition;
             output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
+            output.cursor->animateFromColor = _cursorMotion.fromColor;
         }
         else
         {
             _cursorMotion.toPosition = cursorPos;
+            _cursorMotion.toColor = output.cursor->cursorColor;
         }
     }
 
@@ -1374,13 +1387,13 @@ optional<chrono::milliseconds> Terminal::nextRender() const
         nextBlink = std::min(nextBlink, millisUntilNextMinute);
     }
 
-    // Screen transition animation scheduling (~60fps for smooth crossfade).
+    // Screen transition animation scheduling at display refresh rate.
     if (_screenTransition.active && !_screenTransition.isComplete(_currentTime))
-        nextBlink = std::min(nextBlink, chrono::milliseconds { 16 });
+        nextBlink = std::min(nextBlink, _refreshInterval.value);
 
-    // Cursor motion animation scheduling (~60fps).
+    // Cursor motion animation scheduling at display refresh rate.
     if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
-        nextBlink = std::min(nextBlink, chrono::milliseconds { 16 });
+        nextBlink = std::min(nextBlink, _refreshInterval.value);
 
     if (nextBlink == chrono::milliseconds::max())
         return nullopt;
