@@ -141,6 +141,7 @@ namespace
         settings.cursorDisplay = profile.modeInsert.value().cursor.cursorDisplay;
         settings.blinkStyle = profile.blinkStyle.value();
         settings.screenTransitionStyle = profile.screenTransitionStyle.value();
+        settings.screenTransitionDuration = profile.screenTransitionDuration.value();
         settings.smoothLineScrolling = profile.smoothLineScrolling.value();
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
@@ -1775,6 +1776,7 @@ void TerminalSession::configureTerminal()
     _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
     _terminal.settings().blinkStyle = _profile.blinkStyle.value();
     _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();
+    _terminal.settings().screenTransitionDuration = _profile.screenTransitionDuration.value();
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)

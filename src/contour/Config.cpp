@@ -423,6 +423,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "draw_bold_text_with_bright_colors", where.drawBoldTextWithBrightColors);
         loadFromEntry(child, "blink_style", where.blinkStyle);
         loadFromEntry(child, "screen_transition", where.screenTransitionStyle);
+        loadFromEntry(child, "screen_transition_duration", where.screenTransitionDuration);
         if (child["cursor"])
         {
             loadFromEntry(child["cursor"], "shape", where.modeInsert.value().cursor.cursorShape);

@@ -1861,6 +1861,29 @@ constexpr StringLiteral ScreenTransitionStyleWeb {
 };
 
 using ScreenTransitionStyle = DocumentationEntry<ScreenTransitionStyleConfig, ScreenTransitionStyleWeb>;
+
+constexpr StringLiteral ScreenTransitionDurationConfig {
+    "{comment} Duration in milliseconds for the screen transition animation.\n"
+    "{comment} Only applies when screen_transition is set to \"fade\".\n"
+    "screen_transition_duration: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral ScreenTransitionDurationWeb {
+    "Duration in milliseconds for the screen transition animation.\n"
+    "\n"
+    "Only applies when `screen_transition` is set to `fade`.\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    screen_transition_duration: 500\n"
+    "```\n"
+    "\n"
+};
+
+using ScreenTransitionDuration =
+    DocumentationEntry<ScreenTransitionDurationConfig, ScreenTransitionDurationWeb>;
 using Colors = DocumentationEntry<ColorsConfig, ColorsWeb>;
 using ModalCursorScrollOff = DocumentationEntry<ModalCursorScrollOffConfig, ModalCursorScrollOffWeb>;
 using ModeInsert = DocumentationEntry<ModeInsertConfig, ModeInsertWeb>;
