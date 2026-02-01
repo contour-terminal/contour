@@ -30,6 +30,32 @@ struct RenderAttributes
     LineFlags lineFlags = LineFlag::None;
 };
 
+/// Blends each color channel of @p attrs toward @p target by @p t.
+/// At t=0 the colors remain unchanged; at t=1 every channel equals @p target.
+///
+/// @param attrs   render attributes modified in place (foreground, background, decoration).
+/// @param target  the color each channel converges to as @p t approaches 1.
+/// @param t       interpolation factor in [0, 1].
+constexpr void blendAttributesTo(RenderAttributes& attrs, RGBColor target, float t) noexcept
+{
+    attrs.foregroundColor = mixColor(attrs.foregroundColor, target, t);
+    attrs.backgroundColor = mixColor(attrs.backgroundColor, target, t);
+    attrs.decorationColor = mixColor(attrs.decorationColor, target, t);
+}
+
+/// Blends each color channel of @p attrs from @p source toward the current value by @p t.
+/// At t=0 every channel equals @p source; at t=1 the colors remain unchanged.
+///
+/// @param attrs   render attributes modified in place (foreground, background, decoration).
+/// @param source  the color each channel starts from when @p t is 0.
+/// @param t       interpolation factor in [0, 1].
+constexpr void blendAttributesFrom(RenderAttributes& attrs, RGBColor source, float t) noexcept
+{
+    attrs.foregroundColor = mixColor(source, attrs.foregroundColor, t);
+    attrs.backgroundColor = mixColor(source, attrs.backgroundColor, t);
+    attrs.decorationColor = mixColor(source, attrs.decorationColor, t);
+}
+
 /**
  * Renderable representation of a grid cell with color-altering pre-applied and
  * additional information for cell ranges that can be text-shaped together.

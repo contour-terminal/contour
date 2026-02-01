@@ -633,9 +633,7 @@ void Terminal::applyScreenTransitionBlending(RenderBuffer& output)
             if (!isMainDisplayCell(snap.position))
                 continue;
             auto cell = snap;
-            cell.attributes.foregroundColor = mixColor(snap.attributes.foregroundColor, defaultBg, fadeOut);
-            cell.attributes.backgroundColor = mixColor(snap.attributes.backgroundColor, defaultBg, fadeOut);
-            cell.attributes.decorationColor = mixColor(snap.attributes.decorationColor, defaultBg, fadeOut);
+            blendAttributesTo(cell.attributes, defaultBg, fadeOut);
             output.cells.push_back(std::move(cell));
         }
     }
@@ -648,27 +646,15 @@ void Terminal::applyScreenTransitionBlending(RenderBuffer& output)
         {
             if (!isMainDisplayCell(cell.position))
                 continue;
-            cell.attributes.foregroundColor = mixColor(defaultBg, cell.attributes.foregroundColor, fadeIn);
-            cell.attributes.backgroundColor = mixColor(defaultBg, cell.attributes.backgroundColor, fadeIn);
-            cell.attributes.decorationColor = mixColor(defaultBg, cell.attributes.decorationColor, fadeIn);
+            blendAttributesFrom(cell.attributes, defaultBg, fadeIn);
         }
 
         for (auto& line: output.lines)
         {
             if (!isMainDisplayLine(line.lineOffset))
                 continue;
-            line.textAttributes.foregroundColor =
-                mixColor(defaultBg, line.textAttributes.foregroundColor, fadeIn);
-            line.textAttributes.backgroundColor =
-                mixColor(defaultBg, line.textAttributes.backgroundColor, fadeIn);
-            line.textAttributes.decorationColor =
-                mixColor(defaultBg, line.textAttributes.decorationColor, fadeIn);
-            line.fillAttributes.foregroundColor =
-                mixColor(defaultBg, line.fillAttributes.foregroundColor, fadeIn);
-            line.fillAttributes.backgroundColor =
-                mixColor(defaultBg, line.fillAttributes.backgroundColor, fadeIn);
-            line.fillAttributes.decorationColor =
-                mixColor(defaultBg, line.fillAttributes.decorationColor, fadeIn);
+            blendAttributesFrom(line.textAttributes, defaultBg, fadeIn);
+            blendAttributesFrom(line.fillAttributes, defaultBg, fadeIn);
         }
     }
 }
