@@ -371,11 +371,16 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     {
         auto const cursor = *cursorOpt;
 
+        // When smooth-scrolling is active, flush pending status line commands first (unclipped),
+        // so the cursor can be flushed separately within a scissor rect.
+        if (smoothPixelOffset != 0)
+            _renderTarget->execute(now);
+
         auto const isAnimating = cursor.animateFrom.has_value() && cursor.animationProgress < 1.0f;
         if (isAnimating)
         {
-            auto const fromPixel = _gridMetrics.map(*cursor.animateFrom);
-            auto const toPixel = _gridMetrics.map(cursor.position);
+            auto const fromPixel = _gridMetrics.map(*cursor.animateFrom, smoothPixelOffset);
+            auto const toPixel = _gridMetrics.map(cursor.position, smoothPixelOffset);
             auto const animationProgress = cursor.animationProgress;
             auto const interpolated = crispy::point {
                 .x = fromPixel.x
@@ -393,7 +398,23 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
         else if (cursor.shape != vtbackend::CursorShape::Block)
         {
             _cursorRenderer.setShape(cursor.shape);
-            _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursor.cursorColor);
+            _cursorRenderer.render(
+                _gridMetrics.map(cursor.position, smoothPixelOffset), cursor.width, cursor.cursorColor);
+        }
+
+        // Scissor-clip cursor to the main display area to prevent overflow into the status line.
+        if (smoothPixelOffset != 0)
+        {
+            auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
+            auto const mainAreaTop = _gridMetrics.pageMargin.top;
+            auto const mainAreaHeight = *statusLineBoundary * cellHeight;
+            auto const renderSize = _renderTarget->renderSize();
+            auto const renderWidth = renderSize.width.as<int>();
+            auto const renderHeight = renderSize.height.as<int>();
+            auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
+            _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
+            auto const scissorGuard = crispy::finally([this] { _renderTarget->clearScissorRect(); });
+            _renderTarget->execute(now);
         }
     }
 
