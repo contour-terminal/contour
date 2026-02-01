@@ -143,14 +143,14 @@ namespace
                 constexpr auto AngleStepSize = 40.0f;
                 auto const pixelsPerUnit = static_cast<float>(*multiplier) * cellHeight / AngleStepSize;
                 auto const pixelAmount = static_cast<float>(angleDelta.y) * pixelsPerUnit;
-                terminal.applySmoothScrollPixelDelta(pixelAmount);
-                return;
+                if (terminal.applySmoothScrollPixelDelta(pixelAmount))
+                    return;
             }
             if (pixelDelta.y != 0)
             {
                 // Fallback for pure trackpad input that only provides pixel deltas.
-                terminal.applySmoothScrollPixelDelta(static_cast<float>(pixelDelta.y));
-                return;
+                if (terminal.applySmoothScrollPixelDelta(static_cast<float>(pixelDelta.y)))
+                    return;
             }
         }
 
