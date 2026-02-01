@@ -887,6 +887,73 @@ TEST_CASE("Terminal.screenTransition.fades_out_blends_to_background", "[terminal
     CHECK(progress < 0.5f);
 }
 
+TEST_CASE("Terminal.screenTransition.fadeout_cell_colors_blend_toward_background", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    terminal.settings().screenTransitionStyle = vtbackend::ScreenTransitionStyle::Fade;
+    terminal.settings().screenTransitionDuration = 200ms;
+
+    // Set a known foreground color via SGR so snapshot cells have non-default foreground.
+    // ESC[38;2;255;0;0m sets foreground to bright red.
+    mc.writeToScreen("\033[38;2;255;0;0mHello");
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+
+    // Capture the pre-transition foreground color of the first rendered cell.
+    auto preFg = vtbackend::RGBColor {};
+    {
+        auto const buf = terminal.renderBuffer();
+        REQUIRE(!buf.get().cells.empty());
+        preFg = buf.get().cells.front().attributes.foregroundColor;
+    }
+    // The foreground should be close to red (255, 0, 0).
+    REQUIRE(preFg.red > 200);
+
+    auto const defaultBg = terminal.colorPalette().defaultBackground;
+
+    // Switch to alternate screen, starting the fade transition.
+    mc.writeToScreen("\033[?1049h");
+    REQUIRE(terminal.isScreenTransitionActive());
+
+    // Tick to 25% of the 200ms duration (fade-out phase: progress < 0.5).
+    // At 25% overall, the fade-out factor is 0.5 (progress * 2).
+    terminal.tick(ClockBase + 150ms);
+    terminal.ensureFreshRenderBuffer();
+
+    auto const progress = terminal.screenTransitionProgress();
+    REQUIRE(progress > 0.0f);
+    REQUIRE(progress < 0.5f);
+
+    auto const buf = terminal.renderBuffer();
+    REQUIRE(!buf.get().cells.empty());
+
+    auto const& blendedFg = buf.get().cells.front().attributes.foregroundColor;
+
+    // During fade-out, the foreground should be blended toward defaultBg.
+    // The red channel should have decreased from the original value toward defaultBg.red.
+    // The green/blue channels should have moved toward defaultBg.green/blue.
+    if (preFg.red > defaultBg.red)
+        CHECK(blendedFg.red < preFg.red);
+    else
+        CHECK(blendedFg.red > preFg.red);
+
+    // Verify that the blended color is between the original and the default background.
+    auto const isRedBetween = (blendedFg.red >= std::min(preFg.red, defaultBg.red))
+                              && (blendedFg.red <= std::max(preFg.red, defaultBg.red));
+    auto const isGreenBetween = (blendedFg.green >= std::min(preFg.green, defaultBg.green))
+                                && (blendedFg.green <= std::max(preFg.green, defaultBg.green));
+    auto const isBlueBetween = (blendedFg.blue >= std::min(preFg.blue, defaultBg.blue))
+                               && (blendedFg.blue <= std::max(preFg.blue, defaultBg.blue));
+    CHECK(isRedBetween);
+    CHECK(isGreenBetween);
+    CHECK(isBlueBetween);
+}
+
 TEST_CASE("Terminal.screenTransition.finalizes_after_duration", "[terminal]")
 {
     auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
