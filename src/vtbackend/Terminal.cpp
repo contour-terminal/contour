@@ -23,6 +23,7 @@
 
 #include <sys/types.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <format>
@@ -627,6 +628,11 @@ void Terminal::applyScreenTransitionBlending(RenderBuffer& output)
             blendAttributesTo(cell.attributes, defaultBg, fadeOut);
             output.cells.push_back(std::move(cell));
         }
+
+        // Re-sort cells and lines by position to restore the sorted invariant
+        // required by the renderer's partition_point binary search.
+        std::ranges::sort(output.cells, {}, &RenderCell::position);
+        std::ranges::sort(output.lines, {}, &RenderLine::lineOffset);
     }
     else
     {
