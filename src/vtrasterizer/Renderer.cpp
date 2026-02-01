@@ -357,7 +357,7 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
                 .y = fromPixel.y + static_cast<int>(t * static_cast<float>(toPixel.y - fromPixel.y)),
             };
             auto const color = cursor.animateFromColor
-                                   ? vtbackend::mix(cursor.cursorColor, *cursor.animateFromColor, t)
+                                   ? vtbackend::mixColor(*cursor.animateFromColor, cursor.cursorColor, t)
                                    : cursor.cursorColor;
             _cursorRenderer.setShape(cursor.shape);
             _cursorRenderer.render(interpolated, cursor.width, color);

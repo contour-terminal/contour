@@ -48,9 +48,9 @@ namespace vtbackend::CellUtil
         rgbColors = rgbColors.allBackground();
 
     if (cellFlags & CellFlag::Blinking)
-        return mix(rgbColors, rgbColors.allBackground(), blinkingState);
+        return mixColor(rgbColors.allBackground(), rgbColors, blinkingState);
     if (cellFlags & CellFlag::RapidBlinking)
-        return mix(rgbColors, rgbColors.allBackground(), rapidBlinkState);
+        return mixColor(rgbColors.allBackground(), rgbColors, rapidBlinkState);
 
     return rgbColors;
 }

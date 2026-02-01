@@ -618,4 +618,38 @@ TEST_CASE("Terminal.BoxDrawingCharacters", "[terminal]")
     CHECK(line1.find("dir") != std::string::npos);
 }
 
+TEST_CASE("Terminal.smoothScrollExtraLines.zero_when_no_offset", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    CHECK(*terminal.smoothScrollExtraLines() == 0);
+}
+
+TEST_CASE("Terminal.smoothScrollExtraLines.one_when_offset_nonzero", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    terminal.viewport().setPixelOffset(5.0f);
+    CHECK(*terminal.smoothScrollExtraLines() == 1);
+}
+
+TEST_CASE("Terminal.screenTransitionProgress.no_transition_returns_1", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    // No transition active, should return 1.0 (complete).
+    CHECK(terminal.screenTransitionProgress() == 1.0f);
+    CHECK_FALSE(terminal.isScreenTransitionActive());
+}
+
+TEST_CASE("Terminal.cursorAnimationProgress.no_animation_returns_1", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    // With no animation, cursor at current position should return 1.0 (complete).
+    auto const cursorPos = terminal.currentScreen().cursor().position;
+    auto const screenPos = vtbackend::CellLocation { .line = cursorPos.line, .column = cursorPos.column };
+    CHECK(terminal.cursorAnimationProgress(screenPos) == 1.0f);
+}
+
 // NOLINTEND(misc-const-correctness)

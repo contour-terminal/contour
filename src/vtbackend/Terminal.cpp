@@ -95,17 +95,6 @@ namespace // {{{ helpers
         return CellLocation { .line = std::max(location.line, minimumLine), .column = location.column };
     }
 
-    /// Linearly interpolates between two RGB colors.
-    /// At t=0 returns `a`, at t=1 returns `b`.
-    constexpr RGBColor mixColor(RGBColor const& a, RGBColor const& b, float t) noexcept
-    {
-        auto const lerp = [](uint8_t x, uint8_t y, float f) -> uint8_t {
-            return static_cast<uint8_t>(std::clamp(
-                static_cast<float>(x) + f * (static_cast<float>(y) - static_cast<float>(x)), 0.0f, 255.0f));
-        };
-        return RGBColor { lerp(a.red, b.red, t), lerp(a.green, b.green, t), lerp(a.blue, b.blue, t) };
-    }
-
 } // namespace
 // }}}
 
@@ -561,7 +550,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                          * static_cast<float>((*_cursorMotion.toPosition.column
                                                                - *_cursorMotion.fromPosition.column))));
                 _cursorMotion.fromPosition = CellLocation { .line = fromLine, .column = fromCol };
-                _cursorMotion.fromColor = mix(_cursorMotion.toColor, _cursorMotion.fromColor, p);
+                _cursorMotion.fromColor = mixColor(_cursorMotion.fromColor, _cursorMotion.toColor, p);
                 _cursorMotion.toPosition = cursorPos;
                 _cursorMotion.toColor = output.cursor->cursorColor;
                 _cursorMotion.startTime = _currentTime;
@@ -577,8 +566,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
             // Start new animation
             _cursorMotion.active = true;
             _cursorMotion.fromPosition = _cursorMotion.toPosition; // previous target
-            _cursorMotion.fromWidth = output.cursor->width;
-            _cursorMotion.fromColor = _cursorMotion.toColor; // previous target's color
+            _cursorMotion.fromColor = _cursorMotion.toColor;       // previous target's color
             _cursorMotion.toPosition = cursorPos;
             _cursorMotion.toColor = output.cursor->cursorColor;
             _cursorMotion.startTime = _currentTime;
@@ -1355,7 +1343,7 @@ void Terminal::updateHoveringHyperlinkState()
 
 optional<chrono::milliseconds> Terminal::nextRender() const
 {
-    auto nextBlink = chrono::milliseconds::max();
+    auto nextWakeup = chrono::milliseconds::max();
 
     // Cursor blink scheduling
     if (isModeEnabled(DECMode::VisibleCursor) && _settings.cursorDisplay == CursorDisplay::Blink)
@@ -1363,7 +1351,7 @@ optional<chrono::milliseconds> Terminal::nextRender() const
         auto const passedCursor =
             chrono::duration_cast<chrono::milliseconds>(_currentTime - _lastCursorBlink);
         if (passedCursor <= _settings.cursorBlinkInterval)
-            nextBlink = std::min(nextBlink, _settings.cursorBlinkInterval - passedCursor);
+            nextWakeup = std::min(nextWakeup, _settings.cursorBlinkInterval - passedCursor);
     }
 
     // Cell blink scheduling
@@ -1372,13 +1360,13 @@ optional<chrono::milliseconds> Terminal::nextRender() const
         if (_settings.blinkStyle == BlinkStyle::Classic)
         {
             // Classic mode only needs redraws at toggle transitions.
-            nextBlink = std::min(nextBlink, _slowBlinker.nextToggleIn(_currentTime));
-            nextBlink = std::min(nextBlink, _rapidBlinker.nextToggleIn(_currentTime));
+            nextWakeup = std::min(nextWakeup, _slowBlinker.nextToggleIn(_currentTime));
+            nextWakeup = std::min(nextWakeup, _rapidBlinker.nextToggleIn(_currentTime));
         }
         else
         {
             // Smooth/Linger modes require continuous animation at ~30fps.
-            nextBlink = std::min(nextBlink, chrono::milliseconds { 33 });
+            nextWakeup = std::min(nextWakeup, chrono::milliseconds { 33 });
         }
     }
 
@@ -1389,21 +1377,21 @@ optional<chrono::milliseconds> Terminal::nextRender() const
             % 60;
         auto const millisUntilNextMinute =
             chrono::duration_cast<chrono::milliseconds>(chrono::seconds(60 - currentSecond));
-        nextBlink = std::min(nextBlink, millisUntilNextMinute);
+        nextWakeup = std::min(nextWakeup, millisUntilNextMinute);
     }
 
     // Screen transition animation scheduling at display refresh rate.
     if (_screenTransition.active && !_screenTransition.isComplete(_currentTime))
-        nextBlink = std::min(nextBlink, _refreshInterval.value);
+        nextWakeup = std::min(nextWakeup, _refreshInterval.value);
 
     // Cursor motion animation scheduling at display refresh rate.
     if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
-        nextBlink = std::min(nextBlink, _refreshInterval.value);
+        nextWakeup = std::min(nextWakeup, _refreshInterval.value);
 
-    if (nextBlink == chrono::milliseconds::max())
+    if (nextWakeup == chrono::milliseconds::max())
         return nullopt;
 
-    return nextBlink;
+    return nextWakeup;
 }
 
 void Terminal::tick(chrono::steady_clock::time_point now) noexcept

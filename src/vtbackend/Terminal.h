@@ -1218,7 +1218,6 @@ class Terminal
         bool active = false;
         CellLocation fromPosition {};
         CellLocation toPosition {};
-        int fromWidth = 1;
         RGBColor fromColor {}; ///< Cursor color at the animation source position.
         RGBColor toColor {};   ///< Cursor color at the animation target position.
         std::chrono::steady_clock::time_point startTime {};

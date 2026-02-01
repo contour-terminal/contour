@@ -39,12 +39,12 @@ namespace
     RGBColorPair makeRGBColorPair(RGBColorPair actualColors,
                                   CellRGBColorAndAlphaPair configuredColor) noexcept
     {
-        return RGBColorPair { .foreground = mix(makeRGBColor(actualColors, configuredColor.foreground),
-                                                actualColors.foreground,
-                                                configuredColor.foregroundAlpha),
-                              .background = mix(makeRGBColor(actualColors, configuredColor.background),
-                                                actualColors.background,
-                                                configuredColor.backgroundAlpha) }
+        return RGBColorPair { .foreground = mixColor(actualColors.foreground,
+                                                     makeRGBColor(actualColors, configuredColor.foreground),
+                                                     configuredColor.foregroundAlpha),
+                              .background = mixColor(actualColors.background,
+                                                     makeRGBColor(actualColors, configuredColor.background),
+                                                     configuredColor.backgroundAlpha) }
             .distinct();
     }
 
@@ -96,7 +96,7 @@ namespace
             RGBColorPair { .foreground = makeRGBColor(selectionColors, colorPalette.cursor.textOverrideColor),
                            .background = makeRGBColor(selectionColors, colorPalette.cursor.color) };
 
-        return mix(cursorColor, selectionColors, 0.25f).distinct();
+        return mixColor(selectionColors, cursorColor, 0.25f).distinct();
     }
 
 } // namespace

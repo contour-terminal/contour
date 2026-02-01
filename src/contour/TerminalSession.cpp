@@ -1391,17 +1391,23 @@ bool TerminalSession::operator()(actions::CopyScreenshot)
     return true;
 }
 
-bool TerminalSession::operator()(actions::ScrollDown)
+void TerminalSession::smoothScrollBy(vtbackend::LineCount lineCount)
 {
     if (terminal().settings().smoothScrolling)
     {
         auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
-        auto const pixels =
-            static_cast<float>(*_profile.history.value().historyScrollMultiplier) * cellHeight;
-        terminal().applySmoothScrollPixelDelta(-pixels);
+        auto const pixels = static_cast<float>(*lineCount) * cellHeight;
+        terminal().applySmoothScrollPixelDelta(pixels);
     }
+    else if (*lineCount > 0)
+        terminal().viewport().scrollUp(lineCount);
     else
-        terminal().viewport().scrollDown(_profile.history.value().historyScrollMultiplier);
+        terminal().viewport().scrollDown(vtbackend::LineCount(-*lineCount));
+}
+
+bool TerminalSession::operator()(actions::ScrollDown)
+{
+    smoothScrollBy(-vtbackend::LineCount(*_profile.history.value().historyScrollMultiplier));
     return true;
 }
 
@@ -1419,53 +1425,27 @@ bool TerminalSession::operator()(actions::ScrollMarkUp)
 
 bool TerminalSession::operator()(actions::ScrollOneDown)
 {
-    if (terminal().settings().smoothScrolling)
-    {
-        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
-        terminal().applySmoothScrollPixelDelta(-cellHeight);
-    }
-    else
-        terminal().viewport().scrollDown(LineCount(1));
+    smoothScrollBy(-LineCount(1));
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollOneUp)
 {
-    if (terminal().settings().smoothScrolling)
-    {
-        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
-        terminal().applySmoothScrollPixelDelta(cellHeight);
-    }
-    else
-        terminal().viewport().scrollUp(LineCount(1));
+    smoothScrollBy(LineCount(1));
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageDown)
 {
     auto const stepSize = terminal().pageSize().lines / LineCount(2);
-    if (terminal().settings().smoothScrolling)
-    {
-        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
-        auto const pixels = static_cast<float>(*stepSize) * cellHeight;
-        terminal().applySmoothScrollPixelDelta(-pixels);
-    }
-    else
-        terminal().viewport().scrollDown(stepSize);
+    smoothScrollBy(-stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageUp)
 {
     auto const stepSize = terminal().pageSize().lines / LineCount(2);
-    if (terminal().settings().smoothScrolling)
-    {
-        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
-        auto const pixels = static_cast<float>(*stepSize) * cellHeight;
-        terminal().applySmoothScrollPixelDelta(pixels);
-    }
-    else
-        terminal().viewport().scrollUp(stepSize);
+    smoothScrollBy(stepSize);
     return true;
 }
 
@@ -1487,15 +1467,7 @@ bool TerminalSession::operator()(actions::ScrollToTop)
 
 bool TerminalSession::operator()(actions::ScrollUp)
 {
-    if (terminal().settings().smoothScrolling)
-    {
-        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
-        auto const pixels =
-            static_cast<float>(*_profile.history.value().historyScrollMultiplier) * cellHeight;
-        terminal().applySmoothScrollPixelDelta(pixels);
-    }
-    else
-        terminal().viewport().scrollUp(_profile.history.value().historyScrollMultiplier);
+    smoothScrollBy(vtbackend::LineCount(*_profile.history.value().historyScrollMultiplier));
     return true;
 }
 
@@ -1825,6 +1797,8 @@ void TerminalSession::configureTerminal()
     _terminal.settings().blinkStyle = _profile.blinkStyle.value();
     _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();
     _terminal.settings().screenTransitionDuration = _profile.screenTransitionDuration.value();
+    _terminal.settings().cursorMotionAnimationDuration = _profile.cursorMotionAnimationDuration.value();
+    _terminal.settings().smoothLineScrolling = _profile.smoothLineScrolling.value();
     _terminal.settings().smoothScrolling = _profile.smoothScrolling.value();
 }
 

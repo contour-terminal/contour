@@ -89,9 +89,17 @@ constexpr RGBColor operator+(RGBColor a, RGBColor b) noexcept
                       static_cast<uint8_t>(std::clamp<unsigned>(a.blue + b.blue, 0, 255)) };
 }
 
-constexpr RGBColor mix(RGBColor a, RGBColor b, float t = 0.5) noexcept
+/// Linearly interpolates between two RGB colors.
+/// At t=0 returns @p a, at t=1 returns @p b.
+constexpr RGBColor mixColor(RGBColor const& a, RGBColor const& b, float t = 0.5) noexcept
 {
-    return a * t + b * (1.0f - t);
+    auto const lerpChannel = [](uint8_t x, uint8_t y, float f) -> uint8_t {
+        return static_cast<uint8_t>(
+            std::clamp(std::lerp(static_cast<float>(x), static_cast<float>(y), f), 0.0f, 255.0f));
+    };
+    return RGBColor { lerpChannel(a.red, b.red, t),
+                      lerpChannel(a.green, b.green, t),
+                      lerpChannel(a.blue, b.blue, t) };
 }
 
 inline double distance(RGBColor e1, RGBColor e2) noexcept
@@ -151,11 +159,13 @@ struct RGBColorPair
     }
 };
 
-constexpr RGBColorPair mix(RGBColorPair a, RGBColorPair b, float t = 0.5) noexcept
+/// Linearly interpolates between two RGB color pairs.
+/// At t=0 returns @p a, at t=1 returns @p b.
+constexpr RGBColorPair mixColor(RGBColorPair const& a, RGBColorPair const& b, float t = 0.5) noexcept
 {
     return RGBColorPair {
-        .foreground = mix(a.foreground, b.foreground, t),
-        .background = mix(a.background, b.background, t),
+        .foreground = mixColor(a.foreground, b.foreground, t),
+        .background = mixColor(a.background, b.background, t),
     };
 }
 // }}}

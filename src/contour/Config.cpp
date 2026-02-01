@@ -2182,7 +2182,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 {
     auto parse = [&](std::string const& key) -> std::optional<vtbackend::ScreenTransitionStyle> {
         auto const upperKey = crispy::toUpper(key);
-        logger()("Loading entry: {}, value {}", entry, upperKey);
         if (upperKey == "CLASSIC")
             return vtbackend::ScreenTransitionStyle::Classic;
         if (upperKey == "FADE")
