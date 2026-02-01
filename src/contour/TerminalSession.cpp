@@ -139,6 +139,7 @@ namespace
         settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
         settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
         settings.cursorDisplay = profile.modeInsert.value().cursor.cursorDisplay;
+        settings.blinkStyle = profile.blinkStyle.value();
         settings.smoothLineScrolling = profile.smoothLineScrolling.value();
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
@@ -287,6 +288,27 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
         auto const l = scoped_lock { _terminal };
         _terminal.resizeScreen(_terminal.pageSize(), _display->pixelSize());
         _terminal.setRefreshRate(_display->refreshRate());
+    }
+
+    // Ensure max image size is based on the actual display dimensions,
+    // not just the (possibly zero) config default.
+    // This is needed because configureDisplay() is only called from createRenderer(),
+    // which only runs once for the first session.
+    {
+        auto const dpr = _display->contentScale();
+        auto const qActualScreenSize = _display->window()->screen()->size() * dpr;
+        auto const actualScreenSize = ImageSize { Width::cast_from(qActualScreenSize.width()),
+                                                  Height::cast_from(qActualScreenSize.height()) };
+        auto const configuredMaxImageSize = _config.images.value().maxImageSize;
+        auto const _ = std::scoped_lock { _terminal };
+        // clang-format off
+        auto const maxImageSize = ImageSize {
+            .width = unbox(configuredMaxImageSize.width) == 0 ? actualScreenSize.width : configuredMaxImageSize.width,
+            .height = unbox(configuredMaxImageSize.height) == 0 ? actualScreenSize.height : configuredMaxImageSize.height,
+        };
+        // clang-format on
+
+        _terminal.setMaxImageSize(maxImageSize, maxImageSize);
     }
 
     {
@@ -1750,6 +1772,7 @@ void TerminalSession::configureTerminal()
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
     _terminal.inputHandler().setSearchModeSwitch(_profile.searchModeSwitch.value());
     _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
+    _terminal.settings().blinkStyle = _profile.blinkStyle.value();
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)

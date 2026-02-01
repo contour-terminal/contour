@@ -420,6 +420,9 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::HighlightDoubleClickerWord> highlightDoubleClickedWord { true };
     ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont };
     ConfigEntry<bool, documentation::DrawBoldTextWithBrightColors> drawBoldTextWithBrightColors { false };
+    ConfigEntry<vtbackend::BlinkStyle, documentation::BlinkStyle> blinkStyle {
+        vtbackend::BlinkStyle::Smooth
+    };
     ConfigEntry<InputModeConfig, documentation::ModeInsert> modeInsert { CursorConfig {
         .cursorShape = vtbackend::CursorShape::Bar,
         .cursorDisplay = vtbackend::CursorDisplay::Steady,
@@ -963,6 +966,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::MaxHistoryLineCount& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::lru_capacity& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorDisplay& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::BlinkStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::Modifiers& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorShape& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, contour::config::SelectionAction& where);

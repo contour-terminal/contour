@@ -502,6 +502,14 @@ enum class CursorShape : uint8_t
 
 CursorShape makeCursorShape(std::string const& name);
 
+/// Determines the visual style of cell blink animation (SGR 5/6).
+enum class BlinkStyle : uint8_t
+{
+    Classic, //!< Abrupt on/off toggle at half-period intervals.
+    Smooth,  //!< Continuous cosine-based pulse.
+    Linger,  //!< Like Smooth but stays visible longer.
+};
+
 enum class ControlTransmissionMode : uint8_t
 {
     S7C1T, // 7-bit controls
@@ -921,6 +929,22 @@ struct std::formatter<vtbackend::CursorShape>: formatter<std::string_view>
             case vtbackend::CursorShape::Block: name = "Block"; break;
             case vtbackend::CursorShape::Rectangle: name = "Rectangle"; break;
             case vtbackend::CursorShape::Underscore: name = "Underscore"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::BlinkStyle>: formatter<std::string_view>
+{
+    auto format(vtbackend::BlinkStyle value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::BlinkStyle::Classic: name = "classic"; break;
+            case vtbackend::BlinkStyle::Smooth: name = "smooth"; break;
+            case vtbackend::BlinkStyle::Linger: name = "linger"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

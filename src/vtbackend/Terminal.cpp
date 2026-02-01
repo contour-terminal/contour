@@ -1187,20 +1187,30 @@ void Terminal::updateHoveringHyperlinkState()
 optional<chrono::milliseconds> Terminal::nextRender() const
 {
     auto nextBlink = chrono::milliseconds::max();
-    if ((isModeEnabled(DECMode::VisibleCursor) && _settings.cursorDisplay == CursorDisplay::Blink)
-        || isBlinkOnScreen())
+
+    // Cursor blink scheduling
+    if (isModeEnabled(DECMode::VisibleCursor) && _settings.cursorDisplay == CursorDisplay::Blink)
     {
         auto const passedCursor =
             chrono::duration_cast<chrono::milliseconds>(_currentTime - _lastCursorBlink);
-        auto const passedSlowBlink = chrono::duration_cast<chrono::milliseconds>(_currentTime - _lastBlink);
-        auto const passedRapidBlink =
-            chrono::duration_cast<chrono::milliseconds>(_currentTime - _lastRapidBlink);
         if (passedCursor <= _settings.cursorBlinkInterval)
             nextBlink = std::min(nextBlink, _settings.cursorBlinkInterval - passedCursor);
-        if (passedSlowBlink <= _slowBlinker.interval)
-            nextBlink = std::min(nextBlink, _slowBlinker.interval - passedSlowBlink);
-        if (passedRapidBlink <= _rapidBlinker.interval)
-            nextBlink = std::min(nextBlink, _rapidBlinker.interval - passedRapidBlink);
+    }
+
+    // Cell blink scheduling
+    if (isBlinkOnScreen())
+    {
+        if (_settings.blinkStyle == BlinkStyle::Classic)
+        {
+            // Classic mode only needs redraws at toggle transitions.
+            nextBlink = std::min(nextBlink, _slowBlinker.nextToggleIn(_currentTime));
+            nextBlink = std::min(nextBlink, _rapidBlinker.nextToggleIn(_currentTime));
+        }
+        else
+        {
+            // Smooth/Linger modes require continuous animation at ~30fps.
+            nextBlink = std::min(nextBlink, chrono::milliseconds { 33 });
+        }
     }
 
     if (_statusDisplayType == StatusDisplayType::Indicator)
@@ -1227,11 +1237,6 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
 
     _currentTime = now;
     updateCursorVisibilityState();
-    if (isBlinkOnScreen())
-    {
-        tie(_rapidBlinker.state, _lastRapidBlink) = nextBlinkState(_rapidBlinker, _lastRapidBlink);
-        tie(_slowBlinker.state, _lastBlink) = nextBlinkState(_slowBlinker, _lastBlink);
-    }
 }
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)

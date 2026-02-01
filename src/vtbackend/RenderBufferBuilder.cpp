@@ -57,8 +57,8 @@ namespace
                             bool isCursor,
                             bool isCursorLine,
                             bool isHighlighted,
-                            bool blink,
-                            bool rapidBlink) noexcept
+                            float blink,
+                            float rapidBlink) noexcept
     {
         auto sgrColors = CellUtil::makeColors(
             colorPalette, cellFlags, reverseVideo, foregroundColor, backgroundColor, blink, rapidBlink);

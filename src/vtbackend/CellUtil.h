@@ -20,8 +20,8 @@ namespace vtbackend::CellUtil
                                              bool reverseVideo,
                                              Color foregroundColor,
                                              Color backgroundColor,
-                                             bool blinkingState,
-                                             bool rapidBlinkState) noexcept
+                                             float blinkingState,
+                                             float rapidBlinkState) noexcept
 {
     auto const fgMode = [](CellFlags flags, ColorPalette const& colorPalette) {
         if (flags & CellFlag::Faint)
@@ -47,10 +47,10 @@ namespace vtbackend::CellUtil
     if (cellFlags & CellFlag::Hidden)
         rgbColors = rgbColors.allBackground();
 
-    if ((cellFlags & CellFlag::Blinking) && !blinkingState)
-        return rgbColors.allBackground();
-    if ((cellFlags & CellFlag::RapidBlinking) && !rapidBlinkState)
-        return rgbColors.allBackground();
+    if (cellFlags & CellFlag::Blinking)
+        return mix(rgbColors, rgbColors.allBackground(), blinkingState);
+    if (cellFlags & CellFlag::RapidBlinking)
+        return mix(rgbColors, rgbColors.allBackground(), rapidBlinkState);
 
     return rgbColors;
 }

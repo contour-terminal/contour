@@ -59,6 +59,7 @@ struct Settings
     bool syncWindowTitleWithHostWritableStatusDisplay = true;
     CursorDisplay cursorDisplay = CursorDisplay::Steady;
     CursorShape cursorShape = CursorShape::Block;
+    BlinkStyle blinkStyle = BlinkStyle::Smooth;
 
     bool usePrivateColorRegisters = false;
 
