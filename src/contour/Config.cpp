@@ -422,6 +422,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "font", where.fonts);
         loadFromEntry(child, "draw_bold_text_with_bright_colors", where.drawBoldTextWithBrightColors);
         loadFromEntry(child, "blink_style", where.blinkStyle);
+        loadFromEntry(child, "screen_transition", where.screenTransitionStyle);
         if (child["cursor"])
         {
             loadFromEntry(child["cursor"], "shape", where.modeInsert.value().cursor.cursorShape);
@@ -2161,6 +2162,28 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             return vtbackend::BlinkStyle::Smooth;
         if (upperKey == "LINGER")
             return vtbackend::BlinkStyle::Linger;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parse(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::ScreenTransitionStyle& where)
+{
+    auto parse = [&](std::string const& key) -> std::optional<vtbackend::ScreenTransitionStyle> {
+        auto const upperKey = crispy::toUpper(key);
+        logger()("Loading entry: {}, value {}", entry, upperKey);
+        if (upperKey == "CLASSIC")
+            return vtbackend::ScreenTransitionStyle::Classic;
+        if (upperKey == "FADE")
+            return vtbackend::ScreenTransitionStyle::Fade;
         return std::nullopt;
     };
 

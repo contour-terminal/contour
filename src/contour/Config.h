@@ -423,6 +423,8 @@ struct TerminalProfile
     ConfigEntry<vtbackend::BlinkStyle, documentation::BlinkStyle> blinkStyle {
         vtbackend::BlinkStyle::Smooth
     };
+    ConfigEntry<vtbackend::ScreenTransitionStyle, documentation::ScreenTransitionStyle>
+        screenTransitionStyle { vtbackend::ScreenTransitionStyle::Fade };
     ConfigEntry<InputModeConfig, documentation::ModeInsert> modeInsert { CursorConfig {
         .cursorShape = vtbackend::CursorShape::Bar,
         .cursorDisplay = vtbackend::CursorDisplay::Steady,
@@ -967,6 +969,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::lru_capacity& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorDisplay& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::BlinkStyle& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ScreenTransitionStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::Modifiers& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorShape& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, contour::config::SelectionAction& where);

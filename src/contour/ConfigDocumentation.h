@@ -1831,6 +1831,36 @@ constexpr StringLiteral BlinkStyleWeb {
 };
 
 using BlinkStyle = DocumentationEntry<BlinkStyleConfig, BlinkStyleWeb>;
+
+constexpr StringLiteral ScreenTransitionStyleConfig {
+    "{comment} Determines the visual style of screen transitions between primary and alternate screens.\n"
+    "{comment}\n"
+    "{comment} Valid values are:\n"
+    "{comment}  - classic: Instant switch (no animation).\n"
+    "{comment}  - fade:    Smooth crossfade over a configurable duration.\n"
+    "screen_transition: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral ScreenTransitionStyleWeb {
+    "Determines the visual style of screen transitions between primary and alternate screens.\n"
+    "\n"
+    "When switching between primary and alternate screen buffers (e.g. entering/leaving vim, htop),\n"
+    "this setting controls whether the transition is instant or animated.\n"
+    "\n"
+    "Valid values are:\n"
+    "- `classic` - instant switch (no animation)\n"
+    "- `fade` - smooth crossfade over 500ms\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    screen_transition: fade\n"
+    "```\n"
+    "\n"
+};
+
+using ScreenTransitionStyle = DocumentationEntry<ScreenTransitionStyleConfig, ScreenTransitionStyleWeb>;
 using Colors = DocumentationEntry<ColorsConfig, ColorsWeb>;
 using ModalCursorScrollOff = DocumentationEntry<ModalCursorScrollOffConfig, ModalCursorScrollOffWeb>;
 using ModeInsert = DocumentationEntry<ModeInsertConfig, ModeInsertWeb>;

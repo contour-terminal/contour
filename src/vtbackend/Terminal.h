@@ -45,6 +45,7 @@
 #include <numbers>
 #include <stack>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 
 namespace vtbackend
@@ -614,6 +615,18 @@ class Terminal
         crispy::unreachable();
     }
 
+    /// Returns true if a screen crossfade transition is currently active.
+    [[nodiscard]] bool isScreenTransitionActive() const noexcept { return _screenTransition.active; }
+
+    /// Returns the current transition progress in [0, 1], or 1.0 if no transition is active.
+    [[nodiscard]] float screenTransitionProgress() const noexcept
+    {
+        return _screenTransition.progress(_currentTime);
+    }
+
+    /// Immediately ends any active screen transition.
+    void finalizeScreenTransition() noexcept;
+
     void setHighlightTimeout(std::chrono::milliseconds timeout) noexcept
     {
         _settings.highlightTimeout = timeout;
@@ -1135,6 +1148,34 @@ class Terminal
     };
     BlinkerState _slowBlinker { .period = std::chrono::milliseconds { 1000 } };
     BlinkerState _rapidBlinker { .period = std::chrono::milliseconds { 600 } };
+    // }}}
+
+    // {{{ Screen transition state (crossfade between primary/alternate screens)
+    /// Holds state for an ongoing crossfade transition between screen buffers.
+    struct ScreenTransitionState
+    {
+        bool active = false;
+        std::chrono::steady_clock::time_point startTime {};
+        std::chrono::milliseconds duration { 500 };
+        std::vector<RenderCell> snapshotCells {};
+        std::optional<RenderCursor> snapshotCursor {};
+
+        /// Returns the transition progress in [0, 1].
+        [[nodiscard]] float progress(std::chrono::steady_clock::time_point now) const noexcept
+        {
+            if (!active || duration.count() == 0)
+                return 1.0f;
+            auto const elapsed = std::chrono::duration<float, std::milli>(now - startTime).count();
+            return std::clamp(elapsed / static_cast<float>(duration.count()), 0.0f, 1.0f);
+        }
+
+        /// Returns true if the transition has completed.
+        [[nodiscard]] bool isComplete(std::chrono::steady_clock::time_point now) const noexcept
+        {
+            return !active || progress(now) >= 1.0f;
+        }
+    };
+    ScreenTransitionState _screenTransition;
     // }}}
 
     // {{{ Displays this terminal manages

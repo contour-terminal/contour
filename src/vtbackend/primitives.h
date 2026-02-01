@@ -510,6 +510,13 @@ enum class BlinkStyle : uint8_t
     Linger,  //!< Like Smooth but stays visible longer.
 };
 
+/// Determines the visual style of screen transitions between primary and alternate screens.
+enum class ScreenTransitionStyle : uint8_t
+{
+    Classic, ///< Instant switch (no animation).
+    Fade,    ///< Smooth crossfade over a configurable duration.
+};
+
 enum class ControlTransmissionMode : uint8_t
 {
     S7C1T, // 7-bit controls
@@ -945,6 +952,21 @@ struct std::formatter<vtbackend::BlinkStyle>: formatter<std::string_view>
             case vtbackend::BlinkStyle::Classic: name = "classic"; break;
             case vtbackend::BlinkStyle::Smooth: name = "smooth"; break;
             case vtbackend::BlinkStyle::Linger: name = "linger"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::ScreenTransitionStyle>: formatter<std::string_view>
+{
+    auto format(vtbackend::ScreenTransitionStyle value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::ScreenTransitionStyle::Classic: name = "classic"; break;
+            case vtbackend::ScreenTransitionStyle::Fade: name = "fade"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

@@ -95,6 +95,17 @@ namespace // {{{ helpers
         return CellLocation { .line = std::max(location.line, minimumLine), .column = location.column };
     }
 
+    /// Linearly interpolates between two RGB colors.
+    /// At t=0 returns `a`, at t=1 returns `b`.
+    constexpr RGBColor mixColor(RGBColor const& a, RGBColor const& b, float t) noexcept
+    {
+        auto const lerp = [](uint8_t x, uint8_t y, float f) -> uint8_t {
+            return static_cast<uint8_t>(std::clamp(
+                static_cast<float>(x) + f * (static_cast<float>(y) - static_cast<float>(x)), 0.0f, 255.0f));
+        };
+        return RGBColor { lerp(a.red, b.red, t), lerp(a.green, b.green, t), lerp(a.blue, b.blue, t) };
+    }
+
 } // namespace
 // }}}
 
@@ -515,6 +526,71 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     {
         baseLine += pageSize().lines.as<LineOffset>();
         fillRenderBufferStatusLine(output, includeSelection, baseLine);
+    }
+
+    // Apply crossfade blending when a screen transition is active.
+    if (_screenTransition.active)
+    {
+        auto const progress = _screenTransition.progress(_currentTime);
+        if (progress >= 1.0f)
+        {
+            finalizeScreenTransition();
+        }
+        else
+        {
+            // Build a position-indexed lookup from snapshot cells.
+            auto snapshotLookup =
+                std::unordered_map<uint32_t, size_t> {}; // position hash -> index in snapshotCells
+            auto const posHash = [](CellLocation const& pos) -> uint32_t {
+                return (static_cast<uint32_t>(pos.line.value) << 16)
+                       | static_cast<uint32_t>(pos.column.value & 0xFFFF);
+            };
+            for (auto i = size_t { 0 }; i < _screenTransition.snapshotCells.size(); ++i)
+                snapshotLookup[posHash(_screenTransition.snapshotCells[i].position)] = i;
+
+            auto const defaultBg = _colorPalette.defaultBackground;
+
+            for (auto& cell: output.cells)
+            {
+                auto const key = posHash(cell.position);
+                if (auto const it = snapshotLookup.find(key); it != snapshotLookup.end())
+                {
+                    auto const& snap = _screenTransition.snapshotCells[it->second];
+
+                    // Blend colors: at progress=0 show outgoing, at progress=1 show incoming.
+                    cell.attributes.foregroundColor =
+                        mixColor(snap.attributes.foregroundColor, cell.attributes.foregroundColor, progress);
+                    cell.attributes.backgroundColor =
+                        mixColor(snap.attributes.backgroundColor, cell.attributes.backgroundColor, progress);
+                    cell.attributes.decorationColor =
+                        mixColor(snap.attributes.decorationColor, cell.attributes.decorationColor, progress);
+
+                    // Show outgoing codepoints/image for the first half, incoming for the second half.
+                    if (progress < 0.5f)
+                    {
+                        cell.codepoints = snap.codepoints;
+                        cell.image = snap.image;
+                    }
+                }
+                else
+                {
+                    // No matching snapshot cell — blend incoming toward default background.
+                    cell.attributes.foregroundColor =
+                        mixColor(defaultBg, cell.attributes.foregroundColor, progress);
+                    cell.attributes.backgroundColor =
+                        mixColor(defaultBg, cell.attributes.backgroundColor, progress);
+                    cell.attributes.decorationColor =
+                        mixColor(defaultBg, cell.attributes.decorationColor, progress);
+
+                    if (progress < 0.5f)
+                        cell.codepoints.clear();
+                }
+            }
+
+            // Cursor: show snapshot cursor for first half, incoming cursor for second half.
+            if (progress < 0.5f)
+                output.cursor = _screenTransition.snapshotCursor;
+        }
     }
 }
 
@@ -1223,6 +1299,10 @@ optional<chrono::milliseconds> Terminal::nextRender() const
         nextBlink = std::min(nextBlink, millisUntilNextMinute);
     }
 
+    // Screen transition animation scheduling (~60fps for smooth crossfade).
+    if (_screenTransition.active && !_screenTransition.isComplete(_currentTime))
+        nextBlink = std::min(nextBlink, chrono::milliseconds { 16 });
+
     if (nextBlink == chrono::milliseconds::max())
         return nullopt;
 
@@ -1237,10 +1317,17 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
 
     _currentTime = now;
     updateCursorVisibilityState();
+
+    if (_screenTransition.active && _screenTransition.isComplete(_currentTime))
+        finalizeScreenTransition();
 }
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
+    // Finalize any active screen transition on resize (snapshot dimensions no longer match).
+    if (_screenTransition.active)
+        finalizeScreenTransition();
+
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
     auto const mainDisplayPageSize = totalPageSize - statusLineHeight();
@@ -1986,10 +2073,47 @@ void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
     resizeScreen(totalPageSize, pageSizeInPixels);
 }
 
+void Terminal::finalizeScreenTransition() noexcept
+{
+    _screenTransition.active = false;
+    _screenTransition.snapshotCells.clear();
+    _screenTransition.snapshotCursor.reset();
+}
+
 void Terminal::setScreen(ScreenType type)
 {
     if (type == _currentScreenType)
         return;
+
+    // Capture snapshot of the outgoing screen for crossfade transition.
+    if (_settings.screenTransitionStyle == ScreenTransitionStyle::Fade)
+    {
+        // If a transition is already active, finalize it first.
+        if (_screenTransition.active)
+            finalizeScreenTransition();
+
+        // Save render state that fillRenderBufferInternal() will modify as side effects.
+        auto const savedChanges = _changes.load();
+        auto const savedScreenDirty = _screenDirty;
+        auto const savedFrameID = _lastFrameID.load();
+
+        // Capture the outgoing screen's render cells.
+        RenderBuffer snapshotBuffer;
+        fillRenderBufferInternal(snapshotBuffer, false);
+
+        // Restore render state so the actual rendering pipeline is not disrupted.
+        _changes.store(savedChanges);
+        _screenDirty = savedScreenDirty;
+        _lastFrameID.store(savedFrameID);
+
+        _screenTransition.snapshotCells = std::move(snapshotBuffer.cells);
+        _screenTransition.snapshotCursor = snapshotBuffer.cursor;
+        // Use wall-clock time, not _currentTime, because _currentTime may be stale
+        // if tick() hasn't been called recently (e.g. terminal was idle with no animations).
+        _screenTransition.startTime = std::chrono::steady_clock::now();
+        _screenTransition.duration = _settings.screenTransitionDuration;
+        _screenTransition.active = true;
+    }
 
     switch (type)
     {
