@@ -531,6 +531,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // Apply fade-out/fade-in blending when a screen transition is active.
     // First half:  outgoing screen fades to default background.
     // Second half: incoming screen fades in from default background.
+    // The status line is excluded so it remains always visible.
     if (_screenTransition.active)
     {
         auto const progress = _screenTransition.progress(_currentTime);
@@ -542,16 +543,30 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         {
             auto const defaultBg = _colorPalette.defaultBackground;
 
+            // Determine the line offset range that covers the main display (excluding the status line).
+            auto const mainLineBegin = (_settings.statusDisplayPosition == StatusDisplayPosition::Top)
+                                           ? statusLineHeight().as<LineOffset>()
+                                           : LineOffset(0);
+            auto const mainLineEnd = mainLineBegin + pageSize().lines.as<LineOffset>();
+
+            auto const isMainDisplayCell = [&](CellLocation const& pos) {
+                return pos.line >= mainLineBegin && pos.line < mainLineEnd;
+            };
+            auto const isMainDisplayLine = [&](LineOffset offset) {
+                return offset >= mainLineBegin && offset < mainLineEnd;
+            };
+
             if (progress < 0.5f)
             {
-                // Phase 1: Fade-out — replace output with snapshot cells fading to background.
+                // Phase 1: Fade-out — replace main display cells with snapshot cells fading to background.
                 auto const fadeOut = progress * 2.0f; // 0→1 over the first half
 
-                output.cells.clear();
-                output.lines.clear();
+                // Preserve status line cells and lines, discard main display entries.
+                std::erase_if(output.cells, [&](auto const& c) { return isMainDisplayCell(c.position); });
+                std::erase_if(output.lines, [&](auto const& l) { return isMainDisplayLine(l.lineOffset); });
                 output.cursor.reset();
 
-                output.cells.reserve(_screenTransition.snapshotCells.size());
+                output.cells.reserve(output.cells.size() + _screenTransition.snapshotCells.size());
                 for (auto const& snap: _screenTransition.snapshotCells)
                 {
                     auto cell = snap;
@@ -566,11 +581,13 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
             }
             else
             {
-                // Phase 2: Fade-in — blend incoming screen from default background.
+                // Phase 2: Fade-in — blend main display from default background.
                 auto const fadeIn = (progress - 0.5f) * 2.0f; // 0→1 over the second half
 
                 for (auto& cell: output.cells)
                 {
+                    if (!isMainDisplayCell(cell.position))
+                        continue;
                     cell.attributes.foregroundColor =
                         mixColor(defaultBg, cell.attributes.foregroundColor, fadeIn);
                     cell.attributes.backgroundColor =
@@ -581,6 +598,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
                 for (auto& line: output.lines)
                 {
+                    if (!isMainDisplayLine(line.lineOffset))
+                        continue;
                     line.textAttributes.foregroundColor =
                         mixColor(defaultBg, line.textAttributes.foregroundColor, fadeIn);
                     line.textAttributes.backgroundColor =
