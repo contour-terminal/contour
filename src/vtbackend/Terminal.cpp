@@ -545,17 +545,8 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
         {
             // Chain: start new animation from current interpolated position
             auto const currentProgress = _cursorMotion.progress(_currentTime);
-            auto const fromLine =
-                _cursorMotion.fromPosition.line
-                + LineOffset(static_cast<int>(currentProgress
-                                              * static_cast<float>((*_cursorMotion.toPosition.line
-                                                                    - *_cursorMotion.fromPosition.line))));
-            auto const fromCol = _cursorMotion.fromPosition.column
-                                 + ColumnOffset(static_cast<int>(
-                                     currentProgress
-                                     * static_cast<float>((*_cursorMotion.toPosition.column
-                                                           - *_cursorMotion.fromPosition.column))));
-            _cursorMotion.fromPosition = CellLocation { .line = fromLine, .column = fromCol };
+            _cursorMotion.fromPosition =
+                lerpCellLocation(_cursorMotion.fromPosition, _cursorMotion.toPosition, currentProgress);
             _cursorMotion.fromColor =
                 mixColor(_cursorMotion.fromColor, _cursorMotion.toColor, currentProgress);
             _cursorMotion.toPosition = cursorPos;

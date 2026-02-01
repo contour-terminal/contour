@@ -176,6 +176,22 @@ constexpr CellLocation operator-(CellLocation c, ColumnOffset x) noexcept
     return CellLocation { .line = c.line, .column = c.column - x };
 }
 
+/// Linearly interpolates between two cell locations.
+/// At t=0 returns @p a, at t=1 returns @p b.
+///
+/// @param a  start location.
+/// @param b  end location.
+/// @param t  interpolation factor in [0, 1].
+///
+/// @return the component-wise interpolated CellLocation.
+constexpr CellLocation lerpCellLocation(CellLocation a, CellLocation b, float t) noexcept
+{
+    return CellLocation {
+        .line = a.line + LineOffset::cast_from(t * static_cast<float>(*b.line - *a.line)),
+        .column = a.column + ColumnOffset::cast_from(t * static_cast<float>(*b.column - *a.column)),
+    };
+}
+
 // Constructs a top-left and bottom-right coordinate-pair from given input.
 constexpr std::pair<CellLocation, CellLocation> orderedPoints(CellLocation a, CellLocation b) noexcept
 {
