@@ -296,7 +296,12 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 #endif // }}}
 
     auto const smoothPixelOffset = static_cast<int>(terminal.smoothScrollPixelOffset());
-    auto const statusLineBoundary = terminal.pageSize().lines;
+    auto const statusDisplayAtTop =
+        terminal.settings().statusDisplayPosition == vtbackend::StatusDisplayPosition::Top;
+    // The partition boundary separates the two regions in the render buffer.
+    // Bottom: [main 0..pageSize) [status pageSize..)   → boundary = pageSize
+    // Top:    [status 0..statusHeight) [main statusHeight..)  → boundary = statusHeight
+    auto const statusLineBoundary = statusDisplayAtTop ? statusLineHeight : terminal.pageSize().lines;
     auto const now = terminal.currentTime();
 
     auto cursorOpt = optional<vtbackend::RenderCursor> { std::nullopt };
@@ -335,10 +340,18 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 
         auto const cellSplit = findCellPartitionPoint(renderBuffer.get().cells, statusLineBoundary);
         auto const lineSplit = findLinePartitionPoint(renderBuffer.get().lines, statusLineBoundary);
-        auto const mainCells = std::span(renderBuffer.get().cells).first(cellSplit);
-        auto const statusCells = std::span(renderBuffer.get().cells).subspan(cellSplit);
-        auto const mainLines = std::span(renderBuffer.get().lines).first(lineSplit);
-        auto const statusLines = std::span(renderBuffer.get().lines).subspan(lineSplit);
+
+        // When status line is at bottom, the first partition is main display;
+        // when at top, the first partition is the status line.
+        auto const firstCells = std::span(renderBuffer.get().cells).first(cellSplit);
+        auto const secondCells = std::span(renderBuffer.get().cells).subspan(cellSplit);
+        auto const firstLines = std::span(renderBuffer.get().lines).first(lineSplit);
+        auto const secondLines = std::span(renderBuffer.get().lines).subspan(lineSplit);
+
+        auto const mainCells = statusDisplayAtTop ? secondCells : firstCells;
+        auto const statusCells = statusDisplayAtTop ? firstCells : secondCells;
+        auto const mainLines = statusDisplayAtTop ? secondLines : firstLines;
+        auto const statusLines = statusDisplayAtTop ? firstLines : secondLines;
 
         renderPass(primaryPressure, [&] {
             renderCells(mainCells, smoothPixelOffset);
@@ -348,8 +361,9 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
         // Scissor clips the main display area so the offset content doesn't bleed into the status line.
         {
             auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
-            auto const mainAreaTop = _gridMetrics.pageMargin.top;
-            auto const mainAreaHeight = *statusLineBoundary * cellHeight;
+            auto const mainAreaTop =
+                _gridMetrics.pageMargin.top + (statusDisplayAtTop ? *statusLineHeight * cellHeight : 0);
+            auto const mainAreaHeight = *terminal.pageSize().lines * cellHeight;
             auto const renderSize = _renderTarget->renderSize();
             auto const renderWidth = renderSize.width.as<int>();
             auto const renderHeight = renderSize.height.as<int>();
@@ -406,8 +420,9 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
         if (smoothPixelOffset != 0)
         {
             auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
-            auto const mainAreaTop = _gridMetrics.pageMargin.top;
-            auto const mainAreaHeight = *statusLineBoundary * cellHeight;
+            auto const mainAreaTop =
+                _gridMetrics.pageMargin.top + (statusDisplayAtTop ? *statusLineHeight * cellHeight : 0);
+            auto const mainAreaHeight = *terminal.pageSize().lines * cellHeight;
             auto const renderSize = _renderTarget->renderSize();
             auto const renderWidth = renderSize.width.as<int>();
             auto const renderHeight = renderSize.height.as<int>();
