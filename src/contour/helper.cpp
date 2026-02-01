@@ -135,13 +135,13 @@ namespace
             if (angleDelta.y != 0)
             {
                 // Prefer angleDelta: it is standardized across platforms (120 units = 1 notch)
-                // and allows consistent scaling. The old line-based path uses angleStepSize=40
+                // and allows consistent scaling. The old line-based path uses AngleStepSize=40
                 // to quantize into scroll events, each scrolling historyScrollMultiplier lines.
                 // Match that rate: effective lines per event = (angleDelta / 40) * multiplier.
                 auto const multiplier = session.profile().history.value().historyScrollMultiplier;
                 auto const cellHeight = static_cast<float>(terminal.cellPixelSize().height.as<int>());
-                constexpr auto angleStepSize = 40.0f;
-                auto const pixelsPerUnit = static_cast<float>(*multiplier) * cellHeight / angleStepSize;
+                constexpr auto AngleStepSize = 40.0f;
+                auto const pixelsPerUnit = static_cast<float>(*multiplier) * cellHeight / AngleStepSize;
                 auto const pixelAmount = static_cast<float>(angleDelta.y) * pixelsPerUnit;
                 terminal.applySmoothScrollPixelDelta(pixelAmount);
                 return;
