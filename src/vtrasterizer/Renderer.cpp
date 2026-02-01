@@ -7,6 +7,7 @@
 #include <text_shaper/open_shaper.h>
 
 #include <crispy/StrongLRUHashtable.h>
+#include <crispy/utils.h>
 
 #if defined(_WIN32)
     #include <text_shaper/directwrite_shaper.h>
@@ -354,9 +355,9 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
             auto const renderHeight = renderSize.height.as<int>();
             auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
             _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
+            auto const scissorGuard = crispy::finally([this] { _renderTarget->clearScissorRect(); });
+            _renderTarget->execute(now);
         }
-        _renderTarget->execute(now);
-        _renderTarget->clearScissorRect();
 
         // Pass 2: Status line (no scroll offset, no scissor).
         setSmoothScrollOffset(0);
