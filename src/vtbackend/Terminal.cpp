@@ -2233,6 +2233,9 @@ void Terminal::setScreen(ScreenType type)
             finalizeScreenTransition();
 
         // Save render state that fillRenderBufferInternal() will modify as side effects.
+        // PRECONDITION: Must be called from the writer thread under terminal lock.
+        // The save/restore of atomics is safe because no concurrent reader can observe
+        // intermediate states while we hold the lock.
         auto const savedChanges = _changes.load();
         auto const savedScreenDirty = _screenDirty;
         auto const savedFrameID = _lastFrameID.load();
