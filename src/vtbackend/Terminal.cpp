@@ -528,7 +528,9 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         fillRenderBufferStatusLine(output, includeSelection, baseLine);
     }
 
-    // Apply crossfade blending when a screen transition is active.
+    // Apply fade-out/fade-in blending when a screen transition is active.
+    // First half:  outgoing screen fades to default background.
+    // Second half: incoming screen fades in from default background.
     if (_screenTransition.active)
     {
         auto const progress = _screenTransition.progress(_currentTime);
@@ -538,58 +540,65 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         }
         else
         {
-            // Build a position-indexed lookup from snapshot cells.
-            auto snapshotLookup =
-                std::unordered_map<uint32_t, size_t> {}; // position hash -> index in snapshotCells
-            auto const posHash = [](CellLocation const& pos) -> uint32_t {
-                return (static_cast<uint32_t>(pos.line.value) << 16)
-                       | static_cast<uint32_t>(pos.column.value & 0xFFFF);
-            };
-            for (auto i = size_t { 0 }; i < _screenTransition.snapshotCells.size(); ++i)
-                snapshotLookup[posHash(_screenTransition.snapshotCells[i].position)] = i;
-
             auto const defaultBg = _colorPalette.defaultBackground;
 
-            for (auto& cell: output.cells)
+            if (progress < 0.5f)
             {
-                auto const key = posHash(cell.position);
-                if (auto const it = snapshotLookup.find(key); it != snapshotLookup.end())
+                // Phase 1: Fade-out — blend outgoing snapshot toward default background.
+                auto const fadeOut = progress * 2.0f; // 0→1 over the first half
+
+                // Build a position-indexed lookup from snapshot cells.
+                auto snapshotLookup =
+                    std::unordered_map<uint32_t, size_t> {}; // position hash -> index in snapshotCells
+                auto const posHash = [](CellLocation const& pos) -> uint32_t {
+                    return (static_cast<uint32_t>(pos.line.value) << 16)
+                           | static_cast<uint32_t>(pos.column.value & 0xFFFF);
+                };
+                for (auto i = size_t { 0 }; i < _screenTransition.snapshotCells.size(); ++i)
+                    snapshotLookup[posHash(_screenTransition.snapshotCells[i].position)] = i;
+
+                for (auto& cell: output.cells)
                 {
-                    auto const& snap = _screenTransition.snapshotCells[it->second];
-
-                    // Blend colors: at progress=0 show outgoing, at progress=1 show incoming.
-                    cell.attributes.foregroundColor =
-                        mixColor(snap.attributes.foregroundColor, cell.attributes.foregroundColor, progress);
-                    cell.attributes.backgroundColor =
-                        mixColor(snap.attributes.backgroundColor, cell.attributes.backgroundColor, progress);
-                    cell.attributes.decorationColor =
-                        mixColor(snap.attributes.decorationColor, cell.attributes.decorationColor, progress);
-
-                    // Show outgoing codepoints/image for the first half, incoming for the second half.
-                    if (progress < 0.5f)
+                    auto const key = posHash(cell.position);
+                    if (auto const it = snapshotLookup.find(key); it != snapshotLookup.end())
                     {
+                        auto const& snap = _screenTransition.snapshotCells[it->second];
                         cell.codepoints = snap.codepoints;
                         cell.image = snap.image;
+                        cell.attributes.foregroundColor =
+                            mixColor(snap.attributes.foregroundColor, defaultBg, fadeOut);
+                        cell.attributes.backgroundColor =
+                            mixColor(snap.attributes.backgroundColor, defaultBg, fadeOut);
+                        cell.attributes.decorationColor =
+                            mixColor(snap.attributes.decorationColor, defaultBg, fadeOut);
+                    }
+                    else
+                    {
+                        cell.codepoints.clear();
+                        cell.image.reset();
+                        cell.attributes.foregroundColor = defaultBg;
+                        cell.attributes.backgroundColor = defaultBg;
+                        cell.attributes.decorationColor = defaultBg;
                     }
                 }
-                else
-                {
-                    // No matching snapshot cell — blend incoming toward default background.
-                    cell.attributes.foregroundColor =
-                        mixColor(defaultBg, cell.attributes.foregroundColor, progress);
-                    cell.attributes.backgroundColor =
-                        mixColor(defaultBg, cell.attributes.backgroundColor, progress);
-                    cell.attributes.decorationColor =
-                        mixColor(defaultBg, cell.attributes.decorationColor, progress);
 
-                    if (progress < 0.5f)
-                        cell.codepoints.clear();
+                output.cursor.reset();
+            }
+            else
+            {
+                // Phase 2: Fade-in — blend incoming screen from default background.
+                auto const fadeIn = (progress - 0.5f) * 2.0f; // 0→1 over the second half
+
+                for (auto& cell: output.cells)
+                {
+                    cell.attributes.foregroundColor =
+                        mixColor(defaultBg, cell.attributes.foregroundColor, fadeIn);
+                    cell.attributes.backgroundColor =
+                        mixColor(defaultBg, cell.attributes.backgroundColor, fadeIn);
+                    cell.attributes.decorationColor =
+                        mixColor(defaultBg, cell.attributes.decorationColor, fadeIn);
                 }
             }
-
-            // Cursor: show snapshot cursor for first half, incoming cursor for second half.
-            if (progress < 0.5f)
-                output.cursor = _screenTransition.snapshotCursor;
         }
     }
 }
