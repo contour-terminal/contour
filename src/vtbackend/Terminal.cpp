@@ -569,6 +569,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                 output.cells.reserve(output.cells.size() + _screenTransition.snapshotCells.size());
                 for (auto const& snap: _screenTransition.snapshotCells)
                 {
+                    if (!isMainDisplayCell(snap.position))
+                        continue;
                     auto cell = snap;
                     cell.attributes.foregroundColor =
                         mixColor(snap.attributes.foregroundColor, defaultBg, fadeOut);
