@@ -25,6 +25,7 @@ bdf
 clangcl
 copy'n'paste
 copyable
+crossfade
 gha
 ilammy
 lazygit
@@ -34,10 +35,12 @@ libglib
 libzstd
 lowerCamelCase
 macOS
+midanimation
 nupkg
 nushell
 openxr
 ppem
 tablegen
+tparam
 vswhere
 zypper
