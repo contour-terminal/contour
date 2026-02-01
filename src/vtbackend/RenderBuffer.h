@@ -65,6 +65,8 @@ struct RenderCursor
     CellLocation position;
     CursorShape shape;
     int width = 1;
+    std::optional<CellLocation> animateFrom {}; ///< Grid position cursor is animating from.
+    float animationProgress = 1.0f;             ///< 0.0 = at animateFrom, 1.0 = at position.
 };
 
 struct RenderBuffer

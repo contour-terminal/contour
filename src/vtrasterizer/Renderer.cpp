@@ -308,11 +308,9 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     _textRenderer.endFrame();
     _imageRenderer.endFrame();
 
-    if (cursorOpt && cursorOpt.value().shape != vtbackend::CursorShape::Block)
+    if (cursorOpt)
     {
-        // Note. Block cursor is implicitly rendered via standard grid cell rendering.
         auto const cursor = *cursorOpt;
-        _cursorRenderer.setShape(cursor.shape);
         auto const cursorColor = [&]() {
             if (holds_alternative<vtbackend::CellForegroundColor>(_colorPalette.cursor.color))
                 return _colorPalette.defaultForeground;
@@ -321,7 +319,27 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
             else
                 return get<vtbackend::RGBColor>(_colorPalette.cursor.color);
         }();
-        _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursorColor);
+
+        auto const isAnimating = cursor.animateFrom.has_value() && cursor.animationProgress < 1.0f;
+        if (isAnimating)
+        {
+            // Pixel-level interpolation between source and target positions
+            auto const fromPixel = _gridMetrics.map(*cursor.animateFrom);
+            auto const toPixel = _gridMetrics.map(cursor.position);
+            auto const t = cursor.animationProgress;
+            auto const interpolated = crispy::point {
+                .x = fromPixel.x + static_cast<int>(t * static_cast<float>(toPixel.x - fromPixel.x)),
+                .y = fromPixel.y + static_cast<int>(t * static_cast<float>(toPixel.y - fromPixel.y)),
+            };
+            _cursorRenderer.setShape(cursor.shape);
+            _cursorRenderer.render(interpolated, cursor.width, cursorColor);
+        }
+        else if (cursor.shape != vtbackend::CursorShape::Block)
+        {
+            // Normal non-block cursor rendering (Block handled via cell color inversion)
+            _cursorRenderer.setShape(cursor.shape);
+            _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursorColor);
+        }
     }
 
     _renderTarget->execute(terminal.currentTime());

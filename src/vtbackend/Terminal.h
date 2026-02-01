@@ -1177,6 +1177,38 @@ class Terminal
     ScreenTransitionState _screenTransition;
     // }}}
 
+    // {{{ Cursor motion animation state
+    /// Holds state for an ongoing cursor motion animation between grid cells.
+    struct CursorMotionState
+    {
+        bool active = false;
+        CellLocation fromPosition {};
+        CellLocation toPosition {};
+        int fromWidth = 1;
+        std::chrono::steady_clock::time_point startTime {};
+        std::chrono::milliseconds duration { 100 };
+
+        /// Returns animation progress in [0, 1] with ease-out cubic easing.
+        [[nodiscard]] float progress(std::chrono::steady_clock::time_point now) const noexcept
+        {
+            if (!active || duration.count() == 0)
+                return 1.0f;
+            auto const elapsed = std::chrono::duration<float, std::milli>(now - startTime).count();
+            auto const t = std::clamp(elapsed / static_cast<float>(duration.count()), 0.0f, 1.0f);
+            // Ease-out cubic: 1 - (1 - t)^3
+            auto const inv = 1.0f - t;
+            return 1.0f - (inv * inv * inv);
+        }
+
+        /// Returns true if the animation has completed.
+        [[nodiscard]] bool isComplete(std::chrono::steady_clock::time_point now) const noexcept
+        {
+            return !active || progress(now) >= 1.0f;
+        }
+    };
+    CursorMotionState _cursorMotion;
+    // }}}
+
     // {{{ Displays this terminal manages
     Screen<PrimaryScreenCell> _primaryScreen;
     Screen<AlternateScreenCell> _alternateScreen;

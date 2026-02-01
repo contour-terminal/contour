@@ -253,7 +253,8 @@ RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosit
     bool const paintCursor =
         (hasCursor || (_prevHasCursor && _prevWidth == 2))
             && _output->cursor.has_value()
-            && _output->cursor->shape == CursorShape::Block;
+            && _output->cursor->shape == CursorShape::Block
+            && _output->cursor->animationProgress >= 1.0f;  // Don't invert cell during animation
     // clang-format on
 
     auto const selected =

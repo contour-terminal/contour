@@ -528,6 +528,55 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         fillRenderBufferStatusLine(output, includeSelection, baseLine);
     }
 
+    // Cursor motion animation: detect position change and inject animation data.
+    if (output.cursor.has_value())
+    {
+        auto const& cursorPos = output.cursor->position;
+        if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
+        {
+            // Animation in progress — check if target changed (chaining)
+            if (cursorPos != _cursorMotion.toPosition)
+            {
+                // Chain: start new animation from current interpolated position
+                auto const p = _cursorMotion.progress(_currentTime);
+                auto const fromLine = _cursorMotion.fromPosition.line
+                                      + LineOffset(static_cast<int>(
+                                          p
+                                          * static_cast<float>((*_cursorMotion.toPosition.line
+                                                                - *_cursorMotion.fromPosition.line))));
+                auto const fromCol = _cursorMotion.fromPosition.column
+                                     + ColumnOffset(static_cast<int>(
+                                         p
+                                         * static_cast<float>((*_cursorMotion.toPosition.column
+                                                               - *_cursorMotion.fromPosition.column))));
+                _cursorMotion.fromPosition = CellLocation { .line = fromLine, .column = fromCol };
+                _cursorMotion.toPosition = cursorPos;
+                _cursorMotion.startTime = _currentTime;
+                _cursorMotion.duration = _settings.cursorMotionAnimationDuration;
+            }
+            // Inject animation data
+            output.cursor->animateFrom = _cursorMotion.fromPosition;
+            output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
+        }
+        else if (cursorPos != _cursorMotion.toPosition && _settings.cursorMotionAnimationDuration.count() > 0)
+        {
+            // Start new animation
+            _cursorMotion.active = true;
+            _cursorMotion.fromPosition = _cursorMotion.toPosition; // previous target
+            _cursorMotion.fromWidth = output.cursor->width;
+            _cursorMotion.toPosition = cursorPos;
+            _cursorMotion.startTime = _currentTime;
+            _cursorMotion.duration = _settings.cursorMotionAnimationDuration;
+
+            output.cursor->animateFrom = _cursorMotion.fromPosition;
+            output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
+        }
+        else
+        {
+            _cursorMotion.toPosition = cursorPos;
+        }
+    }
+
     // Apply fade-out/fade-in blending when a screen transition is active.
     // First half:  outgoing screen fades to default background.
     // Second half: incoming screen fades in from default background.
@@ -1329,6 +1378,10 @@ optional<chrono::milliseconds> Terminal::nextRender() const
     if (_screenTransition.active && !_screenTransition.isComplete(_currentTime))
         nextBlink = std::min(nextBlink, chrono::milliseconds { 16 });
 
+    // Cursor motion animation scheduling (~60fps).
+    if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
+        nextBlink = std::min(nextBlink, chrono::milliseconds { 16 });
+
     if (nextBlink == chrono::milliseconds::max())
         return nullopt;
 
@@ -1346,6 +1399,9 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
 
     if (_screenTransition.active && _screenTransition.isComplete(_currentTime))
         finalizeScreenTransition();
+
+    if (_cursorMotion.active && _cursorMotion.isComplete(_currentTime))
+        _cursorMotion.active = false;
 }
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
@@ -1353,6 +1409,9 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
     // Finalize any active screen transition on resize (snapshot dimensions no longer match).
     if (_screenTransition.active)
         finalizeScreenTransition();
+
+    // Cancel any active cursor motion animation on resize.
+    _cursorMotion.active = false;
 
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
@@ -2110,6 +2169,9 @@ void Terminal::setScreen(ScreenType type)
 {
     if (type == _currentScreenType)
         return;
+
+    // Cancel any active cursor motion animation on screen change.
+    _cursorMotion.active = false;
 
     // Capture snapshot of the outgoing screen for crossfade transition.
     if (_settings.screenTransitionStyle == ScreenTransitionStyle::Fade)

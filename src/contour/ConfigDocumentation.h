@@ -1884,6 +1884,30 @@ constexpr StringLiteral ScreenTransitionDurationWeb {
 
 using ScreenTransitionDuration =
     DocumentationEntry<ScreenTransitionDurationConfig, ScreenTransitionDurationWeb>;
+
+constexpr StringLiteral CursorMotionAnimationDurationConfig {
+    "{comment} Duration in milliseconds for cursor motion animation.\n"
+    "{comment} Set to 0 to disable cursor motion animation.\n"
+    "cursor_motion_animation_duration: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral CursorMotionAnimationDurationWeb {
+    "Duration in milliseconds for the cursor motion animation when the cursor moves between cells.\n"
+    "\n"
+    "Set to `0` to disable cursor motion animation (instant jumps).\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    cursor_motion_animation_duration: 100\n"
+    "```\n"
+    "\n"
+};
+
+using CursorMotionAnimationDuration =
+    DocumentationEntry<CursorMotionAnimationDurationConfig, CursorMotionAnimationDurationWeb>;
+
 using Colors = DocumentationEntry<ColorsConfig, ColorsWeb>;
 using ModalCursorScrollOff = DocumentationEntry<ModalCursorScrollOffConfig, ModalCursorScrollOffWeb>;
 using ModeInsert = DocumentationEntry<ModeInsertConfig, ModeInsertWeb>;

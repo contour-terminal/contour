@@ -142,6 +142,7 @@ namespace
         settings.blinkStyle = profile.blinkStyle.value();
         settings.screenTransitionStyle = profile.screenTransitionStyle.value();
         settings.screenTransitionDuration = profile.screenTransitionDuration.value();
+        settings.cursorMotionAnimationDuration = profile.cursorMotionAnimationDuration.value();
         settings.smoothLineScrolling = profile.smoothLineScrolling.value();
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();

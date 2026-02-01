@@ -62,6 +62,7 @@ struct Settings
     BlinkStyle blinkStyle = BlinkStyle::Smooth;
     ScreenTransitionStyle screenTransitionStyle = ScreenTransitionStyle::Fade;
     std::chrono::milliseconds screenTransitionDuration { 250 };
+    std::chrono::milliseconds cursorMotionAnimationDuration { 100 };
 
     bool usePrivateColorRegisters = false;
 
