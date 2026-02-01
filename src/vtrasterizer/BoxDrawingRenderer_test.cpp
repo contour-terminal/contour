@@ -474,3 +474,123 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_extensions", "[renderer]"
         CHECK(mirrored == *rightExt);
     }
 }
+
+TEST_CASE("BoxDrawingRenderer.shade_characters", "[renderer]")
+{
+    auto const size = ImageSize { Width(8), Height(8) };
+    auto const lineThickness = 1;
+
+    SECTION("shade codepoints are renderable")
+    {
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x2591 }));
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x2592 }));
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x2593 }));
+    }
+
+    SECTION("0x2591 LIGHT SHADE produces ~25% lit pixels")
+    {
+        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2591 }, size, lineThickness);
+        REQUIRE(buffer.has_value());
+        REQUIRE(buffer->size() == size.area());
+        auto const litPixels = countLitPixels(*buffer);
+        // 25% of 64 pixels = 16
+        CHECK(litPixels == size.area() / 4);
+    }
+
+    SECTION("0x2592 MEDIUM SHADE produces ~50% lit pixels")
+    {
+        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2592 }, size, lineThickness);
+        REQUIRE(buffer.has_value());
+        REQUIRE(buffer->size() == size.area());
+        auto const litPixels = countLitPixels(*buffer);
+        // 50% of 64 pixels = 32
+        CHECK(litPixels == size.area() / 2);
+    }
+
+    SECTION("0x2593 DARK SHADE produces ~75% lit pixels")
+    {
+        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2593 }, size, lineThickness);
+        REQUIRE(buffer.has_value());
+        REQUIRE(buffer->size() == size.area());
+        auto const litPixels = countLitPixels(*buffer);
+        // 75% of 64 pixels = 48
+        CHECK(litPixels == 3 * size.area() / 4);
+    }
+
+    SECTION("LIGHT SHADE and DARK SHADE are complementary")
+    {
+        auto const light = BoxDrawingRendererTest::buildElements(char32_t { 0x2591 }, size, lineThickness);
+        auto const dark = BoxDrawingRendererTest::buildElements(char32_t { 0x2593 }, size, lineThickness);
+        REQUIRE(light.has_value());
+        REQUIRE(dark.has_value());
+        // Every pixel that is lit in light shade is dark in dark shade and vice versa
+        for (auto i: std::views::iota(0zu, light->size()))
+            CHECK(((*light)[i] > 0) != ((*dark)[i] > 0));
+    }
+
+    SECTION("0x2591 LIGHT SHADE bitmap pattern")
+    {
+        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2591 }, size, lineThickness);
+        REQUIRE(buffer.has_value());
+
+        auto const tileData = TestTileData { .bitmapSize = size,
+                                             .bitmapFormat = vtrasterizer::atlas::Format::Red,
+                                             .bitmap = *buffer };
+
+        vtrasterizer::verifyBitmap(tileData,
+                                   {
+                                       "........",
+                                       "#.#.#.#.",
+                                       "........",
+                                       "#.#.#.#.",
+                                       "........",
+                                       "#.#.#.#.",
+                                       "........",
+                                       "#.#.#.#.",
+                                   });
+    }
+
+    SECTION("0x2592 MEDIUM SHADE bitmap pattern")
+    {
+        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2592 }, size, lineThickness);
+        REQUIRE(buffer.has_value());
+
+        auto const tileData = TestTileData { .bitmapSize = size,
+                                             .bitmapFormat = vtrasterizer::atlas::Format::Red,
+                                             .bitmap = *buffer };
+
+        vtrasterizer::verifyBitmap(tileData,
+                                   {
+                                       ".#.#.#.#",
+                                       "#.#.#.#.",
+                                       ".#.#.#.#",
+                                       "#.#.#.#.",
+                                       ".#.#.#.#",
+                                       "#.#.#.#.",
+                                       ".#.#.#.#",
+                                       "#.#.#.#.",
+                                   });
+    }
+
+    SECTION("0x2593 DARK SHADE bitmap pattern")
+    {
+        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x2593 }, size, lineThickness);
+        REQUIRE(buffer.has_value());
+
+        auto const tileData = TestTileData { .bitmapSize = size,
+                                             .bitmapFormat = vtrasterizer::atlas::Format::Red,
+                                             .bitmap = *buffer };
+
+        vtrasterizer::verifyBitmap(tileData,
+                                   {
+                                       "########",
+                                       ".#.#.#.#",
+                                       "########",
+                                       ".#.#.#.#",
+                                       "########",
+                                       ".#.#.#.#",
+                                       "########",
+                                       ".#.#.#.#",
+                                   });
+    }
+}

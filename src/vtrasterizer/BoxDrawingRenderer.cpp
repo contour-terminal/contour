@@ -1958,8 +1958,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
     };
 
     return ascending(0x239B, 0x23B3)                // mathematical brackets and symbols
-           || ascending(0x2500, 0x2590)             // box drawing, block elements
-           || ascending(0x2594, 0x259F)             // Terminal graphic characters
+           || ascending(0x2500, 0x259F)             // box drawing, block elements, shades
            || ascending(0x1FB00, 0x1FBAF)           // more block sextants
            || ascending(0x1FBF0, 0x1FBF9)           // digits
            || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
@@ -2081,9 +2080,18 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         case 0x258F: return blockElement(size) | left(1 / 8_th);  // ▏ LEFT ONE EIGHTH BLOCK
         case 0x2590:
             return blockElement(size) | right(1 / 2_th); // ▐ RIGHT HALF BLOCK
-        // ░ TODO case 0x2591:
-        // ▒ TODO case 0x2592:
-        // ▓ TODO case 0x2593:
+        case 0x2591: // ░ LIGHT SHADE (~25%)
+            return blockElement<1>(size).fill([](int x, int y) {
+                return (x % 2 == 0 && y % 2 == 0) ? 255 : 0;
+            });
+        case 0x2592: // ▒ MEDIUM SHADE (~50%)
+            return blockElement<1>(size).fill([](int x, int y) {
+                return (x + y) % 2 == 0 ? 255 : 0;
+            });
+        case 0x2593: // ▓ DARK SHADE (~75%)
+            return blockElement<1>(size).fill([](int x, int y) {
+                return (x % 2 == 0 && y % 2 == 0) ? 0 : 255;
+            });
         case 0x2594: return blockElement(size) | upper(1 / 8_th); // ▔  UPPER ONE EIGHTH BLOCK
         case 0x2595: return blockElement(size) | right(1 / 8_th); // ▕  RIGHT ONE EIGHTH BLOCK
         case 0x2596:                                              // ▖  QUADRANT LOWER LEFT
