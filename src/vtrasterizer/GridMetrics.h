@@ -51,47 +51,49 @@ struct GridMetrics
     CellMargin cellMargin {}; // TODO: implement respecting cell margins.
     PageMargin pageMargin {};
 
-    /// Sub-cell Y pixel offset for smooth scrolling.
-    int smoothScrollPixelOffset = 0;
-
     /// Maps screen coordinates to target surface coordinates.
     ///
-    /// @param col screen coordinate's column (between 0 and number of screen columns minus 1)
-    /// @param line screen coordinate's line (between 0 and number of screen lines minus 1)
+    /// @param line          screen coordinate's line (between 0 and number of screen lines minus 1)
+    /// @param column        screen coordinate's column (between 0 and number of screen columns minus 1)
+    /// @param yPixelOffset  sub-cell Y pixel offset for smooth scrolling (default: 0)
     ///
     /// @return 2D point into the grid cell's top left in drawing system coordinates.
-    constexpr crispy::point map(vtbackend::LineOffset line, vtbackend::ColumnOffset column) const noexcept
+    constexpr crispy::point map(vtbackend::LineOffset line,
+                                vtbackend::ColumnOffset column,
+                                int yPixelOffset = 0) const noexcept
     {
-        return mapTopLeft(line, column);
+        return mapTopLeft(line, column, yPixelOffset);
     }
 
-    constexpr crispy::point map(vtbackend::CellLocation pos) const noexcept
+    constexpr crispy::point map(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept
     {
-        return map(pos.line, pos.column);
+        return map(pos.line, pos.column, yPixelOffset);
     }
 
-    constexpr crispy::point mapTopLeft(vtbackend::CellLocation pos) const noexcept
+    constexpr crispy::point mapTopLeft(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept
     {
-        return mapTopLeft(pos.line, pos.column);
+        return mapTopLeft(pos.line, pos.column, yPixelOffset);
     }
 
     constexpr crispy::point mapTopLeft(vtbackend::LineOffset line,
-                                       vtbackend::ColumnOffset column) const noexcept
+                                       vtbackend::ColumnOffset column,
+                                       int yPixelOffset = 0) const noexcept
     {
         auto const x = pageMargin.left + (*column * cellSize.width.as<int>());
-        auto const y = pageMargin.top + (*line * cellSize.height.as<int>()) + smoothScrollPixelOffset;
+        auto const y = pageMargin.top + (*line * cellSize.height.as<int>()) + yPixelOffset;
 
         return { .x = x, .y = y };
     }
 
-    constexpr crispy::point mapBottomLeft(vtbackend::CellLocation pos) const noexcept
+    constexpr crispy::point mapBottomLeft(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept
     {
-        return mapBottomLeft(pos.line, pos.column);
+        return mapBottomLeft(pos.line, pos.column, yPixelOffset);
     }
     constexpr crispy::point mapBottomLeft(vtbackend::LineOffset line,
-                                          vtbackend::ColumnOffset column) const noexcept
+                                          vtbackend::ColumnOffset column,
+                                          int yPixelOffset = 0) const noexcept
     {
-        return mapTopLeft(line + 1, column);
+        return mapTopLeft(line + 1, column, yPixelOffset);
     }
 };
 

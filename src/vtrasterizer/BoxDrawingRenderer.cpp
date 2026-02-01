@@ -1293,7 +1293,7 @@ bool BoxDrawingRenderer::render(vtbackend::LineOffset line,
         if (!data)
             return false;
 
-        auto const pos = _gridMetrics.map(line, column);
+        auto const pos = _gridMetrics.map(line, column, _smoothScrollYOffset);
         auto const x = pos.x + (i * unbox<int>(_gridMetrics.cellSize.width));
         auto const y = pos.y;
 

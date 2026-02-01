@@ -300,72 +300,70 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 
     auto cursorOpt = optional<vtbackend::RenderCursor> { std::nullopt };
 
-    if (smoothPixelOffset != 0)
-    {
-        // --- Two-pass rendering: main display with scroll offset, then status line without ---
-
-        // Pass 1: Main display content (with smooth scroll offset, scissored).
-        _gridMetrics.smoothScrollPixelOffset = smoothPixelOffset;
+    // Wraps a render pass: begins image/text frames, invokes the content callback, then ends both frames.
+    auto const renderPass = [&](bool withPressure, auto&& content) {
         _imageRenderer.beginFrame();
         _textRenderer.beginFrame();
-        _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());
-        {
-            vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
-            cursorOpt = renderBuffer.get().cursor;
-
-            auto const cellSplit = findCellPartitionPoint(renderBuffer.get().cells, statusLineBoundary);
-            auto const lineSplit = findLinePartitionPoint(renderBuffer.get().lines, statusLineBoundary);
-            auto const mainCells = std::span(renderBuffer.get().cells).first(cellSplit);
-            auto const statusCells = std::span(renderBuffer.get().cells).subspan(cellSplit);
-            auto const mainLines = std::span(renderBuffer.get().lines).first(lineSplit);
-            auto const statusLines = std::span(renderBuffer.get().lines).subspan(lineSplit);
-
-            renderCells(mainCells);
-            renderLines(mainLines);
-
-            {
-                // Scissor clips the main display area.
-                auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
-                auto const mainAreaTop = _gridMetrics.pageMargin.top;
-                auto const mainAreaHeight = *statusLineBoundary * cellHeight;
-                auto const renderSize = _renderTarget->renderSize();
-                auto const renderWidth = renderSize.width.as<int>();
-                auto const renderHeight = renderSize.height.as<int>();
-                auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
-                _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
-            }
-
-            _textRenderer.endFrame();
-            _imageRenderer.endFrame();
-            _renderTarget->execute(now);
-            _renderTarget->clearScissorRect();
-
-            // Pass 2: Status line + cursor (no scroll offset, no scissor).
-            _gridMetrics.smoothScrollPixelOffset = 0;
-            _imageRenderer.beginFrame();
-            _textRenderer.beginFrame();
-            _textRenderer.setPressure(false);
-            renderCells(statusCells);
-            renderLines(statusLines);
-        }
+        _textRenderer.setPressure(withPressure);
+        content();
         _textRenderer.endFrame();
         _imageRenderer.endFrame();
-    }
-    else
+    };
+
+    auto const primaryPressure = pressure && terminal.isPrimaryScreen();
+
+    if (smoothPixelOffset == 0)
     {
         // --- Single-pass rendering: no smooth scroll offset, no scissor needed ---
-        _gridMetrics.smoothScrollPixelOffset = 0;
-        _imageRenderer.beginFrame();
-        _textRenderer.beginFrame();
-        _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());
-        {
+        setSmoothScrollOffset(0);
+        renderPass(primaryPressure, [&] {
             vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
             cursorOpt = renderBuffer.get().cursor;
             renderCells(std::span(renderBuffer.get().cells));
             renderLines(std::span(renderBuffer.get().lines));
+        });
+    }
+    else
+    {
+        // --- Two-pass rendering: main display with scroll offset, then status line without ---
+
+        // Pass 1: Main display content (with smooth scroll offset, scissored).
+        setSmoothScrollOffset(smoothPixelOffset);
+        vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
+        cursorOpt = renderBuffer.get().cursor;
+
+        auto const cellSplit = findCellPartitionPoint(renderBuffer.get().cells, statusLineBoundary);
+        auto const lineSplit = findLinePartitionPoint(renderBuffer.get().lines, statusLineBoundary);
+        auto const mainCells = std::span(renderBuffer.get().cells).first(cellSplit);
+        auto const statusCells = std::span(renderBuffer.get().cells).subspan(cellSplit);
+        auto const mainLines = std::span(renderBuffer.get().lines).first(lineSplit);
+        auto const statusLines = std::span(renderBuffer.get().lines).subspan(lineSplit);
+
+        renderPass(primaryPressure, [&] {
+            renderCells(mainCells, smoothPixelOffset);
+            renderLines(mainLines);
+        });
+
+        // Scissor clips the main display area so the offset content doesn't bleed into the status line.
+        {
+            auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
+            auto const mainAreaTop = _gridMetrics.pageMargin.top;
+            auto const mainAreaHeight = *statusLineBoundary * cellHeight;
+            auto const renderSize = _renderTarget->renderSize();
+            auto const renderWidth = renderSize.width.as<int>();
+            auto const renderHeight = renderSize.height.as<int>();
+            auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
+            _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
         }
-        _textRenderer.endFrame();
-        _imageRenderer.endFrame();
+        _renderTarget->execute(now);
+        _renderTarget->clearScissorRect();
+
+        // Pass 2: Status line (no scroll offset, no scissor).
+        setSmoothScrollOffset(0);
+        renderPass(false, [&] {
+            renderCells(statusCells);
+            renderLines(statusLines);
+        });
     }
 
     if (cursorOpt)
@@ -401,7 +399,7 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     _renderTarget->execute(now);
 }
 
-void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells)
+void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells, int yPixelOffset)
 {
     for (auto const& cell: cells)
     {
@@ -409,8 +407,15 @@ void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells)
         _decorationRenderer.renderCell(cell);
         _textRenderer.renderCell(cell);
         if (cell.image)
-            _imageRenderer.renderImage(_gridMetrics.map(cell.position), *cell.image);
+            _imageRenderer.renderImage(_gridMetrics.map(cell.position, yPixelOffset), *cell.image);
     }
+}
+
+void Renderer::setSmoothScrollOffset(int offset)
+{
+    _backgroundRenderer.setSmoothScrollOffset(offset);
+    _decorationRenderer.setSmoothScrollOffset(offset);
+    _textRenderer.setSmoothScrollOffset(offset);
 }
 
 void Renderer::renderLines(std::span<vtbackend::RenderLine const> lines)

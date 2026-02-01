@@ -207,10 +207,16 @@ class Renderable
 
     [[nodiscard]] atlas::AtlasBackend& textureScheduler() noexcept { return *_textureScheduler; }
 
+    /// Sets the sub-cell Y pixel offset used for smooth scrolling.
+    ///
+    /// @param offset  Y pixel offset to apply during rendering.
+    virtual void setSmoothScrollOffset(int offset) noexcept { _smoothScrollYOffset = offset; }
+
     virtual void inspect(std::ostream& output) const = 0;
 
   protected:
     GridMetrics const& _gridMetrics;
+    int _smoothScrollYOffset = 0; ///< Sub-cell Y pixel offset for smooth scrolling.
     RenderTarget* _renderTarget = nullptr;
     TextureAtlas* _textureAtlas = nullptr;
     atlas::DirectMappingAllocator<RenderTileAttributes>* _directMappingAllocator = nullptr;

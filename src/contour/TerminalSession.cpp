@@ -1391,7 +1391,7 @@ bool TerminalSession::operator()(actions::CopyScreenshot)
     return true;
 }
 
-void TerminalSession::smoothScrollBy(vtbackend::LineCount lineCount)
+void TerminalSession::smoothScrollUp(vtbackend::LineCount lineCount)
 {
     if (terminal().settings().smoothScrolling)
     {
@@ -1399,15 +1399,25 @@ void TerminalSession::smoothScrollBy(vtbackend::LineCount lineCount)
         auto const pixels = static_cast<float>(*lineCount) * cellHeight;
         terminal().applySmoothScrollPixelDelta(pixels);
     }
-    else if (*lineCount > 0)
-        terminal().viewport().scrollUp(lineCount);
     else
-        terminal().viewport().scrollDown(vtbackend::LineCount(-*lineCount));
+        terminal().viewport().scrollUp(lineCount);
+}
+
+void TerminalSession::smoothScrollDown(vtbackend::LineCount lineCount)
+{
+    if (terminal().settings().smoothScrolling)
+    {
+        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+        auto const pixels = -static_cast<float>(*lineCount) * cellHeight;
+        terminal().applySmoothScrollPixelDelta(pixels);
+    }
+    else
+        terminal().viewport().scrollDown(lineCount);
 }
 
 bool TerminalSession::operator()(actions::ScrollDown)
 {
-    smoothScrollBy(-vtbackend::LineCount(*_profile.history.value().historyScrollMultiplier));
+    smoothScrollDown(vtbackend::LineCount(*_profile.history.value().historyScrollMultiplier));
     return true;
 }
 
@@ -1425,27 +1435,27 @@ bool TerminalSession::operator()(actions::ScrollMarkUp)
 
 bool TerminalSession::operator()(actions::ScrollOneDown)
 {
-    smoothScrollBy(-LineCount(1));
+    smoothScrollDown(LineCount(1));
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollOneUp)
 {
-    smoothScrollBy(LineCount(1));
+    smoothScrollUp(LineCount(1));
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageDown)
 {
     auto const stepSize = terminal().pageSize().lines / LineCount(2);
-    smoothScrollBy(-stepSize);
+    smoothScrollDown(stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageUp)
 {
     auto const stepSize = terminal().pageSize().lines / LineCount(2);
-    smoothScrollBy(stepSize);
+    smoothScrollUp(stepSize);
     return true;
 }
 
@@ -1467,7 +1477,7 @@ bool TerminalSession::operator()(actions::ScrollToTop)
 
 bool TerminalSession::operator()(actions::ScrollUp)
 {
-    smoothScrollBy(vtbackend::LineCount(*_profile.history.value().historyScrollMultiplier));
+    smoothScrollUp(vtbackend::LineCount(*_profile.history.value().historyScrollMultiplier));
     return true;
 }
 

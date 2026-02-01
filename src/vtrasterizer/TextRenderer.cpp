@@ -589,7 +589,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     auto const hash = hashTextAndStyle(codepoints, style);
     text::shape_result const& glyphPositions =
         getOrCreateCachedGlyphPositions(hash, codepoints, clusters, style);
-    crispy::point pen = _gridMetrics.mapBottomLeft(initialPenPosition);
+    crispy::point pen = _gridMetrics.mapBottomLeft(initialPenPosition, _smoothScrollYOffset);
 
     using vtbackend::LineFlag;
 

@@ -444,9 +444,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void configureTerminal();
     void configureCursor(config::CursorConfig const& cursorConfig);
 
-    /// Scrolls by @p lineCount lines, using smooth pixel scrolling if enabled, otherwise line-based.
-    /// Positive @p lineCount scrolls up, negative scrolls down.
-    void smoothScrollBy(vtbackend::LineCount lineCount);
+    /// Scrolls up by @p lineCount lines, using smooth pixel scrolling if enabled, otherwise line-based.
+    void smoothScrollUp(vtbackend::LineCount lineCount);
+
+    /// Scrolls down by @p lineCount lines, using smooth pixel scrolling if enabled, otherwise line-based.
+    void smoothScrollDown(vtbackend::LineCount lineCount);
     uint8_t matchModeFlags() const;
     void flushInput();
     void mainLoop();

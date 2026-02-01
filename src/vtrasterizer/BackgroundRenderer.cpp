@@ -30,7 +30,7 @@ void BackgroundRenderer::renderLine(vtbackend::RenderLine const& line)
     {
         auto const position =
             vtbackend::CellLocation { .line = line.lineOffset, .column = vtbackend::ColumnOffset(0) };
-        auto const pos = _gridMetrics.mapTopLeft(position);
+        auto const pos = _gridMetrics.mapTopLeft(position, _smoothScrollYOffset);
         auto const width =
             _gridMetrics.cellSize.width * vtbackend::Width::cast_from(line.usedColumns * scale);
 
@@ -47,7 +47,7 @@ void BackgroundRenderer::renderLine(vtbackend::RenderLine const& line)
             .line = line.lineOffset,
             .column = boxed_cast<vtbackend::ColumnOffset>(line.usedColumns * scale),
         };
-        auto const pos = _gridMetrics.mapTopLeft(position);
+        auto const pos = _gridMetrics.mapTopLeft(position, _smoothScrollYOffset);
         auto const width = _gridMetrics.cellSize.width
                            * vtbackend::Width::cast_from((line.displayWidth - line.usedColumns) * scale);
 
@@ -64,7 +64,7 @@ void BackgroundRenderer::renderCell(vtbackend::RenderCell const& cell)
     if (cell.attributes.backgroundColor == _defaultColor)
         return;
 
-    auto const pos = _gridMetrics.mapTopLeft(cell.position);
+    auto const pos = _gridMetrics.mapTopLeft(cell.position, _smoothScrollYOffset);
     auto const scale = cell.attributes.lineFlags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;
 
     renderTarget().renderRectangle(pos.x,

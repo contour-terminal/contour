@@ -146,10 +146,16 @@ class Renderer
   private:
     void configureTextureAtlas();
 
+    /// Sets the smooth scroll Y pixel offset on all sub-renderers.
+    ///
+    /// @param offset  Y pixel offset for smooth scrolling.
+    void setSmoothScrollOffset(int offset);
+
     /// Renders a span of cells to the background, decoration, text, and image renderers.
     ///
-    /// @param cells  Contiguous sub-range of RenderCell entries to render.
-    void renderCells(std::span<vtbackend::RenderCell const> cells);
+    /// @param cells          Contiguous sub-range of RenderCell entries to render.
+    /// @param yPixelOffset   Sub-cell Y pixel offset for smooth scrolling (default: 0).
+    void renderCells(std::span<vtbackend::RenderCell const> cells, int yPixelOffset = 0);
 
     /// Renders a span of lines to the background, decoration, and text renderers.
     ///

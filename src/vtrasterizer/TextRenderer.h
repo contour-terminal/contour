@@ -65,6 +65,12 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void setTextureAtlas(TextureAtlas& atlas) override;
 
+    void setSmoothScrollOffset(int offset) noexcept override
+    {
+        Renderable::setSmoothScrollOffset(offset);
+        _boxDrawingRenderer.setSmoothScrollOffset(offset);
+    }
+
     void inspect(std::ostream& textOutput) const override;
 
     void clearCache() override;
