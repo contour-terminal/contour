@@ -544,45 +544,25 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
             if (progress < 0.5f)
             {
-                // Phase 1: Fade-out — blend outgoing snapshot toward default background.
+                // Phase 1: Fade-out — replace output with snapshot cells fading to background.
                 auto const fadeOut = progress * 2.0f; // 0→1 over the first half
 
-                // Build a position-indexed lookup from snapshot cells.
-                auto snapshotLookup =
-                    std::unordered_map<uint32_t, size_t> {}; // position hash -> index in snapshotCells
-                auto const posHash = [](CellLocation const& pos) -> uint32_t {
-                    return (static_cast<uint32_t>(pos.line.value) << 16)
-                           | static_cast<uint32_t>(pos.column.value & 0xFFFF);
-                };
-                for (auto i = size_t { 0 }; i < _screenTransition.snapshotCells.size(); ++i)
-                    snapshotLookup[posHash(_screenTransition.snapshotCells[i].position)] = i;
-
-                for (auto& cell: output.cells)
-                {
-                    auto const key = posHash(cell.position);
-                    if (auto const it = snapshotLookup.find(key); it != snapshotLookup.end())
-                    {
-                        auto const& snap = _screenTransition.snapshotCells[it->second];
-                        cell.codepoints = snap.codepoints;
-                        cell.image = snap.image;
-                        cell.attributes.foregroundColor =
-                            mixColor(snap.attributes.foregroundColor, defaultBg, fadeOut);
-                        cell.attributes.backgroundColor =
-                            mixColor(snap.attributes.backgroundColor, defaultBg, fadeOut);
-                        cell.attributes.decorationColor =
-                            mixColor(snap.attributes.decorationColor, defaultBg, fadeOut);
-                    }
-                    else
-                    {
-                        cell.codepoints.clear();
-                        cell.image.reset();
-                        cell.attributes.foregroundColor = defaultBg;
-                        cell.attributes.backgroundColor = defaultBg;
-                        cell.attributes.decorationColor = defaultBg;
-                    }
-                }
-
+                output.cells.clear();
+                output.lines.clear();
                 output.cursor.reset();
+
+                output.cells.reserve(_screenTransition.snapshotCells.size());
+                for (auto const& snap: _screenTransition.snapshotCells)
+                {
+                    auto cell = snap;
+                    cell.attributes.foregroundColor =
+                        mixColor(snap.attributes.foregroundColor, defaultBg, fadeOut);
+                    cell.attributes.backgroundColor =
+                        mixColor(snap.attributes.backgroundColor, defaultBg, fadeOut);
+                    cell.attributes.decorationColor =
+                        mixColor(snap.attributes.decorationColor, defaultBg, fadeOut);
+                    output.cells.push_back(std::move(cell));
+                }
             }
             else
             {
@@ -597,6 +577,22 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                         mixColor(defaultBg, cell.attributes.backgroundColor, fadeIn);
                     cell.attributes.decorationColor =
                         mixColor(defaultBg, cell.attributes.decorationColor, fadeIn);
+                }
+
+                for (auto& line: output.lines)
+                {
+                    line.textAttributes.foregroundColor =
+                        mixColor(defaultBg, line.textAttributes.foregroundColor, fadeIn);
+                    line.textAttributes.backgroundColor =
+                        mixColor(defaultBg, line.textAttributes.backgroundColor, fadeIn);
+                    line.textAttributes.decorationColor =
+                        mixColor(defaultBg, line.textAttributes.decorationColor, fadeIn);
+                    line.fillAttributes.foregroundColor =
+                        mixColor(defaultBg, line.fillAttributes.foregroundColor, fadeIn);
+                    line.fillAttributes.backgroundColor =
+                        mixColor(defaultBg, line.fillAttributes.backgroundColor, fadeIn);
+                    line.fillAttributes.decorationColor =
+                        mixColor(defaultBg, line.fillAttributes.decorationColor, fadeIn);
                 }
             }
         }
