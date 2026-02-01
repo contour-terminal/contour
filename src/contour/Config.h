@@ -426,7 +426,7 @@ struct TerminalProfile
     ConfigEntry<vtbackend::ScreenTransitionStyle, documentation::ScreenTransitionStyle>
         screenTransitionStyle { vtbackend::ScreenTransitionStyle::Fade };
     ConfigEntry<std::chrono::milliseconds, documentation::ScreenTransitionDuration> screenTransitionDuration {
-        std::chrono::milliseconds { 500 }
+        std::chrono::milliseconds { 250 }
     };
     ConfigEntry<InputModeConfig, documentation::ModeInsert> modeInsert { CursorConfig {
         .cursorShape = vtbackend::CursorShape::Bar,

@@ -1155,7 +1155,7 @@ class Terminal
     {
         bool active = false;
         std::chrono::steady_clock::time_point startTime {};
-        std::chrono::milliseconds duration { 500 };
+        std::chrono::milliseconds duration { 250 };
         std::vector<RenderCell> snapshotCells {};
         std::optional<RenderCursor> snapshotCursor {};
 

@@ -1850,7 +1850,7 @@ constexpr StringLiteral ScreenTransitionStyleWeb {
     "\n"
     "Valid values are:\n"
     "- `classic` - instant switch (no animation)\n"
-    "- `fade` - smooth crossfade over 500ms\n"
+    "- `fade` - smooth fade-out/fade-in (default 250ms)\n"
     "\n"
     "``` yaml\n"
     "profiles:\n"
@@ -1877,7 +1877,7 @@ constexpr StringLiteral ScreenTransitionDurationWeb {
     "``` yaml\n"
     "profiles:\n"
     "  profile_name:\n"
-    "    screen_transition_duration: 500\n"
+    "    screen_transition_duration: 250\n"
     "```\n"
     "\n"
 };
