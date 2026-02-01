@@ -12,8 +12,10 @@
     #include <text_shaper/directwrite_shaper.h>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <memory>
+#include <span>
 
 using std::array;
 using std::initializer_list;
@@ -298,49 +300,73 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 
     auto cursorOpt = optional<vtbackend::RenderCursor> { std::nullopt };
 
-    // --- Pass 1: Main display content (with smooth scroll offset, scissored) ---
-    _gridMetrics.smoothScrollPixelOffset = smoothPixelOffset;
-    _imageRenderer.beginFrame();
-    _textRenderer.beginFrame();
-    _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());
+    if (smoothPixelOffset != 0)
     {
-        vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
-        cursorOpt = renderBuffer.get().cursor;
-        renderCells(renderBuffer.get().cells, statusLineBoundary);
-        renderLines(renderBuffer.get().lines, statusLineBoundary);
-    }
-    _textRenderer.endFrame();
-    _imageRenderer.endFrame();
+        // --- Two-pass rendering: main display with scroll offset, then status line without ---
 
-    if (smoothPixelOffset != 0 && _renderTarget)
+        // Pass 1: Main display content (with smooth scroll offset, scissored).
+        _gridMetrics.smoothScrollPixelOffset = smoothPixelOffset;
+        _imageRenderer.beginFrame();
+        _textRenderer.beginFrame();
+        _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());
+        {
+            vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
+            cursorOpt = renderBuffer.get().cursor;
+
+            auto const cellSplit = findCellPartitionPoint(renderBuffer.get().cells, statusLineBoundary);
+            auto const lineSplit = findLinePartitionPoint(renderBuffer.get().lines, statusLineBoundary);
+            auto const mainCells = std::span(renderBuffer.get().cells).first(cellSplit);
+            auto const statusCells = std::span(renderBuffer.get().cells).subspan(cellSplit);
+            auto const mainLines = std::span(renderBuffer.get().lines).first(lineSplit);
+            auto const statusLines = std::span(renderBuffer.get().lines).subspan(lineSplit);
+
+            renderCells(mainCells);
+            renderLines(mainLines);
+
+            {
+                // Scissor clips the main display area.
+                auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
+                auto const mainAreaTop = _gridMetrics.pageMargin.top;
+                auto const mainAreaHeight = *statusLineBoundary * cellHeight;
+                auto const renderSize = _renderTarget->renderSize();
+                auto const renderWidth = renderSize.width.as<int>();
+                auto const renderHeight = renderSize.height.as<int>();
+                auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
+                _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
+            }
+
+            _textRenderer.endFrame();
+            _imageRenderer.endFrame();
+            _renderTarget->execute(now);
+            _renderTarget->clearScissorRect();
+
+            // Pass 2: Status line + cursor (no scroll offset, no scissor).
+            _gridMetrics.smoothScrollPixelOffset = 0;
+            _imageRenderer.beginFrame();
+            _textRenderer.beginFrame();
+            _textRenderer.setPressure(false);
+            renderCells(statusCells);
+            renderLines(statusLines);
+        }
+        _textRenderer.endFrame();
+        _imageRenderer.endFrame();
+    }
+    else
     {
-        // Scissor clips the main display area: from pageMargin.top to the status line boundary.
-        auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
-        auto const mainAreaTop = _gridMetrics.pageMargin.top;
-        auto const mainAreaHeight = *statusLineBoundary * cellHeight;
-        auto const renderSize = _renderTarget->renderSize();
-        auto const renderWidth = renderSize.width.as<int>();
-        auto const renderHeight = renderSize.height.as<int>();
-        auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
-        _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
+        // --- Single-pass rendering: no smooth scroll offset, no scissor needed ---
+        _gridMetrics.smoothScrollPixelOffset = 0;
+        _imageRenderer.beginFrame();
+        _textRenderer.beginFrame();
+        _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());
+        {
+            vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
+            cursorOpt = renderBuffer.get().cursor;
+            renderCells(std::span(renderBuffer.get().cells));
+            renderLines(std::span(renderBuffer.get().lines));
+        }
+        _textRenderer.endFrame();
+        _imageRenderer.endFrame();
     }
-
-    _renderTarget->execute(now);
-
-    if (smoothPixelOffset != 0 && _renderTarget)
-        _renderTarget->clearScissorRect();
-
-    // --- Pass 2: Status line + cursor (no scroll offset, no scissor) ---
-    _gridMetrics.smoothScrollPixelOffset = 0;
-    _imageRenderer.beginFrame();
-    _textRenderer.beginFrame();
-    {
-        vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
-        renderStatusLineCells(renderBuffer.get().cells, statusLineBoundary);
-        renderStatusLineLines(renderBuffer.get().lines, statusLineBoundary);
-    }
-    _textRenderer.endFrame();
-    _imageRenderer.endFrame();
 
     if (cursorOpt)
     {
@@ -351,14 +377,17 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
         {
             auto const fromPixel = _gridMetrics.map(*cursor.animateFrom);
             auto const toPixel = _gridMetrics.map(cursor.position);
-            auto const t = cursor.animationProgress;
+            auto const animationProgress = cursor.animationProgress;
             auto const interpolated = crispy::point {
-                .x = fromPixel.x + static_cast<int>(t * static_cast<float>(toPixel.x - fromPixel.x)),
-                .y = fromPixel.y + static_cast<int>(t * static_cast<float>(toPixel.y - fromPixel.y)),
+                .x = fromPixel.x
+                     + static_cast<int>(animationProgress * static_cast<float>(toPixel.x - fromPixel.x)),
+                .y = fromPixel.y
+                     + static_cast<int>(animationProgress * static_cast<float>(toPixel.y - fromPixel.y)),
             };
-            auto const color = cursor.animateFromColor
-                                   ? vtbackend::mixColor(*cursor.animateFromColor, cursor.cursorColor, t)
-                                   : cursor.cursorColor;
+            auto const color =
+                cursor.animateFromColor
+                    ? vtbackend::mixColor(*cursor.animateFromColor, cursor.cursorColor, animationProgress)
+                    : cursor.cursorColor;
             _cursorRenderer.setShape(cursor.shape);
             _cursorRenderer.render(interpolated, cursor.width, color);
         }
@@ -372,13 +401,10 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     _renderTarget->execute(now);
 }
 
-void Renderer::renderCells(vector<vtbackend::RenderCell> const& renderableCells,
-                           vtbackend::LineCount statusLineBoundary)
+void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells)
 {
-    for (vtbackend::RenderCell const& cell: renderableCells)
+    for (auto const& cell: cells)
     {
-        if (cell.position.line >= statusLineBoundary.as<vtbackend::LineOffset>())
-            continue;
         _backgroundRenderer.renderCell(cell);
         _decorationRenderer.renderCell(cell);
         _textRenderer.renderCell(cell);
@@ -387,45 +413,32 @@ void Renderer::renderCells(vector<vtbackend::RenderCell> const& renderableCells,
     }
 }
 
-void Renderer::renderLines(vector<vtbackend::RenderLine> const& renderableLines,
-                           vtbackend::LineCount statusLineBoundary)
+void Renderer::renderLines(std::span<vtbackend::RenderLine const> lines)
 {
-    for (vtbackend::RenderLine const& line: renderableLines)
+    for (auto const& line: lines)
     {
-        if (line.lineOffset >= statusLineBoundary.as<vtbackend::LineOffset>())
-            continue;
         _backgroundRenderer.renderLine(line);
         _decorationRenderer.renderLine(line);
         _textRenderer.renderLine(line);
     }
 }
 
-void Renderer::renderStatusLineCells(vector<vtbackend::RenderCell> const& renderableCells,
-                                     vtbackend::LineCount statusLineBoundary)
+size_t Renderer::findCellPartitionPoint(std::vector<vtbackend::RenderCell> const& cells,
+                                        vtbackend::LineCount statusLineBoundary)
 {
-    for (vtbackend::RenderCell const& cell: renderableCells)
-    {
-        if (cell.position.line < statusLineBoundary.as<vtbackend::LineOffset>())
-            continue;
-        _backgroundRenderer.renderCell(cell);
-        _decorationRenderer.renderCell(cell);
-        _textRenderer.renderCell(cell);
-        if (cell.image)
-            _imageRenderer.renderImage(_gridMetrics.map(cell.position), *cell.image);
-    }
+    auto const boundary = statusLineBoundary.as<vtbackend::LineOffset>();
+    auto const it = std::ranges::partition_point(
+        cells, [boundary](auto const& cell) { return cell.position.line < boundary; });
+    return static_cast<size_t>(std::distance(cells.begin(), it));
 }
 
-void Renderer::renderStatusLineLines(vector<vtbackend::RenderLine> const& renderableLines,
-                                     vtbackend::LineCount statusLineBoundary)
+size_t Renderer::findLinePartitionPoint(std::vector<vtbackend::RenderLine> const& lines,
+                                        vtbackend::LineCount statusLineBoundary)
 {
-    for (vtbackend::RenderLine const& line: renderableLines)
-    {
-        if (line.lineOffset < statusLineBoundary.as<vtbackend::LineOffset>())
-            continue;
-        _backgroundRenderer.renderLine(line);
-        _decorationRenderer.renderLine(line);
-        _textRenderer.renderLine(line);
-    }
+    auto const boundary = statusLineBoundary.as<vtbackend::LineOffset>();
+    auto const it = std::ranges::partition_point(
+        lines, [boundary](auto const& line) { return line.lineOffset < boundary; });
+    return static_cast<size_t>(std::distance(lines.begin(), it));
 }
 
 void Renderer::inspect(std::ostream& textOutput) const

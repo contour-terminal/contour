@@ -2191,9 +2191,12 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
     if (auto const child = node[entry])
     {
-        auto opt = parse(child.as<std::string>());
+        auto const value = child.as<std::string>();
+        auto const opt = parse(value);
         if (opt.has_value())
             where = opt.value();
+        else
+            logger()("Unrecognized screen transition style: {}", value);
     }
 }
 

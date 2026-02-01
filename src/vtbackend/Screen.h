@@ -537,6 +537,16 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).flags();
     }
 
+    [[nodiscard]] Color cellForegroundColorAt(CellLocation position) const noexcept override
+    {
+        return at(position).foregroundColor();
+    }
+
+    [[nodiscard]] Color cellBackgroundColorAt(CellLocation position) const noexcept override
+    {
+        return at(position).backgroundColor();
+    }
+
     [[nodiscard]] LineFlags lineFlagsAt(LineOffset line) const noexcept override
     {
         return _grid.lineAt(line).flags();

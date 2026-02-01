@@ -150,19 +150,9 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
     auto const resolvedCursorColor = [&]() -> RGBColor {
         auto const& colorPalette = _terminal->colorPalette();
         auto const cellFlags = _terminal->currentScreen().cellFlagsAt(*_cursorPosition);
-        // Access the cell through the typed screen to obtain foreground/background colors.
-        auto const [cellFg, cellBg] = [&]() -> std::pair<Color, Color> {
-            if (_terminal->isPrimaryScreen())
-            {
-                auto const& cell = _terminal->primaryScreen().at(*_cursorPosition);
-                return { cell.foregroundColor(), cell.backgroundColor() };
-            }
-            else
-            {
-                auto const& cell = _terminal->alternateScreen().at(*_cursorPosition);
-                return { cell.foregroundColor(), cell.backgroundColor() };
-            }
-        }();
+        // Access the cell through the current screen's virtual interface to obtain colors.
+        auto const cellFg = _terminal->currentScreen().cellForegroundColorAt(*_cursorPosition);
+        auto const cellBg = _terminal->currentScreen().cellBackgroundColorAt(*_cursorPosition);
         auto const sgrColors = CellUtil::makeColors(colorPalette,
                                                     cellFlags,
                                                     _reverseVideo,

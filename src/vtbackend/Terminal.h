@@ -647,6 +647,18 @@ class Terminal
     /// Immediately ends any active screen transition.
     void finalizeScreenTransition() noexcept;
 
+    /// Detects cursor position changes and injects animation data into the render buffer.
+    ///
+    /// @param output  The render buffer whose cursor entry will be updated with
+    ///                animateFrom, animationProgress and animateFromColor fields.
+    void updateCursorMotionAnimation(RenderBuffer& output);
+
+    /// Applies fade-out/fade-in blending when a screen transition is active.
+    ///
+    /// @param output  The render buffer whose cells and lines will be color-blended
+    ///                according to the current transition phase (fade-out or fade-in).
+    void applyScreenTransitionBlending(RenderBuffer& output);
+
     void setHighlightTimeout(std::chrono::milliseconds timeout) noexcept
     {
         _settings.highlightTimeout = timeout;
@@ -1183,56 +1195,42 @@ class Terminal
     BlinkerState _rapidBlinker { .period = std::chrono::milliseconds { 600 } };
     // }}}
 
-    // {{{ Screen transition state (crossfade between primary/alternate screens)
-    /// Holds state for an ongoing crossfade transition between screen buffers.
-    struct ScreenTransitionState
+    // {{{ Animation state base and easing functors
+
+    /// Linear easing: identity mapping.
+    struct LinearEasing
     {
-        bool active = false;
-        std::chrono::steady_clock::time_point startTime {};
-        std::chrono::milliseconds duration { 250 };
-        std::vector<RenderCell> snapshotCells {};
-        std::optional<RenderCursor> snapshotCursor {};
+        constexpr float operator()(float t) const noexcept { return t; }
+    };
 
-        /// Returns the transition progress in [0, 1].
-        [[nodiscard]] float progress(std::chrono::steady_clock::time_point now) const noexcept
+    /// Ease-out cubic easing: 1 - (1 - t)^3.
+    struct EaseOutCubic
+    {
+        constexpr float operator()(float t) const noexcept
         {
-            if (!active || duration.count() == 0)
-                return 1.0f;
-            auto const elapsed = std::chrono::duration<float, std::milli>(now - startTime).count();
-            return std::clamp(elapsed / static_cast<float>(duration.count()), 0.0f, 1.0f);
-        }
-
-        /// Returns true if the transition has completed.
-        [[nodiscard]] bool isComplete(std::chrono::steady_clock::time_point now) const noexcept
-        {
-            return !active || progress(now) >= 1.0f;
+            auto const inv = 1.0f - t;
+            return 1.0f - (inv * inv * inv);
         }
     };
-    ScreenTransitionState _screenTransition;
-    // }}}
 
-    // {{{ Cursor motion animation state
-    /// Holds state for an ongoing cursor motion animation between grid cells.
-    struct CursorMotionState
+    /// Common base for one-shot animations with configurable easing.
+    ///
+    /// @tparam EasingFn  A callable `float(float) noexcept` mapping linear t in [0,1] to eased output.
+    template <typename EasingFn>
+    struct AnimationState
     {
         bool active = false;
-        CellLocation fromPosition {};
-        CellLocation toPosition {};
-        RGBColor fromColor {}; ///< Cursor color at the animation source position.
-        RGBColor toColor {};   ///< Cursor color at the animation target position.
         std::chrono::steady_clock::time_point startTime {};
-        std::chrono::milliseconds duration { 80 };
+        std::chrono::milliseconds duration {};
 
-        /// Returns animation progress in [0, 1] with ease-out cubic easing.
+        /// Returns animation progress in [0, 1] with the configured easing applied.
         [[nodiscard]] float progress(std::chrono::steady_clock::time_point now) const noexcept
         {
             if (!active || duration.count() == 0)
                 return 1.0f;
             auto const elapsed = std::chrono::duration<float, std::milli>(now - startTime).count();
             auto const t = std::clamp(elapsed / static_cast<float>(duration.count()), 0.0f, 1.0f);
-            // Ease-out cubic: 1 - (1 - t)^3
-            auto const inv = 1.0f - t;
-            return 1.0f - (inv * inv * inv);
+            return EasingFn {}(t);
         }
 
         /// Returns true if the animation has completed.
@@ -1240,6 +1238,27 @@ class Terminal
         {
             return !active || progress(now) >= 1.0f;
         }
+    };
+    // }}}
+
+    // {{{ Screen transition state (crossfade between primary/alternate screens)
+    /// Holds state for an ongoing crossfade transition between screen buffers.
+    struct ScreenTransitionState: AnimationState<LinearEasing>
+    {
+        std::vector<RenderCell> snapshotCells {};
+        std::optional<RenderCursor> snapshotCursor {};
+    };
+    ScreenTransitionState _screenTransition;
+    // }}}
+
+    // {{{ Cursor motion animation state
+    /// Holds state for an ongoing cursor motion animation between grid cells.
+    struct CursorMotionState: AnimationState<EaseOutCubic>
+    {
+        CellLocation fromPosition {};
+        CellLocation toPosition {};
+        RGBColor fromColor {}; ///< Cursor color at the animation source position.
+        RGBColor toColor {};   ///< Cursor color at the animation target position.
     };
     CursorMotionState _cursorMotion;
     // }}}

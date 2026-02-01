@@ -522,155 +522,153 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         fillRenderBufferStatusLine(output, includeSelection, baseLine);
     }
 
-    // Cursor motion animation: detect position change and inject animation data.
-    if (output.cursor.has_value())
-    {
-        // Effective animation duration: at least 3 frames at the current refresh rate
-        // to guarantee visible interpolation.
-        constexpr auto MinFrames = 3;
-        auto const effectiveDuration =
-            std::max(_settings.cursorMotionAnimationDuration, _refreshInterval.value * MinFrames);
+    updateCursorMotionAnimation(output);
+    applyScreenTransitionBlending(output);
+}
 
-        auto const& cursorPos = output.cursor->position;
-        if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
+void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
+{
+    if (!output.cursor.has_value())
+        return;
+
+    // Effective animation duration: at least 3 frames at the current refresh rate
+    // to guarantee visible interpolation.
+    constexpr auto MinFrames = 3;
+    auto const effectiveDuration =
+        std::max(_settings.cursorMotionAnimationDuration, _refreshInterval.value * MinFrames);
+
+    auto const& cursorPos = output.cursor->position;
+    if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
+    {
+        // Animation in progress — check if target changed (chaining)
+        if (cursorPos != _cursorMotion.toPosition)
         {
-            // Animation in progress — check if target changed (chaining)
-            if (cursorPos != _cursorMotion.toPosition)
-            {
-                // Chain: start new animation from current interpolated position
-                auto const p = _cursorMotion.progress(_currentTime);
-                auto const fromLine = _cursorMotion.fromPosition.line
-                                      + LineOffset(static_cast<int>(
-                                          p
-                                          * static_cast<float>((*_cursorMotion.toPosition.line
-                                                                - *_cursorMotion.fromPosition.line))));
-                auto const fromCol = _cursorMotion.fromPosition.column
-                                     + ColumnOffset(static_cast<int>(
-                                         p
-                                         * static_cast<float>((*_cursorMotion.toPosition.column
-                                                               - *_cursorMotion.fromPosition.column))));
-                _cursorMotion.fromPosition = CellLocation { .line = fromLine, .column = fromCol };
-                _cursorMotion.fromColor = mixColor(_cursorMotion.fromColor, _cursorMotion.toColor, p);
-                _cursorMotion.toPosition = cursorPos;
-                _cursorMotion.toColor = output.cursor->cursorColor;
-                _cursorMotion.startTime = _currentTime;
-                _cursorMotion.duration = effectiveDuration;
-            }
-            // Inject animation data
-            output.cursor->animateFrom = _cursorMotion.fromPosition;
-            output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
-            output.cursor->animateFromColor = _cursorMotion.fromColor;
-        }
-        else if (cursorPos != _cursorMotion.toPosition && _settings.cursorMotionAnimationDuration.count() > 0)
-        {
-            // Start new animation
-            _cursorMotion.active = true;
-            _cursorMotion.fromPosition = _cursorMotion.toPosition; // previous target
-            _cursorMotion.fromColor = _cursorMotion.toColor;       // previous target's color
+            // Chain: start new animation from current interpolated position
+            auto const currentProgress = _cursorMotion.progress(_currentTime);
+            auto const fromLine =
+                _cursorMotion.fromPosition.line
+                + LineOffset(static_cast<int>(currentProgress
+                                              * static_cast<float>((*_cursorMotion.toPosition.line
+                                                                    - *_cursorMotion.fromPosition.line))));
+            auto const fromCol = _cursorMotion.fromPosition.column
+                                 + ColumnOffset(static_cast<int>(
+                                     currentProgress
+                                     * static_cast<float>((*_cursorMotion.toPosition.column
+                                                           - *_cursorMotion.fromPosition.column))));
+            _cursorMotion.fromPosition = CellLocation { .line = fromLine, .column = fromCol };
+            _cursorMotion.fromColor =
+                mixColor(_cursorMotion.fromColor, _cursorMotion.toColor, currentProgress);
             _cursorMotion.toPosition = cursorPos;
             _cursorMotion.toColor = output.cursor->cursorColor;
             _cursorMotion.startTime = _currentTime;
             _cursorMotion.duration = effectiveDuration;
+        }
+        // Inject animation data
+        output.cursor->animateFrom = _cursorMotion.fromPosition;
+        output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
+        output.cursor->animateFromColor = _cursorMotion.fromColor;
+    }
+    else if (cursorPos != _cursorMotion.toPosition && _settings.cursorMotionAnimationDuration.count() > 0)
+    {
+        // Start new animation
+        _cursorMotion.active = true;
+        _cursorMotion.fromPosition = _cursorMotion.toPosition; // previous target
+        _cursorMotion.fromColor = _cursorMotion.toColor;       // previous target's color
+        _cursorMotion.toPosition = cursorPos;
+        _cursorMotion.toColor = output.cursor->cursorColor;
+        _cursorMotion.startTime = _currentTime;
+        _cursorMotion.duration = effectiveDuration;
 
-            output.cursor->animateFrom = _cursorMotion.fromPosition;
-            output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
-            output.cursor->animateFromColor = _cursorMotion.fromColor;
-        }
-        else
-        {
-            _cursorMotion.toPosition = cursorPos;
-            _cursorMotion.toColor = output.cursor->cursorColor;
-        }
+        output.cursor->animateFrom = _cursorMotion.fromPosition;
+        output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
+        output.cursor->animateFromColor = _cursorMotion.fromColor;
+    }
+    else
+    {
+        _cursorMotion.toPosition = cursorPos;
+        _cursorMotion.toColor = output.cursor->cursorColor;
+    }
+}
+
+void Terminal::applyScreenTransitionBlending(RenderBuffer& output)
+{
+    if (!_screenTransition.active)
+        return;
+
+    auto const progress = _screenTransition.progress(_currentTime);
+    if (progress >= 1.0f)
+    {
+        finalizeScreenTransition();
+        return;
     }
 
-    // Apply fade-out/fade-in blending when a screen transition is active.
-    // First half:  outgoing screen fades to default background.
-    // Second half: incoming screen fades in from default background.
-    // The status line is excluded so it remains always visible.
-    if (_screenTransition.active)
+    auto const defaultBg = _colorPalette.defaultBackground;
+
+    // Determine the line offset range that covers the main display (excluding the status line).
+    auto const mainLineBegin = (_settings.statusDisplayPosition == StatusDisplayPosition::Top)
+                                   ? statusLineHeight().as<LineOffset>()
+                                   : LineOffset(0);
+    auto const mainLineEnd = mainLineBegin + pageSize().lines.as<LineOffset>();
+
+    auto const isMainDisplayCell = [&](CellLocation const& pos) {
+        return pos.line >= mainLineBegin && pos.line < mainLineEnd;
+    };
+    auto const isMainDisplayLine = [&](LineOffset offset) {
+        return offset >= mainLineBegin && offset < mainLineEnd;
+    };
+
+    if (progress < 0.5f)
     {
-        auto const progress = _screenTransition.progress(_currentTime);
-        if (progress >= 1.0f)
+        // Phase 1: Fade-out — replace main display cells with snapshot cells fading to background.
+        auto const fadeOut = progress * 2.0f; // 0→1 over the first half
+
+        // Preserve status line cells and lines, discard main display entries.
+        std::erase_if(output.cells, [&](auto const& c) { return isMainDisplayCell(c.position); });
+        std::erase_if(output.lines, [&](auto const& l) { return isMainDisplayLine(l.lineOffset); });
+        output.cursor.reset();
+
+        output.cells.reserve(output.cells.size() + _screenTransition.snapshotCells.size());
+        for (auto const& snap: _screenTransition.snapshotCells)
         {
-            finalizeScreenTransition();
+            if (!isMainDisplayCell(snap.position))
+                continue;
+            auto cell = snap;
+            cell.attributes.foregroundColor = mixColor(snap.attributes.foregroundColor, defaultBg, fadeOut);
+            cell.attributes.backgroundColor = mixColor(snap.attributes.backgroundColor, defaultBg, fadeOut);
+            cell.attributes.decorationColor = mixColor(snap.attributes.decorationColor, defaultBg, fadeOut);
+            output.cells.push_back(std::move(cell));
         }
-        else
+    }
+    else
+    {
+        // Phase 2: Fade-in — blend main display from default background.
+        auto const fadeIn = (progress - 0.5f) * 2.0f; // 0→1 over the second half
+
+        for (auto& cell: output.cells)
         {
-            auto const defaultBg = _colorPalette.defaultBackground;
+            if (!isMainDisplayCell(cell.position))
+                continue;
+            cell.attributes.foregroundColor = mixColor(defaultBg, cell.attributes.foregroundColor, fadeIn);
+            cell.attributes.backgroundColor = mixColor(defaultBg, cell.attributes.backgroundColor, fadeIn);
+            cell.attributes.decorationColor = mixColor(defaultBg, cell.attributes.decorationColor, fadeIn);
+        }
 
-            // Determine the line offset range that covers the main display (excluding the status line).
-            auto const mainLineBegin = (_settings.statusDisplayPosition == StatusDisplayPosition::Top)
-                                           ? statusLineHeight().as<LineOffset>()
-                                           : LineOffset(0);
-            auto const mainLineEnd = mainLineBegin + pageSize().lines.as<LineOffset>();
-
-            auto const isMainDisplayCell = [&](CellLocation const& pos) {
-                return pos.line >= mainLineBegin && pos.line < mainLineEnd;
-            };
-            auto const isMainDisplayLine = [&](LineOffset offset) {
-                return offset >= mainLineBegin && offset < mainLineEnd;
-            };
-
-            if (progress < 0.5f)
-            {
-                // Phase 1: Fade-out — replace main display cells with snapshot cells fading to background.
-                auto const fadeOut = progress * 2.0f; // 0→1 over the first half
-
-                // Preserve status line cells and lines, discard main display entries.
-                std::erase_if(output.cells, [&](auto const& c) { return isMainDisplayCell(c.position); });
-                std::erase_if(output.lines, [&](auto const& l) { return isMainDisplayLine(l.lineOffset); });
-                output.cursor.reset();
-
-                output.cells.reserve(output.cells.size() + _screenTransition.snapshotCells.size());
-                for (auto const& snap: _screenTransition.snapshotCells)
-                {
-                    if (!isMainDisplayCell(snap.position))
-                        continue;
-                    auto cell = snap;
-                    cell.attributes.foregroundColor =
-                        mixColor(snap.attributes.foregroundColor, defaultBg, fadeOut);
-                    cell.attributes.backgroundColor =
-                        mixColor(snap.attributes.backgroundColor, defaultBg, fadeOut);
-                    cell.attributes.decorationColor =
-                        mixColor(snap.attributes.decorationColor, defaultBg, fadeOut);
-                    output.cells.push_back(std::move(cell));
-                }
-            }
-            else
-            {
-                // Phase 2: Fade-in — blend main display from default background.
-                auto const fadeIn = (progress - 0.5f) * 2.0f; // 0→1 over the second half
-
-                for (auto& cell: output.cells)
-                {
-                    if (!isMainDisplayCell(cell.position))
-                        continue;
-                    cell.attributes.foregroundColor =
-                        mixColor(defaultBg, cell.attributes.foregroundColor, fadeIn);
-                    cell.attributes.backgroundColor =
-                        mixColor(defaultBg, cell.attributes.backgroundColor, fadeIn);
-                    cell.attributes.decorationColor =
-                        mixColor(defaultBg, cell.attributes.decorationColor, fadeIn);
-                }
-
-                for (auto& line: output.lines)
-                {
-                    if (!isMainDisplayLine(line.lineOffset))
-                        continue;
-                    line.textAttributes.foregroundColor =
-                        mixColor(defaultBg, line.textAttributes.foregroundColor, fadeIn);
-                    line.textAttributes.backgroundColor =
-                        mixColor(defaultBg, line.textAttributes.backgroundColor, fadeIn);
-                    line.textAttributes.decorationColor =
-                        mixColor(defaultBg, line.textAttributes.decorationColor, fadeIn);
-                    line.fillAttributes.foregroundColor =
-                        mixColor(defaultBg, line.fillAttributes.foregroundColor, fadeIn);
-                    line.fillAttributes.backgroundColor =
-                        mixColor(defaultBg, line.fillAttributes.backgroundColor, fadeIn);
-                    line.fillAttributes.decorationColor =
-                        mixColor(defaultBg, line.fillAttributes.decorationColor, fadeIn);
-                }
-            }
+        for (auto& line: output.lines)
+        {
+            if (!isMainDisplayLine(line.lineOffset))
+                continue;
+            line.textAttributes.foregroundColor =
+                mixColor(defaultBg, line.textAttributes.foregroundColor, fadeIn);
+            line.textAttributes.backgroundColor =
+                mixColor(defaultBg, line.textAttributes.backgroundColor, fadeIn);
+            line.textAttributes.decorationColor =
+                mixColor(defaultBg, line.textAttributes.decorationColor, fadeIn);
+            line.fillAttributes.foregroundColor =
+                mixColor(defaultBg, line.fillAttributes.foregroundColor, fadeIn);
+            line.fillAttributes.backgroundColor =
+                mixColor(defaultBg, line.fillAttributes.backgroundColor, fadeIn);
+            line.fillAttributes.decorationColor =
+                mixColor(defaultBg, line.fillAttributes.decorationColor, fadeIn);
         }
     }
 }
@@ -2250,9 +2248,10 @@ void Terminal::setScreen(ScreenType type)
 
         _screenTransition.snapshotCells = std::move(snapshotBuffer.cells);
         _screenTransition.snapshotCursor = snapshotBuffer.cursor;
-        // Use wall-clock time, not _currentTime, because _currentTime may be stale
-        // if tick() hasn't been called recently (e.g. terminal was idle with no animations).
-        _screenTransition.startTime = std::chrono::steady_clock::now();
+        // Use _currentTime rather than steady_clock::now() because all animation progress
+        // is computed relative to _currentTime; using wall-clock time could produce negative
+        // elapsed values if tick() has not been called since the last frame.
+        _screenTransition.startTime = _currentTime;
         _screenTransition.duration = _settings.screenTransitionDuration;
         _screenTransition.active = true;
     }
