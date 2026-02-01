@@ -115,6 +115,7 @@
           <li>Adds configurable crossfade transition between primary and alternate screens via screen_transition and screen_transition_duration profile settings</li>
           <li>Adds animated cursor movement between grid cells with ease-out interpolation via cursor_motion_animation_duration profile setting</li>
           <li>Adds pixel-based smooth scrolling via smooth_scrolling profile setting, supporting trackpad pixel deltas, mouse wheel, and keyboard scroll actions</li>
+          <li>Adds pixel-perfect builtin rendering for mathematical bracket and symbol characters (U+239B–U+23B3), including parenthesis pieces, curly bracket pieces, integral extensions, horizontal line extension, bracket sections, and summation symbols</li>
         </ul>
       </description>
     </release>
