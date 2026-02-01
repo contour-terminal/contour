@@ -292,15 +292,52 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     terminal.refreshRenderBuffer();
 #endif // }}}
 
+    auto const smoothPixelOffset = static_cast<int>(terminal.smoothScrollPixelOffset());
+    auto const statusLineBoundary = terminal.pageSize().lines;
+    auto const now = terminal.currentTime();
+
     auto cursorOpt = optional<vtbackend::RenderCursor> { std::nullopt };
+
+    // --- Pass 1: Main display content (with smooth scroll offset, scissored) ---
+    _gridMetrics.smoothScrollPixelOffset = smoothPixelOffset;
     _imageRenderer.beginFrame();
     _textRenderer.beginFrame();
     _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());
     {
         vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
-        renderCells(renderBuffer.get().cells);
-        renderLines(renderBuffer.get().lines);
+        renderCells(renderBuffer.get().cells, statusLineBoundary);
+        renderLines(renderBuffer.get().lines, statusLineBoundary);
+    }
+    _textRenderer.endFrame();
+    _imageRenderer.endFrame();
+
+    if (smoothPixelOffset != 0 && _renderTarget)
+    {
+        // Scissor clips the main display area: from pageMargin.top to the status line boundary.
+        auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
+        auto const mainAreaTop = _gridMetrics.pageMargin.top;
+        auto const mainAreaHeight = *statusLineBoundary * cellHeight;
+        auto const renderSize = _renderTarget->renderSize();
+        auto const renderWidth = renderSize.width.as<int>();
+        auto const renderHeight = renderSize.height.as<int>();
+        auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
+        _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
+    }
+
+    _renderTarget->execute(now);
+
+    if (smoothPixelOffset != 0 && _renderTarget)
+        _renderTarget->clearScissorRect();
+
+    // --- Pass 2: Status line + cursor (no scroll offset, no scissor) ---
+    _gridMetrics.smoothScrollPixelOffset = 0;
+    _imageRenderer.beginFrame();
+    _textRenderer.beginFrame();
+    {
+        vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
+        renderStatusLineCells(renderBuffer.get().cells, statusLineBoundary);
+        renderStatusLineLines(renderBuffer.get().lines, statusLineBoundary);
     }
     _textRenderer.endFrame();
     _imageRenderer.endFrame();
@@ -312,7 +349,6 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
         auto const isAnimating = cursor.animateFrom.has_value() && cursor.animationProgress < 1.0f;
         if (isAnimating)
         {
-            // Pixel-level interpolation between source and target positions
             auto const fromPixel = _gridMetrics.map(*cursor.animateFrom);
             auto const toPixel = _gridMetrics.map(cursor.position);
             auto const t = cursor.animationProgress;
@@ -320,7 +356,6 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
                 .x = fromPixel.x + static_cast<int>(t * static_cast<float>(toPixel.x - fromPixel.x)),
                 .y = fromPixel.y + static_cast<int>(t * static_cast<float>(toPixel.y - fromPixel.y)),
             };
-            // Interpolate cursor color between source and target cell colors
             auto const color = cursor.animateFromColor
                                    ? vtbackend::mix(cursor.cursorColor, *cursor.animateFromColor, t)
                                    : cursor.cursorColor;
@@ -329,19 +364,21 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
         }
         else if (cursor.shape != vtbackend::CursorShape::Block)
         {
-            // Normal non-block cursor rendering (Block handled via cell color inversion)
             _cursorRenderer.setShape(cursor.shape);
             _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursor.cursorColor);
         }
     }
 
-    _renderTarget->execute(terminal.currentTime());
+    _renderTarget->execute(now);
 }
 
-void Renderer::renderCells(vector<vtbackend::RenderCell> const& renderableCells)
+void Renderer::renderCells(vector<vtbackend::RenderCell> const& renderableCells,
+                           vtbackend::LineCount statusLineBoundary)
 {
     for (vtbackend::RenderCell const& cell: renderableCells)
     {
+        if (cell.position.line >= statusLineBoundary.as<vtbackend::LineOffset>())
+            continue;
         _backgroundRenderer.renderCell(cell);
         _decorationRenderer.renderCell(cell);
         _textRenderer.renderCell(cell);
@@ -350,10 +387,41 @@ void Renderer::renderCells(vector<vtbackend::RenderCell> const& renderableCells)
     }
 }
 
-void Renderer::renderLines(vector<vtbackend::RenderLine> const& renderableLines)
+void Renderer::renderLines(vector<vtbackend::RenderLine> const& renderableLines,
+                           vtbackend::LineCount statusLineBoundary)
 {
     for (vtbackend::RenderLine const& line: renderableLines)
     {
+        if (line.lineOffset >= statusLineBoundary.as<vtbackend::LineOffset>())
+            continue;
+        _backgroundRenderer.renderLine(line);
+        _decorationRenderer.renderLine(line);
+        _textRenderer.renderLine(line);
+    }
+}
+
+void Renderer::renderStatusLineCells(vector<vtbackend::RenderCell> const& renderableCells,
+                                     vtbackend::LineCount statusLineBoundary)
+{
+    for (vtbackend::RenderCell const& cell: renderableCells)
+    {
+        if (cell.position.line < statusLineBoundary.as<vtbackend::LineOffset>())
+            continue;
+        _backgroundRenderer.renderCell(cell);
+        _decorationRenderer.renderCell(cell);
+        _textRenderer.renderCell(cell);
+        if (cell.image)
+            _imageRenderer.renderImage(_gridMetrics.map(cell.position), *cell.image);
+    }
+}
+
+void Renderer::renderStatusLineLines(vector<vtbackend::RenderLine> const& renderableLines,
+                                     vtbackend::LineCount statusLineBoundary)
+{
+    for (vtbackend::RenderLine const& line: renderableLines)
+    {
+        if (line.lineOffset < statusLineBoundary.as<vtbackend::LineOffset>())
+            continue;
         _backgroundRenderer.renderLine(line);
         _decorationRenderer.renderLine(line);
         _textRenderer.renderLine(line);

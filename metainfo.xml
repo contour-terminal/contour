@@ -114,6 +114,7 @@
           <li>Replaces abrupt cell blink toggle with configurable smooth pulse animation via blink_style profile setting (classic/smooth/linger)</li>
           <li>Adds configurable crossfade transition between primary and alternate screens via screen_transition and screen_transition_duration profile settings</li>
           <li>Adds animated cursor movement between grid cells with ease-out interpolation via cursor_motion_animation_duration profile setting</li>
+          <li>Adds pixel-based smooth scrolling via smooth_scrolling profile setting, supporting trackpad pixel deltas, mouse wheel, and keyboard scroll actions</li>
         </ul>
       </description>
     </release>

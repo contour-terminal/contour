@@ -51,6 +51,9 @@ struct GridMetrics
     CellMargin cellMargin {}; // TODO: implement respecting cell margins.
     PageMargin pageMargin {};
 
+    /// Sub-cell Y pixel offset for smooth scrolling.
+    int smoothScrollPixelOffset = 0;
+
     /// Maps screen coordinates to target surface coordinates.
     ///
     /// @param col screen coordinate's column (between 0 and number of screen columns minus 1)
@@ -76,7 +79,7 @@ struct GridMetrics
                                        vtbackend::ColumnOffset column) const noexcept
     {
         auto const x = pageMargin.left + (*column * cellSize.width.as<int>());
-        auto const y = pageMargin.top + (*line * cellSize.height.as<int>());
+        auto const y = pageMargin.top + (*line * cellSize.height.as<int>()) + smoothScrollPixelOffset;
 
         return { .x = x, .y = y };
     }

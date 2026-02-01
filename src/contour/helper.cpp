@@ -63,7 +63,11 @@ namespace
         auto const marginLeft = static_cast<int>(unbox(session.profile().margins.value().horizontal) * dpr);
 
         auto const sx = int(double(x) * dpr);
-        auto const sy = int(double(y) * dpr);
+        auto sy = int(double(y) * dpr);
+
+        // Adjust for smooth scroll pixel offset: content is shifted down by pixelOffset,
+        // so subtract the offset from the mouse position to map to the correct cell.
+        sy -= static_cast<int>(session.terminal().smoothScrollPixelOffset());
 
         auto const row = vtbackend::LineOffset(
             clamp((sy - marginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
@@ -121,6 +125,36 @@ namespace
     {
         using VTMouseButton = vtbackend::MouseButton;
 
+        auto& terminal = session.terminal();
+
+        // Smooth scrolling path: bypass line quantization for the primary screen.
+        // Skip smooth scrolling when modifiers are held so that modifier+wheel bindings
+        // (e.g. Alt+Wheel for opacity, Ctrl+Wheel for font size) are handled by the binding system.
+        if (terminal.settings().smoothScrolling && !terminal.isAlternateScreen() && modifiers.none())
+        {
+            if (angleDelta.y != 0)
+            {
+                // Prefer angleDelta: it is standardized across platforms (120 units = 1 notch)
+                // and allows consistent scaling. The old line-based path uses angleStepSize=40
+                // to quantize into scroll events, each scrolling historyScrollMultiplier lines.
+                // Match that rate: effective lines per event = (angleDelta / 40) * multiplier.
+                auto const multiplier = session.profile().history.value().historyScrollMultiplier;
+                auto const cellHeight = static_cast<float>(terminal.cellPixelSize().height.as<int>());
+                constexpr auto angleStepSize = 40.0f;
+                auto const pixelsPerUnit = static_cast<float>(*multiplier) * cellHeight / angleStepSize;
+                auto const pixelAmount = static_cast<float>(angleDelta.y) * pixelsPerUnit;
+                terminal.applySmoothScrollPixelDelta(pixelAmount);
+                return;
+            }
+            if (pixelDelta.y != 0)
+            {
+                // Fallback for pure trackpad input that only provides pixel deltas.
+                terminal.applySmoothScrollPixelDelta(static_cast<float>(pixelDelta.y));
+                return;
+            }
+        }
+
+        // Existing line-based scrolling (unchanged)
         session.addToAccumulatedScroll(pixelDelta, angleDelta);
         auto const [linesScroll, columnsScroll] = session.consumeScroll();
 

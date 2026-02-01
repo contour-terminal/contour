@@ -144,6 +144,7 @@ namespace
         settings.screenTransitionDuration = profile.screenTransitionDuration.value();
         settings.cursorMotionAnimationDuration = profile.cursorMotionAnimationDuration.value();
         settings.smoothLineScrolling = profile.smoothLineScrolling.value();
+        settings.smoothScrolling = profile.smoothScrolling.value();
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
         settings.maxImageSize = config.images.value().maxImageSize;
@@ -1392,7 +1393,15 @@ bool TerminalSession::operator()(actions::CopyScreenshot)
 
 bool TerminalSession::operator()(actions::ScrollDown)
 {
-    terminal().viewport().scrollDown(_profile.history.value().historyScrollMultiplier);
+    if (terminal().settings().smoothScrolling)
+    {
+        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+        auto const pixels =
+            static_cast<float>(*_profile.history.value().historyScrollMultiplier) * cellHeight;
+        terminal().applySmoothScrollPixelDelta(-pixels);
+    }
+    else
+        terminal().viewport().scrollDown(_profile.history.value().historyScrollMultiplier);
     return true;
 }
 
@@ -1410,45 +1419,83 @@ bool TerminalSession::operator()(actions::ScrollMarkUp)
 
 bool TerminalSession::operator()(actions::ScrollOneDown)
 {
-    terminal().viewport().scrollDown(LineCount(1));
+    if (terminal().settings().smoothScrolling)
+    {
+        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+        terminal().applySmoothScrollPixelDelta(-cellHeight);
+    }
+    else
+        terminal().viewport().scrollDown(LineCount(1));
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollOneUp)
 {
-    terminal().viewport().scrollUp(LineCount(1));
+    if (terminal().settings().smoothScrolling)
+    {
+        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+        terminal().applySmoothScrollPixelDelta(cellHeight);
+    }
+    else
+        terminal().viewport().scrollUp(LineCount(1));
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageDown)
 {
     auto const stepSize = terminal().pageSize().lines / LineCount(2);
-    terminal().viewport().scrollDown(stepSize);
+    if (terminal().settings().smoothScrolling)
+    {
+        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+        auto const pixels = static_cast<float>(*stepSize) * cellHeight;
+        terminal().applySmoothScrollPixelDelta(-pixels);
+    }
+    else
+        terminal().viewport().scrollDown(stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageUp)
 {
     auto const stepSize = terminal().pageSize().lines / LineCount(2);
-    terminal().viewport().scrollUp(stepSize);
+    if (terminal().settings().smoothScrolling)
+    {
+        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+        auto const pixels = static_cast<float>(*stepSize) * cellHeight;
+        terminal().applySmoothScrollPixelDelta(pixels);
+    }
+    else
+        terminal().viewport().scrollUp(stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollToBottom)
 {
+    // Snap immediately for ScrollToTop/Bottom (animating large distances is impractical).
+    terminal().resetSmoothScroll();
     terminal().viewport().scrollToBottom();
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollToTop)
 {
+    // Snap immediately for ScrollToTop/Bottom (animating large distances is impractical).
+    terminal().resetSmoothScroll();
     terminal().viewport().scrollToTop();
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollUp)
 {
-    terminal().viewport().scrollUp(_profile.history.value().historyScrollMultiplier);
+    if (terminal().settings().smoothScrolling)
+    {
+        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+        auto const pixels =
+            static_cast<float>(*_profile.history.value().historyScrollMultiplier) * cellHeight;
+        terminal().applySmoothScrollPixelDelta(pixels);
+    }
+    else
+        terminal().viewport().scrollUp(_profile.history.value().historyScrollMultiplier);
     return true;
 }
 
@@ -1778,6 +1825,7 @@ void TerminalSession::configureTerminal()
     _terminal.settings().blinkStyle = _profile.blinkStyle.value();
     _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();
     _terminal.settings().screenTransitionDuration = _profile.screenTransitionDuration.value();
+    _terminal.settings().smoothScrolling = _profile.smoothScrolling.value();
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)

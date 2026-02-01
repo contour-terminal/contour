@@ -497,6 +497,10 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         return _viCommands.cursorPosition;
     }();
 
+    // When smooth scrolling is active with a non-zero pixel offset,
+    // render one extra line at the bottom to fill the gap caused by the sub-cell shift.
+    auto const smoothScrollExtra = smoothScrollExtraLines();
+
     if (isPrimaryScreen())
         _lastRenderPassHints =
             _primaryScreen.render(RenderBufferBuilder<PrimaryScreenCell> { *this,
@@ -508,7 +512,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                            theCursorPosition,
                                                                            includeSelection },
                                   _viewport.scrollOffset(),
-                                  highlightSearchMatches);
+                                  highlightSearchMatches,
+                                  smoothScrollExtra);
     else
         _lastRenderPassHints =
             _alternateScreen.render(RenderBufferBuilder<AlternateScreenCell> { *this,
@@ -1417,6 +1422,48 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
         _cursorMotion.active = false;
 }
 
+void Terminal::resetSmoothScroll() noexcept
+{
+    _viewport.resetPixelOffset();
+}
+
+bool Terminal::applySmoothScrollPixelDelta(float pixelDelta)
+{
+    if (!_settings.smoothScrolling || isAlternateScreen())
+        return false;
+
+    auto const cellHeight = static_cast<float>(_cellPixelSize.height.as<int>());
+    if (cellHeight <= 0.0f)
+        return false;
+
+    // Compute the total pixel position and decompose into whole-line scroll offset + sub-line remainder.
+    // This avoids calling scrollUp/scrollDown in a loop (which triggers intermediate viewport change
+    // notifications and causes visual glitches).
+    auto const totalPixels = _viewport.pixelOffset() + pixelDelta;
+    auto const linesDelta = static_cast<int>(std::floor(totalPixels / cellHeight));
+    auto const remainder = totalPixels - static_cast<float>(linesDelta) * cellHeight;
+
+    auto const maxOffset = boxed_cast<ScrollOffset>(_primaryScreen.historyLineCount());
+    auto const unclampedOffset = _viewport.scrollOffset().value + linesDelta;
+    auto const newScrollOffset = std::clamp(unclampedOffset, 0, maxOffset.value);
+
+    // Set pixel offset first (before scrollTo triggers _modified() and render buffer update).
+    // If the computed offset was clamped at either boundary, zero the pixel remainder
+    // to prevent overshooting past the scrollable area.
+    if (unclampedOffset >= maxOffset.value)
+        _viewport.setPixelOffset(0.0f); // At or past top of history.
+    else if (unclampedOffset < 0)
+        _viewport.setPixelOffset(0.0f); // Overshot bottom.
+    else
+        _viewport.setPixelOffset(remainder);
+
+    // Apply the scroll offset change — triggers at most one _modified() notification.
+    if (!_viewport.scrollTo(ScrollOffset(newScrollOffset)))
+        breakLoopAndRefreshRenderBuffer(); // Pixel offset changed but scroll offset didn't.
+
+    return true;
+}
+
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
     // Finalize any active screen transition on resize (snapshot dimensions no longer match).
@@ -1425,6 +1472,9 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 
     // Cancel any active cursor motion animation on resize.
     _cursorMotion.active = false;
+
+    // Reset smooth scroll state on resize.
+    resetSmoothScroll();
 
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
@@ -2186,6 +2236,9 @@ void Terminal::setScreen(ScreenType type)
     // Cancel any active cursor motion animation on screen change.
     _cursorMotion.active = false;
 
+    // Reset smooth scroll state on screen change.
+    resetSmoothScroll();
+
     // Capture snapshot of the outgoing screen for crossfade transition.
     if (_settings.screenTransitionStyle == ScreenTransitionStyle::Fade)
     {
@@ -2335,7 +2388,7 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
     _viCommands.cursorPosition.line -= n;
 
     // Adjust viewport accordingly to make it fixed at the scroll-offset as if nothing has happened.
-    if (viewport().scrolled() || _inputHandler.mode() == ViMode::Normal)
+    if (viewport().scrolled() || _viewport.pixelOffset() > 0.0f || _inputHandler.mode() == ViMode::Normal)
         viewport().scrollUp(n);
 
     if (!_selection)

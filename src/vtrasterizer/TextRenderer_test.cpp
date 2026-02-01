@@ -165,12 +165,15 @@ class MockAtlasBackend: public vtrasterizer::atlas::AtlasBackend
 class MockRenderTarget: public vtrasterizer::RenderTarget
 {
   public:
-    void setRenderSize(vtbackend::ImageSize) override {}
+    void setRenderSize(vtbackend::ImageSize size) override { _size = size; }
+    [[nodiscard]] vtbackend::ImageSize renderSize() const noexcept override { return _size; }
     void setMargin(vtrasterizer::PageMargin) override {}
     vtrasterizer::atlas::AtlasBackend& textureScheduler() override { return _textureScheduler; }
     MockAtlasBackend& getMockBackend() { return _textureScheduler; }
 
     void renderRectangle(int, int, vtbackend::Width, vtbackend::Height, vtbackend::RGBAColor) override {}
+    void setScissorRect(int, int, int, int) override {}
+    void clearScissorRect() override {}
     void scheduleScreenshot(ScreenshotCallback) override {}
     void execute(std::chrono::steady_clock::time_point) override {}
     void clearCache() override {}
@@ -178,6 +181,7 @@ class MockRenderTarget: public vtrasterizer::RenderTarget
     void inspect(std::ostream&) const override {}
 
   private:
+    vtbackend::ImageSize _size {};
     MockAtlasBackend _textureScheduler;
 };
 

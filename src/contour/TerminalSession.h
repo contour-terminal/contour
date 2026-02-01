@@ -190,6 +190,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     int scrollOffset() const noexcept { return unbox(terminal().viewport().scrollOffset()); }
     void setScrollOffset(int value)
     {
+        terminal().resetSmoothScroll();
         terminal().viewport().scrollTo(vtbackend::ScrollOffset::cast_from(value));
     }
 

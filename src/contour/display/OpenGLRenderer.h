@@ -68,6 +68,7 @@ class OpenGLRenderer final:
 
     // RenderTarget implementation
     void setRenderSize(vtbackend::ImageSize targetSurfaceSize) override;
+    [[nodiscard]] vtbackend::ImageSize renderSize() const noexcept override { return _renderTargetSize; }
     void setTranslation(float x, float y, float z) noexcept;
     void setViewSize(vtbackend::ImageSize size) noexcept { _viewSize = size; }
     void setModelMatrix(QMatrix4x4 matrix) noexcept;
@@ -76,6 +77,8 @@ class OpenGLRenderer final:
     AtlasBackend& textureScheduler() override;
     void scheduleScreenshot(ScreenshotCallback callback) override;
     void renderRectangle(int x, int y, Width, Height, RGBAColor color) override;
+    void setScissorRect(int x, int y, int width, int height) override;
+    void clearScissorRect() override;
     void execute(std::chrono::steady_clock::time_point now) override;
 
     std::pair<vtbackend::ImageSize, std::vector<uint8_t>> takeScreenshot();

@@ -480,6 +480,27 @@ class Terminal
     [[nodiscard]] Viewport& viewport() noexcept { return _viewport; }
     [[nodiscard]] Viewport const& viewport() const noexcept { return _viewport; }
 
+    // {{{ Smooth scrolling API
+
+    /// Applies a pixel delta for smooth scrolling.
+    /// Accumulates sub-cell pixel offset; converts to line scrolls when a full cell height is reached.
+    /// Returns true if the viewport was modified.
+    bool applySmoothScrollPixelDelta(float pixelDelta);
+
+    /// Returns the current sub-cell pixel offset for smooth scrolling.
+    [[nodiscard]] float smoothScrollPixelOffset() const noexcept { return _viewport.pixelOffset(); }
+
+    /// Returns 1 when smooth scroll pixel offset is non-zero (extra line needed), 0 otherwise.
+    [[nodiscard]] LineCount smoothScrollExtraLines() const noexcept
+    {
+        return _viewport.pixelOffset() > 0.0f ? LineCount(1) : LineCount(0);
+    }
+
+    /// Resets pixel offset to zero.
+    void resetSmoothScroll() noexcept;
+
+    // }}}
+
     // {{{ Screen Render Proxy
     std::optional<std::chrono::milliseconds> nextRender() const;
 

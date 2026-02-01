@@ -102,6 +102,9 @@ class RenderTarget
     /// This is the size that can be rendered to.
     virtual void setRenderSize(ImageSize size) = 0;
 
+    /// Returns the current render target size in pixels.
+    [[nodiscard]] virtual ImageSize renderSize() const noexcept = 0;
+
     virtual void setMargin(PageMargin margin) = 0;
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;
@@ -114,6 +117,13 @@ class RenderTarget
 
     /// Schedules taking a screenshot of the current scene and forwards it to the given callback.
     virtual void scheduleScreenshot(ScreenshotCallback callback) = 0;
+
+    /// Enables scissor testing and restricts rendering to the given rectangle.
+    /// Coordinates are in pixels with origin at bottom-left (OpenGL convention).
+    virtual void setScissorRect(int x, int y, int width, int height) = 0;
+
+    /// Disables scissor testing, restoring full-area rendering.
+    virtual void clearScissorRect() = 0;
 
     /// Executes all previously scheduled render commands.
     virtual void execute(std::chrono::steady_clock::time_point now) = 0;

@@ -745,6 +745,17 @@ void OpenGLRenderer::renderRectangle(int ix, int iy, Width width, Height height,
     crispy::copy(vertices, back_inserter(_rectBuffer));
 }
 
+void OpenGLRenderer::setScissorRect(int x, int y, int width, int height)
+{
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(x, y, width, height);
+}
+
+void OpenGLRenderer::clearScissorRect()
+{
+    glDisable(GL_SCISSOR_TEST);
+}
+
 optional<vtrasterizer::AtlasTextureScreenshot> OpenGLRenderer::readAtlas()
 {
     // NB: to get all atlas pages, call this from instance base id up to and including current

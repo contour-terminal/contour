@@ -73,6 +73,9 @@ struct Settings
     // This is used to implement the DECSCLM (slow scroll) mode.
     std::chrono::milliseconds smoothLineScrolling { 100 };
 
+    /// Enables pixel-based smooth scrolling instead of line-jump scrolling.
+    bool smoothScrolling = true;
+
     // Size in bytes per PTY Buffer Object.
     //
     // Defaults to 1 MB, that's roughly 10k lines when column count is 100.

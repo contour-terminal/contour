@@ -415,6 +415,15 @@ constexpr StringLiteral SmoothLineScrollingConfig {
     "\n"
 };
 
+constexpr StringLiteral SmoothScrollingConfig {
+    "{comment} Enables pixel-based smooth scrolling.\n"
+    "{comment} When enabled, scrolling will be performed in pixel increments\n"
+    "{comment} rather than jumping by full lines, providing a smoother visual experience.\n"
+    "{comment} This applies to mouse wheel and trackpad scrolling on the primary screen.\n"
+    "smooth_scrolling: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral HighlightTimeoutConfig {
     "{comment} Time duration in milliseconds for which yank highlight is shown.\n"
     "vi_mode_highlight_timeout: {}\n"
@@ -1780,6 +1789,19 @@ constexpr StringLiteral SmoothLineScrollingWeb {
 
 };
 
+constexpr StringLiteral SmoothScrollingWeb {
+    "Enables pixel-based smooth scrolling.\n"
+    "When enabled, scrolling will be performed in pixel increments rather than jumping by full lines,\n"
+    "providing a smoother visual experience similar to GNOME Terminal/VTE.\n"
+    "This applies to mouse wheel and trackpad scrolling on the primary screen.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    smooth_scrolling: true\n"
+    "```\n"
+    "\n"
+};
+
 using Shell = DocumentationEntry<ShellConfig, ShellWeb>;
 using EscapeSandbox = DocumentationEntry<EscapeSandboxConfig, EscapeSandboxWeb>;
 using SshHostConfig = DocumentationEntry<SshHostConfigConfig, SshHostConfigWeb>;
@@ -1914,6 +1936,7 @@ using ModeInsert = DocumentationEntry<ModeInsertConfig, ModeInsertWeb>;
 using ModeNormal = DocumentationEntry<ModeNormalConfig, ModeNormalWeb>;
 using ModeVisual = DocumentationEntry<ModeVisualConfig, ModeVisualWeb>;
 using SmoothLineScrolling = DocumentationEntry<SmoothLineScrollingConfig, SmoothLineScrollingWeb>;
+using SmoothScrolling = DocumentationEntry<SmoothScrollingConfig, SmoothScrollingWeb>;
 using HighlightTimeout = DocumentationEntry<HighlightTimeoutConfig, HighlightTimeoutWeb>;
 using HighlightDoubleClickerWord =
     DocumentationEntry<HighlightDoubleClickerWordConfig, HighlightDoubleClickerWordWeb>;

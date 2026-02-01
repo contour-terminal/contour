@@ -126,8 +126,14 @@ class Renderer
 
   private:
     void configureTextureAtlas();
-    void renderCells(std::vector<vtbackend::RenderCell> const& renderableCells);
-    void renderLines(std::vector<vtbackend::RenderLine> const& renderableLines);
+    void renderCells(std::vector<vtbackend::RenderCell> const& renderableCells,
+                     vtbackend::LineCount statusLineBoundary);
+    void renderLines(std::vector<vtbackend::RenderLine> const& renderableLines,
+                     vtbackend::LineCount statusLineBoundary);
+    void renderStatusLineCells(std::vector<vtbackend::RenderCell> const& renderableCells,
+                               vtbackend::LineCount statusLineBoundary);
+    void renderStatusLineLines(std::vector<vtbackend::RenderLine> const& renderableLines,
+                               vtbackend::LineCount statusLineBoundary);
     void executeImageDiscards();
 
     crispy::strong_hashtable_size _atlasHashtableSlotCount;

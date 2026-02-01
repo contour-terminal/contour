@@ -406,6 +406,7 @@ struct TerminalProfile
     ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };
     ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> frozenModes {};
     ConfigEntry<std::chrono::milliseconds, documentation::SmoothLineScrolling> smoothLineScrolling { 100 };
+    ConfigEntry<bool, documentation::SmoothScrolling> smoothScrolling { true };
     ConfigEntry<vtbackend::PageSize, documentation::TerminalSize> terminalSize { {
         .lines = vtbackend::LineCount(25),
         .columns = vtbackend::ColumnCount(80),
