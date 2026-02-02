@@ -358,6 +358,26 @@ void TerminalDisplay::sizeChanged()
         // This can happen when the window is minimized, or when the window is not yet fully initialized.
         return;
 
+    // During initial display setup, the Wayland compositor may revert the window to
+    // the stale pre-DPR-correction geometry via a configure event (e.g. in response to
+    // showNormal()). Detect this by checking if BOTH dimensions mismatch the implicit
+    // size — single-dimension mismatch indicates normal QML binding propagation
+    // (which updates width and height sequentially, not atomically).
+    if (steady_clock::now() < _initialResizeDeadline && std::abs(width() - implicitWidth()) > 0.5
+        && std::abs(height() - implicitHeight()) > 0.5)
+    {
+        displayLog()("Correcting initial window size from {}x{} to {}x{}",
+                     width(),
+                     height(),
+                     implicitWidth(),
+                     implicitHeight());
+        post([this]() {
+            window()->resize(static_cast<int>(std::ceil(implicitWidth())),
+                             static_cast<int>(std::ceil(implicitHeight())));
+        });
+        return;
+    }
+
     displayLog()("Size changed to {}x{} virtual", width(), height());
 
     auto const virtualSize = vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
@@ -472,6 +492,15 @@ void TerminalDisplay::applyFontDPI()
     auto fd = _renderer->fontDescriptions();
     fd.dpi = newFontDPI;
     _renderer->setFonts(std::move(fd));
+
+    // Recompute implicit/minimum size when font DPI changes (e.g., DPR correction
+    // from 2.0 → 1.5 on KDE/Wayland with fractional scaling). The implicit size
+    // does not require a render target, so this must happen before the guard below.
+    if (window())
+    {
+        updateImplicitSize();
+        updateMinimumSize();
+    }
 
     if (!_renderTarget)
         return;
@@ -595,6 +624,12 @@ void TerminalDisplay::createRenderer()
     Require(_session);
     Require(window());
 
+    // Catch DPR corrections that occurred between setSession() and first render
+    // (e.g., Qt correcting from integer-ceiling DPR=2 to actual fractional DPR=1.5
+    // on KDE/Wayland). This reloads fonts at the correct DPI before creating the
+    // render target, ensuring correct cell metrics from the start.
+    applyFontDPI();
+
     auto const textureTileSize = gridMetrics().cellSize;
     auto const viewportMargin = vtrasterizer::PageMargin {}; // TODO margin
     auto const precalculatedViewSize = [this]() -> ImageSize {
@@ -653,9 +688,25 @@ void TerminalDisplay::createRenderer()
     configureScreenHooks();
     watchKdeDpiSetting();
 
-    _session->configureDisplay();
+    // Use implicit dimensions (correct for configured terminal size at current DPR)
+    // rather than widget width()/height() which lag behind QML binding propagation
+    // during beforeSynchronizing (GUI thread is blocked, bindings haven't evaluated).
+    {
+        auto const implicitVirtualSize = ImageSize { vtbackend::Width::cast_from(implicitWidth()),
+                                                     vtbackend::Height::cast_from(implicitHeight()) };
+        auto const actualPixelSize = implicitVirtualSize * contentScale();
+        applyResize(actualPixelSize, *_session, *_renderer);
+    }
 
-    resizeTerminalToDisplaySize();
+    // Allow sizeChanged() to correct Wayland configure reversions for 500ms.
+    _initialResizeDeadline = steady_clock::now() + std::chrono::milliseconds(500);
+
+    // Defer configureDisplay() until the GUI thread processes QML binding propagation
+    // and the window is committed at the correct implicit size (e.g. 1136x600 at DPR 1.5).
+    // Calling it synchronously here (render thread, GUI blocked) causes setWindowNormal()
+    // → showNormal() to trigger a Wayland configure event that uses the stale pre-DPR-correction
+    // window geometry (e.g. 1115x585 at DPR 2.0), reverting the terminal to the wrong size.
+    post([this]() { _session->configureDisplay(); });
 
     displayLog()("Implicit size: {}x{}", implicitWidth(), implicitHeight());
 }
@@ -1020,26 +1071,31 @@ void TerminalDisplay::updateImplicitSize()
     assert(_session);
     assert(window());
 
-    auto const totalPageSize = _session->terminal().pageSize() + _session->terminal().statusLineHeight();
-    auto const dpr = contentScale(); // DPR = Device Pixel Ratio
+    auto const totalPageSize = _session->terminal().totalPageSize();
+    auto const dpr = contentScale();
 
     auto const actualGridCellSize = _renderer->cellSize();
-    auto const actualToVirtualFactor = 1.0 / dpr;
+    auto const scaledMargins = applyContentScale(_session->profile().margins.value(), dpr);
 
-    auto const virtualMargins = _session->profile().margins.value();
-    auto const virtualCellSize = actualGridCellSize * actualToVirtualFactor;
+    // Compute the required size in actual pixels using exact integer arithmetic,
+    // then convert to virtual pixels. This avoids compounding ceil-per-cell rounding errors
+    // that would otherwise cause extra pixels and wrong column/line counts at fractional DPR.
+    auto const actualRequiredSize = computeRequiredSize(scaledMargins, actualGridCellSize, totalPageSize);
 
-    auto const requiredSize = computeRequiredSize(virtualMargins, virtualCellSize, totalPageSize);
+    auto const virtualWidth = std::ceil(static_cast<qreal>(unbox(actualRequiredSize.width)) / dpr);
+    auto const virtualHeight = std::ceil(static_cast<qreal>(unbox(actualRequiredSize.height)) / dpr);
 
-    displayLog()("Implicit display size set to {} (margins: {}, cellSize: {}, contentScale: {}, pageSize: {}",
-                 requiredSize,
-                 virtualMargins,
-                 virtualCellSize,
+    displayLog()("Implicit display size set to {}x{} (actualRequired: {}, cellSize: {}, contentScale: {}, "
+                 "pageSize: {})",
+                 virtualWidth,
+                 virtualHeight,
+                 actualRequiredSize,
+                 actualGridCellSize,
                  dpr,
                  totalPageSize);
 
-    setImplicitWidth(unbox<qreal>(requiredSize.width));
-    setImplicitHeight(unbox<qreal>(requiredSize.height));
+    setImplicitWidth(virtualWidth);
+    setImplicitHeight(virtualHeight);
 }
 
 void TerminalDisplay::updateMinimumSize()
