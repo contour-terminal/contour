@@ -23,6 +23,7 @@
 
 #include <sys/types.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <format>
@@ -486,6 +487,10 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         return _viCommands.cursorPosition;
     }();
 
+    // When smooth scrolling is active with a non-zero pixel offset,
+    // render one extra line at the bottom to fill the gap caused by the sub-cell shift.
+    auto const smoothScrollExtra = smoothScrollExtraLines();
+
     if (isPrimaryScreen())
         _lastRenderPassHints =
             _primaryScreen.render(RenderBufferBuilder<PrimaryScreenCell> { *this,
@@ -497,7 +502,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                            theCursorPosition,
                                                                            includeSelection },
                                   _viewport.scrollOffset(),
-                                  highlightSearchMatches);
+                                  highlightSearchMatches,
+                                  smoothScrollExtra);
     else
         _lastRenderPassHints =
             _alternateScreen.render(RenderBufferBuilder<AlternateScreenCell> { *this,
@@ -515,6 +521,138 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     {
         baseLine += pageSize().lines.as<LineOffset>();
         fillRenderBufferStatusLine(output, includeSelection, baseLine);
+    }
+
+    updateCursorMotionAnimation(output);
+    applyScreenTransitionBlending(output);
+}
+
+void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
+{
+    if (!output.cursor.has_value())
+        return;
+
+    // Effective animation duration: at least 3 frames at the current refresh rate
+    // to guarantee visible interpolation.
+    constexpr auto MinFrames = 3;
+    auto const effectiveDuration =
+        std::max(_settings.cursorMotionAnimationDuration, _refreshInterval.value * MinFrames);
+
+    auto const& cursorPos = output.cursor->position;
+    if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
+    {
+        // Animation in progress — check if target changed (chaining)
+        if (cursorPos != _cursorMotion.toPosition)
+        {
+            // Chain: start new animation from current interpolated position
+            auto const currentProgress = _cursorMotion.progress(_currentTime);
+            _cursorMotion.fromPosition =
+                lerpCellLocation(_cursorMotion.fromPosition, _cursorMotion.toPosition, currentProgress);
+            _cursorMotion.fromColor =
+                mixColor(_cursorMotion.fromColor, _cursorMotion.toColor, currentProgress);
+            _cursorMotion.toPosition = cursorPos;
+            _cursorMotion.toColor = output.cursor->cursorColor;
+            _cursorMotion.startTime = _currentTime;
+            _cursorMotion.duration = effectiveDuration;
+        }
+        // Inject animation data
+        output.cursor->animateFrom = _cursorMotion.fromPosition;
+        output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
+        output.cursor->animateFromColor = _cursorMotion.fromColor;
+    }
+    else if (cursorPos != _cursorMotion.toPosition && _settings.cursorMotionAnimationDuration.count() > 0)
+    {
+        // Start new animation
+        _cursorMotion.active = true;
+        _cursorMotion.fromPosition = _cursorMotion.toPosition; // previous target
+        _cursorMotion.fromColor = _cursorMotion.toColor;       // previous target's color
+        _cursorMotion.toPosition = cursorPos;
+        _cursorMotion.toColor = output.cursor->cursorColor;
+        _cursorMotion.startTime = _currentTime;
+        _cursorMotion.duration = effectiveDuration;
+
+        output.cursor->animateFrom = _cursorMotion.fromPosition;
+        output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
+        output.cursor->animateFromColor = _cursorMotion.fromColor;
+    }
+    else
+    {
+        _cursorMotion.toPosition = cursorPos;
+        _cursorMotion.toColor = output.cursor->cursorColor;
+    }
+}
+
+void Terminal::applyScreenTransitionBlending(RenderBuffer& output)
+{
+    if (!_screenTransition.active)
+        return;
+
+    auto const progress = _screenTransition.progress(_currentTime);
+    if (progress >= 1.0f)
+    {
+        finalizeScreenTransition();
+        return;
+    }
+
+    auto const defaultBg = _colorPalette.defaultBackground;
+
+    // Determine the line offset range that covers the main display (excluding the status line).
+    auto const mainLineBegin = (_settings.statusDisplayPosition == StatusDisplayPosition::Top)
+                                   ? statusLineHeight().as<LineOffset>()
+                                   : LineOffset(0);
+    auto const mainLineEnd = mainLineBegin + pageSize().lines.as<LineOffset>();
+
+    auto const isMainDisplayCell = [&](CellLocation const& pos) {
+        return pos.line >= mainLineBegin && pos.line < mainLineEnd;
+    };
+    auto const isMainDisplayLine = [&](LineOffset offset) {
+        return offset >= mainLineBegin && offset < mainLineEnd;
+    };
+
+    if (progress < 0.5f)
+    {
+        // Phase 1: Fade-out — replace main display cells with snapshot cells fading to background.
+        auto const fadeOut = progress * 2.0f; // 0→1 over the first half
+
+        // Preserve status line cells and lines, discard main display entries.
+        std::erase_if(output.cells, [&](auto const& c) { return isMainDisplayCell(c.position); });
+        std::erase_if(output.lines, [&](auto const& l) { return isMainDisplayLine(l.lineOffset); });
+        output.cursor.reset();
+
+        output.cells.reserve(output.cells.size() + _screenTransition.snapshotCells.size());
+        for (auto const& snap: _screenTransition.snapshotCells)
+        {
+            if (!isMainDisplayCell(snap.position))
+                continue;
+            auto cell = snap;
+            blendAttributesTo(cell.attributes, defaultBg, fadeOut);
+            output.cells.push_back(std::move(cell));
+        }
+
+        // Re-sort cells and lines by position to restore the sorted invariant
+        // required by the renderer's partition_point binary search.
+        std::ranges::sort(output.cells, {}, &RenderCell::position);
+        std::ranges::sort(output.lines, {}, &RenderLine::lineOffset);
+    }
+    else
+    {
+        // Phase 2: Fade-in — blend main display from default background.
+        auto const fadeIn = (progress - 0.5f) * 2.0f; // 0→1 over the second half
+
+        for (auto& cell: output.cells)
+        {
+            if (!isMainDisplayCell(cell.position))
+                continue;
+            blendAttributesFrom(cell.attributes, defaultBg, fadeIn);
+        }
+
+        for (auto& line: output.lines)
+        {
+            if (!isMainDisplayLine(line.lineOffset))
+                continue;
+            blendAttributesFrom(line.textAttributes, defaultBg, fadeIn);
+            blendAttributesFrom(line.fillAttributes, defaultBg, fadeIn);
+        }
     }
 }
 
@@ -1186,7 +1324,7 @@ void Terminal::updateHoveringHyperlinkState()
 
 optional<chrono::milliseconds> Terminal::nextRender() const
 {
-    auto nextBlink = chrono::milliseconds::max();
+    auto nextWakeup = chrono::milliseconds::max();
 
     // Cursor blink scheduling
     if (isModeEnabled(DECMode::VisibleCursor) && _settings.cursorDisplay == CursorDisplay::Blink)
@@ -1194,7 +1332,7 @@ optional<chrono::milliseconds> Terminal::nextRender() const
         auto const passedCursor =
             chrono::duration_cast<chrono::milliseconds>(_currentTime - _lastCursorBlink);
         if (passedCursor <= _settings.cursorBlinkInterval)
-            nextBlink = std::min(nextBlink, _settings.cursorBlinkInterval - passedCursor);
+            nextWakeup = std::min(nextWakeup, _settings.cursorBlinkInterval - passedCursor);
     }
 
     // Cell blink scheduling
@@ -1203,13 +1341,13 @@ optional<chrono::milliseconds> Terminal::nextRender() const
         if (_settings.blinkStyle == BlinkStyle::Classic)
         {
             // Classic mode only needs redraws at toggle transitions.
-            nextBlink = std::min(nextBlink, _slowBlinker.nextToggleIn(_currentTime));
-            nextBlink = std::min(nextBlink, _rapidBlinker.nextToggleIn(_currentTime));
+            nextWakeup = std::min(nextWakeup, _slowBlinker.nextToggleIn(_currentTime));
+            nextWakeup = std::min(nextWakeup, _rapidBlinker.nextToggleIn(_currentTime));
         }
         else
         {
             // Smooth/Linger modes require continuous animation at ~30fps.
-            nextBlink = std::min(nextBlink, chrono::milliseconds { 33 });
+            nextWakeup = std::min(nextWakeup, chrono::milliseconds { 33 });
         }
     }
 
@@ -1220,13 +1358,21 @@ optional<chrono::milliseconds> Terminal::nextRender() const
             % 60;
         auto const millisUntilNextMinute =
             chrono::duration_cast<chrono::milliseconds>(chrono::seconds(60 - currentSecond));
-        nextBlink = std::min(nextBlink, millisUntilNextMinute);
+        nextWakeup = std::min(nextWakeup, millisUntilNextMinute);
     }
 
-    if (nextBlink == chrono::milliseconds::max())
+    // Screen transition animation scheduling at display refresh rate.
+    if (_screenTransition.active && !_screenTransition.isComplete(_currentTime))
+        nextWakeup = std::min(nextWakeup, _refreshInterval.value);
+
+    // Cursor motion animation scheduling at display refresh rate.
+    if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
+        nextWakeup = std::min(nextWakeup, _refreshInterval.value);
+
+    if (nextWakeup == chrono::milliseconds::max())
         return nullopt;
 
-    return nextBlink;
+    return nextWakeup;
 }
 
 void Terminal::tick(chrono::steady_clock::time_point now) noexcept
@@ -1237,15 +1383,73 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
 
     _currentTime = now;
     updateCursorVisibilityState();
+
+    if (_screenTransition.active && _screenTransition.isComplete(_currentTime))
+        finalizeScreenTransition();
+
+    if (_cursorMotion.active && _cursorMotion.isComplete(_currentTime))
+        _cursorMotion.active = false;
+}
+
+void Terminal::resetSmoothScroll() noexcept
+{
+    _viewport.resetPixelOffset();
+}
+
+SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
+{
+    if (!_settings.smoothScrolling || isAlternateScreen())
+        return SmoothScrollResult::Disabled;
+
+    auto const cellHeight = static_cast<float>(_cellPixelSize.height.as<int>());
+    if (cellHeight <= 0.0f)
+        return SmoothScrollResult::InvalidCellSize;
+
+    // Compute the total pixel position and decompose into whole-line scroll offset + sub-line remainder.
+    // This avoids calling scrollUp/scrollDown in a loop (which triggers intermediate viewport change
+    // notifications and causes visual glitches).
+    auto const totalPixels = _viewport.pixelOffset() + pixelDelta;
+    auto const linesDelta = static_cast<int>(std::floor(totalPixels / cellHeight));
+    auto const remainder = totalPixels - static_cast<float>(linesDelta) * cellHeight;
+
+    auto const maxOffset = boxed_cast<ScrollOffset>(_primaryScreen.historyLineCount());
+    auto const unclampedOffset = _viewport.scrollOffset().value + linesDelta;
+    auto const newScrollOffset = std::clamp(unclampedOffset, 0, maxOffset.value);
+
+    // Set pixel offset first (before scrollTo triggers _modified() and render buffer update).
+    // If the computed offset was clamped at either boundary, zero the pixel remainder
+    // to prevent overshooting past the scrollable area.
+    if (unclampedOffset >= maxOffset.value)
+        _viewport.setPixelOffset(0.0f); // At or past top of history.
+    else if (unclampedOffset < 0)
+        _viewport.setPixelOffset(0.0f); // Overshot bottom.
+    else
+        _viewport.setPixelOffset(remainder);
+
+    // Apply the scroll offset change — triggers at most one _modified() notification.
+    if (!_viewport.scrollTo(ScrollOffset(newScrollOffset)))
+        breakLoopAndRefreshRenderBuffer(); // Pixel offset changed but scroll offset didn't.
+
+    return SmoothScrollResult::Applied;
 }
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
+    // Finalize any active screen transition on resize (snapshot dimensions no longer match).
+    if (_screenTransition.active)
+        finalizeScreenTransition();
+
+    // Cancel any active cursor motion animation on resize.
+    _cursorMotion.active = false;
+
+    // Reset smooth scroll state on resize.
+    resetSmoothScroll();
+
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
     auto const mainDisplayPageSize = totalPageSize - statusLineHeight();
 
-    auto const oldMainDisplayPageSize = _settings.pageSize;
+    auto const oldMainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
     _factorySettings.pageSize = totalPageSize;
     _settings.pageSize = totalPageSize;
@@ -1986,10 +2190,57 @@ void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
     resizeScreen(totalPageSize, pageSizeInPixels);
 }
 
+void Terminal::finalizeScreenTransition() noexcept
+{
+    _screenTransition.active = false;
+    _screenTransition.snapshotCells.clear();
+    _screenTransition.snapshotCursor.reset();
+}
+
 void Terminal::setScreen(ScreenType type)
 {
     if (type == _currentScreenType)
         return;
+
+    // Cancel any active cursor motion animation on screen change.
+    _cursorMotion.active = false;
+
+    // Reset smooth scroll state on screen change.
+    resetSmoothScroll();
+
+    // Capture snapshot of the outgoing screen for crossfade transition.
+    if (_settings.screenTransitionStyle == ScreenTransitionStyle::Fade)
+    {
+        // If a transition is already active, finalize it first.
+        if (_screenTransition.active)
+            finalizeScreenTransition();
+
+        // Save render state that fillRenderBufferInternal() will modify as side effects.
+        // PRECONDITION: Must be called from the writer thread under terminal lock.
+        // The save/restore of atomics is safe because no concurrent reader can observe
+        // intermediate states while we hold the lock.
+        auto const savedChanges = _changes.load();
+        auto const savedScreenDirty = _screenDirty;
+        auto const savedFrameID = _lastFrameID.load();
+
+        // Capture the outgoing screen's render cells.
+        RenderBuffer snapshotBuffer;
+        fillRenderBufferInternal(snapshotBuffer, false);
+
+        // Restore render state so the actual rendering pipeline is not disrupted.
+        _changes.store(savedChanges);
+        _screenDirty = savedScreenDirty;
+        _lastFrameID.store(savedFrameID);
+
+        _screenTransition.snapshotCells = std::move(snapshotBuffer.cells);
+        _screenTransition.snapshotCursor = snapshotBuffer.cursor;
+        // Use _currentTime rather than steady_clock::now() because all animation progress
+        // is computed relative to _currentTime; using wall-clock time could produce negative
+        // elapsed values if tick() has not been called since the last frame.
+        _screenTransition.startTime = _currentTime;
+        _screenTransition.duration = _settings.screenTransitionDuration;
+        _screenTransition.active = true;
+    }
 
     switch (type)
     {
@@ -2110,7 +2361,7 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
     _viCommands.cursorPosition.line -= n;
 
     // Adjust viewport accordingly to make it fixed at the scroll-offset as if nothing has happened.
-    if (viewport().scrolled() || _inputHandler.mode() == ViMode::Normal)
+    if (viewport().scrolled() || _viewport.pixelOffset() > 0.0f || _inputHandler.mode() == ViMode::Normal)
         viewport().scrollUp(n);
 
     if (!_selection)

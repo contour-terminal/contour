@@ -727,11 +727,14 @@ class Grid
 
     // {{{ Rendering API
     /// Renders the full screen by passing every grid cell to the callback.
+    ///
+    /// @param extraLines  Additional lines to render beyond the page size (e.g. for smooth scrolling).
     template <typename RendererT>
     [[nodiscard]] RenderPassHints render(
         RendererT&& render,
         ScrollOffset scrollOffset = {},
-        HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes) const;
+        HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes,
+        LineCount extraLines = LineCount(0)) const;
 
     /// Takes text-screenshot of the main page.
     [[nodiscard]] std::string renderMainPageText() const;
@@ -866,13 +869,19 @@ template <typename RendererT>
 [[nodiscard]] RenderPassHints Grid<Cell>::render(
     RendererT&& render, // NOLINT(cppcoreguidelines-missing-std-forward)
     ScrollOffset scrollOffset,
-    HighlightSearchMatches highlightSearchMatches) const
+    HighlightSearchMatches highlightSearchMatches,
+    LineCount extraLines) const
 {
     assert(!scrollOffset || unbox<LineCount>(scrollOffset) <= historyLineCount());
 
-    auto y = LineOffset(0);
+    // When extra lines are requested (for smooth scrolling), render them above the viewport.
+    // The extra line at y = -1 will be partially visible due to the pixel offset.
+    // Clamp extra lines to available history above the current scroll position.
+    auto const availableAbove = *historyLineCount() - *scrollOffset;
+    auto const extraOffset = std::min(*extraLines, std::max(0, availableAbove));
+    auto y = LineOffset(-extraOffset);
     auto hints = RenderPassHints {};
-    for (int i = -*scrollOffset, e = i + *_pageSize.lines; i != e; ++i, ++y)
+    for (int i = -*scrollOffset - extraOffset, e = i + *_pageSize.lines + extraOffset; i != e; ++i, ++y)
     {
         auto x = ColumnOffset(0);
         Line<Cell> const& line = _lines[i];

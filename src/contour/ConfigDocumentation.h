@@ -415,6 +415,15 @@ constexpr StringLiteral SmoothLineScrollingConfig {
     "\n"
 };
 
+constexpr StringLiteral SmoothScrollingConfig {
+    "{comment} Enables pixel-based smooth scrolling.\n"
+    "{comment} When enabled, scrolling will be performed in pixel increments\n"
+    "{comment} rather than jumping by full lines, providing a smoother visual experience.\n"
+    "{comment} This applies to mouse wheel and trackpad scrolling on the primary screen.\n"
+    "smooth_scrolling: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral HighlightTimeoutConfig {
     "{comment} Time duration in milliseconds for which yank highlight is shown.\n"
     "vi_mode_highlight_timeout: {}\n"
@@ -1780,6 +1789,19 @@ constexpr StringLiteral SmoothLineScrollingWeb {
 
 };
 
+constexpr StringLiteral SmoothScrollingWeb {
+    "Enables pixel-based smooth scrolling.\n"
+    "When enabled, scrolling will be performed in pixel increments rather than jumping by full lines,\n"
+    "providing a smoother visual experience similar to GNOME Terminal/VTE.\n"
+    "This applies to mouse wheel and trackpad scrolling on the primary screen.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    smooth_scrolling: true\n"
+    "```\n"
+    "\n"
+};
+
 using Shell = DocumentationEntry<ShellConfig, ShellWeb>;
 using EscapeSandbox = DocumentationEntry<EscapeSandboxConfig, EscapeSandboxWeb>;
 using SshHostConfig = DocumentationEntry<SshHostConfigConfig, SshHostConfigWeb>;
@@ -1831,12 +1853,90 @@ constexpr StringLiteral BlinkStyleWeb {
 };
 
 using BlinkStyle = DocumentationEntry<BlinkStyleConfig, BlinkStyleWeb>;
+
+constexpr StringLiteral ScreenTransitionStyleConfig {
+    "{comment} Determines the visual style of screen transitions between primary and alternate screens.\n"
+    "{comment}\n"
+    "{comment} Valid values are:\n"
+    "{comment}  - classic: Instant switch (no animation).\n"
+    "{comment}  - fade:    Smooth crossfade over a configurable duration.\n"
+    "screen_transition: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral ScreenTransitionStyleWeb {
+    "Determines the visual style of screen transitions between primary and alternate screens.\n"
+    "\n"
+    "When switching between primary and alternate screen buffers (e.g. entering/leaving vim, htop),\n"
+    "this setting controls whether the transition is instant or animated.\n"
+    "\n"
+    "Valid values are:\n"
+    "- `classic` - instant switch (no animation)\n"
+    "- `fade` - smooth fade-out/fade-in (default 250ms)\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    screen_transition: fade\n"
+    "```\n"
+    "\n"
+};
+
+using ScreenTransitionStyle = DocumentationEntry<ScreenTransitionStyleConfig, ScreenTransitionStyleWeb>;
+
+constexpr StringLiteral ScreenTransitionDurationConfig {
+    "{comment} Duration in milliseconds for the screen transition animation.\n"
+    "{comment} Only applies when screen_transition is set to \"fade\".\n"
+    "screen_transition_duration: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral ScreenTransitionDurationWeb {
+    "Duration in milliseconds for the screen transition animation.\n"
+    "\n"
+    "Only applies when `screen_transition` is set to `fade`.\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    screen_transition_duration: 250\n"
+    "```\n"
+    "\n"
+};
+
+using ScreenTransitionDuration =
+    DocumentationEntry<ScreenTransitionDurationConfig, ScreenTransitionDurationWeb>;
+
+constexpr StringLiteral CursorMotionAnimationDurationConfig {
+    "{comment} Duration in milliseconds for cursor motion animation.\n"
+    "{comment} Set to 0 to disable cursor motion animation.\n"
+    "cursor_motion_animation_duration: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral CursorMotionAnimationDurationWeb {
+    "Duration in milliseconds for the cursor motion animation when the cursor moves between cells.\n"
+    "\n"
+    "Set to `0` to disable cursor motion animation (instant jumps).\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    cursor_motion_animation_duration: 100\n"
+    "```\n"
+    "\n"
+};
+
+using CursorMotionAnimationDuration =
+    DocumentationEntry<CursorMotionAnimationDurationConfig, CursorMotionAnimationDurationWeb>;
+
 using Colors = DocumentationEntry<ColorsConfig, ColorsWeb>;
 using ModalCursorScrollOff = DocumentationEntry<ModalCursorScrollOffConfig, ModalCursorScrollOffWeb>;
 using ModeInsert = DocumentationEntry<ModeInsertConfig, ModeInsertWeb>;
 using ModeNormal = DocumentationEntry<ModeNormalConfig, ModeNormalWeb>;
 using ModeVisual = DocumentationEntry<ModeVisualConfig, ModeVisualWeb>;
 using SmoothLineScrolling = DocumentationEntry<SmoothLineScrollingConfig, SmoothLineScrollingWeb>;
+using SmoothScrolling = DocumentationEntry<SmoothScrollingConfig, SmoothScrollingWeb>;
 using HighlightTimeout = DocumentationEntry<HighlightTimeoutConfig, HighlightTimeoutWeb>;
 using HighlightDoubleClickerWord =
     DocumentationEntry<HighlightDoubleClickerWordConfig, HighlightDoubleClickerWordWeb>;

@@ -6,7 +6,9 @@
 #include <crispy/logstore.h>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <numbers>
 #include <ranges>
 
 using namespace std::string_view_literals;
@@ -933,6 +935,513 @@ namespace detail
         }
 
         // }}}
+        // {{{ mathematical bracket and symbol construction
+
+        /// Side indicator for curly bracket rendering (left vs. right).
+        enum class BracketSide : uint8_t
+        {
+            Left,
+            Right
+        };
+
+        /// Supersampling factor used for anti-aliased mathematical symbol rendering.
+        constexpr auto MathSymbolSS = 4;
+
+        /// Draws a thick quarter-ellipse arc on a Pixmap.
+        ///
+        /// Uses the inner/outer arc + scanline gap-fill technique for clean thick arcs.
+        ///
+        /// @param pixmap     Target pixmap to draw on (Pixmap coords: y=0 bottom).
+        /// @param center     Center of the full ellipse in pixmap pixel coordinates.
+        /// @param rx         Horizontal radius of the outer arc.
+        /// @param ry         Vertical radius of the outer arc.
+        /// @param thickness  Arc stroke thickness in pixmap pixels.
+        /// @param tStart     Start angle in radians.
+        /// @param tEnd       End angle in radians.
+        /// @param numSteps   Number of sampling steps along the arc.
+        void drawThickArc(Pixmap& pixmap,
+                          double cx,
+                          double cy,
+                          double rx,
+                          double ry,
+                          int thickness,
+                          double tStart,
+                          double tEnd,
+                          int numSteps = 200)
+        {
+            auto const halfTh = std::max(1, thickness / 2);
+
+            // Trace the nominal arc path and paint a uniform square brush at each sample.
+            // The arc path passes through the stem junction, so the brush width (2*halfTh+1)
+            // naturally matches the stem width (2*halfLt), giving a consistent stroke.
+            for (auto const i: Views::iota(0, numSteps + 1))
+            {
+                auto const t = tStart + (tEnd - tStart) * static_cast<double>(i) / numSteps;
+                auto const px = static_cast<int>(std::round(cx + rx * std::cos(t)));
+                auto const py = static_cast<int>(std::round(cy + ry * std::sin(t)));
+
+                for (auto const dy: Views::iota(-halfTh, halfTh + 1))
+                    for (auto const dx: Views::iota(-halfTh, halfTh + 1))
+                        pixmap.paint(px + dx, py + dy, 0xFF);
+            }
+        }
+
+        /// Builds a curly bracket hook glyph (⎧ ⎩ ⎫ ⎭).
+        ///
+        /// The hook consists of a vertical stem occupying one half of the cell,
+        /// and a quarter-ellipse arc curving away in the other half.
+        ///
+        /// @param size          Cell size.
+        /// @param lineThickness Line thickness from grid metrics.
+        /// @param side          Left or Right bracket.
+        /// @param isUpper       true for upper hook (⎧/⎫), false for lower hook (⎩/⎭).
+        /// @return The rendered alpha buffer.
+        atlas::Buffer buildCurlyBracketHook(ImageSize size, int lineThickness, BracketSide side, bool isUpper)
+        {
+            auto pixmap = blockElement<MathSymbolSS>(size);
+            auto const w = unbox<int>(pixmap.size.width);
+            auto const h = unbox<int>(pixmap.size.height);
+            auto const lt = lineThickness * MathSymbolSS;
+            auto const cx = w / 2;
+            auto const halfLt = std::max(1, lt / 2);
+
+            // Vertical stem: occupies the half of the cell opposite the hook
+            auto const stemLeft = static_cast<double>(cx - halfLt) / w;
+            auto const stemRight = static_cast<double>(cx + halfLt) / w;
+
+            if (isUpper)
+            {
+                // Upper hook: stem at screen-bottom, arc at screen-top.
+                pixmap.rect(Ratio { .x = stemLeft, .y = 0.5 }, Ratio { .x = stemRight, .y = 1.0 });
+
+                auto const halfH = static_cast<double>(h) * 0.5;
+
+                // Quarter-arc sweeping toward screen-top (paint y decreasing from h/2 toward 0)
+                if (side == BracketSide::Left)
+                {
+                    // Arc from (cx, h/2) toward (w, 0) — screen top-right
+                    // Center of ellipse at (w, h/2), rx = w - cx, ry = h/2
+                    drawThickArc(pixmap,
+                                 static_cast<double>(w),
+                                 halfH,
+                                 static_cast<double>(w - cx),
+                                 halfH,
+                                 lt,
+                                 std::numbers::pi,       // start: pointing left (at cx)
+                                 std::numbers::pi * 1.5, // end: pointing down (toward screen-top)
+                                 300);
+                }
+                else
+                {
+                    // Mirror: arc from (cx, h/2) toward (0, 0) — screen top-left
+                    // Center of ellipse at (0, h/2), rx = cx, ry = h/2
+                    drawThickArc(pixmap,
+                                 0.0,
+                                 halfH,
+                                 static_cast<double>(cx),
+                                 halfH,
+                                 lt,
+                                 0.0,                     // start: pointing right (at cx)
+                                 -std::numbers::pi * 0.5, // end: pointing down (toward screen-top)
+                                 300);
+                }
+            }
+            else
+            {
+                // Lower hook: stem at screen-top, arc at screen-bottom.
+                pixmap.rect(Ratio { .x = stemLeft, .y = 0.0 }, Ratio { .x = stemRight, .y = 0.5 });
+
+                auto const halfH = static_cast<double>(h) * 0.5;
+
+                // Quarter-arc sweeping toward screen-bottom (paint y increasing from h/2 toward h)
+                if (side == BracketSide::Left)
+                {
+                    // Arc from (cx, h/2) toward (w, h) — screen bottom-right
+                    // Center of ellipse at (w, h/2), rx = w - cx, ry = h/2
+                    drawThickArc(pixmap,
+                                 static_cast<double>(w),
+                                 halfH,
+                                 static_cast<double>(w - cx),
+                                 halfH,
+                                 lt,
+                                 std::numbers::pi,       // start: pointing left (at cx)
+                                 std::numbers::pi * 0.5, // end: pointing up (toward screen-bottom)
+                                 300);
+                }
+                else
+                {
+                    // Mirror: arc from (cx, h/2) toward (0, h) — screen bottom-left
+                    // Center of ellipse at (0, h/2), rx = cx, ry = h/2
+                    drawThickArc(pixmap,
+                                 0.0,
+                                 halfH,
+                                 static_cast<double>(cx),
+                                 halfH,
+                                 lt,
+                                 0.0,                    // start: pointing right (at cx)
+                                 std::numbers::pi * 0.5, // end: pointing up (toward screen-bottom)
+                                 300);
+                }
+            }
+
+            return pixmap.take();
+        }
+
+        /// Builds a curly bracket middle piece glyph (⎨ ⎬).
+        ///
+        /// The middle piece has two quarter-arcs meeting at a pointed tip,
+        /// with vertical stems above and below.
+        ///
+        /// @param size          Cell size.
+        /// @param lineThickness Line thickness from grid metrics.
+        /// @param side          Left (tip points left) or Right (tip points right).
+        /// @return The rendered alpha buffer.
+        atlas::Buffer buildCurlyBracketMiddle(ImageSize size, int lineThickness, BracketSide side)
+        {
+            auto pixmap = blockElement<MathSymbolSS>(size);
+            auto const w = unbox<int>(pixmap.size.width);
+            auto const h = unbox<int>(pixmap.size.height);
+            auto const lt = lineThickness * MathSymbolSS;
+            auto const cx = w / 2;
+            auto const halfLt = std::max(1, lt / 2);
+
+            auto const stemLeft = static_cast<double>(cx - halfLt) / w;
+            auto const stemRight = static_cast<double>(cx + halfLt) / w;
+
+            // Vertical stems in upper and lower quarters
+            pixmap.rect(Ratio { .x = stemLeft, .y = 0.75 }, Ratio { .x = stemRight, .y = 1.0 });
+            pixmap.rect(Ratio { .x = stemLeft, .y = 0.0 }, Ratio { .x = stemRight, .y = 0.25 });
+
+            if (side == BracketSide::Left)
+            {
+                // Upper arc: from (cx, 3h/4) curving left-down to (0, h/2)
+                drawThickArc(pixmap,
+                             0.0,
+                             static_cast<double>(h) * 0.75,
+                             static_cast<double>(cx),
+                             static_cast<double>(h) * 0.25,
+                             lt,
+                             0.0,                     // start: pointing right (at cx)
+                             -std::numbers::pi * 0.5, // end: pointing down (at tip)
+                             200);
+
+                // Lower arc: from (0, h/2) curving right-down to (cx, h/4)
+                drawThickArc(pixmap,
+                             0.0,
+                             static_cast<double>(h) * 0.25,
+                             static_cast<double>(cx),
+                             static_cast<double>(h) * 0.25,
+                             lt,
+                             std::numbers::pi * 0.5, // start: pointing up (at tip)
+                             0.0,                    // end: pointing right (at cx)
+                             200);
+            }
+            else
+            {
+                // Right bracket: tip points right
+                // Upper arc: from (cx, 3h/4) curving right-down to (w, h/2)
+                drawThickArc(pixmap,
+                             static_cast<double>(w),
+                             static_cast<double>(h) * 0.75,
+                             static_cast<double>(w - cx),
+                             static_cast<double>(h) * 0.25,
+                             lt,
+                             std::numbers::pi,       // start: pointing left (at cx)
+                             std::numbers::pi * 1.5, // end: pointing down (at tip)
+                             200);
+
+                // Lower arc: from (w, h/2) curving left-up to (cx, h/4)
+                drawThickArc(pixmap,
+                             static_cast<double>(w),
+                             static_cast<double>(h) * 0.25,
+                             static_cast<double>(w - cx),
+                             static_cast<double>(h) * 0.25,
+                             lt,
+                             std::numbers::pi * 0.5, // start: pointing up (at tip)
+                             std::numbers::pi,       // end: pointing left (at cx)
+                             200);
+            }
+
+            return pixmap.take();
+        }
+
+        /// Builds a curly bracket extension glyph (⎪) or integral extension (⎮).
+        ///
+        /// A centered vertical line spanning the full cell height.
+        ///
+        /// @param size          Cell size.
+        /// @param lineThickness Line thickness from grid metrics.
+        /// @return The rendered alpha buffer.
+        atlas::Buffer buildCurlyBracketExtension(ImageSize size, int lineThickness)
+        {
+            auto pixmap = blockElement<MathSymbolSS>(size);
+            auto const w = unbox<int>(pixmap.size.width);
+            auto const lt = lineThickness * MathSymbolSS;
+            auto const cx = w / 2;
+            auto const halfLt = std::max(1, lt / 2);
+
+            auto const stemLeft = static_cast<double>(cx - halfLt) / w;
+            auto const stemRight = static_cast<double>(cx + halfLt) / w;
+            pixmap.rect(Ratio { .x = stemLeft, .y = 0.0 }, Ratio { .x = stemRight, .y = 1.0 });
+
+            return pixmap.take();
+        }
+
+        /// Builds a horizontal line extension glyph (⎯).
+        ///
+        /// A centered horizontal line spanning the full cell width.
+        ///
+        /// @param size          Cell size.
+        /// @param lineThickness Line thickness from grid metrics.
+        /// @return The rendered alpha buffer.
+        atlas::Buffer buildHorizontalLineExtension(ImageSize size, int lineThickness)
+        {
+            auto pixmap = blockElement<MathSymbolSS>(size);
+            auto const h = unbox<int>(pixmap.size.height);
+            auto const lt = lineThickness * MathSymbolSS;
+            auto const cy = h / 2;
+            auto const halfLt = std::max(1, lt / 2);
+
+            auto const lineTop = static_cast<double>(cy - halfLt) / h;
+            auto const lineBottom = static_cast<double>(cy + halfLt) / h;
+            pixmap.rect(Ratio { .x = 0.0, .y = lineTop }, Ratio { .x = 1.0, .y = lineBottom });
+
+            return pixmap.take();
+        }
+
+        /// Builds a curly bracket section glyph (⎰ ⎱).
+        ///
+        /// These are compact S-shaped curves that combine an upper arc and a lower arc
+        /// in a single cell, forming a miniature bracket section.
+        ///
+        /// @param size          Cell size.
+        /// @param lineThickness Line thickness from grid metrics.
+        /// @param isUpperLeft   true for ⎰ (upper-left/lower-right), false for ⎱ (mirror).
+        /// @return The rendered alpha buffer.
+        atlas::Buffer buildCurlyBracketSection(ImageSize size, int lineThickness, bool isUpperLeft)
+        {
+            auto pixmap = blockElement<MathSymbolSS>(size);
+            auto const w = unbox<int>(pixmap.size.width);
+            auto const h = unbox<int>(pixmap.size.height);
+            auto const lt = lineThickness * MathSymbolSS;
+            auto const cx = w / 2;
+            auto const halfH = static_cast<double>(h) * 0.5;
+
+            if (isUpperLeft)
+            {
+                // ⎰: Screen-top curves RIGHT (like top of {), screen-bottom curves LEFT (like bottom of }).
+                // Screen-top arc: center at (w, h/2), sweeps toward paint y=0 (screen-top)
+                drawThickArc(pixmap,
+                             static_cast<double>(w),
+                             halfH,
+                             static_cast<double>(w - cx),
+                             halfH,
+                             lt,
+                             std::numbers::pi,       // start: at cx
+                             std::numbers::pi * 1.5, // end: toward screen-top
+                             200);
+
+                // Screen-bottom arc: center at (0, h/2), sweeps toward paint y=h (screen-bottom)
+                drawThickArc(pixmap,
+                             0.0,
+                             halfH,
+                             static_cast<double>(cx),
+                             halfH,
+                             lt,
+                             0.0,                    // start: at cx
+                             std::numbers::pi * 0.5, // end: toward screen-bottom
+                             200);
+            }
+            else
+            {
+                // ⎱: Screen-top curves LEFT (like top of }), screen-bottom curves RIGHT (like bottom of {).
+                // Screen-top arc: center at (0, h/2), sweeps toward paint y=0 (screen-top)
+                drawThickArc(pixmap,
+                             0.0,
+                             halfH,
+                             static_cast<double>(cx),
+                             halfH,
+                             lt,
+                             0.0,                     // start: at cx
+                             -std::numbers::pi * 0.5, // end: toward screen-top
+                             200);
+
+                // Screen-bottom arc: center at (w, h/2), sweeps toward paint y=h (screen-bottom)
+                drawThickArc(pixmap,
+                             static_cast<double>(w),
+                             halfH,
+                             static_cast<double>(w - cx),
+                             halfH,
+                             lt,
+                             std::numbers::pi,       // start: at cx
+                             std::numbers::pi * 0.5, // end: toward screen-bottom
+                             200);
+            }
+
+            return pixmap.take();
+        }
+
+        /// Builds a parenthesis hook glyph (⎛ ⎝ ⎞ ⎠).
+        ///
+        /// A quarter-ellipse arc spanning the full cell height, with no vertical stem.
+        /// The arc center is placed at a cell corner, giving a smooth parenthesis curvature.
+        ///
+        /// @param size          Cell size.
+        /// @param lineThickness Line thickness from grid metrics.
+        /// @param side          Left or Right parenthesis.
+        /// @param isUpper       true for upper hook (⎛/⎞), false for lower hook (⎝/⎠).
+        /// @return The rendered alpha buffer.
+        atlas::Buffer buildParenthesisHook(ImageSize size, int lineThickness, BracketSide side, bool isUpper)
+        {
+            auto pixmap = blockElement<MathSymbolSS>(size);
+            auto const w = unbox<int>(pixmap.size.width);
+            auto const h = unbox<int>(pixmap.size.height);
+            auto const lt = lineThickness * MathSymbolSS;
+            auto const halfLt = std::max(1, lt / 2);
+            auto const rx = static_cast<double>(w - halfLt);
+            auto const ry = static_cast<double>(h);
+
+            if (side == BracketSide::Left)
+            {
+                if (isUpper)
+                {
+                    // ⎛ LEFT PARENTHESIS UPPER HOOK
+                    // Arc center at (w, h), sweeps from π to 3π/2.
+                    // Junction at bottom: (halfLt, h) aligns with left extension.
+                    drawThickArc(pixmap,
+                                 static_cast<double>(w),
+                                 static_cast<double>(h),
+                                 rx,
+                                 ry,
+                                 lt,
+                                 std::numbers::pi,       // start: pointing left
+                                 std::numbers::pi * 1.5, // end: pointing up (screen-top)
+                                 300);
+                }
+                else
+                {
+                    // ⎝ LEFT PARENTHESIS LOWER HOOK
+                    // Arc center at (w, 0), sweeps from π down to π/2.
+                    // Junction at top: (halfLt, 0) aligns with left extension.
+                    drawThickArc(pixmap,
+                                 static_cast<double>(w),
+                                 0.0,
+                                 rx,
+                                 ry,
+                                 lt,
+                                 std::numbers::pi,       // start: pointing left
+                                 std::numbers::pi * 0.5, // end: pointing down (screen-bottom)
+                                 300);
+                }
+            }
+            else
+            {
+                if (isUpper)
+                {
+                    // ⎞ RIGHT PARENTHESIS UPPER HOOK
+                    // Arc center at (0, h), sweeps from 0 to -π/2.
+                    // Junction at bottom: (w - halfLt, h) aligns with right extension.
+                    drawThickArc(pixmap,
+                                 0.0,
+                                 static_cast<double>(h),
+                                 rx,
+                                 ry,
+                                 lt,
+                                 0.0,                     // start: pointing right
+                                 -std::numbers::pi * 0.5, // end: pointing up (screen-top)
+                                 300);
+                }
+                else
+                {
+                    // ⎠ RIGHT PARENTHESIS LOWER HOOK
+                    // Arc center at (0, 0), sweeps from 0 to π/2.
+                    // Junction at top: (w - halfLt, 0) aligns with right extension.
+                    drawThickArc(pixmap,
+                                 0.0,
+                                 0.0,
+                                 rx,
+                                 ry,
+                                 lt,
+                                 0.0,                    // start: pointing right
+                                 std::numbers::pi * 0.5, // end: pointing down (screen-bottom)
+                                 300);
+                }
+            }
+
+            return pixmap.take();
+        }
+
+        /// Builds a parenthesis extension glyph (⎜ ⎟).
+        ///
+        /// An edge-aligned vertical line spanning the full cell height.
+        /// Left extension: line at left edge. Right extension: line at right edge.
+        ///
+        /// @param size          Cell size.
+        /// @param lineThickness Line thickness from grid metrics.
+        /// @param side          Left or Right parenthesis.
+        /// @return The rendered alpha buffer.
+        atlas::Buffer buildParenthesisExtension(ImageSize size, int lineThickness, BracketSide side)
+        {
+            auto pixmap = blockElement<MathSymbolSS>(size);
+            auto const w = unbox<int>(pixmap.size.width);
+            auto const lt = lineThickness * MathSymbolSS;
+            auto const halfLt = std::max(1, lt / 2);
+
+            auto const lineWidth = static_cast<double>(2 * halfLt) / w;
+
+            if (side == BracketSide::Left)
+                pixmap.rect(Ratio { .x = 0.0, .y = 0.0 }, Ratio { .x = lineWidth, .y = 1.0 });
+            else
+                pixmap.rect(Ratio { .x = 1.0 - lineWidth, .y = 0.0 }, Ratio { .x = 1.0, .y = 1.0 });
+
+            return pixmap.take();
+        }
+
+        /// Builds a summation top or bottom piece (⎲ ⎳).
+        ///
+        /// ⎲ SUMMATION TOP: horizontal bar at top + diagonal going down-left.
+        /// ⎳ SUMMATION BOTTOM: diagonal going up-right + horizontal bar at bottom.
+        ///
+        /// @param size          Cell size.
+        /// @param lineThickness Line thickness from grid metrics.
+        /// @param isTop         true for ⎲ (top piece), false for ⎳ (bottom piece).
+        /// @return The rendered alpha buffer.
+        atlas::Buffer buildSummation(ImageSize size, int lineThickness, int baseline, bool isTop)
+        {
+            auto pixmap = blockElement<MathSymbolSS>(size);
+            pixmap.getlineThickness(lineThickness * MathSymbolSS);
+            auto const h = unbox<int>(pixmap.size.height);
+            auto const lt = lineThickness * MathSymbolSS;
+            auto const halfLt = std::max(1, lt / 2);
+
+            auto const barThickness = static_cast<double>(halfLt) / h;
+
+            // 2 * static_cast<double>(halfLt) / h;
+            auto const verticalGap = static_cast<double>(baseline) / h + 4 * barThickness;
+
+            if (isTop)
+            {
+                // ⎲: Horizontal bar at screen-top, diagonal going down-right toward the vertex.
+                pixmap.rect(Ratio { .x = 0.0, .y = verticalGap },
+                            Ratio { .x = 1.0, .y = verticalGap + barThickness * 2 });
+                pixmap.getlineThickness(lt * 4);
+                pixmap.line(Ratio { .x = 0.0, .y = verticalGap + barThickness * 2 },
+                            Ratio { .x = 0.5, .y = 1.0 - verticalGap + barThickness * 2 });
+            }
+            else
+            {
+                // ⎳: Diagonal going from vertex at screen-top down-left to the bar at screen-bottom.
+                pixmap.rect(Ratio { .x = 0.0, .y = 1.0 - verticalGap - barThickness * 2 },
+                            Ratio { .x = 1.0, .y = 1.0 - verticalGap });
+                pixmap.getlineThickness(lt * 4);
+                pixmap.line(Ratio { .x = 0.5, .y = 0.0 },
+                            Ratio { .x = 0.0, .y = 1.0 - verticalGap - barThickness * 2 });
+            }
+
+            return pixmap.take();
+        }
+
+        // }}}
         // {{{ block sextant construction
         template <typename Container, typename T>
         constexpr inline void blockSextant(Container& image, ImageSize size, T position)
@@ -1293,7 +1802,7 @@ bool BoxDrawingRenderer::render(vtbackend::LineOffset line,
         if (!data)
             return false;
 
-        auto const pos = _gridMetrics.map(line, column);
+        auto const pos = _gridMetrics.map(line, column, _smoothScrollYOffset);
         auto const x = pos.x + (i * unbox<int>(_gridMetrics.cellSize.width));
         auto const y = pos.y;
 
@@ -1448,9 +1957,8 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
         return a <= codepoint && codepoint <= b;
     };
 
-    return ascending(0x23A1, 0x23A6)                // mathematical square brackets
-           || ascending(0x2500, 0x2590)             // box drawing, block elements
-           || ascending(0x2594, 0x259F)             // Terminal graphic characters
+    return ascending(0x239B, 0x23B3)                // mathematical brackets and symbols
+           || ascending(0x2500, 0x259F)             // box drawing, block elements, shades
            || ascending(0x1FB00, 0x1FBAF)           // more block sextants
            || ascending(0x1FBF0, 0x1FBF9)           // digits
            || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
@@ -1500,12 +2008,18 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
     // clang-format off
     switch (codepoint)
     {
-        // TODO: case 0x239B: // ⎛ LEFT PARENTHESIS UPPER HOOK
-        // TODO: case 0x239C: // ⎜ LEFT PARENTHESIS EXTENSION
-        // TODO: case 0x239D: // ⎝ LEFT PARENTHESIS LOWER HOOK
-        // TODO: case 0x239E: // ⎞ RIGHT PARENTHESIS UPPER HOOK
-        // TODO: case 0x239F: // ⎟ RIGHT PARENTHESIS EXTENSION
-        // TODO: case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
+        case 0x239B: // ⎛ LEFT PARENTHESIS UPPER HOOK
+            return buildParenthesisHook(size, lineThickness, BracketSide::Left, true);
+        case 0x239C: // ⎜ LEFT PARENTHESIS EXTENSION
+            return buildParenthesisExtension(size, lineThickness, BracketSide::Left);
+        case 0x239D: // ⎝ LEFT PARENTHESIS LOWER HOOK
+            return buildParenthesisHook(size, lineThickness, BracketSide::Left, false);
+        case 0x239E: // ⎞ RIGHT PARENTHESIS UPPER HOOK
+            return buildParenthesisHook(size, lineThickness, BracketSide::Right, true);
+        case 0x239F: // ⎟ RIGHT PARENTHESIS EXTENSION
+            return buildParenthesisExtension(size, lineThickness, BracketSide::Right);
+        case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
+            return buildParenthesisHook(size, lineThickness, BracketSide::Right, false);
 
         case 0x23A1: // ⎡ LEFT SQUARE BRACKET UPPER CORNER
             return blockElement(size) | (left(1 / 8_th) + upper(1 / 8_th) * left(1 / 2_th));
@@ -1520,19 +2034,32 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         case 0x23A6: // ⎦ RIGHT SQUARE BRACKET LOWER CORNER
             return blockElement(size) | (right(1 / 8_th) + lower(1 / 8_th) * right(1 / 2_th));
 
-        // TODO: case 0x23A7: // ⎧ LEFT CURLY BRACKET UPPER HOOK
-        // TODO: case 0x23A8: // ⎨ LEFT CURLY BRACKET MIDDLE PIECE
-        // TODO: case 0x23A9: // ⎩ LEFT CURLY BRACKET LOWER HOOK
-        // TODO: case 0x23AA: // ⎪ CURLY BRACKET EXTENSION
-        // TODO: case 0x23AB: // ⎫ RIGHT CURLY BRACKET UPPER HOOK
-        // TODO: case 0x23AC: // ⎬ RIGHT CURLY BRACKET MIDDLE PIECE
-        // TODO: case 0x23AD: // ⎭ RIGHT CURLY BRACKET LOWER HOOK
-        // TODO: case 0x23AE: // ⎮ INTEGRAL EXTENSION
-        // TODO: case 0x23AF: // ⎯ HORIZONTAL LINE EXTENSION
-        // TODO: case 0x23B0: // ⎰ UPPER LEFT OR LOWER RIGHT CURLY BRACKET SECTION
-        // TODO: case 0x23B1: // ⎱ UPPER RIGHT OR LOWER LEFT CURLY BRACKET SECTION
-        // TODO: case 0x23B2: // ⎲ SUMMATION TOP
-        // TODO: case 0x23B3: // ⎳ SUMMATION BOTTOM
+        case 0x23A7: // ⎧ LEFT CURLY BRACKET UPPER HOOK
+            return buildCurlyBracketHook(size, lineThickness, BracketSide::Left, true);
+        case 0x23A8: // ⎨ LEFT CURLY BRACKET MIDDLE PIECE
+            return buildCurlyBracketMiddle(size, lineThickness, BracketSide::Left);
+        case 0x23A9: // ⎩ LEFT CURLY BRACKET LOWER HOOK
+            return buildCurlyBracketHook(size, lineThickness, BracketSide::Left, false);
+        case 0x23AA: // ⎪ CURLY BRACKET EXTENSION
+            return buildCurlyBracketExtension(size, lineThickness);
+        case 0x23AB: // ⎫ RIGHT CURLY BRACKET UPPER HOOK
+            return buildCurlyBracketHook(size, lineThickness, BracketSide::Right, true);
+        case 0x23AC: // ⎬ RIGHT CURLY BRACKET MIDDLE PIECE
+            return buildCurlyBracketMiddle(size, lineThickness, BracketSide::Right);
+        case 0x23AD: // ⎭ RIGHT CURLY BRACKET LOWER HOOK
+            return buildCurlyBracketHook(size, lineThickness, BracketSide::Right, false);
+        case 0x23AE: // ⎮ INTEGRAL EXTENSION
+            return buildCurlyBracketExtension(size, lineThickness);
+        case 0x23AF: // ⎯ HORIZONTAL LINE EXTENSION
+            return buildHorizontalLineExtension(size, lineThickness);
+        case 0x23B0: // ⎰ UPPER LEFT OR LOWER RIGHT CURLY BRACKET SECTION
+            return buildCurlyBracketSection(size, lineThickness, true);
+        case 0x23B1: // ⎱ UPPER RIGHT OR LOWER LEFT CURLY BRACKET SECTION
+            return buildCurlyBracketSection(size, lineThickness, false);
+        case 0x23B2: // ⎲ SUMMATION TOP
+            return buildSummation(size, lineThickness, _gridMetrics.baseline, true);
+        case 0x23B3: // ⎳ SUMMATION BOTTOM
+            return buildSummation(size, lineThickness, _gridMetrics.baseline, false);
 
         // {{{ 2580..259F block elements
         case 0x2580: return blockElement(size) | upper(1 / 2_th); // ▀ UPPER HALF BLOCK
@@ -1553,9 +2080,18 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         case 0x258F: return blockElement(size) | left(1 / 8_th);  // ▏ LEFT ONE EIGHTH BLOCK
         case 0x2590:
             return blockElement(size) | right(1 / 2_th); // ▐ RIGHT HALF BLOCK
-        // ░ TODO case 0x2591:
-        // ▒ TODO case 0x2592:
-        // ▓ TODO case 0x2593:
+        case 0x2591: // ░ LIGHT SHADE (~25%)
+            return blockElement<1>(size).fill([](int x, int y) {
+                return (x % 2 == 0 && y % 2 == 0) ? 255 : 0;
+            });
+        case 0x2592: // ▒ MEDIUM SHADE (~50%)
+            return blockElement<1>(size).fill([](int x, int y) {
+                return (x + y) % 2 == 0 ? 255 : 0;
+            });
+        case 0x2593: // ▓ DARK SHADE (~75%)
+            return blockElement<1>(size).fill([](int x, int y) {
+                return (x % 2 == 0 && y % 2 == 0) ? 0 : 255;
+            });
         case 0x2594: return blockElement(size) | upper(1 / 8_th); // ▔  UPPER ONE EIGHTH BLOCK
         case 0x2595: return blockElement(size) | right(1 / 8_th); // ▕  RIGHT ONE EIGHTH BLOCK
         case 0x2596:                                              // ▖  QUADRANT LOWER LEFT

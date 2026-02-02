@@ -190,6 +190,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     int scrollOffset() const noexcept { return unbox(terminal().viewport().scrollOffset()); }
     void setScrollOffset(int value)
     {
+        terminal().resetSmoothScroll();
         terminal().viewport().scrollTo(vtbackend::ScrollOffset::cast_from(value));
     }
 
@@ -442,6 +443,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void setDefaultCursor();
     void configureTerminal();
     void configureCursor(config::CursorConfig const& cursorConfig);
+
+    /// Scrolls up by @p lineCount lines, using smooth pixel scrolling if enabled, otherwise line-based.
+    void smoothScrollUp(vtbackend::LineCount lineCount);
+
+    /// Scrolls down by @p lineCount lines, using smooth pixel scrolling if enabled, otherwise line-based.
+    void smoothScrollDown(vtbackend::LineCount lineCount);
     uint8_t matchModeFlags() const;
     void flushInput();
     void mainLoop();

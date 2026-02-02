@@ -39,12 +39,12 @@ namespace
     RGBColorPair makeRGBColorPair(RGBColorPair actualColors,
                                   CellRGBColorAndAlphaPair configuredColor) noexcept
     {
-        return RGBColorPair { .foreground = mix(makeRGBColor(actualColors, configuredColor.foreground),
-                                                actualColors.foreground,
-                                                configuredColor.foregroundAlpha),
-                              .background = mix(makeRGBColor(actualColors, configuredColor.background),
-                                                actualColors.background,
-                                                configuredColor.backgroundAlpha) }
+        return RGBColorPair { .foreground = mixColor(actualColors.foreground,
+                                                     makeRGBColor(actualColors, configuredColor.foreground),
+                                                     configuredColor.foregroundAlpha),
+                              .background = mixColor(actualColors.background,
+                                                     makeRGBColor(actualColors, configuredColor.background),
+                                                     configuredColor.backgroundAlpha) }
             .distinct();
     }
 
@@ -96,7 +96,7 @@ namespace
             RGBColorPair { .foreground = makeRGBColor(selectionColors, colorPalette.cursor.textOverrideColor),
                            .background = makeRGBColor(selectionColors, colorPalette.cursor.color) };
 
-        return mix(cursorColor, selectionColors, 0.25f).distinct();
+        return mixColor(selectionColors, cursorColor, 0.25f).distinct();
     }
 
 } // namespace
@@ -144,7 +144,40 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
 
     auto const cellWidth = _terminal->currentScreen().cellWidthAt(*_cursorPosition);
 
-    return RenderCursor { .position = cursorScreenPosition, .shape = shape, .width = cellWidth };
+    // Resolve cursor color from the cell under the cursor, using the same logic as makeColorsForCell
+    // for Block cursor inversion. This ensures the cursor color reflects actual cell content rather
+    // than only palette defaults.
+    auto const resolvedCursorColor = [&]() -> RGBColor {
+        auto const& colorPalette = _terminal->colorPalette();
+        auto const cellFlags = _terminal->currentScreen().cellFlagsAt(*_cursorPosition);
+        // Access the cell through the current screen's virtual interface to obtain colors.
+        auto const cellFg = _terminal->currentScreen().cellForegroundColorAt(*_cursorPosition);
+        auto const cellBg = _terminal->currentScreen().cellBackgroundColorAt(*_cursorPosition);
+        auto const sgrColors = CellUtil::makeColors(colorPalette,
+                                                    cellFlags,
+                                                    _reverseVideo,
+                                                    cellFg,
+                                                    cellBg,
+                                                    _terminal->blinkState(),
+                                                    _terminal->rapidBlinkState());
+        if (holds_alternative<CellForegroundColor>(colorPalette.cursor.color))
+            return sgrColors.foreground;
+        if (holds_alternative<CellBackgroundColor>(colorPalette.cursor.color))
+            return sgrColors.background;
+        return get<RGBColor>(colorPalette.cursor.color);
+    }();
+
+    // Pre-compute animation progress so that makeColorsForCell() sees the correct value
+    // during cell rendering. Without this, animationProgress defaults to 1.0f and the
+    // Block cursor cell inversion fires at the destination while the CursorRenderer also
+    // draws an animated cursor at the interpolated position — producing a double/stretched cursor.
+    auto const animProgress = _terminal->cursorAnimationProgress(cursorScreenPosition);
+
+    return RenderCursor { .position = cursorScreenPosition,
+                          .shape = shape,
+                          .width = cellWidth,
+                          .animationProgress = animProgress,
+                          .cursorColor = resolvedCursorColor };
 }
 
 template <CellConcept Cell>
@@ -253,7 +286,8 @@ RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosit
     bool const paintCursor =
         (hasCursor || (_prevHasCursor && _prevWidth == 2))
             && _output->cursor.has_value()
-            && _output->cursor->shape == CursorShape::Block;
+            && _output->cursor->shape == CursorShape::Block
+            && _output->cursor->animationProgress >= 1.0f;  // Don't invert cell during animation
     // clang-format on
 
     auto const selected =

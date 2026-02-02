@@ -89,6 +89,15 @@ class Viewport
         return p + boxed_cast<LineOffset>(_scrollOffset);
     }
 
+    /// Returns the sub-cell-height pixel offset for smooth scrolling.
+    [[nodiscard]] float pixelOffset() const noexcept { return _pixelOffset; }
+
+    /// Sets the sub-cell-height pixel offset for smooth scrolling.
+    void setPixelOffset(float offset) noexcept { _pixelOffset = offset; }
+
+    /// Resets the pixel offset to zero.
+    void resetPixelOffset() noexcept { _pixelOffset = 0.0f; }
+
   private:
     [[nodiscard]] LineCount historyLineCount() const noexcept;
     [[nodiscard]] LineCount screenLineCount() const noexcept;
@@ -102,6 +111,9 @@ class Viewport
     ScrollOffset _scrollOffset;
 
     LineCount _scrollOff = LineCount(8);
+
+    /// Sub-cell-height pixel offset for smooth scrolling.
+    float _pixelOffset = 0.0f;
 };
 
 } // namespace vtbackend

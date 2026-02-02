@@ -554,6 +554,7 @@ kund
 kwin
 landingpage
 launchable
+lcurly
 ldd
 ldv
 lefticus
@@ -623,6 +624,7 @@ lowp
 lrucache
 lsb
 lsix
+lsq
 luigi
 lukka
 macdeployqt
@@ -808,6 +810,7 @@ rasterized
 rasterizes
 rasterizing
 rcaloras
+rcurly
 rdparty
 rdynamic
 reaaally
@@ -842,6 +845,7 @@ rpath
 rpmbuild
 rpmdevtools
 rquired
+rsq
 rstuvwxyz
 rtime
 runvcpkg
@@ -877,6 +881,7 @@ setname
 setrgbb
 setrgbf
 setzero
+sgn
 sgr
 shadertools
 shae

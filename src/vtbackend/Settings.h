@@ -60,6 +60,9 @@ struct Settings
     CursorDisplay cursorDisplay = CursorDisplay::Steady;
     CursorShape cursorShape = CursorShape::Block;
     BlinkStyle blinkStyle = BlinkStyle::Smooth;
+    ScreenTransitionStyle screenTransitionStyle = ScreenTransitionStyle::Fade;
+    std::chrono::milliseconds screenTransitionDuration { 250 };
+    std::chrono::milliseconds cursorMotionAnimationDuration { 80 };
 
     bool usePrivateColorRegisters = false;
 
@@ -69,6 +72,9 @@ struct Settings
     // Defines the time to wait before the terminal executes the line feed (LF) command.
     // This is used to implement the DECSCLM (slow scroll) mode.
     std::chrono::milliseconds smoothLineScrolling { 100 };
+
+    /// Enables pixel-based smooth scrolling instead of line-jump scrolling.
+    bool smoothScrolling = true;
 
     // Size in bytes per PTY Buffer Object.
     //

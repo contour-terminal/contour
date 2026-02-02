@@ -406,6 +406,7 @@ struct TerminalProfile
     ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };
     ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> frozenModes {};
     ConfigEntry<std::chrono::milliseconds, documentation::SmoothLineScrolling> smoothLineScrolling { 100 };
+    ConfigEntry<bool, documentation::SmoothScrolling> smoothScrolling { true };
     ConfigEntry<vtbackend::PageSize, documentation::TerminalSize> terminalSize { {
         .lines = vtbackend::LineCount(25),
         .columns = vtbackend::ColumnCount(80),
@@ -423,6 +424,13 @@ struct TerminalProfile
     ConfigEntry<vtbackend::BlinkStyle, documentation::BlinkStyle> blinkStyle {
         vtbackend::BlinkStyle::Smooth
     };
+    ConfigEntry<vtbackend::ScreenTransitionStyle, documentation::ScreenTransitionStyle>
+        screenTransitionStyle { vtbackend::ScreenTransitionStyle::Fade };
+    ConfigEntry<std::chrono::milliseconds, documentation::ScreenTransitionDuration> screenTransitionDuration {
+        std::chrono::milliseconds { 250 }
+    };
+    ConfigEntry<std::chrono::milliseconds, documentation::CursorMotionAnimationDuration>
+        cursorMotionAnimationDuration { std::chrono::milliseconds { 80 } };
     ConfigEntry<InputModeConfig, documentation::ModeInsert> modeInsert { CursorConfig {
         .cursorShape = vtbackend::CursorShape::Bar,
         .cursorDisplay = vtbackend::CursorDisplay::Steady,
@@ -967,6 +975,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::lru_capacity& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorDisplay& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::BlinkStyle& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ScreenTransitionStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::Modifiers& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorShape& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, contour::config::SelectionAction& where);

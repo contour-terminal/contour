@@ -96,7 +96,8 @@ void DecorationRenderer::renderLine(vtbackend::RenderLine const& line)
     for (auto const& mapping: CellFlagDecorationMappings)
         if (line.textAttributes.flags & mapping.first)
             renderDecoration(mapping.second,
-                             _gridMetrics.mapBottomLeft(vtbackend::CellLocation { .line = line.lineOffset }),
+                             _gridMetrics.mapBottomLeft(vtbackend::CellLocation { .line = line.lineOffset },
+                                                        _smoothScrollYOffset),
                              line.usedColumns,
                              line.textAttributes.decorationColor);
 }
@@ -106,7 +107,7 @@ void DecorationRenderer::renderCell(vtbackend::RenderCell const& cell)
     for (auto const& mapping: CellFlagDecorationMappings)
         if (cell.attributes.flags & mapping.first)
             renderDecoration(mapping.second,
-                             _gridMetrics.mapBottomLeft(cell.position),
+                             _gridMetrics.mapBottomLeft(cell.position, _smoothScrollYOffset),
                              vtbackend::ColumnCount(1),
                              cell.attributes.decorationColor);
 }

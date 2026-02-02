@@ -412,6 +412,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "terminal_id", where.terminalId);
         loadFromEntry(child, "frozen_dec_modes", where.frozenModes);
         loadFromEntry(child, "slow_scrolling_time", where.smoothLineScrolling);
+        loadFromEntry(child, "smooth_scrolling", where.smoothScrolling);
         loadFromEntry(child, "terminal_size", where.terminalSize);
         loadFromEntry(child, "history", where.history);
         loadFromEntry(child, "scrollbar", where.scrollbar);
@@ -422,6 +423,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "font", where.fonts);
         loadFromEntry(child, "draw_bold_text_with_bright_colors", where.drawBoldTextWithBrightColors);
         loadFromEntry(child, "blink_style", where.blinkStyle);
+        loadFromEntry(child, "screen_transition", where.screenTransitionStyle);
+        loadFromEntry(child, "screen_transition_duration", where.screenTransitionDuration);
+        loadFromEntry(child, "cursor_motion_animation_duration", where.cursorMotionAnimationDuration);
         if (child["cursor"])
         {
             loadFromEntry(child["cursor"], "shape", where.modeInsert.value().cursor.cursorShape);
@@ -2169,6 +2173,30 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         auto opt = parse(child.as<std::string>());
         if (opt.has_value())
             where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::ScreenTransitionStyle& where)
+{
+    auto parse = [&](std::string const& key) -> std::optional<vtbackend::ScreenTransitionStyle> {
+        auto const upperKey = crispy::toUpper(key);
+        if (upperKey == "CLASSIC")
+            return vtbackend::ScreenTransitionStyle::Classic;
+        if (upperKey == "FADE")
+            return vtbackend::ScreenTransitionStyle::Fade;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto const value = child.as<std::string>();
+        auto const opt = parse(value);
+        if (opt.has_value())
+            where = opt.value();
+        else
+            logger()("Unrecognized screen transition style: {}", value);
     }
 }
 

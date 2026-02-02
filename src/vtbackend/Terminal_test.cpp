@@ -11,6 +11,7 @@
 
 #include <libunicode/convert.h>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
@@ -25,6 +26,7 @@ using vtbackend::LineCount;
 using vtbackend::LineOffset;
 using vtbackend::MockTerm;
 using vtbackend::PageSize;
+using vtbackend::SmoothScrollResult;
 
 using namespace vtbackend::test;
 
@@ -617,5 +619,394 @@ TEST_CASE("Terminal.BoxDrawingCharacters", "[terminal]")
     CHECK(line0.find("file") != std::string::npos);
     CHECK(line1.find("dir") != std::string::npos);
 }
+
+TEST_CASE("Terminal.smoothScrollExtraLines.zero_when_no_offset", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    CHECK(*terminal.smoothScrollExtraLines() == 0);
+}
+
+TEST_CASE("Terminal.smoothScrollExtraLines.one_when_offset_nonzero", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    terminal.viewport().setPixelOffset(5.0f);
+    CHECK(*terminal.smoothScrollExtraLines() == 1);
+}
+
+TEST_CASE("Terminal.screenTransitionProgress.no_transition_returns_1", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    // No transition active, should return 1.0 (complete).
+    CHECK(terminal.screenTransitionProgress() == 1.0f);
+    CHECK_FALSE(terminal.isScreenTransitionActive());
+}
+
+TEST_CASE("Terminal.cursorAnimationProgress.no_animation_returns_1", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    // With no animation, cursor at current position should return 1.0 (complete).
+    auto const cursorPos = terminal.currentScreen().cursor().position;
+    auto const screenPos = vtbackend::CellLocation { .line = cursorPos.line, .column = cursorPos.column };
+    CHECK(terminal.cursorAnimationProgress(screenPos) == 1.0f);
+}
+
+// {{{ applySmoothScrollPixelDelta tests
+
+TEST_CASE("Terminal.applySmoothScrollPixelDelta.accumulates_subline_offset", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    // Write enough lines to generate history.
+    for (auto i = 0; i < 14; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // A delta smaller than one cell height should only accumulate pixel offset.
+    auto const result = terminal.applySmoothScrollPixelDelta(5.0f);
+    CHECK(result == SmoothScrollResult::Applied);
+    CHECK(terminal.smoothScrollPixelOffset() == 5.0f);
+    CHECK(terminal.viewport().scrollOffset().value == 0);
+}
+
+TEST_CASE("Terminal.applySmoothScrollPixelDelta.converts_full_cell_to_scroll", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 14; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    auto const cellHeight = terminal.cellPixelSize().height.as<float>();
+    auto const result = terminal.applySmoothScrollPixelDelta(cellHeight + 3.0f);
+    CHECK(result == SmoothScrollResult::Applied);
+    CHECK(terminal.viewport().scrollOffset().value == 1);
+    CHECK(terminal.smoothScrollPixelOffset() == Catch::Approx(3.0f));
+}
+
+TEST_CASE("Terminal.applySmoothScrollPixelDelta.clamps_at_top_of_history", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 14; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Apply a delta much larger than all available history.
+    auto const result = terminal.applySmoothScrollPixelDelta(100000.0f);
+    CHECK(result == SmoothScrollResult::Applied);
+    // Scroll offset should be clamped to max history.
+    auto const maxOffset = terminal.primaryScreen().historyLineCount();
+    CHECK(terminal.viewport().scrollOffset().value == maxOffset.as<int>());
+    CHECK(terminal.smoothScrollPixelOffset() == 0.0f);
+}
+
+TEST_CASE("Terminal.applySmoothScrollPixelDelta.returns_disabled_on_alternate_screen", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Switch to alternate screen.
+    mc.writeToScreen("\033[?1049h");
+    CHECK(terminal.isAlternateScreen());
+
+    auto const result = terminal.applySmoothScrollPixelDelta(10.0f);
+    CHECK(result == SmoothScrollResult::Disabled);
+}
+
+TEST_CASE("Terminal.onBufferScrolled.preserves_viewport_with_pixel_offset", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Write enough lines to generate some history.
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    // Scroll up and set a non-zero pixel offset.
+    terminal.applySmoothScrollPixelDelta(5.0f);
+    auto const offsetBefore = terminal.viewport().scrollOffset().value;
+
+    // Write more content, triggering onBufferScrolled.
+    for (auto i = 0; i < 4; ++i)
+        mc.writeToScreen("more\r\n");
+
+    // The viewport scroll offset should have increased to keep the view stable.
+    CHECK(terminal.viewport().scrollOffset().value > offsetBefore);
+}
+
+// }}}
+// {{{ cursor motion animation tests
+
+TEST_CASE("Terminal.cursorMotionAnimation.starts_on_position_change", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 20 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+
+    // Ensure animation is enabled (default is 80ms).
+    REQUIRE(terminal.settings().cursorMotionAnimationDuration.count() > 0);
+
+    // Tick far enough from epoch so the refresh interval (41ms) is satisfied.
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+
+    // Move cursor by writing a character.
+    mc.writeToScreen("A");
+    terminal.tick(ClockBase + 200ms);
+    terminal.ensureFreshRenderBuffer();
+
+    auto const renderBuffer = terminal.renderBuffer();
+    REQUIRE(renderBuffer.get().cursor.has_value());
+    auto const& cursor = *renderBuffer.get().cursor;
+    CHECK(cursor.animateFrom.has_value());
+    CHECK(cursor.animationProgress < 1.0f);
+}
+
+TEST_CASE("Terminal.cursorMotionAnimation.chains_midanimation", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 20 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+
+    REQUIRE(terminal.settings().cursorMotionAnimationDuration.count() > 0);
+
+    // Tick far enough from epoch so the refresh interval is satisfied.
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+
+    // Move cursor (start first animation).
+    mc.writeToScreen("A");
+    terminal.tick(ClockBase + 200ms);
+    terminal.ensureFreshRenderBuffer();
+
+    auto fromAfterFirst = std::optional<vtbackend::CellLocation> {};
+    {
+        auto const buf1 = terminal.renderBuffer();
+        REQUIRE(buf1.get().cursor.has_value());
+        fromAfterFirst = buf1.get().cursor->animateFrom;
+        REQUIRE(fromAfterFirst.has_value());
+    } // Release RenderBufferRef lock before next render cycle.
+
+    // Tick partway through animation (40ms into default 80ms).
+    terminal.tick(ClockBase + 240ms);
+
+    // Chain: move cursor again while animation is still in progress.
+    mc.writeToScreen("B");
+    terminal.tick(ClockBase + 300ms);
+    terminal.ensureFreshRenderBuffer();
+
+    auto const buf2 = terminal.renderBuffer();
+    REQUIRE(buf2.get().cursor.has_value());
+    auto const& cursor = *buf2.get().cursor;
+
+    // The new animateFrom should be an interpolated position (not the original from-position).
+    CHECK(cursor.animateFrom.has_value());
+    CHECK(cursor.animationProgress < 1.0f);
+    // The chained from-position should differ from the first animation's from-position,
+    // because it was computed from the interpolated mid-animation point.
+    CHECK(cursor.animateFrom != fromAfterFirst);
+}
+
+// }}}
+// {{{ screen transition fade tests
+
+TEST_CASE("Terminal.screenTransition.activates_on_screen_switch", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    // Ensure fade transition is configured.
+    terminal.settings().screenTransitionStyle = vtbackend::ScreenTransitionStyle::Fade;
+    terminal.settings().screenTransitionDuration = 200ms;
+
+    // Write some text to the primary screen.
+    mc.writeToScreen("Hello");
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+
+    // Switch to alternate screen.
+    mc.writeToScreen("\033[?1049h");
+
+    CHECK(terminal.isScreenTransitionActive());
+}
+
+TEST_CASE("Terminal.screenTransition.fades_out_blends_to_background", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    terminal.settings().screenTransitionStyle = vtbackend::ScreenTransitionStyle::Fade;
+    terminal.settings().screenTransitionDuration = 200ms;
+
+    // Write text so there are non-trivial cells to blend.
+    mc.writeToScreen("Hello");
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+
+    // Switch to alternate screen, starting the transition.
+    // setScreen() records _currentTime (ClockBase + 100ms) as startTime.
+    mc.writeToScreen("\033[?1049h");
+    REQUIRE(terminal.isScreenTransitionActive());
+
+    // Tick to 50ms past startTime (ClockBase + 150ms), i.e. 25% of the 200ms duration.
+    terminal.tick(ClockBase + 150ms);
+    terminal.ensureFreshRenderBuffer();
+
+    // The transition is still active and in fade-out phase.
+    auto const progress = terminal.screenTransitionProgress();
+    CHECK(progress > 0.0f);
+    CHECK(progress < 0.5f);
+}
+
+TEST_CASE("Terminal.screenTransition.fadeout_cell_colors_blend_toward_background", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    terminal.settings().screenTransitionStyle = vtbackend::ScreenTransitionStyle::Fade;
+    terminal.settings().screenTransitionDuration = 200ms;
+
+    // Set a known foreground color via SGR so snapshot cells have non-default foreground.
+    // ESC[38;2;255;0;0m sets foreground to bright red.
+    mc.writeToScreen("\033[38;2;255;0;0mHello");
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+
+    // Capture the pre-transition foreground color of the first rendered cell.
+    auto preFg = vtbackend::RGBColor {};
+    {
+        auto const buf = terminal.renderBuffer();
+        REQUIRE(!buf.get().cells.empty());
+        preFg = buf.get().cells.front().attributes.foregroundColor;
+    }
+    // The foreground should be close to red (255, 0, 0).
+    REQUIRE(preFg.red > 200);
+
+    auto const defaultBg = terminal.colorPalette().defaultBackground;
+
+    // Switch to alternate screen, starting the fade transition.
+    mc.writeToScreen("\033[?1049h");
+    REQUIRE(terminal.isScreenTransitionActive());
+
+    // Tick to 25% of the 200ms duration (fade-out phase: progress < 0.5).
+    // At 25% overall, the fade-out factor is 0.5 (progress * 2).
+    terminal.tick(ClockBase + 150ms);
+    terminal.ensureFreshRenderBuffer();
+
+    auto const progress = terminal.screenTransitionProgress();
+    REQUIRE(progress > 0.0f);
+    REQUIRE(progress < 0.5f);
+
+    auto const buf = terminal.renderBuffer();
+    REQUIRE(!buf.get().cells.empty());
+
+    auto const& blendedFg = buf.get().cells.front().attributes.foregroundColor;
+
+    // During fade-out, the foreground should be blended toward defaultBg.
+    // The red channel should have decreased from the original value toward defaultBg.red.
+    // The green/blue channels should have moved toward defaultBg.green/blue.
+    if (preFg.red > defaultBg.red)
+        CHECK(blendedFg.red < preFg.red);
+    else
+        CHECK(blendedFg.red > preFg.red);
+
+    // Verify that the blended color is between the original and the default background.
+    auto const isRedBetween = (blendedFg.red >= std::min(preFg.red, defaultBg.red))
+                              && (blendedFg.red <= std::max(preFg.red, defaultBg.red));
+    auto const isGreenBetween = (blendedFg.green >= std::min(preFg.green, defaultBg.green))
+                                && (blendedFg.green <= std::max(preFg.green, defaultBg.green));
+    auto const isBlueBetween = (blendedFg.blue >= std::min(preFg.blue, defaultBg.blue))
+                               && (blendedFg.blue <= std::max(preFg.blue, defaultBg.blue));
+    CHECK(isRedBetween);
+    CHECK(isGreenBetween);
+    CHECK(isBlueBetween);
+}
+
+TEST_CASE("Terminal.screenTransition.finalizes_after_duration", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    terminal.settings().screenTransitionStyle = vtbackend::ScreenTransitionStyle::Fade;
+    terminal.settings().screenTransitionDuration = 200ms;
+
+    mc.writeToScreen("Hello");
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+
+    // setScreen() records _currentTime (ClockBase + 100ms) as startTime.
+    mc.writeToScreen("\033[?1049h");
+    REQUIRE(terminal.isScreenTransitionActive());
+
+    // Tick past the full duration (startTime + 200ms = ClockBase + 300ms).
+    terminal.tick(ClockBase + 400ms);
+    CHECK_FALSE(terminal.isScreenTransitionActive());
+}
+
+TEST_CASE("Terminal.screenTransition.reaches_fade_in_phase", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    terminal.settings().screenTransitionStyle = vtbackend::ScreenTransitionStyle::Fade;
+    terminal.settings().screenTransitionDuration = 200ms;
+
+    mc.writeToScreen("Hello");
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+
+    // Switch to alternate screen, starting the transition at _currentTime = ClockBase + 100ms.
+    mc.writeToScreen("\033[?1049h");
+    REQUIRE(terminal.isScreenTransitionActive());
+
+    // Tick to 60% of the 200ms duration (120ms past startTime = ClockBase + 220ms).
+    terminal.tick(ClockBase + 220ms);
+    terminal.ensureFreshRenderBuffer();
+
+    auto const progress = terminal.screenTransitionProgress();
+    CHECK(progress > 0.5f);
+    CHECK(terminal.isScreenTransitionActive());
+}
+
+// }}}
 
 // NOLINTEND(misc-const-correctness)

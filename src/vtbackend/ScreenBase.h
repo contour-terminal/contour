@@ -42,6 +42,8 @@ class ScreenBase: public SequenceHandler
                                                  char32_t codepoint) const noexcept = 0;
     [[nodiscard]] virtual std::string cellTextAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual CellFlags cellFlagsAt(CellLocation position) const noexcept = 0;
+    [[nodiscard]] virtual Color cellForegroundColorAt(CellLocation position) const noexcept = 0;
+    [[nodiscard]] virtual Color cellBackgroundColorAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual LineFlags lineFlagsAt(LineOffset line) const noexcept = 0;
     virtual void enableLineFlags(LineOffset lineOffset, LineFlags flags, bool enable) noexcept = 0;
     [[nodiscard]] virtual bool isLineFlagEnabledAt(LineOffset line, LineFlags flags) const noexcept = 0;

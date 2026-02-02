@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/Animation.h>
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/Cursor.h>
 #include <vtbackend/Grid.h>
@@ -54,6 +55,14 @@ template <CellConcept Cell>
 class Screen;
 
 class ScreenBase;
+
+/// Result of applying a smooth-scroll pixel delta.
+enum class SmoothScrollResult : uint8_t
+{
+    Applied,         ///< Pixel delta was applied to the viewport.
+    Disabled,        ///< Smooth scrolling is disabled or not applicable (alternate screen).
+    InvalidCellSize, ///< Cell pixel size is zero or negative; cannot compute scroll.
+};
 
 /// Helping information to visualize IME text that has not been comitted yet.
 struct InputMethodData
@@ -402,7 +411,7 @@ class Terminal
 
     [[nodiscard]] PageSize totalPageSize() const noexcept { return _settings.pageSize; }
 
-    [[nodiscard]] ImageSize pixelSize() const noexcept { return cellPixelSize() * pageSize(); }
+    [[nodiscard]] ImageSize pixelSize() const noexcept { return cellPixelSize() * totalPageSize(); }
 
     // Returns number of lines for the currently displayed status line,
     // or 0 if status line is currently not displayed.
@@ -479,6 +488,31 @@ class Terminal
     // viewport management
     [[nodiscard]] Viewport& viewport() noexcept { return _viewport; }
     [[nodiscard]] Viewport const& viewport() const noexcept { return _viewport; }
+
+    // {{{ Smooth scrolling API
+
+    /// Applies a pixel delta for smooth scrolling.
+    /// Accumulates sub-cell pixel offset; converts to line scrolls when a full cell height is reached.
+    ///
+    /// @param pixelDelta  The pixel amount to scroll by (positive = scroll up into history).
+    /// @return SmoothScrollResult::Applied if the viewport was modified,
+    ///         SmoothScrollResult::Disabled if smooth scrolling is off or on alternate screen,
+    ///         SmoothScrollResult::InvalidCellSize if the cell pixel height is zero or negative.
+    SmoothScrollResult applySmoothScrollPixelDelta(float pixelDelta);
+
+    /// Returns the current sub-cell pixel offset for smooth scrolling.
+    [[nodiscard]] float smoothScrollPixelOffset() const noexcept { return _viewport.pixelOffset(); }
+
+    /// Returns 1 when smooth scroll pixel offset is non-zero (extra line needed), 0 otherwise.
+    [[nodiscard]] LineCount smoothScrollExtraLines() const noexcept
+    {
+        return _viewport.pixelOffset() > 0.0f ? LineCount(1) : LineCount(0);
+    }
+
+    /// Resets pixel offset to zero.
+    void resetSmoothScroll() noexcept;
+
+    // }}}
 
     // {{{ Screen Render Proxy
     std::optional<std::chrono::milliseconds> nextRender() const;
@@ -614,6 +648,30 @@ class Terminal
         crispy::unreachable();
     }
 
+    /// Returns true if a screen crossfade transition is currently active.
+    [[nodiscard]] bool isScreenTransitionActive() const noexcept { return _screenTransition.active; }
+
+    /// Returns the current transition progress in [0, 1], or 1.0 if no transition is active.
+    [[nodiscard]] float screenTransitionProgress() const noexcept
+    {
+        return _screenTransition.progress(_currentTime);
+    }
+
+    /// Immediately ends any active screen transition.
+    void finalizeScreenTransition() noexcept;
+
+    /// Detects cursor position changes and injects animation data into the render buffer.
+    ///
+    /// @param output  The render buffer whose cursor entry will be updated with
+    ///                animateFrom, animationProgress and animateFromColor fields.
+    void updateCursorMotionAnimation(RenderBuffer& output);
+
+    /// Applies fade-out/fade-in blending when a screen transition is active.
+    ///
+    /// @param output  The render buffer whose cells and lines will be color-blended
+    ///                according to the current transition phase (fade-out or fade-in).
+    void applyScreenTransitionBlending(RenderBuffer& output);
+
     void setHighlightTimeout(std::chrono::milliseconds timeout) noexcept
     {
         _settings.highlightTimeout = timeout;
@@ -665,6 +723,19 @@ class Terminal
     {
         return isModeEnabled(DECMode::VisibleCursor)
                && (cursorDisplay() == CursorDisplay::Steady || _cursorBlinkState);
+    }
+
+    /// Returns the predicted animation progress for a cursor at the given screen position.
+    /// Used by RenderBufferBuilder to pre-set animationProgress before cell rendering,
+    /// so that Block cursor cell inversion is suppressed during animation.
+    [[nodiscard]] float cursorAnimationProgress(CellLocation cursorScreenPosition) const noexcept
+    {
+        if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
+            return _cursorMotion.progress(_currentTime);
+        if (cursorScreenPosition != _cursorMotion.toPosition
+            && _settings.cursorMotionAnimationDuration.count() > 0)
+            return 0.0f;
+        return 1.0f;
     }
 
     bool isBlinkOnScreen() const noexcept { return _lastRenderPassHints.containsBlinkingCells; }
@@ -1135,6 +1206,31 @@ class Terminal
     };
     BlinkerState _slowBlinker { .period = std::chrono::milliseconds { 1000 } };
     BlinkerState _rapidBlinker { .period = std::chrono::milliseconds { 600 } };
+    // }}}
+
+    // {{{ Animation state (see Animation.h for base types and easing functors)
+    // }}}
+
+    // {{{ Screen transition state (crossfade between primary/alternate screens)
+    /// Holds state for an ongoing crossfade transition between screen buffers.
+    struct ScreenTransitionState: AnimationState<LinearEasing>
+    {
+        std::vector<RenderCell> snapshotCells {};
+        std::optional<RenderCursor> snapshotCursor {};
+    };
+    ScreenTransitionState _screenTransition;
+    // }}}
+
+    // {{{ Cursor motion animation state
+    /// Holds state for an ongoing cursor motion animation between grid cells.
+    struct CursorMotionState: AnimationState<EaseOutCubic>
+    {
+        CellLocation fromPosition {};
+        CellLocation toPosition {};
+        RGBColor fromColor {}; ///< Cursor color at the animation source position.
+        RGBColor toColor {};   ///< Cursor color at the animation target position.
+    };
+    CursorMotionState _cursorMotion;
     // }}}
 
     // {{{ Displays this terminal manages

@@ -2,6 +2,7 @@
 
 #include <vtrasterizer/FontDescriptions.h>
 #include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/Renderer.h>
 #include <vtrasterizer/RendererTestHelpers.h>
 #include <vtrasterizer/TextRenderer.h>
 
@@ -165,12 +166,15 @@ class MockAtlasBackend: public vtrasterizer::atlas::AtlasBackend
 class MockRenderTarget: public vtrasterizer::RenderTarget
 {
   public:
-    void setRenderSize(vtbackend::ImageSize) override {}
+    void setRenderSize(vtbackend::ImageSize size) override { _size = size; }
+    [[nodiscard]] vtbackend::ImageSize renderSize() const noexcept override { return _size; }
     void setMargin(vtrasterizer::PageMargin) override {}
     vtrasterizer::atlas::AtlasBackend& textureScheduler() override { return _textureScheduler; }
     MockAtlasBackend& getMockBackend() { return _textureScheduler; }
 
     void renderRectangle(int, int, vtbackend::Width, vtbackend::Height, vtbackend::RGBAColor) override {}
+    void setScissorRect(int, int, int, int) override {}
+    void clearScissorRect() override {}
     void scheduleScreenshot(ScreenshotCallback) override {}
     void execute(std::chrono::steady_clock::time_point) override {}
     void clearCache() override {}
@@ -178,6 +182,7 @@ class MockRenderTarget: public vtrasterizer::RenderTarget
     void inspect(std::ostream&) const override {}
 
   private:
+    vtbackend::ImageSize _size {};
     MockAtlasBackend _textureScheduler;
 };
 
@@ -498,6 +503,98 @@ TEST_CASE("TextRenderer", "[renderer]")
         // Bottom: -3.
         checkY(U'g', vtbackend::LineFlag::DoubleHeightTop, 5);
         checkY(U'g', vtbackend::LineFlag::DoubleHeightBottom, -3);
+    }
+}
+
+TEST_CASE("Renderer.findCellPartitionPoint", "[renderer]")
+{
+    SECTION("empty vector returns 0")
+    {
+        std::vector<RenderCell> cells;
+        CHECK(Renderer::findCellPartitionPoint(cells, LineCount(5)) == 0);
+    }
+
+    SECTION("all cells below boundary")
+    {
+        std::vector<RenderCell> cells;
+        for (auto i = 0; i < 3; ++i)
+        {
+            auto cell = RenderCell {};
+            cell.position = CellLocation { .line = LineOffset(i), .column = ColumnOffset(0) };
+            cells.push_back(cell);
+        }
+        CHECK(Renderer::findCellPartitionPoint(cells, LineCount(5)) == 3);
+    }
+
+    SECTION("all cells above boundary")
+    {
+        std::vector<RenderCell> cells;
+        for (auto i = 5; i < 8; ++i)
+        {
+            auto cell = RenderCell {};
+            cell.position = CellLocation { .line = LineOffset(i), .column = ColumnOffset(0) };
+            cells.push_back(cell);
+        }
+        CHECK(Renderer::findCellPartitionPoint(cells, LineCount(5)) == 0);
+    }
+
+    SECTION("mixed: partition at boundary")
+    {
+        std::vector<RenderCell> cells;
+        for (auto i = 0; i < 6; ++i)
+        {
+            auto cell = RenderCell {};
+            cell.position = CellLocation { .line = LineOffset(i), .column = ColumnOffset(0) };
+            cells.push_back(cell);
+        }
+        // Boundary at line 3: cells at lines 0,1,2 are below, cells at 3,4,5 are at or above.
+        CHECK(Renderer::findCellPartitionPoint(cells, LineCount(3)) == 3);
+    }
+}
+
+TEST_CASE("Renderer.findLinePartitionPoint", "[renderer]")
+{
+    SECTION("empty vector returns 0")
+    {
+        std::vector<RenderLine> lines;
+        CHECK(Renderer::findLinePartitionPoint(lines, LineCount(5)) == 0);
+    }
+
+    SECTION("all lines below boundary")
+    {
+        std::vector<RenderLine> lines;
+        for (auto i = 0; i < 3; ++i)
+        {
+            auto line = RenderLine {};
+            line.lineOffset = LineOffset(i);
+            lines.push_back(line);
+        }
+        CHECK(Renderer::findLinePartitionPoint(lines, LineCount(5)) == 3);
+    }
+
+    SECTION("all lines above boundary")
+    {
+        std::vector<RenderLine> lines;
+        for (auto i = 5; i < 8; ++i)
+        {
+            auto line = RenderLine {};
+            line.lineOffset = LineOffset(i);
+            lines.push_back(line);
+        }
+        CHECK(Renderer::findLinePartitionPoint(lines, LineCount(5)) == 0);
+    }
+
+    SECTION("mixed: partition at boundary")
+    {
+        std::vector<RenderLine> lines;
+        for (auto i = 0; i < 6; ++i)
+        {
+            auto line = RenderLine {};
+            line.lineOffset = LineOffset(i);
+            lines.push_back(line);
+        }
+        // Boundary at line 4: lines 0,1,2,3 are below, lines 4,5 are at or above.
+        CHECK(Renderer::findLinePartitionPoint(lines, LineCount(4)) == 4);
     }
 }
 

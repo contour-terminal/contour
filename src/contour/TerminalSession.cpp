@@ -140,7 +140,11 @@ namespace
         settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
         settings.cursorDisplay = profile.modeInsert.value().cursor.cursorDisplay;
         settings.blinkStyle = profile.blinkStyle.value();
+        settings.screenTransitionStyle = profile.screenTransitionStyle.value();
+        settings.screenTransitionDuration = profile.screenTransitionDuration.value();
+        settings.cursorMotionAnimationDuration = profile.cursorMotionAnimationDuration.value();
         settings.smoothLineScrolling = profile.smoothLineScrolling.value();
+        settings.smoothScrolling = profile.smoothScrolling.value();
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
         settings.maxImageSize = config.images.value().maxImageSize;
@@ -286,7 +290,7 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
     {
         // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
         auto const l = scoped_lock { _terminal };
-        _terminal.resizeScreen(_terminal.pageSize(), _display->pixelSize());
+        _terminal.resizeScreen(_terminal.totalPageSize(), _display->pixelSize());
         _terminal.setRefreshRate(_display->refreshRate());
     }
 
@@ -316,6 +320,8 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
         if (_onClosedHandled)
             _display->closeDisplay();
     }
+
+    scheduleRedraw();
 }
 
 void TerminalSession::scheduleRedraw()
@@ -1387,9 +1393,33 @@ bool TerminalSession::operator()(actions::CopyScreenshot)
     return true;
 }
 
+void TerminalSession::smoothScrollUp(vtbackend::LineCount lineCount)
+{
+    if (terminal().settings().smoothScrolling)
+    {
+        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+        auto const pixels = static_cast<float>(*lineCount) * cellHeight;
+        if (terminal().applySmoothScrollPixelDelta(pixels) == vtbackend::SmoothScrollResult::Applied)
+            return;
+    }
+    terminal().viewport().scrollUp(lineCount);
+}
+
+void TerminalSession::smoothScrollDown(vtbackend::LineCount lineCount)
+{
+    if (terminal().settings().smoothScrolling)
+    {
+        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+        auto const pixels = -static_cast<float>(*lineCount) * cellHeight;
+        if (terminal().applySmoothScrollPixelDelta(pixels) == vtbackend::SmoothScrollResult::Applied)
+            return;
+    }
+    terminal().viewport().scrollDown(lineCount);
+}
+
 bool TerminalSession::operator()(actions::ScrollDown)
 {
-    terminal().viewport().scrollDown(_profile.history.value().historyScrollMultiplier);
+    smoothScrollDown(vtbackend::LineCount(*_profile.history.value().historyScrollMultiplier));
     return true;
 }
 
@@ -1407,45 +1437,49 @@ bool TerminalSession::operator()(actions::ScrollMarkUp)
 
 bool TerminalSession::operator()(actions::ScrollOneDown)
 {
-    terminal().viewport().scrollDown(LineCount(1));
+    smoothScrollDown(LineCount(1));
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollOneUp)
 {
-    terminal().viewport().scrollUp(LineCount(1));
+    smoothScrollUp(LineCount(1));
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageDown)
 {
     auto const stepSize = terminal().pageSize().lines / LineCount(2);
-    terminal().viewport().scrollDown(stepSize);
+    smoothScrollDown(stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageUp)
 {
     auto const stepSize = terminal().pageSize().lines / LineCount(2);
-    terminal().viewport().scrollUp(stepSize);
+    smoothScrollUp(stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollToBottom)
 {
+    // Snap immediately for ScrollToTop/Bottom (animating large distances is impractical).
+    terminal().resetSmoothScroll();
     terminal().viewport().scrollToBottom();
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollToTop)
 {
+    // Snap immediately for ScrollToTop/Bottom (animating large distances is impractical).
+    terminal().resetSmoothScroll();
     terminal().viewport().scrollToTop();
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollUp)
 {
-    terminal().viewport().scrollUp(_profile.history.value().historyScrollMultiplier);
+    smoothScrollUp(vtbackend::LineCount(*_profile.history.value().historyScrollMultiplier));
     return true;
 }
 
@@ -1773,6 +1807,11 @@ void TerminalSession::configureTerminal()
     _terminal.inputHandler().setSearchModeSwitch(_profile.searchModeSwitch.value());
     _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
     _terminal.settings().blinkStyle = _profile.blinkStyle.value();
+    _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();
+    _terminal.settings().screenTransitionDuration = _profile.screenTransitionDuration.value();
+    _terminal.settings().cursorMotionAnimationDuration = _profile.cursorMotionAnimationDuration.value();
+    _terminal.settings().smoothLineScrolling = _profile.smoothLineScrolling.value();
+    _terminal.settings().smoothScrolling = _profile.smoothScrolling.value();
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)

@@ -7,17 +7,18 @@
 #include <text_shaper/open_shaper.h>
 
 #include <crispy/StrongLRUHashtable.h>
+#include <crispy/utils.h>
 
 #if defined(_WIN32)
     #include <text_shaper/directwrite_shaper.h>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <memory>
+#include <span>
 
 using std::array;
-using std::get;
-using std::holds_alternative;
 using std::initializer_list;
 using std::make_unique;
 using std::move;
@@ -131,7 +132,6 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
     _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
     //.
-    _colorPalette { colorPalette },
     _backgroundRenderer { _gridMetrics, colorPalette.defaultBackground },
     _imageRenderer { _gridMetrics, cellSize() },
     _textRenderer { _gridMetrics, *_textShaper, _fontDescriptions, _fonts, _imageRenderer },
@@ -295,58 +295,192 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     terminal.refreshRenderBuffer();
 #endif // }}}
 
+    auto const smoothPixelOffset = static_cast<int>(terminal.smoothScrollPixelOffset());
+    auto const statusDisplayAtTop =
+        terminal.settings().statusDisplayPosition == vtbackend::StatusDisplayPosition::Top;
+    // The partition boundary separates the two regions in the render buffer.
+    // Bottom: [main 0..pageSize) [status pageSize..)   → boundary = pageSize
+    // Top:    [status 0..statusHeight) [main statusHeight..)  → boundary = statusHeight
+    auto const statusLineBoundary = statusDisplayAtTop ? statusLineHeight : terminal.pageSize().lines;
+    auto const now = terminal.currentTime();
+
     auto cursorOpt = optional<vtbackend::RenderCursor> { std::nullopt };
-    _imageRenderer.beginFrame();
-    _textRenderer.beginFrame();
-    _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());
+
+    // Wraps a render pass: begins image/text frames, invokes the content callback, then ends both frames.
+    auto const renderPass = [&](bool withPressure, auto&& content) {
+        _imageRenderer.beginFrame();
+        _textRenderer.beginFrame();
+        _textRenderer.setPressure(withPressure);
+        content();
+        _textRenderer.endFrame();
+        _imageRenderer.endFrame();
+    };
+
+    auto const primaryPressure = pressure && terminal.isPrimaryScreen();
+
+    if (smoothPixelOffset == 0)
     {
+        // --- Single-pass rendering: no smooth scroll offset, no scissor needed ---
+        setSmoothScrollOffset(0);
+        renderPass(primaryPressure, [&] {
+            vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
+            cursorOpt = renderBuffer.get().cursor;
+            renderCells(std::span(renderBuffer.get().cells));
+            renderLines(std::span(renderBuffer.get().lines));
+        });
+    }
+    else
+    {
+        // --- Two-pass rendering: main display with scroll offset, then status line without ---
+
+        // Pass 1: Main display content (with smooth scroll offset, scissored).
+        setSmoothScrollOffset(smoothPixelOffset);
         vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
-        renderCells(renderBuffer.get().cells);
-        renderLines(renderBuffer.get().lines);
-    }
-    _textRenderer.endFrame();
-    _imageRenderer.endFrame();
 
-    if (cursorOpt && cursorOpt.value().shape != vtbackend::CursorShape::Block)
+        auto const cellSplit = findCellPartitionPoint(renderBuffer.get().cells, statusLineBoundary);
+        auto const lineSplit = findLinePartitionPoint(renderBuffer.get().lines, statusLineBoundary);
+
+        // When status line is at bottom, the first partition is main display;
+        // when at top, the first partition is the status line.
+        auto const firstCells = std::span(renderBuffer.get().cells).first(cellSplit);
+        auto const secondCells = std::span(renderBuffer.get().cells).subspan(cellSplit);
+        auto const firstLines = std::span(renderBuffer.get().lines).first(lineSplit);
+        auto const secondLines = std::span(renderBuffer.get().lines).subspan(lineSplit);
+
+        auto const mainCells = statusDisplayAtTop ? secondCells : firstCells;
+        auto const statusCells = statusDisplayAtTop ? firstCells : secondCells;
+        auto const mainLines = statusDisplayAtTop ? secondLines : firstLines;
+        auto const statusLines = statusDisplayAtTop ? firstLines : secondLines;
+
+        renderPass(primaryPressure, [&] {
+            renderCells(mainCells, smoothPixelOffset);
+            renderLines(mainLines);
+        });
+
+        // Scissor clips the main display area so the offset content doesn't bleed into the status line.
+        {
+            auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
+            auto const mainAreaTop =
+                _gridMetrics.pageMargin.top + (statusDisplayAtTop ? *statusLineHeight * cellHeight : 0);
+            auto const mainAreaHeight = *terminal.pageSize().lines * cellHeight;
+            auto const renderSize = _renderTarget->renderSize();
+            auto const renderWidth = renderSize.width.as<int>();
+            auto const renderHeight = renderSize.height.as<int>();
+            auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
+            _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
+            auto const scissorGuard = crispy::finally([this] { _renderTarget->clearScissorRect(); });
+            _renderTarget->execute(now);
+        }
+
+        // Pass 2: Status line (no scroll offset, no scissor).
+        setSmoothScrollOffset(0);
+        renderPass(false, [&] {
+            renderCells(statusCells);
+            renderLines(statusLines);
+        });
+    }
+
+    if (cursorOpt)
     {
-        // Note. Block cursor is implicitly rendered via standard grid cell rendering.
         auto const cursor = *cursorOpt;
-        _cursorRenderer.setShape(cursor.shape);
-        auto const cursorColor = [&]() {
-            if (holds_alternative<vtbackend::CellForegroundColor>(_colorPalette.cursor.color))
-                return _colorPalette.defaultForeground;
-            else if (holds_alternative<vtbackend::CellBackgroundColor>(_colorPalette.cursor.color))
-                return _colorPalette.defaultBackground;
-            else
-                return get<vtbackend::RGBColor>(_colorPalette.cursor.color);
-        }();
-        _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursorColor);
+
+        // When smooth-scrolling is active, flush pending status line commands first (unclipped),
+        // so the cursor can be flushed separately within a scissor rect.
+        if (smoothPixelOffset != 0)
+            _renderTarget->execute(now);
+
+        auto const isAnimating = cursor.animateFrom.has_value() && cursor.animationProgress < 1.0f;
+        if (isAnimating)
+        {
+            auto const fromPixel = _gridMetrics.map(*cursor.animateFrom, smoothPixelOffset);
+            auto const toPixel = _gridMetrics.map(cursor.position, smoothPixelOffset);
+            auto const animationProgress = cursor.animationProgress;
+            auto const interpolated = crispy::point {
+                .x = fromPixel.x
+                     + static_cast<int>(animationProgress * static_cast<float>(toPixel.x - fromPixel.x)),
+                .y = fromPixel.y
+                     + static_cast<int>(animationProgress * static_cast<float>(toPixel.y - fromPixel.y)),
+            };
+            auto const color =
+                cursor.animateFromColor
+                    ? vtbackend::mixColor(*cursor.animateFromColor, cursor.cursorColor, animationProgress)
+                    : cursor.cursorColor;
+            _cursorRenderer.setShape(cursor.shape);
+            _cursorRenderer.render(interpolated, cursor.width, color);
+        }
+        else if (cursor.shape != vtbackend::CursorShape::Block)
+        {
+            _cursorRenderer.setShape(cursor.shape);
+            _cursorRenderer.render(
+                _gridMetrics.map(cursor.position, smoothPixelOffset), cursor.width, cursor.cursorColor);
+        }
+
+        // Scissor-clip cursor to the main display area to prevent overflow into the status line.
+        if (smoothPixelOffset != 0)
+        {
+            auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
+            auto const mainAreaTop =
+                _gridMetrics.pageMargin.top + (statusDisplayAtTop ? *statusLineHeight * cellHeight : 0);
+            auto const mainAreaHeight = *terminal.pageSize().lines * cellHeight;
+            auto const renderSize = _renderTarget->renderSize();
+            auto const renderWidth = renderSize.width.as<int>();
+            auto const renderHeight = renderSize.height.as<int>();
+            auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
+            _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
+            auto const scissorGuard = crispy::finally([this] { _renderTarget->clearScissorRect(); });
+            _renderTarget->execute(now);
+        }
     }
 
-    _renderTarget->execute(terminal.currentTime());
+    _renderTarget->execute(now);
 }
 
-void Renderer::renderCells(vector<vtbackend::RenderCell> const& renderableCells)
+void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells, int yPixelOffset)
 {
-    for (vtbackend::RenderCell const& cell: renderableCells)
+    for (auto const& cell: cells)
     {
         _backgroundRenderer.renderCell(cell);
         _decorationRenderer.renderCell(cell);
         _textRenderer.renderCell(cell);
         if (cell.image)
-            _imageRenderer.renderImage(_gridMetrics.map(cell.position), *cell.image);
+            _imageRenderer.renderImage(_gridMetrics.map(cell.position, yPixelOffset), *cell.image);
     }
 }
 
-void Renderer::renderLines(vector<vtbackend::RenderLine> const& renderableLines)
+void Renderer::setSmoothScrollOffset(int offset)
 {
-    for (vtbackend::RenderLine const& line: renderableLines)
+    _backgroundRenderer.setSmoothScrollOffset(offset);
+    _decorationRenderer.setSmoothScrollOffset(offset);
+    _textRenderer.setSmoothScrollOffset(offset);
+}
+
+void Renderer::renderLines(std::span<vtbackend::RenderLine const> lines)
+{
+    for (auto const& line: lines)
     {
         _backgroundRenderer.renderLine(line);
         _decorationRenderer.renderLine(line);
         _textRenderer.renderLine(line);
     }
+}
+
+size_t Renderer::findCellPartitionPoint(std::vector<vtbackend::RenderCell> const& cells,
+                                        vtbackend::LineCount statusLineBoundary)
+{
+    auto const boundary = statusLineBoundary.as<vtbackend::LineOffset>();
+    auto const it = std::ranges::partition_point(
+        cells, [boundary](auto const& cell) { return cell.position.line < boundary; });
+    return static_cast<size_t>(std::distance(cells.begin(), it));
+}
+
+size_t Renderer::findLinePartitionPoint(std::vector<vtbackend::RenderLine> const& lines,
+                                        vtbackend::LineCount statusLineBoundary)
+{
+    auto const boundary = statusLineBoundary.as<vtbackend::LineOffset>();
+    auto const it = std::ranges::partition_point(
+        lines, [boundary](auto const& line) { return line.lineOffset < boundary; });
+    return static_cast<size_t>(std::distance(lines.begin(), it));
 }
 
 void Renderer::inspect(std::ostream& textOutput) const

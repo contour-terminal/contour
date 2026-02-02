@@ -168,12 +168,15 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void writeTextFromExternal(std::string_view text);
 
     /// Renders the full screen by passing every grid cell to the callback.
+    ///
+    /// @param extraLines  Additional lines to render beyond the page size (e.g. for smooth scrolling).
     template <typename Renderer>
     RenderPassHints render(Renderer&& render,
                            ScrollOffset scrollOffset = {},
-                           HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes) const
+                           HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes,
+                           LineCount extraLines = LineCount(0)) const
     {
-        return _grid.render(std::forward<Renderer>(render), scrollOffset, highlightSearchMatches);
+        return _grid.render(std::forward<Renderer>(render), scrollOffset, highlightSearchMatches, extraLines);
     }
 
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
@@ -532,6 +535,16 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     {
         // TODO: This is not efficient. We should have a direct access to the flags.
         return _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).flags();
+    }
+
+    [[nodiscard]] Color cellForegroundColorAt(CellLocation position) const noexcept override
+    {
+        return at(position).foregroundColor();
+    }
+
+    [[nodiscard]] Color cellBackgroundColorAt(CellLocation position) const noexcept override
+    {
+        return at(position).backgroundColor();
     }
 
     [[nodiscard]] LineFlags lineFlagsAt(LineOffset line) const noexcept override

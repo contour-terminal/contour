@@ -187,8 +187,7 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
     {
 
         auto const pixels = _activeDisplay->pixelSize();
-        auto const totalPageSize =
-            _activeDisplay->calculatePageSize() + displayState.currentSession->terminal().statusLineHeight();
+        auto const totalPageSize = _activeDisplay->calculatePageSize();
 
         // Ensure that the existing session is resized to the display's size.
         if (!isNewSession)
@@ -196,6 +195,7 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
             managerLog()("Resize existing session to display size: {}x{}.",
                          _activeDisplay->width(),
                          _activeDisplay->height());
+            auto const _ = std::scoped_lock { displayState.currentSession->terminal() };
             displayState.currentSession->terminal().resizeScreen(totalPageSize, pixels);
         }
 
@@ -206,7 +206,10 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
 
         // Resize active session after display is attached to it
         // to return a lost line
-        displayState.currentSession->terminal().resizeScreen(totalPageSize, pixels);
+        {
+            auto const _ = std::scoped_lock { displayState.currentSession->terminal() };
+            displayState.currentSession->terminal().resizeScreen(totalPageSize, pixels);
+        }
     }
 
     return session;

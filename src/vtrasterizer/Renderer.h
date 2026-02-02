@@ -21,6 +21,7 @@
 
 #include <format>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace vtrasterizer
@@ -124,10 +125,43 @@ class Renderer
         };
     }
 
+    /// Returns the index of the first cell whose line offset >= @p statusLineBoundary.
+    ///
+    /// @param cells                Sorted vector of render cells ordered by line offset.
+    /// @param statusLineBoundary   Line count that separates main display from the status line.
+    /// @return Index into @p cells at the partition point; equals cells.size() if all cells
+    ///         belong to the main display.
+    [[nodiscard]] static size_t findCellPartitionPoint(std::vector<vtbackend::RenderCell> const& cells,
+                                                       vtbackend::LineCount statusLineBoundary);
+
+    /// Returns the index of the first line whose offset >= @p statusLineBoundary.
+    ///
+    /// @param lines                Sorted vector of render lines ordered by line offset.
+    /// @param statusLineBoundary   Line count that separates main display from the status line.
+    /// @return Index into @p lines at the partition point; equals lines.size() if all lines
+    ///         belong to the main display.
+    [[nodiscard]] static size_t findLinePartitionPoint(std::vector<vtbackend::RenderLine> const& lines,
+                                                       vtbackend::LineCount statusLineBoundary);
+
   private:
     void configureTextureAtlas();
-    void renderCells(std::vector<vtbackend::RenderCell> const& renderableCells);
-    void renderLines(std::vector<vtbackend::RenderLine> const& renderableLines);
+
+    /// Sets the smooth scroll Y pixel offset on all sub-renderers.
+    ///
+    /// @param offset  Y pixel offset for smooth scrolling.
+    void setSmoothScrollOffset(int offset);
+
+    /// Renders a span of cells to the background, decoration, text, and image renderers.
+    ///
+    /// @param cells          Contiguous sub-range of RenderCell entries to render.
+    /// @param yPixelOffset   Sub-cell Y pixel offset for smooth scrolling (default: 0).
+    void renderCells(std::span<vtbackend::RenderCell const> cells, int yPixelOffset = 0);
+
+    /// Renders a span of lines to the background, decoration, and text renderers.
+    ///
+    /// @param lines  Contiguous sub-range of RenderLine entries to render.
+    void renderLines(std::span<vtbackend::RenderLine const> lines);
+
     void executeImageDiscards();
 
     crispy::strong_hashtable_size _atlasHashtableSlotCount;
@@ -144,8 +178,6 @@ class Renderer
     FontKeys _fonts;
 
     GridMetrics _gridMetrics;
-
-    vtbackend::ColorPalette const& _colorPalette;
 
     std::mutex _imageDiscardLock;                       //!< Lock guard for accessing _discardImageQueue.
     std::vector<vtbackend::ImageId> _discardImageQueue; //!< List of images to be discarded.

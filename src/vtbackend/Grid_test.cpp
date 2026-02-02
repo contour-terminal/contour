@@ -955,4 +955,96 @@ TEST_CASE("Grid resize with wrap and spaces", "[grid]")
 }
 
 // }}}
+
+// {{{ Grid::render extraLines tests
+
+namespace
+{
+
+/// Minimal mock renderer that tracks which lines were rendered.
+struct MockGridRenderer
+{
+    std::vector<LineOffset> renderedLines;
+
+    void startLine(LineOffset y, [[maybe_unused]] LineFlags flags) { renderedLines.push_back(y); }
+
+    void renderCell([[maybe_unused]] Cell const& cell,
+                    [[maybe_unused]] LineOffset line,
+                    [[maybe_unused]] ColumnOffset column)
+    {
+    }
+
+    void endLine() {}
+
+    void renderTrivialLine([[maybe_unused]] TrivialLineBuffer const& lineBuffer,
+                           LineOffset y,
+                           [[maybe_unused]] LineFlags flags)
+    {
+        renderedLines.push_back(y);
+    }
+
+    void finish() {}
+};
+
+} // namespace
+
+TEST_CASE("Grid.render_extraLines.renders_extra_line_above_viewport", "[grid]")
+{
+    // Create a grid with 2 visible lines and 5 history lines.
+    auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+
+    // Write enough lines to fill some history.
+    for (auto i = 0; i < 5; ++i)
+    {
+        grid.scrollUp(LineCount(1));
+        grid.setLineText(LineOffset(1), std::format("L{:03}", i));
+    }
+
+    auto renderer = MockGridRenderer {};
+    (void) grid.render(renderer, ScrollOffset(0), HighlightSearchMatches::No, LineCount(1));
+
+    // Should have rendered 3 lines: y=-1 (extra), y=0, y=1.
+    CHECK(renderer.renderedLines.size() == 3);
+    CHECK(renderer.renderedLines[0] == LineOffset(-1));
+    CHECK(renderer.renderedLines[1] == LineOffset(0));
+    CHECK(renderer.renderedLines[2] == LineOffset(1));
+}
+
+TEST_CASE("Grid.render_extraLines.clamps_to_available_history", "[grid]")
+{
+    // Create a grid with 2 visible lines and only 1 history line.
+    auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+    grid.scrollUp(LineCount(1));
+    grid.setLineText(LineOffset(1), "hist1");
+
+    auto renderer = MockGridRenderer {};
+    // Request 5 extra lines, but only 1 history line is available.
+    (void) grid.render(renderer, ScrollOffset(0), HighlightSearchMatches::No, LineCount(5));
+
+    // Should have rendered 3 lines: y=-1 (the one available extra), y=0, y=1.
+    CHECK(renderer.renderedLines.size() == 3);
+    CHECK(renderer.renderedLines[0] == LineOffset(-1));
+    CHECK(renderer.renderedLines[1] == LineOffset(0));
+    CHECK(renderer.renderedLines[2] == LineOffset(1));
+}
+
+TEST_CASE("Grid.render_extraLines.zero_extra_lines_unchanged", "[grid]")
+{
+    auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+    for (auto i = 0; i < 5; ++i)
+    {
+        grid.scrollUp(LineCount(1));
+        grid.setLineText(LineOffset(1), std::format("L{:03}", i));
+    }
+
+    auto renderer = MockGridRenderer {};
+    (void) grid.render(renderer, ScrollOffset(0), HighlightSearchMatches::No, LineCount(0));
+
+    // Should have rendered exactly 2 lines: y=0, y=1 (no extras).
+    CHECK(renderer.renderedLines.size() == 2);
+    CHECK(renderer.renderedLines[0] == LineOffset(0));
+    CHECK(renderer.renderedLines[1] == LineOffset(1));
+}
+
+// }}}
 // NOLINTEND(misc-const-correctness)
