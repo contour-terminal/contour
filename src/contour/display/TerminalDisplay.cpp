@@ -933,15 +933,6 @@ bool TerminalDisplay::event(QEvent* event)
             emit terminated();
         }
 
-        // Accept all ShortcutOverride events so Qt delivers modifier+key KeyPress events
-        // immediately instead of buffering them until the modifier is released.
-        // Without this, bindings like Alt+[ only fire when Alt is released, not when [ is pressed.
-        if (event->type() == QEvent::ShortcutOverride)
-        {
-            event->accept();
-            return true;
-        }
-
         return QQuickItem::event(event);
     }
     catch (std::exception const& e)
