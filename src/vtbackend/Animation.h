@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 
 namespace vtbackend
@@ -10,7 +11,11 @@ namespace vtbackend
 /// Linear easing: identity mapping.
 struct LinearEasing
 {
-    constexpr float operator()(float t) const noexcept { return t; }
+    constexpr float operator()(float t) const noexcept
+    {
+        assert(t >= 0.0f && t <= 1.0f);
+        return t;
+    }
 };
 
 /// Ease-out cubic easing: 1 - (1 - t)^3.
@@ -18,6 +23,7 @@ struct EaseOutCubic
 {
     constexpr float operator()(float t) const noexcept
     {
+        assert(t >= 0.0f && t <= 1.0f);
         auto const inv = 1.0f - t;
         return 1.0f - (inv * inv * inv);
     }

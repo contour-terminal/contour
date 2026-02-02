@@ -139,9 +139,9 @@ namespace
                 // to quantize into scroll events, each scrolling historyScrollMultiplier lines.
                 // Match that rate: effective lines per event = (angleDelta / 40) * multiplier.
                 auto const multiplier = session.profile().history.value().historyScrollMultiplier;
-                auto const cellHeight = static_cast<float>(terminal.cellPixelSize().height.as<int>());
+                auto const cellHeight = terminal.cellPixelSize().height.as<float>();
                 constexpr auto AngleStepSize = 40.0f;
-                auto const pixelsPerUnit = static_cast<float>(*multiplier) * cellHeight / AngleStepSize;
+                auto const pixelsPerUnit = unbox<float>(multiplier) * cellHeight / AngleStepSize;
                 auto const pixelAmount = static_cast<float>(angleDelta.y) * pixelsPerUnit;
                 if (terminal.applySmoothScrollPixelDelta(pixelAmount))
                     return;
