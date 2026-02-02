@@ -120,6 +120,7 @@
           <li>Adds pixel-based smooth scrolling via smooth_scrolling profile setting, supporting trackpad pixel deltas, mouse wheel, and keyboard scroll actions</li>
           <li>Adds pixel-perfect builtin rendering for mathematical bracket and symbol characters (U+239B–U+23B3), including parenthesis pieces, curly bracket pieces, integral extensions, horizontal line extension, bracket sections, and summation symbols</li>
           <li>Adds pixel-perfect builtin rendering for shade characters (U+2591–U+2593): light shade, medium shade, and dark shade</li>
+          <li>Adds snap-to-grid window resizing via WM size-increment hints (X11/macOS) and client-side snapping (Wayland, where xdg-shell has no size-increment hint)</li>
         </ul>
       </description>
     </release>
