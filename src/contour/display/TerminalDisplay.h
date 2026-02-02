@@ -227,7 +227,9 @@ class TerminalDisplay: public QQuickItem
     void watchKdeDpiSetting();
     [[nodiscard]] float uptime() const noexcept;
 
-    void updateMinimumSize();
+    /// Updates all window size constraints: minimum size, base size, and size increment.
+    /// Configures the window manager to constrain user resizes to exact cell boundaries.
+    void updateSizeConstraints();
 
     // Updates the recommended size in (virtual pixels) based on:
     // - the grid cell size (based on the current font size and DPI),
@@ -261,6 +263,7 @@ class TerminalDisplay: public QQuickItem
     std::string _programPath;
     TerminalSession* _session = nullptr;
     std::chrono::steady_clock::time_point _startTime;
+    std::chrono::steady_clock::time_point _initialResizeDeadline {};
     text::DPI _lastFontDPI;
 #if !defined(__APPLE__) && !defined(_WIN32)
     mutable std::optional<double> _lastReportedContentScale;
@@ -269,6 +272,7 @@ class TerminalDisplay: public QQuickItem
     bool _renderingPressure = false;
     display::OpenGLRenderer* _renderTarget = nullptr;
     bool _maximizedState = false;
+    bool _snapPending = false; ///< Guards against redundant snap-to-grid post() calls.
     bool _sessionChanged = false;
     // update() timer used to animate the blinking cursor.
     QTimer _updateTimer;

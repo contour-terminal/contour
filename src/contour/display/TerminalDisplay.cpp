@@ -333,7 +333,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
         // setup once with the renderer creation
         applyFontDPI();
         updateImplicitSize();
-        updateMinimumSize();
+        updateSizeConstraints();
     }
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
@@ -358,12 +358,76 @@ void TerminalDisplay::sizeChanged()
         // This can happen when the window is minimized, or when the window is not yet fully initialized.
         return;
 
+    // During initial display setup, the Wayland compositor may revert the window to
+    // the stale pre-DPR-correction geometry via a configure event (e.g. in response to
+    // showNormal()). Detect this by checking if BOTH dimensions mismatch the implicit
+    // size — single-dimension mismatch indicates normal QML binding propagation
+    // (which updates width and height sequentially, not atomically).
+    if (steady_clock::now() < _initialResizeDeadline && std::abs(width() - implicitWidth()) > 0.5
+        && std::abs(height() - implicitHeight()) > 0.5)
+    {
+        displayLog()("Correcting initial window size from {}x{} to {}x{}",
+                     width(),
+                     height(),
+                     implicitWidth(),
+                     implicitHeight());
+        post([this]() {
+            if (auto* currentWindow = window(); currentWindow)
+                currentWindow->resize(static_cast<int>(std::ceil(implicitWidth())),
+                                      static_cast<int>(std::ceil(implicitHeight())));
+        });
+        return;
+    }
+
     displayLog()("Size changed to {}x{} virtual", width(), height());
 
     auto const virtualSize = vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
     auto const actualPixelSize = virtualSize * contentScale();
     displayLog()("Resizing view to {} virtual ({} actual).", virtualSize, actualPixelSize);
     applyResize(actualPixelSize, *_session, *_renderer);
+
+    // Client-side snap to cell-grid boundaries.
+    // On X11/macOS, setSizeIncrement() handles this in the WM — the snap is a no-op.
+    // On Wayland (xdg-shell has no size-increment hint), this is the only mechanism.
+    if (!_snapPending && !isFullScreen() && window()->visibility() != QQuickWindow::Visibility::Maximized
+        && steady_clock::now() >= _initialResizeDeadline)
+    {
+        _snapPending = true;
+        post([this]() {
+            if (!_session || !_renderTarget || !window())
+            {
+                _snapPending = false;
+                return;
+            }
+            if (isFullScreen() || window()->visibility() == QQuickWindow::Visibility::Maximized)
+            {
+                _snapPending = false;
+                return;
+            }
+
+            auto const dpr = contentScale();
+            auto const snappedActualSize = pixelSize();
+            auto const snappedVirtualWidth =
+                static_cast<int>(std::ceil(static_cast<double>(unbox(snappedActualSize.width)) / dpr));
+            auto const snappedVirtualHeight =
+                static_cast<int>(std::ceil(static_cast<double>(unbox(snappedActualSize.height)) / dpr));
+
+            auto const currentWidth = window()->width();
+            auto const currentHeight = window()->height();
+
+            if (snappedVirtualWidth != currentWidth || snappedVirtualHeight != currentHeight)
+            {
+                displayLog()("Snapping window from {}x{} to {}x{} virtual (grid-aligned, actual {})",
+                             currentWidth,
+                             currentHeight,
+                             snappedVirtualWidth,
+                             snappedVirtualHeight,
+                             snappedActualSize);
+                window()->resize(snappedVirtualWidth, snappedVirtualHeight);
+            }
+            _snapPending = false;
+        });
+    }
 }
 
 void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
@@ -472,6 +536,15 @@ void TerminalDisplay::applyFontDPI()
     auto fd = _renderer->fontDescriptions();
     fd.dpi = newFontDPI;
     _renderer->setFonts(std::move(fd));
+
+    // Recompute implicit/minimum size when font DPI changes (e.g., DPR correction
+    // from 2.0 → 1.5 on KDE/Wayland with fractional scaling). The implicit size
+    // does not require a render target, so this must happen before the guard below.
+    if (window())
+    {
+        updateImplicitSize();
+        updateSizeConstraints();
+    }
 
     if (!_renderTarget)
         return;
@@ -595,6 +668,12 @@ void TerminalDisplay::createRenderer()
     Require(_session);
     Require(window());
 
+    // Catch DPR corrections that occurred between setSession() and first render
+    // (e.g., Qt correcting from integer-ceiling DPR=2 to actual fractional DPR=1.5
+    // on KDE/Wayland). This reloads fonts at the correct DPI before creating the
+    // render target, ensuring correct cell metrics from the start.
+    applyFontDPI();
+
     auto const textureTileSize = gridMetrics().cellSize;
     auto const viewportMargin = vtrasterizer::PageMargin {}; // TODO margin
     auto const precalculatedViewSize = [this]() -> ImageSize {
@@ -653,9 +732,25 @@ void TerminalDisplay::createRenderer()
     configureScreenHooks();
     watchKdeDpiSetting();
 
-    _session->configureDisplay();
+    // Use implicit dimensions (correct for configured terminal size at current DPR)
+    // rather than widget width()/height() which lag behind QML binding propagation
+    // during beforeSynchronizing (GUI thread is blocked, bindings haven't evaluated).
+    {
+        auto const implicitVirtualSize = ImageSize { vtbackend::Width::cast_from(implicitWidth()),
+                                                     vtbackend::Height::cast_from(implicitHeight()) };
+        auto const actualPixelSize = implicitVirtualSize * contentScale();
+        applyResize(actualPixelSize, *_session, *_renderer);
+    }
 
-    resizeTerminalToDisplaySize();
+    // Allow sizeChanged() to correct Wayland configure reversions for 500ms.
+    _initialResizeDeadline = steady_clock::now() + std::chrono::milliseconds(500);
+
+    // Defer configureDisplay() until the GUI thread processes QML binding propagation
+    // and the window is committed at the correct implicit size (e.g. 1136x600 at DPR 1.5).
+    // Calling it synchronously here (render thread, GUI blocked) causes setWindowNormal()
+    // → showNormal() to trigger a Wayland configure event that uses the stale pre-DPR-correction
+    // window geometry (e.g. 1115x585 at DPR 2.0), reverting the terminal to the wrong size.
+    post([this]() { _session->configureDisplay(); });
 
     displayLog()("Implicit size: {}x{}", implicitWidth(), implicitHeight());
 }
@@ -1020,40 +1115,72 @@ void TerminalDisplay::updateImplicitSize()
     assert(_session);
     assert(window());
 
-    auto const totalPageSize = _session->terminal().pageSize() + _session->terminal().statusLineHeight();
-    auto const dpr = contentScale(); // DPR = Device Pixel Ratio
+    auto const totalPageSize = _session->terminal().totalPageSize();
+    auto const dpr = contentScale();
 
     auto const actualGridCellSize = _renderer->cellSize();
-    auto const actualToVirtualFactor = 1.0 / dpr;
+    auto const scaledMargins = applyContentScale(_session->profile().margins.value(), dpr);
 
-    auto const virtualMargins = _session->profile().margins.value();
-    auto const virtualCellSize = actualGridCellSize * actualToVirtualFactor;
+    // Compute the required size in actual pixels using exact integer arithmetic,
+    // then convert to virtual pixels. This avoids compounding ceil-per-cell rounding errors
+    // that would otherwise cause extra pixels and wrong column/line counts at fractional DPR.
+    auto const actualRequiredSize = computeRequiredSize(scaledMargins, actualGridCellSize, totalPageSize);
 
-    auto const requiredSize = computeRequiredSize(virtualMargins, virtualCellSize, totalPageSize);
+    auto const virtualWidth = std::ceil(static_cast<double>(unbox(actualRequiredSize.width)) / dpr);
+    auto const virtualHeight = std::ceil(static_cast<double>(unbox(actualRequiredSize.height)) / dpr);
 
-    displayLog()("Implicit display size set to {} (margins: {}, cellSize: {}, contentScale: {}, pageSize: {}",
-                 requiredSize,
-                 virtualMargins,
-                 virtualCellSize,
+    displayLog()("Implicit display size set to {}x{} (actualRequired: {}, cellSize: {}, contentScale: {}, "
+                 "pageSize: {})",
+                 virtualWidth,
+                 virtualHeight,
+                 actualRequiredSize,
+                 actualGridCellSize,
                  dpr,
                  totalPageSize);
 
-    setImplicitWidth(unbox<qreal>(requiredSize.width));
-    setImplicitHeight(unbox<qreal>(requiredSize.height));
+    setImplicitWidth(virtualWidth);
+    setImplicitHeight(virtualHeight);
 }
 
-void TerminalDisplay::updateMinimumSize()
+void TerminalDisplay::updateSizeConstraints()
 {
     Require(window());
     Require(_renderer);
     assert(_session);
 
-    auto constexpr MinimumTotalPageSize = PageSize { LineCount(5), ColumnCount(10) };
-    auto const minimumSize = computeRequiredSize(_session->profile().margins.value(),
-                                                 _renderer->cellSize() * (1.0 / contentScale()),
-                                                 MinimumTotalPageSize);
+    auto const dpr = contentScale();
+    auto const actualCellSize = _renderer->cellSize();
+    auto const margins = _session->profile().margins.value();
 
+    // Minimum size (existing logic, unchanged)
+    auto constexpr MinimumTotalPageSize = PageSize { LineCount(5), ColumnCount(10) };
+    auto const minimumSize = computeRequiredSize(margins, actualCellSize * (1.0 / dpr), MinimumTotalPageSize);
     window()->setMinimumSize(QSize(unbox<int>(minimumSize.width), unbox<int>(minimumSize.height)));
+
+    // Base size: the margin area not participating in the increment grid.
+    // Margins from config are in virtual pixels, applied on both sides.
+    auto const baseWidth = static_cast<int>(2 * unbox(margins.horizontal));
+    auto const baseHeight = static_cast<int>(2 * unbox(margins.vertical));
+    window()->setBaseSize(QSize(baseWidth, baseHeight));
+
+    // Size increment: virtual cell size.
+    // ceil ensures the increment always covers the full cell at fractional DPR.
+    auto const virtualCellWidth =
+        static_cast<int>(std::ceil(static_cast<double>(unbox(actualCellSize.width)) / dpr));
+    auto const virtualCellHeight =
+        static_cast<int>(std::ceil(static_cast<double>(unbox(actualCellSize.height)) / dpr));
+    window()->setSizeIncrement(QSize(virtualCellWidth, virtualCellHeight));
+
+    displayLog()("Size constraints: minSize={}x{}, baseSize={}x{}, sizeIncrement={}x{} "
+                 "(cellSize={}, dpr={})",
+                 unbox<int>(minimumSize.width),
+                 unbox<int>(minimumSize.height),
+                 baseWidth,
+                 baseHeight,
+                 virtualCellWidth,
+                 virtualCellHeight,
+                 actualCellSize,
+                 dpr);
 }
 // }}}
 
@@ -1301,6 +1428,7 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
     {
         // resize widget (same pixels, but adjusted terminal rows/columns and margin)
         applyResize(pixelSize(), *_session, *_renderer);
+        updateSizeConstraints(); // cell size changed
         // logDisplayInfo();
     }
 }
@@ -1315,7 +1443,7 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
         return false;
 
     resizeTerminalToDisplaySize();
-    updateMinimumSize();
+    updateSizeConstraints();
     // logDisplayInfo();
     return true;
 }
@@ -1343,18 +1471,20 @@ void TerminalDisplay::setMouseCursorShape(MouseCursorShape newCursorShape)
 
 void TerminalDisplay::setWindowFullScreen()
 {
+    window()->setSizeIncrement(QSize(0, 0));
     window()->showFullScreen();
 }
 
 void TerminalDisplay::setWindowMaximized()
 {
+    window()->setSizeIncrement(QSize(0, 0));
     window()->showMaximized();
     _maximizedState = true;
 }
 
 void TerminalDisplay::setWindowNormal()
 {
-    updateMinimumSize();
+    updateSizeConstraints();
     window()->showNormal();
     _maximizedState = false;
 }
@@ -1369,12 +1499,19 @@ void TerminalDisplay::toggleFullScreen()
     if (!isFullScreen())
     {
         _maximizedState = window()->visibility() == QQuickWindow::Visibility::Maximized;
+        window()->setSizeIncrement(QSize(0, 0));
         window()->showFullScreen();
     }
     else if (_maximizedState)
+    {
+        window()->setSizeIncrement(QSize(0, 0));
         window()->showMaximized();
+    }
     else
+    {
+        updateSizeConstraints();
         window()->showNormal();
+    }
 }
 
 void TerminalDisplay::toggleTitleBar()

@@ -113,12 +113,14 @@
           <li>Fixes garbled or missing characters when displaying Unicode text</li>
           <li>Fixes terminal shrinking/growing on tab switch when status line is displayed</li>
           <li>Fixes WINDOWMANIP cell-based resize (CSI 8;rows;cols t) gaining columns at non-integer content scale</li>
+          <li>Fixes initial terminal window size being wrong at fractional DPR (e.g. 127×29 instead of configured 130×30 at 150% scaling on Wayland, #1858)</li>
           <li>Replaces abrupt cell blink toggle with configurable smooth pulse animation via blink_style profile setting (classic/smooth/linger)</li>
           <li>Adds configurable crossfade transition between primary and alternate screens via screen_transition and screen_transition_duration profile settings</li>
           <li>Adds animated cursor movement between grid cells with ease-out interpolation via cursor_motion_animation_duration profile setting</li>
           <li>Adds pixel-based smooth scrolling via smooth_scrolling profile setting, supporting trackpad pixel deltas, mouse wheel, and keyboard scroll actions</li>
           <li>Adds pixel-perfect builtin rendering for mathematical bracket and symbol characters (U+239B–U+23B3), including parenthesis pieces, curly bracket pieces, integral extensions, horizontal line extension, bracket sections, and summation symbols</li>
           <li>Adds pixel-perfect builtin rendering for shade characters (U+2591–U+2593): light shade, medium shade, and dark shade</li>
+          <li>Adds snap-to-grid window resizing via WM size-increment hints (X11/macOS) and client-side snapping (Wayland, where xdg-shell has no size-increment hint)</li>
         </ul>
       </description>
     </release>
