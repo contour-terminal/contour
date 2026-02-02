@@ -1396,14 +1396,14 @@ void Terminal::resetSmoothScroll() noexcept
     _viewport.resetPixelOffset();
 }
 
-bool Terminal::applySmoothScrollPixelDelta(float pixelDelta)
+SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
 {
     if (!_settings.smoothScrolling || isAlternateScreen())
-        return false;
+        return SmoothScrollResult::Disabled;
 
     auto const cellHeight = static_cast<float>(_cellPixelSize.height.as<int>());
     if (cellHeight <= 0.0f)
-        return false;
+        return SmoothScrollResult::InvalidCellSize;
 
     // Compute the total pixel position and decompose into whole-line scroll offset + sub-line remainder.
     // This avoids calling scrollUp/scrollDown in a loop (which triggers intermediate viewport change
@@ -1430,7 +1430,7 @@ bool Terminal::applySmoothScrollPixelDelta(float pixelDelta)
     if (!_viewport.scrollTo(ScrollOffset(newScrollOffset)))
         breakLoopAndRefreshRenderBuffer(); // Pixel offset changed but scroll offset didn't.
 
-    return true;
+    return SmoothScrollResult::Applied;
 }
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)

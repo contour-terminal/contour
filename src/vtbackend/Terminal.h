@@ -56,6 +56,14 @@ class Screen;
 
 class ScreenBase;
 
+/// Result of applying a smooth-scroll pixel delta.
+enum class SmoothScrollResult : uint8_t
+{
+    Applied,         ///< Pixel delta was applied to the viewport.
+    Disabled,        ///< Smooth scrolling is disabled or not applicable (alternate screen).
+    InvalidCellSize, ///< Cell pixel size is zero or negative; cannot compute scroll.
+};
+
 /// Helping information to visualize IME text that has not been comitted yet.
 struct InputMethodData
 {
@@ -485,8 +493,12 @@ class Terminal
 
     /// Applies a pixel delta for smooth scrolling.
     /// Accumulates sub-cell pixel offset; converts to line scrolls when a full cell height is reached.
-    /// Returns true if the viewport was modified.
-    bool applySmoothScrollPixelDelta(float pixelDelta);
+    ///
+    /// @param pixelDelta  The pixel amount to scroll by (positive = scroll up into history).
+    /// @return SmoothScrollResult::Applied if the viewport was modified,
+    ///         SmoothScrollResult::Disabled if smooth scrolling is off or on alternate screen,
+    ///         SmoothScrollResult::InvalidCellSize if the cell pixel height is zero or negative.
+    SmoothScrollResult applySmoothScrollPixelDelta(float pixelDelta);
 
     /// Returns the current sub-cell pixel offset for smooth scrolling.
     [[nodiscard]] float smoothScrollPixelOffset() const noexcept { return _viewport.pixelOffset(); }

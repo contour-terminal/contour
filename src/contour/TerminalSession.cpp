@@ -1399,7 +1399,7 @@ void TerminalSession::smoothScrollUp(vtbackend::LineCount lineCount)
     {
         auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
         auto const pixels = static_cast<float>(*lineCount) * cellHeight;
-        if (terminal().applySmoothScrollPixelDelta(pixels))
+        if (terminal().applySmoothScrollPixelDelta(pixels) == vtbackend::SmoothScrollResult::Applied)
             return;
     }
     terminal().viewport().scrollUp(lineCount);
@@ -1411,7 +1411,7 @@ void TerminalSession::smoothScrollDown(vtbackend::LineCount lineCount)
     {
         auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
         auto const pixels = -static_cast<float>(*lineCount) * cellHeight;
-        if (terminal().applySmoothScrollPixelDelta(pixels))
+        if (terminal().applySmoothScrollPixelDelta(pixels) == vtbackend::SmoothScrollResult::Applied)
             return;
     }
     terminal().viewport().scrollDown(lineCount);

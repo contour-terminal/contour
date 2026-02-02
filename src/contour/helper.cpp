@@ -143,13 +143,15 @@ namespace
                 constexpr auto AngleStepSize = 40.0f;
                 auto const pixelsPerUnit = unbox<float>(multiplier) * cellHeight / AngleStepSize;
                 auto const pixelAmount = static_cast<float>(angleDelta.y) * pixelsPerUnit;
-                if (terminal.applySmoothScrollPixelDelta(pixelAmount))
+                if (terminal.applySmoothScrollPixelDelta(pixelAmount)
+                    == vtbackend::SmoothScrollResult::Applied)
                     return;
             }
             if (pixelDelta.y != 0)
             {
                 // Fallback for pure trackpad input that only provides pixel deltas.
-                if (terminal.applySmoothScrollPixelDelta(static_cast<float>(pixelDelta.y)))
+                if (terminal.applySmoothScrollPixelDelta(static_cast<float>(pixelDelta.y))
+                    == vtbackend::SmoothScrollResult::Applied)
                     return;
             }
         }

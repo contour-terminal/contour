@@ -26,6 +26,7 @@ using vtbackend::LineCount;
 using vtbackend::LineOffset;
 using vtbackend::MockTerm;
 using vtbackend::PageSize;
+using vtbackend::SmoothScrollResult;
 
 using namespace vtbackend::test;
 
@@ -670,7 +671,7 @@ TEST_CASE("Terminal.applySmoothScrollPixelDelta.accumulates_subline_offset", "[t
 
     // A delta smaller than one cell height should only accumulate pixel offset.
     auto const result = terminal.applySmoothScrollPixelDelta(5.0f);
-    CHECK(result == true);
+    CHECK(result == SmoothScrollResult::Applied);
     CHECK(terminal.smoothScrollPixelOffset() == 5.0f);
     CHECK(terminal.viewport().scrollOffset().value == 0);
 }
@@ -689,7 +690,7 @@ TEST_CASE("Terminal.applySmoothScrollPixelDelta.converts_full_cell_to_scroll", "
 
     auto const cellHeight = terminal.cellPixelSize().height.as<float>();
     auto const result = terminal.applySmoothScrollPixelDelta(cellHeight + 3.0f);
-    CHECK(result == true);
+    CHECK(result == SmoothScrollResult::Applied);
     CHECK(terminal.viewport().scrollOffset().value == 1);
     CHECK(terminal.smoothScrollPixelOffset() == Catch::Approx(3.0f));
 }
@@ -708,14 +709,14 @@ TEST_CASE("Terminal.applySmoothScrollPixelDelta.clamps_at_top_of_history", "[ter
 
     // Apply a delta much larger than all available history.
     auto const result = terminal.applySmoothScrollPixelDelta(100000.0f);
-    CHECK(result == true);
+    CHECK(result == SmoothScrollResult::Applied);
     // Scroll offset should be clamped to max history.
     auto const maxOffset = terminal.primaryScreen().historyLineCount();
     CHECK(terminal.viewport().scrollOffset().value == maxOffset.as<int>());
     CHECK(terminal.smoothScrollPixelOffset() == 0.0f);
 }
 
-TEST_CASE("Terminal.applySmoothScrollPixelDelta.returns_false_on_alternate_screen", "[terminal]")
+TEST_CASE("Terminal.applySmoothScrollPixelDelta.returns_disabled_on_alternate_screen", "[terminal]")
 {
     auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
     auto& terminal = mc.terminal;
@@ -729,7 +730,7 @@ TEST_CASE("Terminal.applySmoothScrollPixelDelta.returns_false_on_alternate_scree
     CHECK(terminal.isAlternateScreen());
 
     auto const result = terminal.applySmoothScrollPixelDelta(10.0f);
-    CHECK(result == false);
+    CHECK(result == SmoothScrollResult::Disabled);
 }
 
 TEST_CASE("Terminal.onBufferScrolled.preserves_viewport_with_pixel_offset", "[terminal]")
