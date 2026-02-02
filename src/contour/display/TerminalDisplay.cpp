@@ -372,8 +372,9 @@ void TerminalDisplay::sizeChanged()
                      implicitWidth(),
                      implicitHeight());
         post([this]() {
-            window()->resize(static_cast<int>(std::ceil(implicitWidth())),
-                             static_cast<int>(std::ceil(implicitHeight())));
+            if (auto* currentWindow = window(); currentWindow)
+                currentWindow->resize(static_cast<int>(std::ceil(implicitWidth())),
+                                      static_cast<int>(std::ceil(implicitHeight())));
         });
         return;
     }
@@ -1125,8 +1126,8 @@ void TerminalDisplay::updateImplicitSize()
     // that would otherwise cause extra pixels and wrong column/line counts at fractional DPR.
     auto const actualRequiredSize = computeRequiredSize(scaledMargins, actualGridCellSize, totalPageSize);
 
-    auto const virtualWidth = std::ceil(static_cast<qreal>(unbox(actualRequiredSize.width)) / dpr);
-    auto const virtualHeight = std::ceil(static_cast<qreal>(unbox(actualRequiredSize.height)) / dpr);
+    auto const virtualWidth = std::ceil(static_cast<double>(unbox(actualRequiredSize.width)) / dpr);
+    auto const virtualHeight = std::ceil(static_cast<double>(unbox(actualRequiredSize.height)) / dpr);
 
     displayLog()("Implicit display size set to {}x{} (actualRequired: {}, cellSize: {}, contentScale: {}, "
                  "pageSize: {})",
