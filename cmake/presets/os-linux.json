@@ -18,7 +18,8 @@
                 "rhs": "Linux"
             },
             "cacheVariables": {
-                "CMAKE_CXX_COMPILER": "g++"
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_C_COMPILER": "gcc"
             }
         },
         {
@@ -36,6 +37,7 @@
             },
             "cacheVariables": {
                 "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_C_COMPILER": "gcc",
                 "CMAKE_INSTALL_PREFIX": "/usr/local"
             }
         },
@@ -53,7 +55,8 @@
                 "rhs": "Linux"
             },
             "cacheVariables": {
-                "CMAKE_CXX_COMPILER": "clang++"
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_C_COMPILER": "clang"
             }
         },
         {
@@ -71,6 +74,7 @@
             },
             "cacheVariables": {
                 "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_C_COMPILER": "clang",
                 "CMAKE_INSTALL_PREFIX": "/usr/local"
             }
         }

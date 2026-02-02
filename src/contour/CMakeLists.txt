@@ -205,7 +205,8 @@ if(CONTOUR_FRONTEND_GUI)
         qt_import_qml_plugins(contour)
     endif()
 
-    if(LINUX AND CONTOUR_WAYLAND)
+    # At the moment only works with gcc on Linux.
+    if(LINUX AND CONTOUR_WAYLAND AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         find_package(Qt6 COMPONENTS WaylandClient WaylandClientPrivate)
         target_compile_definitions(contour PRIVATE CONTOUR_WAYLAND)
         target_link_libraries(contour PRIVATE Qt6::WaylandClient Qt6::WaylandClientPrivate)
