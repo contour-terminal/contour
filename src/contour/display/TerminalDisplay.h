@@ -227,7 +227,9 @@ class TerminalDisplay: public QQuickItem
     void watchKdeDpiSetting();
     [[nodiscard]] float uptime() const noexcept;
 
-    void updateMinimumSize();
+    /// Updates all window size constraints: minimum size, base size, and size increment.
+    /// Configures the window manager to constrain user resizes to exact cell boundaries.
+    void updateSizeConstraints();
 
     // Updates the recommended size in (virtual pixels) based on:
     // - the grid cell size (based on the current font size and DPI),

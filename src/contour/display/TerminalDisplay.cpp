@@ -333,7 +333,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
         // setup once with the renderer creation
         applyFontDPI();
         updateImplicitSize();
-        updateMinimumSize();
+        updateSizeConstraints();
     }
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
@@ -499,7 +499,7 @@ void TerminalDisplay::applyFontDPI()
     if (window())
     {
         updateImplicitSize();
-        updateMinimumSize();
+        updateSizeConstraints();
     }
 
     if (!_renderTarget)
@@ -1098,18 +1098,45 @@ void TerminalDisplay::updateImplicitSize()
     setImplicitHeight(virtualHeight);
 }
 
-void TerminalDisplay::updateMinimumSize()
+void TerminalDisplay::updateSizeConstraints()
 {
     Require(window());
     Require(_renderer);
     assert(_session);
 
-    auto constexpr MinimumTotalPageSize = PageSize { LineCount(5), ColumnCount(10) };
-    auto const minimumSize = computeRequiredSize(_session->profile().margins.value(),
-                                                 _renderer->cellSize() * (1.0 / contentScale()),
-                                                 MinimumTotalPageSize);
+    auto const dpr = contentScale();
+    auto const actualCellSize = _renderer->cellSize();
+    auto const margins = _session->profile().margins.value();
 
+    // Minimum size (existing logic, unchanged)
+    auto constexpr MinimumTotalPageSize = PageSize { LineCount(5), ColumnCount(10) };
+    auto const minimumSize = computeRequiredSize(margins, actualCellSize * (1.0 / dpr), MinimumTotalPageSize);
     window()->setMinimumSize(QSize(unbox<int>(minimumSize.width), unbox<int>(minimumSize.height)));
+
+    // Base size: the margin area not participating in the increment grid.
+    // Margins from config are in virtual pixels, applied on both sides.
+    auto const baseWidth = static_cast<int>(2 * unbox(margins.horizontal));
+    auto const baseHeight = static_cast<int>(2 * unbox(margins.vertical));
+    window()->setBaseSize(QSize(baseWidth, baseHeight));
+
+    // Size increment: virtual cell size.
+    // ceil ensures the increment always covers the full cell at fractional DPR.
+    auto const virtualCellWidth =
+        static_cast<int>(std::ceil(static_cast<double>(unbox(actualCellSize.width)) / dpr));
+    auto const virtualCellHeight =
+        static_cast<int>(std::ceil(static_cast<double>(unbox(actualCellSize.height)) / dpr));
+    window()->setSizeIncrement(QSize(virtualCellWidth, virtualCellHeight));
+
+    displayLog()("Size constraints: minSize={}x{}, baseSize={}x{}, sizeIncrement={}x{} "
+                 "(cellSize={}, dpr={})",
+                 unbox<int>(minimumSize.width),
+                 unbox<int>(minimumSize.height),
+                 baseWidth,
+                 baseHeight,
+                 virtualCellWidth,
+                 virtualCellHeight,
+                 actualCellSize,
+                 dpr);
 }
 // }}}
 
@@ -1357,6 +1384,7 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
     {
         // resize widget (same pixels, but adjusted terminal rows/columns and margin)
         applyResize(pixelSize(), *_session, *_renderer);
+        updateSizeConstraints(); // cell size changed
         // logDisplayInfo();
     }
 }
@@ -1371,7 +1399,7 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
         return false;
 
     resizeTerminalToDisplaySize();
-    updateMinimumSize();
+    updateSizeConstraints();
     // logDisplayInfo();
     return true;
 }
@@ -1399,18 +1427,20 @@ void TerminalDisplay::setMouseCursorShape(MouseCursorShape newCursorShape)
 
 void TerminalDisplay::setWindowFullScreen()
 {
+    window()->setSizeIncrement(QSize(0, 0));
     window()->showFullScreen();
 }
 
 void TerminalDisplay::setWindowMaximized()
 {
+    window()->setSizeIncrement(QSize(0, 0));
     window()->showMaximized();
     _maximizedState = true;
 }
 
 void TerminalDisplay::setWindowNormal()
 {
-    updateMinimumSize();
+    updateSizeConstraints();
     window()->showNormal();
     _maximizedState = false;
 }
@@ -1425,12 +1455,19 @@ void TerminalDisplay::toggleFullScreen()
     if (!isFullScreen())
     {
         _maximizedState = window()->visibility() == QQuickWindow::Visibility::Maximized;
+        window()->setSizeIncrement(QSize(0, 0));
         window()->showFullScreen();
     }
     else if (_maximizedState)
+    {
+        window()->setSizeIncrement(QSize(0, 0));
         window()->showMaximized();
+    }
     else
+    {
+        updateSizeConstraints();
         window()->showNormal();
+    }
 }
 
 void TerminalDisplay::toggleTitleBar()
