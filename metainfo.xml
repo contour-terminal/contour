@@ -111,6 +111,8 @@
           <li>Fixes Sixel images not rendering on non-first tabs</li>
           <li>Fixes text rendering artifacts and corruption when rapidly outputting content</li>
           <li>Fixes garbled or missing characters when displaying Unicode text</li>
+          <li>Fixes terminal shrinking/growing on tab switch when status line is displayed</li>
+          <li>Fixes WINDOWMANIP cell-based resize (CSI 8;rows;cols t) gaining columns at non-integer content scale</li>
           <li>Replaces abrupt cell blink toggle with configurable smooth pulse animation via blink_style profile setting (classic/smooth/linger)</li>
           <li>Adds configurable crossfade transition between primary and alternate screens via screen_transition and screen_transition_duration profile settings</li>
           <li>Adds animated cursor movement between grid cells with ease-out interpolation via cursor_motion_animation_duration profile setting</li>

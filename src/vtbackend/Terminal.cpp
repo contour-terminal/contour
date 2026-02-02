@@ -1449,7 +1449,7 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
     // Any other buffer will be resized when it is switched to.
     auto const mainDisplayPageSize = totalPageSize - statusLineHeight();
 
-    auto const oldMainDisplayPageSize = _settings.pageSize;
+    auto const oldMainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
     _factorySettings.pageSize = totalPageSize;
     _settings.pageSize = totalPageSize;

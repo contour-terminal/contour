@@ -35,22 +35,6 @@ auto inline const inputLog =
     logstore::category("gui.input", "Logs input driver details (e.g. GUI input events).");
 auto inline const sessionLog = logstore::category("gui.session", "VT terminal session logs");
 auto inline const managerLog = logstore::category("gui.session_manager", "Sessions manager logs");
-namespace detail
-{
-    template <typename F>
-    class FunctionCallEvent: public QEvent
-    {
-      private:
-        using Fun = std::decay_t<F>;
-        Fun _fun;
-
-      public:
-        FunctionCallEvent(Fun&& fun): QEvent(QEvent::None), _fun(std::move(fun)) {}
-        FunctionCallEvent(Fun const& fun): QEvent(QEvent::None), _fun(fun) {}
-        ~FunctionCallEvent() override { _fun(); }
-    };
-} // namespace detail
-
 enum class MouseCursorShape : uint8_t
 {
     Hidden,
@@ -59,16 +43,14 @@ enum class MouseCursorShape : uint8_t
     Arrow,
 };
 
+/// Posts a functor to be executed on the event loop of the thread that owns @p obj.
+///
+/// Uses QMetaObject::invokeMethod with Qt::QueuedConnection to ensure the functor
+/// is invoked via a QMetaCallEvent, which Qt's event loop processes promptly.
 template <typename F>
 void postToObject(QObject* obj, F fun)
 {
-#if 0
-    // Qt >= 5.10
-    QMetaObject::invokeMethod(obj, std::forward<F>(fun));
-#else
-    // Qt < 5.10
-    QCoreApplication::postEvent(obj, new detail::FunctionCallEvent<F>(std::forward<F>(fun)));
-#endif
+    QMetaObject::invokeMethod(obj, std::forward<F>(fun), Qt::QueuedConnection);
 }
 
 constexpr inline bool isModifier(Qt::Key key)

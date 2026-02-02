@@ -300,6 +300,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     if (_session)
     {
         QObject::disconnect(_session, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
+        _session->detachDisplay(*this);
     }
 
     _session = newSession;
@@ -932,6 +933,15 @@ bool TerminalDisplay::event(QEvent* event)
             emit terminated();
         }
 
+        // Accept all ShortcutOverride events so Qt delivers modifier+key KeyPress events
+        // immediately instead of buffering them until the modifier is released.
+        // Without this, bindings like Alt+[ only fire when Alt is released, not when [ is pressed.
+        if (event->type() == QEvent::ShortcutOverride)
+        {
+            event->accept();
+            return true;
+        }
+
         return QQuickItem::event(event);
     }
     catch (std::exception const& e)
@@ -1084,7 +1094,7 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
     auto const scaledWindowMarginsPixels =
         vtbackend::ImageSize { Width::cast_from(unbox(scaledWindowMargins.horizontal) * 2),
                                Height::cast_from(unbox(scaledWindowMargins.vertical) * 2) };
-    return gridMetrics().cellSize * _session->terminal().pageSize() + scaledWindowMarginsPixels;
+    return gridMetrics().cellSize * _session->terminal().totalPageSize() + scaledWindowMarginsPixels;
 }
 
 vtbackend::ImageSize TerminalDisplay::cellSize() const
@@ -1261,19 +1271,33 @@ void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend:
         return;
     }
 
+    // The TUI app requests the usable area (what the PTY reports via TIOCSWINSZ),
+    // not the total page size. Add back the status line height to get the total page size.
     auto requestedPageSize = terminal().totalPageSize();
     if (*newColumnCount)
         requestedPageSize.columns = newColumnCount;
     if (*newLineCount)
-        requestedPageSize.lines = newLineCount;
+        requestedPageSize.lines = newLineCount + terminal().statusLineHeight();
 
-    // Qt uses unscaled pixels, so we need to adjust the requested size to the actual content scale.
-    auto const unscaledCellSize = gridMetrics().cellSize / contentScale();
-    auto const unscaledViewSize = vtbackend::ImageSize {
-        unscaledCellSize.width * boxed_cast<vtbackend::Width>(requestedPageSize.columns),
-        unscaledCellSize.height * boxed_cast<vtbackend::Height>(requestedPageSize.lines)
+    // Compute the target pixel size in device (scaled) pixels first, using the same
+    // cell size and scaled margins that pageSizeForPixels() will use in the reverse
+    // direction. This avoids cumulative rounding errors from the previous approach
+    // of computing an unscaled cell size separately (which involved two std::ceil
+    // operations that could inflate the pixel count).
+    auto const cellSize = gridMetrics().cellSize;
+    auto const scaledMargins = applyContentScale(_session->profile().margins.value(), contentScale());
+    auto const targetScaledSize = vtbackend::ImageSize {
+        cellSize.width * boxed_cast<vtbackend::Width>(requestedPageSize.columns)
+            + vtbackend::Width::cast_from(2 * unbox(scaledMargins.horizontal)),
+        cellSize.height * boxed_cast<vtbackend::Height>(requestedPageSize.lines)
+            + vtbackend::Height::cast_from(2 * unbox(scaledMargins.vertical)),
     };
 
+    // Convert to logical (unscaled) pixels for Qt with a single ceil division.
+    // sizeChanged() will multiply back by contentScale(), recovering targetScaledSize
+    // (possibly +1 pixel due to ceil, which is safe: floor((target+delta)/cellSize) == M
+    // as long as delta < cellSize, which holds for all reasonable contentScale values).
+    auto const unscaledViewSize = targetScaledSize / contentScale();
     window()->resize(QSize(unscaledViewSize.width.as<int>(), unscaledViewSize.height.as<int>()));
 }
 

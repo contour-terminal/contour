@@ -403,7 +403,7 @@ class Terminal
 
     [[nodiscard]] PageSize totalPageSize() const noexcept { return _settings.pageSize; }
 
-    [[nodiscard]] ImageSize pixelSize() const noexcept { return cellPixelSize() * pageSize(); }
+    [[nodiscard]] ImageSize pixelSize() const noexcept { return cellPixelSize() * totalPageSize(); }
 
     // Returns number of lines for the currently displayed status line,
     // or 0 if status line is currently not displayed.

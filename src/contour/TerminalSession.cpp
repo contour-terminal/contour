@@ -290,7 +290,7 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
     {
         // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
         auto const l = scoped_lock { _terminal };
-        _terminal.resizeScreen(_terminal.pageSize(), _display->pixelSize());
+        _terminal.resizeScreen(_terminal.totalPageSize(), _display->pixelSize());
         _terminal.setRefreshRate(_display->refreshRate());
     }
 
@@ -320,6 +320,8 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
         if (_onClosedHandled)
             _display->closeDisplay();
     }
+
+    scheduleRedraw();
 }
 
 void TerminalSession::scheduleRedraw()

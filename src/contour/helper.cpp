@@ -640,7 +640,7 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     if (*newPixelSize.width == 0 || *newPixelSize.height == 0)
         return;
 
-    auto const oldPageSize = session.terminal().pageSize();
+    auto const oldPageSize = session.terminal().totalPageSize();
     auto const newPageSize = pageSizeForPixels(
         newPixelSize,
         renderer.gridMetrics().cellSize,
@@ -673,7 +673,7 @@ void applyResize(vtbackend::ImageSize newPixelSize,
 
     auto const l = scoped_lock { terminal };
 
-    if (newPageSize == terminal.pageSize())
+    if (newPageSize == terminal.totalPageSize())
     {
         displayLog()("No resize necessary. New size is same as old size of {}.", newPageSize);
         return;
