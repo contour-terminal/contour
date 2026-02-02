@@ -272,6 +272,7 @@ class TerminalDisplay: public QQuickItem
     bool _renderingPressure = false;
     display::OpenGLRenderer* _renderTarget = nullptr;
     bool _maximizedState = false;
+    bool _snapPending = false; ///< Guards against redundant snap-to-grid post() calls.
     bool _sessionChanged = false;
     // update() timer used to animate the blinking cursor.
     QTimer _updateTimer;

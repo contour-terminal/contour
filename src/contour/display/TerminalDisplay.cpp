@@ -384,6 +384,49 @@ void TerminalDisplay::sizeChanged()
     auto const actualPixelSize = virtualSize * contentScale();
     displayLog()("Resizing view to {} virtual ({} actual).", virtualSize, actualPixelSize);
     applyResize(actualPixelSize, *_session, *_renderer);
+
+    // Client-side snap to cell-grid boundaries.
+    // On X11/macOS, setSizeIncrement() handles this in the WM — the snap is a no-op.
+    // On Wayland (xdg-shell has no size-increment hint), this is the only mechanism.
+    if (!_snapPending && !isFullScreen() && window()->visibility() != QQuickWindow::Visibility::Maximized
+        && steady_clock::now() >= _initialResizeDeadline)
+    {
+        _snapPending = true;
+        post([this]() {
+            if (!_session || !_renderTarget || !window())
+            {
+                _snapPending = false;
+                return;
+            }
+            if (isFullScreen() || window()->visibility() == QQuickWindow::Visibility::Maximized)
+            {
+                _snapPending = false;
+                return;
+            }
+
+            auto const dpr = contentScale();
+            auto const snappedActualSize = pixelSize();
+            auto const snappedVirtualWidth =
+                static_cast<int>(std::ceil(static_cast<double>(unbox(snappedActualSize.width)) / dpr));
+            auto const snappedVirtualHeight =
+                static_cast<int>(std::ceil(static_cast<double>(unbox(snappedActualSize.height)) / dpr));
+
+            auto const currentWidth = window()->width();
+            auto const currentHeight = window()->height();
+
+            if (snappedVirtualWidth != currentWidth || snappedVirtualHeight != currentHeight)
+            {
+                displayLog()("Snapping window from {}x{} to {}x{} virtual (grid-aligned, actual {})",
+                             currentWidth,
+                             currentHeight,
+                             snappedVirtualWidth,
+                             snappedVirtualHeight,
+                             snappedActualSize);
+                window()->resize(snappedVirtualWidth, snappedVirtualHeight);
+            }
+            _snapPending = false;
+        });
+    }
 }
 
 void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
