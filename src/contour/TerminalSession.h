@@ -320,6 +320,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::DecreaseFontSize);
     bool operator()(actions::DecreaseOpacity);
     bool operator()(actions::FollowHyperlink);
+    bool operator()(actions::HintMode const&);
     bool operator()(actions::FocusNextSearchMatch);
     bool operator()(actions::FocusPreviousSearchMatch);
     bool operator()(actions::IncreaseFontSize);

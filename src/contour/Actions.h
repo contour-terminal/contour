@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/HintModeHandler.h>
+
 #include <crispy/assert.h>
 #include <crispy/utils.h>
 
@@ -43,6 +45,7 @@ struct DecreaseOpacity{};
 struct FocusNextSearchMatch{};
 struct FocusPreviousSearchMatch{};
 struct FollowHyperlink{};
+struct HintMode{ std::string patterns; vtbackend::HintAction hintAction = vtbackend::HintAction::Copy; };
 struct IncreaseFontSize{};
 struct IncreaseOpacity{};
 struct NewTerminal{ std::optional<std::string> profileName; };
@@ -107,6 +110,7 @@ using Action = std::variant<CancelSelection,
                             FocusNextSearchMatch,
                             FocusPreviousSearchMatch,
                             FollowHyperlink,
+                            HintMode,
                             IncreaseFontSize,
                             IncreaseOpacity,
                             NewTerminal,
@@ -189,6 +193,12 @@ namespace documentation
     };
     constexpr inline std::string_view FollowHyperlink {
         "Follows the hyperlink that is exposed via OSC 8 under the current cursor position."
+    };
+    constexpr inline std::string_view HintMode {
+        "Activates hint mode: scans the visible terminal for regex-matched patterns (URLs, file paths, "
+        "git hashes, etc.), renders short alphabetic labels on each match, and lets the user type a label "
+        "to act on that match (copy, open, paste). Parameter `patterns` selects which pattern set to use, "
+        "and `hint_action` specifies the action (Copy, Open, Paste, CopyAndPaste, Select)."
     };
     constexpr inline std::string_view IncreaseFontSize { "Increases the font size by 1 pixel." };
     constexpr inline std::string_view IncreaseOpacity { "Increases the default-background opacity by 5%." };
@@ -307,6 +317,7 @@ constexpr inline auto getDocumentation()
         std::tuple { Action { FocusNextSearchMatch {} }, documentation::FocusNextSearchMatch },
         std::tuple { Action { FocusPreviousSearchMatch {} }, documentation::FocusPreviousSearchMatch },
         std::tuple { Action { FollowHyperlink {} }, documentation::FollowHyperlink },
+        std::tuple { Action { HintMode {} }, documentation::HintMode },
         std::tuple { Action { IncreaseFontSize {} }, documentation::IncreaseFontSize },
         std::tuple { Action { IncreaseOpacity {} }, documentation::IncreaseOpacity },
         std::tuple { Action { NewTerminal {} }, documentation::NewTerminal },
@@ -390,6 +401,7 @@ DECLARE_ACTION_FMT(DecreaseOpacity)
 DECLARE_ACTION_FMT(FocusNextSearchMatch)
 DECLARE_ACTION_FMT(FocusPreviousSearchMatch)
 DECLARE_ACTION_FMT(FollowHyperlink)
+DECLARE_ACTION_FMT(HintMode)
 DECLARE_ACTION_FMT(IncreaseFontSize)
 DECLARE_ACTION_FMT(IncreaseOpacity)
 DECLARE_ACTION_FMT(NewTerminal)
@@ -484,6 +496,7 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(FocusNextSearchMatch);
         HANDLE_ACTION(FocusPreviousSearchMatch);
         HANDLE_ACTION(FollowHyperlink);
+        HANDLE_ACTION(HintMode);
         HANDLE_ACTION(IncreaseFontSize);
         HANDLE_ACTION(IncreaseOpacity);
         HANDLE_ACTION(NewTerminal);
@@ -569,6 +582,24 @@ struct std::formatter<contour::actions::CopyFormat>: std::formatter<std::string_
             case contour::actions::CopyFormat::HTML: output = "HTML"; break;
             case contour::actions::CopyFormat::PNG: output = "PNG"; break;
             case contour::actions::CopyFormat::VT: output = "VT"; break;
+        }
+        return formatter<string_view>::format(output, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::HintAction>: std::formatter<std::string_view>
+{
+    auto format(vtbackend::HintAction value, auto& ctx) const
+    {
+        string_view output;
+        switch (value)
+        {
+            case vtbackend::HintAction::Copy: output = "Copy"; break;
+            case vtbackend::HintAction::Open: output = "Open"; break;
+            case vtbackend::HintAction::Paste: output = "Paste"; break;
+            case vtbackend::HintAction::CopyAndPaste: output = "CopyAndPaste"; break;
+            case vtbackend::HintAction::Select: output = "Select"; break;
         }
         return formatter<string_view>::format(output, ctx);
     }

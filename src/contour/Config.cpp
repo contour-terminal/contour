@@ -554,6 +554,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
     loadWithLog("search_highlight_focused", where.searchHighlightFocused);
     loadWithLog("word_highlight_current", where.wordHighlightCurrent);
     loadWithLog("word_highlight_other", where.wordHighlight);
+    loadWithLog("hint_label", where.hintLabel);
+    loadWithLog("hint_match", where.hintMatch);
     loadWithLog("input_method_editor", where.inputMethodEditor);
 
     if (child["indicator_statusline"])
@@ -2055,6 +2057,40 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 return std::nullopt;
         }
 
+        if (holds_alternative<actions::HintMode>(action))
+        {
+            auto hintAction = vtbackend::HintAction::Copy;
+            if (auto nodeHintAction = node["hint_action"]; nodeHintAction && nodeHintAction.IsScalar())
+            {
+                auto const actionStr = crispy::toUpper(nodeHintAction.as<std::string>());
+                static auto constexpr HintActionMappings =
+                    std::array<std::pair<std::string_view, vtbackend::HintAction>, 5> { {
+                        { "COPY", vtbackend::HintAction::Copy },
+                        { "OPEN", vtbackend::HintAction::Open },
+                        { "PASTE", vtbackend::HintAction::Paste },
+                        { "COPYANDPASTE", vtbackend::HintAction::CopyAndPaste },
+                        { "SELECT", vtbackend::HintAction::Select },
+                    } };
+                if (auto const p = std::ranges::find_if(HintActionMappings,
+                                                        [&](auto const& t) { return t.first == actionStr; });
+                    p != HintActionMappings.end())
+                {
+                    hintAction = p->second;
+                }
+                else
+                {
+                    logger()("Invalid hint_action '{}' in HintMode action. Defaulting to 'Copy'.",
+                             nodeHintAction.as<std::string>());
+                }
+            }
+
+            auto patterns = std::string {};
+            if (auto nodePatterns = node["patterns"]; nodePatterns && nodePatterns.IsScalar())
+                patterns = nodePatterns.as<std::string>();
+
+            return actions::HintMode { .patterns = std::move(patterns), .hintAction = hintAction };
+        }
+
         return action;
     }
     return std::nullopt;
@@ -2446,6 +2482,18 @@ std::string createForColorScheme(Config const& c)
                                entry.wordHighlight.foregroundAlpha,
                                entry.wordHighlight.background,
                                entry.wordHighlight.backgroundAlpha);
+
+                processWithDoc(documentation::HintLabel {},
+                               entry.hintLabel.foreground,
+                               entry.hintLabel.foregroundAlpha,
+                               entry.hintLabel.background,
+                               entry.hintLabel.backgroundAlpha);
+
+                processWithDoc(documentation::HintMatch {},
+                               entry.hintMatch.foreground,
+                               entry.hintMatch.foregroundAlpha,
+                               entry.hintMatch.background,
+                               entry.hintMatch.backgroundAlpha);
 
                 processWithDoc(documentation::IndicatorStatusLine {},
                                entry.indicatorStatusLineInsertMode.foreground,

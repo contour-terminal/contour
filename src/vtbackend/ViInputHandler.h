@@ -14,6 +14,12 @@
 
 namespace vtbackend
 {
+// Forward declaration (defined in HintModeHandler.h).
+enum class HintAction : uint8_t;
+} // namespace vtbackend
+
+namespace vtbackend
+{
 
 /*
  * ViInput emulates vi very basic in order to support
@@ -193,6 +199,9 @@ class ViInputHandler: public InputHandler
 
         // Similar to reverse search, but searching forward.
         virtual void searchCurrentWord() = 0;
+
+        /// Enters hint mode with the given action.
+        virtual void enterHintMode(HintAction action) = 0;
     };
 
     ViInputHandler(Executor& theExecutor, ViMode initialMode);
@@ -209,7 +218,8 @@ class ViInputHandler: public InputHandler
         switch (_viMode)
         {
             case ViMode::Insert:
-            case ViMode::Normal: return false;
+            case ViMode::Normal:
+            case ViMode::Hint: return false;
             case ViMode::Visual:
             case ViMode::VisualBlock:
             case ViMode::VisualLine: return true;

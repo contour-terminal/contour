@@ -123,6 +123,9 @@ struct ColorPalette
     CellRGBColorAndAlphaPair selection { .foreground=CellForegroundColor {}, .foregroundAlpha=1.0f, .background=0x4040f0_rgb , .backgroundAlpha=0.5f };
 
     CellRGBColorAndAlphaPair normalModeCursorline = { .foreground=0xFFFFFF_rgb, .foregroundAlpha=0.2f, .background=0x808080_rgb, .backgroundAlpha=0.4f };
+
+    CellRGBColorAndAlphaPair hintLabel = { .foreground=0x1a1716_rgb, .foregroundAlpha=1.0f, .background=0xFFCC00_rgb, .backgroundAlpha=1.0f };
+    CellRGBColorAndAlphaPair hintMatch = { .foreground=CellForegroundColor {}, .foregroundAlpha=1.0f, .background=0x4488CC_rgb, .backgroundAlpha=0.35f };
     // clang-format on
 
     RGBColorPair indicatorStatusLineInactive = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };

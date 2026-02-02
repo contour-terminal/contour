@@ -714,6 +714,12 @@ const InputMappings defaultInputMappings {
                                         | vtbackend::Modifiers { vtbackend::Modifier::Control } },
                            .input = 'H',
                            .binding = { { actions::NoSearchHighlight {} } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                           .input = 'U',
+                           .binding = { { actions::HintMode {
+                               .patterns = "url", .hintAction = vtbackend::HintAction::Open } } } },
     },
     .mouseMappings {
         MouseInputMapping { .modes { vtbackend::MatchModes {} },

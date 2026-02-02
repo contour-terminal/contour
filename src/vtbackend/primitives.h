@@ -750,6 +750,9 @@ enum class ViMode : uint8_t
 
     /// Vi-like visual block-select mode.
     VisualBlock, // <C-V>
+
+    /// Hint overlay mode (keyboard-driven link following).
+    Hint,
 };
 
 std::string to_string(GraphicsRendition s);
@@ -1053,6 +1056,7 @@ struct std::formatter<vtbackend::ViMode>: formatter<std::string_view>
             case ViMode::Visual: name = "Visual"; break;
             case ViMode::VisualLine: name = "VisualLine"; break;
             case ViMode::VisualBlock: name = "VisualBlock"; break;
+            case ViMode::Hint: name = "Hint"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

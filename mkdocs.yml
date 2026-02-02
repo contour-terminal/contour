@@ -104,6 +104,7 @@ nav:
     - Input method editor (IME): demo/ime.md
     - Line marks: demo/line-marks.md
     - Status line: demo/statusline.md
+    - Hint mode: demo/hint-mode.md
     - Input modes: input-modes.md
     - Size indicator: demo/size_indicator.md
     - Git branch drawings: demo/git-branch-drawings.md

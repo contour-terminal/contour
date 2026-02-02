@@ -25,6 +25,7 @@ CInclude
 CLEARTYPE
 CODEHALTH
 CONOUT
+COPYANDPASTE
 COPYTOCLIPBOARD
 COPYTOSELECTIONCLIPBOARD
 Crafters
@@ -51,6 +52,7 @@ DUSE
 Danich
 ERRORDEF
 Extrawurst
+FFCC
 FFFDu
 FFFFFFFFu
 FFu
@@ -464,6 +466,7 @@ hendrikmuhs
 hewbrew
 highcon
 highp
+hintmode
 histcontrol
 hla
 hori
@@ -1010,6 +1013,7 @@ versionsuffix
 vfork
 vgetq
 viewn
+vimium
 vimspector
 visibile
 visiblity

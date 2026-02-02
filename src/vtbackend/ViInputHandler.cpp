@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/HintModeHandler.h>
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/logging.h>
 
@@ -176,6 +177,8 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "*", [this]() { _executor->searchCurrentWord(); });
     registerCommand(ModeSelect::Normal, "p", [this]() { _executor->paste(count(), false); });
     registerCommand(ModeSelect::Normal, "P", [this]() { _executor->paste(count(), true); });
+    registerCommand(ModeSelect::Normal, "gh", [this]() { _executor->enterHintMode(HintAction::Copy); });
+    registerCommand(ModeSelect::Normal, "gH", [this]() { _executor->enterHintMode(HintAction::Open); });
 
     for (auto&& [theKey, viOperator]: { pair { 'y', ViOperator::Yank }, pair { 'o', ViOperator::Open } })
     {
@@ -369,6 +372,9 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
         case ViMode::Insert:
             // In insert mode we do not handle any key events here.
             // The terminal will handle them and send them to the application.
+            return Handled { false };
+        case ViMode::Hint:
+            // Hint mode input is handled by HintModeHandler, not the vi handler.
             return Handled { false };
         case ViMode::Visual:
         case ViMode::VisualLine:
@@ -564,7 +570,7 @@ Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers, Key
     if (_promptEditMode != PromptMode::Disabled)
         return handlePromptEditor(ch, modifiers);
 
-    if (_viMode == ViMode::Insert)
+    if (_viMode == ViMode::Insert || _viMode == ViMode::Hint)
         return Handled { false };
 
     if (ch == 033 && modifiers.none())
