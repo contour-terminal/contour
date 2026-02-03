@@ -6,8 +6,7 @@ set -x
 
 LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-true}"
 CONTOUR_BIN=${CONTOUR_BIN:-contour}
-LOG="error,config,pty,gui.session,gui.display,vt.renderer,font.locator" # "all"
-LOG="all"
+LOG="error,config,gui.session,gui.display"
 DISPLAY=:99
 #CONTOUR_PREFIX=gdb --batch --command=./scripts/test.gdb --args
 
@@ -38,8 +37,14 @@ $CONTOUR_PREFIX \
         early-exit-threshold 0 \
         ${@}
 
+# Capture exit code immediately before any other command overwrites $?
+EXIT_CODE=$?
+
 # ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses
 
-if [[ "$GITHUB_OUTPUT" != "" ]]; then
-    echo "exitCode=$?" >> "$GITHUB_OUTPUT"
+if [[ -n "$GITHUB_OUTPUT" ]]; then
+    echo "exitCode=$EXIT_CODE" >> "$GITHUB_OUTPUT"
 fi
+
+# Exit with the actual exit code so the CI step itself fails on error
+exit $EXIT_CODE

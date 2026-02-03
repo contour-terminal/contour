@@ -843,7 +843,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     auto const yOverflow = max(0, yMax - _gridMetrics.cellSize.height.as<int>());
 
     // {{{ crop underflow if glyph is larger than cell
-    if (yMax - yMin > _gridMetrics.cellSize.height.as<int>())
+    if (yMin < 0 && yMax - yMin > _gridMetrics.cellSize.height.as<int>())
     {
         auto const rowCount = (unsigned) -yMin;
         Require(rowCount <= unbox(glyph.bitmapSize.height));
