@@ -16,6 +16,7 @@ using vim motion keys and then start selecting.
 - **visual mode**: Linear selection, use motion keys to alter the selection.
 - **visual line mode**: Line based selection, use motion keys to alter the selection.
 - **visual block mode**: Block based selection, use motion keys to alter the selection.
+- **[hint mode](demo/hint-mode.md)**: Overlay alphabetic labels on detected patterns (URLs, file paths, etc.) and type a label to act on it.
 
 ### Supported operators (Normal Mode)
 
@@ -31,6 +32,8 @@ using vim motion keys and then start selecting.
 - Normal: `o {motion}` (opens resource by given `motion`, this can be a URL or local file)
 - Normal: `o {TextObject}` (opens resource by given `textObject`, such as `oiw`, `oaw`, `oiW`, ...)
 - Visual: `o` (open current selection into primary clipboard)
+- Normal: `gh` (enter [hint mode](demo/hint-mode.md) — copy selected match to clipboard)
+- Normal: `gH` (enter [hint mode](demo/hint-mode.md) — open selected match)
 
 ### Supported motions
 

@@ -916,6 +916,7 @@ void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
         case ViMode::Visual:
         case ViMode::VisualLine:
         case ViMode::VisualBlock: configureCursor(_profile.modeVisual.value().cursor); break;
+        case ViMode::Hint: configureCursor(_profile.modeNormal.value().cursor); break;
     }
 }
 
@@ -1239,6 +1240,30 @@ bool TerminalSession::operator()(actions::FollowHyperlink)
         return true;
     }
     return false;
+}
+
+bool TerminalSession::operator()(actions::HintMode const& action)
+{
+    sessionLog()("Activating hint mode with patterns: '{}', action: {}", action.patterns, action.hintAction);
+
+    // Resolve patterns: if empty or "all", use all builtin patterns.
+    auto patterns = vtbackend::HintModeHandler::builtinPatterns();
+    if (!action.patterns.empty() && action.patterns != "all")
+    {
+        // Filter to only the named pattern(s).
+        auto filtered = std::vector<vtbackend::HintPattern>();
+        for (auto& p: patterns)
+        {
+            if (p.name == action.patterns)
+                filtered.push_back(std::move(p));
+        }
+        if (!filtered.empty())
+            patterns = std::move(filtered);
+    }
+
+    auto const hintAction = action.hintAction;
+    crispy::locked(terminal(), [&]() { terminal().activateHintMode(patterns, hintAction); });
+    return true;
 }
 
 bool TerminalSession::operator()(actions::IncreaseFontSize)

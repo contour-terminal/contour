@@ -9,6 +9,7 @@
 :material-check-bold:{.check-mark}  Bold and italic fonts <br/>
 :material-check-bold:{.check-mark}  High-DPI support. <br/>
 :material-check-bold:{.check-mark}  [Vi-like input modes](input-modes.md) for improved navigation, selection and copy'n'paste experience <br/>
+:material-check-bold:{.check-mark}  [Hint mode](demo/hint-mode.md) for keyboard-driven selection of URLs, file paths, git hashes, and more <br/>
 :material-check-bold:{.check-mark}  [Vertical Line Markers](demo/line-marks.md) (quickly jump to markers in your history!) <br/>
 :material-check-bold:{.check-mark}  Blurred behind transparent background when using Windows 10 or KDE window manager on Linux. <br/>
 :material-check-bold:{.check-mark}  Blurrable Background image support. <br/>

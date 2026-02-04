@@ -26,7 +26,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -184,6 +186,9 @@ void Terminal::onViewportChanged()
 {
     if (_inputHandler.mode() != ViMode::Insert)
         _viCommands.cursorPosition = _viewport.clampCellLocation(_viCommands.cursorPosition);
+
+    if (_hintModeHandler.isActive())
+        refreshHints();
 
     _eventListener.onScrollOffsetChanged(_viewport.scrollOffset());
     breakLoopAndRefreshRenderBuffer();
@@ -517,12 +522,16 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                     _viewport.scrollOffset(),
                                     highlightSearchMatches);
 
+    // Save the baseLine used for the main screen before the bottom status line shifts it.
+    auto const mainScreenBaseLine = baseLine;
+
     if (_settings.statusDisplayPosition == StatusDisplayPosition::Bottom)
     {
         baseLine += pageSize().lines.as<LineOffset>();
         fillRenderBufferStatusLine(output, includeSelection, baseLine);
     }
 
+    applyHintOverlay(output, mainScreenBaseLine);
     updateCursorMotionAnimation(output);
     applyScreenTransitionBlending(output);
 }
@@ -707,7 +716,8 @@ void Terminal::updateIndicatorStatusLine()
             switch (_inputHandler.mode())
             {
                 case ViMode::Insert: return colorPalette().indicatorStatusLineInsertMode;
-                case ViMode::Normal: return colorPalette().indicatorStatusLineNormalMode;
+                case ViMode::Normal:
+                case ViMode::Hint: return colorPalette().indicatorStatusLineNormalMode;
                 case ViMode::Visual:
                 case ViMode::VisualLine:
                 case ViMode::VisualBlock: return colorPalette().indicatorStatusLineVisualMode;
@@ -780,6 +790,13 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     if (!allowInput())
         return Handled { true };
 
+    // Route Escape to hint mode handler if active (ignore key release events).
+    if (_hintModeHandler.isActive() && key == Key::Escape && eventType != KeyboardEventType::Release)
+    {
+        _hintModeHandler.processInput(U'\x1B');
+        return Handled { true };
+    }
+
     if (_inputHandler.sendKeyPressEvent(key, modifiers, eventType))
         return Handled { true };
 
@@ -801,6 +818,15 @@ Handled Terminal::sendCharEvent(
     // Early exit if KAM is enabled.
     if (!allowInput())
         return Handled { true };
+
+    // Route input to hint mode handler if active (no modifiers — just label chars).
+    // Ignore key release events to prevent the activating key's release from being
+    // processed as a label character (e.g. 'h' release after 'gh' triggered hint mode).
+    if (_hintModeHandler.isActive() && modifiers.none() && eventType != KeyboardEventType::Release)
+    {
+        if (_hintModeHandler.processInput(ch))
+            return Handled { true };
+    }
 
     if (_inputHandler.sendCharPressEvent(ch, modifiers, eventType))
         return Handled { true };
@@ -1704,6 +1730,219 @@ void Terminal::openDocument(string_view data)
 {
     _eventListener.openDocument(data);
 }
+
+// {{{ Hint mode
+
+void Terminal::refreshHints()
+{
+    auto const lines = unbox<int>(pageSize().lines);
+    auto const scrollOff = unbox<int>(_viewport.scrollOffset());
+    auto visibleLines = std::vector<std::string>();
+    visibleLines.reserve(static_cast<size_t>(lines));
+    for (auto const i: std::views::iota(0, lines))
+        visibleLines.push_back(currentScreen().lineTextAt(LineOffset(i - scrollOff), false, false));
+
+    _hintModeHandler.refresh(visibleLines, pageSize());
+}
+
+void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAction action)
+{
+    auto const lines = unbox<int>(pageSize().lines);
+    auto const scrollOff = unbox<int>(_viewport.scrollOffset());
+    auto visibleLines = std::vector<std::string>();
+    visibleLines.reserve(static_cast<size_t>(lines));
+    for (auto const i: std::views::iota(0, lines))
+        visibleLines.push_back(currentScreen().lineTextAt(LineOffset(i - scrollOff), false, false));
+
+    // Make a mutable copy so we can attach validators.
+    auto mutablePatterns = patterns;
+
+    // When CWD is available, attach a filesystem-existence validator to filepath patterns.
+    auto const cwdUrl = currentWorkingDirectory();
+    auto const cwd = extractPathFromFileUrl(cwdUrl);
+    if (!cwd.empty())
+    {
+        auto const* const homeEnv = std::getenv("HOME");
+        auto const home = std::string(homeEnv ? homeEnv : "");
+        for (auto& pattern: mutablePatterns)
+        {
+            if (pattern.name != "filepath")
+                continue;
+
+            // With CWD available, broaden the regex to also match bare filenames,
+            // extensionless files (e.g. "Makefile"), and directories (e.g. "src").
+            // The validator ensures only entries that actually exist on disk are kept.
+            pattern.regex =
+                std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
+                           std::regex_constants::ECMAScript | std::regex_constants::optimize);
+
+            pattern.validator = [cwd, home](std::string const& matchStr) -> bool {
+                namespace fs = std::filesystem;
+                auto resolved = std::string {};
+                if (matchStr.starts_with("/"))
+                {
+                    // Absolute path — use as-is.
+                    resolved = matchStr;
+                }
+                else if (matchStr.starts_with("~/"))
+                {
+                    // Home-relative path.
+                    if (home.empty())
+                        return true; // Cannot resolve — let it through.
+                    resolved = home + matchStr.substr(1);
+                }
+                else
+                {
+                    // Relative path (./foo, ../foo, or bare relative like src/foo).
+                    resolved = cwd + "/" + matchStr;
+                }
+                return fs::exists(resolved);
+            };
+        }
+    }
+
+    _hintModeHandler.activate(visibleLines, pageSize(), mutablePatterns, action);
+    _inputHandler.setMode(ViMode::Hint);
+}
+
+void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
+{
+    if (!_hintModeHandler.isActive())
+        return;
+
+    auto const& matches = _hintModeHandler.matches();
+    auto const& filter = _hintModeHandler.currentFilter();
+
+    // Resolve palette colors for hint rendering.
+    // CellRGBColor is a variant that may hold RGBColor directly, or CellForegroundColor/CellBackgroundColor
+    // sentinels that refer to the terminal's default foreground/background.
+    auto const resolveColor = [&](CellRGBColor const& color) -> RGBColor {
+        if (std::holds_alternative<CellForegroundColor>(color))
+            return _colorPalette.defaultForeground;
+        if (std::holds_alternative<CellBackgroundColor>(color))
+            return _colorPalette.defaultBackground;
+        return std::get<RGBColor>(color);
+    };
+
+    auto const& hintLabel = _colorPalette.hintLabel;
+    auto const& hintMatch = _colorPalette.hintMatch;
+    auto const labelFg = resolveColor(hintLabel.foreground);
+    auto const labelBg = resolveColor(hintLabel.background);
+    // Dimmed version of label colors for the already-typed portion.
+    auto const typedLabelFg = mixColor(labelFg, _colorPalette.defaultBackground, 0.5f);
+    auto const typedLabelBg = mixColor(labelBg, _colorPalette.defaultBackground, 0.5f);
+    auto const matchBg = resolveColor(hintMatch.background);
+    auto const matchBgAlpha = hintMatch.backgroundAlpha;
+
+    for (auto const& match: matches)
+    {
+        auto const labelLen = static_cast<int>(match.label.size());
+        auto const matchLine = baseLine + match.start.line;
+
+        // Apply overlay for each cell in the RenderBuffer.
+        for (auto& cell: output.cells)
+        {
+            auto const line = cell.position.line;
+            auto const col = cell.position.column;
+
+            // Check if this cell is in the label region.
+            if (line == matchLine && col >= match.start.column
+                && col < match.start.column + ColumnOffset(labelLen))
+            {
+                auto const labelIdx = static_cast<size_t>(unbox(col) - unbox(match.start.column));
+                if (labelIdx < match.label.size())
+                {
+                    // Replace codepoints with label character.
+                    cell.codepoints = std::u32string(1, static_cast<char32_t>(match.label[labelIdx]));
+                    cell.width = 1;
+
+                    // Distinguish typed-so-far from remaining label characters.
+                    if (labelIdx < filter.size())
+                    {
+                        // Already-typed portion: dimmed label styling.
+                        cell.attributes.foregroundColor = typedLabelFg;
+                        cell.attributes.backgroundColor = typedLabelBg;
+                    }
+                    else
+                    {
+                        // Remaining label: bright label styling from palette.
+                        cell.attributes.foregroundColor = labelFg;
+                        cell.attributes.backgroundColor = labelBg;
+                    }
+                    cell.attributes.flags |= CellFlag::Bold;
+                }
+            }
+            // Check if this cell is in the match body region (after the label).
+            else if (line == matchLine && col > match.start.column + ColumnOffset(labelLen - 1)
+                     && col <= match.end.column)
+            {
+                // Highlight match body with palette-configured background blend.
+                cell.attributes.backgroundColor =
+                    mixColor(cell.attributes.backgroundColor, matchBg, matchBgAlpha);
+            }
+        }
+    }
+
+    // Dim all cells that don't belong to any match when hints are active.
+    // This helps the labels stand out.
+    if (!matches.empty())
+    {
+        for (auto& cell: output.cells)
+        {
+            auto const line = cell.position.line;
+            auto const col = cell.position.column;
+
+            auto const belongsToMatch = std::ranges::any_of(matches, [&](auto const& m) {
+                auto const mLine = baseLine + m.start.line;
+                return line == mLine && col >= m.start.column && col <= m.end.column;
+            });
+
+            if (!belongsToMatch)
+            {
+                // Fade non-match cells toward the terminal's default background.
+                blendAttributesTo(cell.attributes, _colorPalette.defaultBackground, 0.5f);
+            }
+        }
+    }
+}
+
+void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText, HintAction action)
+{
+    switch (action)
+    {
+        case HintAction::Copy: terminal._eventListener.copyToClipboard(matchedText); break;
+        case HintAction::Open: terminal._eventListener.openDocument(matchedText); break;
+        case HintAction::Paste: terminal.sendRawInput(matchedText); break;
+        case HintAction::CopyAndPaste:
+            terminal._eventListener.copyToClipboard(matchedText);
+            terminal.sendRawInput(matchedText);
+            break;
+        case HintAction::Select:
+            // TODO: Implement visual-mode pre-selection of the match range.
+            // Currently falls back to clipboard copy as an interim behavior.
+            terminal._eventListener.copyToClipboard(matchedText);
+            break;
+    }
+}
+
+void Terminal::HintModeExecutor::onHintModeEntered()
+{
+    previousViMode = terminal._inputHandler.mode();
+    terminal.breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::HintModeExecutor::onHintModeExited()
+{
+    terminal._inputHandler.setMode(previousViMode.value_or(ViMode::Normal));
+    previousViMode.reset();
+    terminal.breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::HintModeExecutor::requestRedraw()
+{
+    terminal.breakLoopAndRefreshRenderBuffer();
+}
+// }}} Hint mode
 
 void Terminal::inspect()
 {

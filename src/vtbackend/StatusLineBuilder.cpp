@@ -35,6 +35,7 @@ namespace // helper functions
             case ViMode::Visual: return "VISUAL"sv;
             case ViMode::VisualLine: return "VISUAL LINE"sv;
             case ViMode::VisualBlock: return "VISUAL BLOCK"sv;
+            case ViMode::Hint: return "HINT"sv;
         }
         crispy::unreachable();
     }

@@ -297,6 +297,10 @@ void ViCommands::modeChanged(ViMode mode)
             (void) _terminal->selector()->extend(cursorPosition);
             _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
             break;
+        case ViMode::Hint:
+            // Keep cursor visible and status indicator, similar to Normal mode.
+            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            break;
     }
 
     _terminal->screenUpdated();
@@ -328,6 +332,12 @@ void ViCommands::searchCurrentWord()
     cursorPosition = range.second;
     updateSearchTerm(wordUnderCursor);
     jumpToNextMatch(1);
+}
+
+void ViCommands::enterHintMode(HintAction action)
+{
+    auto const patterns = HintModeHandler::builtinPatterns();
+    _terminal->activateHintMode(patterns, action);
 }
 
 void ViCommands::executeYank(ViMotion motion, unsigned count)
@@ -1190,7 +1200,8 @@ void ViCommands::moveCursorTo(CellLocation position)
     switch (_terminal->inputHandler().mode())
     {
         case ViMode::Normal:
-        case ViMode::Insert: break;
+        case ViMode::Insert:
+        case ViMode::Hint: break;
         case ViMode::Visual:
         case ViMode::VisualLine:
         case ViMode::VisualBlock:

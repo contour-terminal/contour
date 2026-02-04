@@ -40,6 +40,7 @@ optional<Action> fromString(string const& name)
         mapAction<actions::FocusNextSearchMatch>("FocusNextSearchMatch"),
         mapAction<actions::FocusPreviousSearchMatch>("FocusPreviousSearchMatch"),
         mapAction<actions::FollowHyperlink>("FollowHyperlink"),
+        mapAction<actions::HintMode>("HintMode"),
         mapAction<actions::IncreaseFontSize>("IncreaseFontSize"),
         mapAction<actions::IncreaseOpacity>("IncreaseOpacity"),
         mapAction<actions::NewTerminal>("NewTerminal"),

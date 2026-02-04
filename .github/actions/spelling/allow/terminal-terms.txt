@@ -158,6 +158,7 @@ cuu
 dcl
 dcs
 fbterm
+githash
 stty
 undercurl
 zellij

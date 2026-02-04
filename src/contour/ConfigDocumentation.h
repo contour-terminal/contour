@@ -1004,6 +1004,28 @@ constexpr StringLiteral WordHighlightConfig {
     "    background_alpha: {}\n"
 };
 
+constexpr StringLiteral HintLabelConfig {
+    "\n"
+    "{comment} Colors for hint mode labels (the short alphabetic tags shown on matches).\n"
+    "{comment} The format is equivalent to selection/search highlighting.\n"
+    "hint_label:\n"
+    "    foreground: {}\n"
+    "    foreground_alpha: {}\n"
+    "    background: {}\n"
+    "    background_alpha: {}\n"
+};
+
+constexpr StringLiteral HintMatchConfig {
+    "\n"
+    "{comment} Colors for hint mode match bodies (the text behind the labels).\n"
+    "{comment} The format is equivalent to selection/search highlighting.\n"
+    "hint_match:\n"
+    "    foreground: {}\n"
+    "    foreground_alpha: {}\n"
+    "    background: {}\n"
+    "    background_alpha: {}\n"
+};
+
 constexpr StringLiteral IndicatorStatusLineConfig {
     "\n"
     "{comment} Defines the colors to be used for the Indicator status line.\n"
@@ -1973,6 +1995,8 @@ using SearchHighlight = DocumentationEntry<SearchHighlightConfig, Dummy>;
 using SearchHighlightFocused = DocumentationEntry<SearchHighlightFocusedConfig, Dummy>;
 using WordHighlightCurrent = DocumentationEntry<WordHighlightCurrentConfig, Dummy>;
 using WordHighlight = DocumentationEntry<WordHighlightConfig, Dummy>;
+using HintLabel = DocumentationEntry<HintLabelConfig, Dummy>;
+using HintMatch = DocumentationEntry<HintMatchConfig, Dummy>;
 using IndicatorStatusLine = DocumentationEntry<IndicatorStatusLineConfig, Dummy>;
 using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
 using InputMethodEditorSupport = DocumentationEntry<InputMethodEditorSupportConfig, Dummy>;

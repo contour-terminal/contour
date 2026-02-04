@@ -5,6 +5,7 @@
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/Cursor.h>
 #include <vtbackend/Grid.h>
+#include <vtbackend/HintModeHandler.h>
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/InputHandler.h>
@@ -44,6 +45,7 @@
 #include <memory>
 #include <mutex>
 #include <numbers>
+#include <optional>
 #include <stack>
 #include <string_view>
 #include <utility>
@@ -900,6 +902,34 @@ class Terminal
     [[nodiscard]] Search const& search() const noexcept { return _search; }
     [[nodiscard]] Prompt& prompt() noexcept { return _prompt; }
     [[nodiscard]] Prompt const& prompt() const noexcept { return _prompt; }
+
+    // {{{ hint mode
+    /// Activates hint mode by scanning visible lines for regex matches.
+    void activateHintMode(std::vector<HintPattern> const& patterns, HintAction action);
+
+    /// Returns true if hint mode is currently active.
+    [[nodiscard]] bool isHintModeActive() const noexcept { return _hintModeHandler.isActive(); }
+
+    /// Returns the current hint matches for rendering.
+    [[nodiscard]] std::vector<HintMatch> const& hintMatches() const noexcept
+    {
+        return _hintModeHandler.matches();
+    }
+
+    /// Returns the current hint filter prefix.
+    [[nodiscard]] std::string const& hintFilter() const noexcept { return _hintModeHandler.currentFilter(); }
+
+    /// Applies hint mode overlay to the render buffer.
+    /// @param baseLine  The line offset of the first main-screen line in the render buffer.
+    void applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const;
+
+    /// Returns the hint mode handler (for direct access by ViCommands).
+    [[nodiscard]] HintModeHandler& hintModeHandler() noexcept { return _hintModeHandler; }
+
+    /// Re-scans hints for the current viewport (called on scroll while hint mode is active).
+    void refreshHints();
+    // }}} hint mode
+
     void saveWindowTitle();
     void restoreWindowTitle();
     void setTerminalProfile(std::string const& configProfileName);
@@ -1372,6 +1402,21 @@ class Terminal
 
     ViCommands _viCommands;
     ViInputHandler _inputHandler;
+
+    /// Bridges Terminal to HintModeHandler::Executor.
+    struct HintModeExecutor: HintModeHandler::Executor
+    {
+        Terminal& terminal;
+        std::optional<ViMode> previousViMode;
+
+        explicit HintModeExecutor(Terminal& t): terminal { t } {}
+        void onHintSelected(std::string const& matchedText, HintAction action) override;
+        void onHintModeEntered() override;
+        void onHintModeExited() override;
+        void requestRedraw() override;
+    };
+    HintModeExecutor _hintModeExecutor { *this };
+    HintModeHandler _hintModeHandler { _hintModeExecutor };
 
     std::unique_ptr<ShellIntegration> _shellIntegration;
 };

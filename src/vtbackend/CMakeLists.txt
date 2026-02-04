@@ -25,6 +25,7 @@ set(vtbackend_HEADERS
     Functions.h
     GraphicsAttributes.h
     Grid.h
+    HintModeHandler.h
     Hyperlink.h
     Image.h
     InputBinding.h
@@ -58,6 +59,7 @@ set(vtbackend_SOURCES
     ColorPalette.cpp
     Functions.cpp
     Grid.cpp
+    HintModeHandler.cpp
     Image.cpp
     InputBinding.cpp
     InputGenerator.cpp
@@ -127,6 +129,7 @@ if(LIBTERMINAL_TESTING)
         Selector_test.cpp
         Functions_test.cpp
         Grid_test.cpp
+        HintModeHandler_test.cpp
         Line_test.cpp
         Screen_test.cpp
         Image_test.cpp
