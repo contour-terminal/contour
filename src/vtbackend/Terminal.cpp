@@ -547,11 +547,22 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
     auto const effectiveDuration =
         std::max(_settings.cursorMotionAnimationDuration, _refreshInterval.value * MinFrames);
 
-    auto const& cursorPos = output.cursor->position;
+    // Use grid coordinates (without scroll offset or baseLine) for animation state.
+    // This prevents viewport scrolling from triggering spurious cursor animations,
+    // since the grid position doesn't change when the user scrolls.
+    auto const gridCursorPos = [&]() -> CellLocation {
+        if (inputHandler().mode() == ViMode::Insert)
+            return currentScreen().cursor().position;
+        return _viCommands.cursorPosition;
+    }();
+
+    // The line offset from grid to screen coordinates (accounts for baseLine and scrollOffset).
+    auto const gridToScreenLineOffset = output.cursor->position.line - gridCursorPos.line;
+
     if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
     {
         // Animation in progress — check if target changed (chaining)
-        if (cursorPos != _cursorMotion.toPosition)
+        if (gridCursorPos != _cursorMotion.toPosition)
         {
             // Chain: start new animation from current interpolated position
             auto const currentProgress = _cursorMotion.progress(_currentTime);
@@ -559,34 +570,38 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
                 lerpCellLocation(_cursorMotion.fromPosition, _cursorMotion.toPosition, currentProgress);
             _cursorMotion.fromColor =
                 mixColor(_cursorMotion.fromColor, _cursorMotion.toColor, currentProgress);
-            _cursorMotion.toPosition = cursorPos;
+            _cursorMotion.toPosition = gridCursorPos;
             _cursorMotion.toColor = output.cursor->cursorColor;
             _cursorMotion.startTime = _currentTime;
             _cursorMotion.duration = effectiveDuration;
         }
-        // Inject animation data
-        output.cursor->animateFrom = _cursorMotion.fromPosition;
+        // Inject animation data (convert grid -> screen coordinates)
+        auto fromScreen = _cursorMotion.fromPosition;
+        fromScreen.line += gridToScreenLineOffset;
+        output.cursor->animateFrom = fromScreen;
         output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
         output.cursor->animateFromColor = _cursorMotion.fromColor;
     }
-    else if (cursorPos != _cursorMotion.toPosition && _settings.cursorMotionAnimationDuration.count() > 0)
+    else if (gridCursorPos != _cursorMotion.toPosition && _settings.cursorMotionAnimationDuration.count() > 0)
     {
-        // Start new animation
+        // Start new animation (store grid positions)
         _cursorMotion.active = true;
         _cursorMotion.fromPosition = _cursorMotion.toPosition; // previous target
         _cursorMotion.fromColor = _cursorMotion.toColor;       // previous target's color
-        _cursorMotion.toPosition = cursorPos;
+        _cursorMotion.toPosition = gridCursorPos;
         _cursorMotion.toColor = output.cursor->cursorColor;
         _cursorMotion.startTime = _currentTime;
         _cursorMotion.duration = effectiveDuration;
 
-        output.cursor->animateFrom = _cursorMotion.fromPosition;
+        auto fromScreen = _cursorMotion.fromPosition;
+        fromScreen.line += gridToScreenLineOffset;
+        output.cursor->animateFrom = fromScreen;
         output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
         output.cursor->animateFromColor = _cursorMotion.fromColor;
     }
     else
     {
-        _cursorMotion.toPosition = cursorPos;
+        _cursorMotion.toPosition = gridCursorPos;
         _cursorMotion.toColor = output.cursor->cursorColor;
     }
 }

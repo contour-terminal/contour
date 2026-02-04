@@ -727,14 +727,14 @@ class Terminal
                && (cursorDisplay() == CursorDisplay::Steady || _cursorBlinkState);
     }
 
-    /// Returns the predicted animation progress for a cursor at the given screen position.
+    /// Returns the predicted animation progress for a cursor at the given grid position.
     /// Used by RenderBufferBuilder to pre-set animationProgress before cell rendering,
     /// so that Block cursor cell inversion is suppressed during animation.
-    [[nodiscard]] float cursorAnimationProgress(CellLocation cursorScreenPosition) const noexcept
+    [[nodiscard]] float cursorAnimationProgress(CellLocation cursorGridPosition) const noexcept
     {
         if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
             return _cursorMotion.progress(_currentTime);
-        if (cursorScreenPosition != _cursorMotion.toPosition
+        if (cursorGridPosition != _cursorMotion.toPosition
             && _settings.cursorMotionAnimationDuration.count() > 0)
             return 0.0f;
         return 1.0f;

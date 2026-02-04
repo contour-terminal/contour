@@ -649,9 +649,8 @@ TEST_CASE("Terminal.cursorAnimationProgress.no_animation_returns_1", "[terminal]
     auto mc = MockTerm { ColumnCount { 10 }, LineCount { 4 } };
     auto& terminal = mc.terminal;
     // With no animation, cursor at current position should return 1.0 (complete).
-    auto const cursorPos = terminal.currentScreen().cursor().position;
-    auto const screenPos = vtbackend::CellLocation { .line = cursorPos.line, .column = cursorPos.column };
-    CHECK(terminal.cursorAnimationProgress(screenPos) == 1.0f);
+    auto const gridPos = terminal.currentScreen().cursor().position;
+    CHECK(terminal.cursorAnimationProgress(gridPos) == 1.0f);
 }
 
 // {{{ applySmoothScrollPixelDelta tests
