@@ -379,7 +379,7 @@ const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDesc
     .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
     .fontLocator = vtrasterizer::FontLocatorEngine::Native,
     .builtinBoxDrawing = true,
-    .maxFallbackCount = 16,
+    .maxFallbackCount = vtrasterizer::DefaultMaxFallbackCount,
 };
 
 struct TerminalProfile

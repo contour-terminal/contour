@@ -244,21 +244,9 @@ void Renderer::setFonts(FontDescriptions fontDescriptions)
 
     // When only DPI changed, the enhanced set_dpi() updates existing FT_Face
     // objects in-place. Skip clear_cache() to avoid destroying them.
-    // clang-format off
-    auto const onlyDpiChanged =
-        _fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine
-        && _fontDescriptions.fontLocator == fontDescriptions.fontLocator
-        && _fontDescriptions.dpiScale == fontDescriptions.dpiScale
-        && _fontDescriptions.size.pt == fontDescriptions.size.pt
-        && _fontDescriptions.regular == fontDescriptions.regular
-        && _fontDescriptions.bold == fontDescriptions.bold
-        && _fontDescriptions.italic == fontDescriptions.italic
-        && _fontDescriptions.boldItalic == fontDescriptions.boldItalic
-        && _fontDescriptions.emoji == fontDescriptions.emoji
-        && _fontDescriptions.renderMode == fontDescriptions.renderMode
-        && _fontDescriptions.builtinBoxDrawing == fontDescriptions.builtinBoxDrawing
-        && _fontDescriptions.maxFallbackCount == fontDescriptions.maxFallbackCount;
-    // clang-format on
+    auto descriptionsWithSameDpi = fontDescriptions;
+    descriptionsWithSameDpi.dpi = _fontDescriptions.dpi;
+    auto const onlyDpiChanged = (descriptionsWithSameDpi == _fontDescriptions);
 
     if (_fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine)
     {

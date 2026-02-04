@@ -23,6 +23,9 @@ enum class FontLocatorEngine : uint8_t
 
 using DPI = text::DPI;
 
+/// Default maximum number of fallback fonts per key. -1 = unlimited, 0 = disabled.
+inline constexpr int DefaultMaxFallbackCount = 16;
+
 struct FontDescriptions
 {
     double dpiScale = 1.0;
@@ -37,7 +40,8 @@ struct FontDescriptions
     TextShapingEngine textShapingEngine = TextShapingEngine::OpenShaper;
     FontLocatorEngine fontLocator = FontLocatorEngine::Native;
     bool builtinBoxDrawing = true;
-    int maxFallbackCount = 16; ///< Maximum fallback fonts per key. -1 = unlimited, 0 = disabled.
+    int maxFallbackCount =
+        DefaultMaxFallbackCount; ///< Maximum fallback fonts per key. -1 = unlimited, 0 = disabled.
 };
 
 inline bool operator==(FontDescriptions const& a, FontDescriptions const& b) noexcept

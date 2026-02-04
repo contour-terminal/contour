@@ -557,6 +557,9 @@ struct open_shaper::private_open_shaper // {{{
     FT_Library ft {};
     font_locator* locator = nullptr;
     DPI dpi;
+    // Default must match vtrasterizer::DefaultMaxFallbackCount.
+    // Cannot include the header directly due to dependency direction (vtrasterizer depends on text_shaper).
+    // The actual value is passed at runtime via set_font_fallback_limit().
     int fontFallbackLimit = 16; ///< Maximum total fallback fonts per key. -1 = unlimited, 0 = disabled.
     unordered_map<FontInfo, font_key> fontPathAndSizeToKeyMapping;
     unordered_map<font_key, HbFontInfo> fontKeyToHbFontInfoMapping; // from font_key to FontInfo struct
