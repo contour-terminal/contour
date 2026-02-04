@@ -1094,6 +1094,13 @@ double TerminalDisplay::contentScale() const
         // This can only happen during TerminalDisplay instanciation
         return 1.0;
 
+    // Prefer the screen's DPR over the window's DPR. On Wayland with fractional
+    // scaling, QWindow::devicePixelRatio() may report a ceiling integer (e.g., 2.0)
+    // before the window receives the compositor's surface scale, whereas
+    // QScreen::devicePixelRatio() already reflects the correct output scale (e.g., 1.75).
+    if (auto const* screen = window()->screen(); screen != nullptr)
+        return screen->devicePixelRatio();
+
     return window()->devicePixelRatio();
 }
 
