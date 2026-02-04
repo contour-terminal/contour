@@ -2655,6 +2655,24 @@ TEST_CASE("RequestMode", "[screen]")
     }
 }
 
+TEST_CASE("DECNKM", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+
+    // Enable application keypad via DECSM 66
+    mock.writeToScreen(DECSM(66));
+    CHECK(mock.terminal.isModeEnabled(DECMode::ApplicationKeypad));
+
+    // Disable via DECRM 66
+    mock.writeToScreen(DECRM(66));
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::ApplicationKeypad));
+
+    // DECRQM should report correctly
+    mock.writeToScreen(DECSM(66));
+    mock.writeToScreen(DECRQM(66));
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033[?66;1$y"));
+}
+
 TEST_CASE("peek into history", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) }, LineCount { 5 } };

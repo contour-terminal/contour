@@ -2260,6 +2260,7 @@ void Terminal::setMode(DECMode mode, bool enable)
                 // because it's local to the screen buffer.
             }
             break;
+        case DECMode::ApplicationKeypad: setApplicationkeypadMode(enable); break;
         default: break;
     }
 
@@ -2329,7 +2330,7 @@ void Terminal::softReset()
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
 
-    // TODO: DECNKM (Numeric keypad)
+    setMode(DECMode::ApplicationKeypad, false); // DECNKM
     // TODO: DECSCA (Select character attribute)
     // TODO: DECNRCM (National replacement character set)
     // TODO: GL, GR (G0, G1, G2, G3)
@@ -3077,6 +3078,7 @@ std::string to_string(DECMode mode)
         case DECMode::AllowColumns80to132: return "AllowColumns80to132";
         case DECMode::DebugLogging: return "DebugLogging";
         case DECMode::UseAlternateScreen: return "UseAlternateScreen";
+        case DECMode::ApplicationKeypad: return "ApplicationKeypad";
         case DECMode::BracketedPaste: return "BracketedPaste";
         case DECMode::FocusTracking: return "FocusTracking";
         case DECMode::NoSixelScrolling: return "NoSixelScrolling";

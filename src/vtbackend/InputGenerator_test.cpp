@@ -228,4 +228,28 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Escape", "[terminal,input]")
     REQUIRE(escape(input.take()) == escape("\033[27;1:3u"sv));
 }
 
+TEST_CASE("InputGenerator.DECNKM", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+
+    // Default: numeric keypad mode
+    REQUIRE(input.numericKeypad());
+    input.generate(Key::Numpad_5, Modifiers {}, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("5"sv));
+    input.consume(static_cast<int>(input.peek().size()));
+
+    // Enable application keypad (DECNKM set)
+    input.setApplicationKeypadMode(true);
+    REQUIRE(input.applicationKeypad());
+    input.generate(Key::Numpad_5, Modifiers {}, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[E"sv));
+    input.consume(static_cast<int>(input.peek().size()));
+
+    // Disable application keypad (DECNKM reset)
+    input.setApplicationKeypadMode(false);
+    REQUIRE(input.numericKeypad());
+    input.generate(Key::Numpad_5, Modifiers {}, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("5"sv));
+}
+
 // }}}

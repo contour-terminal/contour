@@ -625,6 +625,12 @@ enum class DECMode : std::uint16_t
     SaveCursor = 10,
     ExtendedAltScreen = 11,
 
+    /// DECNKM — Numeric Keypad Mode (VT320).
+    ///
+    /// When set, the numeric keypad generates application sequences (same as DECKPAM).
+    /// When reset, the numeric keypad generates numeric characters (same as DECKPNM).
+    ApplicationKeypad = 27,
+
     /**
      * DECOM - Origin Mode.
      *
@@ -804,6 +810,7 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::AllowColumns80to132: return 40;
         case DECMode::DebugLogging: return 46;
         case DECMode::UseAlternateScreen: return 47;
+        case DECMode::ApplicationKeypad: return 66;
         case DECMode::LeftRightMargin: return 69;
         case DECMode::MouseProtocolNormalTracking: return 1000;
         case DECMode::MouseProtocolHighlightTracking: return 1001;
@@ -858,7 +865,7 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
         case 46: return DECMode::DebugLogging;
         case 47: return DECMode::UseAlternateScreen;
-        // TODO: Ps = 6 6  -> Application keypad (DECNKM), VT320.
+        case 66: return DECMode::ApplicationKeypad;
         // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the
         // backarrowKey resource to "true".
         case 69: return DECMode::LeftRightMargin;
