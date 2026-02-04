@@ -113,6 +113,7 @@ constexpr inline auto SETMARK = FunctionDocumentation { .mnemonic = "SETMARK", .
 constexpr inline auto SGR = FunctionDocumentation { .mnemonic = "SGR", .comment = "Select Graphic Rendition" };
 constexpr inline auto SM = FunctionDocumentation { .mnemonic = "SM", .comment = "Set Mode" };
 constexpr inline auto SU = FunctionDocumentation { .mnemonic = "SU", .comment = "Scroll Up" };
+constexpr inline auto UNSCROLL = FunctionDocumentation { .mnemonic = "UNSCROLL", .comment = "Scroll Down with Scrollback Fill (kitty unscroll)" };
 constexpr inline auto TBC = FunctionDocumentation { .mnemonic = "TBC", .comment = "Horizontal Tab Clear" };
 constexpr inline auto VPA = FunctionDocumentation { .mnemonic = "VPA", .comment = "Vertical Position Absolute" };
 constexpr inline auto WINMANIP = FunctionDocumentation { .mnemonic = "WINMANIP", .comment = "Window Manipulation" };
@@ -582,6 +583,7 @@ constexpr inline auto SETMARK     = detail::CSI('>', 0, 0, std::nullopt, 'M', VT
 constexpr inline auto SGR         = detail::CSI(std::nullopt, 0, ArgsMax, std::nullopt, 'm', VTType::VT100, documentation::SGR);
 constexpr inline auto SM          = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'h', VTType::VT100, documentation::SM);
 constexpr inline auto SU          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'S', VTType::VT100, documentation::SU);
+constexpr inline auto UNSCROLL    = detail::CSI(std::nullopt, 0, 1, '+', 'T', VTExtension::Unknown, documentation::UNSCROLL);
 constexpr inline auto TBC         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'g', VTType::VT100, documentation::TBC);
 constexpr inline auto VPA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'd', VTType::VT100, documentation::VPA);
 constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt, 't', VTExtension::XTerm, documentation::WINMANIP);
@@ -748,6 +750,7 @@ constexpr static auto allFunctionsArray() noexcept
         SGRSAVE,
         SM,
         SU,
+        UNSCROLL,
         TBC,
         VPA,
         WINMANIP,

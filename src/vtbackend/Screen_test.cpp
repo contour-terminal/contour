@@ -1836,6 +1836,71 @@ TEST_CASE("ScrollDown", "[screen]")
     }
 }
 
+TEST_CASE("Unscroll", "[screen]")
+{
+    SECTION("with history")
+    {
+        // 5 lines page, 5 lines scrollback capacity
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) }, LineCount(5) };
+        auto& screen = mock.terminal.primaryScreen();
+
+        // Write 8 lines to create 3 lines of history
+        mock.writeToScreen("AAAAA\r\nBBBBB\r\nCCCCC\r\nDDDDD\r\nEEEEE\r\nFFFFF\r\nGGGGG\r\nHHHHH");
+        REQUIRE(screen.historyLineCount() == LineCount(3));
+        REQUIRE("DDDDD\nEEEEE\nFFFFF\nGGGGG\nHHHHH\n" == screen.renderMainPageText());
+
+        // Unscroll 2 lines — should pull 2 most-recent history lines into view
+        screen.unscroll(LineCount(2));
+        CHECK(screen.historyLineCount() == LineCount(1));
+        CHECK("BBBBB\nCCCCC\nDDDDD\nEEEEE\nFFFFF\n" == screen.renderMainPageText());
+    }
+
+    SECTION("partial history")
+    {
+        // 5 lines page, 3 lines scrollback capacity
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) }, LineCount(3) };
+        auto& screen = mock.terminal.primaryScreen();
+
+        // Write 7 lines to create 2 lines of history
+        mock.writeToScreen("AAAAA\r\nBBBBB\r\nCCCCC\r\nDDDDD\r\nEEEEE\r\nFFFFF\r\nGGGGG");
+        REQUIRE(screen.historyLineCount() == LineCount(2));
+        REQUIRE("CCCCC\nDDDDD\nEEEEE\nFFFFF\nGGGGG\n" == screen.renderMainPageText());
+
+        // Unscroll 4 lines — 2 from history + 2 blank
+        screen.unscroll(LineCount(4));
+        CHECK(screen.historyLineCount() == LineCount(0));
+        CHECK("     \n     \nAAAAA\nBBBBB\nCCCCC\n" == screen.renderMainPageText());
+    }
+
+    SECTION("no history")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto& screen = mock.terminal.primaryScreen();
+
+        mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+        REQUIRE(screen.historyLineCount() == LineCount(0));
+        REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+
+        // Unscroll with no history — should behave like regular SD
+        screen.unscroll(LineCount(2));
+        CHECK("     \n     \n12345\n67890\nABCDE\n" == screen.renderMainPageText());
+    }
+
+    SECTION("clamped to page size")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(5) };
+        auto& screen = mock.terminal.primaryScreen();
+
+        mock.writeToScreen("AAAAA\r\nBBBBB\r\nCCCCC\r\nDDDDD\r\nEEEEE\r\nFFFFF");
+        REQUIRE(screen.historyLineCount() == LineCount(3));
+
+        // Unscroll 10 lines — should clamp to page size (3)
+        screen.unscroll(LineCount(10));
+        CHECK(screen.historyLineCount() == LineCount(0));
+        CHECK("AAAAA\nBBBBB\nCCCCC\n" == screen.renderMainPageText());
+    }
+}
+
 TEST_CASE("Sequence.CUU", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };

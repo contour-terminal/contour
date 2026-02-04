@@ -502,6 +502,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     void scrollUp(LineCount n) { scrollUp(n, margin()); }
     void scrollDown(LineCount n) { scrollDown(n, margin()); }
+    void unscroll(LineCount n);
 
     void verifyState() const override;
 

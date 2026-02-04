@@ -811,6 +811,13 @@ void Screen<Cell>::scrollDown(LineCount n, Margin margin)
 }
 
 template <CellConcept Cell>
+void Screen<Cell>::unscroll(LineCount n)
+{
+    _grid.unscroll(n, cursor().graphicsRendition);
+    updateCursorIterator();
+}
+
+template <CellConcept Cell>
 void Screen<Cell>::setCurrentColumn(ColumnOffset n)
 {
     auto const col = _cursor.originMode ? margin().horizontal.from + n : n;
@@ -3662,6 +3669,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         }
         case SCOSC: saveCursor(); break;
         case SD: scrollDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
+        case UNSCROLL: unscroll(seq.param_or<LineCount>(0, LineCount(1))); break;
         case SETMARK:
             // TODO: deprecated. Remove in some future version.
             // Users should migrate to OSC 133.

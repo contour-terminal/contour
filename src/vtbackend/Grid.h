@@ -721,6 +721,12 @@ class Grid
     /// @param margin the margin coordinates to perform the scrolling action into.
     void scrollDown(LineCount n, GraphicsAttributes const& defaultAttributes, Margin const& margin);
 
+    /// Scrolls down by @p n lines, filling new top lines from scrollback history (kitty unscroll).
+    ///
+    /// Lines pulled from history are removed from the scrollback buffer. If fewer than @p n
+    /// history lines are available, the remaining top lines are blank (matching regular SD behavior).
+    void unscroll(LineCount n, GraphicsAttributes const& defaultAttributes);
+
     // Scrolls the data within the margins to the left filling the new space on the right with empty cells.
     void scrollLeft(GraphicsAttributes defaultAttributes, Margin margin) noexcept;
     // }}}
