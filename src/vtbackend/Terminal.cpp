@@ -1419,6 +1419,10 @@ optional<chrono::milliseconds> Terminal::nextRender() const
     if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
         nextWakeup = std::min(nextWakeup, _refreshInterval.value);
 
+    // Momentum scrolling animation scheduling at display refresh rate.
+    if (_scrollMomentum.active && !_scrollMomentum.shouldStop())
+        nextWakeup = std::min(nextWakeup, _refreshInterval.value);
+
     if (nextWakeup == chrono::milliseconds::max())
         return nullopt;
 
@@ -1439,12 +1443,132 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
 
     if (_cursorMotion.active && _cursorMotion.isComplete(_currentTime))
         _cursorMotion.active = false;
+
+    // Apply momentum scrolling each frame.
+    if (_scrollMomentum.active)
+    {
+        auto const dt = chrono::duration<float>(now - _scrollMomentum.lastUpdate).count();
+        if (dt > 0.0f)
+        {
+            auto const result = applySmoothScrollPixelDelta(_scrollMomentum.velocity * dt);
+            _scrollMomentum.velocity *= std::pow(ScrollMomentumState::FrictionDecayPerSecond, dt);
+            _scrollMomentum.lastUpdate = now;
+            if (_scrollMomentum.shouldStop() || result == SmoothScrollResult::Disabled)
+                cancelMomentumScroll();
+        }
+    }
 }
 
 void Terminal::resetSmoothScroll() noexcept
 {
+    cancelMomentumScroll();
     _viewport.resetPixelOffset();
 }
+
+// {{{ VelocityTracker
+
+void Terminal::VelocityTracker::reset() noexcept
+{
+    count = 0;
+    writeIndex = 0;
+}
+
+void Terminal::VelocityTracker::addSample(std::chrono::steady_clock::time_point time,
+                                          float pixelDelta) noexcept
+{
+    samples[writeIndex] = { .time = time, .pixelDelta = pixelDelta };
+    writeIndex = (writeIndex + 1) % MaxSamples;
+    if (count < MaxSamples)
+        ++count;
+}
+
+float Terminal::VelocityTracker::computeVelocity() const noexcept
+{
+    if (count < 2)
+        return 0.0f;
+
+    auto const oldestIndex = (writeIndex + MaxSamples - count) % MaxSamples;
+    auto const newestIndex = (writeIndex + MaxSamples - 1) % MaxSamples;
+
+    auto const dt =
+        std::chrono::duration<float>(samples[newestIndex].time - samples[oldestIndex].time).count();
+    if (dt <= 0.0f)
+        return 0.0f;
+
+    // Sum pixel deltas, excluding the oldest sample.
+    // Each sample's pixelDelta is an incremental scroll since the previous event.
+    // The oldest sample's delta occurred *before* the measurement window [t_oldest, t_newest],
+    // so it must not be counted in the distance traversed during that window.
+    auto totalPixels = 0.0f;
+    for (size_t i = 1; i < count; ++i)
+        totalPixels += samples[(oldestIndex + i) % MaxSamples].pixelDelta;
+
+    return totalPixels / dt;
+}
+
+// }}} VelocityTracker
+
+// {{{ ScrollMomentumState
+
+bool Terminal::ScrollMomentumState::shouldStop() const noexcept
+{
+    return !active || std::abs(velocity) < MinVelocityThreshold;
+}
+
+// }}} ScrollMomentumState
+
+// {{{ Momentum scrolling
+
+void Terminal::handleScrollPhase(ScrollPhase phase,
+                                 float pixelDelta,
+                                 std::chrono::steady_clock::time_point now)
+{
+    if (!_settings.smoothScrolling || !_settings.momentumScrolling)
+        return;
+
+    switch (phase)
+    {
+        case ScrollPhase::Begin:
+            cancelMomentumScroll();
+            _scrollVelocityTracker.reset();
+            break;
+        case ScrollPhase::Update: _scrollVelocityTracker.addSample(now, pixelDelta); break;
+        case ScrollPhase::End: {
+            auto const velocity = _scrollVelocityTracker.computeVelocity();
+            if (std::abs(velocity) >= ScrollMomentumState::StartThreshold)
+            {
+                _scrollMomentum.active = true;
+                _scrollMomentum.velocity = velocity;
+                _scrollMomentum.lastUpdate = now;
+                // Kick-start the render loop so that tick() is called each frame.
+                // Without this, the display idles after the last wheel event and
+                // momentum would only advance on the next unrelated input (e.g. mouse move).
+                breakLoopAndRefreshRenderBuffer();
+            }
+            _scrollVelocityTracker.reset();
+            break;
+        }
+        case ScrollPhase::Momentum:
+            // Discard OS-generated momentum events when our own momentum is active.
+            break;
+        case ScrollPhase::NoPhase:
+            // No phase info (e.g. mouse wheel or X11 without phase support). No-op.
+            break;
+    }
+}
+
+void Terminal::cancelMomentumScroll() noexcept
+{
+    _scrollMomentum.active = false;
+    _scrollMomentum.velocity = 0.0f;
+}
+
+bool Terminal::isMomentumScrollActive() const noexcept
+{
+    return _scrollMomentum.active;
+}
+
+// }}} Momentum scrolling
 
 SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
 {

@@ -76,6 +76,9 @@ struct Settings
     /// Enables pixel-based smooth scrolling instead of line-jump scrolling.
     bool smoothScrolling = true;
 
+    /// Enables momentum (inertia) scrolling for touchpad gestures.
+    bool momentumScrolling = true;
+
     // Size in bytes per PTY Buffer Object.
     //
     // Defaults to 1 MB, that's roughly 10k lines when column count is 100.

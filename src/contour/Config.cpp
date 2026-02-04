@@ -413,6 +413,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "frozen_dec_modes", where.frozenModes);
         loadFromEntry(child, "slow_scrolling_time", where.smoothLineScrolling);
         loadFromEntry(child, "smooth_scrolling", where.smoothScrolling);
+        loadFromEntry(child, "momentum_scrolling", where.momentumScrolling);
         loadFromEntry(child, "terminal_size", where.terminalSize);
         loadFromEntry(child, "history", where.history);
         loadFromEntry(child, "scrollbar", where.scrollbar);

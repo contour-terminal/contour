@@ -129,6 +129,7 @@
           <li>Adds DECARM (DEC mode 8, VT100) to enable/disable keyboard auto-repeat via CSI ? 8 h / CSI ? 8 l</li>
           <li>Adds DECBKM (DEC mode 67, VT340) to toggle Backspace key between BS (0x08) and DEL (0x7F) via CSI ? 67 h / CSI ? 67 l</li>
           <li>Adds kitty's unscroll extension (CSI n + T) to restore scrolled-off content from scrollback history</li>
+          <li>Adds natural momentum scrolling for touchpad gestures with configurable falloff via momentum_scrolling profile setting</li>
         </ul>
       </description>
     </release>

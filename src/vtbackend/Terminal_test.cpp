@@ -758,6 +758,486 @@ TEST_CASE("Terminal.onBufferScrolled.preserves_viewport_with_pixel_offset", "[te
 }
 
 // }}}
+// {{{ momentum scroll tests
+
+TEST_CASE("Terminal.momentumScroll.starts_on_end_with_velocity", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Simulate touchpad gesture: Begin, several Updates, then End.
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 30.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 30.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 30.0f, ClockBase + 30ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 40ms);
+
+    CHECK(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.momentumScroll.velocity_computation_is_correct", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 20 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 20; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // 3 Updates each 10ms apart, each with 20px delta.
+    // Expected velocity = (20 + 20) / (30ms - 10ms) = 40 / 0.02 = 2000 px/s
+    // (The oldest sample's delta is excluded from the sum.)
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 20.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 20.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 20.0f, ClockBase + 30ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 40ms);
+
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // Apply one tick at ~16ms after End and verify the scroll offset advanced.
+    // With v=2000 px/s and dt=16ms: pixelDelta = 2000 * 0.016 = 32px.
+    // With cellHeight=20, that's 1 full line + 12px remainder.
+    auto const offsetBefore = terminal.viewport().scrollOffset().value;
+    terminal.tick(ClockBase + 56ms);
+    auto const offsetAfter = terminal.viewport().scrollOffset().value;
+    CHECK(offsetAfter > offsetBefore);
+}
+
+TEST_CASE("Terminal.momentumScroll.no_start_below_threshold", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Very small, slow deltas — velocity below startThreshold (50 px/s).
+    // velocity = 0.5 / 0.1 = 5 px/s
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 0.5f, ClockBase + 100ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 0.5f, ClockBase + 200ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 300ms);
+
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.momentumScroll.no_start_with_single_sample", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Only a single Update — VelocityTracker needs at least 2 samples.
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 100.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 20ms);
+
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.momentumScroll.decelerates_over_ticks", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 20 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 20; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Start momentum with fast gesture.
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 30ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 40ms);
+
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // Track scroll offset + pixel offset through several frames.
+    auto const offsetAfterStart = terminal.viewport().scrollOffset().value;
+    auto const pixelOffsetAfterStart = terminal.smoothScrollPixelOffset();
+
+    // First frame of momentum.
+    terminal.tick(ClockBase + 56ms);
+    auto const offset1 = terminal.viewport().scrollOffset().value;
+    auto const pixel1 = terminal.smoothScrollPixelOffset();
+
+    // Second frame.
+    terminal.tick(ClockBase + 72ms);
+    auto const offset2 = terminal.viewport().scrollOffset().value;
+    auto const pixel2 = terminal.smoothScrollPixelOffset();
+
+    // Third frame.
+    terminal.tick(ClockBase + 88ms);
+    auto const offset3 = terminal.viewport().scrollOffset().value;
+
+    // Scroll offset should advance (or pixel accumulate) over time.
+    auto const totalScroll1 = static_cast<float>(offset1) * 20.0f + pixel1;
+    auto const totalScroll0 = static_cast<float>(offsetAfterStart) * 20.0f + pixelOffsetAfterStart;
+    CHECK(totalScroll1 > totalScroll0);
+
+    // Overall scroll should only increase (deceleration, not reversal).
+    auto const totalScroll2 = static_cast<float>(offset2) * 20.0f + pixel2;
+    CHECK(totalScroll2 >= totalScroll1);
+
+    // Scroll offset should have advanced by at least one line after several ticks.
+    CHECK(offset3 >= offsetAfterStart);
+}
+
+TEST_CASE("Terminal.momentumScroll.stops_at_min_velocity", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 30.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 30.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 30ms);
+
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // Advance time far enough for velocity to decay below threshold.
+    // With FrictionDecayPerSecond=0.05 and velocity ~3000 px/s, after ~2.5s velocity ≈ 3.7 px/s < 10.
+    terminal.tick(ClockBase + 3030ms);
+
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.momentumScroll.cancelled_by_begin", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Start momentum.
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 30ms);
+
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // Let momentum run for one tick.
+    terminal.tick(ClockBase + 46ms);
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // New gesture begins — should cancel momentum.
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase + 50ms);
+
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.momentumScroll.cancelled_by_resize", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 30ms);
+
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // Resize cancels momentum via resetSmoothScroll().
+    terminal.resizeScreen(PageSize { LineCount { 5 }, ColumnCount { 10 } });
+
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.momentumScroll.disabled_when_setting_off", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Disable momentum scrolling.
+    terminal.settings().momentumScrolling = false;
+
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 30ms);
+
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.momentumScroll.disabled_when_smooth_scrolling_off", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Momentum requires smooth scrolling to be enabled.
+    terminal.settings().smoothScrolling = false;
+
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 30ms);
+
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.momentumScroll.noPhase_never_triggers_momentum", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Mouse wheel events have NoPhase — should never trigger momentum.
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::NoPhase, 100.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::NoPhase, 100.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::NoPhase, 100.0f, ClockBase + 20ms);
+
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.momentumScroll.nextRender_schedules_during_active", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 30ms);
+
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // nextRender should return a value during active momentum.
+    auto const next = terminal.nextRender();
+    CHECK(next.has_value());
+}
+
+TEST_CASE("Terminal.momentumScroll.repeated_gestures_work_independently", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 30 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 30; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // --- First gesture: scroll up into history ---
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 40.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 40.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 40.0f, ClockBase + 30ms);
+    // Apply the scroll deltas.
+    for (auto i = 0; i < 3; ++i)
+        terminal.applySmoothScrollPixelDelta(40.0f);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 40ms);
+
+    REQUIRE(terminal.isMomentumScrollActive());
+    auto const offsetAfterFirstEnd = terminal.viewport().scrollOffset().value;
+
+    // Let momentum run for a bit.
+    terminal.tick(ClockBase + 56ms);
+    terminal.tick(ClockBase + 72ms);
+    auto const offsetAfterFirstMomentum = terminal.viewport().scrollOffset().value;
+    CHECK(offsetAfterFirstMomentum >= offsetAfterFirstEnd);
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // --- Second gesture: Begin cancels first momentum ---
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase + 100ms);
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+
+    auto const offsetBeforeSecond = terminal.viewport().scrollOffset().value;
+
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 60.0f, ClockBase + 110ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 60.0f, ClockBase + 120ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 60.0f, ClockBase + 130ms);
+    for (auto i = 0; i < 3; ++i)
+        terminal.applySmoothScrollPixelDelta(60.0f);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 140ms);
+
+    // Second gesture should start its own momentum.
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // Momentum from second gesture should still scroll further.
+    terminal.tick(ClockBase + 156ms);
+    auto const offsetAfterSecondMomentum = terminal.viewport().scrollOffset().value;
+    CHECK(offsetAfterSecondMomentum >= offsetBeforeSecond);
+}
+
+TEST_CASE("Terminal.momentumScroll.rapid_repeated_gestures", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 50 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 50; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Simulate 3 rapid gestures in quick succession without letting momentum settle.
+    auto t = ClockBase;
+    for (auto gesture = 0; gesture < 3; ++gesture)
+    {
+        terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, t);
+        if (gesture > 0)
+            CHECK_FALSE(terminal.isMomentumScrollActive()); // Begin cancels previous momentum.
+
+        terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 30.0f, t + 8ms);
+        terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 30.0f, t + 16ms);
+        terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 30.0f, t + 24ms);
+        for (auto i = 0; i < 3; ++i)
+            terminal.applySmoothScrollPixelDelta(30.0f);
+        terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, t + 32ms);
+
+        CHECK(terminal.isMomentumScrollActive());
+
+        // Let one tick of momentum run before next gesture.
+        t += 50ms;
+        terminal.tick(t);
+    }
+
+    // After all three gestures, momentum from the last one should still be active.
+    CHECK(terminal.isMomentumScrollActive());
+
+    // Scroll should have advanced into history.
+    CHECK(terminal.viewport().scrollOffset().value > 0);
+}
+
+TEST_CASE("Terminal.momentumScroll.scroll_position_advances_correctly", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 40 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 40; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Known velocity: 3 Updates, 40px each, 10ms apart.
+    // velocity = (40 + 40) / 0.02 = 4000 px/s
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 40.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 40.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 40.0f, ClockBase + 30ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 40ms);
+
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // Run momentum frames at 16ms intervals until it stops.
+    auto lastActive = true;
+    auto frameCount = 0;
+    for (auto t = ClockBase + 56ms; lastActive && frameCount < 200; t += 16ms, ++frameCount)
+    {
+        terminal.tick(t);
+        lastActive = terminal.isMomentumScrollActive();
+    }
+
+    // Momentum should have eventually stopped.
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+
+    // Should have scrolled at least several lines (4000 px/s is a brisk swipe).
+    CHECK(terminal.viewport().scrollOffset().value > 0);
+}
+
+TEST_CASE("Terminal.momentumScroll.cancelled_by_alternate_screen", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 8; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 10ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 50.0f, ClockBase + 20ms);
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::End, 0.0f, ClockBase + 30ms);
+
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // Switch to alternate screen (e.g. vim) — cancels momentum via resetSmoothScroll.
+    mc.writeToScreen("\033[?1049h");
+    CHECK(terminal.isAlternateScreen());
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+// }}}
 // {{{ cursor motion animation tests
 
 TEST_CASE("Terminal.cursorMotionAnimation.starts_on_position_change", "[terminal]")

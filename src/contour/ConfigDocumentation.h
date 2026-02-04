@@ -429,6 +429,15 @@ constexpr StringLiteral SmoothScrollingConfig {
     "\n"
 };
 
+constexpr StringLiteral MomentumScrollingConfig {
+    "{comment} Enables momentum (inertia) scrolling for touchpad gestures.\n"
+    "{comment} When enabled, lifting your finger from the touchpad after a swipe\n"
+    "{comment} will cause the terminal to continue scrolling with decelerating velocity.\n"
+    "{comment} This only affects touchpad gestures; mouse wheel scrolling is unaffected.\n"
+    "momentum_scrolling: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral HighlightTimeoutConfig {
     "{comment} Time duration in milliseconds for which yank highlight is shown.\n"
     "vi_mode_highlight_timeout: {}\n"
@@ -1832,6 +1841,20 @@ constexpr StringLiteral SmoothScrollingWeb {
     "\n"
 };
 
+constexpr StringLiteral MomentumScrollingWeb {
+    "Enables momentum (inertia) scrolling for touchpad gestures.\n"
+    "When enabled, lifting your finger from the touchpad after a swipe will cause\n"
+    "the terminal to continue scrolling with decelerating velocity, mimicking\n"
+    "the natural scrolling behaviour of macOS and iOS.\n"
+    "This only affects touchpad gestures; mouse wheel scrolling is unaffected.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    momentum_scrolling: true\n"
+    "```\n"
+    "\n"
+};
+
 using Shell = DocumentationEntry<ShellConfig, ShellWeb>;
 using EscapeSandbox = DocumentationEntry<EscapeSandboxConfig, EscapeSandboxWeb>;
 using SshHostConfig = DocumentationEntry<SshHostConfigConfig, SshHostConfigWeb>;
@@ -1967,6 +1990,7 @@ using ModeNormal = DocumentationEntry<ModeNormalConfig, ModeNormalWeb>;
 using ModeVisual = DocumentationEntry<ModeVisualConfig, ModeVisualWeb>;
 using SmoothLineScrolling = DocumentationEntry<SmoothLineScrollingConfig, SmoothLineScrollingWeb>;
 using SmoothScrolling = DocumentationEntry<SmoothScrollingConfig, SmoothScrollingWeb>;
+using MomentumScrolling = DocumentationEntry<MomentumScrollingConfig, MomentumScrollingWeb>;
 using HighlightTimeout = DocumentationEntry<HighlightTimeoutConfig, HighlightTimeoutWeb>;
 using HighlightDoubleClickerWord =
     DocumentationEntry<HighlightDoubleClickerWordConfig, HighlightDoubleClickerWordWeb>;
