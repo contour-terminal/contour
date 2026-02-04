@@ -560,6 +560,7 @@ void InputGenerator::reset()
     _mouseProtocol = std::nullopt;
     _mouseTransport = MouseTransport::Default;
     _mouseWheelMode = MouseWheelMode::Default;
+    _modifyOtherKeys = 0;
 
     // _pendingSequence = {};
     // _currentMousePosition = {0, 0}; // current mouse position
@@ -595,6 +596,21 @@ bool InputGenerator::generate(char32_t characterEvent,
                               Modifiers modifiers,
                               KeyboardEventType eventType)
 {
+    // modifyOtherKeys mode 2: emit CSI 27 ; modifier ; codepoint ~ for modified keys.
+    // This takes precedence over the CSI u keyboard protocol but only when no CSI u flags are active.
+    if (_modifyOtherKeys == 2 && !_keyboardInputGenerator.flags().any()
+        && eventType != KeyboardEventType::Release && modifiers.without(Modifier::Shift).any()
+        && characterEvent < 0x110000)
+    {
+        auto const mod = makeVirtualTerminalParam(modifiers);
+        append(std::format("\033[27;{};{}~", mod, static_cast<uint32_t>(characterEvent)));
+        inputLog()("Sending modifyOtherKeys mode 2 {} \"{}\" {}.",
+                   modifiers,
+                   crispy::escape(unicode::convert_to<char>(characterEvent)),
+                   eventType);
+        return true;
+    }
+
     bool const success =
         _keyboardInputGenerator.generateChar(characterEvent, physicalKey, modifiers, eventType);
 

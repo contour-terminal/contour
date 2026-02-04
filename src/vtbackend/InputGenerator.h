@@ -443,6 +443,12 @@ class InputGenerator
     void setPassiveMouseTracking(bool v) noexcept { _passiveMouseTracking = v; }
     [[nodiscard]] bool passiveMouseTracking() const noexcept { return _passiveMouseTracking; }
 
+    /// Sets the modifyOtherKeys mode (0 = disabled, 1 = mode 1, 2 = mode 2).
+    void setModifyOtherKeys(int mode) noexcept { _modifyOtherKeys = mode; }
+
+    /// @returns the current modifyOtherKeys mode.
+    [[nodiscard]] int modifyOtherKeys() const noexcept { return _modifyOtherKeys; }
+
     bool generate(char32_t characterEvent,
                   uint32_t physicalKey,
                   Modifiers modifier,
@@ -551,6 +557,7 @@ class InputGenerator
     bool _passiveMouseTracking = false;
     MouseTransport _mouseTransport = MouseTransport::Default;
     MouseWheelMode _mouseWheelMode = MouseWheelMode::Default;
+    int _modifyOtherKeys = 0;
     Sequence _pendingSequence {};
     int _consumedBytes {};
 

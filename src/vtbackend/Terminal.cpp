@@ -2136,6 +2136,16 @@ void Terminal::setBracketedPaste(bool enabled)
     _inputGenerator.setBracketedPaste(enabled);
 }
 
+void Terminal::setModifyOtherKeys(int mode)
+{
+    _inputGenerator.setModifyOtherKeys(mode);
+}
+
+int Terminal::modifyOtherKeys() const noexcept
+{
+    return _inputGenerator.modifyOtherKeys();
+}
+
 void Terminal::setCursorStyle(CursorDisplay display, CursorShape shape)
 {
     _settings.cursorDisplay = display;
@@ -2179,6 +2189,12 @@ void Terminal::setWindowTitle(string_view title)
 std::string const& Terminal::windowTitle() const noexcept
 {
     return _windowTitle;
+}
+
+void Terminal::setTabName(string_view title)
+{
+    _tabName = title;
+    _eventListener.setTabName(title);
 }
 
 void Terminal::requestTabName()

@@ -502,6 +502,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     void scrollUp(LineCount n) { scrollUp(n, margin()); }
     void scrollDown(LineCount n) { scrollDown(n, margin()); }
+    void scrollLeft(ColumnCount n);
+    void scrollRight(ColumnCount n);
     void unscroll(LineCount n);
 
     void verifyState() const override;
@@ -676,6 +678,12 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 #endif
 
     std::string_view _name;
+
+    /// Controls whether DECCARA/DECRARA operate on the full rectangle (true) or stream (false).
+    bool _rectangularAttributeMode = true;
+
+    /// XTCHECKSUM extension flags for DECRQCRA checksum computation.
+    int _checksumExtension = 0;
 };
 
 template <CellConcept Cell>

@@ -163,6 +163,17 @@ constexpr inline auto SETICON = FunctionDocumentation { .mnemonic = "SETICON", .
 constexpr inline auto SETTITLE = FunctionDocumentation { .mnemonic = "SETTITLE", .comment = "Change Window & Icon Title" };
 constexpr inline auto SETWINTITLE = FunctionDocumentation { .mnemonic = "SETWINTITLE", .comment = "Change Window Title" };
 constexpr inline auto SETXPROP = FunctionDocumentation { .mnemonic = "SETXPROP", .comment = "Set X11 property" };
+constexpr inline auto SETTABNAME = FunctionDocumentation { .mnemonic = "SETTABNAME", .comment = "Set Session/Tab Name" };
+constexpr inline auto CONEMU = FunctionDocumentation { .mnemonic = "CONEMU", .comment = "ConEmu-style notification or progress indicator" };
+
+// CSI additions
+constexpr inline auto DECRARA = FunctionDocumentation { .mnemonic = "DECRARA", .comment = "Reverse Attributes in Rectangular Area" };
+constexpr inline auto DECSACE = FunctionDocumentation { .mnemonic = "DECSACE", .comment = "Select Attribute Change Extent" };
+constexpr inline auto DECRQCRA = FunctionDocumentation { .mnemonic = "DECRQCRA", .comment = "Request Checksum of Rectangular Area" };
+constexpr inline auto XTCHECKSUM = FunctionDocumentation { .mnemonic = "XTCHECKSUM", .comment = "Select checksum extension" };
+constexpr inline auto SL = FunctionDocumentation { .mnemonic = "SL", .comment = "Scroll Left" };
+constexpr inline auto SR = FunctionDocumentation { .mnemonic = "SR", .comment = "Scroll Right" };
+constexpr inline auto MODIFYOTHERKEYS = FunctionDocumentation { .mnemonic = "MODIFYOTHERKEYS", .comment = "Modify Other Keys mode" };
 
 } // namespace documentation
 
@@ -545,6 +556,9 @@ constexpr inline auto DECERA      = detail::CSI(std::nullopt, 0, 4, '$', 'z', VT
 constexpr inline auto DECFRA      = detail::CSI(std::nullopt, 0, 5, '$', 'x', VTType::VT420, documentation::DECFRA);
 constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', VTType::VT420, documentation::DECIC);
 constexpr inline auto DECPS       = detail::CSI(std::nullopt, 3, 18, ',', '~', VTType::VT520, documentation::DECPS);
+constexpr inline auto DECRARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 't', VTType::VT420, documentation::DECRARA);
+constexpr inline auto DECRQCRA    = detail::CSI(std::nullopt, 2, 6, '$', 'y', VTType::VT420, documentation::DECRQCRA);
+constexpr inline auto DECSACE     = detail::CSI(std::nullopt, 0, 1, '*', 'x', VTType::VT420, documentation::DECSACE);
 constexpr inline auto DECRM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'l', VTType::VT100, documentation::DECRM);
 constexpr inline auto DECRQM      = detail::CSI('?', 1, 1, '$', 'p', VTType::VT100, documentation::DECRQM);
 constexpr inline auto DECRQM_ANSI = detail::CSI(std::nullopt, 1, 1, '$', 'p', VTType::VT100, documentation::DECRQM_ANSI);// NOLINT
@@ -583,6 +597,8 @@ constexpr inline auto SETMARK     = detail::CSI('>', 0, 0, std::nullopt, 'M', VT
 constexpr inline auto SGR         = detail::CSI(std::nullopt, 0, ArgsMax, std::nullopt, 'm', VTType::VT100, documentation::SGR);
 constexpr inline auto SM          = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'h', VTType::VT100, documentation::SM);
 constexpr inline auto SU          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'S', VTType::VT100, documentation::SU);
+constexpr inline auto SL          = detail::CSI(std::nullopt, 0, 1, ' ', '@', VTType::VT420, documentation::SL);
+constexpr inline auto SR          = detail::CSI(std::nullopt, 0, 1, ' ', 'A', VTType::VT420, documentation::SR);
 constexpr inline auto UNSCROLL    = detail::CSI(std::nullopt, 0, 1, '+', 'T', VTExtension::Unknown, documentation::UNSCROLL);
 constexpr inline auto TBC         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'g', VTType::VT100, documentation::TBC);
 constexpr inline auto VPA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'd', VTType::VT100, documentation::VPA);
@@ -596,8 +612,10 @@ constexpr inline auto XTREPORTCOLORS = detail::CSI(std::nullopt, 0, 0, '#', 'R',
 constexpr inline auto XTRESTORE   = detail::CSI('?', 0, ArgsMax, std::nullopt, 'r', VTExtension::XTerm, documentation::XTRESTORE);
 constexpr inline auto XTSAVE      = detail::CSI('?', 0, ArgsMax, std::nullopt, 's', VTExtension::XTerm, documentation::XTSAVE);
 constexpr inline auto XTSHIFTESCAPE=detail::CSI('>', 0, 1, std::nullopt, 's', VTExtension::XTerm, documentation::XTSHIFTESCAPE);
+constexpr inline auto XTCHECKSUM  = detail::CSI(std::nullopt, 1, 1, '#', 'y', VTExtension::XTerm, documentation::XTCHECKSUM);
 constexpr inline auto XTSMGRAPHICS= detail::CSI('?', 2, 4, std::nullopt, 'S', VTExtension::XTerm, documentation::XTSMGRAPHICS);
 constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VTExtension::XTerm, documentation::XTVERSION);
+constexpr inline auto MODIFYOTHERKEYS = detail::CSI('>', 0, 1, std::nullopt, 'm', VTExtension::XTerm, documentation::MODIFYOTHERKEYS);
 
 // DCS functions
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
@@ -614,8 +632,10 @@ constexpr inline auto COLORMOUSEBG      = detail::OSC(14, VTExtension::XTerm, do
 constexpr inline auto COLORMOUSEFG      = detail::OSC(13, VTExtension::XTerm, documentation::COLORMOUSEFG);
 constexpr inline auto COLORSPECIAL      = detail::OSC(106, VTExtension::XTerm, documentation::COLORSPECIAL);
 constexpr inline auto DUMPSTATE         = detail::OSC(888, VTExtension::Contour, documentation::DUMPSTATE);
+constexpr inline auto CONEMU            = detail::OSC(9, VTExtension::Unknown, documentation::CONEMU);
 constexpr inline auto HYPERLINK         = detail::OSC(8, VTExtension::Unknown, documentation::HYPERLINK);
 constexpr inline auto NOTIFY            = detail::OSC(777, VTExtension::XTerm, documentation::NOTIFY);
+constexpr inline auto SETTABNAME        = detail::OSC(30, VTExtension::XTerm, documentation::SETTABNAME);
 constexpr inline auto RCOLORBG          = detail::OSC(111, VTExtension::XTerm, documentation::RCOLORBG);
 constexpr inline auto RCOLORCURSOR      = detail::OSC(112, VTExtension::XTerm, documentation::RCOLORCURSOR);
 constexpr inline auto RCOLORFG          = detail::OSC(110, VTExtension::XTerm, documentation::RCOLORFG);
@@ -702,6 +722,10 @@ constexpr static auto allFunctionsArray() noexcept
         DECERA,
         DECFRA,
         DECIC,
+        DECPS,
+        DECRARA,
+        DECRQCRA,
+        DECSACE,
         DECSCA,
         DECSED,
         DECSERA,
@@ -710,7 +734,6 @@ constexpr static auto allFunctionsArray() noexcept
         DSR,
         XTRESTORE,
         XTSAVE,
-        DECPS,
         CSIUENTER,
         CSIUQUERY,
         CSIUENHCE,
@@ -748,7 +771,9 @@ constexpr static auto allFunctionsArray() noexcept
         SGR,
         SGRRESTORE,
         SGRSAVE,
+        SL,
         SM,
+        SR,
         SU,
         UNSCROLL,
         TBC,
@@ -757,9 +782,11 @@ constexpr static auto allFunctionsArray() noexcept
         XTPOPCOLORS,
         XTPUSHCOLORS,
         XTREPORTCOLORS,
+        XTCHECKSUM,
         XTSHIFTESCAPE,
         XTSMGRAPHICS,
         XTVERSION,
+        MODIFYOTHERKEYS,
 
         // DCS
         STP,
@@ -774,6 +801,7 @@ constexpr static auto allFunctionsArray() noexcept
         SETXPROP,
         SETCOLPAL,
         SETCWD,
+        CONEMU,
         HYPERLINK,
         COLORFG,
         COLORBG,
@@ -793,6 +821,7 @@ constexpr static auto allFunctionsArray() noexcept
         RCOLORMOUSEBG,
         RCOLORHIGHLIGHTFG,
         RCOLORHIGHLIGHTBG,
+        SETTABNAME,
         NOTIFY,
         DUMPSTATE,
     };

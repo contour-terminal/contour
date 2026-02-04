@@ -920,6 +920,8 @@ class Terminal
     void setMouseProtocol(MouseProtocol protocol, bool enabled);
     void setMouseTransport(MouseTransport transport);
     void setMouseWheelMode(InputGenerator::MouseWheelMode mode);
+    void setModifyOtherKeys(int mode);
+    [[nodiscard]] int modifyOtherKeys() const noexcept;
     void setWindowTitle(std::string_view title);
     void setTabName(std::string_view title);
     [[nodiscard]] std::string const& windowTitle() const noexcept;
