@@ -8,6 +8,8 @@
 #include <fontconfig/fontconfig.h>
 
 #include <algorithm>
+#include <chrono>
+#include <format>
 #include <ranges>
 #include <string_view>
 #include <variant>
@@ -136,8 +138,14 @@ struct fontconfig_locator::private_tag
 
     private_tag()
     {
+        auto const start = std::chrono::steady_clock::now();
         FcInit();
-        ftConfig = FcInitLoadConfigAndFonts(); // Most convenient of all the alternatives
+        ftConfig = FcInitLoadConfigAndFonts();
+        auto const elapsed = std::chrono::steady_clock::now() - start;
+        auto const ms =
+            static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count())
+            / 1000.0;
+        locatorLog()("FcInitLoadConfigAndFonts: {:.1f} ms", ms);
     }
 
     ~private_tag()
