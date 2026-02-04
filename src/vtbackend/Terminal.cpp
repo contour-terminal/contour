@@ -2271,6 +2271,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             break;
         case DECMode::ApplicationKeypad: setApplicationkeypadMode(enable); break;
         case DECMode::AutoRepeat: break;
+        case DECMode::BackarrowKey: _inputGenerator.setBackarrowKeyMode(enable); break;
         default: break;
     }
 
@@ -2342,6 +2343,7 @@ void Terminal::softReset()
 
     setMode(DECMode::ApplicationKeypad, false); // DECNKM
     setMode(DECMode::AutoRepeat, true);         // DECARM
+    setMode(DECMode::BackarrowKey, false);      // DECBKM
     // TODO: DECSCA (Select character attribute)
     // TODO: DECNRCM (National replacement character set)
     // TODO: GL, GR (G0, G1, G2, G3)
@@ -3092,6 +3094,7 @@ std::string to_string(DECMode mode)
         case DECMode::UseAlternateScreen: return "UseAlternateScreen";
         case DECMode::ApplicationKeypad: return "ApplicationKeypad";
         case DECMode::AutoRepeat: return "AutoRepeat";
+        case DECMode::BackarrowKey: return "BackarrowKey";
         case DECMode::BracketedPaste: return "BracketedPaste";
         case DECMode::FocusTracking: return "FocusTracking";
         case DECMode::NoSixelScrolling: return "NoSixelScrolling";

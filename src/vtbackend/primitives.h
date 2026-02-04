@@ -637,6 +637,12 @@ enum class DECMode : std::uint16_t
     /// When reset, keyboard auto-repeat is disabled.
     AutoRepeat = 28,
 
+    /// DECBKM — Backarrow Key Mode (VT340, VT420).
+    ///
+    /// When set, the Backspace key sends BS (0x08).
+    /// When reset (default), the Backspace key sends DEL (0x7F).
+    BackarrowKey = 29,
+
     /**
      * DECOM - Origin Mode.
      *
@@ -818,6 +824,7 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::DebugLogging: return 46;
         case DECMode::UseAlternateScreen: return 47;
         case DECMode::ApplicationKeypad: return 66;
+        case DECMode::BackarrowKey: return 67;
         case DECMode::LeftRightMargin: return 69;
         case DECMode::MouseProtocolNormalTracking: return 1000;
         case DECMode::MouseProtocolHighlightTracking: return 1001;
@@ -873,8 +880,7 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         case 46: return DECMode::DebugLogging;
         case 47: return DECMode::UseAlternateScreen;
         case 66: return DECMode::ApplicationKeypad;
-        // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the
-        // backarrowKey resource to "true".
+        case 67: return DECMode::BackarrowKey;
         case 69: return DECMode::LeftRightMargin;
         case 80: return DECMode::NoSixelScrolling;
         case 1000: return DECMode::MouseProtocolNormalTracking;

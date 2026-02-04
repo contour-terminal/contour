@@ -263,6 +263,13 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
         _numpadKeysMode = enable ? KeyMode::Application : KeyMode::Normal;
     }
 
+    /// Enables or disables DECBKM (Backarrow Key Mode).
+    ///
+    /// When enabled, the Backspace key sends BS (0x08).
+    /// When disabled (default), the Backspace key sends DEL (0x7F).
+    void setBackarrowKeyMode(bool enable) { _backarrowKey = enable; }
+    [[nodiscard]] bool backarrowKey() const noexcept { return _backarrowKey; }
+
     [[nodiscard]] std::string_view peek() const noexcept { return std::string_view(_pendingSequence); }
 
     [[nodiscard]] std::string take() noexcept
@@ -276,6 +283,7 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     {
         _cursorKeysMode = KeyMode::Normal;
         _numpadKeysMode = KeyMode::Normal;
+        _backarrowKey = false;
     }
 
   protected:
@@ -305,6 +313,7 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
 
     KeyMode _cursorKeysMode = KeyMode::Normal;
     KeyMode _numpadKeysMode = KeyMode::Normal;
+    bool _backarrowKey = false;
     std::string _pendingSequence {};
 };
 
@@ -387,6 +396,8 @@ class InputGenerator
     void setNumpadKeysMode(KeyMode mode);
 
     void setApplicationKeypadMode(bool enable);
+
+    void setBackarrowKeyMode(bool enable);
 
     [[nodiscard]] bool normalCursorKeys() const noexcept
     {

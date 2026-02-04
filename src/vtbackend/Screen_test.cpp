@@ -2703,6 +2703,36 @@ TEST_CASE("DECARM", "[screen]")
     }
 }
 
+TEST_CASE("DECBKM", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+
+    // Backarrow key mode should be disabled by default (VT340/VT420 spec)
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::BackarrowKey));
+
+    // Enable backarrow key mode via DECSM 67
+    mock.writeToScreen(DECSM(67));
+    CHECK(mock.terminal.isModeEnabled(DECMode::BackarrowKey));
+
+    // Disable via DECRM 67
+    mock.writeToScreen(DECRM(67));
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::BackarrowKey));
+
+    SECTION("DECRQM reports set when enabled")
+    {
+        mock.writeToScreen(DECSM(67));
+        mock.writeToScreen(DECRQM(67));
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[?67;1$y"));
+    }
+
+    SECTION("DECRQM reports reset when disabled")
+    {
+        mock.writeToScreen(DECRM(67));
+        mock.writeToScreen(DECRQM(67));
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[?67;2$y"));
+    }
+}
+
 TEST_CASE("peek into history", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) }, LineCount { 5 } };

@@ -252,4 +252,35 @@ TEST_CASE("InputGenerator.DECNKM", "[terminal,input]")
     CHECK(escape(input.peek()) == escape("5"sv));
 }
 
+TEST_CASE("InputGenerator.DECBKM.Backspace", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+
+    // Default (DECBKM reset): Backspace sends DEL (0x7F)
+    input.generate(Key::Backspace, Modifiers {}, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\x7F"sv));
+    input.consume(static_cast<int>(input.peek().size()));
+
+    // Default (DECBKM reset): Ctrl+Backspace sends BS (0x08)
+    input.generate(Key::Backspace, Modifier::Control, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\x08"sv));
+    input.consume(static_cast<int>(input.peek().size()));
+
+    // Enable DECBKM: Backspace sends BS (0x08)
+    input.setBackarrowKeyMode(true);
+    input.generate(Key::Backspace, Modifiers {}, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\x08"sv));
+    input.consume(static_cast<int>(input.peek().size()));
+
+    // Enable DECBKM: Ctrl+Backspace sends DEL (0x7F)
+    input.generate(Key::Backspace, Modifier::Control, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\x7F"sv));
+    input.consume(static_cast<int>(input.peek().size()));
+
+    // Disable DECBKM: Backspace reverts to DEL (0x7F)
+    input.setBackarrowKeyMode(false);
+    input.generate(Key::Backspace, Modifiers {}, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\x7F"sv));
+}
+
 // }}}

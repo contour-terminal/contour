@@ -54,15 +54,15 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
         // NB: There are other modes in xterm to send Alt+Key options or even send ESC on Meta key instead.
         append("\033");
 
-    // Well accepted hack to distinguish between Backspace nad Ctrl+Backspace,
-    // - Backspace is emitting 0x7f,
-    // - Ctrl+Backspace is emitting 0x08
+    // Well accepted hack to distinguish between Backspace and Ctrl+Backspace.
+    // DECBKM (Backarrow Key Mode) swaps the default byte:
+    //   DECBKM reset (default): Backspace → DEL (0x7F), Ctrl+Backspace → BS (0x08)
+    //   DECBKM set:             Backspace → BS  (0x08), Ctrl+Backspace → DEL (0x7F)
     if (characterEvent == 0x08)
     {
-        if (!modifiers.contains(Modifier::Control))
-            append("\x7f");
-        else
-            append("\x08");
+        auto const hasCtrl = modifiers.contains(Modifier::Control);
+        auto const sendBS = _backarrowKey ? !hasCtrl : hasCtrl;
+        append(sendBS ? "\x08" : "\x7f");
         return true;
     }
 
@@ -221,10 +221,13 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
         case Key::Enter: append(select(modifiers, { .std = "\r" })); break;
         case Key::Tab: generateChar('\t', 0, modifiers, eventType); break;
         case Key::Backspace:
-            // Well accepted hack to distinguish between Backspace nad Ctrl+Backspace,
-            // - Backspace is emitting 0x7f,
-            // - Ctrl+Backspace is emitting 0x08
-            append(select(modifiers, { .std = modifiers & Modifier::Control ? "\x08" : "\x7F" })); break;
+        {
+            // DECBKM swaps the default byte sent by Backspace (see generateChar for details).
+            auto const hasCtrl = static_cast<bool>(modifiers & Modifier::Control);
+            auto const sendBS = _backarrowKey ? !hasCtrl : hasCtrl;
+            append(select(modifiers, { .std = sendBS ? "\x08" : "\x7F" }));
+            break;
+        }
         case Key::UpArrow: append(select(modifiers, { .std = CSI "A", .mods = CSI "1;{}A", .appCursor = SS3 "A" })); break;
         case Key::DownArrow: append(select(modifiers, { .std = CSI "B", .mods = CSI "1;{}B", .appCursor = SS3 "B" })); break;
         case Key::RightArrow: append(select(modifiers, { .std = CSI "C", .mods = CSI "1;{}C", .appCursor = SS3 "C" })); break;
@@ -579,6 +582,12 @@ void InputGenerator::setApplicationKeypadMode(bool enable)
 {
     _keyboardInputGenerator.setApplicationKeypadMode(enable);
     inputLog()("set application keypad mode: {}", enable);
+}
+
+void InputGenerator::setBackarrowKeyMode(bool enable)
+{
+    _keyboardInputGenerator.setBackarrowKeyMode(enable);
+    inputLog()("set backarrow key mode: {}", enable);
 }
 
 bool InputGenerator::generate(char32_t characterEvent,
