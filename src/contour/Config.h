@@ -379,6 +379,7 @@ const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDesc
     .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
     .fontLocator = vtrasterizer::FontLocatorEngine::Native,
     .builtinBoxDrawing = true,
+    .maxFallbackCount = 16,
 };
 
 struct TerminalProfile
@@ -1163,6 +1164,7 @@ struct Writer
                       v.fontLocator,
                       v.textShapingEngine,
                       v.builtinBoxDrawing,
+                      v.maxFallbackCount,
                       v.renderMode,
                       "true",
                       v.regular.familyName,

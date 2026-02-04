@@ -196,10 +196,26 @@ struct font_description
     [[nodiscard]] static font_description parse(std::string_view pattern);
 };
 
+inline bool operator==(font_fallback_none const&, font_fallback_none const&) noexcept
+{
+    return true;
+}
+
+inline bool operator==(font_fallback_list const& a, font_fallback_list const& b) noexcept
+{
+    return a.fallbackFonts == b.fallbackFonts;
+}
+
+inline bool operator==(font_feature const& a, font_feature const& b) noexcept
+{
+    return a.name == b.name && a.enabled == b.enabled;
+}
+
 inline bool operator==(font_description const& a, font_description const& b)
 {
     return a.familyName == b.familyName && a.weight == b.weight && a.slant == b.slant
-           && a.spacing == b.spacing && a.strictSpacing == b.strictSpacing;
+           && a.spacing == b.spacing && a.strictSpacing == b.strictSpacing && a.features == b.features
+           && a.fontFallback == b.fontFallback;
 }
 
 inline bool operator!=(font_description const& a, font_description const& b)
@@ -330,9 +346,18 @@ struct hash<text::font_description>
     std::size_t operator()(text::font_description const& fd) const noexcept
     {
         auto fnv = crispy::fnv<char>();
-        return size_t(
-            fnv(fnv(fnv(fnv(fnv(fd.familyName), char(fd.weight)), char(fd.slant)), char(fd.spacing)),
-                char(fd.strictSpacing)));
+        auto h = fnv(fnv(fnv(fnv(fnv(fd.familyName), char(fd.weight)), char(fd.slant)), char(fd.spacing)),
+                     char(fd.strictSpacing));
+        // Include fontFallback variant index and content in the hash
+        h = fnv(h, char(fd.fontFallback.index()));
+        if (auto const* fallbackList = std::get_if<text::font_fallback_list>(&fd.fontFallback))
+            for (auto const& name: fallbackList->fallbackFonts)
+                h = fnv(h, name);
+        // Include features in the hash
+        for (auto const& feature: fd.features)
+            h = fnv(fnv(h, std::string_view(feature.name.data(), feature.name.size())),
+                    char(feature.enabled));
+        return size_t(h);
     }
 };
 } // namespace std

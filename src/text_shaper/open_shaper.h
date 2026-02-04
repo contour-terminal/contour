@@ -26,6 +26,8 @@ class open_shaper: public shaper
 
     void clear_cache() override;
 
+    void set_font_fallback_limit(int limit) override;
+
     [[nodiscard]] std::optional<font_key> load_font(font_description const& description,
                                                     font_size size) override;
 

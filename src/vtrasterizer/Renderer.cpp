@@ -126,9 +126,13 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _atlasDirectMapping { atlasDirectMapping },
     //.
     _fontDescriptions { std::move(fontDescriptions) },
-    _textShaper { createTextShaper(_fontDescriptions.textShapingEngine,
-                                   _fontDescriptions.dpi,
-                                   createFontLocator(_fontDescriptions.fontLocator)) },
+    _textShaper { [&] {
+        auto shaper = createTextShaper(_fontDescriptions.textShapingEngine,
+                                       _fontDescriptions.dpi,
+                                       createFontLocator(_fontDescriptions.fontLocator));
+        shaper->set_font_fallback_limit(_fontDescriptions.maxFallbackCount);
+        return shaper;
+    }() },
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
     _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
     //.
@@ -234,17 +238,43 @@ void Renderer::clearCache()
 
 void Renderer::setFonts(FontDescriptions fontDescriptions)
 {
+    if (fontDescriptions == _fontDescriptions)
+        return;
+
+    // When only DPI changed, the enhanced set_dpi() updates existing FT_Face
+    // objects in-place. Skip clear_cache() to avoid destroying them.
+    // clang-format off
+    auto const onlyDpiChanged =
+        _fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine
+        && _fontDescriptions.fontLocator == fontDescriptions.fontLocator
+        && _fontDescriptions.dpiScale == fontDescriptions.dpiScale
+        && _fontDescriptions.size.pt == fontDescriptions.size.pt
+        && _fontDescriptions.regular == fontDescriptions.regular
+        && _fontDescriptions.bold == fontDescriptions.bold
+        && _fontDescriptions.italic == fontDescriptions.italic
+        && _fontDescriptions.boldItalic == fontDescriptions.boldItalic
+        && _fontDescriptions.emoji == fontDescriptions.emoji
+        && _fontDescriptions.renderMode == fontDescriptions.renderMode
+        && _fontDescriptions.builtinBoxDrawing == fontDescriptions.builtinBoxDrawing
+        && _fontDescriptions.maxFallbackCount == fontDescriptions.maxFallbackCount;
+    // clang-format on
+
     if (_fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine)
     {
-        _textShaper->clear_cache();
+        if (!onlyDpiChanged)
+            _textShaper->clear_cache();
         _textShaper->set_dpi(fontDescriptions.dpi);
+        _textShaper->set_font_fallback_limit(fontDescriptions.maxFallbackCount);
         if (_fontDescriptions.fontLocator != fontDescriptions.fontLocator)
             _textShaper->set_locator(createFontLocator(fontDescriptions.fontLocator));
     }
     else
+    {
         _textShaper = createTextShaper(fontDescriptions.textShapingEngine,
                                        fontDescriptions.dpi,
                                        createFontLocator(fontDescriptions.fontLocator));
+        _textShaper->set_font_fallback_limit(fontDescriptions.maxFallbackCount);
+    }
 
     _fontDescriptions = std::move(fontDescriptions);
     _fonts = loadFontKeys(_fontDescriptions, *_textShaper);

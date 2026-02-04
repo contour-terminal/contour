@@ -37,18 +37,25 @@ struct FontDescriptions
     TextShapingEngine textShapingEngine = TextShapingEngine::OpenShaper;
     FontLocatorEngine fontLocator = FontLocatorEngine::Native;
     bool builtinBoxDrawing = true;
+    int maxFallbackCount = 16; ///< Maximum fallback fonts per key. -1 = unlimited, 0 = disabled.
 };
 
 inline bool operator==(FontDescriptions const& a, FontDescriptions const& b) noexcept
 {
     // clang-format off
-    return a.size.pt == b.size.pt
+    return a.dpiScale == b.dpiScale
+        && a.dpi == b.dpi
+        && a.size.pt == b.size.pt
         && a.regular == b.regular
         && a.bold == b.bold
         && a.italic == b.italic
         && a.boldItalic == b.boldItalic
         && a.emoji == b.emoji
-        && a.renderMode == b.renderMode;
+        && a.renderMode == b.renderMode
+        && a.textShapingEngine == b.textShapingEngine
+        && a.fontLocator == b.fontLocator
+        && a.builtinBoxDrawing == b.builtinBoxDrawing
+        && a.maxFallbackCount == b.maxFallbackCount;
     // clang-format on
 }
 
@@ -160,7 +167,7 @@ struct std::formatter<vtrasterizer::FontDescriptions>: std::formatter<std::strin
 {
     auto format(vtrasterizer::FontDescriptions const& fd, auto& ctx) const
     {
-        return formatter<std::string>::format(std::format("({}, {}, {}, {}, {}, {}, {}, {})",
+        return formatter<std::string>::format(std::format("({}, {}, {}, {}, {}, {}, {}, {}, maxFallback={})",
                                                           fd.size,
                                                           fd.dpi,
                                                           fd.dpiScale,
@@ -169,7 +176,8 @@ struct std::formatter<vtrasterizer::FontDescriptions>: std::formatter<std::strin
                                                           fd.italic,
                                                           fd.boldItalic,
                                                           fd.emoji,
-                                                          fd.renderMode),
+                                                          fd.renderMode,
+                                                          fd.maxFallbackCount),
                                               ctx);
     }
 };

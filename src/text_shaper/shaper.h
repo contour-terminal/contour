@@ -103,6 +103,10 @@ class shaper
      */
     virtual void clear_cache() = 0;
 
+    /// Sets the maximum number of fallback fonts to consider per font key.
+    /// @param limit  -1 for unlimited, 0 to disable fallbacks, positive for a cap.
+    virtual void set_font_fallback_limit(int limit) = 0;
+
     /**
      * Returns a font matching the given font description.
      *
