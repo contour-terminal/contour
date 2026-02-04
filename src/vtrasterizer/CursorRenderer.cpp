@@ -70,7 +70,8 @@ void CursorRenderer::clearCache()
 
 void CursorRenderer::initializeDirectMapping()
 {
-    Require(_textureAtlas);
+    if (!SoftRequire(_textureAtlas))
+        return;
 
     for (int width = 1; width <= 2; ++width)
     {
@@ -162,7 +163,7 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
                 return image;
             });
     }
-    Require(false && "Unhandled case.");
+    (void) SoftRequire(false);
     return {};
 }
 

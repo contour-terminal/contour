@@ -1473,8 +1473,7 @@ namespace detail
                         }
                         break;
                 }
-                Guarantee(false);
-                crispy::unreachable();
+                (void) SoftRequire(false);
                 return 0;
             }();
 
@@ -1541,9 +1540,9 @@ namespace detail
                     case SquareEmpty: return buildSquare(value, size, th, 1, style == SquareEmpty);
                     case AASquare: [[fallthrough]];
                     case AASquareEmpty: return buildSquare(value, size, th, ss, style == AASquareEmpty);
-                    case Font: assert(false); return atlas::Buffer(*size.width * *size.height);
+                    case Font: (void) SoftRequire(false); return atlas::Buffer(*size.width * *size.height);
                 }
-                assert(false);
+                (void) SoftRequire(false);
                 return atlas::Buffer(*size.width * *size.height);
             }
             static auto buildSolid(uint8_t value, ImageSize size) -> atlas::Buffer

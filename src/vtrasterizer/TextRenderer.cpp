@@ -201,8 +201,8 @@ namespace
             case text::bitmap_format::rgba: return atlas::Format::RGBA;
         }
 
-        Require(false && "missing case");
-        return atlas::Format::Red; // unreachable();
+        (void) SoftRequire(false);
+        return atlas::Format::RGBA;
     }
 
     uint32_t toFragmentShaderSelector(text::bitmap_format glyphFormat)
@@ -215,8 +215,8 @@ namespace
             case text::bitmap_format::rgb: return lcdShaderId;
             case text::bitmap_format::rgba: return FRAGMENT_SELECTOR_IMAGE_BGRA;
         }
-        Require(false && "Glyph format not handled.");
-        return 0;
+        (void) SoftRequire(false);
+        return FRAGMENT_SELECTOR_IMAGE_BGRA;
     }
 
     constexpr TextStyle makeTextStyle(vtbackend::CellFlags mask) noexcept
@@ -313,7 +313,8 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
     auto const targetPitch = unbox<uintptr_t>(targetSize.width) * colorComponentCount;
     auto const sourcePitch = unbox<uintptr_t>(tileCreateData.bitmapSize.width) * colorComponentCount;
 
-    Require(targetPitch < sourcePitch);
+    if (!SoftRequire(targetPitch < sourcePitch))
+        return;
 
     auto slicedBitmap = vector<uint8_t>(targetSize.area() * colorComponentCount);
 
@@ -329,7 +330,9 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
     {
         uint8_t* targetRow = slicedBitmap.data() + (rowIndex * targetPitch);
         uint8_t const* sourceRow = tileCreateData.bitmap.data() + (rowIndex * sourcePitch);
-        Require(sourceRow + targetPitch <= tileCreateData.bitmap.data() + tileCreateData.bitmap.size());
+        if (!SoftRequire(sourceRow + targetPitch
+                         <= tileCreateData.bitmap.data() + tileCreateData.bitmap.size()))
+            return;
         std::copy_n(sourceRow, targetPitch, targetRow);
     }
 
@@ -345,8 +348,8 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
 
 void TextRenderer::initializeDirectMapping()
 {
-    Require(_textureAtlas);
-    Require(_directMapping.count == DirectMappedCharsCount);
+    if (!SoftRequire(_textureAtlas) || !SoftRequire(_directMapping.count == DirectMappedCharsCount))
+        return;
 
     _directMappedGlyphKeyToTileIndex.clear();
     _directMappedGlyphKeyToTileIndex.resize(LastReservedChar + 1);
@@ -384,7 +387,8 @@ Renderable::AtlasTileAttributes const* TextRenderer::ensureRasterizedIfDirectMap
         return nullptr;
 
     restrictToTileSize(*tileCreateData);
-    Require(tileCreateData->bitmapSize.width <= textureAtlas().tileSize().width);
+    if (!SoftRequire(tileCreateData->bitmapSize.width <= textureAtlas().tileSize().width))
+        return nullptr;
 
     // std::cout << std::format("Initialize direct mapping {} ({}) for {}; {}; {}\n",
     //            tileIndex,
@@ -735,7 +739,9 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
                     uint8_t* targetRow = bitmap.data() + (rowIndex * subPitch);
                     uint8_t const* sourceRow = createData.bitmap.data() + (rowIndex * pitch)
                                                + (uintptr_t(xOffset) * colorComponentCount);
-                    Require(sourceRow + subPitch <= createData.bitmap.data() + createData.bitmap.size());
+                    if (!SoftRequire(sourceRow + subPitch
+                                     <= createData.bitmap.data() + createData.bitmap.size()))
+                        break;
                     std::memcpy(targetRow, sourceRow, subPitch);
                 }
 
@@ -779,9 +785,10 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         return nullopt;
 
     text::rasterized_glyph& glyph = theGlyphOpt.value();
-    Require(glyph.bitmap.size()
-            == text::pixel_size(glyph.format) * unbox<size_t>(glyph.bitmapSize.width)
-                   * unbox<size_t>(glyph.bitmapSize.height));
+    if (!SoftRequire(glyph.bitmap.size()
+                     == text::pixel_size(glyph.format) * unbox<size_t>(glyph.bitmapSize.width)
+                            * unbox<size_t>(glyph.bitmapSize.height)))
+        return nullopt;
 
     uint32_t const numCells = presentation == unicode::PresentationStyle::Emoji
                                   ? 2
@@ -846,7 +853,8 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     if (yMin < 0 && yMax - yMin > _gridMetrics.cellSize.height.as<int>())
     {
         auto const rowCount = (unsigned) -yMin;
-        Require(rowCount <= unbox(glyph.bitmapSize.height));
+        if (!SoftRequire(rowCount <= unbox(glyph.bitmapSize.height)))
+            return nullopt;
         auto const pixelCount =
             rowCount * unbox<size_t>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
         if (static_cast<size_t>(pixelCount) > glyph.bitmap.size())
@@ -857,12 +865,14 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                        pixelCount);
             return nullopt;
         }
-        Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());
+        if (!SoftRequire(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size()))
+            return nullopt;
         rasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.bitmapSize.height += vtbackend::Height::cast_from(yMin);
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), (int) pixelCount)); // XXX asan hit (size = -2)
-        Guarantee(glyph.valid());
+        if (!SoftRequire(glyph.valid()))
+            return nullopt;
     }
     // }}}
 

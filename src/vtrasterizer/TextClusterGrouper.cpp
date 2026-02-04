@@ -12,7 +12,8 @@ namespace
 {
     uint8_t graphemeClusterWidth(std::u32string_view text) noexcept
     {
-        assert(!text.empty());
+        if (!SoftRequire(!text.empty()))
+            return 1;
         auto const baseWidth = static_cast<uint8_t>(unicode::width(text[0]));
         for (size_t i = 1; i < text.size(); ++i)
             if (text[i] == 0xFE0F)
@@ -27,8 +28,11 @@ TextClusterGrouper::TextClusterGrouper(Events& events): _events { events }
 
 void TextClusterGrouper::beginFrame() noexcept
 {
-    Require(_codepoints.empty());
-    Require(_clusters.empty());
+    if (!SoftRequire(_codepoints.empty() && _clusters.empty()))
+    {
+        _codepoints.clear();
+        _clusters.clear();
+    }
 
     auto constexpr DefaultColor = vtbackend::RGBColor {};
     _style = TextStyle::Invalid;
@@ -79,7 +83,8 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
 {
     if (_forceUpdateInitialPenPosition)
     {
-        assert(_codepoints.empty());
+        if (!SoftRequire(_codepoints.empty()))
+            flushTextClusterGroup();
         _initialPenPosition = position;
         _forceUpdateInitialPenPosition = false;
     }

@@ -68,7 +68,8 @@ namespace
     {
         FontKeys output {};
         auto const regularOpt = shaper.load_font(fd.regular, fd.size);
-        Require(regularOpt.has_value());
+        if (!SoftRequire(regularOpt.has_value()))
+            return output; // Return default-constructed FontKeys if regular font fails to load.
         output.regular = regularOpt.value();
         output.bold = shaper.load_font(fd.bold, fd.size).value_or(output.regular);
         output.italic = shaper.load_font(fd.italic, fd.size).value_or(output.regular);
@@ -313,6 +314,22 @@ void Renderer::updateFontMetrics()
 
 void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 {
+    try
+    {
+        renderImpl(terminal, pressure);
+    }
+    catch (std::exception const& e)
+    {
+        errorLog()("Renderer::render: caught exception: {}", e.what());
+    }
+    catch (...)
+    {
+        errorLog()("Renderer::render: caught unknown exception.");
+    }
+}
+
+void Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
+{
     auto const statusLineHeight = terminal.statusLineHeight();
     _gridMetrics.pageSize = terminal.pageSize() + statusLineHeight;
 
@@ -470,11 +487,21 @@ void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells, int yPi
 {
     for (auto const& cell: cells)
     {
-        _backgroundRenderer.renderCell(cell);
-        _decorationRenderer.renderCell(cell);
-        _textRenderer.renderCell(cell);
-        if (cell.image)
-            _imageRenderer.renderImage(_gridMetrics.map(cell.position, yPixelOffset), *cell.image);
+        try
+        {
+            _backgroundRenderer.renderCell(cell);
+            _decorationRenderer.renderCell(cell);
+            _textRenderer.renderCell(cell);
+            if (cell.image)
+                _imageRenderer.renderImage(_gridMetrics.map(cell.position, yPixelOffset), *cell.image);
+        }
+        catch (std::exception const& e)
+        {
+            errorLog()("renderCells: skipping cell at ({},{}) due to exception: {}",
+                       cell.position.line,
+                       cell.position.column,
+                       e.what());
+        }
     }
 }
 

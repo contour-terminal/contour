@@ -66,7 +66,8 @@ void ImageRenderer::onAfterRenderingText()
 
 void ImageRenderer::beginFrame()
 {
-    assert(_pendingRenderTilesAboveText.empty());
+    if (!SoftRequire(_pendingRenderTilesAboveText.empty()))
+        _pendingRenderTilesAboveText.clear();
 }
 
 void ImageRenderer::endFrame()

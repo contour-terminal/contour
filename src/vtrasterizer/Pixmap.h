@@ -53,8 +53,8 @@ constexpr crispy::point operator*(vtbackend::ImageSize a, Ratio b) noexcept
 
 constexpr auto linearEq(crispy::point p1, crispy::point p2) noexcept
 {
-    // Require(p2.x != p1.x);
-    auto const m = double(p2.y - p1.y) / double(p2.x - p1.x);
+    auto const dx = double(p2.x - p1.x);
+    auto const m = (dx != 0.0) ? double(p2.y - p1.y) / dx : 0.0;
     auto const n = double(p1.y) - (m * double(p1.x));
     return [m, n](int x) -> int {
         return int((double(m) * double(x)) + n);
