@@ -40,6 +40,13 @@ class ContourGuiApp: public QObject, public ContourApp
     [[nodiscard]] crispy::cli::command parameterDefinition() const override;
 
     void newWindow();
+    void newWindowWithHandoff(void* hInput,
+                              void* hOutput,
+                              void* hSignal,
+                              void* hReference,
+                              void* hServer,
+                              void* hClient,
+                              std::wstring const& title);
     static void showNotification(std::string_view title, std::string_view content);
 
     [[nodiscard]] std::string profileName() const;

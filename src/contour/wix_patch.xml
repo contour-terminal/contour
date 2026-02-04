@@ -3,6 +3,13 @@
     <Component Id="CM_C_contour_path" Guid="*" Directory="INSTALL_ROOT">
       <Environment Id="UpdatePath" Name="PATH" Value="[INSTALL_ROOT]bin" Permanent="no" Part="last" Action="set" System="yes" />
       <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="PathEnv" Type="integer" Value="1" KeyPath="yes"/>
+
+      <!-- COM Registration for Default Terminal Handoff -->
+      <RegistryValue Root="HKCR" Key="CLSID\{B178D323-E77D-4C67-AF21-AE2B81F269F0}" Type="string" Value="Contour Terminal Handoff" />
+      <RegistryValue Root="HKCR" Key="CLSID\{B178D323-E77D-4C67-AF21-AE2B81F269F0}\LocalServer32" Type="string" Value="[INSTALL_ROOT]bin\contour.exe" />
+
+      <!-- Register as a Terminal Handler -->
+      <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows NT\CurrentVersion\Console\TerminalHandlers" Name="{B178D323-E77D-4C67-AF21-AE2B81F269F0}" Type="string" Value="Contour" />
     </Component>
   </CPackWiXFragment>
   <CPackWiXFragment Id="#PRODUCT">

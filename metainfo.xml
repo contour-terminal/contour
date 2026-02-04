@@ -173,6 +173,7 @@
           <li>Adds VT sequences for double width / double height lines, `DECDHL`, `DECDWL`, `DECSWL` (#137)</li>
           <li>Adds VT sequence extension OSC 133 shell integration (#793)</li>
           <li>Adds support for rendering COLRv1 fonts (e.g. new Google Noto Color Emoji)</li>
+          <li>Adds Contour Terminal to the list of possible default terminals on Windows 11 (#605)</li>
           <li>Drop Qt5 support</li>
         </ul>
       </description>

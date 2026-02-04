@@ -14,6 +14,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
+#include <optional>
 #include <string>
 
 using namespace std::string_literals;
@@ -240,7 +242,34 @@ void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
 
 TerminalSession* TerminalSessionManager::createSession()
 {
+    if (auto* session = _displayStates[nullptr].currentSession; session)
+    {
+        managerLog()("createSession: returning pending session {}({})", session->id(), (void*) session);
+        return activateSession(session, true);
+    }
     return activateSession(createSessionInBackground(), true /*force resize on before display-attach*/);
+}
+
+TerminalSession* TerminalSessionManager::createSessionWithPty(std::unique_ptr<vtpty::Pty> pty)
+{
+    if (!_activeDisplay)
+    {
+        managerLog()("No active display found. something went wrong.");
+    }
+
+    auto* session = new TerminalSession(this, std::move(pty), _app);
+    managerLog()("Create new handoff session with ID {}({}) at index {}",
+                 session->id(),
+                 (void*) session,
+                 _sessions.size());
+
+    _sessions.insert(_sessions.end(), session);
+
+    connect(session, &TerminalSession::sessionClosed, [this, session]() { removeSession(*session); });
+
+    QQmlEngine::setObjectOwnership(session, QQmlEngine::CppOwnership);
+
+    return activateSession(session, true);
 }
 
 void TerminalSessionManager::switchToPreviousTab()
