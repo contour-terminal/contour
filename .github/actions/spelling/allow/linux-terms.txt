@@ -1,3 +1,4 @@
+VDPAU
 libwayland
 qplatformwindow
 qwayland

@@ -9,6 +9,7 @@
         <file>shell-integration/shell-integration.tcsh</file>
         <file>shell-integration/shell-integration.bash</file>
         <file>ui/RequestPermission.qml</file>
+        <file>ui/BellSound.qml</file>
         <file>ui/Terminal.qml</file>
         <file>ui/main.qml</file>
     </qresource>

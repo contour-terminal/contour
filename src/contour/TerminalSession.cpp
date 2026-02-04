@@ -1106,10 +1106,13 @@ void TerminalSession::onHighlightUpdate()
 
 void TerminalSession::playSound(vtbackend::Sequence::Parameters const& params)
 {
+    if (!_audio)
+        _audio = std::make_unique<Audio>();
+
     auto range = params.range();
     _musicalNotesBuffer.clear();
     _musicalNotesBuffer.insert(_musicalNotesBuffer.begin(), range.begin() + 2, range.end());
-    emit _audio.play(params.at(0), params.at(1), _musicalNotesBuffer);
+    emit _audio->play(params.at(0), params.at(1), _musicalNotesBuffer);
 }
 
 void TerminalSession::cursorPositionChanged()

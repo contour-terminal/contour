@@ -3,14 +3,11 @@ import Contour.Terminal
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtMultimedia
 import QtQuick.Window
 import Qt5Compat.GraphicalEffects
 
 ContourTerminal
 {
-    property url bellSoundSource: "qrc:/contour/bell.wav"
-
     id: vtWidget
     visible: true
 
@@ -99,16 +96,21 @@ ContourTerminal
         stepSize : 1.0 / (vtWidget.session.pageLineCount + vtWidget.session.historyLineCount)
     }
 
-    AudioOutput {
-        id: bellAudioOutput
-        objectName: "BellAudioOutput"
-    }
+    // Deferred multimedia loading: the bell Loader activates only after the
+    // background thread has finished probing FFmpeg/VDPAU/VA-API/Vulkan drivers.
+    property real _pendingBellVolume: -1
 
-    MediaPlayer {
-        id: bellSoundEffect
-        objectName: "Bell"
-        source: session.bellSource
-        audioOutput: bellAudioOutput
+    Loader {
+        id: bellLoader
+        active: terminalSessions.multimediaReady
+        source: "BellSound.qml"
+        onLoaded: {
+            item.source = Qt.binding(function() { return vtWidget.session.bellSource; });
+            if (vtWidget._pendingBellVolume >= 0) {
+                item.play(vtWidget._pendingBellVolume);
+                vtWidget._pendingBellVolume = -1;
+            }
+        }
     }
 
     RequestPermission {
@@ -202,17 +204,10 @@ ContourTerminal
 
 
     function playBell(volume) {
-        if (bellSoundEffect.playbackState === MediaPlayer.PlayingState)
-           return;
-
-        if (bellSoundEffect.audioOutput)
-            // Qt 6 solution to set the volume
-            bellSoundEffect.audioOutput.volume = volume;
+        if (bellLoader.status === Loader.Ready)
+            bellLoader.item.play(volume);
         else
-            // Qt 5 fallback
-            bellSoundEffect.volume = volume;
-
-        bellSoundEffect.play()
+            _pendingBellVolume = volume;
     }
 
     function doAlert() {

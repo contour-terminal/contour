@@ -22,6 +22,7 @@ class TerminalSessionManager: public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count)
+    Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
     QML_ELEMENT
 
   public:
@@ -64,11 +65,27 @@ class TerminalSessionManager: public QAbstractListModel
 
     void doNotSwitchToNewSession() { _allowSwitchOfTheSession = false; }
 
+    /// Returns whether the Qt multimedia backend has been initialized.
+    [[nodiscard]] bool isMultimediaReady() const noexcept { return _multimediaReady; }
+
+    /// Sets the multimedia readiness flag and emits multimediaReadyChanged().
+    void setMultimediaReady(bool ready)
+    {
+        if (_multimediaReady != ready)
+        {
+            _multimediaReady = ready;
+            emit multimediaReadyChanged();
+        }
+    }
+
     struct DisplayState
     {
         TerminalSession* currentSession = nullptr;
         TerminalSession* previousSession = nullptr;
     };
+
+  signals:
+    void multimediaReadyChanged();
 
   private:
     contour::TerminalSession* activateSession(TerminalSession* session, bool isNewSession = false);
@@ -121,6 +138,7 @@ class TerminalSessionManager: public QAbstractListModel
     // prevent that, and to allow creation of new session
     // user have to call allowCreation() method first
     std::atomic<bool> _allowCreation { true };
+    bool _multimediaReady = false;
 
     // When we spawn a new window and share multiple windows within the same process,
     // we first create a new session and then attempt to "activateSession".

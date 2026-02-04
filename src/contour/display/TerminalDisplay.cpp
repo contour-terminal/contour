@@ -29,7 +29,6 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
-#include <QtMultimedia/QAudioOutput>
 #include <QtNetwork/QHostInfo>
 #include <QtQml/QQmlContext>
 #include <QtQuick/QQuickWindow>
@@ -241,9 +240,10 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
     _startTime { steady_clock::time_point::min() },
     _lastFontDPI { fontDPI() },
     _updateTimer(this),
-    _filesystemWatcher(this),
-    _mediaPlayer(this)
+    _filesystemWatcher(this)
 {
+    startupLog()("TerminalDisplay constructed (QML component instantiation reached)");
+    auto const timer = ScopedTimer(startupLog, "TerminalDisplay constructor");
     initializeResourcesForContourFrontendOpenGL();
 
     setFlag(Flag::ItemIsFocusScope);
@@ -311,13 +311,16 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     setFlag(Flag::ItemAcceptsInputMethod, imeEnabled);
     displayLog()("IME enabled: {}", imeEnabled);
 
-    _session->start();
+    {
+        auto const timer = ScopedTimer(startupLog, "Session start");
+        _session->start();
+    }
 
     window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar.value());
 
     if (!_renderer)
     {
-
+        auto const timer = ScopedTimer(startupLog, "Renderer construction");
         _renderer = make_unique<vtrasterizer::Renderer>(
             _session->profile().terminalSize.value(),
             sanitizeFontDescription(profile().fonts.value(), fontDPI()),

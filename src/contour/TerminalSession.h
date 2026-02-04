@@ -483,7 +483,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     vtbackend::ScreenType _currentScreenType = vtbackend::ScreenType::Primary;
     vtbackend::CellLocation _currentMousePosition = vtbackend::CellLocation {};
     bool _allowKeyMappings = true;
-    Audio _audio;
+    std::unique_ptr<Audio> _audio;
     std::vector<int> _musicalNotesBuffer;
 
     vtbackend::LineCount _lastHistoryLineCount;
