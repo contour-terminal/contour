@@ -2673,6 +2673,36 @@ TEST_CASE("DECNKM", "[screen]")
     REQUIRE(e(mock.terminal.peekInput()) == e("\033[?66;1$y"));
 }
 
+TEST_CASE("DECARM", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+
+    // Auto-repeat should be enabled by default (VT100 spec)
+    CHECK(mock.terminal.isModeEnabled(DECMode::AutoRepeat));
+
+    // Disable auto-repeat via DECRM 8
+    mock.writeToScreen(DECRM(8));
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::AutoRepeat));
+
+    // Re-enable via DECSM 8
+    mock.writeToScreen(DECSM(8));
+    CHECK(mock.terminal.isModeEnabled(DECMode::AutoRepeat));
+
+    SECTION("DECRQM reports set when enabled")
+    {
+        mock.writeToScreen(DECSM(8));
+        mock.writeToScreen(DECRQM(8));
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[?8;1$y"));
+    }
+
+    SECTION("DECRQM reports reset when disabled")
+    {
+        mock.writeToScreen(DECRM(8));
+        mock.writeToScreen(DECRQM(8));
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[?8;2$y"));
+    }
+}
+
 TEST_CASE("peek into history", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) }, LineCount { 5 } };

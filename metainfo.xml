@@ -126,6 +126,7 @@
           <li>Adds hint mode for keyboard-driven selection of URLs, file paths, git hashes, and IP addresses with configurable actions (Copy, Open, Paste, Select), activatable via key binding or Vi normal mode (gh/gH)</li>
           <li>Adds configurable font fallback limit (max_fallback_count) with on-demand loading and persistent locate cache for faster font resolution</li>
           <li>Adds DECNKM (DEC mode 66, VT320) to toggle numeric keypad between application and numeric mode via CSI ? 66 h / CSI ? 66 l</li>
+          <li>Adds DECARM (DEC mode 8, VT100) to enable/disable keyboard auto-repeat via CSI ? 8 h / CSI ? 8 l</li>
         </ul>
       </description>
     </release>

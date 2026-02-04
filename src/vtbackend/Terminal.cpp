@@ -172,6 +172,7 @@ Terminal::Terminal(Events& eventListener,
 
     // TODO(should be this instead?): hardReset();
     setMode(DECMode::AutoWrap, true);
+    setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::Unicode, true);
@@ -805,6 +806,10 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     if (!allowInput())
         return Handled { true };
 
+    // Suppress key repeat events when DECARM (auto-repeat mode) is disabled.
+    if (eventType == KeyboardEventType::Repeat && !isModeEnabled(DECMode::AutoRepeat))
+        return Handled { true };
+
     // Route Escape to hint mode handler if active (ignore key release events).
     if (_hintModeHandler.isActive() && key == Key::Escape && eventType != KeyboardEventType::Release)
     {
@@ -832,6 +837,10 @@ Handled Terminal::sendCharEvent(
 
     // Early exit if KAM is enabled.
     if (!allowInput())
+        return Handled { true };
+
+    // Suppress character repeat events when DECARM (auto-repeat mode) is disabled.
+    if (eventType == KeyboardEventType::Repeat && !isModeEnabled(DECMode::AutoRepeat))
         return Handled { true };
 
     // Route input to hint mode handler if active (no modifiers — just label chars).
@@ -2261,6 +2270,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             }
             break;
         case DECMode::ApplicationKeypad: setApplicationkeypadMode(enable); break;
+        case DECMode::AutoRepeat: break;
         default: break;
     }
 
@@ -2331,6 +2341,7 @@ void Terminal::softReset()
     setStatusDisplay(StatusDisplayType::None);
 
     setMode(DECMode::ApplicationKeypad, false); // DECNKM
+    setMode(DECMode::AutoRepeat, true);         // DECARM
     // TODO: DECSCA (Select character attribute)
     // TODO: DECNRCM (National replacement character set)
     // TODO: GL, GR (G0, G1, G2, G3)
@@ -2374,6 +2385,7 @@ void Terminal::hardReset()
 
     _modes = Modes {};
     setMode(DECMode::AutoWrap, true);
+    setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::Unicode, true);
@@ -3079,6 +3091,7 @@ std::string to_string(DECMode mode)
         case DECMode::DebugLogging: return "DebugLogging";
         case DECMode::UseAlternateScreen: return "UseAlternateScreen";
         case DECMode::ApplicationKeypad: return "ApplicationKeypad";
+        case DECMode::AutoRepeat: return "AutoRepeat";
         case DECMode::BracketedPaste: return "BracketedPaste";
         case DECMode::FocusTracking: return "FocusTracking";
         case DECMode::NoSixelScrolling: return "NoSixelScrolling";

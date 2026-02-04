@@ -631,6 +631,12 @@ enum class DECMode : std::uint16_t
     /// When reset, the numeric keypad generates numeric characters (same as DECKPNM).
     ApplicationKeypad = 27,
 
+    /// DECARM — Auto Repeat Mode (VT100).
+    ///
+    /// When set (default), keys auto-repeat when held down.
+    /// When reset, keyboard auto-repeat is disabled.
+    AutoRepeat = 28,
+
     /**
      * DECOM - Origin Mode.
      *
@@ -801,6 +807,7 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::ReverseVideo: return 5;
         case DECMode::Origin: return 6;
         case DECMode::AutoWrap: return 7;
+        case DECMode::AutoRepeat: return 8;
         case DECMode::MouseProtocolX10: return 9;
         case DECMode::ShowToolbar: return 10;
         case DECMode::BlinkingCursor: return 12;
@@ -849,7 +856,7 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         case 5: return DECMode::ReverseVideo;
         case 6: return DECMode::Origin;
         case 7: return DECMode::AutoWrap;
-        // TODO: Ps = 8  -> Auto-repeat Keys (DECARM), VT100.
+        case 8: return DECMode::AutoRepeat;
         case 9: return DECMode::MouseProtocolX10;
         case 10: return DECMode::ShowToolbar;
         case 12: return DECMode::BlinkingCursor;
