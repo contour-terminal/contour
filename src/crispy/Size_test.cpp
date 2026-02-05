@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Size.h>
-
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <string_view>
+
+#include <vtbackend/Size.h>
 
 using terminal::Coordinate;
 using terminal::Size;
