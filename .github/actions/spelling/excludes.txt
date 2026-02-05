@@ -1,0 +1,2 @@
+# Desktop files contain translations in various languages
+\.desktop$
