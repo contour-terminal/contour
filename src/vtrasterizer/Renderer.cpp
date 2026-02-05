@@ -68,7 +68,8 @@ namespace
     {
         FontKeys output {};
         auto const regularOpt = shaper.load_font(fd.regular, fd.size);
-        Require(regularOpt.has_value());
+        if (!SoftRequire(regularOpt.has_value()))
+            return output; // Return default-constructed FontKeys if regular font fails to load.
         output.regular = regularOpt.value();
         output.bold = shaper.load_font(fd.bold, fd.size).value_or(output.regular);
         output.italic = shaper.load_font(fd.italic, fd.size).value_or(output.regular);
@@ -126,9 +127,13 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _atlasDirectMapping { atlasDirectMapping },
     //.
     _fontDescriptions { std::move(fontDescriptions) },
-    _textShaper { createTextShaper(_fontDescriptions.textShapingEngine,
-                                   _fontDescriptions.dpi,
-                                   createFontLocator(_fontDescriptions.fontLocator)) },
+    _textShaper { [&] {
+        auto shaper = createTextShaper(_fontDescriptions.textShapingEngine,
+                                       _fontDescriptions.dpi,
+                                       createFontLocator(_fontDescriptions.fontLocator));
+        shaper->set_font_fallback_limit(_fontDescriptions.maxFallbackCount);
+        return shaper;
+    }() },
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
     _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
     //.
@@ -234,17 +239,31 @@ void Renderer::clearCache()
 
 void Renderer::setFonts(FontDescriptions fontDescriptions)
 {
+    if (fontDescriptions == _fontDescriptions)
+        return;
+
+    // When only DPI changed, the enhanced set_dpi() updates existing FT_Face
+    // objects in-place. Skip clear_cache() to avoid destroying them.
+    auto descriptionsWithSameDpi = fontDescriptions;
+    descriptionsWithSameDpi.dpi = _fontDescriptions.dpi;
+    auto const onlyDpiChanged = (descriptionsWithSameDpi == _fontDescriptions);
+
     if (_fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine)
     {
-        _textShaper->clear_cache();
+        if (!onlyDpiChanged)
+            _textShaper->clear_cache();
         _textShaper->set_dpi(fontDescriptions.dpi);
+        _textShaper->set_font_fallback_limit(fontDescriptions.maxFallbackCount);
         if (_fontDescriptions.fontLocator != fontDescriptions.fontLocator)
             _textShaper->set_locator(createFontLocator(fontDescriptions.fontLocator));
     }
     else
+    {
         _textShaper = createTextShaper(fontDescriptions.textShapingEngine,
                                        fontDescriptions.dpi,
                                        createFontLocator(fontDescriptions.fontLocator));
+        _textShaper->set_font_fallback_limit(fontDescriptions.maxFallbackCount);
+    }
 
     _fontDescriptions = std::move(fontDescriptions);
     _fonts = loadFontKeys(_fontDescriptions, *_textShaper);
@@ -282,6 +301,22 @@ void Renderer::updateFontMetrics()
 }
 
 void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
+{
+    try
+    {
+        renderImpl(terminal, pressure);
+    }
+    catch (std::exception const& e)
+    {
+        errorLog()("Renderer::render: caught exception: {}", e.what());
+    }
+    catch (...)
+    {
+        errorLog()("Renderer::render: caught unknown exception.");
+    }
+}
+
+void Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 {
     auto const statusLineHeight = terminal.statusLineHeight();
     _gridMetrics.pageSize = terminal.pageSize() + statusLineHeight;
@@ -440,11 +475,21 @@ void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells, int yPi
 {
     for (auto const& cell: cells)
     {
-        _backgroundRenderer.renderCell(cell);
-        _decorationRenderer.renderCell(cell);
-        _textRenderer.renderCell(cell);
-        if (cell.image)
-            _imageRenderer.renderImage(_gridMetrics.map(cell.position, yPixelOffset), *cell.image);
+        try
+        {
+            _backgroundRenderer.renderCell(cell);
+            _decorationRenderer.renderCell(cell);
+            _textRenderer.renderCell(cell);
+            if (cell.image)
+                _imageRenderer.renderImage(_gridMetrics.map(cell.position, yPixelOffset), *cell.image);
+        }
+        catch (std::exception const& e)
+        {
+            errorLog()("renderCells: skipping cell at ({},{}) due to exception: {}",
+                       cell.position.line,
+                       cell.position.column,
+                       e.what());
+        }
     }
 }
 

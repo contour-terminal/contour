@@ -76,7 +76,8 @@ void DecorationRenderer::clearCache()
 
 void DecorationRenderer::initializeDirectMapping()
 {
-    Require(_textureAtlas);
+    if (!SoftRequire(_textureAtlas))
+        return;
 
     for (Decorator const decoration: each_element<Decorator>())
     {
@@ -288,7 +289,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             });
         }
     }
-    Require(false && "Unhandled case.");
+    (void) SoftRequire(false);
     return {};
 }
 

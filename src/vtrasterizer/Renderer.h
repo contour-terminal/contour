@@ -144,6 +144,9 @@ class Renderer
                                                        vtbackend::LineCount statusLineBoundary);
 
   private:
+    /// Internal implementation of render(), wrapped in a try/catch for graceful degradation.
+    void renderImpl(vtbackend::Terminal& terminal, bool pressure);
+
     void configureTextureAtlas();
 
     /// Sets the smooth scroll Y pixel offset on all sub-renderers.

@@ -31,7 +31,8 @@ auto Renderable::createTileData(atlas::TileLocation tileLocation,
     auto const atlasSize = _textureScheduler->atlasSize();
     Require(!!atlasSize.width);
     Require(!!atlasSize.height);
-    Require(bitmap.size() == bitmapSize.area() * atlas::element_count(bitmapFormat));
+    if (!SoftRequire(bitmap.size() == bitmapSize.area() * atlas::element_count(bitmapFormat)))
+        return {};
     tileData.bitmap = std::move(bitmap);
     tileData.bitmapSize = bitmapSize;
     tileData.bitmapFormat = bitmapFormat;
@@ -65,7 +66,8 @@ auto Renderable::sliceTileData(Renderable::TextureAtlas::TileCreateData const& c
         uint8_t* targetRow = bitmap.data() + (rowIndex * subPitch);
         uint8_t const* sourceRow = createData.bitmap.data() + (rowIndex * pitch)
                                    + (uintptr_t(sliceIndex.beginX) * colorComponentCount);
-        Require(sourceRow + subPitch <= createData.bitmap.data() + createData.bitmap.size());
+        if (!SoftRequire(sourceRow + subPitch <= createData.bitmap.data() + createData.bitmap.size()))
+            break;
         std::copy_n(sourceRow, subPitch, targetRow);
     }
 

@@ -171,7 +171,7 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
     // during cell rendering. Without this, animationProgress defaults to 1.0f and the
     // Block cursor cell inversion fires at the destination while the CursorRenderer also
     // draws an animated cursor at the interpolated position — producing a double/stretched cursor.
-    auto const animProgress = _terminal->cursorAnimationProgress(cursorScreenPosition);
+    auto const animProgress = _terminal->cursorAnimationProgress(*_cursorPosition);
 
     return RenderCursor { .position = cursorScreenPosition,
                           .shape = shape,

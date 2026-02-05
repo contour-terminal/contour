@@ -19,7 +19,6 @@
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QVector4D>
-#include <QtMultimedia/QMediaPlayer>
 #include <QtQml/QtQml>
 #include <QtQuick/QQuickItem>
 
@@ -282,7 +281,6 @@ class TerminalDisplay: public QQuickItem
     std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
 
     QFileSystemWatcher _filesystemWatcher;
-    QMediaPlayer _mediaPlayer;
 
     vtbackend::LineCount _lastHistoryLineCount = vtbackend::LineCount(0);
 

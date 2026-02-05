@@ -21,12 +21,14 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QStyleHints>
 #include <QtGui/QSurfaceFormat>
+#include <QtMultimedia/QMediaDevices>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
 #include <QtWidgets/QApplication>
 
 #include <filesystem>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 using std::bind;
@@ -348,8 +350,11 @@ int ContourGuiApp::fontConfigAction()
 
 int ContourGuiApp::terminalGuiAction()
 {
-    if (!loadConfig("terminal"))
-        return EXIT_FAILURE;
+    {
+        auto const timer = ScopedTimer(startupLog, "loadConfig");
+        if (!loadConfig("terminal"))
+            return EXIT_FAILURE;
+    }
 
 #if defined(__APPLE__)
     QGuiApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta, true);
@@ -414,9 +419,18 @@ int ContourGuiApp::terminalGuiAction()
     auto qtArgsCount = static_cast<int>(qtArgsPtr.size());
 
     // NB: We use QApplication over QGuiApplication because we want to use SystemTrayIcon.
+    // NOTE: Cannot use ScopedTimer here because QApplication must live until end of function.
+    auto const qtInitStart = std::chrono::steady_clock::now();
     QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
-
     setupQCoreApplication();
+    if (startupLog.is_enabled())
+    {
+        auto const elapsed = std::chrono::steady_clock::now() - qtInitStart;
+        auto const ms =
+            static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count())
+            / 1000.0;
+        startupLog()("QApplication + setup: {:.1f} ms", ms);
+    }
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     _colorPreference = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark
@@ -455,29 +469,32 @@ int ContourGuiApp::terminalGuiAction()
     qRegisterMetaType<TerminalSession*>("TerminalSession*");
     // clang-format on
 
-    _qmlEngine = make_unique<QQmlApplicationEngine>();
+    {
+        auto const timer = ScopedTimer(startupLog, "QML engine setup");
+        _qmlEngine = make_unique<QQmlApplicationEngine>();
 
-    QQmlContext* context = _qmlEngine->rootContext();
-    context->setContextProperty("terminalSessions", &_sessionManager);
+        QQmlContext* context = _qmlEngine->rootContext();
+        context->setContextProperty("terminalSessions", &_sessionManager);
+    }
 
     // auto const HTS = "\033H";
     // auto const TBC = "\033[g";
     // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
 
-    // Spawn initial window.
-    newWindow();
+    // Pre-warm the Qt multimedia singleton on a background thread.
+    // This triggers the expensive FFmpeg/VDPAU/VA-API/Vulkan driver probing
+    // without blocking the main thread. When done, we signal QML via
+    // multimediaReady so the bell Loader activates only after the probe completes.
+    auto multimediaWarmupThread = std::thread([this] {
+        QMediaDevices::audioOutputs();
+        QMetaObject::invokeMethod(
+            &_sessionManager, [this] { _sessionManager.setMultimediaReady(true); }, Qt::QueuedConnection);
+    });
 
-    if (auto const& bell = config().profile().bell.value().sound; bell == "off")
+    // Spawn initial window.
     {
-        if (auto* bellAudioOutput = _qmlEngine->rootObjects().first()->findChild<QObject*>("BellAudioOutput");
-            bellAudioOutput)
-            bellAudioOutput->setProperty("muted", true);
-    }
-    else if (bell != "default")
-    {
-        QUrl const path(bell.c_str());
-        if (auto* bellObject = _qmlEngine->rootObjects().first()->findChild<QObject*>("Bell"); bellObject)
-            bellObject->setProperty("source", path);
+        auto const timer = ScopedTimer(startupLog, "newWindow (QML load)");
+        newWindow();
     }
 
     auto rv = QApplication::exec();
@@ -504,6 +521,10 @@ int ContourGuiApp::terminalGuiAction()
                 rv = EXIT_FAILURE;
         }
     }
+
+    // Ensure the multimedia warmup thread has finished before destroying Qt objects.
+    if (multimediaWarmupThread.joinable())
+        multimediaWarmupThread.join();
 
     // Explicitly destroy QML engine here to ensure it's being destructed before QGuiApplication.
     _qmlEngine.reset();

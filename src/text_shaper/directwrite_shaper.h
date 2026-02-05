@@ -22,6 +22,8 @@ class directwrite_shaper: public shaper
     void set_locator(font_locator& _locator) override;
     void clear_cache() override;
 
+    void set_font_fallback_limit(int limit) override;
+
     std::optional<font_key> load_font(font_description const& _description, font_size _size) override;
 
     font_metrics metrics(font_key _key) const override;

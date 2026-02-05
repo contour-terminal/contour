@@ -811,6 +811,13 @@ void Screen<Cell>::scrollDown(LineCount n, Margin margin)
 }
 
 template <CellConcept Cell>
+void Screen<Cell>::unscroll(LineCount n)
+{
+    _grid.unscroll(n, cursor().graphicsRendition);
+    updateCursorIterator();
+}
+
+template <CellConcept Cell>
 void Screen<Cell>::setCurrentColumn(ColumnOffset n)
 {
     auto const col = _cursor.originMode ? margin().horizontal.from + n : n;
@@ -1297,6 +1304,60 @@ void Screen<Cell>::insertColumns(ColumnCount n)
     if (isCursorInsideMargins())
         for (auto lineNo = margin().vertical.from; lineNo <= margin().vertical.to; ++lineNo)
             insertChars(lineNo, n);
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::scrollLeft(ColumnCount n)
+{
+    // SL — Scroll Left (ECMA-48)
+    // For each line in the scroll margin, shift cells left by N within the horizontal margins,
+    // filling vacated cells on the right with blanks.
+    for (auto lineNo = margin().vertical.from; lineNo <= margin().vertical.to; ++lineNo)
+    {
+        auto& line = _grid.lineAt(lineNo);
+        auto lineBuffer = line.cells();
+        auto const leftMargin = *margin().horizontal.from;
+        auto const rightMargin = *margin().horizontal.to;
+        auto const width = rightMargin - leftMargin + 1;
+        auto const count = std::min(*n, width);
+
+        Cell* left = const_cast<Cell*>(lineBuffer.data() + leftMargin);
+        Cell* mid = left + count;
+        Cell* right = const_cast<Cell*>(lineBuffer.data() + rightMargin + 1);
+
+        rotate(left, mid, right);
+
+        // Blank the vacated cells on the right
+        for (Cell& cell: gsl::make_span(right - count, right))
+            cell.write(_cursor.graphicsRendition, L' ', 1);
+    }
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::scrollRight(ColumnCount n)
+{
+    // SR — Scroll Right (ECMA-48)
+    // For each line in the scroll margin, shift cells right by N within the horizontal margins,
+    // filling vacated cells on the left with blanks.
+    for (auto lineNo = margin().vertical.from; lineNo <= margin().vertical.to; ++lineNo)
+    {
+        auto& line = _grid.lineAt(lineNo);
+        auto lineBuffer = line.cells();
+        auto const leftMargin = *margin().horizontal.from;
+        auto const rightMargin = *margin().horizontal.to;
+        auto const width = rightMargin - leftMargin + 1;
+        auto const count = std::min(*n, width);
+
+        Cell* left = const_cast<Cell*>(lineBuffer.data() + leftMargin);
+        Cell* mid = const_cast<Cell*>(lineBuffer.data() + rightMargin + 1 - count);
+        Cell* right = const_cast<Cell*>(lineBuffer.data() + rightMargin + 1);
+
+        rotate(left, mid, right);
+
+        // Blank the vacated cells on the left
+        for (Cell& cell: gsl::make_span(left, left + count))
+            cell.write(_cursor.graphicsRendition, L' ', 1);
+    }
 }
 
 template <CellConcept Cell>
@@ -2677,9 +2738,42 @@ namespace impl
             if (seq.parameterCount() != 1)
                 return ApplyResult::Invalid; // -> error
             else if (seq.param(0) == 1)
-                // TODO: https://vt100.net/docs/vt510-rm/DECCIR.html
-                // TODO return emitCommand<RequestCursorState>(); // or call it with ...Detailed?
-                return ApplyResult::Invalid;
+            {
+                // DECCIR — Cursor Information Report
+                // Response: DCS 1 $ u <Pr>;<Pc>;<Pp>;<Srend>;<Satt>;<Sflag>;<Pgl>;<Pgr>;<Scss>;<Sdesig> ST
+                auto const& cursor = screen.cursor();
+                auto const line = *cursor.position.line + 1;
+                auto const column = *cursor.position.column + 1;
+                auto const page = 1; // We only support one page
+
+                // Encode SGR flags as a bitmask character (0x40 base)
+                auto const& flags = cursor.graphicsRendition.flags;
+                int srendBits = 0;
+                if (flags.test(CellFlag::Bold))
+                    srendBits |= 1;
+                if (flags.test(CellFlag::Underline))
+                    srendBits |= 2;
+                if (flags.test(CellFlag::Blinking))
+                    srendBits |= 4;
+                if (flags.test(CellFlag::Inverse))
+                    srendBits |= 8;
+                auto const srend = static_cast<char>(0x40 + srendBits);
+
+                // Protection attribute
+                auto const satt = flags.test(CellFlag::CharacterProtected) ? static_cast<char>(0x41)
+                                                                           : static_cast<char>(0x40);
+
+                // Flags: origin mode, auto-wrap, selective erase
+                int sflagBits = 0;
+                if (cursor.originMode)
+                    sflagBits |= 1;
+                if (cursor.autoWrap)
+                    sflagBits |= 8;
+                auto const sflag = static_cast<char>(0x40 + sflagBits);
+
+                screen.reply("\033P1$u{};{};{};{};{};{}\033\\", line, column, page, srend, satt, sflag);
+                return ApplyResult::Ok;
+            }
             else if (seq.param(0) == 2)
             {
                 screen.requestTabStops();
@@ -2943,6 +3037,30 @@ namespace impl
             }
             else
                 return ApplyResult::Unsupported;
+        }
+
+        /// OSC 9 — ConEmu-style notification and progress indicator.
+        ///
+        /// Simple notification: OSC 9 ; <message> ST
+        /// Progress indicator:  OSC 9 ; 4 ; <state> ; <progress> ST
+        template <CellConcept Cell>
+        ApplyResult CONEMU(Sequence const& seq, Screen<Cell>& screen)
+        {
+            auto const& value = seq.intermediateCharacters();
+            if (value.empty())
+                return ApplyResult::Invalid;
+
+            // Check for progress indicator: "4;state;progress"
+            if (value.size() >= 2 && value[0] == '4' && value[1] == ';')
+            {
+                // Progress indicator — currently, we silently accept it.
+                // TODO: expose progress state to the GUI layer
+                return ApplyResult::Ok;
+            }
+
+            // Simple notification: the payload is the notification message
+            screen.notify(string("ConEmu"), string(value));
+            return ApplyResult::Ok;
         }
 
         template <CellConcept Cell>
@@ -3432,13 +3550,69 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
             auto const left = ColumnOffset(seq.param_or(1, *origin.column + 1) - 1);
             auto const bottom = LineOffset(seq.param_or(2, *pageSize().lines) - 1);
             auto const right = ColumnOffset(seq.param_or(3, *pageSize().columns) - 1);
-            for (auto row = top; row <= bottom; ++row)
+            if (_rectangularAttributeMode)
             {
-                for (auto column = left; column <= right; ++column)
+                for (auto row = top; row <= bottom; ++row)
+                    for (auto column = left; column <= right; ++column)
+                        impl::applySGR(at(row, column), seq, 4, seq.parameterCount());
+            }
+            else
+            {
+                // Stream mode: iterate left-to-right, top-to-bottom
+                for (auto row = top; row <= bottom; ++row)
                 {
-                    auto& cell = at(row, column);
-                    impl::applySGR(cell, seq, 4, seq.parameterCount());
-                    // Maybe move setGraphicsRendition to Screen::cursor() ?
+                    auto const colStart = (row == top) ? left : ColumnOffset(0);
+                    auto const colEnd = (row == bottom) ? right : ColumnOffset(*pageSize().columns - 1);
+                    for (auto column = colStart; column <= colEnd; ++column)
+                        impl::applySGR(at(row, column), seq, 4, seq.parameterCount());
+                }
+            }
+        }
+        break;
+        case DECRARA: {
+            auto const origin = this->origin();
+            auto const top = LineOffset(seq.param_or(0, *origin.line + 1) - 1);
+            auto const left = ColumnOffset(seq.param_or(1, *origin.column + 1) - 1);
+            auto const bottom = LineOffset(seq.param_or(2, *pageSize().lines) - 1);
+            auto const right = ColumnOffset(seq.param_or(3, *pageSize().columns) - 1);
+            // Build a bitmask of CellFlags to toggle from the SGR params at position 4+
+            auto flagsToToggle = CellFlags {};
+            for (size_t i = 4; i < seq.parameterCount(); ++i)
+            {
+                switch (seq.param(i))
+                {
+                    case 0: break; // reset has no toggle equivalent
+                    case 1: flagsToToggle.enable(CellFlag::Bold); break;
+                    case 2: flagsToToggle.enable(CellFlag::Faint); break;
+                    case 3: flagsToToggle.enable(CellFlag::Italic); break;
+                    case 4: flagsToToggle.enable(CellFlag::Underline); break;
+                    case 5: flagsToToggle.enable(CellFlag::Blinking); break;
+                    case 7: flagsToToggle.enable(CellFlag::Inverse); break;
+                    case 8: flagsToToggle.enable(CellFlag::Hidden); break;
+                    case 9: flagsToToggle.enable(CellFlag::CrossedOut); break;
+                    default: break;
+                }
+            }
+            auto const toggleCell = [&](auto row, auto column) {
+                auto& cell = at(row, column);
+                auto const oldFlags = cell.flags();
+                auto const toggled = CellFlags::from_value(oldFlags.value() ^ flagsToToggle.value());
+                cell.resetFlags(toggled);
+            };
+            if (_rectangularAttributeMode)
+            {
+                for (auto row = top; row <= bottom; ++row)
+                    for (auto column = left; column <= right; ++column)
+                        toggleCell(row, column);
+            }
+            else
+            {
+                for (auto row = top; row <= bottom; ++row)
+                {
+                    auto const colStart = (row == top) ? left : ColumnOffset(0);
+                    auto const colEnd = (row == bottom) ? right : ColumnOffset(*pageSize().columns - 1);
+                    for (auto column = colStart; column <= colEnd; ++column)
+                        toggleCell(row, column);
                 }
             }
         }
@@ -3499,6 +3673,10 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         break;
         case DECDC: deleteColumns(seq.param_or(0, ColumnCount(1))); break;
         case DECIC: insertColumns(seq.param_or(0, ColumnCount(1))); break;
+        case DECSACE:
+            // Ps=0 or 1 → stream mode, Ps=2 → rectangle mode
+            _rectangularAttributeMode = (seq.param_or(0, 1) == 2);
+            break;
         case DECSCA: {
             auto const pc = seq.param_or(0, 0);
             switch (pc)
@@ -3560,6 +3738,28 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
                 return ApplyResult::Invalid;
             requestAnsiMode(seq.param(0));
             return ApplyResult::Ok;
+        case DECRQCRA: {
+            // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ y
+            auto const requestId = seq.param_or(0, 0);
+            // Pp is page number (ignored, we have one page)
+            auto const top = LineOffset(std::max(seq.param_or(2, 1), 1) - 1);
+            auto const left = ColumnOffset(std::max(seq.param_or(3, 1), 1) - 1);
+            auto const bottom =
+                LineOffset(std::min(seq.param_or(4, *pageSize().lines), *pageSize().lines) - 1);
+            auto const right =
+                ColumnOffset(std::min(seq.param_or(5, *pageSize().columns), *pageSize().columns) - 1);
+            uint16_t checksum = 0;
+            for (auto row = top; row <= bottom; ++row)
+                for (auto column = left; column <= right; ++column)
+                {
+                    auto const& cell = at(row, column);
+                    auto const text = cell.toUtf8();
+                    for (auto const ch: text)
+                        checksum += static_cast<uint16_t>(static_cast<uint8_t>(ch));
+                }
+            reply("\033P{}!~{:04X}\033\\", requestId, checksum);
+            return ApplyResult::Ok;
+        }
         case DECRQPSR: return impl::DECRQPSR(seq, *this);
         case DECSCUSR: return impl::DECSCUSR(seq, *_terminal);
         case DECSCPP:
@@ -3662,6 +3862,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         }
         case SCOSC: saveCursor(); break;
         case SD: scrollDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
+        case UNSCROLL: unscroll(seq.param_or<LineCount>(0, LineCount(1))); break;
         case SETMARK:
             // TODO: deprecated. Remove in some future version.
             // Users should migrate to OSC 133.
@@ -3679,6 +3880,8 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
             });
             return r;
         }
+        case SL: scrollLeft(seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
+        case SR: scrollRight(seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
         case SU: scrollUp(seq.param_or<LineCount>(0, LineCount(1))); break;
         case TBC: return impl::TBC(seq, *this);
         case VPA: moveCursorToLine(seq.param_or<LineOffset>(0, LineOffset { 1 }) - 1); break;
@@ -3700,6 +3903,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
                     _terminal->pushColorPalette(seq.param<size_t>(i));
             return ApplyResult::Ok;
         case XTREPORTCOLORS: _terminal->reportColorPaletteStack(); return ApplyResult::Ok;
+        case XTCHECKSUM: _checksumExtension = seq.param_or(0, 0); break;
         case XTSMGRAPHICS: return impl::XTSMGRAPHICS(seq, *this);
         case XTVERSION:
             reply("\033P>|{} {}\033\\", LIBTERMINAL_NAME, LIBTERMINAL_VERSION_STRING);
@@ -3739,6 +3943,11 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
             break;
 
         case DECPS: _terminal->playSound(seq.parameters()); break;
+        case MODIFYOTHERKEYS: {
+            auto const mode = seq.param_or(0, 0);
+            _terminal->setModifyOtherKeys(mode);
+            return ApplyResult::Ok;
+        }
         case CSIUENTER: {
             auto const flags = KeyboardEventFlags::from_value(seq.param_or(0, 1));
             _terminal->keyboardProtocol().enter(flags);
@@ -3773,6 +3982,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         case SETICON: return ApplyResult::Ok; // NB: Silently ignore!
         case SETWINTITLE: _terminal->setWindowTitle(seq.intermediateCharacters()); break;
+        case SETTABNAME: _terminal->setTabName(seq.intermediateCharacters()); break;
         case SETXPROP: return ApplyResult::Unsupported;
         case SETCOLPAL: return impl::SETCOLPAL(seq, *_terminal);
         case RCOLPAL: return impl::RCOLPAL(seq, *_terminal);
@@ -3801,6 +4011,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case RCOLORMOUSEBG: resetDynamicColor(DynamicColorName::MouseBackgroundColor); break;
         case RCOLORHIGHLIGHTFG: resetDynamicColor(DynamicColorName::HighlightForegroundColor); break;
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
+        case CONEMU: return impl::CONEMU(seq, *this);
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case DUMPSTATE: inspect(); break;
         case SEMA: processShellIntegration(seq); break;

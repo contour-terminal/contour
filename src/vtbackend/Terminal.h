@@ -66,6 +66,16 @@ enum class SmoothScrollResult : uint8_t
     InvalidCellSize, ///< Cell pixel size is zero or negative; cannot compute scroll.
 };
 
+/// Platform-independent scroll gesture phase, mapped from Qt::ScrollPhase.
+enum class ScrollPhase : uint8_t
+{
+    NoPhase,  ///< No phase information (e.g. mouse wheel events on X11).
+    Begin,    ///< Touchpad gesture started (finger touched).
+    Update,   ///< Touchpad gesture is ongoing (finger moving).
+    End,      ///< Touchpad gesture ended (finger lifted).
+    Momentum, ///< OS-generated momentum phase (we implement our own).
+};
+
 /// Helping information to visualize IME text that has not been comitted yet.
 struct InputMethodData
 {
@@ -514,6 +524,23 @@ class Terminal
     /// Resets pixel offset to zero.
     void resetSmoothScroll() noexcept;
 
+    // {{{ Momentum scrolling API
+
+    /// Processes a scroll gesture phase event for momentum scrolling.
+    ///
+    /// @param phase      The gesture phase (Begin/Update/End/Momentum/NoPhase).
+    /// @param pixelDelta The pixel scroll amount for this event (positive = scroll up into history).
+    /// @param now        Current time point for velocity tracking.
+    void handleScrollPhase(ScrollPhase phase, float pixelDelta, std::chrono::steady_clock::time_point now);
+
+    /// Cancels any active momentum scroll animation.
+    void cancelMomentumScroll() noexcept;
+
+    /// Returns true if a momentum scroll animation is currently active.
+    [[nodiscard]] bool isMomentumScrollActive() const noexcept;
+
+    // }}} Momentum scrolling API
+
     // }}}
 
     // {{{ Screen Render Proxy
@@ -727,14 +754,14 @@ class Terminal
                && (cursorDisplay() == CursorDisplay::Steady || _cursorBlinkState);
     }
 
-    /// Returns the predicted animation progress for a cursor at the given screen position.
+    /// Returns the predicted animation progress for a cursor at the given grid position.
     /// Used by RenderBufferBuilder to pre-set animationProgress before cell rendering,
     /// so that Block cursor cell inversion is suppressed during animation.
-    [[nodiscard]] float cursorAnimationProgress(CellLocation cursorScreenPosition) const noexcept
+    [[nodiscard]] float cursorAnimationProgress(CellLocation cursorGridPosition) const noexcept
     {
         if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
             return _cursorMotion.progress(_currentTime);
-        if (cursorScreenPosition != _cursorMotion.toPosition
+        if (cursorGridPosition != _cursorMotion.toPosition
             && _settings.cursorMotionAnimationDuration.count() > 0)
             return 0.0f;
         return 1.0f;
@@ -893,6 +920,8 @@ class Terminal
     void setMouseProtocol(MouseProtocol protocol, bool enabled);
     void setMouseTransport(MouseTransport transport);
     void setMouseWheelMode(InputGenerator::MouseWheelMode mode);
+    void setModifyOtherKeys(int mode);
+    [[nodiscard]] int modifyOtherKeys() const noexcept;
     void setWindowTitle(std::string_view title);
     void setTabName(std::string_view title);
     [[nodiscard]] std::string const& windowTitle() const noexcept;
@@ -1261,6 +1290,43 @@ class Terminal
         RGBColor toColor {};   ///< Cursor color at the animation target position.
     };
     CursorMotionState _cursorMotion;
+    // }}}
+
+    // {{{ Momentum scrolling state
+    /// Tracks velocity during a touchpad scroll gesture for momentum estimation.
+    struct VelocityTracker
+    {
+        static constexpr size_t MaxSamples = 5;
+        struct Sample
+        {
+            std::chrono::steady_clock::time_point time {};
+            float pixelDelta = 0.0f;
+        };
+        std::array<Sample, MaxSamples> samples {};
+        size_t count = 0;
+        size_t writeIndex = 0;
+
+        void reset() noexcept;
+        void addSample(std::chrono::steady_clock::time_point time, float pixelDelta) noexcept;
+        [[nodiscard]] float computeVelocity() const noexcept;
+    };
+
+    /// Holds state for an active momentum (inertia) scroll animation.
+    struct ScrollMomentumState
+    {
+        bool active = false;
+        float velocity = 0.0f; ///< pixels/second (positive = scroll up into history).
+        std::chrono::steady_clock::time_point lastUpdate {};
+
+        [[nodiscard]] bool shouldStop() const noexcept;
+
+        static constexpr float FrictionDecayPerSecond = 0.05f; ///< ~95% decay per second.
+        static constexpr float MinVelocityThreshold = 10.0f;   ///< px/s below which momentum stops.
+        static constexpr float StartThreshold = 50.0f;         ///< px/s required to start momentum.
+    };
+
+    ScrollMomentumState _scrollMomentum;
+    VelocityTracker _scrollVelocityTracker;
     // }}}
 
     // {{{ Displays this terminal manages

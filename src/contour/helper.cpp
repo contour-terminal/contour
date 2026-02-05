@@ -117,21 +117,43 @@ namespace
         return QPoint { p.y(), p.x() };
     }
 
+    /// Maps Qt's scroll phase to the platform-independent vtbackend enum.
+    vtbackend::ScrollPhase mapScrollPhase(Qt::ScrollPhase phase) noexcept
+    {
+        switch (phase)
+        {
+            case Qt::ScrollBegin: return vtbackend::ScrollPhase::Begin;
+            case Qt::ScrollUpdate: return vtbackend::ScrollPhase::Update;
+            case Qt::ScrollEnd: return vtbackend::ScrollPhase::End;
+            case Qt::ScrollMomentum: return vtbackend::ScrollPhase::Momentum;
+            case Qt::NoScrollPhase: return vtbackend::ScrollPhase::NoPhase;
+        }
+        return vtbackend::ScrollPhase::NoPhase;
+    }
+
     void sendWheelEvent(crispy::point const& pixelDelta,
                         crispy::point const& angleDelta,
                         PixelCoordinate const& currentMousePixelPosition,
                         vtbackend::Modifiers modifiers,
+                        vtbackend::ScrollPhase scrollPhase,
                         TerminalSession& session)
     {
         using VTMouseButton = vtbackend::MouseButton;
 
         auto& terminal = session.terminal();
 
+        // Discard OS-generated momentum events when our own momentum scrolling is active.
+        if (scrollPhase == vtbackend::ScrollPhase::Momentum && terminal.isMomentumScrollActive())
+            return;
+
         // Smooth scrolling path: bypass line quantization for the primary screen.
         // Skip smooth scrolling when modifiers are held so that modifier+wheel bindings
         // (e.g. Alt+Wheel for opacity, Ctrl+Wheel for font size) are handled by the binding system.
         if (terminal.settings().smoothScrolling && !terminal.isAlternateScreen() && modifiers.none())
         {
+            auto const now = steady_clock::now();
+            auto effectivePixelDelta = 0.0f;
+
             if (angleDelta.y != 0)
             {
                 // Prefer angleDelta: it is standardized across platforms (120 units = 1 notch)
@@ -142,17 +164,27 @@ namespace
                 auto const cellHeight = terminal.cellPixelSize().height.as<float>();
                 constexpr auto AngleStepSize = 40.0f;
                 auto const pixelsPerUnit = unbox<float>(multiplier) * cellHeight / AngleStepSize;
-                auto const pixelAmount = static_cast<float>(angleDelta.y) * pixelsPerUnit;
-                if (terminal.applySmoothScrollPixelDelta(pixelAmount)
+                effectivePixelDelta = static_cast<float>(angleDelta.y) * pixelsPerUnit;
+            }
+            else if (pixelDelta.y != 0)
+            {
+                // Fallback for pure trackpad input that only provides pixel deltas.
+                effectivePixelDelta = static_cast<float>(pixelDelta.y);
+            }
+
+            if (effectivePixelDelta != 0.0f)
+            {
+                terminal.handleScrollPhase(scrollPhase, effectivePixelDelta, now);
+                if (terminal.applySmoothScrollPixelDelta(effectivePixelDelta)
                     == vtbackend::SmoothScrollResult::Applied)
                     return;
             }
-            if (pixelDelta.y != 0)
+            else if (scrollPhase == vtbackend::ScrollPhase::End
+                     || scrollPhase == vtbackend::ScrollPhase::Begin)
             {
-                // Fallback for pure trackpad input that only provides pixel deltas.
-                if (terminal.applySmoothScrollPixelDelta(static_cast<float>(pixelDelta.y))
-                    == vtbackend::SmoothScrollResult::Applied)
-                    return;
+                // Handle zero-delta phase events (e.g. ScrollEnd often has zero delta).
+                terminal.handleScrollPhase(scrollPhase, 0.0f, now);
+                return;
             }
         }
 
@@ -457,7 +489,10 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
 void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 {
-    if (event->pixelDelta().isNull() && event->angleDelta().isNull())
+    auto const phase = event->phase();
+    // Allow zero-delta events through if they carry phase info (e.g. ScrollEnd).
+    if (event->pixelDelta().isNull() && event->angleDelta().isNull() && phase != Qt::ScrollEnd
+        && phase != Qt::ScrollBegin)
         return;
 
     using vtbackend::Modifier;
@@ -494,7 +529,8 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
         return { .x = numDegrees.x(), .y = numDegrees.y() };
     }();
 
-    sendWheelEvent(pixelDelta, angleDelta, pixelPosition, modifiers, session);
+    auto const scrollPhase = mapScrollPhase(event->phase());
+    sendWheelEvent(pixelDelta, angleDelta, pixelPosition, modifiers, scrollPhase, session);
     event->accept();
 }
 

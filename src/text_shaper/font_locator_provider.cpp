@@ -30,7 +30,6 @@ font_locator& font_locator_provider::native()
         _native = make_unique<fontconfig_locator>();
 #endif
     }
-
     return *_native;
 }
 

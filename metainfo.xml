@@ -114,6 +114,8 @@
           <li>Fixes terminal shrinking/growing on tab switch when status line is displayed</li>
           <li>Fixes WINDOWMANIP cell-based resize (CSI 8;rows;cols t) gaining columns at non-integer content scale</li>
           <li>Fixes initial terminal window size being wrong at fractional DPR (e.g. 127×29 instead of configured 130×30 at 150% scaling on Wayland, #1858)</li>
+          <li>Fixes ~2s startup delay caused by synchronous Qt multimedia driver probing by deferring audio initialization to a background thread</li>
+          <li>Fixes initial font sizing at fractional DPR on Wayland by preferring screen DPR over window DPR</li>
           <li>Replaces abrupt cell blink toggle with configurable smooth pulse animation via blink_style profile setting (classic/smooth/linger)</li>
           <li>Adds configurable crossfade transition between primary and alternate screens via screen_transition and screen_transition_duration profile settings</li>
           <li>Adds animated cursor movement between grid cells with ease-out interpolation via cursor_motion_animation_duration profile setting</li>
@@ -122,6 +124,12 @@
           <li>Adds pixel-perfect builtin rendering for shade characters (U+2591–U+2593): light shade, medium shade, and dark shade</li>
           <li>Adds snap-to-grid window resizing via WM size-increment hints (X11/macOS) and client-side snapping (Wayland, where xdg-shell has no size-increment hint)</li>
           <li>Adds hint mode for keyboard-driven selection of URLs, file paths, git hashes, and IP addresses with configurable actions (Copy, Open, Paste, Select), activatable via key binding or Vi normal mode (gh/gH)</li>
+          <li>Adds configurable font fallback limit (max_fallback_count) with on-demand loading and persistent locate cache for faster font resolution</li>
+          <li>Adds DECNKM (DEC mode 66, VT320) to toggle numeric keypad between application and numeric mode via CSI ? 66 h / CSI ? 66 l</li>
+          <li>Adds DECARM (DEC mode 8, VT100) to enable/disable keyboard auto-repeat via CSI ? 8 h / CSI ? 8 l</li>
+          <li>Adds DECBKM (DEC mode 67, VT340) to toggle Backspace key between BS (0x08) and DEL (0x7F) via CSI ? 67 h / CSI ? 67 l</li>
+          <li>Adds kitty's unscroll extension (CSI n + T) to restore scrolled-off content from scrollback history</li>
+          <li>Adds natural momentum scrolling for touchpad gestures with configurable falloff via momentum_scrolling profile setting</li>
         </ul>
       </description>
     </release>

@@ -172,6 +172,7 @@ Terminal::Terminal(Events& eventListener,
 
     // TODO(should be this instead?): hardReset();
     setMode(DECMode::AutoWrap, true);
+    setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::Unicode, true);
@@ -547,11 +548,22 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
     auto const effectiveDuration =
         std::max(_settings.cursorMotionAnimationDuration, _refreshInterval.value * MinFrames);
 
-    auto const& cursorPos = output.cursor->position;
+    // Use grid coordinates (without scroll offset or baseLine) for animation state.
+    // This prevents viewport scrolling from triggering spurious cursor animations,
+    // since the grid position doesn't change when the user scrolls.
+    auto const gridCursorPos = [&]() -> CellLocation {
+        if (inputHandler().mode() == ViMode::Insert)
+            return currentScreen().cursor().position;
+        return _viCommands.cursorPosition;
+    }();
+
+    // The line offset from grid to screen coordinates (accounts for baseLine and scrollOffset).
+    auto const gridToScreenLineOffset = output.cursor->position.line - gridCursorPos.line;
+
     if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
     {
         // Animation in progress — check if target changed (chaining)
-        if (cursorPos != _cursorMotion.toPosition)
+        if (gridCursorPos != _cursorMotion.toPosition)
         {
             // Chain: start new animation from current interpolated position
             auto const currentProgress = _cursorMotion.progress(_currentTime);
@@ -559,34 +571,38 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
                 lerpCellLocation(_cursorMotion.fromPosition, _cursorMotion.toPosition, currentProgress);
             _cursorMotion.fromColor =
                 mixColor(_cursorMotion.fromColor, _cursorMotion.toColor, currentProgress);
-            _cursorMotion.toPosition = cursorPos;
+            _cursorMotion.toPosition = gridCursorPos;
             _cursorMotion.toColor = output.cursor->cursorColor;
             _cursorMotion.startTime = _currentTime;
             _cursorMotion.duration = effectiveDuration;
         }
-        // Inject animation data
-        output.cursor->animateFrom = _cursorMotion.fromPosition;
+        // Inject animation data (convert grid -> screen coordinates)
+        auto fromScreen = _cursorMotion.fromPosition;
+        fromScreen.line += gridToScreenLineOffset;
+        output.cursor->animateFrom = fromScreen;
         output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
         output.cursor->animateFromColor = _cursorMotion.fromColor;
     }
-    else if (cursorPos != _cursorMotion.toPosition && _settings.cursorMotionAnimationDuration.count() > 0)
+    else if (gridCursorPos != _cursorMotion.toPosition && _settings.cursorMotionAnimationDuration.count() > 0)
     {
-        // Start new animation
+        // Start new animation (store grid positions)
         _cursorMotion.active = true;
         _cursorMotion.fromPosition = _cursorMotion.toPosition; // previous target
         _cursorMotion.fromColor = _cursorMotion.toColor;       // previous target's color
-        _cursorMotion.toPosition = cursorPos;
+        _cursorMotion.toPosition = gridCursorPos;
         _cursorMotion.toColor = output.cursor->cursorColor;
         _cursorMotion.startTime = _currentTime;
         _cursorMotion.duration = effectiveDuration;
 
-        output.cursor->animateFrom = _cursorMotion.fromPosition;
+        auto fromScreen = _cursorMotion.fromPosition;
+        fromScreen.line += gridToScreenLineOffset;
+        output.cursor->animateFrom = fromScreen;
         output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
         output.cursor->animateFromColor = _cursorMotion.fromColor;
     }
     else
     {
-        _cursorMotion.toPosition = cursorPos;
+        _cursorMotion.toPosition = gridCursorPos;
         _cursorMotion.toColor = output.cursor->cursorColor;
     }
 }
@@ -790,6 +806,10 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     if (!allowInput())
         return Handled { true };
 
+    // Suppress key repeat events when DECARM (auto-repeat mode) is disabled.
+    if (eventType == KeyboardEventType::Repeat && !isModeEnabled(DECMode::AutoRepeat))
+        return Handled { true };
+
     // Route Escape to hint mode handler if active (ignore key release events).
     if (_hintModeHandler.isActive() && key == Key::Escape && eventType != KeyboardEventType::Release)
     {
@@ -817,6 +837,10 @@ Handled Terminal::sendCharEvent(
 
     // Early exit if KAM is enabled.
     if (!allowInput())
+        return Handled { true };
+
+    // Suppress character repeat events when DECARM (auto-repeat mode) is disabled.
+    if (eventType == KeyboardEventType::Repeat && !isModeEnabled(DECMode::AutoRepeat))
         return Handled { true };
 
     // Route input to hint mode handler if active (no modifiers — just label chars).
@@ -1395,6 +1419,10 @@ optional<chrono::milliseconds> Terminal::nextRender() const
     if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
         nextWakeup = std::min(nextWakeup, _refreshInterval.value);
 
+    // Momentum scrolling animation scheduling at display refresh rate.
+    if (_scrollMomentum.active && !_scrollMomentum.shouldStop())
+        nextWakeup = std::min(nextWakeup, _refreshInterval.value);
+
     if (nextWakeup == chrono::milliseconds::max())
         return nullopt;
 
@@ -1415,12 +1443,132 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
 
     if (_cursorMotion.active && _cursorMotion.isComplete(_currentTime))
         _cursorMotion.active = false;
+
+    // Apply momentum scrolling each frame.
+    if (_scrollMomentum.active)
+    {
+        auto const dt = chrono::duration<float>(now - _scrollMomentum.lastUpdate).count();
+        if (dt > 0.0f)
+        {
+            auto const result = applySmoothScrollPixelDelta(_scrollMomentum.velocity * dt);
+            _scrollMomentum.velocity *= std::pow(ScrollMomentumState::FrictionDecayPerSecond, dt);
+            _scrollMomentum.lastUpdate = now;
+            if (_scrollMomentum.shouldStop() || result == SmoothScrollResult::Disabled)
+                cancelMomentumScroll();
+        }
+    }
 }
 
 void Terminal::resetSmoothScroll() noexcept
 {
+    cancelMomentumScroll();
     _viewport.resetPixelOffset();
 }
+
+// {{{ VelocityTracker
+
+void Terminal::VelocityTracker::reset() noexcept
+{
+    count = 0;
+    writeIndex = 0;
+}
+
+void Terminal::VelocityTracker::addSample(std::chrono::steady_clock::time_point time,
+                                          float pixelDelta) noexcept
+{
+    samples[writeIndex] = { .time = time, .pixelDelta = pixelDelta };
+    writeIndex = (writeIndex + 1) % MaxSamples;
+    if (count < MaxSamples)
+        ++count;
+}
+
+float Terminal::VelocityTracker::computeVelocity() const noexcept
+{
+    if (count < 2)
+        return 0.0f;
+
+    auto const oldestIndex = (writeIndex + MaxSamples - count) % MaxSamples;
+    auto const newestIndex = (writeIndex + MaxSamples - 1) % MaxSamples;
+
+    auto const dt =
+        std::chrono::duration<float>(samples[newestIndex].time - samples[oldestIndex].time).count();
+    if (dt <= 0.0f)
+        return 0.0f;
+
+    // Sum pixel deltas, excluding the oldest sample.
+    // Each sample's pixelDelta is an incremental scroll since the previous event.
+    // The oldest sample's delta occurred *before* the measurement window [t_oldest, t_newest],
+    // so it must not be counted in the distance traversed during that window.
+    auto totalPixels = 0.0f;
+    for (size_t i = 1; i < count; ++i)
+        totalPixels += samples[(oldestIndex + i) % MaxSamples].pixelDelta;
+
+    return totalPixels / dt;
+}
+
+// }}} VelocityTracker
+
+// {{{ ScrollMomentumState
+
+bool Terminal::ScrollMomentumState::shouldStop() const noexcept
+{
+    return !active || std::abs(velocity) < MinVelocityThreshold;
+}
+
+// }}} ScrollMomentumState
+
+// {{{ Momentum scrolling
+
+void Terminal::handleScrollPhase(ScrollPhase phase,
+                                 float pixelDelta,
+                                 std::chrono::steady_clock::time_point now)
+{
+    if (!_settings.smoothScrolling || !_settings.momentumScrolling)
+        return;
+
+    switch (phase)
+    {
+        case ScrollPhase::Begin:
+            cancelMomentumScroll();
+            _scrollVelocityTracker.reset();
+            break;
+        case ScrollPhase::Update: _scrollVelocityTracker.addSample(now, pixelDelta); break;
+        case ScrollPhase::End: {
+            auto const velocity = _scrollVelocityTracker.computeVelocity();
+            if (std::abs(velocity) >= ScrollMomentumState::StartThreshold)
+            {
+                _scrollMomentum.active = true;
+                _scrollMomentum.velocity = velocity;
+                _scrollMomentum.lastUpdate = now;
+                // Kick-start the render loop so that tick() is called each frame.
+                // Without this, the display idles after the last wheel event and
+                // momentum would only advance on the next unrelated input (e.g. mouse move).
+                breakLoopAndRefreshRenderBuffer();
+            }
+            _scrollVelocityTracker.reset();
+            break;
+        }
+        case ScrollPhase::Momentum:
+            // Discard OS-generated momentum events when our own momentum is active.
+            break;
+        case ScrollPhase::NoPhase:
+            // No phase info (e.g. mouse wheel or X11 without phase support). No-op.
+            break;
+    }
+}
+
+void Terminal::cancelMomentumScroll() noexcept
+{
+    _scrollMomentum.active = false;
+    _scrollMomentum.velocity = 0.0f;
+}
+
+bool Terminal::isMomentumScrollActive() const noexcept
+{
+    return _scrollMomentum.active;
+}
+
+// }}} Momentum scrolling
 
 SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
 {
@@ -1988,6 +2136,16 @@ void Terminal::setBracketedPaste(bool enabled)
     _inputGenerator.setBracketedPaste(enabled);
 }
 
+void Terminal::setModifyOtherKeys(int mode)
+{
+    _inputGenerator.setModifyOtherKeys(mode);
+}
+
+int Terminal::modifyOtherKeys() const noexcept
+{
+    return _inputGenerator.modifyOtherKeys();
+}
+
 void Terminal::setCursorStyle(CursorDisplay display, CursorShape shape)
 {
     _settings.cursorDisplay = display;
@@ -2031,6 +2189,12 @@ void Terminal::setWindowTitle(string_view title)
 std::string const& Terminal::windowTitle() const noexcept
 {
     return _windowTitle;
+}
+
+void Terminal::setTabName(string_view title)
+{
+    _tabName = title;
+    _eventListener.setTabName(title);
 }
 
 void Terminal::requestTabName()
@@ -2245,6 +2409,9 @@ void Terminal::setMode(DECMode mode, bool enable)
                 // because it's local to the screen buffer.
             }
             break;
+        case DECMode::ApplicationKeypad: setApplicationkeypadMode(enable); break;
+        case DECMode::AutoRepeat: break;
+        case DECMode::BackarrowKey: _inputGenerator.setBackarrowKeyMode(enable); break;
         default: break;
     }
 
@@ -2314,7 +2481,9 @@ void Terminal::softReset()
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
 
-    // TODO: DECNKM (Numeric keypad)
+    setMode(DECMode::ApplicationKeypad, false); // DECNKM
+    setMode(DECMode::AutoRepeat, true);         // DECARM
+    setMode(DECMode::BackarrowKey, false);      // DECBKM
     // TODO: DECSCA (Select character attribute)
     // TODO: DECNRCM (National replacement character set)
     // TODO: GL, GR (G0, G1, G2, G3)
@@ -2358,6 +2527,7 @@ void Terminal::hardReset()
 
     _modes = Modes {};
     setMode(DECMode::AutoWrap, true);
+    setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::Unicode, true);
@@ -3062,6 +3232,9 @@ std::string to_string(DECMode mode)
         case DECMode::AllowColumns80to132: return "AllowColumns80to132";
         case DECMode::DebugLogging: return "DebugLogging";
         case DECMode::UseAlternateScreen: return "UseAlternateScreen";
+        case DECMode::ApplicationKeypad: return "ApplicationKeypad";
+        case DECMode::AutoRepeat: return "AutoRepeat";
+        case DECMode::BackarrowKey: return "BackarrowKey";
         case DECMode::BracketedPaste: return "BracketedPaste";
         case DECMode::FocusTracking: return "FocusTracking";
         case DECMode::NoSixelScrolling: return "NoSixelScrolling";

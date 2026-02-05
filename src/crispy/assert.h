@@ -122,4 +122,27 @@ inline void set_fail_handler(fail_handler_t handler)
         }                                                                             \
     } while (0)
 
+namespace detail
+{
+    /// Checks a condition. On failure: logs to errorLog, asserts (debug abort), returns false.
+    /// In release builds (NDEBUG), assert compiles out — logs error and returns false.
+    [[nodiscard]] inline bool softRequire(
+        bool condition,
+        char const* conditionText,
+        logstore::source_location location = logstore::source_location::current()) noexcept
+    {
+        if (condition) [[likely]]
+            return true;
+        // NB: Using a reference to bypass the errorLog() macro and pass a custom source_location.
+        auto const& softRequireErrorCategory = ::logstore::errorLog;
+        softRequireErrorCategory(location)("Precondition failed: {}", conditionText);
+        assert(false && "SoftRequire failed (debug-only abort)");
+        return false;
+    }
+} // namespace detail
+
+/// Soft precondition check. Logs and asserts (debug-only abort) on failure, returns bool.
+/// Usage: if (!SoftRequire(ptr != nullptr)) return fallback;
+#define SoftRequire(cond) crispy::detail::softRequire(!!(cond), #cond)
+
 } // namespace crispy

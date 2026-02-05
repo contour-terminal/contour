@@ -379,6 +379,7 @@ const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDesc
     .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
     .fontLocator = vtrasterizer::FontLocatorEngine::Native,
     .builtinBoxDrawing = true,
+    .maxFallbackCount = vtrasterizer::DefaultMaxFallbackCount,
 };
 
 struct TerminalProfile
@@ -407,6 +408,7 @@ struct TerminalProfile
     ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> frozenModes {};
     ConfigEntry<std::chrono::milliseconds, documentation::SmoothLineScrolling> smoothLineScrolling { 100 };
     ConfigEntry<bool, documentation::SmoothScrolling> smoothScrolling { true };
+    ConfigEntry<bool, documentation::MomentumScrolling> momentumScrolling { true };
     ConfigEntry<vtbackend::PageSize, documentation::TerminalSize> terminalSize { {
         .lines = vtbackend::LineCount(25),
         .columns = vtbackend::ColumnCount(80),
@@ -1163,6 +1165,7 @@ struct Writer
                       v.fontLocator,
                       v.textShapingEngine,
                       v.builtinBoxDrawing,
+                      v.maxFallbackCount,
                       v.renderMode,
                       "true",
                       v.regular.familyName,

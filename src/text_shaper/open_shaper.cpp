@@ -246,10 +246,16 @@ using ft_face_ptr = unique_ptr<FT_FaceRec_, void (*)(FT_FaceRec_*)>;
 
 auto constexpr MissingGlyphId = 0xFFFDu;
 
+/// Maximum number of fallback fonts loaded initially per font key.
+/// Additional fallbacks are loaded on demand when a glyph isn't found
+/// in the initial set.
+constexpr size_t InitialFallbackCount = 8;
+
 struct HbFontInfo // NOLINT(readability-identifier-naming)
 {
     font_source primary;
     font_source_list fallbacks;
+    font_source_list allFallbacks; ///< Complete fallback list for on-demand extension.
     font_size size;
     ft_face_ptr ftFace;
     hb_font_ptr hbFont;
@@ -551,8 +557,17 @@ struct open_shaper::private_open_shaper // {{{
     FT_Library ft {};
     font_locator* locator = nullptr;
     DPI dpi;
+    // Default must match vtrasterizer::DefaultMaxFallbackCount.
+    // Cannot include the header directly due to dependency direction (vtrasterizer depends on text_shaper).
+    // The actual value is passed at runtime via set_font_fallback_limit().
+    int fontFallbackLimit = 16; ///< Maximum total fallback fonts per key. -1 = unlimited, 0 = disabled.
     unordered_map<FontInfo, font_key> fontPathAndSizeToKeyMapping;
     unordered_map<font_key, HbFontInfo> fontKeyToHbFontInfoMapping; // from font_key to FontInfo struct
+
+    /// Persistent cache for locate() results.
+    /// Survives clear_cache() since font descriptions map to the same font files
+    /// regardless of DPI or font size changes.
+    unordered_map<font_description, font_source_list> locateCache;
 
     // Blacklisted font files as we tried them already and failed.
     std::vector<std::string> blacklistedSources;
@@ -604,6 +619,7 @@ struct open_shaper::private_open_shaper // {{{
 
         auto fontInfo = HbFontInfo { .primary = source,
                                      .fallbacks = {},
+                                     .allFallbacks = {},
                                      .size = fontSize,
                                      .ftFace = std::move(ftFacePtr),
                                      .hbFont = std::move(hbFontPtr) };
@@ -650,6 +666,53 @@ struct open_shaper::private_open_shaper // {{{
             errorLog()("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
     }
 
+    /// Extends fontInfo.fallbacks by appending the next batch from allFallbacks.
+    /// Returns true if new fallbacks were added.
+    static bool extendFallbacks(HbFontInfo& fontInfo)
+    {
+        auto const currentCount = fontInfo.fallbacks.size();
+        auto const totalCount = fontInfo.allFallbacks.size();
+        if (currentCount >= totalCount)
+            return false;
+
+        auto const nextBatchEnd = std::min(currentCount + InitialFallbackCount, totalCount);
+        fontInfo.fallbacks.insert(fontInfo.fallbacks.end(),
+                                  fontInfo.allFallbacks.begin() + static_cast<ptrdiff_t>(currentCount),
+                                  fontInfo.allFallbacks.begin() + static_cast<ptrdiff_t>(nextBatchEnd));
+        return true;
+    }
+
+    /// Updates an existing FT_Face's char size to the new DPI in-place,
+    /// avoiding the cost of reloading the font file from disk.
+    void updateFaceDpi(HbFontInfo& fontInfo, DPI newDpi)
+    {
+        auto* ftFace = fontInfo.ftFace.get();
+
+        if (FT_HAS_COLOR(ftFace))
+        {
+            auto const strikeIndexOpt = ftBestStrikeIndex(ftFace, fontInfo.size.pt, newDpi);
+            if (strikeIndexOpt.has_value())
+                if (auto const ec = FT_Select_Size(ftFace, *strikeIndexOpt); ec != FT_Err_Ok)
+                    errorLog()("Failed to FT_Select_Size(index={}) during DPI update: {}",
+                               *strikeIndexOpt,
+                               ftErrorStr(ec));
+        }
+        else
+        {
+            auto const size = static_cast<FT_F26Dot6>(ceil(fontInfo.size.pt * 64.0));
+            if (auto const ec = FT_Set_Char_Size(
+                    ftFace, size, 0, static_cast<FT_UInt>(newDpi.x), static_cast<FT_UInt>(newDpi.y));
+                ec != FT_Err_Ok)
+                errorLog()("Failed to FT_Set_Char_Size during DPI update: {}", ftErrorStr(ec));
+        }
+
+        // Notify HarfBuzz that the underlying FT_Face metrics changed.
+        hb_ft_font_changed(fontInfo.hbFont.get());
+
+        // Invalidate cached metrics so they are recomputed on next access.
+        fontInfo.metrics.reset();
+    }
+
     bool tryShapeWithFallback(font_key font,
                               HbFontInfo& fontInfo,
                               hb_buffer_t* hbBuf,
@@ -665,28 +728,39 @@ struct open_shaper::private_open_shaper // {{{
         if (tryShape(font, fontInfo, hbBuf, hbFont, script, presentation, codepoints, clusters, result))
             return true;
 
-        for (font_source const& fallbackFont: fontInfo.fallbacks)
+        // Try fallbacks, extending the list on demand from allFallbacks when exhausted.
+        // NB: We use an index-based while loop because extendFallbacks() may grow
+        // fontInfo.fallbacks during iteration; range-based loops would miss new entries.
+        auto fallbackIndex = size_t { 0 };
+        while (fallbackIndex < fontInfo.fallbacks.size())
         {
             result.resize(initialResultOffset); // rollback to initial size
 
-            optional<font_key> fallbackKeyOpt =
+            auto const& fallbackFont = fontInfo.fallbacks[fallbackIndex];
+            auto fallbackKeyOpt =
                 getOrCreateKeyForFont(fallbackFont, fontInfo.size, fontInfo.description.weight);
             if (!fallbackKeyOpt.has_value())
+            {
+                ++fallbackIndex;
                 continue;
+            }
 
             // Skip if main font is monospace but fallbacks font is not.
             if (fontInfo.description.strictSpacing
                 && fontInfo.description.spacing != font_spacing::proportional)
             {
                 Require(fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
-                HbFontInfo const& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
-                bool const fontIsMonospace = fallbackFontInfo.ftFace->face_flags & FT_FACE_FLAG_FIXED_WIDTH;
+                auto const& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
+                auto const fontIsMonospace = fallbackFontInfo.ftFace->face_flags & FT_FACE_FLAG_FIXED_WIDTH;
                 if (!fontIsMonospace)
+                {
+                    ++fallbackIndex;
                     continue;
+                }
             }
 
             Require(fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
-            HbFontInfo& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
+            auto& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
             // clang-format off
             textShapingLog()("Try fallbacks font key:{}, source: {}",
                              fallbackKeyOpt.value(),
@@ -702,6 +776,12 @@ struct open_shaper::private_open_shaper // {{{
                          clusters,
                          result))
                 return true;
+
+            ++fallbackIndex;
+
+            // If we've exhausted the current fallback list, try extending it.
+            if (fallbackIndex == fontInfo.fallbacks.size())
+                extendFallbacks(fontInfo);
         }
 
         return false;
@@ -718,12 +798,26 @@ void open_shaper::set_dpi(DPI dpi)
     if (!dpi)
         return;
 
+    auto const oldDpi = _d->dpi;
     _d->dpi = dpi;
+
+    if (oldDpi == dpi)
+        return;
+
+    // Update all existing FT_Face objects in-place with the new DPI,
+    // avoiding the cost of destroying and reloading fonts from disk.
+    for (auto& [key, fontInfo]: _d->fontKeyToHbFontInfoMapping)
+        _d->updateFaceDpi(fontInfo, dpi);
 }
 
 void open_shaper::set_locator(font_locator& locator)
 {
     _d->locator = &locator;
+}
+
+void open_shaper::set_font_fallback_limit(int limit)
+{
+    _d->fontFallbackLimit = limit;
 }
 
 void open_shaper::clear_cache()
@@ -737,18 +831,44 @@ void open_shaper::clear_cache()
 
 optional<font_key> open_shaper::load_font(font_description const& description, font_size size)
 {
-    font_source_list sources = _d->locator->locate(description);
-    if (sources.empty())
+    // Check the persistent locate cache before calling into fontconfig.
+    auto cacheIt = _d->locateCache.find(description);
+    if (cacheIt == _d->locateCache.end())
+    {
+        auto sources = _d->locator->locate(description);
+        cacheIt = _d->locateCache.emplace(description, std::move(sources)).first;
+    }
+
+    auto const& cachedSources = cacheIt->second;
+    if (cachedSources.empty())
         return nullopt;
 
-    optional<font_key> fontKeyOpt = _d->getOrCreateKeyForFont(sources[0], size, description.weight);
+    auto fontKeyOpt = _d->getOrCreateKeyForFont(cachedSources[0], size, description.weight);
     if (!fontKeyOpt.has_value())
         return nullopt;
 
-    sources.erase(sources.begin()); // remove primary font from list
+    // Build the full fallback list (excluding the primary font).
+    auto allFallbacks = font_source_list(cachedSources.begin() + 1, cachedSources.end());
 
-    HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(*fontKeyOpt);
-    fontInfo.fallbacks = std::move(sources);
+    // Apply the global fallback limit.
+    if (_d->fontFallbackLimit == 0)
+    {
+        allFallbacks.clear();
+    }
+    else if (_d->fontFallbackLimit > 0 && allFallbacks.size() > static_cast<size_t>(_d->fontFallbackLimit))
+    {
+        allFallbacks.resize(static_cast<size_t>(_d->fontFallbackLimit));
+    }
+    // fontFallbackLimit == -1 means unlimited — keep all.
+
+    // Initially load only a limited number of fallbacks; the rest are extended on demand.
+    auto const initialCount = std::min(allFallbacks.size(), InitialFallbackCount);
+    auto initialFallbacks =
+        font_source_list(allFallbacks.begin(), allFallbacks.begin() + static_cast<ptrdiff_t>(initialCount));
+
+    auto& fontInfo = _d->fontKeyToHbFontInfoMapping.at(*fontKeyOpt);
+    fontInfo.fallbacks = std::move(initialFallbacks);
+    fontInfo.allFallbacks = std::move(allFallbacks);
     fontInfo.description = description;
 
     return fontKeyOpt;
@@ -769,22 +889,35 @@ font_metrics open_shaper::metrics(font_key key) const
 optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
 {
     Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
-    HbFontInfo const& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
+    auto& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
 
     glyph_index glyphIndex { FT_Get_Char_Index(fontInfo.ftFace.get(), codepoint) };
     if (!glyphIndex.value)
     {
-        for (font_source const& fallbackFont: fontInfo.fallbacks)
+        // Try fallbacks with on-demand extension from allFallbacks.
+        // NB: while loop because extendFallbacks() may grow the list during iteration.
+        auto fallbackIndex = size_t { 0 };
+        while (fallbackIndex < fontInfo.fallbacks.size())
         {
-            optional<font_key> fallbackKeyOpt =
+            auto const& fallbackFont = fontInfo.fallbacks[fallbackIndex];
+            auto fallbackKeyOpt =
                 _d->getOrCreateKeyForFont(fallbackFont, fontInfo.size, fontInfo.description.weight);
             if (!fallbackKeyOpt.has_value())
+            {
+                ++fallbackIndex;
                 continue;
+            }
             Require(_d->fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
-            HbFontInfo const& fallbackFontInfo = _d->fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
+            auto const& fallbackFontInfo = _d->fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
             glyphIndex = glyph_index { FT_Get_Char_Index(fallbackFontInfo.ftFace.get(), codepoint) };
             if (glyphIndex.value)
                 break;
+
+            ++fallbackIndex;
+
+            // Extend fallbacks on demand when we've exhausted the current list.
+            if (fallbackIndex == fontInfo.fallbacks.size())
+                private_open_shaper::extendFallbacks(fontInfo);
         }
     }
     if (!glyphIndex.value)

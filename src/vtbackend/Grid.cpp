@@ -568,6 +568,33 @@ void Grid<Cell>::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttri
 }
 
 template <CellConcept Cell>
+void Grid<Cell>::unscroll(LineCount n, GraphicsAttributes const& defaultAttributes)
+{
+    verifyState();
+    auto const clampedN = std::min(n, _pageSize.lines);
+    auto const pullable = std::min(clampedN, historyLineCount());
+
+    // Pull history lines into the main page by rotating the ring buffer right.
+    // This shifts the most recent `pullable` history lines into positions [0..pullable-1]
+    // of the main page, pushing the old bottom page lines out of view.
+    if (*pullable > 0)
+    {
+        rotateBuffersRight(pullable);
+        _linesUsed -= pullable;
+    }
+
+    // If more lines were requested than history could supply, insert blank lines at top.
+    auto const remaining = clampedN - pullable;
+    if (*remaining > 0)
+    {
+        rotateBuffersRight(remaining);
+        for (auto& line: mainPage().subspan(0, unbox<size_t>(remaining)))
+            line.reset(defaultLineFlags(), defaultAttributes);
+    }
+    verifyState();
+}
+
+template <CellConcept Cell>
 void Grid<Cell>::scrollLeft(GraphicsAttributes defaultAttributes, Margin margin) noexcept
 {
     for (LineOffset lineNo = margin.vertical.from; lineNo <= margin.vertical.to; ++lineNo)

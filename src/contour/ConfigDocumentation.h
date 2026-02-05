@@ -263,6 +263,11 @@ constexpr StringLiteral FontsConfig {
     "    {comment} will be used (Default: true).\n"
     "    builtin_box_drawing: {}\n"
     "\n"
+    "    {comment} Maximum number of fallback fonts per font style.\n"
+    "    {comment} Set to -1 for unlimited, 0 to disable fallbacks entirely.\n"
+    "    {comment} Default: 16\n"
+    "    max_fallback_count: {}\n"
+    "\n"
     "    {comment} Font render modes tell the font rasterizer engine what rendering technique to use.\n"
     "    {comment}\n"
     "    {comment} Modes available are:\n"
@@ -421,6 +426,15 @@ constexpr StringLiteral SmoothScrollingConfig {
     "{comment} rather than jumping by full lines, providing a smoother visual experience.\n"
     "{comment} This applies to mouse wheel and trackpad scrolling on the primary screen.\n"
     "smooth_scrolling: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral MomentumScrollingConfig {
+    "{comment} Enables momentum (inertia) scrolling for touchpad gestures.\n"
+    "{comment} When enabled, lifting your finger from the touchpad after a swipe\n"
+    "{comment} will cause the terminal to continue scrolling with decelerating velocity.\n"
+    "{comment} This only affects touchpad gestures; mouse wheel scrolling is unaffected.\n"
+    "momentum_scrolling: {}\n"
     "\n"
 };
 
@@ -1481,6 +1495,7 @@ constexpr StringLiteral FontsWeb {
     "      text_shaping:\n"
     "        engine: native\n"
     "      builtin_box_drawing: true\n"
+    "      max_fallback_count: 16\n"
     "      render_mode: gray\n"
     "      strict_spacing: true\n"
     "      regular:\n"
@@ -1503,6 +1518,8 @@ constexpr StringLiteral FontsWeb {
     ":octicons-horizontal-rule-16: ==builtin_box_drawing== Specifies whether to use built-in textures for "
     "pixel-perfect box drawing. If disabled, the font's provided box drawing characters will be used. The "
     "default value is true.<br/>\n"
+    ":octicons-horizontal-rule-16: ==max_fallback_count== Maximum number of fallback fonts per font style. "
+    "Set to -1 for unlimited, 0 to disable fallbacks entirely. The default value is 16.<br/>\n"
     ":octicons-horizontal-rule-16: ==render_mode== Specifies the font render mode, which tells the font "
     "rasterizer engine what rendering technique to use. Available modes are lcd, light, gray, and "
     "monochrome.  <br/>\n"
@@ -1824,6 +1841,20 @@ constexpr StringLiteral SmoothScrollingWeb {
     "\n"
 };
 
+constexpr StringLiteral MomentumScrollingWeb {
+    "Enables momentum (inertia) scrolling for touchpad gestures.\n"
+    "When enabled, lifting your finger from the touchpad after a swipe will cause\n"
+    "the terminal to continue scrolling with decelerating velocity, mimicking\n"
+    "the natural scrolling behaviour of macOS and iOS.\n"
+    "This only affects touchpad gestures; mouse wheel scrolling is unaffected.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    momentum_scrolling: true\n"
+    "```\n"
+    "\n"
+};
+
 using Shell = DocumentationEntry<ShellConfig, ShellWeb>;
 using EscapeSandbox = DocumentationEntry<EscapeSandboxConfig, EscapeSandboxWeb>;
 using SshHostConfig = DocumentationEntry<SshHostConfigConfig, SshHostConfigWeb>;
@@ -1959,6 +1990,7 @@ using ModeNormal = DocumentationEntry<ModeNormalConfig, ModeNormalWeb>;
 using ModeVisual = DocumentationEntry<ModeVisualConfig, ModeVisualWeb>;
 using SmoothLineScrolling = DocumentationEntry<SmoothLineScrollingConfig, SmoothLineScrollingWeb>;
 using SmoothScrolling = DocumentationEntry<SmoothScrollingConfig, SmoothScrollingWeb>;
+using MomentumScrolling = DocumentationEntry<MomentumScrollingConfig, MomentumScrollingWeb>;
 using HighlightTimeout = DocumentationEntry<HighlightTimeoutConfig, HighlightTimeoutWeb>;
 using HighlightDoubleClickerWord =
     DocumentationEntry<HighlightDoubleClickerWordConfig, HighlightDoubleClickerWordWeb>;

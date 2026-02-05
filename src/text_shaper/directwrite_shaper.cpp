@@ -599,6 +599,11 @@ void directwrite_shaper::clear_cache()
     // TODO: clear the cache
 }
 
+void directwrite_shaper::set_font_fallback_limit([[maybe_unused]] int limit)
+{
+    // DirectWrite manages font fallback internally.
+}
+
 optional<glyph_position> directwrite_shaper::shape(font_key _font, char32_t _codepoint)
 {
     return nullopt; // TODO

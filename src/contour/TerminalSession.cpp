@@ -145,6 +145,7 @@ namespace
         settings.cursorMotionAnimationDuration = profile.cursorMotionAnimationDuration.value();
         settings.smoothLineScrolling = profile.smoothLineScrolling.value();
         settings.smoothScrolling = profile.smoothScrolling.value();
+        settings.momentumScrolling = profile.momentumScrolling.value();
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
         settings.maxImageSize = config.images.value().maxImageSize;
@@ -1106,10 +1107,13 @@ void TerminalSession::onHighlightUpdate()
 
 void TerminalSession::playSound(vtbackend::Sequence::Parameters const& params)
 {
+    if (!_audio)
+        _audio = std::make_unique<Audio>();
+
     auto range = params.range();
     _musicalNotesBuffer.clear();
     _musicalNotesBuffer.insert(_musicalNotesBuffer.begin(), range.begin() + 2, range.end());
-    emit _audio.play(params.at(0), params.at(1), _musicalNotesBuffer);
+    emit _audio->play(params.at(0), params.at(1), _musicalNotesBuffer);
 }
 
 void TerminalSession::cursorPositionChanged()
@@ -1837,6 +1841,7 @@ void TerminalSession::configureTerminal()
     _terminal.settings().cursorMotionAnimationDuration = _profile.cursorMotionAnimationDuration.value();
     _terminal.settings().smoothLineScrolling = _profile.smoothLineScrolling.value();
     _terminal.settings().smoothScrolling = _profile.smoothScrolling.value();
+    _terminal.settings().momentumScrolling = _profile.momentumScrolling.value();
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)
