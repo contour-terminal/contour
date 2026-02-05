@@ -2,9 +2,9 @@
 #include <vtparser/Parser.h>
 #include <vtparser/ParserEvents.h>
 
-#include <catch2/catch_test_macros.hpp>
-
 #include <libunicode/convert.h>
+
+#include <catch2/catch_test_macros.hpp>
 
 using namespace std;
 
