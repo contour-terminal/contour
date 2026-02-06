@@ -117,37 +117,12 @@ constexpr inline char32_t makeChar(Qt::Key key, Qt::KeyboardModifiers mods)
     return 0;
 }
 
-constexpr inline vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers)
-{
-    using vtbackend::Modifier;
-    using vtbackend::Modifiers;
-
-    Modifiers modifiers {};
-
-    if (qtModifiers & Qt::GroupSwitchModifier)
-        modifiers |= Modifier::NumLock;
-
-    if (qtModifiers & Qt::AltModifier)
-        modifiers |= Modifier::Alt;
-    if (qtModifiers & Qt::ShiftModifier)
-        modifiers |= Modifier::Shift;
-    if (qtModifiers & Qt::ControlModifier)
-        modifiers |= Modifier::Control;
-    if (qtModifiers & Qt::MetaModifier)
-        modifiers |= Modifier::Super;
-
-#if defined(_WIN32)
-    // Deal with AltGr on Windows, which is seen by the app as Ctrl+Alt, because
-    // the user may alternatively press Ctrl+Alt to emulate AltGr on keyboard
-    // that are missing the AltGr key.
-    // Microsoft does not recommend using Ctrl+Alt modifier for shortcuts.
-    auto constexpr AltGrEquivalent = Modifiers { Modifier::Alt, Modifier::Control };
-    if (modifiers.contains(AltGrEquivalent))
-        modifiers = modifiers.without(AltGrEquivalent);
-#endif
-
-    return modifiers;
-}
+/// Creates VT modifiers from Qt modifiers and native platform modifiers.
+/// Extracts CapsLock and NumLock states from platform-specific native modifiers.
+/// @param qtModifiers Standard Qt keyboard modifiers
+/// @param nativeModifiers Platform-specific value from QKeyEvent::nativeModifiers()
+/// @return Combined modifiers including lock key states
+vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers, quint32 nativeModifiers = 0);
 
 constexpr inline vtbackend::MouseButton makeMouseButton(Qt::MouseButton button)
 {

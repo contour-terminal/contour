@@ -100,7 +100,7 @@ if(COMMAND ContourThirdParties_Embed_libunicode)
     endif()
     set(THIRDPARTY_BUILTIN_unicode_core "embedded")
 else()
-    HandleThirdparty(libunicode "gh:contour-terminal/libunicode#v${LIBUNICODE_MINIMAL_VERSION}")
+    HandleThirdparty(libunicode "gh:contour-terminal/libunicode#feature/casing_and_normalization")
 endif()
 
 if(LIBTERMINAL_BUILD_BENCH_HEADLESS)
