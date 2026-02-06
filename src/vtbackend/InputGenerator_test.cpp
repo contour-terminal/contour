@@ -222,10 +222,10 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Escape", "[terminal,input]")
     input.flags().enable(KeyboardEventFlag::ReportEventTypes);
 
     input.generateKey(Key::Escape, Modifier::Shift, KeyboardEventType::Repeat);
-    REQUIRE(escape(input.take()) == escape("\033[27;1:2u"sv));
+    REQUIRE(escape(input.take()) == escape("\033[27;2:2u"sv));
 
     input.generateKey(Key::Escape, Modifier::Shift, KeyboardEventType::Release);
-    REQUIRE(escape(input.take()) == escape("\033[27;1:3u"sv));
+    REQUIRE(escape(input.take()) == escape("\033[27;2:3u"sv));
 }
 
 TEST_CASE("InputGenerator.DECNKM", "[terminal,input]")
@@ -281,6 +281,43 @@ TEST_CASE("InputGenerator.DECBKM.Backspace", "[terminal,input]")
     input.setBackarrowKeyMode(false);
     input.generate(Key::Backspace, Modifiers {}, KeyboardEventType::Press);
     CHECK(escape(input.peek()) == escape("\x7F"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.CapsLock", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    // 'A' with CapsLock active: key code is lowercase (97),
+    // modifier is CapsLock (64), encoded = 1 + 64 = 65
+    input.generateChar('A', 'a', Modifier::CapsLock, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[97;65u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.NumLock", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    // '5' with NumLock (128), encoded = 1 + 128 = 129
+    input.generateChar('5', '5', Modifier::NumLock, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[53;129u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.CapsLock.ReportEventTypes", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.flags().enable(KeyboardEventFlag::ReportEventTypes);
+
+    // 'A' with CapsLock, Press event
+    // modifier = CapsLock (64), encoded = 1 + 64 = 65, event type = 1 (Press)
+    input.generateChar('A', 'a', Modifier::CapsLock, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[97;65:1u"sv));
+
+    // 'A' with CapsLock, Release event
+    input.generateChar('A', 'a', Modifier::CapsLock, KeyboardEventType::Release);
+    REQUIRE(escape(input.take()) == escape("\033[97;65:3u"sv));
 }
 
 // }}}
