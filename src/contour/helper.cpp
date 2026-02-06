@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+
+#if defined(_WIN32)
+    #include <windows.h>
+#endif
+
 #include <contour/Config.h>
 #include <contour/TerminalSession.h>
 #include <contour/display/TerminalDisplay.h>
@@ -50,6 +55,59 @@ using vtbackend::Width;
 
 namespace contour
 {
+
+vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers, quint32 nativeModifiers)
+{
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+
+    Modifiers modifiers {};
+
+    // Standard modifiers from Qt
+    if (qtModifiers & Qt::AltModifier)
+        modifiers |= Modifier::Alt;
+    if (qtModifiers & Qt::ShiftModifier)
+        modifiers |= Modifier::Shift;
+    if (qtModifiers & Qt::ControlModifier)
+        modifiers |= Modifier::Control;
+    if (qtModifiers & Qt::MetaModifier)
+        modifiers |= Modifier::Super;
+
+#if defined(_WIN32)
+    // Windows: Handle AltGr (Ctrl+Alt combination)
+    auto constexpr AltGrEquivalent = Modifiers { Modifier::Alt, Modifier::Control };
+    if (modifiers.contains(AltGrEquivalent))
+        modifiers = modifiers.without(AltGrEquivalent);
+
+    // Windows: Query lock states directly via Win32 API
+    // GetKeyState returns toggle state in low-order bit (0x0001)
+    if (GetKeyState(VK_CAPITAL) & 0x0001)
+        modifiers |= Modifier::CapsLock;
+    if (GetKeyState(VK_NUMLOCK) & 0x0001)
+        modifiers |= Modifier::NumLock;
+
+#elif defined(__APPLE__)
+    // macOS: NSEventModifierFlagCapsLock = 0x00010000
+    constexpr quint32 MacCapsLock = 0x00010000;
+    if (nativeModifiers & MacCapsLock)
+        modifiers |= Modifier::CapsLock;
+    // NumLock doesn't exist on standard macOS keyboards
+
+#else
+    // Linux (X11/Wayland): XCB/XKB modifier masks
+    // CapsLock = XCB_MOD_MASK_LOCK (bit 1, value 0x02) - fixed by X11 protocol
+    // NumLock = XCB_MOD_MASK_2 (bit 4, value 0x10) - conventional mapping
+    constexpr quint32 XcbCapsLock = 0x02;
+    constexpr quint32 XcbNumLock = 0x10;
+
+    if (nativeModifiers & XcbCapsLock)
+        modifiers |= Modifier::CapsLock;
+    if (nativeModifiers & XcbNumLock)
+        modifiers |= Modifier::NumLock;
+#endif
+
+    return modifiers;
+}
 
 namespace
 {
@@ -383,7 +441,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         // clang-format on
     }; // }}}
 
-    auto const modifiers = makeModifiers(event->modifiers());
+    auto const modifiers = makeModifiers(event->modifiers(), event->nativeModifiers());
     auto const key = event->key();
 
     if (event->modifiers().testFlag(Qt::KeypadModifier))
