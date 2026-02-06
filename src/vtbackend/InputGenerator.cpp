@@ -6,6 +6,7 @@
 #include <crispy/assert.h>
 #include <crispy/utils.h>
 
+#include <libunicode/case_mapping.h>
 #include <libunicode/convert.h>
 
 #include <array>
@@ -325,7 +326,7 @@ std::string ExtendedKeyboardInputGenerator::encodeModifiers(Modifiers modifiers,
                                                             KeyboardEventType eventType) const
 {
     if (enabled(KeyboardEventFlag::ReportEventTypes))
-        return std::format("{}:{}", modifiers.value(), encodeEventType(eventType));
+        return std::format("{}:{}", 1 + modifiers.value(), encodeEventType(eventType));
 
     if (modifiers.value() != 0)
         return std::to_string(1 + modifiers.value());
@@ -337,21 +338,24 @@ std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
                                                             uint32_t physicalKey,
                                                             Modifiers modifiers) const
 {
-    // The codepoint is always the lower-case form
-    // TODO: use libunicode for down-shifting
-    auto unshiftedKey = ch < 0x80 ? std::format("{}", std::tolower(static_cast<char>(ch))) : ""s;
-
-    auto result = std::move(unshiftedKey);
+    // Per Kitty spec: unicode-key-code is always the lowercase/unshifted form
+    auto const lowercaseCodepoint = unicode::simple_lowercase(ch);
+    auto result = std::to_string(static_cast<uint32_t>(lowercaseCodepoint));
 
     if (enabled(KeyboardEventFlag::ReportAlternateKeys))
     {
-        // The shifted key is simply the upper-case version of unicode-codepoint
-        auto const shiftedKey = static_cast<uint32_t>(
-            (modifiers & Modifier::Shift && (0x20 <= ch && ch < 0x80)) ? std::toupper(static_cast<char>(ch))
-                                                                       : 0);
-        // TODO: use libunicode for up-shifting
+        // Shifted key only included when Shift modifier is active
+        uint32_t shiftedKey = 0;
+        if (modifiers.contains(Modifier::Shift))
+        {
+            auto const uppercaseCodepoint = unicode::simple_uppercase(ch);
+            if (uppercaseCodepoint != lowercaseCodepoint)
+                shiftedKey = static_cast<uint32_t>(uppercaseCodepoint);
+        }
 
-        bool const showPhysicalKey = physicalKey && physicalKey != ch && physicalKey != shiftedKey;
+        bool const showPhysicalKey = physicalKey && physicalKey != static_cast<uint32_t>(lowercaseCodepoint)
+                                     && physicalKey != shiftedKey;
+
         if (shiftedKey || showPhysicalKey)
             result += ':';
         if (shiftedKey)
