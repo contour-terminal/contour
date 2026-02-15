@@ -130,6 +130,7 @@
           <li>Adds DECBKM (DEC mode 67, VT340) to toggle Backspace key between BS (0x08) and DEL (0x7F) via CSI ? 67 h / CSI ? 67 l</li>
           <li>Adds kitty's unscroll extension (CSI n + T) to restore scrolled-off content from scrollback history</li>
           <li>Adds natural momentum scrolling for touchpad gestures with configurable falloff via momentum_scrolling profile setting</li>
+          <li>Adds Kitty OSC 99 desktop notification protocol with D-Bus backend on Linux, supporting structured metadata, chunked payloads, base64 encoding, urgency levels, display occasion filtering, bidirectional close/activation events, and query/alive responses</li>
         </ul>
       </description>
     </release>

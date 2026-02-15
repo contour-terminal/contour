@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/ControlCode.h>
+#include <vtbackend/DesktopNotification.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/Screen.h>
 #include <vtbackend/SixelParser.h>
@@ -3063,6 +3064,14 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        /// OSC 99 — Kitty Desktop Notification protocol.
+        ApplyResult DESKTOPNOTIFY(Sequence const& seq, Terminal& terminal)
+        {
+            auto const& value = seq.intermediateCharacters();
+            terminal.desktopNotificationManager().handleOSC99(value, terminal);
+            return ApplyResult::Ok;
+        }
+
         template <CellConcept Cell>
         ApplyResult SETCWD(Sequence const& seq, Screen<Cell>& screen)
         {
@@ -4013,6 +4022,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
         case CONEMU: return impl::CONEMU(seq, *this);
         case NOTIFY: return impl::NOTIFY(seq, *this);
+        case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
         case SEMA: processShellIntegration(seq); break;
 

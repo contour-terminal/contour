@@ -647,6 +647,87 @@ void TerminalSession::notify(string_view title, string_view content)
                           QString::fromUtf8(content.data(), static_cast<int>(content.size())));
 }
 
+void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification const& notification)
+{
+#if defined(__linux__)
+    _desktopNotifier.notify(notification);
+
+    // Connect close event reporting if requested.
+    if (notification.closeEventRequested)
+    {
+        auto const identifier = notification.identifier;
+        QObject::connect(
+            &_desktopNotifier,
+            &FreeDesktopNotifier::notificationClosed,
+            this,
+            [this, identifier](QString const& closedId, uint /*reason*/) {
+                if (closedId.toStdString() == identifier)
+                {
+                    _terminal.reply("\033]99;i={}:p=close;\033\\", identifier);
+                    _terminal.desktopNotificationManager().removeActiveNotification(identifier);
+                }
+            },
+            Qt::SingleShotConnection);
+    }
+
+    // Connect activation reporting if requested.
+    if (notification.reportOnActivation)
+    {
+        auto const identifier = notification.identifier;
+        QObject::connect(
+            &_desktopNotifier,
+            &FreeDesktopNotifier::actionInvoked,
+            this,
+            [this, identifier](QString const& activatedId) {
+                if (activatedId.toStdString() == identifier)
+                    _terminal.reply("\033]99;i={}:p=activated;\033\\", identifier);
+            },
+            Qt::SingleShotConnection);
+    }
+
+    // Focus terminal on activation if requested.
+    if (notification.focusOnActivation)
+    {
+        QObject::connect(
+            &_desktopNotifier,
+            &FreeDesktopNotifier::actionInvoked,
+            this,
+            [this](QString const& /*activatedId*/) { focusTerminalWindow(); },
+            Qt::SingleShotConnection);
+    }
+#else
+    // On non-Linux platforms, fall back to the simple notification mechanism.
+    emit showNotification(QString::fromStdString(notification.title),
+                          QString::fromStdString(notification.body));
+#endif
+}
+
+void TerminalSession::discardDesktopNotification(std::string_view identifier)
+{
+#if defined(__linux__)
+    _desktopNotifier.close(std::string(identifier));
+#else
+    (void) identifier;
+#endif
+}
+
+void TerminalSession::focusTerminalWindow()
+{
+    if (_display)
+    {
+        QMetaObject::invokeMethod(
+            _display,
+            [display = _display]() {
+                if (auto* window = display->window())
+                {
+                    window->raise();
+                    window->requestActivate();
+                }
+            },
+            Qt::QueuedConnection);
+    }
+}
+
 void TerminalSession::onClosed()
 {
     auto const _ = std::scoped_lock { _onClosedMutex };

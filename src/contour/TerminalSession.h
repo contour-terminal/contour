@@ -4,6 +4,9 @@
 #include <contour/Actions.h>
 #include <contour/Audio.h>
 #include <contour/Config.h>
+#if defined(__linux__)
+    #include <contour/FreeDesktopNotifier.h>
+#endif
 #include <contour/helper.h>
 
 #include <vtbackend/Terminal.h>
@@ -268,6 +271,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void openDocument(std::string_view /*fileOrUrl*/) override;
     void inspect() override;
     void notify(std::string_view title, std::string_view content) override;
+    void showDesktopNotification(vtbackend::DesktopNotification const& notification) override;
+    void discardDesktopNotification(std::string_view identifier) override;
+    void focusTerminalWindow() override;
     void onClosed() override;
     void pasteFromClipboard(unsigned count, bool strip) override;
     void onSelectionCompleted() override;
@@ -501,6 +507,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     std::atomic<bool> _onClosedHandled = false;
     std::mutex _onClosedMutex;
+
+#if defined(__linux__)
+    FreeDesktopNotifier _desktopNotifier;
+#endif
 };
 
 } // namespace contour
