@@ -43,7 +43,15 @@ bool Viewport::scrollToBottom()
 bool Viewport::forceScrollToBottom()
 {
     viewportLog()("force ScrollToBottom");
-    return scrollTo(ScrollOffset(0));
+    bool changed = scrollTo(ScrollOffset(0));
+    if (_pixelOffset != 0.0f)
+    {
+        resetPixelOffset();
+        if (!changed)
+            _modified();
+        changed = true;
+    }
+    return changed;
 }
 
 bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset)
