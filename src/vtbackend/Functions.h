@@ -165,6 +165,7 @@ constexpr inline auto SETWINTITLE = FunctionDocumentation { .mnemonic = "SETWINT
 constexpr inline auto SETXPROP = FunctionDocumentation { .mnemonic = "SETXPROP", .comment = "Set X11 property" };
 constexpr inline auto SETTABNAME = FunctionDocumentation { .mnemonic = "SETTABNAME", .comment = "Set Session/Tab Name" };
 constexpr inline auto CONEMU = FunctionDocumentation { .mnemonic = "CONEMU", .comment = "ConEmu-style notification or progress indicator" };
+constexpr inline auto DESKTOPNOTIFY = FunctionDocumentation { .mnemonic = "DESKTOPNOTIFY", .comment = "Kitty Desktop Notification." };
 
 // CSI additions
 constexpr inline auto DECRARA = FunctionDocumentation { .mnemonic = "DECRARA", .comment = "Reverse Attributes in Rectangular Area" };
@@ -653,6 +654,7 @@ constexpr inline auto SETICON           = detail::OSC(1, VTExtension::XTerm, doc
 constexpr inline auto SETTITLE          = detail::OSC(0, VTExtension::XTerm, documentation::SETTITLE);
 constexpr inline auto SETWINTITLE       = detail::OSC(2, VTExtension::XTerm, documentation::SETWINTITLE);
 constexpr inline auto SETXPROP          = detail::OSC(3, VTExtension::XTerm, documentation::SETXPROP);
+constexpr inline auto DESKTOPNOTIFY    = detail::OSC(99, VTExtension::Unknown, documentation::DESKTOPNOTIFY);
 
 // NOLINTEND(readability-identifier-naming)
 // clang-format on
@@ -823,6 +825,7 @@ constexpr static auto allFunctionsArray() noexcept
         RCOLORHIGHLIGHTBG,
         SETTABNAME,
         NOTIFY,
+        DESKTOPNOTIFY,
         DUMPSTATE,
     };
     return funcs;
