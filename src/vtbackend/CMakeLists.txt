@@ -14,6 +14,7 @@ option(LIBTERMINAL_BUILD_BENCH_HEADLESS "Builds bench-headless CLI tool to bench
 set(vtbackend_HEADERS
     Animation.h
     Capabilities.h
+    DesktopNotification.h
     cell/CellConcept.h
     cell/CellConfig.h
     cell/SimpleCell.h
@@ -55,6 +56,7 @@ set(vtbackend_SOURCES
     Capabilities.cpp
     cell/CompactCell.cpp
     Charset.cpp
+    DesktopNotification.cpp
     Color.cpp
     ColorPalette.cpp
     Functions.cpp
@@ -124,6 +126,7 @@ if(LIBTERMINAL_TESTING)
     add_executable(vtbackend_test
         Animation_test.cpp
         Capabilities_test.cpp
+        DesktopNotification_test.cpp
         Color_test.cpp
         InputGenerator_test.cpp
         Selector_test.cpp

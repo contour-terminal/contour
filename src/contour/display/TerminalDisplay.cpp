@@ -1353,11 +1353,6 @@ void TerminalDisplay::doDumpStateInternal()
     screenshot().save(QString::fromStdString(screenshotFilePath.string()));
 }
 
-void TerminalDisplay::notify(std::string_view /*_title*/, std::string_view /*_body*/)
-{
-    // TODO: showNotification callback to Controller?
-}
-
 void TerminalDisplay::resizeTerminalToDisplaySize()
 {
     // Resize widget (same pixels, but adjusted terminal rows/columns and margin)

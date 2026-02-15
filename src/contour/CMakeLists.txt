@@ -18,7 +18,7 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 # {{{ Setup QT_COMPONENTS
 # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
 # NB: Widgets is rquired for SystemTrayIcon's fallback implementation
-set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets OpenGL OpenGLWidgets)
+set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets OpenGL OpenGLWidgets DBus)
 # }}}
 
 message(STATUS "Qt components: ${QT_COMPONENTS}")
@@ -57,6 +57,7 @@ if(CONTOUR_FRONTEND_GUI)
         Audio.h
         BlurBehind.h
         ContourGuiApp.h
+        FreeDesktopNotifier.h
         TerminalSession.h
         TerminalSessionManager.h
         helper.h
@@ -65,6 +66,7 @@ if(CONTOUR_FRONTEND_GUI)
         Audio.cpp
         BlurBehind.cpp
         ContourGuiApp.cpp
+        FreeDesktopNotifier.cpp
         TerminalSession.cpp
         TerminalSessionManager.cpp
         helper.cpp
@@ -189,6 +191,7 @@ if(CONTOUR_FRONTEND_GUI)
         PRIVATE
         vtrasterizer
         ContourTerminalDisplay
+        Qt6::DBus
         Qt6::Multimedia
         Qt6::Network
         Qt6::OpenGL
