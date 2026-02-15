@@ -643,8 +643,15 @@ void TerminalSession::inspect()
 
 void TerminalSession::notify(string_view title, string_view content)
 {
+#if defined(__linux__)
+    auto notification = vtbackend::DesktopNotification {};
+    notification.title = std::string(title);
+    notification.body = std::string(content);
+    _desktopNotifier.notify(notification);
+#else
     emit showNotification(QString::fromUtf8(title.data(), static_cast<int>(title.size())),
                           QString::fromUtf8(content.data(), static_cast<int>(content.size())));
+#endif
 }
 
 void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification const& notification)

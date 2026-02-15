@@ -127,7 +127,6 @@ class TerminalDisplay: public QQuickItem
     vtbackend::FontDef getFontDef();
     static void copyToClipboard(std::string_view /*_data*/);
     void inspect();
-    void notify(std::string_view /*_title*/, std::string_view /*_body*/);
     void resizeWindow(vtbackend::LineCount, vtbackend::ColumnCount);
     void resizeWindow(vtbackend::Width, vtbackend::Height);
     void setFonts(vtrasterizer::FontDescriptions fontDescriptions);
