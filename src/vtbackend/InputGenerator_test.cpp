@@ -320,4 +320,32 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.CapsLock.ReportEventTypes", "[ter
     REQUIRE(escape(input.take()) == escape("\033[97;65:3u"sv));
 }
 
+TEST_CASE("ExtendedKeyboardInputGenerator.Home", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    // Home with no modifiers: CSI 1 H
+    input.generateKey(Key::Home, Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[1H"sv));
+
+    // Ctrl+Home: CSI 1;5 H
+    input.generateKey(Key::Home, Modifier::Control, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[1;5H"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.End", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    // End with no modifiers: CSI 1 F
+    input.generateKey(Key::End, Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[1F"sv));
+
+    // Ctrl+End: CSI 1;5 F
+    input.generateKey(Key::End, Modifier::Control, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[1;5F"sv));
+}
+
 // }}}

@@ -388,8 +388,8 @@ constexpr pair<unsigned, char> mapKey(Key key) noexcept
         case Key::DownArrow: return { 1, 'B' };
         case Key::PageUp: return { 5, '~' };
         case Key::PageDown: return { 6, '~' };
-        case Key::Home: return { 7, '~' }; // or 1 H
-        case Key::End: return { 8, '~' };  // or 1 F
+        case Key::Home: return { 1, 'H' };
+        case Key::End: return { 1, 'F' };
         case Key::CapsLock: return { 57358, 'u' };
         case Key::ScrollLock: return { 57359, 'u' };
         case Key::NumLock: return { 57360, 'u' };

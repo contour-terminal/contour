@@ -107,6 +107,7 @@
     <release version="0.6.3" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes Home/End key encoding in Kitty keyboard protocol (extended keyboard input generator)</li>
           <li>Fixes glyph scaling and vertical centering of colored emoji</li>
           <li>Fixes Sixel images not rendering on non-first tabs</li>
           <li>Fixes text rendering artifacts and corruption when rapidly outputting content</li>
