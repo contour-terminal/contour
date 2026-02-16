@@ -48,8 +48,8 @@ endif()
 
 set(CRISPY_CORE_LIBS unicode::unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp reflection-cpp::reflection-cpp)
 
-# if compiler is not MSVC
-if(NOT MSVC)
+# if compiler is not MSVC and not Emscripten
+if(NOT MSVC AND NOT EMSCRIPTEN)
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL AMD64)
         target_compile_options(crispy-core PUBLIC -maes)
     elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL aarch64) # ARM64
@@ -79,7 +79,7 @@ macro(target_compile_definitions_if _target _visibility)
     endforeach()
 endmacro()
 
-if(UNIX)
+if(UNIX AND NOT EMSCRIPTEN)
     include(CheckIncludeFiles)
     include(CheckIncludeFileCXX)
     include(CheckFunctionExists)
@@ -143,6 +143,5 @@ if(CRISPY_TESTING)
     if(NOT WIN32)
         target_compile_options(crispy_test PRIVATE -Wno-c2y-extensions)
     endif()
-
 endif()
 message(STATUS "[crispy] Compile unit tests: ${CRISPY_TESTING}")
