@@ -104,12 +104,11 @@ fetch_and_unpack_boxed() {
 
 fetch_and_unpack_libunicode() {
     if test x$LIBUNICODE_SRC_DIR = x; then
-        local libunicode_branch="feature/casing_and_normalization"
-        local libunicode_branch_safe="feature-casing_and_normalization"
+        local libunicode_version="0.8.0"
         fetch_and_unpack \
-            libunicode-$libunicode_branch_safe \
-            libunicode-$libunicode_branch_safe.tar.gz \
-            https://github.com/contour-terminal/libunicode/archive/refs/heads/${libunicode_branch}.tar.gz \
+            libunicode-$libunicode_version \
+            libunicode-$libunicode_version.tar.gz \
+            https://github.com/contour-terminal/libunicode/archive/refs/tags/v${libunicode_version}.tar.gz \
             libunicode
     else
         echo "Hard linking external libunicode source directory to: $LIBUNICODE_SRC_DIR"

@@ -10,8 +10,7 @@ class ThirdParty {
     [string] $Macro
 }
 
-$libunicode_branch="feature/casing_and_normalization"
-$libunicode_branch_safe="feature-casing_and_normalization"
+$libunicode_version="0.8.0"
 $reflection_cpp_version="0.4.0"
 
 # Take care, order matters, at least as much as dependencies are of concern.
@@ -24,9 +23,9 @@ $ThirdParties =
         Macro   = "reflection_cpp"
     };
     [ThirdParty]@{
-        Folder  = "libunicode-${libunicode_branch_safe}";
-        Archive = "libunicode-${libunicode_branch_safe}.zip";
-        URI     = "https://github.com/contour-terminal/libunicode/archive/refs/heads/${libunicode_branch}.zip";
+        Folder  = "libunicode-${libunicode_version}";
+        Archive = "libunicode-${libunicode_version}.zip";
+        URI     = "https://github.com/contour-terminal/libunicode/archive/refs/tags/v${libunicode_version}.zip";
         Macro   = "libunicode"
     };
     [ThirdParty]@{

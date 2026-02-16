@@ -174,7 +174,7 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
         auto const nextChar =
             holds_alternative<unicode::Success>(r) ? get<unicode::Success>(r).value : ReplacementCharacter;
 
-        if (unicode::grapheme_segmenter::breakable(lastChar, nextChar))
+        if (unicode::grapheme_segmenter::is_breakable(lastChar, nextChar))
         {
             while (gapPending > 0)
             {

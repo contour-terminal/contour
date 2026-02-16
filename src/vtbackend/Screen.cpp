@@ -588,7 +588,7 @@ void Screen<Cell>::writeTextInternal(char32_t sourceCodepoint)
 
     char32_t const codepoint = _cursor.charsets.map(sourceCodepoint);
 
-    if (unicode::grapheme_segmenter::breakable(_terminal->parser().precedingGraphicCharacter(), codepoint))
+    if (unicode::grapheme_segmenter::is_breakable(_terminal->parser().precedingGraphicCharacter(), codepoint))
     {
         writeCharToCurrentAndAdvance(codepoint);
     }
