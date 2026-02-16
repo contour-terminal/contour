@@ -588,35 +588,4 @@ void ContourGuiApp::newWindow()
     _qmlEngine->load(resolveResource("ui/main.qml"));
 }
 
-void ContourGuiApp::showNotification(std::string_view title, std::string_view content)
-{
-    // systrayIcon_->showMessage(
-    //     title,
-    //     content,
-    //     QSystemTrayIcon::MessageIcon::Information,
-    //     10 * 1000
-    // );
-
-#if defined(__linux__)
-    // XXX requires notify-send to be installed.
-    QStringList args;
-    args.append("--urgency=low");
-    args.append("--expire-time=10000");
-    args.append("--category=terminal");
-    args.append(QString::fromStdString(string(title)));
-    args.append(QString::fromStdString(string(content)));
-    QProcess::execute(QString::fromLatin1("notify-send"), args);
-#elif defined(__APPLE__)
-    // TODO: use Growl?
-    (void) title;
-    (void) content;
-#elif defined(_WIN32)
-    // TODO: use Toast
-    (void) title;
-    (void) content;
-#else
-    crispy::ignore_unused(title, content);
-#endif
-}
-
 } // namespace contour

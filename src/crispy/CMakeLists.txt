@@ -96,7 +96,7 @@ if(UNIX)
 
     # The following options are all important to get stacktrace dumping working
     target_link_libraries(crispy-core PUBLIC ${CMAKE_DL_LIBS})
-    if(NOT(FREEBSD))
+    if(NOT(FREEBSD) AND NOT ENABLE_STATIC_LINKING)
         target_link_options(crispy-core PUBLIC -rdynamic)
     endif()
     if(CONTOUR_STACKTRACE_ADDR2LINE)

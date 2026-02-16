@@ -4,6 +4,7 @@
 #include <vtbackend/Animation.h>
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/Cursor.h>
+#include <vtbackend/DesktopNotification.h>
 #include <vtbackend/Grid.h>
 #include <vtbackend/HintModeHandler.h>
 #include <vtbackend/Hyperlink.h>
@@ -272,6 +273,9 @@ class Terminal
         virtual void openDocument(std::string_view /*fileOrUrl*/) = 0;
         virtual void inspect() {}
         virtual void notify(std::string_view /*title*/, std::string_view /*body*/) {}
+        virtual void showDesktopNotification(DesktopNotification const& /*notification*/) {}
+        virtual void discardDesktopNotification(std::string_view /*identifier*/) {}
+        virtual void focusTerminalWindow() {}
         virtual void onClosed() {}
         virtual void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) {}
         virtual void onSelectionCompleted() {}
@@ -303,6 +307,9 @@ class Terminal
         void openDocument(std::string_view /*fileOrUrl*/) override {}
         void inspect() override {}
         void notify(std::string_view /*title*/, std::string_view /*body*/) override {}
+        void showDesktopNotification(DesktopNotification const& /*notification*/) override {}
+        void discardDesktopNotification(std::string_view /*identifier*/) override {}
+        void focusTerminalWindow() override {}
         void onClosed() override {}
         void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) override {}
         void onSelectionCompleted() override {}
@@ -898,6 +905,13 @@ class Terminal
     void openDocument(std::string_view data);
     void inspect();
     void notify(std::string_view title, std::string_view body);
+    void showDesktopNotification(DesktopNotification const& notification);
+    void discardDesktopNotification(std::string_view identifier);
+    void focusTerminalWindow();
+    [[nodiscard]] DesktopNotificationManager& desktopNotificationManager() noexcept
+    {
+        return _desktopNotificationManager;
+    }
     void reply(std::string_view text);
 
     template <typename... Ts>
@@ -1485,6 +1499,8 @@ class Terminal
     HintModeHandler _hintModeHandler { _hintModeExecutor };
 
     std::unique_ptr<ShellIntegration> _shellIntegration;
+
+    DesktopNotificationManager _desktopNotificationManager;
 };
 
 } // namespace vtbackend

@@ -2102,6 +2102,21 @@ void Terminal::notify(string_view title, string_view body)
     _eventListener.notify(title, body);
 }
 
+void Terminal::showDesktopNotification(DesktopNotification const& notification)
+{
+    _eventListener.showDesktopNotification(notification);
+}
+
+void Terminal::discardDesktopNotification(string_view identifier)
+{
+    _eventListener.discardDesktopNotification(identifier);
+}
+
+void Terminal::focusTerminalWindow()
+{
+    _eventListener.focusTerminalWindow();
+}
+
 void Terminal::reply(string_view text)
 {
     // this is invoked from within the terminal thread.
