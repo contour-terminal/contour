@@ -243,7 +243,7 @@ buffer_object<T>::~buffer_object()
 }
 
 template <BufferObjectElementType T>
-buffer_object_ptr<T> buffer_object<T>::create(size_t capacity, buffer_object_release<T> release)
+auto buffer_object<T>::create(size_t capacity, buffer_object_release<T> release) -> buffer_object_ptr<T>
 {
 #if defined(BUFFER_OBJECT_INLINE)
     auto const totalCapacity = nextPowerOfTwo(static_cast<uint32_t>(sizeof(buffer_object) + capacity));
