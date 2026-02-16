@@ -145,6 +145,12 @@ TEST_CASE("DesktopNotification.ParseActivationFlags", "[DesktopNotification]")
         CHECK(n.focusOnActivation == true);
         CHECK(n.reportOnActivation == true);
     }
+    SECTION("Default (no a= key)")
+    {
+        auto const n = parseOSC99("i=af4;test");
+        CHECK(n.focusOnActivation == true);
+        CHECK(n.reportOnActivation == false);
+    }
 }
 
 TEST_CASE("DesktopNotification.ParseCloseEventRequested", "[DesktopNotification]")

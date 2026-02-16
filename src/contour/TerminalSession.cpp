@@ -677,10 +677,11 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
             Qt::SingleShotConnection);
     }
 
+    auto const identifier = notification.identifier;
+
     // Connect activation reporting if requested.
     if (notification.reportOnActivation)
     {
-        auto const identifier = notification.identifier;
         QObject::connect(
             &_desktopNotifier,
             &FreeDesktopNotifier::actionInvoked,
@@ -699,7 +700,10 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
             &_desktopNotifier,
             &FreeDesktopNotifier::actionInvoked,
             this,
-            [this](QString const& /*activatedId*/) { focusTerminalWindow(); },
+            [this, identifier](QString const& activatedId) {
+                if (activatedId.toStdString() == identifier)
+                    focusTerminalWindow();
+            },
             Qt::SingleShotConnection);
     }
 #else

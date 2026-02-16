@@ -102,6 +102,10 @@ void FreeDesktopNotifier::notify(vtbackend::DesktopNotification const& notificat
         auto const dbusId = reply.value();
         notifierLog()("Notification sent: id='{}' -> dbus_id={}", notification.identifier, dbusId);
 
+        // Remove stale reverse mapping when replacing a notification.
+        if (replacesId != 0)
+            _dbusToOsc.erase(replacesId);
+
         // Update the bidirectional ID mapping.
         _dbusToOsc[dbusId] = notification.identifier;
         _oscToDbus[notification.identifier] = dbusId;

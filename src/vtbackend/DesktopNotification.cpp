@@ -166,6 +166,9 @@ void DesktopNotificationManager::handleOSC99(string_view payload, Terminal& term
 {
     auto notification = parseOSC99(payload);
 
+    if (notification.identifier.empty())
+        return;
+
     switch (notification.currentPayload)
     {
         case NotificationPayloadType::Query: {
@@ -211,16 +214,21 @@ void DesktopNotificationManager::handleOSC99(string_view payload, Terminal& term
                         pending.title += notification.title;
                     else if (notification.currentPayload == NotificationPayloadType::Body)
                         pending.body += notification.body;
-                    // Update other metadata fields from the latest chunk.
+                    // Only overwrite fields that were explicitly set (differ from defaults).
+                    static constexpr DesktopNotification Defaults {};
                     if (!notification.applicationName.empty())
                         pending.applicationName = std::move(notification.applicationName);
-                    pending.urgency = notification.urgency;
-                    pending.occasion = notification.occasion;
+                    if (notification.urgency != Defaults.urgency)
+                        pending.urgency = notification.urgency;
+                    if (notification.occasion != Defaults.occasion)
+                        pending.occasion = notification.occasion;
                     pending.closeEventRequested =
                         pending.closeEventRequested || notification.closeEventRequested;
-                    pending.focusOnActivation = notification.focusOnActivation;
-                    pending.reportOnActivation = notification.reportOnActivation;
-                    if (notification.timeout >= 0)
+                    if (notification.focusOnActivation != Defaults.focusOnActivation)
+                        pending.focusOnActivation = notification.focusOnActivation;
+                    if (notification.reportOnActivation != Defaults.reportOnActivation)
+                        pending.reportOnActivation = notification.reportOnActivation;
+                    if (notification.timeout != Defaults.timeout)
                         pending.timeout = notification.timeout;
                 }
                 return;
