@@ -80,7 +80,7 @@ namespace
 
     void closeAllFileDescriptorsAbove(int keepFd)
     {
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(HAVE_CLOSE_RANGE)
         if (close_range(keepFd + 1, ~0U, 0) == 0)
             return;
 #endif

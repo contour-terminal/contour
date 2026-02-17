@@ -107,6 +107,7 @@
     <release version="0.6.3" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes build failure on Alpine Linux (musl libc) due to missing close_range() function (#1879)</li>
           <li>Fixes Insert Replace Mode (IRM, CSI 4 h) not shifting text right on character insertion (#1877)</li>
           <li>Fixes Home/End key encoding in Kitty keyboard protocol (extended keyboard input generator)</li>
           <li>Fixes glyph scaling and vertical centering of colored emoji</li>
