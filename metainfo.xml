@@ -107,6 +107,7 @@
     <release version="0.6.3" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes Home/End key encoding in Kitty keyboard protocol (extended keyboard input generator)</li>
           <li>Fixes glyph scaling and vertical centering of colored emoji</li>
           <li>Fixes Sixel images not rendering on non-first tabs</li>
           <li>Fixes text rendering artifacts and corruption when rapidly outputting content</li>
@@ -116,6 +117,7 @@
           <li>Fixes initial terminal window size being wrong at fractional DPR (e.g. 127×29 instead of configured 130×30 at 150% scaling on Wayland, #1858)</li>
           <li>Fixes ~2s startup delay caused by synchronous Qt multimedia driver probing by deferring audio initialization to a background thread</li>
           <li>Fixes initial font sizing at fractional DPR on Wayland by preferring screen DPR over window DPR</li>
+          <li>Fixes Kitty keyboard protocol: proper CapsLock/NumLock modifier reporting, correct modifier encoding per spec, and Unicode case folding for non-ASCII characters</li>
           <li>Replaces abrupt cell blink toggle with configurable smooth pulse animation via blink_style profile setting (classic/smooth/linger)</li>
           <li>Adds configurable crossfade transition between primary and alternate screens via screen_transition and screen_transition_duration profile settings</li>
           <li>Adds animated cursor movement between grid cells with ease-out interpolation via cursor_motion_animation_duration profile setting</li>

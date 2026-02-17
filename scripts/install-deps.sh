@@ -104,7 +104,7 @@ fetch_and_unpack_boxed() {
 
 fetch_and_unpack_libunicode() {
     if test x$LIBUNICODE_SRC_DIR = x; then
-        local libunicode_version="0.7.0"
+        local libunicode_version="0.8.0"
         fetch_and_unpack \
             libunicode-$libunicode_version \
             libunicode-$libunicode_version.tar.gz \

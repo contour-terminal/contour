@@ -10,7 +10,7 @@ class ThirdParty {
     [string] $Macro
 }
 
-$libunicode_version="0.7.0"
+$libunicode_version="0.8.0"
 $reflection_cpp_version="0.4.0"
 
 # Take care, order matters, at least as much as dependencies are of concern.

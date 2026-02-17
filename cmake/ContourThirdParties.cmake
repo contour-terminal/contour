@@ -32,19 +32,24 @@ else()
 endif()
 
 macro(HandleThirdparty _TARGET _CPM_TARGET)
+    cmake_parse_arguments(_HTP "" "VERSION" "" ${ARGN})
     if(TARGET ${_TARGET})
         set(THIRDPARTY_BUILTIN_${_TARGET} "embedded")
     else()
-        find_package(${_TARGET})
-
+        if(_HTP_VERSION)
+            find_package(${_TARGET} ${_HTP_VERSION} QUIET)
+        else()
+            find_package(${_TARGET} QUIET)
+        endif()
         if(${_TARGET}_FOUND)
             set(THIRDPARTY_BUILTIN_${_TARGET} "system package")
         elseif(CONTOUR_USE_CPM)
-            message(STATUS "====== Using CPM to add ${_TARGET}")
+            message(STATUS "Using CPM to fetch ${_TARGET}")
             CPMAddPackage(${_CPM_TARGET})
             set(THIRDPARTY_BUILTIN_${_TARGET} "embedded (CPM)")
         else()
-            message(FATAL_ERROR "Could not find ${_TARGET}")
+            message(FATAL_ERROR "Could not find ${_TARGET}. "
+                "Run install-deps.sh, install system packages, or set CONTOUR_USE_CPM=ON.")
         endif()
     endif()
 endmacro()
@@ -53,44 +58,51 @@ endmacro()
 message(STATUS "==============================================================================")
 message(STATUS "    Contour ThirdParties: ${ContourThirdParties}")
 
-set(LIBUNICODE_MINIMAL_VERSION "0.7.0")
+set(LIBUNICODE_MINIMAL_VERSION "0.8.0")
 set(BOXED_CPP_MINIMAL_VERSION "1.4.3")
 set(TERMBENCH_PRO_COMMIT_HASH "f6c37988e6481b48a8b8acaf1575495e018e9747")
 set(CATCH_VERSION "3.4.0")
 set(YAML_CPP_VERSION "0.8.0")
 set(HARFBUZZ_VERSION "8.4.0")
+set(GSL_VERSION "3.1.0")
+set(REFLECTION_CPP_VERSION "0.4.0")
+set(FREETYPE_VERSION "2.10.0")
 
 
 if(TARGET GSL)
     set(THIRDPARTY_BUILTIN_GSL "embedded")
-elseif(CONTOUR_USE_CPM)
-    CPMAddPackage(
-        NAME GSL
-        GITHUB_REPOSITORY microsoft/GSL
-        GIT_TAG v3.1.0
-        OPTIONS "GSL_TEST=OFF"
-    )
-    set(THIRDPARTY_BUILTIN_GSL "embedded(CPM)")
 else()
-    set(THIRDPARTY_BUILTIN_GSL "system package")
-    if (WIN32)
-        # On Windows we use vcpkg and there the name is different
-        find_package(Microsoft.GSL CONFIG REQUIRED)
-        #target_link_libraries(main PRIVATE Microsoft.GSL::GSL)
+    if(WIN32)
+        find_package(Microsoft.GSL CONFIG QUIET)
     else()
-        find_package(Microsoft.GSL REQUIRED)
+        find_package(Microsoft.GSL QUIET)
+    endif()
+    if(Microsoft.GSL_FOUND)
+        set(THIRDPARTY_BUILTIN_GSL "system package")
+    elseif(CONTOUR_USE_CPM)
+        message(STATUS "Using CPM to fetch GSL")
+        CPMAddPackage(
+            NAME GSL
+            GITHUB_REPOSITORY microsoft/GSL
+            GIT_TAG v${GSL_VERSION}
+            OPTIONS "GSL_TEST=OFF"
+        )
+        set(THIRDPARTY_BUILTIN_GSL "embedded (CPM)")
+    else()
+        message(FATAL_ERROR "Could not find GSL. "
+            "Run install-deps.sh, install system packages, or set CONTOUR_USE_CPM=ON.")
     endif()
 endif()
 
 
 
 if(CONTOUR_TESTING)
-    HandleThirdparty(Catch2 "gh:catchorg/Catch2@${CATCH_VERSION}")
+    HandleThirdparty(Catch2 "gh:catchorg/Catch2@${CATCH_VERSION}" VERSION ${CATCH_VERSION})
 endif()
-HandleThirdparty(yaml-cpp "gh:jbeder/yaml-cpp#${YAML_CPP_VERSION}")
-HandleThirdparty(Freetype "https://download.savannah.gnu.org/releases/freetype/freetype-2.10.0.tar.gz")
+HandleThirdparty(yaml-cpp "gh:jbeder/yaml-cpp#${YAML_CPP_VERSION}" VERSION ${YAML_CPP_VERSION})
+HandleThirdparty(Freetype "https://download.savannah.gnu.org/releases/freetype/freetype-${FREETYPE_VERSION}.tar.gz" VERSION ${FREETYPE_VERSION})
 # harfbuzz is only needed for non static builds since qt provides own harfbuzz target
-HandleThirdparty(HarfBuzz "gh:harfbuzz/harfbuzz#${HARFBUZZ_VERSION}")
+HandleThirdparty(HarfBuzz "gh:harfbuzz/harfbuzz#${HARFBUZZ_VERSION}" VERSION ${HARFBUZZ_VERSION})
 
 if(COMMAND ContourThirdParties_Embed_libunicode)
     ContourThirdParties_Embed_libunicode()
@@ -104,12 +116,27 @@ else()
 endif()
 
 if(LIBTERMINAL_BUILD_BENCH_HEADLESS)
-    ContourThirdParties_Embed_termbench_pro()
-    if (TARGET termbench)
+    if(COMMAND ContourThirdParties_Embed_termbench_pro)
+        ContourThirdParties_Embed_termbench_pro()
+    endif()
+    if(TARGET termbench)
         set(THIRDPARTY_BUILTIN_termbench "embedded")
     else()
-        find_package(termbench-pro REQUIRED)
-        set(THIRDPARTY_BUILTIN_termbench "system package")
+        find_package(termbench-pro QUIET)
+        if(termbench-pro_FOUND)
+            set(THIRDPARTY_BUILTIN_termbench "system package")
+        elseif(CONTOUR_USE_CPM)
+            message(STATUS "Using CPM to fetch termbench-pro")
+            CPMAddPackage(
+                NAME termbench-pro
+                GITHUB_REPOSITORY contour-terminal/termbench-pro
+                GIT_TAG ${TERMBENCH_PRO_COMMIT_HASH}
+            )
+            set(THIRDPARTY_BUILTIN_termbench "embedded (CPM)")
+        else()
+            message(FATAL_ERROR "Could not find termbench-pro. "
+                "Run install-deps.sh, install system packages, or set CONTOUR_USE_CPM=ON.")
+        endif()
     endif()
 else()
     set(THIRDPARTY_BUILTIN_termbench "(bench-headless disabled)")
@@ -130,7 +157,7 @@ if(COMMAND ContourThirdParties_Embed_reflection_cpp)
     ContourThirdParties_Embed_reflection_cpp()
     set(THIRDPARTY_BUILTIN_reflection-cpp "embedded")
 else()
-    HandleThirdparty(reflection-cpp "gh:contour-terminal/reflection-cpp#master")
+    HandleThirdparty(reflection-cpp "gh:contour-terminal/reflection-cpp#v${REFLECTION_CPP_VERSION}")
 endif()
 
 macro(ContourThirdPartiesSummary2)
@@ -144,7 +171,7 @@ macro(ContourThirdPartiesSummary2)
     message(STATUS "yaml-cpp            ${THIRDPARTY_BUILTIN_yaml-cpp}")
     message(STATUS "termbench-pro       ${THIRDPARTY_BUILTIN_termbench}")
     message(STATUS "reflection-cpp      ${THIRDPARTY_BUILTIN_reflection-cpp}")
-    if(CONTOUR_USE_CPM)
+    if(DEFINED THIRDPARTY_BUILTIN_libunicode)
         message(STATUS "libunicode          ${THIRDPARTY_BUILTIN_libunicode}")
     else()
         message(STATUS "libunicode          ${THIRDPARTY_BUILTIN_unicode_core}")
