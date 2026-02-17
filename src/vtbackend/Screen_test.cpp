@@ -3978,6 +3978,78 @@ TEST_CASE("LS1 and LS0", "[screen]")
 // TODO: SendDeviceAttributes
 // TODO: SendTerminalId
 
+TEST_CASE("HorizontalTab.FillsCellsWithSpaces", "[screen]")
+{
+    // Verify that HT fills intermediate cells with space characters,
+    // not just moves the cursor. This ensures TrivialLineBuffer consistency.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("A\tB");
+
+    // 'A' at col 0, tab advances to col 8 (default tab width), 'B' at col 8.
+    // Columns 1..7 should be filled with spaces, rendering correctly.
+    CHECK(screen.logicalCursorPosition().column == ColumnOffset(9));
+    CHECK("A       B           \n                    \n" == screen.renderMainPageText());
+}
+
+TEST_CASE("HorizontalTab.AfterBulkText", "[screen]")
+{
+    // Write printable ASCII followed by HT followed by more text.
+    // This exercises the parseBulkText fast-path → C0 execute → more text path.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("AB\tCD");
+
+    // "AB" occupies columns 0-1, tab advances to column 8, "CD" at columns 8-9
+    CHECK("AB      CD          \n                    \n" == screen.renderMainPageText());
+    CHECK(screen.logicalCursorPosition().column == ColumnOffset(10));
+}
+
+TEST_CASE("HorizontalTab.MultipleTabs", "[screen]")
+{
+    // "A\tB\tC" should produce correctly spaced output with space-filled cells.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(25) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("A\tB\tC");
+
+    // 'A' at col 0, tab to col 8, 'B' at col 8, tab to col 16, 'C' at col 16
+    CHECK("A       B       C        \n                         \n" == screen.renderMainPageText());
+    CHECK(screen.logicalCursorPosition().column == ColumnOffset(17));
+}
+
+TEST_CASE("HorizontalTab.AtChunkBoundary", "[screen]")
+{
+    // Force text+tab across chunk boundaries by using a small ptyReadBufferSize.
+    // The tab character should still be processed correctly even at a chunk boundary.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) }, LineCount(0), 4 };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ABC\tD");
+
+    // "ABC" at cols 0-2, tab to col 8, 'D' at col 8
+    CHECK("ABC     D           \n                    \n" == screen.renderMainPageText());
+}
+
+TEST_CASE("HorizontalTab.AfterScreenClear", "[screen]")
+{
+    // After ED (Erase in Display), write text with tabs and verify correct rendering.
+    // This tests TrivialLineBuffer reset + tab interaction.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Write initial content
+    mock.writeToScreen("Hello World");
+    // Clear screen (CSI 2 J) and cursor home (CSI H)
+    mock.writeToScreen("\033[2J\033[H");
+    // Write text with tab
+    mock.writeToScreen("X\tY");
+
+    CHECK("X       Y           \n                    \n" == screen.renderMainPageText());
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 
 // NOLINTBEGIN(misc-const-correctness)

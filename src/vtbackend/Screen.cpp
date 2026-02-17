@@ -1621,6 +1621,9 @@ void Screen<Cell>::moveCursorToNextTab()
     // TODO: respect HTS/TBC
 
     static_assert(TabWidth > ColumnCount(0));
+
+    auto columnsToAdvance = ColumnCount(0);
+
     if (!_terminal->tabs().empty())
     {
         // advance to the next tab
@@ -1631,20 +1634,32 @@ void Screen<Cell>::moveCursorToNextTab()
         auto const currentCursorColumn = logicalCursorPosition().column;
 
         if (i < _terminal->tabs().size())
-            moveCursorForward(boxed_cast<ColumnCount>(_terminal->tabs()[i] - currentCursorColumn));
+            columnsToAdvance = boxed_cast<ColumnCount>(_terminal->tabs()[i] - currentCursorColumn);
         else if (realCursorPosition().column < margin().horizontal.to)
-            moveCursorForward(boxed_cast<ColumnCount>(margin().horizontal.to - currentCursorColumn));
+            columnsToAdvance = boxed_cast<ColumnCount>(margin().horizontal.to - currentCursorColumn);
     }
     else
     {
         // default tab settings
         if (realCursorPosition().column < margin().horizontal.to)
         {
-            auto const n =
+            columnsToAdvance =
                 std::min((TabWidth - boxed_cast<ColumnCount>(_cursor.position.column) % TabWidth),
                          pageSize().columns - boxed_cast<ColumnCount>(logicalCursorPosition().column));
-            moveCursorForward(n);
         }
+    }
+
+    if (columnsToAdvance > ColumnCount(0))
+    {
+        // Fill intermediate cells with spaces to ensure TrivialLineBuffer consistency.
+        // Without this, the cursor advances but the cell buffer doesn't reflect the gap,
+        // causing tabs to be visually lost during rendering.
+        auto const startCol = _cursor.position.column;
+        auto& line = currentLine();
+        for (auto const i: std::views::iota(0, unbox(columnsToAdvance)))
+            line.useCellAt(startCol + ColumnOffset(i)).write(_cursor.graphicsRendition, L' ', 1);
+
+        moveCursorForward(columnsToAdvance);
     }
 }
 
@@ -3305,6 +3320,11 @@ template <CellConcept Cell>
 void Screen<Cell>::executeControlCode(char controlCode)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
+    // Flush any pending text trace before processing the control code.
+    // Without this, when the parser's bulk text optimization processes
+    // text → C0 → text inline (without leaving Ground state), writeTextEnd()
+    // is never called, causing gaps in the trace log.
+    writeTextEnd();
     if (vtTraceSequenceLog)
         vtTraceSequenceLog()(
             "control U+{:02X} ({})", controlCode, to_string(static_cast<ControlCode::C0>(controlCode)));

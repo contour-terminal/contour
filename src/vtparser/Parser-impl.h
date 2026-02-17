@@ -474,13 +474,28 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
 
     if (_scanState.utf8.expectedLength == 0)
     {
-        // This optimization is for the `cat`-people.
-        // It further optimizes the throughput performance by bypassing
-        // the FSM for the `(TEXT LF+)+`-case.
+        // Process trailing C0 control characters inline, bypassing the FSM.
+        // This handles the common (TEXT C0)+ pattern (e.g. text followed by LF, HT, CR)
+        // with a significant throughput improvement (~50x for cat-like workloads).
         //
-        // As of bench-headless, the performance increase is about 50x.
-        if (input != end && *input == '\n')
-            _eventListener.execute(*input++);
+        // C0 Execute range: 0x00-0x17, 0x19, 0x1C-0x1F (bits in a 32-bit mask)
+        // Excluded: 0x18 (CAN) and 0x1A (SUB) — trigger state transitions (Ground + Ignore)
+        // Excluded: 0x1B (ESC) — transitions to Escape state
+        constexpr auto C0ExecuteMask =
+            uint32_t { 0xFFFFFFFF } & ~(1u << 0x18) & ~(1u << 0x1A) & ~(1u << 0x1B);
+        auto const* current = _scanState.next;
+        while (current != end)
+        {
+            auto const ch = static_cast<uint8_t>(*current);
+            if (ch < 0x20 && (C0ExecuteMask & (1u << ch)) != 0)
+            {
+                _eventListener.execute(*current);
+                ++current;
+            }
+            else
+                break;
+        }
+        _scanState.next = current;
     }
 
     auto const count = static_cast<size_t>(std::distance(input, _scanState.next));
