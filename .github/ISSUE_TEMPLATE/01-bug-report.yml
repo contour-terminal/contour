@@ -28,7 +28,7 @@ body:
         - "GitHub: Source code"
         - "GitHub: CI (Actions) artifact"
         - "GitHub: Release page"
-        - "Linux distribution package manager (dnf, apt, pacman, brew, winget, scoop, etc.)"
+        - "Distribution package manager (dnf, apt, pacman, brew, winget, scoop, etc.)"
         - "Other (please specify below)"
     validations:
       required: true
