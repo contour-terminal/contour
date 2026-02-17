@@ -1,0 +1,129 @@
+name: Performance Issue
+description: Report slow rendering, high CPU/memory usage, or other performance problems
+type: Bug
+labels:
+  - performance
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a performance issue!
+        Contour uses GPU-accelerated rendering, so GPU/driver details are especially important for diagnosis.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What performance issue are you experiencing?
+      placeholder: "Contour becomes very slow when..."
+    validations:
+      required: true
+
+  - type: input
+    id: contour_version
+    attributes:
+      label: Contour Terminal version
+      description: |
+        Run `contour version` at the command line and paste the full version string.
+      placeholder: "0.4.5.6789"
+    validations:
+      required: true
+
+  - type: input
+    id: os_and_version
+    attributes:
+      label: Operating System
+      description: |
+        Please specify the exact operating system and version.
+      placeholder: "Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: textarea
+    id: gpu_driver
+    attributes:
+      label: GPU & Driver
+      description: |
+        Please provide your GPU model and driver version.
+        If possible, paste the output of `contour info vt`.
+      placeholder: |
+        GPU: NVIDIA GeForce RTX 3070
+        Driver: 535.183.01
+    validations:
+      required: false
+
+  - type: dropdown
+    id: renderer
+    attributes:
+      label: Renderer
+      description: Which rendering backend are you using?
+      options:
+        - OpenGL
+        - "Default (not sure)"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: shell
+    attributes:
+      label: Shell
+      description: Which shell are you using inside Contour?
+      options:
+        - bash
+        - zsh
+        - fish
+        - PowerShell
+        - Endo
+        - other
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps to reproduce
+      description: What triggers the performance problem?
+      placeholder: |
+        1. Open Contour
+        2. Run 'cat large-file.txt'
+        3. Observe frame drops / high CPU
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed_behavior
+    attributes:
+      label: Observed behavior
+      description: |
+        Describe the performance characteristics you observe (FPS drops, latency, CPU/memory usage).
+      placeholder: "CPU spikes to 100%, scrolling drops below 10 FPS..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: What performance would you expect?
+      placeholder: "Smooth 60 FPS scrolling, CPU usage under 20%..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration excerpt
+      description: Paste any relevant parts of your `contour.yml` configuration file.
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: profiling_data
+    attributes:
+      label: Profiling data
+      description: |
+        If you have any profiling output (perf, flamegraphs, traces), please share it here.
+    validations:
+      required: false

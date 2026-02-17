@@ -1,0 +1,146 @@
+name: Bug Report
+description: Report errors or unexpected behavior
+type: Bug
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+        Please make sure to [search for existing issues](https://github.com/contour-terminal/contour/issues) before filing a new one.
+
+  - type: input
+    id: contour_version
+    attributes:
+      label: Contour Terminal version
+      description: |
+        Run `contour version` at the command line and paste the full version string.
+      placeholder: "0.4.5.6789"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: package_source
+    attributes:
+      label: Installer source
+      description: Where did you install Contour from?
+      options:
+        - "GitHub: Source code"
+        - "GitHub: CI (Actions) artifact"
+        - "GitHub: Release page"
+        - "Linux distribution package manager (dnf, apt, pacman, brew, winget, scoop, etc.)"
+        - "Other (please specify below)"
+    validations:
+      required: true
+
+  - type: input
+    id: os_and_version
+    attributes:
+      label: Operating System
+      description: |
+        Please specify the exact operating system and version.
+        Examples: Ubuntu 24.04, Fedora 41, macOS Sequoia 15.2, Windows 11 23H2
+      placeholder: "Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Architecture
+      description: What hardware architecture is Contour running on?
+      options:
+        - "x86-64 / amd64"
+        - "AArch64 / ARM64"
+        - "Other (please specify below)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: shell
+    attributes:
+      label: Shell
+      description: Which shell are you using inside Contour?
+      options:
+        - bash
+        - zsh
+        - fish
+        - PowerShell
+        - Endo
+        - other
+    validations:
+      required: false
+
+  - type: textarea
+    id: gpu_renderer
+    attributes:
+      label: GPU & Renderer
+      description: |
+        Contour uses GPU-accelerated rendering. Please provide your GPU model and driver version.
+        If possible, paste the output of `contour info vt`.
+      placeholder: |
+        GPU: NVIDIA GeForce RTX 3070
+        Driver: 535.183.01
+        Renderer: OpenGL
+    validations:
+      required: false
+
+  - type: textarea
+    id: other_software
+    attributes:
+      label: Other Software
+      description: |
+        If the bug involves interaction with other software, please list it here with versions.
+      placeholder: |
+        vim 9.1
+        NeoVIM 0.10
+        tmux 3.4
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Tell us the steps required to trigger the bug.
+      placeholder: |
+        1. Open Contour
+        2. Run '...'
+        3. Observe that...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: Describe the expected outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual Behavior
+      description: What happened instead? You can paste screenshots directly into this field.
+      placeholder: Describe what actually happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration excerpt
+      description: Paste any relevant parts of your `contour.yml` configuration file.
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional_notes
+    attributes:
+      label: Additional notes
+      placeholder: Anything else noteworthy that might be helpful.
+    validations:
+      required: false

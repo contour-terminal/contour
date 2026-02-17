@@ -1,31 +1,22 @@
 ## Description
 
-Describe your changes in detail
+<!-- Describe your changes: what and why. -->
 
-```markdown
-Your issue description (body) goes here
-```
+## Related Issues
+
+<!-- Link to related issues: Fixes #123, Relates to #456 -->
 
 ## Motivation and Context
 
-Why is this change required? What problem does it solve?
-
-```markdown
-
-```
+<!-- Why is this change required? What problem does it solve? -->
 
 ## How Has This Been Tested?
 
-- [ ] Please describe how you tested your changes.
-- [ ] see how your change affects other areas of the code, etc.
+<!-- Describe how you tested your changes and what scenarios were covered. -->
 
-## Checklist:
+## Checklist
 
-Go over all the following points, and put an `x` in all the boxes that apply.
-
-If you're unsure about any of these, don't hesitate to ask. We're here to help!
-
-- [ ] I have read the [**`CONTRIBUTING`**](https://github.com/contour-terminal/contour/blob/master/docs/CONTRIBUTING.md) document in my spoken language, and understand the terms
-- [ ] I have updated (or added) the documentation accordingly.
-- [ ] I have added tests to cover my changes.
-- [ ] I have gone through all the steps, and have thoroughly read the instructions
+- [ ] I have read the [**CONTRIBUTING**](https://github.com/contour-terminal/contour/blob/master/docs/CONTRIBUTING.md) guide
+- [ ] I have updated the documentation accordingly
+- [ ] I have added tests to cover my changes
+- [ ] Breaking changes (if any) are documented
