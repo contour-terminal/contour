@@ -9,6 +9,28 @@ using namespace std;
 namespace vtbackend
 {
 
+/// Converts a UTF-8 byte offset within @p text to the corresponding codepoint index.
+///
+/// In the UTF-8 strings produced by Line::toUtf8(), each grid cell emits exactly one
+/// codepoint (wide-character continuation cells emit a space). Therefore the codepoint
+/// index equals the column index for these strings.
+///
+/// @note This function counts UTF-8 leading bytes and does not perform grapheme-cluster
+///       segmentation. The returned index equals a terminal grid column only when the
+///       input was produced by Line::toUtf8(), which guarantees one codepoint per cell.
+///
+/// @param text       The UTF-8 encoded string.
+/// @param byteOffset The byte offset to convert.
+/// @return The number of codepoints before @p byteOffset.
+static constexpr auto utf8ByteOffsetToCodepointIndex(string_view text, size_t byteOffset) noexcept -> size_t
+{
+    auto const limit = min(byteOffset, text.size());
+    // Count bytes that are NOT continuation bytes (10xxxxxx).
+    return static_cast<size_t>(ranges::count_if(views::iota(size_t { 0 }, limit), [&](auto i) {
+        return (static_cast<char8_t>(text[i]) & 0xC0) != 0x80;
+    }));
+}
+
 HintModeHandler::HintModeHandler(Executor& executor): _executor { executor }
 {
 }
@@ -43,8 +65,11 @@ void HintModeHandler::rescanLines(vector<string> const& visibleLines, PageSize p
                 if (pattern.validator && !pattern.validator(matchStr))
                     continue;
 
-                auto const startCol = ColumnOffset(static_cast<int>(match.position()));
-                auto const endCol = ColumnOffset(static_cast<int>(match.position() + match.length() - 1));
+                auto const startCol =
+                    ColumnOffset::cast_from(utf8ByteOffsetToCodepointIndex(lineText, match.position()));
+                auto const endCodepointIndex =
+                    utf8ByteOffsetToCodepointIndex(lineText, match.position() + match.length());
+                auto const endCol = ColumnOffset::cast_from(endCodepointIndex - 1);
 
                 _allMatches.push_back(HintMatch {
                     .label = {},

@@ -12,6 +12,7 @@ DDDDD
 ellips
 emtpy
 FFFFF
+fullwidth
 GGGGG
 gitbranch
 gitgraph
@@ -23,3 +24,4 @@ rbong
 ULval
 unscroll
 URval
+xad
