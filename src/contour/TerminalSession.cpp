@@ -1060,8 +1060,12 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
         if (auto const* actions =
                 config::apply(_config.inputMappings.value().keyMappings, key, modifiers, matchModeFlags()))
         {
-            handleAction(actions, eventType, [&](auto const& actions) { executeAllActions(actions); });
-            return;
+            auto executionCount = 0;
+            handleAction(actions, eventType, [&](auto const& actions) {
+                executionCount = executeAllActions(actions);
+            });
+            if (executionCount > 0)
+                return;
         }
     }
     terminal().sendKeyEvent(key, modifiers, eventType, now);
@@ -1095,8 +1099,12 @@ void TerminalSession::sendCharEvent(
                 config::apply(_config.inputMappings.value().charMappings, value, modifiers, matchModeFlags());
             actions && !_terminal.inputHandler().isEditingSearch())
         {
-            handleAction(actions, eventType, [&](auto const& actions) { executeAllActions(actions); });
-            return;
+            auto executionCount = 0;
+            handleAction(actions, eventType, [&](auto const& actions) {
+                executionCount = executeAllActions(actions);
+            });
+            if (executionCount > 0)
+                return;
         }
     }
     terminal().sendCharEvent(value, physicalKey, modifiers, eventType, now);
