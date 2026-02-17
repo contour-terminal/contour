@@ -107,6 +107,7 @@
     <release version="0.6.3" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes F3/Shift+F3 search navigation keybindings firing in any mode instead of only when Search mode is active</li>
           <li>Fixes Kitty keyboard protocol: F1-F4 CSI u key codes, legacy F1-F4 modifier encoding, CSI u gating for ReportEventTypes and ReportAllKeys flags, lock modifier handling, and Press event type suppression</li>
           <li>Fixes build failure on Alpine Linux (musl libc) due to missing close_range() function (#1879)</li>
           <li>Fixes third-party dependency files (headers, libraries) leaking into install tree (#1788)</li>
