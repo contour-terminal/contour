@@ -10,6 +10,7 @@ ENDPROPERTIES
 FONTBOUNDINGBOX
 FreeBSD
 LASTEXITCODE
+RTX
 OPENCONSOLE
 OpenBSD
 SEMA
@@ -32,6 +33,7 @@ copy'n'paste
 copyable
 crossfade
 dbus
+flamegraphs
 gha
 ilammy
 lazygit
@@ -55,4 +57,5 @@ tparam
 unk
 urg
 vswhere
+winget
 zypper
