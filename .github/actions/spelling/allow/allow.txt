@@ -7,11 +7,13 @@ Dbus
 ENDCHAR
 ENDFONT
 ENDPROPERTIES
+FFFFFFFF
 FONTBOUNDINGBOX
 FreeBSD
 LASTEXITCODE
 OPENCONSOLE
 OpenBSD
+RTX
 SEMA
 STARTCHAR
 STARTFONT
@@ -32,6 +34,7 @@ copy'n'paste
 copyable
 crossfade
 dbus
+flamegraphs
 gha
 ilammy
 lazygit
@@ -55,4 +58,5 @@ tparam
 unk
 urg
 vswhere
+winget
 zypper
