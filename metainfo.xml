@@ -107,6 +107,7 @@
     <release version="0.6.3" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes Kitty keyboard protocol: F1-F4 CSI u key codes, legacy F1-F4 modifier encoding, CSI u gating for ReportEventTypes and ReportAllKeys flags, lock modifier handling, and Press event type suppression</li>
           <li>Fixes build failure on Alpine Linux (musl libc) due to missing close_range() function (#1879)</li>
           <li>Fixes third-party dependency files (headers, libraries) leaking into install tree (#1788)</li>
           <li>Fixes Insert Replace Mode (IRM, CSI 4 h) not shifting text right on character insertion (#1877)</li>

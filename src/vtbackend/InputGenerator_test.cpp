@@ -287,9 +287,12 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.CapsLock", "[terminal,input]")
 {
     auto input = ExtendedKeyboardInputGenerator {};
     input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
 
-    // 'A' with CapsLock active: key code is lowercase (97),
+    // 'A' with CapsLock active + ReportAllKeys: key code is lowercase (97),
     // modifier is CapsLock (64), encoded = 1 + 64 = 65
+    // (CapsLock alone with only DisambiguateEscapeCodes would go to legacy,
+    //  because lock modifiers don't trigger CSI u on their own)
     input.generateChar('A', 'a', Modifier::CapsLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[97;65u"sv));
 }
@@ -298,8 +301,9 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.NumLock", "[terminal,input]")
 {
     auto input = ExtendedKeyboardInputGenerator {};
     input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
 
-    // '5' with NumLock (128), encoded = 1 + 128 = 129
+    // '5' with NumLock (128) + ReportAllKeys, encoded = 1 + 128 = 129
     input.generateChar('5', '5', Modifier::NumLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[53;129u"sv));
 }
@@ -311,11 +315,13 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.CapsLock.ReportEventTypes", "[ter
     input.flags().enable(KeyboardEventFlag::ReportEventTypes);
 
     // 'A' with CapsLock, Press event
-    // modifier = CapsLock (64), encoded = 1 + 64 = 65, event type = 1 (Press)
+    // CapsLock is a lock modifier — Press event doesn't need action encoding,
+    // so this goes to legacy (no real mods, no action, no report-all-keys)
     input.generateChar('A', 'a', Modifier::CapsLock, KeyboardEventType::Press);
-    REQUIRE(escape(input.take()) == escape("\033[97;65:1u"sv));
+    REQUIRE(escape(input.take()) == escape("A"sv));
 
-    // 'A' with CapsLock, Release event
+    // 'A' with CapsLock, Release event — needs action encoding, so CSI u kicks in
+    // modifier = CapsLock (64), encoded = 1 + 64 = 65, event type = 3 (Release)
     input.generateChar('A', 'a', Modifier::CapsLock, KeyboardEventType::Release);
     REQUIRE(escape(input.take()) == escape("\033[97;65:3u"sv));
 }
@@ -346,6 +352,216 @@ TEST_CASE("ExtendedKeyboardInputGenerator.End", "[terminal,input]")
     // Ctrl+End: CSI 1;5 F
     input.generateKey(Key::End, Modifier::Control, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[1;5F"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Shift+3", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+
+    // Shift+3 → '#': primary key must be '3' (51), not '#' (35)
+    input.generateChar('#', '3', Modifier::Shift, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[51;2u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Shift+3.AlternateKeys", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+    input.flags().enable(KeyboardEventFlag::ReportAlternateKeys);
+
+    // With alternate keys: CSI 51:35;2u (key='3', shifted_key='#', Shift)
+    input.generateChar('#', '3', Modifier::Shift, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[51:35;2u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Shift+semicolon", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+
+    // Shift+; → ':' — primary key must be ';' (59), not ':' (58)
+    input.generateChar(':', ';', Modifier::Shift, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[59;2u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.plain_hash_german", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+
+    // Direct '#' key (German layout): physicalKey='#', no shift
+    // No semicolon when modifiers encode to empty string
+    input.generateChar('#', '#', Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[35u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.F1_F4", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    // F1 no mods: CSI 1 P
+    input.generateKey(Key::F1, Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[1P"sv));
+
+    // F2 no mods: CSI 1 Q
+    input.generateKey(Key::F2, Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[1Q"sv));
+
+    // F3 no mods: CSI 13 ~ (tilde-form to avoid CSI R conflict)
+    input.generateKey(Key::F3, Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[13~"sv));
+
+    // F4 no mods: CSI 1 S
+    input.generateKey(Key::F4, Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[1S"sv));
+
+    // Shift+F1: CSI 1;2 P
+    input.generateKey(Key::F1, Modifier::Shift, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[1;2P"sv));
+
+    // Ctrl+F1: CSI 1;5 P
+    input.generateKey(Key::F1, Modifier::Control, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[1;5P"sv));
+}
+
+TEST_CASE("StandardKeyboardInputGenerator.Legacy.F1_F4_with_modifiers", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+
+    // Shift+F1 (legacy): CSI 1;2 P
+    input.generate(Key::F1, Modifier::Shift, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[1;2P"sv));
+    input.consume(static_cast<int>(input.peek().size()));
+
+    // Ctrl+F3 (legacy): CSI 13;5 ~
+    input.generate(Key::F3, Modifier::Control, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[13;5~"sv));
+    input.consume(static_cast<int>(input.peek().size()));
+
+    // Ctrl+F4 (legacy): CSI 1;5 S
+    input.generate(Key::F4, Modifier::Control, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[1;5S"sv));
+    input.consume(static_cast<int>(input.peek().size()));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.ReportEventTypes_alone", "[terminal,input]")
+{
+    // ReportEventTypes alone (flag=0b10) should trigger CSI u for non-Press events
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::ReportEventTypes);
+
+    // 'a' Press: legacy (no mods, no action encoding for Press)
+    input.generateChar('a', 'a', Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("a"sv));
+
+    // 'a' Repeat: CSI 97;1:2 u (needs CSI u for action encoding)
+    input.generateChar('a', 'a', Modifier::None, KeyboardEventType::Repeat);
+    REQUIRE(escape(input.take()) == escape("\033[97;1:2u"sv));
+
+    // 'a' Release: CSI 97;1:3 u
+    input.generateChar('a', 'a', Modifier::None, KeyboardEventType::Release);
+    REQUIRE(escape(input.take()) == escape("\033[97;1:3u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.ReportAllKeys_alone", "[terminal,input]")
+{
+    // ReportAllKeysAsEscapeCodes alone (flag=0b1000)
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+
+    // 'a' Press: CSI 97 u
+    input.generateChar('a', 'a', Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[97u"sv));
+
+    // Enter Press: CSI 13 u
+    input.generateKey(Key::Enter, Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[13u"sv));
+
+    // Tab Press: CSI 9 u
+    input.generateKey(Key::Tab, Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[9u"sv));
+
+    // LeftShift Press: CSI 57441 u
+    input.generateKey(Key::LeftShift, Modifier::None, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[57441u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Shift_only_with_disambiguate", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    // Shift+'a' with disambiguate: CSI 97;2 u (Shift is a real modifier)
+    input.generateChar('A', 'a', Modifier::Shift, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[97;2u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.LockModifier_handling", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    // CapsLock+Enter: legacy (\r) because only lock modifiers
+    input.generateKey(Key::Enter, Modifier::CapsLock, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\r"sv));
+
+    // NumLock+Tab: legacy (\t) because only lock modifiers
+    input.generateKey(Key::Tab, Modifier::NumLock, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\t"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.LockModifier_with_ReportAllKeys", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+
+    // CapsLock+Enter with ReportAllKeys: CSI 13;65 u
+    input.generateKey(Key::Enter, Modifier::CapsLock, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[13;65u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Enter_Tab_Backspace_with_modifiers", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    // Shift+Enter: CSI 13;2 u
+    input.generateKey(Key::Enter, Modifier::Shift, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[13;2u"sv));
+
+    // Shift+Tab: CSI 9;2 u
+    input.generateKey(Key::Tab, Modifier::Shift, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[9;2u"sv));
+
+    // Ctrl+Backspace: CSI 127;5 u
+    input.generateKey(Key::Backspace, Modifier::Control, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[127;5u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.EventType_encoding", "[terminal,input]")
+{
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.flags().enable(KeyboardEventFlag::ReportEventTypes);
+
+    // Press with mods: no :1 suffix (Press is default, omitted per spec)
+    input.generateChar('a', 'a', Modifier::Control, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[97;5u"sv));
+
+    // Repeat with mods: :2 suffix
+    input.generateChar('a', 'a', Modifier::Control, KeyboardEventType::Repeat);
+    REQUIRE(escape(input.take()) == escape("\033[97;5:2u"sv));
+
+    // Release with mods: :3 suffix
+    input.generateChar('a', 'a', Modifier::Control, KeyboardEventType::Release);
+    REQUIRE(escape(input.take()) == escape("\033[97;5:3u"sv));
 }
 
 // }}}

@@ -183,10 +183,10 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
     // clang-format off
     switch (key)
     {
-        case Key::F1: append(select(modifiers, { .std = ESC "OP", .mods = ESC "O{}P" })); break;
-        case Key::F2: append(select(modifiers, { .std = ESC "OQ", .mods = ESC "O{}Q" })); break;
-        case Key::F3: append(select(modifiers, { .std = ESC "OR", .mods = ESC "O{}R" })); break;
-        case Key::F4: append(select(modifiers, { .std = ESC "OS", .mods = ESC "O{}S" })); break;
+        case Key::F1: append(select(modifiers, { .std = ESC "OP", .mods = CSI "1;{}P" })); break;
+        case Key::F2: append(select(modifiers, { .std = ESC "OQ", .mods = CSI "1;{}Q" })); break;
+        case Key::F3: append(select(modifiers, { .std = ESC "OR", .mods = CSI "13;{}~" })); break;
+        case Key::F4: append(select(modifiers, { .std = ESC "OS", .mods = CSI "1;{}S" })); break;
         case Key::F5: append(select(modifiers, { .std = CSI "15~", .mods = CSI "15;{}~" })); break;
         case Key::F6: append(select(modifiers, { .std = CSI "17~", .mods = CSI "17;{}~" })); break;
         case Key::F7: append(select(modifiers, { .std = CSI "18~", .mods = CSI "18;{}~" })); break;
@@ -296,25 +296,49 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
 // }}}
 
 // {{{ ExtendedKeyboardInputGenerator
+
+/// Lock modifiers (CapsLock, NumLock) that should not trigger CSI u encoding on their own.
+constexpr auto LockModifiers = Modifiers { Modifier::CapsLock } | Modifiers { Modifier::NumLock };
+
+/// Returns true if the given modifiers consist only of lock modifiers (CapsLock/NumLock) or no modifiers.
+constexpr bool hasOnlyLockModifiers(Modifiers modifiers) noexcept
+{
+    return modifiers.without(LockModifiers).none();
+}
+
 bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
                                                   uint32_t physicalKey,
                                                   Modifiers modifiers,
                                                   KeyboardEventType eventType)
 {
-    if (enabled(eventType))
-    {
-        if (enabled(KeyboardEventFlag::DisambiguateEscapeCodes)
-            && (modifiers.without(Modifier::Shift).any()
-                || enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes)))
-        {
-            append("\033[{};{}u",
-                   encodeCharacter(characterEvent, physicalKey, modifiers),
-                   encodeModifiers(modifiers, eventType));
-            return true;
-        }
-    }
+    if (!enabled(eventType))
+        return false;
 
-    return StandardKeyboardInputGenerator::generateChar(characterEvent, physicalKey, modifiers, eventType);
+    if (!isNonLegacyMode())
+        return StandardKeyboardInputGenerator::generateChar(
+            characterEvent, physicalKey, modifiers, eventType);
+
+    auto const hasRealMods = !hasOnlyLockModifiers(modifiers);
+    auto const needsAction =
+        enabled(KeyboardEventFlag::ReportEventTypes) && eventType != KeyboardEventType::Press;
+    auto const reportAllKeys = enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+    auto const disambiguate = enabled(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    // No real mods, no action encoding needed, not report-all-keys: legacy UTF-8
+    if (!hasRealMods && !needsAction && !reportAllKeys)
+        return StandardKeyboardInputGenerator::generateChar(
+            characterEvent, physicalKey, modifiers, eventType);
+
+    // Has real mods but neither disambiguate nor report-all-keys and no action needed: legacy
+    if (hasRealMods && !needsAction && !disambiguate && !reportAllKeys)
+        return StandardKeyboardInputGenerator::generateChar(
+            characterEvent, physicalKey, modifiers, eventType);
+
+    // CSI u encoding (conditionally include semicolon only when modifiers non-empty)
+    auto const encodedMods = encodeModifiers(modifiers, eventType);
+    auto const modsPart = encodedMods.empty() ? std::string {} : std::format(";{}", encodedMods);
+    append("\033[{}{}u", encodeCharacter(characterEvent, physicalKey, modifiers), modsPart);
+    return true;
 }
 
 constexpr unsigned encodeEventType(KeyboardEventType eventType) noexcept
@@ -325,7 +349,8 @@ constexpr unsigned encodeEventType(KeyboardEventType eventType) noexcept
 std::string ExtendedKeyboardInputGenerator::encodeModifiers(Modifiers modifiers,
                                                             KeyboardEventType eventType) const
 {
-    if (enabled(KeyboardEventFlag::ReportEventTypes))
+    // Per Kitty spec: action is omitted for Press (the default), only encoded for Repeat/Release.
+    if (enabled(KeyboardEventFlag::ReportEventTypes) && eventType != KeyboardEventType::Press)
         return std::format("{}:{}", 1 + modifiers.value(), encodeEventType(eventType));
 
     if (modifiers.value() != 0)
@@ -338,23 +363,31 @@ std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
                                                             uint32_t physicalKey,
                                                             Modifiers modifiers) const
 {
-    // Per Kitty spec: unicode-key-code is always the lowercase/unshifted form
-    auto const lowercaseCodepoint = unicode::simple_lowercase(ch);
-    auto result = std::to_string(static_cast<uint32_t>(lowercaseCodepoint));
+    // Per Kitty spec: unicode-key-code is always the un-shifted base key.
+    // For letters, simple_lowercase normalizes both ch and physicalKey (A→a).
+    // For non-letter shifted symbols (Shift+3→#), simple_lowercase('#')='#'
+    // which is WRONG — the base key '3' (from physicalKey) must be used instead.
+    // We apply simple_lowercase to physicalKey to normalize letter keys that may
+    // arrive as uppercase from the platform (e.g., physicalKey='L' for the L key).
+    auto const baseKey =
+        (physicalKey >= 32 && physicalKey < 0x110000)
+            ? static_cast<uint32_t>(unicode::simple_lowercase(static_cast<char32_t>(physicalKey)))
+            : static_cast<uint32_t>(unicode::simple_lowercase(ch));
+    auto result = std::to_string(baseKey);
 
     if (enabled(KeyboardEventFlag::ReportAlternateKeys))
     {
-        // Shifted key only included when Shift modifier is active
+        // Shifted key = the character actually produced when Shift is active.
+        // For Shift+3→'#': shiftedKey=35. For Shift+A→'A': shiftedKey=65.
         uint32_t shiftedKey = 0;
         if (modifiers.contains(Modifier::Shift))
         {
-            auto const uppercaseCodepoint = unicode::simple_uppercase(ch);
-            if (uppercaseCodepoint != lowercaseCodepoint)
-                shiftedKey = static_cast<uint32_t>(uppercaseCodepoint);
+            auto const producedKey = static_cast<uint32_t>(ch);
+            if (producedKey != baseKey)
+                shiftedKey = producedKey;
         }
 
-        bool const showPhysicalKey = physicalKey && physicalKey != static_cast<uint32_t>(lowercaseCodepoint)
-                                     && physicalKey != shiftedKey;
+        bool const showPhysicalKey = physicalKey && physicalKey != baseKey && physicalKey != shiftedKey;
 
         if (shiftedKey || showPhysicalKey)
             result += ':';
@@ -396,10 +429,10 @@ constexpr pair<unsigned, char> mapKey(Key key) noexcept
         case Key::PrintScreen: return { 57361, 'u' };
         case Key::Pause: return { 57362, 'u' };
         case Key::Menu: return { 57363, 'u' };
-        case Key::F1: return { 11, '~' }; // or 1 P
-        case Key::F2: return { 12, '~' }; // or 1 Q
-        case Key::F3: return { 13, '~' }; // or 1 R (not anymore)
-        case Key::F4: return { 14, '~' }; // or 1 S
+        case Key::F1: return { 1, 'P' };
+        case Key::F2: return { 1, 'Q' };
+        case Key::F3: return { 13, '~' }; // Tilde-form to avoid conflict with CSI R (Cursor Position Report)
+        case Key::F4: return { 1, 'S' };
         case Key::F5: return { 15, '~' };
         case Key::F6: return { 17, '~' };
         case Key::F7: return { 18, '~' };
@@ -523,14 +556,12 @@ bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
     if (!enabled(eventType))
         return false;
 
-    if (!enabled(KeyboardEventFlag::DisambiguateEscapeCodes))
+    if (!isNonLegacyMode())
         return StandardKeyboardInputGenerator::generateKey(key, modifiers, eventType);
 
-    if (modifiers.none() && !enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes))
+    // Enter/Tab/Backspace: legacy when only lock mods and not report-all-keys
+    if (hasOnlyLockModifiers(modifiers) && !enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes))
     {
-        // "The only exceptions are the Enter, Tab and Backspace keys which still generate the same bytes as
-        // in legacy mode this is to allow the user to type and execute commands in the shell such as reset
-        // after a program that sets this mode crashes without clearing it."
         switch (key)
         {
             case Key::Enter:
