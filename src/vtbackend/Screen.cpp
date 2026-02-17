@@ -366,6 +366,9 @@ void Screen<Cell>::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
 template <CellConcept Cell>
 string_view Screen<Cell>::tryEmplaceChars(string_view chars, size_t cellCount) noexcept
 {
+    if (_terminal->isModeEnabled(AnsiMode::Insert))
+        return chars; // Cannot use fast path during insert mode
+
     if (!isFullHorizontalMargins())
         return chars;
 
@@ -605,6 +608,13 @@ void Screen<Cell>::writeTextInternal(char32_t sourceCodepoint)
 template <CellConcept Cell>
 void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 {
+    // IRM: shift existing cells right to make room for the new character
+    if (_terminal->isModeEnabled(AnsiMode::Insert))
+    {
+        auto const width = ColumnCount::cast_from(unicode::width(codepoint));
+        insertChars(realCursorPosition().line, width);
+    }
+
     Line<Cell>& line = currentLine();
 
     Cell& cell = line.useCellAt(_cursor.position.column);

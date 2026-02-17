@@ -1120,6 +1120,39 @@ TEST_CASE("InsertCharacters.Margins", "[screen]")
     }
 }
 
+TEST_CASE("InsertMode", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("ABCDEFGHIJ");
+    screen.moveCursorTo(LineOffset(0), ColumnOffset(3));
+
+    SECTION("basic insert shifts text right")
+    {
+        mock.writeToScreen("\033[4h"); // Enable IRM
+        mock.writeToScreen("XY");      // Insert "XY" at column 3
+        CHECK(screen.renderMainPageText() == "ABCXYDEFGH\n");
+        // "IJ" pushed past the right margin are lost
+    }
+
+    SECTION("disable insert returns to overwrite")
+    {
+        mock.writeToScreen("\033[4h"); // Enable IRM
+        mock.writeToScreen("X");       // Insert 'X' at column 3 -> "ABCXDEFGHI"
+        mock.writeToScreen("\033[4l"); // Disable IRM
+        mock.writeToScreen("Z");       // Overwrite at column 4 -> "ABCXZEFGHI"
+        CHECK(screen.renderMainPageText() == "ABCXZEFGHI\n");
+    }
+
+    SECTION("insert single character at end of line")
+    {
+        screen.moveCursorTo(LineOffset(0), ColumnOffset(9));
+        mock.writeToScreen("\033[4h"); // Enable IRM
+        mock.writeToScreen("X");       // Insert at last column
+        CHECK(screen.renderMainPageText() == "ABCDEFGHIX\n");
+    }
+}
+
 TEST_CASE("InsertLines", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(4) } };
