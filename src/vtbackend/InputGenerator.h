@@ -352,6 +352,15 @@ class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerato
         return flags().contains(flag);
     }
 
+    /// Returns true if any non-legacy Kitty keyboard flag is active.
+    /// Kitty: legacy_mode = !disambiguate && !report_event_types && !report_all_keys
+    [[nodiscard]] constexpr bool isNonLegacyMode() const noexcept
+    {
+        return enabled(KeyboardEventFlag::DisambiguateEscapeCodes)
+               || enabled(KeyboardEventFlag::ReportEventTypes)
+               || enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+    }
+
     [[nodiscard]] constexpr bool enabled(KeyboardEventType eventType) const noexcept
     {
         // Press-event is always emitted. The other events are only emitted if the corresponding flag is set.

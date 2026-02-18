@@ -499,11 +499,19 @@ const InputMappings defaultInputMappings {
                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
                           .input = vtbackend::Key::UpArrow,
                           .binding = { { actions::ScrollOneUp {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+        KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
+                             auto mods = vtbackend::MatchModes();
+                             mods.enable(vtbackend::MatchModes::Search);
+                             return mods;
+                         }(),
                           .modifiers { vtbackend::Modifiers {} },
                           .input = vtbackend::Key::F3,
                           .binding = { { actions::FocusNextSearchMatch {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+        KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
+                             auto mods = vtbackend::MatchModes();
+                             mods.enable(vtbackend::MatchModes::Search);
+                             return mods;
+                         }(),
                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
                           .input = vtbackend::Key::F3,
                           .binding = { { actions::FocusPreviousSearchMatch {} } } },

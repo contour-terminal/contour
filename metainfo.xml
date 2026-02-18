@@ -107,10 +107,11 @@
     <release version="0.6.3" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes F3 key not reaching PTY applications when a keybinding matches but its action does not execute, by falling through to the terminal instead of silently consuming the key event</li>
+          <li>Fixes F3/Shift+F3 search navigation keybindings firing in any mode instead of only when Search mode is active</li>
           <li>Fixes build failure on Alpine Linux (musl libc) due to missing close_range() function (#1879)</li>
           <li>Fixes third-party dependency files (headers, libraries) leaking into install tree (#1788)</li>
           <li>Fixes Insert Replace Mode (IRM, CSI 4 h) not shifting text right on character insertion (#1877)</li>
-          <li>Fixes Home/End key encoding in Kitty keyboard protocol (extended keyboard input generator)</li>
           <li>Fixes glyph scaling and vertical centering of colored emoji</li>
           <li>Fixes Sixel images not rendering on non-first tabs</li>
           <li>Fixes text rendering artifacts and corruption when rapidly outputting content</li>
@@ -120,6 +121,8 @@
           <li>Fixes initial terminal window size being wrong at fractional DPR (e.g. 127×29 instead of configured 130×30 at 150% scaling on Wayland, #1858)</li>
           <li>Fixes ~2s startup delay caused by synchronous Qt multimedia driver probing by deferring audio initialization to a background thread</li>
           <li>Fixes initial font sizing at fractional DPR on Wayland by preferring screen DPR over window DPR</li>
+          <li>Fixes Home/End key encoding in Kitty keyboard protocol (extended keyboard input generator)</li>
+          <li>Fixes Kitty keyboard protocol: F1-F4 CSI u key codes, legacy F1-F4 modifier encoding, CSI u gating for ReportEventTypes and ReportAllKeys flags, lock modifier handling, and Press event type suppression</li>
           <li>Fixes Kitty keyboard protocol: proper CapsLock/NumLock modifier reporting, correct modifier encoding per spec, and Unicode case folding for non-ASCII characters</li>
           <li>Fixes tab characters (HT) intermittently lost in terminal output due to bulk text parser skipping trailing C0 controls and tab cursor movement not filling intermediate cells with spaces (#1876)</li>
           <li>Replaces abrupt cell blink toggle with configurable smooth pulse animation via blink_style profile setting (classic/smooth/linger)</li>
