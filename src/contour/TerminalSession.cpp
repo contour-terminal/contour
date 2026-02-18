@@ -1224,6 +1224,8 @@ void TerminalSession::cursorPositionChanged()
 // {{{ Actions
 bool TerminalSession::operator()(actions::CancelSelection)
 {
+    if (!_terminal.selectionAvailable())
+        return false;
     _terminal.clearSelection();
     return true;
 }
