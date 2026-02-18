@@ -770,3 +770,105 @@ TEST_CASE("HintModeHandler.IPv6DoesNotMatchPlainHex", "[hintmode]")
     REQUIRE(handler.isActive());
     CHECK(handler.matches().empty());
 }
+
+// --- Unicode / non-ASCII offset tests ---
+
+TEST_CASE("HintModeHandler.UnicodeOffsetInPrompt", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // The prompt symbol ❯ (U+276F) is 3 bytes in UTF-8 but occupies 1 grid column.
+    // "❯ " = columns 0-1, URL starts at column 2.
+    // In UTF-8 bytes: ❯ = 3 bytes, space = 1 byte → URL starts at byte 4.
+    // Without the fix, startCol would incorrectly be 4 instead of 2.
+    auto lines = std::vector<std::string> { "\xe2\x9d\xaf https://example.com" };
+
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, urlOnlyPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.isActive());
+    REQUIRE(handler.matches().size() == 1);
+    CHECK(handler.matches()[0].matchedText == "https://example.com");
+    CHECK(handler.matches()[0].start.column == ColumnOffset(2));
+    CHECK(handler.matches()[0].end.column == ColumnOffset(20));
+}
+
+TEST_CASE("HintModeHandler.AsciiPositionsUnchanged", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // Pure ASCII: byte offset == column offset. Regression guard.
+    auto lines = std::vector<std::string> { "visit https://example.com for more" };
+
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, urlOnlyPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.isActive());
+    REQUIRE(handler.matches().size() == 1);
+    CHECK(handler.matches()[0].matchedText == "https://example.com");
+    CHECK(handler.matches()[0].start.column == ColumnOffset(6));
+    CHECK(handler.matches()[0].end.column == ColumnOffset(24));
+}
+
+TEST_CASE("HintModeHandler.WideCharacterOffset", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // CJK character 中 (U+4E2D) is 3 bytes in UTF-8 and occupies 2 terminal columns.
+    // Line::toUtf8() represents a wide character as the glyph in the leading cell
+    // plus a space for the continuation cell. We therefore model the output as
+    // "中 中  https://test.org":
+    //   col 0: '中', col 1: continuation ' ', col 2: '中', col 3: continuation ' ',
+    //   col 4: ' ' (separator), col 5..20: URL.
+    auto lines = std::vector<std::string> { "\xe4\xb8\xad \xe4\xb8\xad  https://test.org" };
+
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, urlOnlyPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.isActive());
+    REQUIRE(handler.matches().size() == 1);
+    CHECK(handler.matches()[0].matchedText == "https://test.org");
+    CHECK(handler.matches()[0].start.column == ColumnOffset(5));
+    CHECK(handler.matches()[0].end.column == ColumnOffset(20));
+}
+
+TEST_CASE("HintModeHandler.MultipleUnicodeSegments", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // "→ https://a.com ★ https://b.com"
+    // → (U+2192) = 3 bytes, ★ (U+2605) = 3 bytes
+    // Columns: → = 0, ' ' = 1, URL1 starts at 2 (len 14, ends at 14),
+    //          ' ' = 15, ★ = 16, ' ' = 17, URL2 starts at 18 (len 14, ends at 30)
+    auto lines = std::vector<std::string> { "\xe2\x86\x92 https://a.com \xe2\x98\x85 https://b.com" };
+
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, urlOnlyPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.isActive());
+    REQUIRE(handler.matches().size() == 2);
+    CHECK(handler.matches()[0].matchedText == "https://a.com");
+    CHECK(handler.matches()[0].start.column == ColumnOffset(2));
+    CHECK(handler.matches()[0].end.column == ColumnOffset(14));
+    CHECK(handler.matches()[1].matchedText == "https://b.com");
+    CHECK(handler.matches()[1].start.column == ColumnOffset(18));
+    CHECK(handler.matches()[1].end.column == ColumnOffset(30));
+}
+
+TEST_CASE("HintModeHandler.MatchAtLineStartWithUnicode", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // URL at column 0, followed by non-ASCII chars. Column 0 should be unaffected.
+    // "https://start.org ❯" — URL at columns 0..17, then space at 18, ❯ at 19.
+    auto lines = std::vector<std::string> { "https://start.org \xe2\x9d\xaf" };
+
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(30) }, urlOnlyPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.isActive());
+    REQUIRE(handler.matches().size() == 1);
+    CHECK(handler.matches()[0].matchedText == "https://start.org");
+    CHECK(handler.matches()[0].start.column == ColumnOffset(0));
+    CHECK(handler.matches()[0].end.column == ColumnOffset(16));
+}
