@@ -26,7 +26,7 @@ endfunction(subproject_version)
 set(ContourThirdParties_SRCDIR ${PROJECT_SOURCE_DIR}/_deps/sources)
 if(EXISTS "${ContourThirdParties_SRCDIR}/CMakeLists.txt")
     message(STATUS "Embedding 3rdparty libraries: ${ContourThirdParties_SRCDIR}")
-    add_subdirectory(${ContourThirdParties_SRCDIR})
+    add_subdirectory(${ContourThirdParties_SRCDIR} EXCLUDE_FROM_ALL)
 else()
     message(STATUS "No 3rdparty libraries found at ${ContourThirdParties_SRCDIR}")
 endif()
@@ -85,6 +85,7 @@ else()
             NAME GSL
             GITHUB_REPOSITORY microsoft/GSL
             GIT_TAG v${GSL_VERSION}
+            EXCLUDE_FROM_ALL YES
             OPTIONS "GSL_TEST=OFF"
         )
         set(THIRDPARTY_BUILTIN_GSL "embedded (CPM)")
@@ -131,6 +132,7 @@ if(LIBTERMINAL_BUILD_BENCH_HEADLESS)
                 NAME termbench-pro
                 GITHUB_REPOSITORY contour-terminal/termbench-pro
                 GIT_TAG ${TERMBENCH_PRO_COMMIT_HASH}
+                EXCLUDE_FROM_ALL YES
             )
             set(THIRDPARTY_BUILTIN_termbench "embedded (CPM)")
         else()
