@@ -190,6 +190,76 @@ TEST_CASE("InputGenerator.all(Ctrl + A..Z)", "[terminal,input]")
     }
 }
 
+// {{{ Lock modifier tests (NumLock / CapsLock must not break standard input)
+
+TEST_CASE("InputGenerator.Ctrl+D_with_NumLock", "[terminal,input]")
+{
+    auto constexpr CtrlNumLock = Modifiers { Modifier::Control } | Modifier::NumLock;
+    auto input = InputGenerator {};
+    input.generate('D', CtrlNumLock, KeyboardEventType::Press);
+    auto const c0 = string(1, static_cast<char>(0x04));
+    REQUIRE(escape(input.peek()) == escape(c0));
+}
+
+TEST_CASE("InputGenerator.Ctrl+A_with_NumLock", "[terminal,input]")
+{
+    auto constexpr CtrlNumLock = Modifiers { Modifier::Control } | Modifier::NumLock;
+    auto input = InputGenerator {};
+    input.generate('A', CtrlNumLock, KeyboardEventType::Press);
+    auto const c0 = string(1, static_cast<char>(0x01));
+    REQUIRE(escape(input.peek()) == escape(c0));
+}
+
+TEST_CASE("InputGenerator.Ctrl+C_with_NumLock", "[terminal,input]")
+{
+    auto constexpr CtrlNumLock = Modifiers { Modifier::Control } | Modifier::NumLock;
+    auto input = InputGenerator {};
+    input.generate('C', CtrlNumLock, KeyboardEventType::Press);
+    auto const c0 = string(1, static_cast<char>(0x03));
+    REQUIRE(escape(input.peek()) == escape(c0));
+}
+
+TEST_CASE("InputGenerator.all_Ctrl_A_to_Z_with_NumLock", "[terminal,input]")
+{
+    auto constexpr CtrlNumLock = Modifiers { Modifier::Control } | Modifier::NumLock;
+    for (char ch = 'A'; ch <= 'Z'; ++ch)
+    {
+        INFO(std::format("Testing Ctrl+{} with NumLock", ch));
+        auto input = InputGenerator {};
+        input.generate(static_cast<char32_t>(ch), CtrlNumLock, KeyboardEventType::Press);
+        auto const c0 = string(1, static_cast<char>(ch - 'A' + 1));
+        REQUIRE(escape(input.peek()) == escape(c0));
+    }
+}
+
+TEST_CASE("InputGenerator.Ctrl+D_with_CapsLock", "[terminal,input]")
+{
+    auto constexpr CtrlCapsLock = Modifiers { Modifier::Control } | Modifier::CapsLock;
+    auto input = InputGenerator {};
+    input.generate('D', CtrlCapsLock, KeyboardEventType::Press);
+    auto const c0 = string(1, static_cast<char>(0x04));
+    REQUIRE(escape(input.peek()) == escape(c0));
+}
+
+TEST_CASE("InputGenerator.Ctrl+D_with_NumLock_and_CapsLock", "[terminal,input]")
+{
+    auto constexpr CtrlBothLocks = Modifiers { Modifier::Control } | Modifier::NumLock | Modifier::CapsLock;
+    auto input = InputGenerator {};
+    input.generate('D', CtrlBothLocks, KeyboardEventType::Press);
+    auto const c0 = string(1, static_cast<char>(0x04));
+    REQUIRE(escape(input.peek()) == escape(c0));
+}
+
+TEST_CASE("InputGenerator.Shift+Tab_with_NumLock", "[terminal,input]")
+{
+    auto constexpr ShiftNumLock = Modifiers { Modifier::Shift } | Modifier::NumLock;
+    auto input = InputGenerator {};
+    input.generate(static_cast<char32_t>(0x09), ShiftNumLock, KeyboardEventType::Press);
+    REQUIRE(escape(input.peek()) == escape("\033[Z"sv));
+}
+
+// }}}
+
 // {{{ ExtendedKeyboardInputGenerator
 
 TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Ctrl+L", "[terminal,input]")

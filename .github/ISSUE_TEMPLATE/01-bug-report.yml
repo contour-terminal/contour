@@ -65,6 +65,7 @@ body:
         - bash
         - zsh
         - fish
+        - tcsh
         - PowerShell
         - Endo
         - other
