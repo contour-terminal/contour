@@ -2766,13 +2766,15 @@ namespace impl
             else if (seq.param(0) == 1)
             {
                 // DECCIR — Cursor Information Report
-                // Response: DCS 1 $ u <Pr>;<Pc>;<Pp>;<Srend>;<Satt>;<Sflag>;<Pgl>;<Pgr>;<Scss>;<Sdesig> ST
+                // Response: DCS 1 $ u Pr;Pc;Pp;Srend;Satt;Sflag;Pgl;Pgr;Scss;Sdesig ST
+                // See: https://vt100.net/docs/vt510-rm/DECCIR.html
                 auto const& cursor = screen.cursor();
                 auto const line = *cursor.position.line + 1;
                 auto const column = *cursor.position.column + 1;
                 auto const page = 1; // We only support one page
 
-                // Encode SGR flags as a bitmask character (0x40 base)
+                // Srend: visual attributes bitmask (0x40 base)
+                // Bit 1=Bold, Bit 2=Underline, Bit 3=Blinking, Bit 4=Inverse
                 auto const& flags = cursor.graphicsRendition.flags;
                 int srendBits = 0;
                 if (flags.test(CellFlag::Bold))
@@ -2785,19 +2787,54 @@ namespace impl
                     srendBits |= 8;
                 auto const srend = static_cast<char>(0x40 + srendBits);
 
-                // Protection attribute
+                // Satt: protection attribute (Bit 1 = DECSCA protection)
                 auto const satt = flags.test(CellFlag::CharacterProtected) ? static_cast<char>(0x41)
                                                                            : static_cast<char>(0x40);
 
-                // Flags: origin mode, auto-wrap, selective erase
+                // Sflag: Bit 1=DECOM, Bit 2=SS2, Bit 3=SS3, Bit 4=wrap pending
+                auto const& charsets = cursor.charsets;
                 int sflagBits = 0;
                 if (cursor.originMode)
                     sflagBits |= 1;
-                if (cursor.autoWrap)
+                if (charsets.tableForNextGraphic() != charsets.selectedTable())
+                {
+                    if (charsets.tableForNextGraphic() == CharsetTable::G2)
+                        sflagBits |= 2; // SS2 active
+                    else if (charsets.tableForNextGraphic() == CharsetTable::G3)
+                        sflagBits |= 4; // SS3 active
+                }
+                if (cursor.wrapPending)
                     sflagBits |= 8;
                 auto const sflag = static_cast<char>(0x40 + sflagBits);
 
-                screen.reply("\033P1$u{};{};{};{};{};{}\033\\", line, column, page, srend, satt, sflag);
+                // Pgl: GL charset table index (0=G0, 1=G1, 2=G2, 3=G3)
+                auto const pgl = static_cast<int>(charsets.selectedTable());
+
+                // Pgr: GR charset table index (GR not tracked; default to G2 per VT standard)
+                auto const pgr = 2;
+
+                // Scss: character set size for each G-set (0x40 base)
+                // Bit N = G(N-1) size: 0=94-char, 1=96-char. All supported charsets are 94-char.
+                auto const scss = static_cast<char>(0x40);
+
+                // Sdesig: SCS designation final characters for G0 through G3
+                auto const sdesig =
+                    std::string { charsetDesignation(charsets.charsetIdOf(CharsetTable::G0)),
+                                  charsetDesignation(charsets.charsetIdOf(CharsetTable::G1)),
+                                  charsetDesignation(charsets.charsetIdOf(CharsetTable::G2)),
+                                  charsetDesignation(charsets.charsetIdOf(CharsetTable::G3)) };
+
+                screen.reply("\033P1$u{};{};{};{};{};{};{};{};{};{}\033\\",
+                             line,
+                             column,
+                             page,
+                             srend,
+                             satt,
+                             sflag,
+                             pgl,
+                             pgr,
+                             scss,
+                             sdesig);
                 return ApplyResult::Ok;
             }
             else if (seq.param(0) == 2)
