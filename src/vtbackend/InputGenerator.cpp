@@ -39,6 +39,15 @@ string to_string(MouseButton button)
     return std::format("{}", button);
 }
 
+/// Lock modifiers (CapsLock, NumLock) that should not trigger CSI u encoding on their own.
+constexpr auto LockModifiers = Modifiers { Modifier::CapsLock } | Modifiers { Modifier::NumLock };
+
+/// Returns true if the given modifiers consist only of lock modifiers (CapsLock/NumLock) or no modifiers.
+constexpr bool hasOnlyLockModifiers(Modifiers modifiers) noexcept
+{
+    return modifiers.without(LockModifiers).none();
+}
+
 // {{{ StandardKeyboardInputGenerator
 bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
                                                   uint32_t physicalKey,
@@ -49,6 +58,9 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
 
     if (eventType == KeyboardEventType::Release)
         return false;
+
+    // Strip lock modifiers (NumLock, CapsLock) as they are irrelevant for legacy character generation.
+    modifiers = modifiers.without(LockModifiers);
 
     // See section "Alt and Meta Keys" in ctlseqs.txt from xterm.
     if (modifiers == Modifier::Alt)
@@ -296,15 +308,6 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
 // }}}
 
 // {{{ ExtendedKeyboardInputGenerator
-
-/// Lock modifiers (CapsLock, NumLock) that should not trigger CSI u encoding on their own.
-constexpr auto LockModifiers = Modifiers { Modifier::CapsLock } | Modifiers { Modifier::NumLock };
-
-/// Returns true if the given modifiers consist only of lock modifiers (CapsLock/NumLock) or no modifiers.
-constexpr bool hasOnlyLockModifiers(Modifiers modifiers) noexcept
-{
-    return modifiers.without(LockModifiers).none();
-}
 
 bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
                                                   uint32_t physicalKey,
