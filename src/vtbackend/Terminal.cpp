@@ -2499,7 +2499,7 @@ void Terminal::softReset()
     setMode(DECMode::ApplicationKeypad, false); // DECNKM
     setMode(DECMode::AutoRepeat, true);         // DECARM
     setMode(DECMode::BackarrowKey, false);      // DECBKM
-    // TODO: DECSCA (Select character attribute)
+    // DECSCA is reset by setGraphicsRendition(GraphicsRendition::Reset) above.
     // TODO: DECNRCM (National replacement character set)
     // TODO: GL, GR (G0, G1, G2, G3)
     // TODO: DECAUPSS (Assign user preference supplemental set)

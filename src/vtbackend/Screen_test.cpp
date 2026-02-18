@@ -1186,6 +1186,77 @@ TEST_CASE("InsertLines", "[screen]")
     // TODO: test with (top/bottom and left/right) margins enabled
 }
 
+// {{{ DECSCA
+TEST_CASE("DECSCA: enable and disable character protection", "[screen]")
+{
+    // Verifies that DECSCA Ps=1 enables CharacterProtected on subsequent characters,
+    // and DECSCA Ps=0/2 disables it.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(6) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // A unprotected, BC protected, D unprotected (Ps=0), EF unprotected (Ps=2)
+    mock.writeToScreen(std::format("A{0}BC{1}D{2}EF", "\033[1\"q", "\033[0\"q", "\033[2\"q"));
+
+    REQUIRE("ABCDEF" == screen.grid().lineText(LineOffset(0)));
+
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlag::CharacterProtected)); // A
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::CharacterProtected));       // B
+    CHECK(screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlag::CharacterProtected));       // C
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlag::CharacterProtected)); // D
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(4)).isFlagEnabled(CellFlag::CharacterProtected)); // E
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(5)).isFlagEnabled(CellFlag::CharacterProtected)); // F
+}
+
+TEST_CASE("DECSCA: default parameter disables protection", "[screen]")
+{
+    // DECSCA with no parameter (default) should disable protection.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // AB protected, then DECSCA with default (0) disables protection, CD unprotected
+    mock.writeToScreen(std::format("{0}AB{1}CD", "\033[1\"q", "\033[\"q"));
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlag::CharacterProtected));       // A
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::CharacterProtected));       // B
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlag::CharacterProtected)); // C
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlag::CharacterProtected)); // D
+}
+
+TEST_CASE("DECSCA: protection is independent of SGR rendition", "[screen]")
+{
+    // DECSCA protection attribute is independent of SGR visual attributes.
+    // Setting SGR bold or other attributes should not affect the protection state.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Enable protection, then set bold, then write characters — protection should persist.
+    mock.writeToScreen(std::format("{0}\033[1mAB{1}CD", "\033[1\"q", "\033[0\"q"));
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlag::CharacterProtected)); // A
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::CharacterProtected)); // B
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlag::Bold));               // A bold
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::Bold));               // B bold
+}
+
+TEST_CASE("DECSCA: save and restore cursor preserves protection state", "[screen]")
+{
+    // DECSC/DECRC should save and restore the CharacterProtected attribute.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Enable protection, save cursor, disable protection, write AB (unprotected),
+    // restore cursor (re-enables protection), write CD (protected, overwrites AB).
+    mock.writeToScreen(std::format("{0}\0337{1}AB\0338CD", "\033[1\"q", "\033[0\"q"));
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlag::CharacterProtected)); // C
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::CharacterProtected)); // D
+    CHECK_FALSE(
+        screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlag::CharacterProtected)); // empty
+    CHECK_FALSE(
+        screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlag::CharacterProtected)); // empty
+}
+// }}}
+
 // {{{ DECSEL
 TEST_CASE("DECSEL-0", "[screen]")
 {
@@ -1292,6 +1363,29 @@ TEST_CASE("DECSED-2", "[screen]")
     mock.writeToScreen("\033[2;2H");
     mock.writeToScreen("\033[?2J");
     REQUIRE(e(mainPageText(screen)) == "A C\\n E \\nG I\\n");
+}
+
+TEST_CASE("DECSED-2: lines without protected characters are erased correctly", "[screen]")
+{
+    // Regression test: selectiveEraseLine must erase the correct line even when
+    // the line has no protected characters and is not the cursor's current line.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Line 0: "ABC" — all unprotected
+    // Line 1: "DEF" — all unprotected
+    // Line 2: protected "G", unprotected "H", protected "I"
+    mock.writeToScreen("ABC\r\nDEF\r\n");
+    mock.writeToScreen(std::format("{0}G{1}H{0}I{1}", "\033[1\"q", "\033[2\"q"));
+
+    REQUIRE(e(mainPageText(screen)) == "ABC\\nDEF\\nGHI\\n");
+
+    // Move cursor to line 1, col 1 and perform DECSED-2 (erase entire display selectively).
+    // Lines 0 and 1 have NO protected characters, so they should be fully erased.
+    // Line 2 should keep 'G' and 'I' (protected) but erase 'H'.
+    mock.writeToScreen("\033[2;2H");
+    mock.writeToScreen("\033[?2J");
+    REQUIRE(e(mainPageText(screen)) == "   \\n   \\nG I\\n");
 }
 // }}}
 
