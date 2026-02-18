@@ -144,6 +144,57 @@ TEST_CASE("homeResolvedPath")
     CHECK("/var/tmp/workspace" == crispy::homeResolvedPath("~/workspace", "/var/tmp").generic_string());
 }
 
+TEST_CASE("expandEnvironmentVariables")
+{
+    auto const envReplacer = [](string_view name) -> string {
+        if (name == "HOME")
+            return "/home/user";
+        if (name == "SHELL")
+            return "/bin/bash";
+        return {};
+    };
+
+    // Known variables resolve correctly
+    CHECK("/home/user/Pictures" == crispy::replaceVariables("${HOME}/Pictures", envReplacer));
+    CHECK("/bin/bash" == crispy::replaceVariables("${SHELL}", envReplacer));
+
+    // Multiple variables in one string
+    CHECK("/home/user runs /bin/bash" == crispy::replaceVariables("${HOME} runs ${SHELL}", envReplacer));
+
+    // Unknown variables expand to empty string
+    CHECK("/Pictures" == crispy::replaceVariables("${UNDEFINED}/Pictures", envReplacer));
+
+    // No markers at all — input passes through unchanged
+    CHECK("/usr/local/bin" == crispy::replaceVariables("/usr/local/bin", envReplacer));
+
+    // Malformed ${UNCLOSED at start of string passes through unchanged
+    CHECK("${UNCLOSED" == crispy::replaceVariables("${UNCLOSED", envReplacer));
+}
+
+TEST_CASE("replaceVariables.and.homeResolvedPath.composition")
+{
+    auto const envReplacer = [](string_view name) -> string {
+        if (name == "HOME")
+            return "/home/user";
+        if (name == "PICS")
+            return "Pictures";
+        return {};
+    };
+
+    auto const resolve = [&](string const& input) {
+        return crispy::homeResolvedPath(crispy::replaceVariables(input, envReplacer), "/home/user");
+    };
+
+    // ${HOME}/path → env expansion → home resolution (no ~ involved)
+    CHECK("/home/user/Pictures/bg.png" == resolve("${HOME}/Pictures/bg.png").generic_string());
+
+    // ~/path → no env vars to expand → home resolution handles ~
+    CHECK("/home/user/workspace" == resolve("~/workspace").generic_string());
+
+    // Mixed: env var inside path with ~
+    CHECK("/home/user/Pictures" == resolve("~/${PICS}").generic_string());
+}
+
 TEST_CASE("unescapeURL")
 {
     CHECK(crispy::unescapeURL(""sv).empty());

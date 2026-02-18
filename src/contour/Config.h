@@ -47,6 +47,7 @@
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -856,22 +857,23 @@ struct Config
 
 struct YAMLConfigReader
 {
+    /// Callable that resolves a variable name to its value.
+    using VariableReplacer = std::function<std::string(std::string_view)>;
+
     std::filesystem::path configFile;
     YAML::Node doc;
     logstore::category const& logger;
+    VariableReplacer variableReplacer;
 
-    YAMLConfigReader(std::string const& filename, logstore::category const& log):
-        configFile(filename), logger { log }
-    {
-        try
-        {
-            doc = YAML::LoadFile(configFile.string());
-        }
-        catch (std::exception const& e)
-        {
-            errorLog()("Configuration file is corrupted. {}\nDefault config will be loaded.", e.what());
-        }
-    }
+    YAMLConfigReader(std::string const& filename,
+                     logstore::category const& log,
+                     VariableReplacer replacer = {});
+
+    /// Expands `${VAR}` tokens in @p input using the configured variable replacer.
+    [[nodiscard]] std::string resolveVariables(std::string const& input) const;
+
+    /// Expands `${VAR}` tokens then resolves `~` to the home directory.
+    [[nodiscard]] std::filesystem::path resolvedPath(std::string const& input) const;
 
     template <typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
     void loadFromEntry(YAML::Node const& node,
