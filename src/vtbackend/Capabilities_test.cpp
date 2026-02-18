@@ -42,10 +42,11 @@ TEST_CASE("Capabilities.terminfo_no_empty_string_values", "[issue-1861]")
     vtbackend::capabilities::StaticDatabase const tcap;
     auto const terminfo = tcap.terminfo();
 
-    // The regex matches lines like "    name=," where the value after '=' is empty.
+    // The regex matches sequences like "\n    name=,\n" where the value after '=' is empty.
     // In terminfo format, "name=value," defines a string capability.
-    // "name=," means the value is an empty string — this must never appear.
-    auto const emptyValuePattern = std::regex(R"(^\s+(\w+)=,$)", std::regex::multiline);
+    // "name=,\n" means the value is an empty string — this must never appear.
+    // Note: We avoid std::regex::multiline because MSVC does not support it.
+    auto const emptyValuePattern = std::regex(R"(\n\s+(\w+)=,\n)");
 
     auto begin = std::sregex_iterator(terminfo.begin(), terminfo.end(), emptyValuePattern);
     auto end = std::sregex_iterator();
