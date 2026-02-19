@@ -275,7 +275,7 @@ namespace // {{{ helper
     /// or the value would overflow an int.
     std::optional<int> toNumber(string const* _value)
     {
-        if (!_value)
+        if (!_value || _value->empty())
             return std::nullopt;
 
         int result = 0;
@@ -310,9 +310,8 @@ namespace // {{{ helper
             case '7': return ImageAlignment::BottomStart;
             case '8': return ImageAlignment::BottomCenter;
             case '9': return ImageAlignment::BottomEnd;
+            default: return nullopt;
         }
-
-        return nullopt;
     }
 
     optional<ImageResize> toImageResizePolicy(string const* _value, ImageResize _default)
@@ -329,9 +328,8 @@ namespace // {{{ helper
             case '1': return ImageResize::ResizeToFit;
             case '2': return ImageResize::ResizeToFill;
             case '3': return ImageResize::StretchToFill;
+            default: return nullopt;
         }
-
-        return nullopt; // TODO
     }
 
     optional<ImageFormat> toImageFormat(string const* _value)
@@ -4442,8 +4440,8 @@ bool Screen<Cell>::isCursorInsideMargins() const noexcept
 template <CellConcept Cell>
 unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageUpload(Sequence const&)
 {
-    return make_unique<MessageParser>([this](Message&& message) {
-        auto const name = message.header("n");
+    return make_unique<MessageParser>([this](Message message) {
+        auto const* const name = message.header("n");
         auto const imageFormat = toImageFormat(message.header("f"));
         auto const width = Width::cast_from(toNumber(message.header("w")).value_or(0));
         auto const height = Height::cast_from(toNumber(message.header("h")).value_or(0));
@@ -4463,8 +4461,8 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageUpload(Sequence const&)
 template <CellConcept Cell>
 unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRender(Sequence const&)
 {
-    return make_unique<MessageParser>([this](Message&& message) {
-        auto const name = message.header("n");
+    return make_unique<MessageParser>([this](Message const& message) {
+        auto const* const name = message.header("n");
         auto const x = PixelCoordinate::X { toNumber(message.header("x")).value_or(0) }; // XXX grid x offset
         auto const y = PixelCoordinate::Y { toNumber(message.header("y")).value_or(0) }; // XXX grid y offset
         auto const screenRows = LineCount::cast_from(toNumber(message.header("r")).value_or(0));
@@ -4499,8 +4497,8 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRender(Sequence const&)
 template <CellConcept Cell>
 unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRelease(Sequence const&)
 {
-    return make_unique<MessageParser>([this](Message&& message) {
-        if (auto const name = message.header("n"); name)
+    return make_unique<MessageParser>([this](Message const& message) {
+        if (auto const* const name = message.header("n"); name)
             releaseImage(*name);
     });
 }
@@ -4508,7 +4506,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRelease(Sequence const&)
 template <CellConcept Cell>
 unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageOneshot(Sequence const&)
 {
-    return make_unique<MessageParser>([this](Message&& message) {
+    return make_unique<MessageParser>([this](Message message) {
         auto const screenRows = LineCount::cast_from(toNumber(message.header("r")).value_or(0));
         auto const screenCols = ColumnCount::cast_from(toNumber(message.header("c")).value_or(0));
         auto const autoScroll = message.header("l") != nullptr;
@@ -4547,6 +4545,8 @@ void Screen<Cell>::uploadImage(string name, ImageFormat format, ImageSize imageS
             _terminal->imagePool().link(std::move(name),
                                         uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData)));
         }
+        else
+            errorLog()("Failed to decode PNG image for upload.");
         return;
     }
 
@@ -4632,6 +4632,8 @@ void Screen<Cell>::renderImage(ImageFormat format,
                         autoScroll,
                         layer);
         }
+        else
+            errorLog()("Failed to decode PNG image for oneshot render.");
         return;
     }
 

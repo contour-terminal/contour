@@ -625,9 +625,18 @@ int ContourApp::catAction()
     auto const layer = parseImageLayer(parameters().get<string>("contour.cat.layer"));
     auto const fileName = parameters().verbatim.front();
 
-    if (!std::filesystem::exists(std::filesystem::path(string(fileName))))
+    auto const filePath = std::filesystem::path(string(fileName));
+    if (!std::filesystem::exists(filePath))
     {
         cerr << std::format("Error: File not found: '{}'\n", fileName);
+        return EXIT_FAILURE;
+    }
+
+    // GIP protocol limits the body to 16 MB.
+    auto constexpr MaxImageFileSize = std::uintmax_t { 16 * 1024 * 1024 };
+    if (std::filesystem::file_size(filePath) > MaxImageFileSize)
+    {
+        cerr << std::format("Error: File '{}' exceeds the maximum supported size of 16 MB.\n", fileName);
         return EXIT_FAILURE;
     }
 
