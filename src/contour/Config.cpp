@@ -312,10 +312,10 @@ YAMLConfigReader::YAMLConfigReader(std::string const& filename,
 {
     if (!variableReplacer)
     {
-        variableReplacer = [this](std::string_view name) -> std::string {
+        variableReplacer = [&log = logger](std::string_view name) -> std::string {
             if (auto const* value = std::getenv(std::string(name).c_str()))
                 return value;
-            logger()("Undefined environment variable: ${{{}}}", name);
+            log()("Undefined environment variable: ${{{}}}", name);
             return {};
         };
     }
