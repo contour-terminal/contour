@@ -113,7 +113,30 @@ if(COMMAND ContourThirdParties_Embed_libunicode)
     endif()
     set(THIRDPARTY_BUILTIN_unicode_core "embedded")
 else()
-    HandleThirdparty(libunicode "gh:contour-terminal/libunicode#v${LIBUNICODE_MINIMAL_VERSION}")
+    if(NOT CONTOUR_BUILD_STATIC)
+        find_package(libunicode ${LIBUNICODE_MINIMAL_VERSION} QUIET)
+    endif()
+    if(TARGET unicode::unicode OR TARGET unicode::core)
+        set(THIRDPARTY_BUILTIN_libunicode "system package")
+    elseif(CONTOUR_USE_CPM)
+        message(STATUS "Using CPM to fetch libunicode")
+        CPMAddPackage(
+            NAME libunicode
+            GITHUB_REPOSITORY contour-terminal/libunicode
+            GIT_TAG v${LIBUNICODE_MINIMAL_VERSION}
+            OPTIONS
+                "LIBUNICODE_TESTING OFF"
+                "LIBUNICODE_BENCHMARK OFF"
+                "LIBUNICODE_TOOLS OFF"
+                "LIBUNICODE_EXAMPLES OFF"
+                "BUILD_SHARED_LIBS OFF"
+            EXCLUDE_FROM_ALL YES
+        )
+        set(THIRDPARTY_BUILTIN_libunicode "CPM (v${LIBUNICODE_MINIMAL_VERSION}, static)")
+    else()
+        message(FATAL_ERROR "Could not find libunicode >= ${LIBUNICODE_MINIMAL_VERSION}. "
+            "Run install-deps.sh, install system packages, or set CONTOUR_USE_CPM=ON.")
+    endif()
 endif()
 
 if(LIBTERMINAL_BUILD_BENCH_HEADLESS)
