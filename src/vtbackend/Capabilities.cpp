@@ -274,10 +274,6 @@ namespace
         String { Undefined, "kUP5"sv, "\033[1;5A"sv },
         String { Undefined, "kUP6"sv, "\033[1;6A"sv },
         String { Undefined, "kUP7"sv, "\033[1;7A"sv },
-        String { "K1"_tcap, "ka1"sv, ""sv },         // upper left of keypad
-        String { "K3"_tcap, "ka3"sv, ""sv },         // upper right of keypad
-        String { "K4"_tcap, "kc1"sv, ""sv },         // center of keypad
-        String { "K5"_tcap, "kc3"sv, ""sv },         // lower right of keypad
         String { "kl"_tcap, "kcub1"sv, "\033OD"sv }, // app: cursor left
         String { "kd"_tcap, "kcud1"sv, "\033OB"sv }, // app: cursor left
         String { "kr"_tcap, "kcuf1"sv, "\033OC"sv }, // app: cursor right
@@ -347,14 +343,11 @@ namespace
         String { "k7"_tcap, "kf7"sv, "\033[18~"sv },
         String { "k8"_tcap, "kf8"sv, "\033[19~"sv },
         String { "k9"_tcap, "kf9"sv, "\033[20~"sv },
-        String { "%1"_tcap, "khlp"sv, ""sv },
         String { "kh"_tcap, "khome"sv, "\033OH"sv },
         String { "kI"_tcap, "kich1"sv, "\033[2~"sv },
         String { "Km"_tcap, "kmous"sv, "\033[M"sv },
         String { "kN"_tcap, "knp"sv, "\033[6~"sv },
         String { "kP"_tcap, "kpp"sv, "\033[5~"sv },
-        String { "&8"_tcap, "kund"sv, ""sv },
-
         // {{{ Extensions originally introduced by tmux.
         //
         String { "Ss"_tcap, "Ss"sv, "\033[%p1%d q" }, // Set cursor style.
@@ -492,7 +485,7 @@ string StaticDatabase::terminfo() const
             output << "    " << cap.name << "#" << cap.value << ",\n";
 
     for (auto const& cap: strings)
-        if (!cap.name.empty())
+        if (!cap.name.empty() && !cap.value.empty())
             output << "    " << cap.name << "=" << crispy::escape(cap.value, crispy::numeric_escape::Octal)
                    << ",\n";
 
