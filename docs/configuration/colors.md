@@ -36,7 +36,7 @@ color_schemes:
       blur: false
 
 ```
-:octicons-horizontal-rule-16: ==path== To specify the image file to use as the background, you need to provide the full path to the image. By default, the path option is set to an empty string, indicating that background image support is disabled. <br/>
+:octicons-horizontal-rule-16: ==path== To specify the image file to use as the background, you need to provide the full path to the image. Both `~` (home directory) and `${VAR}` (environment variable) expansion are supported — see [Path Handling](paths.md) for details. By default, the path option is set to an empty string, indicating that background image support is disabled. <br/>
 :octicons-horizontal-rule-16: ==opacity== option controls the opacity of the background image. It determines how transparent or intense the image appears. The default value is 0.5, which provides a moderately transparent background. You can adjust this value to make the image more or less prominent, depending on your preferences. <br/>
 :octicons-horizontal-rule-16: ==blur== option applies a blur effect to the background image. This can help reduce distractions and keep the focus on the terminal contents. By default, the blur option is set to false, indicating that background image blurring is disabled. If you want to enable it, set the value to true.
 

@@ -17,6 +17,7 @@
 #include <QtGui/QOpenGLContext>
 
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 
@@ -304,6 +305,40 @@ optional<std::string> readConfigFile(std::string const& filename)
     return nullopt;
 }
 
+YAMLConfigReader::YAMLConfigReader(std::string const& filename,
+                                   logstore::category const& log,
+                                   VariableReplacer replacer):
+    configFile(filename), logger { log }, variableReplacer { std::move(replacer) }
+{
+    if (!variableReplacer)
+    {
+        variableReplacer = [&log = logger](std::string_view name) -> std::string {
+            if (auto const* value = std::getenv(std::string(name).c_str()))
+                return value;
+            log()("Undefined environment variable: ${{{}}}", name);
+            return {};
+        };
+    }
+    try
+    {
+        doc = YAML::LoadFile(configFile.string());
+    }
+    catch (std::exception const& e)
+    {
+        errorLog()("Configuration file is corrupted. {}\nDefault config will be loaded.", e.what());
+    }
+}
+
+std::string YAMLConfigReader::resolveVariables(std::string const& input) const
+{
+    return replaceVariables(input, variableReplacer);
+}
+
+std::filesystem::path YAMLConfigReader::resolvedPath(std::string const& input) const
+{
+    return homeResolvedPath(resolveVariables(input), vtpty::Process::homeDirectory());
+}
+
 // NOLINTBEGIN(readability-convert-member-functions-to-static)
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
@@ -312,8 +347,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     auto const child = node[entry];
     if (child)
     {
-        where = crispy::homeResolvedPath(std::filesystem::path(child.as<std::string>()).string(),
-                                         vtpty::Process::homeDirectory());
+        where = resolvedPath(child.as<std::string>());
     }
 }
 
@@ -733,9 +767,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         loadFromEntry(child, "path", filename);
         loadFromEntry(child, "opacity", where->opacity);
         loadFromEntry(child, "blur", where->blur);
-        auto resolvedPath = crispy::homeResolvedPath(filename, vtpty::Process::homeDirectory());
-        where->location = resolvedPath;
-        where->hash = crispy::strong_hash::compute(resolvedPath.string());
+        auto const resolved = resolvedPath(filename);
+        where->location = resolved;
+        where->hash = crispy::strong_hash::compute(resolved.string());
     }
 }
 
@@ -856,13 +890,13 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 {
     if (auto const child = node[entry])
     {
-        where.program = child.as<std::string>();
+        where.program = resolveVariables(child.as<std::string>());
     }
     // loading arguments from the profile
     if (auto args = node["arguments"]; args && args.IsSequence())
     {
         for (auto const& argNode: args)
-            where.arguments.emplace_back(argNode.as<string>());
+            where.arguments.emplace_back(resolveVariables(argNode.as<string>()));
     }
     if (node["initial_working_directory"])
     {
