@@ -142,6 +142,7 @@
           <li>Adds kitty's unscroll extension (CSI n + T) to restore scrolled-off content from scrollback history</li>
           <li>Adds natural momentum scrolling for touchpad gestures with configurable falloff via momentum_scrolling profile setting</li>
           <li>Adds Kitty OSC 99 desktop notification protocol with D-Bus backend on Linux, supporting structured metadata, chunked payloads, base64 encoding, urgency levels, display occasion filtering, bidirectional close/activation events, and query/alive responses</li>
+          <li>Adds complete DECCIR (Cursor Information Report) response including character set designations, GL/GR mappings, and wrap-pending state (#97)</li>
         </ul>
       </description>
     </release>

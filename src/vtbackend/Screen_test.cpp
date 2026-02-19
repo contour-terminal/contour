@@ -4050,6 +4050,158 @@ TEST_CASE("HorizontalTab.AfterScreenClear", "[screen]")
     CHECK("X       Y           \n                    \n" == screen.renderMainPageText());
 }
 
+// {{{ DECCIR — Cursor Information Report
+
+TEST_CASE("DECCIR.default_state", "[screen]")
+{
+    // Verify DECCIR response with all defaults: cursor at (1,1), no attributes, no wrap pending,
+    // GL=G0, GR=G2, all charsets USASCII.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Expected: DCS 1 $ u 1;1;1;@;@;@;0;2;@;BBBB ST
+    //   Pr=1, Pc=1, Pp=1
+    //   Srend='@' (0x40, no attributes)
+    //   Satt='@' (0x40, no protection)
+    //   Sflag='@' (0x40, no flags)
+    //   Pgl=0 (G0 in GL)
+    //   Pgr=2 (G2 in GR, default)
+    //   Scss='@' (0x40, all 94-char sets)
+    //   Sdesig="BBBB" (all USASCII)
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.cursor_position", "[screen]")
+{
+    // Verify DECCIR correctly reports cursor position after movement.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+
+    mock.writeToScreen(CUP(3, 7)); // Move to line 3, column 7
+
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Pr=3, Pc=7
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u3;7;1;@;@;@;0;2;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.bold_and_underline", "[screen]")
+{
+    // Verify Srend field encodes bold (bit 1) and underline (bit 2).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen(SGR(1)); // Bold
+    mock.writeToScreen(SGR(4)); // Underline
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Srend = 0x40 + 0x01 (bold) + 0x02 (underline) = 0x43 = 'C'
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;C;@;@;0;2;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.blinking_and_inverse", "[screen]")
+{
+    // Verify Srend field encodes blinking (bit 3) and inverse (bit 4).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen(SGR(5)); // Blinking
+    mock.writeToScreen(SGR(7)); // Inverse
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Srend = 0x40 + 0x04 (blink) + 0x08 (inverse) = 0x4C = 'L'
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;L;@;@;0;2;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.all_rendition_attributes", "[screen]")
+{
+    // Verify Srend field with all attributes enabled: bold+underline+blink+inverse.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen(SGR(1)); // Bold
+    mock.writeToScreen(SGR(4)); // Underline
+    mock.writeToScreen(SGR(5)); // Blinking
+    mock.writeToScreen(SGR(7)); // Inverse
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Srend = 0x40 + 0x01 + 0x02 + 0x04 + 0x08 = 0x4F = 'O'
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;O;@;@;0;2;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.character_protection", "[screen]")
+{
+    // Verify Satt field reports DECSCA character protection attribute.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen(DECSCA(1)); // Enable character protection
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Satt = 0x41 = 'A' (bit 1 set for protection)
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;A;@;0;2;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.origin_mode", "[screen]")
+{
+    // Verify Sflag bit 1 reports origin mode (DECOM).
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+
+    mock.writeToScreen(DECSM(toDECModeNum(DECMode::Origin)));
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Sflag = 0x40 + 0x01 = 0x41 = 'A' (origin mode set)
+    // Note: cursor is at (1,1) because origin mode homes the cursor.
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;A;0;2;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.wrap_pending", "[screen]")
+{
+    // Verify Sflag bit 4 reports wrap-pending state.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    // Write exactly enough characters to reach the right margin and trigger wrap pending.
+    mock.writeToScreen("ABCDE");
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Cursor is at column 5, wrap pending. Sflag = 0x40 + 0x08 = 0x48 = 'H'
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;5;1;@;@;H;0;2;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.charset_designation_special", "[screen]")
+{
+    // Verify Sdesig reports DEC Special charset when designated into G0.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen(SCS_G0_SPECIAL()); // Designate G0 = DEC Special
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Sdesig: G0='0' (Special), G1-G3='B' (USASCII)
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;@;0BBB\033\\"));
+}
+
+TEST_CASE("DECCIR.charset_designation_g1", "[screen]")
+{
+    // Verify Sdesig reports charset designated into G1.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen(SCS_G1_SPECIAL()); // Designate G1 = DEC Special
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Sdesig: G0='B', G1='0' (Special), G2-G3='B'
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;@;B0BB\033\\"));
+}
+
+TEST_CASE("DECCIR.gl_charset_after_locking_shift", "[screen]")
+{
+    // Verify Pgl reports G1 after a locking shift (SO → LS1 maps G1 into GL).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\x0E"); // SO (Shift Out) = LS1 → map G1 into GL
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Pgl=1 (G1 in GL)
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;1;2;@;BBBB\033\\"));
+}
+
+// }}} DECCIR
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 
 // NOLINTBEGIN(misc-const-correctness)
