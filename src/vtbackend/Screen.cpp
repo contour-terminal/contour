@@ -269,7 +269,6 @@ namespace // {{{ helper
     //     }
     // }
 
-#if defined(GOOD_IMAGE_PROTOCOL)
     int toNumber(string const* _value, int _default)
     {
         if (!_value)
@@ -352,7 +351,20 @@ namespace // {{{ helper
         else
             return DefaultFormat;
     }
-#endif
+
+    ImageLayer toImageLayer(string const* value)
+    {
+        if (!value || value->empty())
+            return ImageLayer::Replace;
+
+        switch (value->at(0))
+        {
+            case '0': return ImageLayer::Below;
+            case '1': return ImageLayer::Replace;
+            case '2': return ImageLayer::Above;
+            default: return ImageLayer::Replace;
+        }
+    }
 } // namespace
 
 // }}}
@@ -1070,7 +1082,9 @@ void Screen<Cell>::sendDeviceAttributes()
                                  // TODO: DeviceAttributes::SelectiveErase |
                                  DeviceAttributes::SixelGraphics |
                                  // TODO: DeviceAttributes::TechnicalCharacters |
-                                 DeviceAttributes::UserDefinedKeys | DeviceAttributes::ClipboardExtension);
+                                 DeviceAttributes::UserDefinedKeys | DeviceAttributes::ClipboardExtension
+                                 | DeviceAttributes::GoodImageProtocol
+    );
 
     reply("\033[?{};{}c", id, attrs);
 }
@@ -2072,10 +2086,10 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
                                ImageSize imageSize,
                                ImageAlignment alignmentPolicy,
                                ImageResize resizePolicy,
-                               bool autoScroll)
+                               bool autoScroll,
+                               ImageLayer layer)
 {
-    // TODO: make use of imageOffset
-    (void) imageOffset;
+    (void) imageOffset; // TODO: Use for cropping/tiling in RasterizedImage
 
     auto const linesAvailable = pageSize().lines - topLeft.line.as<LineCount>();
     auto const linesToBeRendered = std::min(gridSize.lines, linesAvailable);
@@ -2083,39 +2097,46 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
     auto const columnsToBeRendered = ColumnCount(std::min(columnsAvailable, gridSize.columns));
     auto const gapColor = RGBAColor {}; // TODO: _cursor.graphicsRendition.backgroundColor;
 
-    // TODO: make use of imageOffset and imageSize
     auto const rasterizedImage = make_shared<RasterizedImage>(
-        std::move(image), alignmentPolicy, resizePolicy, gapColor, gridSize, _terminal->cellPixelSize());
-    const auto lastSixelBand = unbox(imageSize.height) % 6;
-    const LineOffset offset = [&]() {
-        auto offset = LineOffset::cast_from(std::ceil((imageSize.height - lastSixelBand).as<double>()
-                                                      / _terminal->cellPixelSize().height.as<double>()))
-                      - 1 * (lastSixelBand == 0);
-        auto const h = unbox(imageSize.height) - 1;
-        // VT340 has this behavior where for some heights it text cursor is placed not
-        // at the final sixel line but a line above it.
-        // See
-        // https://github.com/hackerb9/vt340test/blob/main/glitches.md#text-cursor-is-left-one-row-too-high-for-certain-sixel-heights
-        if (h % 6 > h % unbox(_terminal->cellPixelSize().height))
-            return offset - 1;
-        return offset;
+        std::move(image), alignmentPolicy, resizePolicy, gapColor, gridSize, _terminal->cellPixelSize(), layer);
+
+    // Compute the cursor line offset after rendering.
+    // For Sixel images (identified by non-zero pixel imageSize), use VT340-compatible sixel band math.
+    // For GIP images, simply place the cursor at the last row of the rendered area.
+    auto const isSixelImage = imageSize.width.value > 0 && imageSize.height.value > 0;
+    auto const cursorLineOffset = [&]() -> LineOffset {
+        if (isSixelImage)
+        {
+            auto const lastSixelBand = unbox(imageSize.height) % 6;
+            auto lineOffset =
+                LineOffset::cast_from(std::ceil((imageSize.height - lastSixelBand).as<double>()
+                                                / _terminal->cellPixelSize().height.as<double>()))
+                - 1 * (lastSixelBand == 0);
+            auto const h = unbox(imageSize.height) - 1;
+            // VT340 quirk: for some heights the text cursor is placed one row too high.
+            // See: https://github.com/hackerb9/vt340test/blob/main/glitches.md
+            if (h % 6 > h % unbox(_terminal->cellPixelSize().height))
+                lineOffset = lineOffset - 1;
+            return lineOffset;
+        }
+        // GIP: cursor goes to the last row of the rendered image area.
+        return boxed_cast<LineOffset>(linesToBeRendered) - 1;
     }();
 
     if (unbox(linesToBeRendered))
     {
-        for (GridSize::Offset const offset: GridSize { linesToBeRendered, columnsToBeRendered })
+        for (GridSize::Offset const gridOffset: GridSize { linesToBeRendered, columnsToBeRendered })
         {
-            Cell& cell = at(topLeft + offset);
+            Cell& cell = at(topLeft + gridOffset);
             cell.setImageFragment(rasterizedImage,
-                                  CellLocation { .line = offset.line, .column = offset.column });
+                                  CellLocation { .line = gridOffset.line, .column = gridOffset.column });
             cell.setHyperlink(_cursor.hyperlink);
         };
-        moveCursorTo(topLeft.line + offset, topLeft.column);
+        moveCursorTo(topLeft.line + cursorLineOffset, topLeft.column);
     }
 
-    // If there're lines to be rendered missing (because it didn't fit onto the screen just yet)
-    // AND iff sixel !sixelScrolling  is enabled, then scroll as much as needed to render the remaining
-    // lines.
+    // If there are lines remaining (image didn't fit on screen) and autoScroll is enabled,
+    // scroll content up and render the remaining lines.
     if (linesToBeRendered != gridSize.lines && autoScroll)
     {
         auto const remainingLineCount = gridSize.lines - linesToBeRendered;
@@ -2124,15 +2145,16 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
             linefeed(topLeft.column);
             for (auto const columnOffset: crispy::views::iota_as<ColumnOffset>(*columnsToBeRendered))
             {
-                auto const offset =
+                auto const fragOffset =
                     CellLocation { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset, columnOffset };
                 Cell& cell = at(boxed_cast<LineOffset>(pageSize().lines) - 1, topLeft.column + columnOffset);
-                cell.setImageFragment(rasterizedImage, offset);
+                cell.setImageFragment(rasterizedImage, fragOffset);
                 cell.setHyperlink(_cursor.hyperlink);
             };
         }
     }
-    // move ansi text cursor to position of the sixel cursor
+
+    // Move ANSI text cursor to the correct column after image placement.
     moveCursorToColumn(topLeft.column);
 }
 
@@ -4186,12 +4208,10 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case STP: _terminal->hookParser(hookSTP(seq)); break;
         case DECRQSS: _terminal->hookParser(hookDECRQSS(seq)); break;
         case XTGETTCAP: _terminal->hookParser(hookXTGETTCAP(seq)); break;
-#if defined(GOOD_IMAGE_PROTOCOL)
         case GIUPLOAD: _terminal->hookParser(hookGoodImageUpload(seq)); break;
         case GIRENDER: _terminal->hookParser(hookGoodImageRender(seq)); break;
         case GIDELETE: _terminal->hookParser(hookGoodImageRelease(seq)); break;
         case GIONESHOT: _terminal->hookParser(hookGoodImageOneshot(seq)); break;
-#endif
 
         default: return ApplyResult::Unsupported;
     }
@@ -4410,7 +4430,6 @@ bool Screen<Cell>::isCursorInsideMargins() const noexcept
     return insideVerticalMargin && insideHorizontalMargin;
 }
 
-#if defined(GOOD_IMAGE_PROTOCOL)
 template <CellConcept Cell>
 unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageUpload(Sequence const&)
 {
@@ -4448,10 +4467,11 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRender(Sequence const&)
         auto const resizePolicy = toImageResizePolicy(message.header("z"), ImageResize::NoResize);
         auto const requestStatus = message.header("s") != nullptr;
         auto const autoScroll = message.header("l") != nullptr;
+        auto const layer = toImageLayer(message.header("L"));
 
-        auto const imageOffset = PixelCoordinate { x, y };
+        auto const imageOffset = PixelCoordinate { .x = x, .y = y };
         auto const imageSize = ImageSize { imageWidth, imageHeight };
-        auto const screenExtent = GridSize { screenRows, screenCols };
+        auto const screenExtent = GridSize { .lines = screenRows, .columns = screenCols };
 
         renderImageByName(name ? *name : "",
                           screenExtent,
@@ -4460,7 +4480,8 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRender(Sequence const&)
                           *alignmentPolicy,
                           *resizePolicy,
                           autoScroll,
-                          requestStatus);
+                          requestStatus,
+                          layer);
     });
 }
 
@@ -4480,6 +4501,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageOneshot(Sequence const&)
         auto const screenRows = LineCount::cast_from(toNumber(message.header("r"), 0));
         auto const screenCols = ColumnCount::cast_from(toNumber(message.header("c"), 0));
         auto const autoScroll = message.header("l") != nullptr;
+        auto const layer = toImageLayer(message.header("L"));
         auto const alignmentPolicy =
             toImageAlignmentPolicy(message.header("a"), ImageAlignment::MiddleCenter);
         auto const resizePolicy = toImageResizePolicy(message.header("z"), ImageResize::NoResize);
@@ -4488,7 +4510,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageOneshot(Sequence const&)
         auto const imageFormat = toImageFormat(message.header("f"));
 
         auto const imageSize = ImageSize { imageWidth, imageHeight };
-        auto const screenExtent = GridSize { screenRows, screenCols };
+        auto const screenExtent = GridSize { .lines = screenRows, .columns = screenCols };
 
         renderImage(*imageFormat,
                     imageSize,
@@ -4496,13 +4518,28 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageOneshot(Sequence const&)
                     screenExtent,
                     *alignmentPolicy,
                     *resizePolicy,
-                    autoScroll);
+                    autoScroll,
+                    layer);
     });
 }
 
 template <CellConcept Cell>
 void Screen<Cell>::uploadImage(string name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap)
 {
+    // For PNG format, decode to RGBA using the image decoder callback.
+    if (format == ImageFormat::PNG && _terminal->imageDecoder())
+    {
+        auto decodedSize = imageSize;
+        auto decodedData = _terminal->imageDecoder()(format, std::span<uint8_t const>(pixmap), decodedSize);
+        if (decodedData)
+        {
+            _terminal->imagePool().link(
+                std::move(name),
+                uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData)));
+        }
+        return;
+    }
+
     _terminal->imagePool().link(std::move(name), uploadImage(format, imageSize, std::move(pixmap)));
 }
 
@@ -4514,7 +4551,8 @@ void Screen<Cell>::renderImageByName(std::string const& name,
                                      ImageAlignment alignmentPolicy,
                                      ImageResize resizePolicy,
                                      bool autoScroll,
-                                     bool requestStatus)
+                                     bool requestStatus,
+                                     ImageLayer layer)
 {
     auto const imageRef = _terminal->imagePool().findImageByName(name);
     auto const topLeft = _cursor.position;
@@ -4527,10 +4565,14 @@ void Screen<Cell>::renderImageByName(std::string const& name,
                     imageSize,
                     alignmentPolicy,
                     resizePolicy,
-                    autoScroll);
+                    autoScroll,
+                    layer);
 
     if (requestStatus)
-        _terminal->reply("\033P{}r\033\\", imageRef != nullptr ? 1 : 0);
+    {
+        _terminal->reply("\033[>{}i", imageRef ? 0 : 1);
+        _terminal->flushInput();
+    }
 }
 
 template <CellConcept Cell>
@@ -4540,22 +4582,54 @@ void Screen<Cell>::renderImage(ImageFormat format,
                                GridSize gridSize,
                                ImageAlignment alignmentPolicy,
                                ImageResize resizePolicy,
-                               bool autoScroll)
+                               bool autoScroll,
+                               ImageLayer layer)
 {
-    auto constexpr pixelOffset = PixelCoordinate {};
-    auto constexpr pixelSize = ImageSize {};
+    auto constexpr PixelOffset = PixelCoordinate {};
+    auto constexpr PixelSize = ImageSize {};
 
     auto const topLeft = _cursor.position;
+
+    // Helper to compute grid size from pixel dimensions when the sender specified {0, 0}.
+    auto const computeGridSize = [&](ImageSize decodedPixelSize) -> GridSize {
+        if (*gridSize.lines && *gridSize.columns)
+            return gridSize;
+        auto const cellSize = _terminal->cellPixelSize();
+        auto const columns = ColumnCount::cast_from(
+            std::ceil(decodedPixelSize.width.as<double>() / cellSize.width.as<double>()));
+        auto const lines = LineCount::cast_from(
+            std::ceil(decodedPixelSize.height.as<double>() / cellSize.height.as<double>()));
+        return GridSize { .lines = *gridSize.lines ? gridSize.lines : lines,
+                          .columns = *gridSize.columns ? gridSize.columns : columns };
+    };
+
+    // For PNG format, decode to RGBA using the image decoder callback.
+    if (format == ImageFormat::PNG && _terminal->imageDecoder())
+    {
+        auto decodedSize = imageSize;
+        auto decodedData = _terminal->imageDecoder()(format, std::span<uint8_t const>(pixmap), decodedSize);
+        if (decodedData)
+        {
+            auto const effectiveGridSize = computeGridSize(decodedSize);
+            auto const imageRef = uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData));
+            renderImage(imageRef, topLeft, effectiveGridSize, PixelOffset, PixelSize,
+                        alignmentPolicy, resizePolicy, autoScroll, layer);
+        }
+        return;
+    }
+
+    auto const effectiveGridSize = computeGridSize(imageSize);
     auto const imageRef = uploadImage(format, imageSize, std::move(pixmap));
 
     renderImage(imageRef,
                 topLeft,
-                gridSize,
-                pixelOffset,
-                pixelSize,
+                effectiveGridSize,
+                PixelOffset,
+                PixelSize,
                 alignmentPolicy,
                 resizePolicy,
-                autoScroll);
+                autoScroll,
+                layer);
 }
 
 template <CellConcept Cell>
@@ -4563,7 +4637,6 @@ void Screen<Cell>::releaseImage(std::string const& name)
 {
     _terminal->imagePool().unlink(name);
 }
-#endif
 
 } // namespace vtbackend
 

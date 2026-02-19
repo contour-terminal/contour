@@ -302,9 +302,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     std::shared_ptr<Image const> uploadImage(ImageFormat format, ImageSize imageSize, Image::Data&& pixmap);
 
-#if defined(GOOD_IMAGE_PROTOCOL)
     void uploadImage(std::string name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap);
-#endif
 
     /**
      * Renders an image onto the screen.
@@ -326,9 +324,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
                      ImageSize imageSize,
                      ImageAlignment alignmentPolicy,
                      ImageResize resizePolicy,
-                     bool autoScroll);
+                     bool autoScroll,
+                     ImageLayer layer = ImageLayer::Replace);
 
-#if defined(GOOD_IMAGE_PROTOCOL)
     void renderImageByName(std::string const& name,
                            GridSize gridSize,
                            PixelCoordinate imageOffset,
@@ -336,7 +334,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
                            ImageAlignment alignmentPolicy,
                            ImageResize resizePolicy,
                            bool autoScroll,
-                           bool requestStatus);
+                           bool requestStatus,
+                           ImageLayer layer = ImageLayer::Replace);
 
     void renderImage(ImageFormat format,
                      ImageSize imageSize,
@@ -344,10 +343,10 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
                      GridSize gridSize,
                      ImageAlignment alignmentPolicy,
                      ImageResize resizePolicy,
-                     bool autoScroll);
+                     bool autoScroll,
+                     ImageLayer layer = ImageLayer::Replace);
 
     void releaseImage(std::string const& name);
-#endif
 
     void inspect(std::string const& message, std::ostream& os) const override;
 
@@ -683,12 +682,10 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
 
-#if defined(GOOD_IMAGE_PROTOCOL)
     [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageUpload(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageRender(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageRelease(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageOneshot(Sequence const& seq);
-#endif
 
     void processShellIntegration(Sequence const& seq);
 

@@ -149,9 +149,7 @@ class TerminalDisplay: public QQuickItem
     void onSelectionCompleted();
     void bufferChanged(vtbackend::ScreenType);
     void discardImage(vtbackend::Image const&);
-#if defined(GOOD_IMAGE_PROTOCOL)
     std::optional<vtbackend::Image> decodeImage(std::span<uint8_t const> imageData);
-#endif
     void setScreenshotOutput(auto&& where) { _saveScreenshot = std::forward<decltype(where)>(where); }
     // }}}
 

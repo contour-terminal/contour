@@ -87,6 +87,16 @@ class Image: public std::enable_shared_from_this<Image>
     OnImageRemove _onImageRemove;
 };
 
+/// Image layer determines the z-ordering of the image relative to text.
+///
+/// @see GoodImageProtocol spec, parameter `L`.
+enum class ImageLayer : uint8_t
+{
+    Below = 0,   ///< Render below text (watermark-like).
+    Replace = 1, ///< Replace text cells (default, like Sixel).
+    Above = 2,   ///< Render above text (overlay).
+};
+
 /// Image resize hints are used to properly fit/fill the area to place the image onto.
 enum class ImageResize : uint8_t
 {
@@ -123,13 +133,15 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
                     ImageResize resizePolicy,
                     RGBAColor defaultColor,
                     GridSize cellSpan,
-                    ImageSize cellSize):
+                    ImageSize cellSize,
+                    ImageLayer layer = ImageLayer::Replace):
         _image { std::move(image) },
         _alignmentPolicy { alignmentPolicy },
         _resizePolicy { resizePolicy },
         _defaultColor { defaultColor },
         _cellSpan { cellSpan },
-        _cellSize { cellSize }
+        _cellSize { cellSize },
+        _layer { layer }
     {
         ++ImageStats::get().rasterized;
     }
@@ -150,6 +162,7 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     RGBAColor defaultColor() const noexcept { return _defaultColor; }
     GridSize cellSpan() const noexcept { return _cellSpan; }
     ImageSize cellSize() const noexcept { return _cellSize; }
+    ImageLayer layer() const noexcept { return _layer; }
 
     /// @returns an RGBA buffer for a grid cell at given coordinate @p pos of the rasterized image.
     ///
@@ -165,6 +178,7 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     RGBAColor _defaultColor;             //!< Default color to be applied at corners when needed.
     GridSize _cellSpan;                  //!< Number of grid cells to span the pixel image onto.
     ImageSize _cellSize;                 //!< number of pixels in X and Y dimension one grid cell has to fill.
+    ImageLayer _layer;                   //!< Layer for z-ordering relative to text.
 };
 
 std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,
@@ -172,7 +186,8 @@ std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,
                                            ImageResize resizePolicy,
                                            RGBAColor defaultColor,
                                            GridSize cellSpan,
-                                           ImageSize cellSize);
+                                           ImageSize cellSize,
+                                           ImageLayer layer = ImageLayer::Replace);
 
 /// An ImageFragment holds a graphical image that ocupies one full grid cell.
 class ImageFragment
@@ -316,6 +331,22 @@ struct std::formatter<std::shared_ptr<vtbackend::Image const>>: std::formatter<s
                                imageRef.size().height.value);
         }
         return formatter<std::string>::format(text, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::ImageLayer>: formatter<std::string_view>
+{
+    auto format(vtbackend::ImageLayer value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::ImageLayer::Below: name = "Below"; break;
+            case vtbackend::ImageLayer::Replace: name = "Replace"; break;
+            case vtbackend::ImageLayer::Above: name = "Above"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
     }
 };
 

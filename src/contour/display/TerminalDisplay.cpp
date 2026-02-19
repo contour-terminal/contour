@@ -341,6 +341,34 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
 
+    _session->terminal().setImageDecoder(
+        [](vtbackend::ImageFormat format,
+           std::span<uint8_t const> data,
+           vtbackend::ImageSize& size) -> std::optional<vtbackend::Image::Data> {
+            if (format != vtbackend::ImageFormat::PNG)
+                return std::nullopt;
+
+            QImage image;
+            image.loadFromData(static_cast<uchar const*>(data.data()), static_cast<int>(data.size()));
+            if (image.isNull())
+                return std::nullopt;
+
+            image = image.convertToFormat(QImage::Format_RGBA8888);
+
+            size = vtbackend::ImageSize { vtbackend::Width::cast_from(image.width()),
+                                          vtbackend::Height::cast_from(image.height()) };
+
+            vtbackend::Image::Data pixels;
+            pixels.resize(static_cast<size_t>(image.width() * image.height() * 4));
+            auto* p = pixels.data();
+            for (int i = 0; i < image.height(); ++i)
+            {
+                memcpy(p, image.constScanLine(i), static_cast<size_t>(image.bytesPerLine()));
+                p += image.bytesPerLine();
+            }
+            return pixels;
+        });
+
     emit sessionChanged(newSession);
 }
 
@@ -1585,7 +1613,6 @@ void TerminalDisplay::discardImage(vtbackend::Image const& image)
     _renderer->discardImage(image);
 }
 
-#if defined(GOOD_IMAGE_PROTOCOL)
 std::optional<vtbackend::Image> TerminalDisplay::decodeImage(std::span<uint8_t const> imageData)
 {
     QImage image;
@@ -1624,7 +1651,6 @@ std::optional<vtbackend::Image> TerminalDisplay::decodeImage(std::span<uint8_t c
 
     return vtbackend::Image(nextImageId++, format, std::move(pixels), size, std::move(onRemove));
 }
-#endif
 // }}}
 
 } // namespace contour::display

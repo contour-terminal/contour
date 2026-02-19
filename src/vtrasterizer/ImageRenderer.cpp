@@ -36,22 +36,29 @@ void ImageRenderer::setCellSize(ImageSize cellSize)
 
 void ImageRenderer::renderImage(crispy::point pos, vtbackend::ImageFragment const& fragment)
 {
-    // std::cout << std::format("ImageRenderer.renderImage: {}\n", fragment);
-
     AtlasTileAttributes const* tileAttributes = getOrCreateCachedTileAttributes(fragment);
     if (!tileAttributes)
         return;
 
-    // clang-format off
-    _pendingRenderTilesAboveText.emplace_back(createRenderTile(atlas::RenderTile::X { pos.x },
-                                                               atlas::RenderTile::Y { pos.y },
-                                                               vtbackend::RGBAColor::White, *tileAttributes));
-    // clang-format on
+    auto const tile = createRenderTile(atlas::RenderTile::X { pos.x },
+                                       atlas::RenderTile::Y { pos.y },
+                                       vtbackend::RGBAColor::White,
+                                       *tileAttributes);
+
+    // Route to below-text or above-text queue based on the image layer.
+    auto const layer = fragment.rasterizedImage().layer();
+    if (layer == vtbackend::ImageLayer::Below)
+        _pendingRenderTilesBelowText.emplace_back(tile);
+    else
+        _pendingRenderTilesAboveText.emplace_back(tile);
 }
 
 void ImageRenderer::onBeforeRenderingText()
 {
-    // We could render here the images that should go below text.
+    // Render images that should go below text (ImageLayer::Below).
+    for (auto const& tile: _pendingRenderTilesBelowText)
+        textureScheduler().renderTile(tile);
+    _pendingRenderTilesBelowText.clear();
 }
 
 void ImageRenderer::onAfterRenderingText()
@@ -66,17 +73,24 @@ void ImageRenderer::onAfterRenderingText()
 
 void ImageRenderer::beginFrame()
 {
+    if (!SoftRequire(_pendingRenderTilesBelowText.empty()))
+        _pendingRenderTilesBelowText.clear();
     if (!SoftRequire(_pendingRenderTilesAboveText.empty()))
         _pendingRenderTilesAboveText.clear();
 }
 
 void ImageRenderer::endFrame()
 {
+    // Flush any remaining tiles that were not rendered during the text pass.
+    if (!_pendingRenderTilesBelowText.empty())
+    {
+        for (auto const& tile: _pendingRenderTilesBelowText)
+            textureScheduler().renderTile(tile);
+        _pendingRenderTilesBelowText.clear();
+    }
     if (!_pendingRenderTilesAboveText.empty())
     {
-        // In case some image tiles are still pending but no text had to be rendered.
-
-        for (auto& tile: _pendingRenderTilesAboveText)
+        for (auto const& tile: _pendingRenderTilesAboveText)
             textureScheduler().renderTile(tile);
         _pendingRenderTilesAboveText.clear();
     }

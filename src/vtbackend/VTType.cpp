@@ -32,6 +32,7 @@ string to_string(DeviceAttributes v)
         pair { DeviceAttributes::UserDefinedKeys, "UserDefinedKeys" },
         pair { DeviceAttributes::Windowing, "Windowing" },
         pair { DeviceAttributes::ClipboardExtension, "ClipboardExtension" },
+        pair { DeviceAttributes::GoodImageProtocol, "GoodImageProtocol" },
     };
 
     for (auto const& mapping: Mappings)
@@ -65,6 +66,7 @@ string to_params(DeviceAttributes v)
         pair { DeviceAttributes::UserDefinedKeys, "8" },
         pair { DeviceAttributes::Windowing, "18" },
         pair { DeviceAttributes::ClipboardExtension, "52" },
+        pair { DeviceAttributes::GoodImageProtocol, "11" },
     };
 
     for (auto const& mapping: Mappings)
