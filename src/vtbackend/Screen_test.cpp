@@ -4190,7 +4190,7 @@ TEST_CASE("DECCIR.charset_designation_g1", "[screen]")
 
 TEST_CASE("DECCIR.gl_charset_after_locking_shift", "[screen]")
 {
-    // Verify Pgl reports G1 after a locking shift (SI → LS1 maps G1 into GL).
+    // Verify Pgl reports G1 after a locking shift (SO → LS1 maps G1 into GL).
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
 
     mock.writeToScreen("\x0E"); // SO (Shift Out) = LS1 → map G1 into GL
