@@ -70,7 +70,7 @@ class Message
  * The format is more simple than HTTP messages.
  * You have a set of headers (key/value pairs)) and an optional body.
  *
- * Duplicate header names will override the previousely declared ones.
+ * Duplicate header names will override the previously declared ones.
  *
  * - Headers and body are seperated by ';'
  * - Header entries are seperated by ','

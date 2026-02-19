@@ -1083,8 +1083,7 @@ void Screen<Cell>::sendDeviceAttributes()
                                  DeviceAttributes::SixelGraphics |
                                  // TODO: DeviceAttributes::TechnicalCharacters |
                                  DeviceAttributes::UserDefinedKeys | DeviceAttributes::ClipboardExtension
-                                 | DeviceAttributes::GoodImageProtocol
-    );
+                                 | DeviceAttributes::GoodImageProtocol);
 
     reply("\033[?{};{}c", id, attrs);
 }
@@ -2097,8 +2096,13 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
     auto const columnsToBeRendered = ColumnCount(std::min(columnsAvailable, gridSize.columns));
     auto const gapColor = RGBAColor {}; // TODO: _cursor.graphicsRendition.backgroundColor;
 
-    auto const rasterizedImage = make_shared<RasterizedImage>(
-        std::move(image), alignmentPolicy, resizePolicy, gapColor, gridSize, _terminal->cellPixelSize(), layer);
+    auto const rasterizedImage = make_shared<RasterizedImage>(std::move(image),
+                                                              alignmentPolicy,
+                                                              resizePolicy,
+                                                              gapColor,
+                                                              gridSize,
+                                                              _terminal->cellPixelSize(),
+                                                              layer);
 
     // Compute the cursor line offset after rendering.
     // For Sixel images (identified by non-zero pixel imageSize), use VT340-compatible sixel band math.
@@ -4533,9 +4537,8 @@ void Screen<Cell>::uploadImage(string name, ImageFormat format, ImageSize imageS
         auto decodedData = _terminal->imageDecoder()(format, std::span<uint8_t const>(pixmap), decodedSize);
         if (decodedData)
         {
-            _terminal->imagePool().link(
-                std::move(name),
-                uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData)));
+            _terminal->imagePool().link(std::move(name),
+                                        uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData)));
         }
         return;
     }
@@ -4612,8 +4615,15 @@ void Screen<Cell>::renderImage(ImageFormat format,
         {
             auto const effectiveGridSize = computeGridSize(decodedSize);
             auto const imageRef = uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData));
-            renderImage(imageRef, topLeft, effectiveGridSize, PixelOffset, PixelSize,
-                        alignmentPolicy, resizePolicy, autoScroll, layer);
+            renderImage(imageRef,
+                        topLeft,
+                        effectiveGridSize,
+                        PixelOffset,
+                        PixelSize,
+                        alignmentPolicy,
+                        resizePolicy,
+                        autoScroll,
+                        layer);
         }
         return;
     }

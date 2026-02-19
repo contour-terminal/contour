@@ -163,8 +163,8 @@ class MessageParserTest: public vtparser::NullParserEvents
 
     void hook(char) override
     {
-        parserExtension_ = std::make_unique<MessageParser>(
-            [&](vtbackend::Message&& msg) { message = std::move(msg); });
+        parserExtension_ =
+            std::make_unique<MessageParser>([&](vtbackend::Message&& msg) { message = std::move(msg); });
     }
 
     void put(char ch) override

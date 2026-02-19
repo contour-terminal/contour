@@ -1124,8 +1124,8 @@ class Terminal
     /// @param size     [in/out] For PNG: the size is extracted during decoding.
     ///                 For RGB/RGBA: the size is already known.
     /// @returns Decoded RGBA pixel data, or std::nullopt on failure.
-    using ImageDecoderCallback =
-        std::function<std::optional<Image::Data>(ImageFormat format, std::span<uint8_t const> data, ImageSize& size)>;
+    using ImageDecoderCallback = std::function<std::optional<Image::Data>(
+        ImageFormat format, std::span<uint8_t const> data, ImageSize& size)>;
 
     void setImageDecoder(ImageDecoderCallback decoder) noexcept { _imageDecoder = std::move(decoder); }
     ImageDecoderCallback const& imageDecoder() const noexcept { return _imageDecoder; }

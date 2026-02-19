@@ -666,10 +666,14 @@ constexpr inline auto DESKTOPNOTIFY    = detail::OSC(99, VTExtension::Unknown, d
 // clang-format on
 
 // DCS: Good Image Protocol
-constexpr inline auto GIUPLOAD    = detail::DCS(std::nullopt, 0, 0, std::nullopt, 'u', VTType::VT525, documentation::GIUPLOAD);
-constexpr inline auto GIRENDER    = detail::DCS(std::nullopt, 0, 0, std::nullopt, 'r', VTType::VT525, documentation::GIRENDER);
-constexpr inline auto GIDELETE    = detail::DCS(std::nullopt, 0, 0, std::nullopt, 'd', VTType::VT525, documentation::GIDELETE);
-constexpr inline auto GIONESHOT   = detail::DCS(std::nullopt, 0, 0, std::nullopt, 's', VTType::VT525, documentation::GIONESHOT);
+constexpr inline auto GIUPLOAD =
+    detail::DCS(std::nullopt, 0, 0, std::nullopt, 'u', VTType::VT525, documentation::GIUPLOAD);
+constexpr inline auto GIRENDER =
+    detail::DCS(std::nullopt, 0, 0, std::nullopt, 'r', VTType::VT525, documentation::GIRENDER);
+constexpr inline auto GIDELETE =
+    detail::DCS(std::nullopt, 0, 0, std::nullopt, 'd', VTType::VT525, documentation::GIDELETE);
+constexpr inline auto GIONESHOT =
+    detail::DCS(std::nullopt, 0, 0, std::nullopt, 's', VTType::VT525, documentation::GIONESHOT);
 
 constexpr inline auto CaptureBufferCode = 314;
 

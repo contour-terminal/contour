@@ -107,6 +107,9 @@
     <release version="0.6.3" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Improves libunicode dependency resolution with system/CPM/error fallback</li>
+          <li>Adds Good Image Protocol (GIP) implementation — a DCS-based protocol for displaying raster images with named image pools, LRU eviction, three compositing layers (below/replace/above), configurable resize and alignment policies, PNG/RGB/RGBA format support, and DA1 capability advertisement via code 11 (#100)</li>
+          <li>Adds contour cat CLI command for displaying images in the terminal via GIP oneshot sequences</li>
           <li>Fixes keyboard input being swallowed in programs like less and bat due to empty-string terminfo capabilities (#1861)</li>
           <li>Fixes ESC key not being sent to the application when CancelSelection input mapping has no mode restriction (#1839)</li>
           <li>Fixes selective erase (DECSED/DECSEL) incorrectly erasing the cursor line instead of the target line when erasing lines without protected characters (#28)</li>

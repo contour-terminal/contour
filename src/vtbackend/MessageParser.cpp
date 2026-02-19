@@ -21,7 +21,7 @@
 namespace vtbackend
 {
 
-// XXX prominent usecase:
+// XXX prominent use case:
 //
 // Good Image Protocol
 // ===================

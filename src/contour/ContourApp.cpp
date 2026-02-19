@@ -497,34 +497,50 @@ namespace
     /// Parses an image alignment string.
     vtbackend::ImageAlignment parseImageAlignment(string_view text)
     {
-        if (text == "top-start") return vtbackend::ImageAlignment::TopStart;
-        if (text == "top-center") return vtbackend::ImageAlignment::TopCenter;
-        if (text == "top-end") return vtbackend::ImageAlignment::TopEnd;
-        if (text == "middle-start") return vtbackend::ImageAlignment::MiddleStart;
-        if (text == "middle-center" || text == "center") return vtbackend::ImageAlignment::MiddleCenter;
-        if (text == "middle-end") return vtbackend::ImageAlignment::MiddleEnd;
-        if (text == "bottom-start") return vtbackend::ImageAlignment::BottomStart;
-        if (text == "bottom-center") return vtbackend::ImageAlignment::BottomCenter;
-        if (text == "bottom-end") return vtbackend::ImageAlignment::BottomEnd;
+        if (text == "top-start")
+            return vtbackend::ImageAlignment::TopStart;
+        if (text == "top-center")
+            return vtbackend::ImageAlignment::TopCenter;
+        if (text == "top-end")
+            return vtbackend::ImageAlignment::TopEnd;
+        if (text == "middle-start")
+            return vtbackend::ImageAlignment::MiddleStart;
+        if (text == "middle-center" || text == "center")
+            return vtbackend::ImageAlignment::MiddleCenter;
+        if (text == "middle-end")
+            return vtbackend::ImageAlignment::MiddleEnd;
+        if (text == "bottom-start")
+            return vtbackend::ImageAlignment::BottomStart;
+        if (text == "bottom-center")
+            return vtbackend::ImageAlignment::BottomCenter;
+        if (text == "bottom-end")
+            return vtbackend::ImageAlignment::BottomEnd;
         return vtbackend::ImageAlignment::MiddleCenter;
     }
 
     /// Parses an image resize policy string.
     vtbackend::ImageResize parseImageResize(string_view text)
     {
-        if (text == "no" || text == "none") return vtbackend::ImageResize::NoResize;
-        if (text == "fit") return vtbackend::ImageResize::ResizeToFit;
-        if (text == "fill") return vtbackend::ImageResize::ResizeToFill;
-        if (text == "stretch") return vtbackend::ImageResize::StretchToFill;
+        if (text == "no" || text == "none")
+            return vtbackend::ImageResize::NoResize;
+        if (text == "fit")
+            return vtbackend::ImageResize::ResizeToFit;
+        if (text == "fill")
+            return vtbackend::ImageResize::ResizeToFill;
+        if (text == "stretch")
+            return vtbackend::ImageResize::StretchToFill;
         return vtbackend::ImageResize::ResizeToFit;
     }
 
     /// Parses an image layer value string (0/1/2).
     int parseImageLayer(string_view text)
     {
-        if (text == "0" || text == "below") return 0;
-        if (text == "1" || text == "replace") return 1;
-        if (text == "2" || text == "above") return 2;
+        if (text == "0" || text == "below")
+            return 0;
+        if (text == "1" || text == "replace")
+            return 1;
+        if (text == "2" || text == "above")
+            return 2;
         return 1; // default: replace
     }
 
