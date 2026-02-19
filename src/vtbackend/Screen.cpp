@@ -1089,7 +1089,8 @@ void Screen<Cell>::selectiveEraseLine(LineOffset line)
         return;
     }
 
-    currentLine().reset(currentLine().flags(), _cursor.graphicsRendition);
+    auto& targetLine = _grid.lineAt(line);
+    targetLine.reset(targetLine.flags(), _cursor.graphicsRendition);
 
     auto const left = ColumnOffset(0);
     auto const right = boxed_cast<ColumnOffset>(pageSize().columns - 1);
