@@ -230,7 +230,8 @@ inline void CompactCell::write(GraphicsAttributes const& attributes, char32_t ch
     if (_extra)
     {
         _extra->codepoints.clear();
-        _extra->imageFragment = {};
+        if (!shouldPreserveImageOnTextWrite(_extra->imageFragment))
+            _extra->imageFragment = {};
     }
 
     _foregroundColor = attributes.foregroundColor;
@@ -251,8 +252,10 @@ inline void CompactCell::write(GraphicsAttributes const& attributes,
     writeTextOnly(ch, width);
     if (_extra)
     {
-        // Writing text into a cell destroys the image fragment (as least for Sixels).
-        _extra->imageFragment = {};
+        // Writing text into a cell destroys Replace-layer images (Sixel-compatible behavior).
+        // Below and Above layer images coexist with text per the GIP spec.
+        if (!shouldPreserveImageOnTextWrite(_extra->imageFragment))
+            _extra->imageFragment = {};
     }
 
     _foregroundColor = attributes.foregroundColor;
@@ -313,7 +316,8 @@ inline void CompactCell::setCharacter(char32_t codepoint) noexcept
     if (_extra)
     {
         _extra->codepoints.clear();
-        _extra->imageFragment = {};
+        if (!shouldPreserveImageOnTextWrite(_extra->imageFragment))
+            _extra->imageFragment = {};
     }
     if (codepoint)
         setWidth(std::max<uint8_t>(unicode::width(codepoint), 1));

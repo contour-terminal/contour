@@ -37,8 +37,8 @@ std::vector<uint8_t> makeRGBA(int width, int height, uint8_t r, uint8_t g, uint8
 /// DCS u <headers>;<body> ST
 std::string gipUpload(std::string_view headers, std::span<uint8_t const> body)
 {
-    auto const encoded = crispy::base64::encode(std::string_view(
-        reinterpret_cast<char const*>(body.data()), body.size()));
+    auto const encoded =
+        crispy::base64::encode(std::string_view(reinterpret_cast<char const*>(body.data()), body.size()));
     return std::format("\033Pu{};!{}\033\\", headers, encoded);
 }
 
@@ -51,8 +51,8 @@ std::string gipRender(std::string_view headers)
 /// Helper: wraps a GIP DCS oneshot sequence string.
 std::string gipOneshot(std::string_view headers, std::span<uint8_t const> body)
 {
-    auto const encoded = crispy::base64::encode(std::string_view(
-        reinterpret_cast<char const*>(body.data()), body.size()));
+    auto const encoded =
+        crispy::base64::encode(std::string_view(reinterpret_cast<char const*>(body.data()), body.size()));
     return std::format("\033Ps{};!{}\033\\", headers, encoded);
 }
 
@@ -295,4 +295,134 @@ TEST_CASE("GoodImageProtocol.Oneshot.WithLayer", "[GIP]")
 TEST_CASE("GoodImageProtocol.MaxBodyLength", "[GIP]")
 {
     CHECK(MessageParser::MaxBodyLength == 16 * 1024 * 1024);
+}
+
+// ==================== Layer Text-Write Interaction Tests ====================
+
+TEST_CASE("GoodImageProtocol.Layer.Below.SurvivesTextWrite", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+
+    // Place a Below-layer image at cursor position (top-left).
+    mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2,L=0", pixels));
+
+    // Verify fragment is placed.
+    auto fragment = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    REQUIRE(fragment != nullptr);
+    CHECK(fragment->rasterizedImage().layer() == ImageLayer::Below);
+
+    // Move cursor back to top-left and write text over the image area.
+    mock.writeToScreen("\033[H"); // CUP to (1,1)
+    mock.writeToScreen("ABCD");
+
+    // Below-layer image should survive the text write.
+    fragment = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    CHECK(fragment != nullptr);
+
+    // Text should also be present.
+    auto const& cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.codepoint(0) == U'A');
+}
+
+TEST_CASE("GoodImageProtocol.Layer.Replace.DestroyedByTextWrite", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+
+    // Place a Replace-layer image (default layer).
+    mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2", pixels));
+
+    // Verify fragment is placed with Replace layer.
+    auto fragment = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    REQUIRE(fragment != nullptr);
+    CHECK(fragment->rasterizedImage().layer() == ImageLayer::Replace);
+
+    // Move cursor back and write text.
+    mock.writeToScreen("\033[H");
+    mock.writeToScreen("ABCD");
+
+    // Replace-layer image should be destroyed by text write.
+    fragment = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    CHECK(fragment == nullptr);
+
+    // Text should be present.
+    auto const& cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.codepoint(0) == U'A');
+}
+
+TEST_CASE("GoodImageProtocol.Layer.Above.SurvivesTextWrite", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+
+    // Place an Above-layer image.
+    mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2,L=2", pixels));
+
+    // Verify fragment is placed.
+    auto fragment = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    REQUIRE(fragment != nullptr);
+    CHECK(fragment->rasterizedImage().layer() == ImageLayer::Above);
+
+    // Move cursor back and write text.
+    mock.writeToScreen("\033[H");
+    mock.writeToScreen("ABCD");
+
+    // Above-layer image should survive the text write.
+    fragment = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    CHECK(fragment != nullptr);
+
+    // Text should also be present.
+    auto const& cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.codepoint(0) == U'A');
+}
+
+TEST_CASE("GoodImageProtocol.Layer.Below.SurvivesCursorMoveAndTextWrite", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+
+    // Place a Below-layer image spanning 4 columns x 2 rows at top-left.
+    mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2,L=0", pixels));
+
+    // Write some text elsewhere (after the image area).
+    mock.writeToScreen("extra text");
+
+    // Move cursor back to top-left and overwrite all 4 image columns.
+    mock.writeToScreen("\033[H"); // CUP to (1,1)
+    mock.writeToScreen("WXYZ");
+
+    // All 4 cells on the first row should retain their image fragments.
+    for (auto col: { 0, 1, 2, 3 })
+    {
+        auto const fragment =
+            mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(col)).imageFragment();
+        CHECK(fragment != nullptr);
+    }
+
+    // Text should also be present in those cells.
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).codepoint(0) == U'W');
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(1)).codepoint(0) == U'X');
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(2)).codepoint(0) == U'Y');
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(3)).codepoint(0) == U'Z');
+}
+
+TEST_CASE("GoodImageProtocol.Layer.Below.ClearedByErase", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+
+    // Place a Below-layer image.
+    mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2,L=0", pixels));
+
+    // Verify fragment is placed.
+    auto fragment = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    REQUIRE(fragment != nullptr);
+
+    // Erase display (ED 2 = clear entire screen). Reset operations should clear everything.
+    mock.writeToScreen("\033[2J");
+
+    // Below-layer image should be destroyed by erase.
+    fragment = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    CHECK(fragment == nullptr);
 }

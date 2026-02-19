@@ -230,6 +230,17 @@ namespace detail
 }
 using ImageFragmentId = boxed::boxed<uint16_t, detail::ImageFragmentId>;
 
+/// Returns true if the image fragment should be preserved when text is written to a cell.
+///
+/// Below and Above layer images coexist with text; only Replace layer images are destroyed.
+[[nodiscard]] inline bool shouldPreserveImageOnTextWrite(
+    std::shared_ptr<ImageFragment> const& fragment) noexcept
+{
+    if (!fragment)
+        return false;
+    return fragment->rasterizedImage().layer() != ImageLayer::Replace;
+}
+
 inline bool operator==(ImageFragment const& a, ImageFragment const& b) noexcept
 {
     return a.rasterizedImage().image().id() == b.rasterizedImage().image().id() && a.offset() == b.offset();
