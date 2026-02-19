@@ -16,6 +16,7 @@
 
 #include <QtCore/QFile>
 
+#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -168,6 +169,7 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.documentation.keys", bind(&ContourApp::documentationKeyMapping, this));
     link("contour.documentation.configuration.global", bind(&ContourApp::documentationGlobalConfig, this));
     link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
+    link("contour.cat", bind(&ContourApp::catAction, this));
 }
 
 template <typename Callback>
@@ -468,66 +470,104 @@ int ContourApp::captureAction()
         return EXIT_FAILURE;
 }
 
-#if defined(GOOD_IMAGE_PROTOCOL)
 namespace
 {
-    crispy::size parseSize(string_view _text)
+    /// Parses a size string in the format "WxH" (e.g. "80x24").
+    /// Returns {0,0} if the format is invalid.
+    crispy::size parseSize(string_view text)
     {
-        (void) _text;
-        return crispy::size {}; // TODO
+        auto const pos = text.find('x');
+        if (pos == string_view::npos || pos == 0 || pos == text.size() - 1)
+            return crispy::size {};
+
+        auto const widthStr = text.substr(0, pos);
+        auto const heightStr = text.substr(pos + 1);
+
+        int width = 0;
+        int height = 0;
+        auto [pW, ecW] = std::from_chars(widthStr.data(), widthStr.data() + widthStr.size(), width);
+        auto [pH, ecH] = std::from_chars(heightStr.data(), heightStr.data() + heightStr.size(), height);
+
+        if (ecW != std::errc {} || ecH != std::errc {})
+            return crispy::size {};
+
+        return crispy::size { .width = width, .height = height };
     }
 
-    vtbackend::ImageAlignment parseImageAlignment(string_view _text)
+    /// Parses an image alignment string.
+    vtbackend::ImageAlignment parseImageAlignment(string_view text)
     {
-        (void) _text;
-        return vtbackend::ImageAlignment::TopStart; // TODO
+        if (text == "top-start") return vtbackend::ImageAlignment::TopStart;
+        if (text == "top-center") return vtbackend::ImageAlignment::TopCenter;
+        if (text == "top-end") return vtbackend::ImageAlignment::TopEnd;
+        if (text == "middle-start") return vtbackend::ImageAlignment::MiddleStart;
+        if (text == "middle-center" || text == "center") return vtbackend::ImageAlignment::MiddleCenter;
+        if (text == "middle-end") return vtbackend::ImageAlignment::MiddleEnd;
+        if (text == "bottom-start") return vtbackend::ImageAlignment::BottomStart;
+        if (text == "bottom-center") return vtbackend::ImageAlignment::BottomCenter;
+        if (text == "bottom-end") return vtbackend::ImageAlignment::BottomEnd;
+        return vtbackend::ImageAlignment::MiddleCenter;
     }
 
-    vtbackend::ImageResize parseImageResize(string_view _text)
+    /// Parses an image resize policy string.
+    vtbackend::ImageResize parseImageResize(string_view text)
     {
-        (void) _text;
-        return vtbackend::ImageResize::NoResize; // TODO
+        if (text == "no" || text == "none") return vtbackend::ImageResize::NoResize;
+        if (text == "fit") return vtbackend::ImageResize::ResizeToFit;
+        if (text == "fill") return vtbackend::ImageResize::ResizeToFill;
+        if (text == "stretch") return vtbackend::ImageResize::StretchToFill;
+        return vtbackend::ImageResize::ResizeToFit;
     }
 
-    // vtbackend::CellLocation parsePosition(string_view _text)
-    // {
-    //     (void) _text;
-    //     return {}; // TODO
-    // }
-
-    // TODO: chunkedFileReader(path) to return iterator over spans of data chunks.
-    std::vector<uint8_t> readFile(std::filesystem::path const& _path)
+    /// Parses an image layer value string (0/1/2).
+    int parseImageLayer(string_view text)
     {
-        auto ifs = std::ifstream(_path.string());
+        if (text == "0" || text == "below") return 0;
+        if (text == "1" || text == "replace") return 1;
+        if (text == "2" || text == "above") return 2;
+        return 1; // default: replace
+    }
+
+    /// Reads a file in binary mode, returning its raw bytes.
+    std::vector<uint8_t> readFile(std::filesystem::path const& path)
+    {
+        auto ifs = std::ifstream(path.string(), std::ios::binary);
         if (!ifs.good())
             return {};
 
-        auto const size = std::filesystem::file_size(_path);
-        auto text = std::vector<uint8_t>();
-        text.resize(size);
-        ifs.read((char*) &text[0], static_cast<std::streamsize>(size));
-        return text;
+        auto const fileSize = std::filesystem::file_size(path);
+        auto data = std::vector<uint8_t>();
+        data.resize(fileSize);
+        ifs.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(fileSize));
+        return data;
     }
 
-    void displayImage(vtbackend::ImageResize _resizePolicy,
-                      vtbackend::ImageAlignment _alignmentPolicy,
-                      crispy::size _screenSize,
-                      string_view _fileName)
+    void displayImage(vtbackend::ImageResize resizePolicy,
+                      vtbackend::ImageAlignment alignmentPolicy,
+                      crispy::size screenSize,
+                      int layer,
+                      string_view fileName)
     {
         auto constexpr ST = "\033\\"sv;
 
-        cout << std::format("{}f={},c={},l={},a={},z={};",
-                            "\033Ps"sv, // GIONESHOT
-                            '0',        // image format: 0 = auto detect
-                            _screenSize.width,
-                            _screenSize.height,
-                            int(_alignmentPolicy),
-                            int(_resizePolicy));
+        // Emit GIP oneshot DCS sequence.
+        // Format 3 = PNG (let the terminal decode it).
+        cout << std::format("{}f=3,c={},r={},a={},z={},L={};!",
+                            "\033Ps"sv,
+                            screenSize.width,
+                            screenSize.height,
+                            static_cast<int>(alignmentPolicy) + 1,
+                            static_cast<int>(resizePolicy),
+                            layer);
 
-    #if 1
-        auto const data = readFile(std::filesystem::path(string(_fileName))); // TODO: incremental buffered read
+        auto const data = readFile(std::filesystem::path(string(fileName)));
+        if (data.empty())
+        {
+            cerr << std::format("Error: Failed to read file '{}'\n", fileName);
+            return;
+        }
+
         auto encoderState = crispy::base64::encoder_state {};
-
         std::vector<char> buf;
         auto const writer = [&](char a, char b, char c, char d) {
             buf.push_back(a);
@@ -546,27 +586,36 @@ namespace
             if (buf.size() >= 4096)
                 flush();
         }
+        crispy::base64::finish(encoderState, writer);
         flush();
-    #endif
 
         cout << ST;
     }
 } // namespace
 
-int ContourApp::imageAction()
+int ContourApp::catAction()
 {
-    auto const resizePolicy = parseImageResize(parameters().get<string>("contour.image.resize"));
-    auto const alignmentPolicy = parseImageAlignment(parameters().get<string>("contour.image.align"));
-    auto const size = parseSize(parameters().get<string>("contour.image.size"));
+    if (parameters().verbatim.empty())
+    {
+        cerr << "Error: No image file specified.\n";
+        return EXIT_FAILURE;
+    }
+
+    auto const resizePolicy = parseImageResize(parameters().get<string>("contour.cat.resize"));
+    auto const alignmentPolicy = parseImageAlignment(parameters().get<string>("contour.cat.align"));
+    auto const size = parseSize(parameters().get<string>("contour.cat.size"));
+    auto const layer = parseImageLayer(parameters().get<string>("contour.cat.layer"));
     auto const fileName = parameters().verbatim.front();
-    // TODO: how do we wanna handle more than one verbatim arg (image)?
-    // => report error and EXIT_FAILURE as only one verbatim arg is allowed.
-    // FIXME: What if parameter `size` is given as `_size` instead, it should cause an
-    //        invalid-argument error above already!
-    displayImage(resizePolicy, alignmentPolicy, size, fileName);
+
+    if (!std::filesystem::exists(std::filesystem::path(string(fileName))))
+    {
+        cerr << std::format("Error: File not found: '{}'\n", fileName);
+        return EXIT_FAILURE;
+    }
+
+    displayImage(resizePolicy, alignmentPolicy, size, layer, fileName);
     return EXIT_SUCCESS;
 }
-#endif
 
 int ContourApp::parserTableAction()
 {
@@ -677,35 +726,39 @@ crispy::cli::command ContourApp::parameterDefinition() const
                                           "FILE",
                                           CLI::presence::Required },
                         } } } },
-#if defined(GOOD_IMAGE_PROTOCOL)
             CLI::command {
-                "image",
-                "Sends an image to the terminal emulator for display.",
+                "cat",
+                "Displays an image in the terminal using the Good Image Protocol.",
                 CLI::option_list {
                     CLI::option { "resize",
                                   CLI::value { "fit"s },
                                   "Sets the image resize policy.\n"
                                   "Policies available are:\n"
-                                  " - no (no resize),\n"
+                                  " - no/none (no resize),\n"
                                   " - fit (resize to fit),\n"
                                   " - fill (resize to fill),\n"
                                   " - stretch (stretch to fill)." },
                     CLI::option { "align",
                                   CLI::value { "center"s },
                                   "Sets the image alignment policy.\n"
-                                  "Possible policies are: TopLeft, TopCenter, TopRight, MiddleLeft, "
-                                  "MiddleCenter, MiddleRight, BottomLeft, BottomCenter, BottomRight." },
+                                  "Possible values: top-start, top-center, top-end, "
+                                  "middle-start, middle-center/center, middle-end, "
+                                  "bottom-start, bottom-center, bottom-end." },
                     CLI::option { "size",
-                                  CLI::value { ""s },
-                                  "Sets the amount of columns and rows to place the image onto. "
-                                  "The top-left of the this area is the current cursor position, "
-                                  "and it will be scrolled automatically if not enough rows are present." } },
+                                  CLI::value { "0x0"s },
+                                  "Sets the amount of columns and rows to place the image onto "
+                                  "(format: COLSxROWS, e.g. 80x24). "
+                                  "The top-left of the area is the current cursor position." },
+                    CLI::option { "layer",
+                                  CLI::value { "1"s },
+                                  "Sets the image layer relative to text.\n"
+                                  "Values: 0/below (below text), 1/replace (replace text, default), "
+                                  "2/above (above text)." } },
                 CLI::command_list {},
                 CLI::command_select::Explicit,
                 CLI::verbatim {
                     "IMAGE_FILE",
                     "Path to image to be displayed. Image formats supported are at least PNG, JPG." } },
-#endif
             CLI::command {
                 "capture",
                 "Captures the screen buffer of the currently running terminal.",
