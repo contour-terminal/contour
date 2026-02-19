@@ -130,6 +130,7 @@ if(LIBTERMINAL_TESTING)
         Capabilities_test.cpp
         DesktopNotification_test.cpp
         Color_test.cpp
+        GoodImageProtocol_test.cpp
         InputGenerator_test.cpp
         Selector_test.cpp
         Functions_test.cpp
