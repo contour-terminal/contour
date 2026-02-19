@@ -94,22 +94,24 @@ void DecorationRenderer::inspect(std::ostream& /*output*/) const
 
 void DecorationRenderer::renderLine(vtbackend::RenderLine const& line)
 {
+    auto const scale = line.flags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;
     for (auto const& mapping: CellFlagDecorationMappings)
         if (line.textAttributes.flags & mapping.first)
             renderDecoration(mapping.second,
                              _gridMetrics.mapBottomLeft(vtbackend::CellLocation { .line = line.lineOffset },
                                                         _smoothScrollYOffset),
-                             line.usedColumns,
+                             line.usedColumns * scale,
                              line.textAttributes.decorationColor);
 }
 
 void DecorationRenderer::renderCell(vtbackend::RenderCell const& cell)
 {
+    auto const scale = cell.attributes.lineFlags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;
     for (auto const& mapping: CellFlagDecorationMappings)
         if (cell.attributes.flags & mapping.first)
             renderDecoration(mapping.second,
                              _gridMetrics.mapBottomLeft(cell.position, _smoothScrollYOffset),
-                             vtbackend::ColumnCount(1),
+                             vtbackend::ColumnCount(cell.width * scale),
                              cell.attributes.decorationColor);
 }
 
