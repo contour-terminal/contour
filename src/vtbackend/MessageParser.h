@@ -1,16 +1,4 @@
-/**
- * This file is part of the "libterminal" project
- *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
 
 #include <vtparser/ParserExtension.h>
@@ -43,25 +31,25 @@ class Message
     Message& operator=(Message const&) = default;
     Message& operator=(Message&&) = default;
 
-    Message(HeaderMap _headers, Data _body): headers_ { std::move(_headers) }, body_ { std::move(_body) } {}
+    Message(HeaderMap headers, Data body): _headers { std::move(headers) }, _body { std::move(body) } {}
 
-    HeaderMap const& headers() const noexcept { return headers_; }
-    HeaderMap& headers() noexcept { return headers_; }
+    HeaderMap const& headers() const noexcept { return _headers; }
+    HeaderMap& headers() noexcept { return _headers; }
 
-    std::string const* header(std::string const& _key) const noexcept
+    std::string const* header(std::string const& key) const noexcept
     {
-        if (auto const i = headers_.find(_key); i != headers_.end())
+        if (auto const i = _headers.find(key); i != _headers.end())
             return &i->second;
         else
             return nullptr;
     }
 
-    Data const& body() const noexcept { return body_; }
-    Data takeBody() noexcept { return std::move(body_); }
+    Data const& body() const noexcept { return _body; }
+    Data takeBody() noexcept { return std::move(_body); }
 
   private:
-    HeaderMap headers_;
-    Data body_;
+    HeaderMap _headers;
+    Data _body;
 };
 
 /**
@@ -72,9 +60,9 @@ class Message
  *
  * Duplicate header names will override the previously declared ones.
  *
- * - Headers and body are seperated by ';'
- * - Header entries are seperated by ','
- * - Header name and value is seperated by '='
+ * - Headers and body are separated by ';'
+ * - Header entries are separated by ','
+ * - Header name and value is separated by '='
  *
  * Therefore the header name must not contain any ';', ',', '=',
  * and the parameter value must not contain any ';', ',', '!'.
@@ -100,7 +88,7 @@ class MessageParser: public ParserExtension
 
     using OnFinalize = std::function<void(Message&&)>;
 
-    explicit MessageParser(OnFinalize _finalizer = {}): finalizer_ { std::move(_finalizer) } {}
+    explicit MessageParser(OnFinalize finalizer = {}): _finalizer { std::move(finalizer) } {}
 
     void parseFragment(std::string_view chars)
     {
@@ -108,17 +96,17 @@ class MessageParser: public ParserExtension
             pass(ch);
     }
 
-    static Message parse(std::string_view _range);
+    static Message parse(std::string_view range);
 
     // ParserExtension overrides
     //
-    void pass(char _char) override;
+    void pass(char ch) override;
     void finalize() override;
 
   private:
     void flushHeader();
 
-    enum class State
+    enum class State : std::uint8_t
     {
         ParamKey,
         ParamValue,
@@ -126,14 +114,14 @@ class MessageParser: public ParserExtension
         Body,
     };
 
-    State state_ = State::ParamKey;
-    std::string parsedKey_;
-    std::string parsedValue_;
+    State _state = State::ParamKey;
+    std::string _parsedKey;
+    std::string _parsedValue;
 
-    OnFinalize finalizer_;
+    OnFinalize _finalizer;
 
-    Message::HeaderMap headers_;
-    Message::Data body_;
+    Message::HeaderMap _headers;
+    Message::Data _body;
 };
 
 } // namespace vtbackend

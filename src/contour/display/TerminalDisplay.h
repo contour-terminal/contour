@@ -25,7 +25,6 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
-#include <span>
 #include <variant>
 #if defined(CONTOUR_PERF_STATS)
     #include <atomic>
@@ -149,7 +148,6 @@ class TerminalDisplay: public QQuickItem
     void onSelectionCompleted();
     void bufferChanged(vtbackend::ScreenType);
     void discardImage(vtbackend::Image const&);
-    std::optional<vtbackend::Image> decodeImage(std::span<uint8_t const> imageData);
     void setScreenshotOutput(auto&& where) { _saveScreenshot = std::forward<decltype(where)>(where); }
     // }}}
 

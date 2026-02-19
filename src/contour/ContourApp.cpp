@@ -555,6 +555,8 @@ namespace
         auto data = std::vector<uint8_t>();
         data.resize(fileSize);
         ifs.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(fileSize));
+        if (!ifs || static_cast<std::size_t>(ifs.gcount()) != fileSize)
+            return {};
         return data;
     }
 

@@ -1613,44 +1613,6 @@ void TerminalDisplay::discardImage(vtbackend::Image const& image)
     _renderer->discardImage(image);
 }
 
-std::optional<vtbackend::Image> TerminalDisplay::decodeImage(std::span<uint8_t const> imageData)
-{
-    QImage image;
-    image.loadFromData(static_cast<uchar const*>(imageData.data()), static_cast<int>(imageData.size()));
-
-    if (image.isNull())
-        return std::nullopt;
-
-    if (image.hasAlphaChannel() && image.format() != QImage::Format_ARGB32)
-        image = image.convertToFormat(QImage::Format_ARGB32);
-    else
-        image = image.convertToFormat(QImage::Format_RGB888);
-
-    static auto nextImageId = vtbackend::ImageId(0);
-
-    vtbackend::Image::Data pixels;
-    pixels.resize(static_cast<size_t>(image.bytesPerLine() * image.height()));
-    auto* p = pixels.data();
-    for (int i = 0; i < image.height(); ++i)
-    {
-        memcpy(p, image.constScanLine(i), static_cast<size_t>(image.bytesPerLine()));
-        p += image.bytesPerLine();
-    }
-
-    auto format = vtbackend::ImageFormat::RGBA;
-    switch (image.format())
-    {
-        case QImage::Format_RGBA8888: format = vtbackend::ImageFormat::RGBA; break;
-        case QImage::Format_RGB888: format = vtbackend::ImageFormat::RGB; break;
-        default: return std::nullopt;
-    }
-
-    auto const size = vtbackend::ImageSize { vtbackend::Width::cast_from(image.width()),
-                                             vtbackend::Height::cast_from(image.height()) };
-    auto onRemove = vtbackend::Image::OnImageRemove {};
-
-    return vtbackend::Image(nextImageId++, format, std::move(pixels), size, std::move(onRemove));
-}
 // }}}
 
 } // namespace contour::display

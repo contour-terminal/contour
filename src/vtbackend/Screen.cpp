@@ -28,6 +28,7 @@
 #include <cassert>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <ranges>
 #include <sstream>
 #include <string_view>
@@ -269,18 +270,22 @@ namespace // {{{ helper
     //     }
     // }
 
-    int toNumber(string const* _value, int _default)
+    /// Parses a non-negative decimal integer from a string pointer.
+    /// Returns std::nullopt if the pointer is null, the string contains non-digit characters,
+    /// or the value would overflow an int.
+    std::optional<int> toNumber(string const* _value)
     {
         if (!_value)
-            return _default;
+            return std::nullopt;
 
         int result = 0;
         for (char const ch: *_value)
         {
-            if (ch >= '0' && ch <= '9')
-                result = result * 10 + (ch - '0');
-            else
-                return _default;
+            if (ch < '0' || ch > '9')
+                return std::nullopt;
+            if (result > (std::numeric_limits<int>::max() - (ch - '0')) / 10)
+                return std::nullopt; // overflow
+            result = result * 10 + (ch - '0');
         }
 
         return result;
@@ -4440,8 +4445,8 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageUpload(Sequence const&)
     return make_unique<MessageParser>([this](Message&& message) {
         auto const name = message.header("n");
         auto const imageFormat = toImageFormat(message.header("f"));
-        auto const width = Width::cast_from(toNumber(message.header("w"), 0));
-        auto const height = Height::cast_from(toNumber(message.header("h"), 0));
+        auto const width = Width::cast_from(toNumber(message.header("w")).value_or(0));
+        auto const height = Height::cast_from(toNumber(message.header("h")).value_or(0));
         auto const size = ImageSize { width, height };
 
         bool const validImage = imageFormat.has_value()
@@ -4460,12 +4465,14 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRender(Sequence const&)
 {
     return make_unique<MessageParser>([this](Message&& message) {
         auto const name = message.header("n");
-        auto const x = PixelCoordinate::X { toNumber(message.header("x"), 0) }; // XXX grid x offset
-        auto const y = PixelCoordinate::Y { toNumber(message.header("y"), 0) }; // XXX grid y offset
-        auto const screenRows = LineCount::cast_from(toNumber(message.header("r"), 0));
-        auto const screenCols = ColumnCount::cast_from(toNumber(message.header("c"), 0));
-        auto const imageWidth = Width::cast_from(toNumber(message.header("w"), 0));   // XXX in grid coords
-        auto const imageHeight = Height::cast_from(toNumber(message.header("h"), 0)); // XXX in grid coords
+        auto const x = PixelCoordinate::X { toNumber(message.header("x")).value_or(0) }; // XXX grid x offset
+        auto const y = PixelCoordinate::Y { toNumber(message.header("y")).value_or(0) }; // XXX grid y offset
+        auto const screenRows = LineCount::cast_from(toNumber(message.header("r")).value_or(0));
+        auto const screenCols = ColumnCount::cast_from(toNumber(message.header("c")).value_or(0));
+        auto const imageWidth =
+            Width::cast_from(toNumber(message.header("w")).value_or(0)); // XXX in grid coords
+        auto const imageHeight =
+            Height::cast_from(toNumber(message.header("h")).value_or(0)); // XXX in grid coords
         auto const alignmentPolicy =
             toImageAlignmentPolicy(message.header("a"), ImageAlignment::MiddleCenter);
         auto const resizePolicy = toImageResizePolicy(message.header("z"), ImageResize::NoResize);
@@ -4481,8 +4488,8 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRender(Sequence const&)
                           screenExtent,
                           imageOffset,
                           imageSize,
-                          *alignmentPolicy,
-                          *resizePolicy,
+                          alignmentPolicy.value_or(ImageAlignment::MiddleCenter),
+                          resizePolicy.value_or(ImageResize::NoResize),
                           autoScroll,
                           requestStatus,
                           layer);
@@ -4502,26 +4509,26 @@ template <CellConcept Cell>
 unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageOneshot(Sequence const&)
 {
     return make_unique<MessageParser>([this](Message&& message) {
-        auto const screenRows = LineCount::cast_from(toNumber(message.header("r"), 0));
-        auto const screenCols = ColumnCount::cast_from(toNumber(message.header("c"), 0));
+        auto const screenRows = LineCount::cast_from(toNumber(message.header("r")).value_or(0));
+        auto const screenCols = ColumnCount::cast_from(toNumber(message.header("c")).value_or(0));
         auto const autoScroll = message.header("l") != nullptr;
         auto const layer = toImageLayer(message.header("L"));
         auto const alignmentPolicy =
             toImageAlignmentPolicy(message.header("a"), ImageAlignment::MiddleCenter);
         auto const resizePolicy = toImageResizePolicy(message.header("z"), ImageResize::NoResize);
-        auto const imageWidth = Width::cast_from(toNumber(message.header("w"), 0));
-        auto const imageHeight = Height::cast_from(toNumber(message.header("h"), 0));
+        auto const imageWidth = Width::cast_from(toNumber(message.header("w")).value_or(0));
+        auto const imageHeight = Height::cast_from(toNumber(message.header("h")).value_or(0));
         auto const imageFormat = toImageFormat(message.header("f"));
 
         auto const imageSize = ImageSize { imageWidth, imageHeight };
         auto const screenExtent = GridSize { .lines = screenRows, .columns = screenCols };
 
-        renderImage(*imageFormat,
+        renderImage(imageFormat.value_or(ImageFormat::RGB),
                     imageSize,
                     message.takeBody(),
                     screenExtent,
-                    *alignmentPolicy,
-                    *resizePolicy,
+                    alignmentPolicy.value_or(ImageAlignment::MiddleCenter),
+                    resizePolicy.value_or(ImageResize::NoResize),
                     autoScroll,
                     layer);
     });
