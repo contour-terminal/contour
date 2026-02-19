@@ -1,0 +1,11 @@
+.check-mark {
+  color: #116111;
+}
+.arrow-right-bold {
+  color: #1FFFA2;
+}
+
+.md-typeset table:not([class]) th,
+.md-typeset table:not([class]) td {
+    padding: 5px 5px;
+}
