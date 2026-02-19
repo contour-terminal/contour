@@ -1488,4 +1488,106 @@ TEST_CASE("Terminal.screenTransition.reaches_fade_in_phase", "[terminal]")
 
 // }}}
 
+// {{{ CancelSelection precondition tests
+
+TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
+{
+    // Reproducer for #1839: On a fresh terminal with no selection,
+    // selectionAvailable() must return false so CancelSelection
+    // does not consume the key event.
+    auto mock = MockTerm { ColumnCount { 10 }, LineCount { 3 } };
+    auto& terminal = mock.terminal;
+
+    mock.writeToScreen("Hello World");
+    terminal.ensureFreshRenderBuffer();
+
+    CHECK_FALSE(terminal.selectionAvailable());
+
+    // clearSelection() should be a safe no-op when no selection exists.
+    terminal.clearSelection();
+    CHECK_FALSE(terminal.selectionAvailable());
+}
+
+TEST_CASE("Terminal.CancelSelection_with_selection", "[terminal]")
+{
+    // Verify that creating a selection sets selectionAvailable() to true,
+    // and clearSelection() resets it to false.
+    auto mock = MockTerm { ColumnCount { 5 }, LineCount { 3 } };
+    auto& terminal = mock.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+
+    terminal.tick(ClockBase);
+    terminal.ensureFreshRenderBuffer();
+    mock.writeToScreen("Hello\r\nWorld\r\nTest!");
+    terminal.tick(ClockBase + 1s);
+    terminal.ensureFreshRenderBuffer();
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    // Initiate a mouse selection across lines to avoid division-by-zero
+    // on cellPixelWidth in mock terminal (no real renderer).
+    terminal.tick(ClockBase + 2s);
+    terminal.sendMouseMoveEvent(
+        Modifier::None, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    terminal.tick(ClockBase + 3s);
+    terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    terminal.tick(ClockBase + 4s);
+    terminal.sendMouseMoveEvent(
+        Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoordinate, UiHandledHint);
+    terminal.tick(ClockBase + 5s);
+    terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+
+    REQUIRE(terminal.selectionAvailable());
+    CHECK_FALSE(terminal.extractSelectionText().empty());
+
+    // Now clear it, simulating what CancelSelection does.
+    terminal.clearSelection();
+    CHECK_FALSE(terminal.selectionAvailable());
+}
+
+TEST_CASE("Terminal.CancelSelection_double_clear", "[terminal]")
+{
+    // Edge case: calling clearSelection() twice must not crash or
+    // have unexpected side effects.
+    auto mock = MockTerm { ColumnCount { 5 }, LineCount { 3 } };
+    auto& terminal = mock.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+
+    terminal.tick(ClockBase);
+    terminal.ensureFreshRenderBuffer();
+    mock.writeToScreen("Hello\r\nWorld\r\nTest!");
+    terminal.tick(ClockBase + 1s);
+    terminal.ensureFreshRenderBuffer();
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    // Create a selection across lines.
+    terminal.tick(ClockBase + 2s);
+    terminal.sendMouseMoveEvent(
+        Modifier::None, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    terminal.tick(ClockBase + 3s);
+    terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    terminal.tick(ClockBase + 4s);
+    terminal.sendMouseMoveEvent(
+        Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoordinate, UiHandledHint);
+    terminal.tick(ClockBase + 5s);
+    terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+
+    REQUIRE(terminal.selectionAvailable());
+
+    // First clear.
+    terminal.clearSelection();
+    CHECK_FALSE(terminal.selectionAvailable());
+
+    // Second clear — must be a safe no-op.
+    terminal.clearSelection();
+    CHECK_FALSE(terminal.selectionAvailable());
+}
+
+// }}}
+
 // NOLINTEND(misc-const-correctness)
