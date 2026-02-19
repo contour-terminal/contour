@@ -144,29 +144,29 @@ TEST_CASE("MessageParser.body", "[MessageParser]")
 class MessageParserTest: public vtparser::NullParserEvents
 {
   private:
-    std::unique_ptr<vtbackend::ParserExtension> parserExtension_;
+    std::unique_ptr<vtbackend::ParserExtension> _parserExtension;
 
   public:
     vtbackend::Message message;
 
     void hook(char) override
     {
-        parserExtension_ =
+        _parserExtension =
             std::make_unique<MessageParser>([&](vtbackend::Message&& msg) { message = std::move(msg); });
     }
 
     void put(char ch) override
     {
-        if (parserExtension_)
-            parserExtension_->pass(ch);
+        if (_parserExtension)
+            _parserExtension->pass(ch);
     }
 
     void unhook() override
     {
-        if (parserExtension_)
+        if (_parserExtension)
         {
-            parserExtension_->finalize();
-            parserExtension_.reset();
+            _parserExtension->finalize();
+            _parserExtension.reset();
         }
     }
 };

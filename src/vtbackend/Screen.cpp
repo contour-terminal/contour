@@ -273,13 +273,13 @@ namespace // {{{ helper
     /// Parses a non-negative decimal integer from a string pointer.
     /// Returns std::nullopt if the pointer is null, the string contains non-digit characters,
     /// or the value would overflow an int.
-    std::optional<int> toNumber(string const* _value)
+    std::optional<int> toNumber(string const* value)
     {
-        if (!_value || _value->empty())
+        if (!value || value->empty())
             return std::nullopt;
 
         int result = 0;
-        for (char const ch: *_value)
+        for (char const ch: *value)
         {
             if (ch < '0' || ch > '9')
                 return std::nullopt;
@@ -291,15 +291,15 @@ namespace // {{{ helper
         return result;
     }
 
-    optional<ImageAlignment> toImageAlignmentPolicy(string const* _value, ImageAlignment _default)
+    optional<ImageAlignment> toImageAlignmentPolicy(string const* value, ImageAlignment defaultValue)
     {
-        if (!_value)
-            return _default;
+        if (!value)
+            return defaultValue;
 
-        if (_value->size() != 1)
+        if (value->size() != 1)
             return nullopt;
 
-        switch (_value->at(0))
+        switch (value->at(0))
         {
             case '1': return ImageAlignment::TopStart;
             case '2': return ImageAlignment::TopCenter;
@@ -314,15 +314,15 @@ namespace // {{{ helper
         }
     }
 
-    optional<ImageResize> toImageResizePolicy(string const* _value, ImageResize _default)
+    optional<ImageResize> toImageResizePolicy(string const* value, ImageResize defaultValue)
     {
-        if (!_value)
-            return _default;
+        if (!value)
+            return defaultValue;
 
-        if (_value->size() != 1)
+        if (value->size() != 1)
             return nullopt;
 
-        switch (_value->at(0))
+        switch (value->at(0))
         {
             case '0': return ImageResize::NoResize;
             case '1': return ImageResize::ResizeToFit;
@@ -332,15 +332,15 @@ namespace // {{{ helper
         }
     }
 
-    optional<ImageFormat> toImageFormat(string const* _value)
+    optional<ImageFormat> toImageFormat(string const* value)
     {
         auto constexpr DefaultFormat = ImageFormat::RGB;
 
-        if (_value)
+        if (value)
         {
-            if (_value->size() == 1)
+            if (value->size() == 1)
             {
-                switch (_value->at(0))
+                switch (value->at(0))
                 {
                     case '1': return ImageFormat::RGB;
                     case '2': return ImageFormat::RGBA;
