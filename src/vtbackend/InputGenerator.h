@@ -184,6 +184,38 @@ enum class Key : uint8_t
     // NOLINTEND(readability-identifier-naming)
 };
 
+/// Checks whether the given key is a modifier-only key (e.g. Shift, Control, Alt, etc.).
+///
+/// @param key The key to check.
+/// @return true if the key is a modifier-only key, false otherwise.
+constexpr bool isModifierKey(Key key) noexcept
+{
+    // clang-format off
+    switch (key)
+    {
+        case Key::LeftShift:
+        case Key::LeftControl:
+        case Key::LeftAlt:
+        case Key::LeftSuper:
+        case Key::LeftHyper:
+        case Key::LeftMeta:
+        case Key::RightShift:
+        case Key::RightControl:
+        case Key::RightAlt:
+        case Key::RightSuper:
+        case Key::RightHyper:
+        case Key::RightMeta:
+        case Key::IsoLevel3Shift:
+        case Key::IsoLevel5Shift:
+        case Key::CapsLock:
+        case Key::NumLock:
+            return true;
+        default:
+            return false;
+    }
+    // clang-format on
+}
+
 std::string to_string(Key key);
 
 enum class KeyMode : uint8_t

@@ -824,7 +824,8 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     if (success)
     {
         flushInput();
-        _viewport.scrollToBottom();
+        if (!isModifierKey(key))
+            _viewport.scrollToBottom();
     }
     return Handled { success };
 }

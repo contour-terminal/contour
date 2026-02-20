@@ -88,6 +88,82 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
     }
 }
 
+TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
+{
+    // Set up a terminal with history capacity to allow scrollback
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(6) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+
+    // Enable ReportAllKeysAsEscapeCodes (kitty keyboard protocol)
+    terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+
+    // Fill terminal and generate scrollback history
+    mc.writeToScreen("line1\r\n"
+                     "line2\r\n"
+                     "line3\r\n"
+                     "line4\r\n"
+                     "line5\r\n"
+                     "line6\r\n");
+
+    // Scroll up so viewport is not at bottom
+    terminal.viewport().scrollUp(LineCount(2));
+    REQUIRE(terminal.viewport().scrolled());
+    auto const scrollOffsetBeforeKey = terminal.viewport().scrollOffset();
+
+    SECTION("modifier-only press does not scroll")
+    {
+        mc.resetReplyData();
+        terminal.sendKeyEvent(vtbackend::Key::LeftShift,
+                              vtbackend::Modifiers { vtbackend::Modifier::Shift },
+                              vtbackend::KeyboardEventType::Press,
+                              std::chrono::steady_clock::now());
+
+        // Viewport should remain scrolled
+        CHECK(terminal.viewport().scrolled());
+        CHECK(terminal.viewport().scrollOffset() == scrollOffsetBeforeKey);
+        // Escape sequence should still have been sent to the application
+        CHECK(!mc.replyData().empty());
+    }
+
+    SECTION("non-modifier press does scroll")
+    {
+        mc.resetReplyData();
+        terminal.sendKeyEvent(vtbackend::Key::Enter,
+                              vtbackend::Modifiers { vtbackend::Modifier::None },
+                              vtbackend::KeyboardEventType::Press,
+                              std::chrono::steady_clock::now());
+
+        // Viewport should scroll to bottom
+        CHECK(!terminal.viewport().scrolled());
+    }
+
+    SECTION("various modifier keys")
+    {
+        auto const modifierKeys = std::vector<vtbackend::Key> {
+            vtbackend::Key::LeftShift,    vtbackend::Key::RightShift, vtbackend::Key::LeftControl,
+            vtbackend::Key::RightControl, vtbackend::Key::LeftAlt,    vtbackend::Key::RightAlt,
+            vtbackend::Key::LeftSuper,    vtbackend::Key::RightSuper, vtbackend::Key::LeftMeta,
+            vtbackend::Key::RightMeta,    vtbackend::Key::CapsLock,   vtbackend::Key::NumLock,
+        };
+
+        for (auto const modKey: modifierKeys)
+        {
+            INFO("Testing modifier key: " << std::format("{}", modKey));
+
+            // Reset viewport to scrolled position
+            terminal.viewport().scrollUp(LineCount(2));
+            REQUIRE(terminal.viewport().scrolled());
+
+            terminal.sendKeyEvent(modKey,
+                                  vtbackend::Modifiers { vtbackend::Modifier::None },
+                                  vtbackend::KeyboardEventType::Press,
+                                  std::chrono::steady_clock::now());
+
+            CHECK(terminal.viewport().scrolled());
+        }
+    }
+}
+
 TEST_CASE("Terminal.DECCARA", "[terminal]")
 {
     auto mock = MockTerm { ColumnCount(5), LineCount(5) };
