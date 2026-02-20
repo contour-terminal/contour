@@ -140,10 +140,12 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
     SECTION("various modifier keys")
     {
         auto const modifierKeys = std::vector<vtbackend::Key> {
-            vtbackend::Key::LeftShift,    vtbackend::Key::RightShift, vtbackend::Key::LeftControl,
-            vtbackend::Key::RightControl, vtbackend::Key::LeftAlt,    vtbackend::Key::RightAlt,
-            vtbackend::Key::LeftSuper,    vtbackend::Key::RightSuper, vtbackend::Key::LeftMeta,
-            vtbackend::Key::RightMeta,    vtbackend::Key::CapsLock,   vtbackend::Key::NumLock,
+            vtbackend::Key::LeftShift,      vtbackend::Key::RightShift,     vtbackend::Key::LeftControl,
+            vtbackend::Key::RightControl,   vtbackend::Key::LeftAlt,        vtbackend::Key::RightAlt,
+            vtbackend::Key::LeftSuper,      vtbackend::Key::RightSuper,     vtbackend::Key::LeftHyper,
+            vtbackend::Key::RightHyper,     vtbackend::Key::LeftMeta,       vtbackend::Key::RightMeta,
+            vtbackend::Key::IsoLevel3Shift, vtbackend::Key::IsoLevel5Shift, vtbackend::Key::CapsLock,
+            vtbackend::Key::NumLock,
         };
 
         for (auto const modKey: modifierKeys)
