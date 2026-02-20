@@ -68,7 +68,9 @@ void MessageParser::flushHeader()
     {
         auto decoded = std::string {};
         decoded.resize(crispy::base64::decodeLength(next(begin(_parsedValue)), end(_parsedValue)));
-        crispy::base64::decode(next(begin(_parsedValue)), end(_parsedValue), decoded.data());
+        auto const actualSize =
+            crispy::base64::decode(next(begin(_parsedValue)), end(_parsedValue), decoded.data());
+        decoded.resize(actualSize);
         _parsedValue = std::move(decoded);
     }
 
@@ -91,8 +93,9 @@ void MessageParser::finalize()
             {
                 auto decoded = std::vector<uint8_t> {};
                 decoded.resize(crispy::base64::decodeLength(next(begin(_body)), end(_body)));
-                crispy::base64::decode(
+                auto const actualSize = crispy::base64::decode(
                     next(begin(_body)), end(_body), reinterpret_cast<char*>(decoded.data()));
+                decoded.resize(actualSize);
                 _body = std::move(decoded);
             }
             break;

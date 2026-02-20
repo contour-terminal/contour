@@ -140,6 +140,7 @@ constexpr inline auto GIUPLOAD = FunctionDocumentation { .mnemonic = "GIUPLOAD",
 constexpr inline auto GIRENDER = FunctionDocumentation { .mnemonic = "GIRENDER", .comment = "Renders an image." };
 constexpr inline auto GIDELETE = FunctionDocumentation { .mnemonic = "GIDELETE", .comment = "Deletes an image." };
 constexpr inline auto GIONESHOT = FunctionDocumentation { .mnemonic = "GIONESHOT", .comment = "Uploads and renders an unnamed image." };
+constexpr inline auto GIQUERY = FunctionDocumentation { .mnemonic = "GIQUERY", .comment = "Queries image resource limits." };
 
 // OSC
 constexpr inline auto CLIPBOARD = FunctionDocumentation { .mnemonic = "CLIPBOARD", .comment = "Clipboard management." };
@@ -674,6 +675,8 @@ constexpr inline auto GIDELETE =
     detail::DCS(std::nullopt, 0, 0, std::nullopt, 'd', VTType::VT525, documentation::GIDELETE);
 constexpr inline auto GIONESHOT =
     detail::DCS(std::nullopt, 0, 0, std::nullopt, 's', VTType::VT525, documentation::GIONESHOT);
+constexpr inline auto GIQUERY =
+    detail::DCS(std::nullopt, 0, 0, std::nullopt, 'q', VTType::VT525, documentation::GIQUERY);
 
 constexpr inline auto CaptureBufferCode = 314;
 
@@ -811,6 +814,7 @@ constexpr static auto allFunctionsArray() noexcept
         GIRENDER,
         GIDELETE,
         GIONESHOT,
+        GIQUERY,
         STP,
         DECRQSS,
         DECSIXEL,

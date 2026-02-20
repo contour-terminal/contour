@@ -325,6 +325,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
                      ImageAlignment alignmentPolicy,
                      ImageResize resizePolicy,
                      bool autoScroll,
+                     bool updateCursor = true,
                      ImageLayer layer = ImageLayer::Replace);
 
     void renderImageByName(std::string const& name,
@@ -335,6 +336,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
                            ImageResize resizePolicy,
                            bool autoScroll,
                            bool requestStatus,
+                           bool updateCursor = false,
                            ImageLayer layer = ImageLayer::Replace);
 
     void renderImage(ImageFormat format,
@@ -344,6 +346,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
                      ImageAlignment alignmentPolicy,
                      ImageResize resizePolicy,
                      bool autoScroll,
+                     bool updateCursor = false,
                      ImageLayer layer = ImageLayer::Replace);
 
     void releaseImage(std::string const& name);
@@ -686,6 +689,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageRender(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageRelease(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageOneshot(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageQuery(Sequence const& seq);
 
     void processShellIntegration(Sequence const& seq);
 

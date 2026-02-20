@@ -134,14 +134,18 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
                     RGBAColor defaultColor,
                     GridSize cellSpan,
                     ImageSize cellSize,
-                    ImageLayer layer = ImageLayer::Replace):
+                    ImageLayer layer = ImageLayer::Replace,
+                    PixelCoordinate imageOffset = {},
+                    ImageSize imageSubSize = {}):
         _image { std::move(image) },
         _alignmentPolicy { alignmentPolicy },
         _resizePolicy { resizePolicy },
         _defaultColor { defaultColor },
         _cellSpan { cellSpan },
         _cellSize { cellSize },
-        _layer { layer }
+        _layer { layer },
+        _imageOffset { imageOffset },
+        _imageSubSize { imageSubSize }
     {
         ++ImageStats::get().rasterized;
     }
@@ -179,6 +183,8 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     GridSize _cellSpan;                  //!< Number of grid cells to span the pixel image onto.
     ImageSize _cellSize;                 //!< number of pixels in X and Y dimension one grid cell has to fill.
     ImageLayer _layer;                   //!< Layer for z-ordering relative to text.
+    PixelCoordinate _imageOffset;        //!< Pixel offset into the source image for sub-rectangle rendering.
+    ImageSize _imageSubSize;             //!< Sub-region pixel size (zero means full image).
 };
 
 std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,

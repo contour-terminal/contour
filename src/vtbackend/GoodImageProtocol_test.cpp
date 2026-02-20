@@ -426,3 +426,159 @@ TEST_CASE("GoodImageProtocol.Layer.Below.ClearedByErase", "[GIP]")
     fragment = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
     CHECK(fragment == nullptr);
 }
+
+// ==================== Update-Cursor Tests ====================
+
+TEST_CASE("GoodImageProtocol.Render.UpdateCursorFalse", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+
+    mock.writeToScreen(gipUpload("n=uc,f=2,w=2,h=2", pixels));
+
+    // Move cursor to a known position.
+    mock.writeToScreen("\033[3;5H"); // CUP to (3, 5) — 1-based
+    auto const beforePos = mock.terminal.primaryScreen().realCursorPosition();
+
+    // Render without u flag — cursor should NOT move.
+    mock.writeToScreen(gipRender("n=uc,c=4,r=2"));
+
+    auto const afterPos = mock.terminal.primaryScreen().realCursorPosition();
+    CHECK(afterPos.line == beforePos.line);
+    CHECK(afterPos.column == beforePos.column);
+}
+
+TEST_CASE("GoodImageProtocol.Render.UpdateCursorTrue", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+
+    mock.writeToScreen(gipUpload("n=uc2,f=2,w=2,h=2", pixels));
+
+    // Move cursor to top-left.
+    mock.writeToScreen("\033[1;1H"); // CUP to (1, 1) — 1-based
+    // Render with u flag — cursor should move below the image.
+    mock.writeToScreen(gipRender("n=uc2,c=4,r=3,u"));
+
+    auto const afterPos = mock.terminal.primaryScreen().realCursorPosition();
+    // Cursor should be at column 0 (left margin), line 2 (below 3 rows of image, 0-based).
+    CHECK(afterPos.column == ColumnOffset(0));
+    CHECK(afterPos.line == LineOffset(2));
+}
+
+// ==================== Upload Status Response Tests ====================
+
+TEST_CASE("GoodImageProtocol.Upload.StatusSuccess", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+    mock.resetReplyData();
+    mock.writeToScreen(gipUpload("n=upstat,f=2,w=2,h=2,s", pixels));
+
+    // CSI > 0 i = success
+    CHECK(mock.replyData().find("\033[>0i") != std::string::npos);
+
+    // Verify image was actually uploaded.
+    auto const imageRef = mock.terminal.imagePool().findImageByName("upstat");
+    CHECK(imageRef != nullptr);
+}
+
+TEST_CASE("GoodImageProtocol.Upload.StatusInvalidData", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    // Create data that doesn't match the declared dimensions (2x2 RGBA = 16 bytes, but we send 4).
+    auto const wrongPixels = std::vector<uint8_t> { 0xFF, 0x00, 0x00, 0xFF };
+    mock.resetReplyData();
+    mock.writeToScreen(gipUpload("n=bad,f=2,w=2,h=2,s", wrongPixels));
+
+    // CSI > 2 i = invalid image data
+    CHECK(mock.replyData().find("\033[>2i") != std::string::npos);
+
+    // Image should NOT be in pool.
+    CHECK(mock.terminal.imagePool().findImageByName("bad") == nullptr);
+}
+
+// ==================== Name Validation Tests ====================
+
+TEST_CASE("GoodImageProtocol.Upload.InvalidNameCharacters", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(1, 1, 0xFF, 0xFF, 0xFF, 0xFF);
+
+    // Name with spaces should be rejected.
+    mock.writeToScreen(gipUpload("n=bad name,f=2,w=1,h=1", pixels));
+    CHECK(mock.terminal.imagePool().findImageByName("bad name") == nullptr);
+
+    // Name with special characters should be rejected.
+    mock.writeToScreen(gipUpload("n=bad!name,f=2,w=1,h=1", pixels));
+    CHECK(mock.terminal.imagePool().findImageByName("bad!name") == nullptr);
+
+    // Valid name with underscore should be accepted.
+    mock.writeToScreen(gipUpload("n=good_name_123,f=2,w=1,h=1", pixels));
+    CHECK(mock.terminal.imagePool().findImageByName("good_name_123") != nullptr);
+}
+
+// ==================== Query Tests ====================
+
+TEST_CASE("GoodImageProtocol.Query.ResourceLimits", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.resetReplyData();
+
+    // Send DCS q ST
+    mock.writeToScreen("\033Pq\033\\");
+
+    // Response should be CSI > 8 ; Pm ; Pb ; Pw ; Ph i
+    auto const& reply = mock.replyData();
+    CHECK(reply.find("\033[>8;") != std::string::npos);
+    CHECK(reply.find("i") != std::string::npos);
+}
+
+// ==================== Oneshot Update-Cursor Tests ====================
+
+TEST_CASE("GoodImageProtocol.Oneshot.UpdateCursorFalse", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+
+    // Move cursor to known position.
+    mock.writeToScreen("\033[3;5H");
+    auto const beforePos = mock.terminal.primaryScreen().realCursorPosition();
+
+    // Oneshot without u flag — cursor should NOT move.
+    mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2", pixels));
+
+    auto const afterPos = mock.terminal.primaryScreen().realCursorPosition();
+    CHECK(afterPos.line == beforePos.line);
+    CHECK(afterPos.column == beforePos.column);
+}
+
+TEST_CASE("GoodImageProtocol.Oneshot.UpdateCursorTrue", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+
+    // Move cursor to top-left.
+    mock.writeToScreen("\033[1;1H");
+    // Oneshot with u flag — cursor should move below the image.
+    mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2,u", pixels));
+
+    auto const afterPos = mock.terminal.primaryScreen().realCursorPosition();
+    // Cursor should be at column 0, line 1 (below 2 rows, 0-based).
+    CHECK(afterPos.column == ColumnOffset(0));
+    CHECK(afterPos.line == LineOffset(1));
+}
+
+// ==================== Oneshot Status Response Tests ====================
+
+TEST_CASE("GoodImageProtocol.Oneshot.StatusResponse", "[GIP]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+    mock.resetReplyData();
+
+    mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2,s", pixels));
+
+    // CSI > 0 i = success
+    CHECK(mock.replyData().find("\033[>0i") != std::string::npos);
+}

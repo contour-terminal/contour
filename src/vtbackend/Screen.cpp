@@ -2089,15 +2089,17 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
                                ImageAlignment alignmentPolicy,
                                ImageResize resizePolicy,
                                bool autoScroll,
+                               bool updateCursor,
                                ImageLayer layer)
 {
-    (void) imageOffset; // TODO: Use for cropping/tiling in RasterizedImage
-
     auto const linesAvailable = pageSize().lines - topLeft.line.as<LineCount>();
     auto const linesToBeRendered = std::min(gridSize.lines, linesAvailable);
     auto const columnsAvailable = pageSize().columns - topLeft.column;
     auto const columnsToBeRendered = ColumnCount(std::min(columnsAvailable, gridSize.columns));
-    auto const gapColor = RGBAColor {}; // TODO: _cursor.graphicsRendition.backgroundColor;
+    auto const gapColor = RGBAColor { vtbackend::apply(_terminal->colorPalette(),
+                                                       _cursor.graphicsRendition.backgroundColor,
+                                                       ColorTarget::Background,
+                                                       ColorMode::Normal) };
 
     auto const rasterizedImage = make_shared<RasterizedImage>(std::move(image),
                                                               alignmentPolicy,
@@ -2105,7 +2107,9 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
                                                               gapColor,
                                                               gridSize,
                                                               _terminal->cellPixelSize(),
-                                                              layer);
+                                                              layer,
+                                                              imageOffset,
+                                                              imageSize);
 
     // Compute the cursor line offset after rendering.
     // For Sixel images (identified by non-zero pixel imageSize), use VT340-compatible sixel band math.
@@ -2139,7 +2143,8 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
                                   CellLocation { .line = gridOffset.line, .column = gridOffset.column });
             cell.setHyperlink(_cursor.hyperlink);
         };
-        moveCursorTo(topLeft.line + cursorLineOffset, topLeft.column);
+        if (updateCursor)
+            moveCursorTo(topLeft.line + cursorLineOffset, topLeft.column);
     }
 
     // If there are lines remaining (image didn't fit on screen) and autoScroll is enabled,
@@ -2162,7 +2167,8 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
     }
 
     // Move ANSI text cursor to the correct column after image placement.
-    moveCursorToColumn(topLeft.column);
+    if (updateCursor)
+        moveCursorToColumn(topLeft.column);
 }
 
 template <CellConcept Cell>
@@ -4219,6 +4225,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case GIRENDER: _terminal->hookParser(hookGoodImageRender(seq)); break;
         case GIDELETE: _terminal->hookParser(hookGoodImageRelease(seq)); break;
         case GIONESHOT: _terminal->hookParser(hookGoodImageOneshot(seq)); break;
+        case GIQUERY: _terminal->hookParser(hookGoodImageQuery(seq)); break;
 
         default: return ApplyResult::Unsupported;
     }
@@ -4446,14 +4453,47 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageUpload(Sequence const&)
         auto const width = Width::cast_from(toNumber(message.header("w")).value_or(0));
         auto const height = Height::cast_from(toNumber(message.header("h")).value_or(0));
         auto const size = ImageSize { width, height };
+        auto const requestStatus = message.header("s") != nullptr;
+
+        // Validate name: ASCII alphanumeric + underscore, 1-512 chars.
+        auto const validName = [&]() -> bool {
+            if (!name || name->empty() || name->size() > 512)
+                return false;
+            return std::ranges::all_of(*name, [](char ch) {
+                return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+                       || ch == '_';
+            });
+        }();
 
         bool const validImage = imageFormat.has_value()
                                 && ((*imageFormat == ImageFormat::PNG && !*size.width && !*size.height)
                                     || (*imageFormat != ImageFormat::PNG && *size.width && *size.height));
 
-        if (name && validImage)
+        // Validate RGB/RGBA data size: body must equal width * height * bytes-per-pixel.
+        auto const validDataSize = [&]() -> bool {
+            if (!validImage || !imageFormat.has_value())
+                return false;
+            if (*imageFormat == ImageFormat::PNG)
+                return true; // PNG is self-describing
+            auto const bpp = (*imageFormat == ImageFormat::RGBA) ? 4u : 3u;
+            auto const expectedSize = static_cast<size_t>(*size.width) * *size.height * bpp;
+            return message.body().size() == expectedSize;
+        }();
+
+        if (validName && validImage && validDataSize)
         {
             uploadImage(*name, imageFormat.value(), size, message.takeBody());
+            if (requestStatus)
+            {
+                _terminal->reply("\033[>0i");
+                _terminal->flushInput();
+            }
+        }
+        else if (requestStatus)
+        {
+            // Error code 2: invalid image data (bad format, corrupt data, dimension mismatch)
+            _terminal->reply("\033[>2i");
+            _terminal->flushInput();
         }
     });
 }
@@ -4476,6 +4516,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRender(Sequence const&)
         auto const resizePolicy = toImageResizePolicy(message.header("z"), ImageResize::NoResize);
         auto const requestStatus = message.header("s") != nullptr;
         auto const autoScroll = message.header("l") != nullptr;
+        auto const updateCursor = message.header("u") != nullptr;
         auto const layer = toImageLayer(message.header("L"));
 
         auto const imageOffset = PixelCoordinate { .x = x, .y = y };
@@ -4490,6 +4531,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRender(Sequence const&)
                           resizePolicy.value_or(ImageResize::NoResize),
                           autoScroll,
                           requestStatus,
+                          updateCursor,
                           layer);
     });
 }
@@ -4504,12 +4546,28 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRelease(Sequence const&)
 }
 
 template <CellConcept Cell>
+unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageQuery(Sequence const&)
+{
+    // DCS q ST → respond with CSI > 8 ; Pm ; Pb ; Pw ; Ph i
+    return make_unique<MessageParser>([this](Message const& /*message*/) {
+        auto constexpr MaxImages = 100; // matches ImagePool LRU capacity
+        auto const maxSize = _terminal->maxImageSize();
+        auto const maxBytes =
+            static_cast<unsigned long>(*maxSize.width) * *maxSize.height * 4; // RGBA = 4 bytes per pixel
+        _terminal->reply("\033[>8;{};{};{};{}i", MaxImages, maxBytes, *maxSize.width, *maxSize.height);
+        _terminal->flushInput();
+    });
+}
+
+template <CellConcept Cell>
 unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageOneshot(Sequence const&)
 {
     return make_unique<MessageParser>([this](Message message) {
         auto const screenRows = LineCount::cast_from(toNumber(message.header("r")).value_or(0));
         auto const screenCols = ColumnCount::cast_from(toNumber(message.header("c")).value_or(0));
         auto const autoScroll = message.header("l") != nullptr;
+        auto const updateCursor = message.header("u") != nullptr;
+        auto const requestStatus = message.header("s") != nullptr;
         auto const layer = toImageLayer(message.header("L"));
         auto const alignmentPolicy =
             toImageAlignmentPolicy(message.header("a"), ImageAlignment::MiddleCenter);
@@ -4528,7 +4586,14 @@ unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageOneshot(Sequence const&)
                     alignmentPolicy.value_or(ImageAlignment::MiddleCenter),
                     resizePolicy.value_or(ImageResize::NoResize),
                     autoScroll,
+                    updateCursor,
                     layer);
+
+        if (requestStatus)
+        {
+            _terminal->reply("\033[>0i");
+            _terminal->flushInput();
+        }
     });
 }
 
@@ -4562,6 +4627,7 @@ void Screen<Cell>::renderImageByName(std::string const& name,
                                      ImageResize resizePolicy,
                                      bool autoScroll,
                                      bool requestStatus,
+                                     bool updateCursor,
                                      ImageLayer layer)
 {
     auto const imageRef = _terminal->imagePool().findImageByName(name);
@@ -4576,6 +4642,7 @@ void Screen<Cell>::renderImageByName(std::string const& name,
                     alignmentPolicy,
                     resizePolicy,
                     autoScroll,
+                    updateCursor,
                     layer);
 
     if (requestStatus)
@@ -4593,6 +4660,7 @@ void Screen<Cell>::renderImage(ImageFormat format,
                                ImageAlignment alignmentPolicy,
                                ImageResize resizePolicy,
                                bool autoScroll,
+                               bool updateCursor,
                                ImageLayer layer)
 {
     auto constexpr PixelOffset = PixelCoordinate {};
@@ -4630,6 +4698,7 @@ void Screen<Cell>::renderImage(ImageFormat format,
                         alignmentPolicy,
                         resizePolicy,
                         autoScroll,
+                        updateCursor,
                         layer);
         }
         else
@@ -4648,6 +4717,7 @@ void Screen<Cell>::renderImage(ImageFormat format,
                 alignmentPolicy,
                 resizePolicy,
                 autoScroll,
+                updateCursor,
                 layer);
 }
 
