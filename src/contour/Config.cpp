@@ -1417,7 +1417,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         {
             if (auto const thicknessNode = child["thickness"])
             {
-                where.thickness = thicknessNode.as<float>(0.0f);
+                where.thickness = std::clamp(thicknessNode.as<float>(0.0f), 0.0f, 10.0f);
                 logger()("Loading text_outline.thickness: {}", where.thickness);
             }
             if (auto const colorNode = child["color"])
@@ -1430,7 +1430,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         else if (child.IsScalar())
         {
             // Simple form: text_outline: 1.0 (thickness only)
-            where.thickness = child.as<float>(0.0f);
+            where.thickness = std::clamp(child.as<float>(0.0f), 0.0f, 10.0f);
             logger()("Loading text_outline (scalar): {}", where.thickness);
         }
     }

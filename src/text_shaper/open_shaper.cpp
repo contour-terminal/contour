@@ -1062,6 +1062,9 @@ optional<rasterized_glyph> rasterizeOutlined(
     }
 
     // Rasterize the fill glyph (grayscale).
+    // Outlined glyphs always use FT_RENDER_MODE_NORMAL regardless of the configured
+    // render_mode because the fill and outline are composited as separate alpha channels
+    // in the shader. Sub-pixel (LCD) rendering is not applicable to this two-channel format.
     ec = FT_Glyph_To_Bitmap(&fillGlyph, FT_RENDER_MODE_NORMAL, nullptr, true);
     if (ec != FT_Err_Ok)
     {
@@ -1072,7 +1075,14 @@ optional<rasterized_glyph> rasterizeOutlined(
 
     // Create the stroker and apply it to the outline glyph.
     FT_Stroker stroker = nullptr;
-    FT_Stroker_New(ftLib, &stroker);
+    ec = FT_Stroker_New(ftLib, &stroker);
+    if (ec != FT_Err_Ok)
+    {
+        rasterizerLog()("rasterizeOutlined: FT_Stroker_New failed for {} (ec={}).", glyph, ec);
+        FT_Done_Glyph(fillGlyph);
+        FT_Done_Glyph(outlineGlyph);
+        return nullopt;
+    }
     FT_Stroker_Set(stroker,
                    static_cast<FT_Fixed>(outlineThickness * 64.0f), // 26.6 fixed-point
                    FT_STROKER_LINECAP_ROUND,
@@ -1137,6 +1147,9 @@ optional<rasterized_glyph> rasterizeOutlined(
     output.format = bitmap_format::outlined;
     output.bitmap.resize(static_cast<size_t>(outWidth) * static_cast<size_t>(outHeight) * 4);
 
+    // FT_Bitmap::pitch is signed: positive means rows are top-down, negative means bottom-up.
+    // In both cases, buffer points to the first scanline (top row) and row * pitch + col
+    // correctly addresses each pixel regardless of pitch sign.
     auto const outPitch = static_cast<int>(outlineBmp.pitch);
     auto const fillPitch = static_cast<int>(fillBmp.pitch);
     auto const fillW = static_cast<int>(fillBmp.width);

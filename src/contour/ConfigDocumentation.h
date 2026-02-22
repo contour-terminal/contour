@@ -334,7 +334,7 @@ constexpr StringLiteral FontsConfig {
     "    {comment}     color: \"#000000\"\n"
     "    {comment}\n"
     "    {comment} Default: disabled (0)\n"
-    "    {comment}text_outline: 0\n"
+    "    {comment} text_outline: 0\n"
     "\n"
 };
 
