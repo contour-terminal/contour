@@ -381,6 +381,7 @@ const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDesc
     .fontLocator = vtrasterizer::FontLocatorEngine::Native,
     .builtinBoxDrawing = true,
     .maxFallbackCount = vtrasterizer::DefaultMaxFallbackCount,
+    .textOutline = {},
 };
 
 struct TerminalProfile
@@ -1005,6 +1006,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, text::render_mode& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::TextOutlineConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontLocatorEngine& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::TextShapingEngine& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ColorConfig& where);

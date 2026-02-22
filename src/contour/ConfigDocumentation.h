@@ -324,6 +324,18 @@ constexpr StringLiteral FontsConfig {
     "    {comment} that are to be rendered in emoji presentation.\n"
     "    emoji: {}\n"
     "\n"
+    "    {comment} Text outline draws a colored stroke around each text glyph to improve\n"
+    "    {comment} readability on transparent or low-opacity backgrounds.\n"
+    "    {comment}\n"
+    "    {comment} Set to a number for simple thickness (e.g. text_outline: 1.0),\n"
+    "    {comment} or use a map for thickness and color:\n"
+    "    {comment}   text_outline:\n"
+    "    {comment}     thickness: 1.0\n"
+    "    {comment}     color: \"#000000\"\n"
+    "    {comment}\n"
+    "    {comment} Default: disabled (0)\n"
+    "    {comment}text_outline: 0\n"
+    "\n"
 };
 
 constexpr StringLiteral PermissionsConfig {

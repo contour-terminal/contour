@@ -1,6 +1,7 @@
 uniform highp float pixel_x;                  // 1.0 / lcdAtlas.width
 uniform highp sampler2D fs_textureAtlas;      // RGBA
 uniform highp float u_time;
+uniform highp vec4 u_textOutlineColor;        // outline RGBA color
 
 in highp vec4 fs_TexCoord;
 in highp vec4 fs_textColor;
@@ -14,14 +15,11 @@ const highp vec4 TEST_PIXEL = vec4(1.0, 0.0, 0.0, 1.0); // test pixel for debugg
 
 void renderGrayscaleGlyph()
 {
-    // XXX monochrome glyph (RGB)
-    //highp vec4 alphaMap = texture(fs_monochromeTextures, fs_TexCoord.xy);
-    //fragColor = fs_textColor;
-    //colorMask = alphaMap;
-
-    // Using the RED-channel as alpha-mask of an anti-aliases glyph.
+    // Using the RED-channel as alpha-mask of an anti-aliased glyph.
     highp vec4 pixel = texture(fs_textureAtlas, fs_TexCoord.xy);
-    highp vec4 sampled = vec4(1.0, 1.0, 1.0, pixel.r);
+    highp float glyphAlpha = pixel.r;
+
+    highp vec4 sampled = vec4(1.0, 1.0, 1.0, glyphAlpha);
     fragColor = sampled * fs_textColor;
 }
 
@@ -134,6 +132,26 @@ void renderLcdGlyph()
     fragColor = vec4(color.rgb, alpha);
 }
 
+// Renders a glyph with pre-rasterized outline via FT_Stroker.
+// R = fill alpha, G = outline alpha, B = unused, A = max(fill, outline).
+void renderOutlinedGlyph()
+{
+    highp vec4 pixel = texture(fs_textureAtlas, fs_TexCoord.xy);
+    highp float fillAlpha = pixel.r;
+    highp float outlineAlpha = pixel.g;
+
+    highp vec4 glyph = vec4(fs_textColor.rgb, fs_textColor.a * fillAlpha);
+    highp vec4 outline = vec4(u_textOutlineColor.rgb, u_textOutlineColor.a * outlineAlpha);
+
+    // Composite glyph over outline ("over" alpha blending)
+    fragColor.a = glyph.a + outline.a * (1.0 - glyph.a);
+    if (fragColor.a > 0.0)
+        fragColor.rgb = (glyph.rgb * glyph.a + outline.rgb * outline.a * (1.0 - glyph.a))
+                        / fragColor.a;
+    else
+        fragColor = vec4(0.0);
+}
+
 void main()
 {
     int selector = int(fs_TexCoord.w); // This is the RenderTile::userdata component.
@@ -148,6 +166,9 @@ void main()
             break;
         case FRAGMENT_SELECTOR_IMAGE_BGRA:
             renderColoredRGBA();
+            break;
+        case FRAGMENT_SELECTOR_GLYPH_OUTLINED:
+            renderOutlinedGlyph();
             break;
         case FRAGMENT_SELECTOR_GLYPH_ALPHA:
         default:

@@ -37,7 +37,9 @@ class directwrite_shaper: public shaper
 
     std::optional<glyph_position> shape(font_key _font, char32_t _codepoint) override;
 
-    std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) override;
+    std::optional<rasterized_glyph> rasterize(glyph_key _glyph,
+                                              render_mode _mode,
+                                              float outlineThickness = 0.0f) override;
 
   private:
     struct Private;

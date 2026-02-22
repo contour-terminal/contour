@@ -174,6 +174,8 @@ void Renderer::setRenderTarget(RenderTarget& renderTarget)
     _directMappingAllocator.enabled = _atlasDirectMapping;
     _textRenderer.setRenderTarget(renderTarget, _directMappingAllocator);
 
+    renderTarget.setTextOutline(_fontDescriptions.textOutline.thickness, _fontDescriptions.textOutline.color);
+
     configureTextureAtlas();
 }
 
@@ -268,6 +270,10 @@ void Renderer::setFonts(FontDescriptions fontDescriptions)
     _fontDescriptions = std::move(fontDescriptions);
     _fonts = loadFontKeys(_fontDescriptions, *_textShaper);
     updateFontMetrics();
+
+    if (_renderTarget)
+        _renderTarget->setTextOutline(_fontDescriptions.textOutline.thickness,
+                                      _fontDescriptions.textOutline.color);
 }
 
 bool Renderer::setFontSize(text::font_size fontSize)
