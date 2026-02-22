@@ -26,6 +26,7 @@ enum class ImageFormat : uint8_t
 {
     RGB,
     RGBA,
+    PNG,
 };
 
 // clang-format off
@@ -86,6 +87,16 @@ class Image: public std::enable_shared_from_this<Image>
     OnImageRemove _onImageRemove;
 };
 
+/// Image layer determines the z-ordering of the image relative to text.
+///
+/// @see GoodImageProtocol spec, parameter `L`.
+enum class ImageLayer : uint8_t
+{
+    Below = 0,   ///< Render below text (watermark-like).
+    Replace = 1, ///< Replace text cells (default, like Sixel).
+    Above = 2,   ///< Render above text (overlay).
+};
+
 /// Image resize hints are used to properly fit/fill the area to place the image onto.
 enum class ImageResize : uint8_t
 {
@@ -122,13 +133,19 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
                     ImageResize resizePolicy,
                     RGBAColor defaultColor,
                     GridSize cellSpan,
-                    ImageSize cellSize):
+                    ImageSize cellSize,
+                    ImageLayer layer = ImageLayer::Replace,
+                    PixelCoordinate imageOffset = {},
+                    ImageSize imageSubSize = {}):
         _image { std::move(image) },
         _alignmentPolicy { alignmentPolicy },
         _resizePolicy { resizePolicy },
         _defaultColor { defaultColor },
         _cellSpan { cellSpan },
-        _cellSize { cellSize }
+        _cellSize { cellSize },
+        _layer { layer },
+        _imageOffset { imageOffset },
+        _imageSubSize { imageSubSize }
     {
         ++ImageStats::get().rasterized;
     }
@@ -149,6 +166,7 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     RGBAColor defaultColor() const noexcept { return _defaultColor; }
     GridSize cellSpan() const noexcept { return _cellSpan; }
     ImageSize cellSize() const noexcept { return _cellSize; }
+    ImageLayer layer() const noexcept { return _layer; }
 
     /// @returns an RGBA buffer for a grid cell at given coordinate @p pos of the rasterized image.
     ///
@@ -164,6 +182,9 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     RGBAColor _defaultColor;             //!< Default color to be applied at corners when needed.
     GridSize _cellSpan;                  //!< Number of grid cells to span the pixel image onto.
     ImageSize _cellSize;                 //!< number of pixels in X and Y dimension one grid cell has to fill.
+    ImageLayer _layer;                   //!< Layer for z-ordering relative to text.
+    PixelCoordinate _imageOffset;        //!< Pixel offset into the source image for sub-rectangle rendering.
+    ImageSize _imageSubSize;             //!< Sub-region pixel size (zero means full image).
 };
 
 std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,
@@ -171,7 +192,8 @@ std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,
                                            ImageResize resizePolicy,
                                            RGBAColor defaultColor,
                                            GridSize cellSpan,
-                                           ImageSize cellSize);
+                                           ImageSize cellSize,
+                                           ImageLayer layer = ImageLayer::Replace);
 
 /// An ImageFragment holds a graphical image that ocupies one full grid cell.
 class ImageFragment
@@ -214,6 +236,17 @@ namespace detail
 }
 using ImageFragmentId = boxed::boxed<uint16_t, detail::ImageFragmentId>;
 
+/// Returns true if the image fragment should be preserved when text is written to a cell.
+///
+/// Below and Above layer images coexist with text; only Replace layer images are destroyed.
+[[nodiscard]] inline bool shouldPreserveImageOnTextWrite(
+    std::shared_ptr<ImageFragment> const& fragment) noexcept
+{
+    if (!fragment)
+        return false;
+    return fragment->rasterizedImage().layer() != ImageLayer::Replace;
+}
+
 inline bool operator==(ImageFragment const& a, ImageFragment const& b) noexcept
 {
     return a.rasterizedImage().image().id() == b.rasterizedImage().image().id() && a.offset() == b.offset();
@@ -246,7 +279,7 @@ class ImagePool
 
     // named image access
     //
-    void link(std::string const& name, std::shared_ptr<Image const> imageRef);
+    void link(std::string name, std::shared_ptr<Image const> imageRef);
     [[nodiscard]] std::shared_ptr<Image const> findImageByName(std::string const& name) const noexcept;
     void unlink(std::string const& name);
 
@@ -279,6 +312,7 @@ struct std::formatter<vtbackend::ImageFormat>: formatter<std::string_view>
         {
             case vtbackend::ImageFormat::RGB: name = "RGB"; break;
             case vtbackend::ImageFormat::RGBA: name = "RGBA"; break;
+            case vtbackend::ImageFormat::PNG: name = "PNG"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
@@ -314,6 +348,22 @@ struct std::formatter<std::shared_ptr<vtbackend::Image const>>: std::formatter<s
                                imageRef.size().height.value);
         }
         return formatter<std::string>::format(text, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::ImageLayer>: formatter<std::string_view>
+{
+    auto format(vtbackend::ImageLayer value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::ImageLayer::Below: name = "Below"; break;
+            case vtbackend::ImageLayer::Replace: name = "Replace"; break;
+            case vtbackend::ImageLayer::Above: name = "Above"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
     }
 };
 

@@ -47,6 +47,7 @@
 #include <mutex>
 #include <numbers>
 #include <optional>
+#include <span>
 #include <stack>
 #include <string_view>
 #include <utility>
@@ -1116,6 +1117,19 @@ class Terminal
     ImagePool& imagePool() noexcept { return _imagePool; }
     ImagePool const& imagePool() const noexcept { return _imagePool; }
 
+    /// Callback for decoding encoded images (e.g. PNG) to RGBA pixel data.
+    ///
+    /// @param format   The source image format.
+    /// @param data     The raw encoded image data.
+    /// @param size     [in/out] For PNG: the size is extracted during decoding.
+    ///                 For RGB/RGBA: the size is already known.
+    /// @returns Decoded RGBA pixel data, or std::nullopt on failure.
+    using ImageDecoderCallback = std::function<std::optional<Image::Data>(
+        ImageFormat format, std::span<uint8_t const> data, ImageSize& size)>;
+
+    void setImageDecoder(ImageDecoderCallback decoder) noexcept { _imageDecoder = std::move(decoder); }
+    ImageDecoderCallback const& imageDecoder() const noexcept { return _imageDecoder; }
+
     bool syncWindowTitleWithHostWritableStatusDisplay() const noexcept
     {
         return _syncWindowTitleWithHostWritableStatusDisplay;
@@ -1411,6 +1425,7 @@ class Terminal
     ImageSize _effectiveImageCanvasSize;
     std::shared_ptr<SixelColorPalette> _sixelColorPalette;
     ImagePool _imagePool;
+    ImageDecoderCallback _imageDecoder;
 
     std::vector<ColumnOffset> _tabs;
 

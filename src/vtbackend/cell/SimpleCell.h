@@ -113,6 +113,8 @@ inline void SimpleCell::write(GraphicsAttributes sgr, char32_t codepoint, uint8_
     _graphicsAttributes = sgr;
     _codepoints.clear();
     _codepoints.push_back(codepoint);
+    if (!shouldPreserveImageOnTextWrite(_imageFragment))
+        _imageFragment = {};
 
     _width = width;
 }
@@ -125,6 +127,8 @@ inline void SimpleCell::write(GraphicsAttributes sgr,
     _graphicsAttributes = sgr;
     _codepoints.clear();
     _codepoints.push_back(codepoint);
+    if (!shouldPreserveImageOnTextWrite(_imageFragment))
+        _imageFragment = {};
     _width = width;
     _hyperlink = hyperlink;
 }
@@ -157,7 +161,8 @@ inline size_t SimpleCell::codepointCount() const noexcept
 inline void SimpleCell::setCharacter(char32_t codepoint)
 {
     _codepoints.clear();
-    _imageFragment = {};
+    if (!shouldPreserveImageOnTextWrite(_imageFragment))
+        _imageFragment = {};
     if (codepoint)
     {
         _codepoints.push_back(codepoint);

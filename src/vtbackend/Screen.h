@@ -302,6 +302,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     std::shared_ptr<Image const> uploadImage(ImageFormat format, ImageSize imageSize, Image::Data&& pixmap);
 
+    void uploadImage(std::string name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap);
+
     /**
      * Renders an image onto the screen.
      *
@@ -322,7 +324,32 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
                      ImageSize imageSize,
                      ImageAlignment alignmentPolicy,
                      ImageResize resizePolicy,
-                     bool autoScroll);
+                     bool autoScroll,
+                     bool updateCursor = true,
+                     ImageLayer layer = ImageLayer::Replace);
+
+    void renderImageByName(std::string const& name,
+                           GridSize gridSize,
+                           PixelCoordinate imageOffset,
+                           ImageSize imageSize,
+                           ImageAlignment alignmentPolicy,
+                           ImageResize resizePolicy,
+                           bool autoScroll,
+                           bool requestStatus,
+                           bool updateCursor = false,
+                           ImageLayer layer = ImageLayer::Replace);
+
+    void renderImage(ImageFormat format,
+                     ImageSize imageSize,
+                     Image::Data&& pixmap,
+                     GridSize gridSize,
+                     ImageAlignment alignmentPolicy,
+                     ImageResize resizePolicy,
+                     bool autoScroll,
+                     bool updateCursor = false,
+                     ImageLayer layer = ImageLayer::Replace);
+
+    void releaseImage(std::string const& name);
 
     void inspect(std::string const& message, std::ostream& os) const override;
 
@@ -657,6 +684,12 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
+
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageUpload(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageRender(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageRelease(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageOneshot(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageQuery(Sequence const& seq);
 
     void processShellIntegration(Sequence const& seq);
 
