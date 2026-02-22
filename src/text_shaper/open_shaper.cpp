@@ -19,7 +19,9 @@
 #include FT_BITMAP_H
 #include FT_ERRORS_H
 #include FT_FREETYPE_H
+#include FT_GLYPH_H
 #include FT_LCD_FILTER_H
+#include FT_STROKER_H
 
 #if __has_include(<fontconfig/fontconfig.h>)
     #include <fontconfig/fontconfig.h>
@@ -1014,11 +1016,196 @@ void open_shaper::shape(font_key font,
     replaceMissingGlyphs(fontInfo.ftFace.get(), result);
 }
 
-optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode mode)
+/// Rasterizes a glyph with a pre-computed FT_Stroker outline into a two-channel RGBA bitmap.
+///
+/// The fill glyph is stored in the R channel, the outline in the G channel, B=0, A=max(R,G).
+/// This allows the fragment shader to composite fill color over outline color at render time
+/// without re-rasterization when colors change.
+///
+/// @param ftLib           FreeType library handle.
+/// @param ftFace          FreeType font face (already sized).
+/// @param glyph           glyph key for logging.
+/// @param glyphIndex      FreeType glyph index.
+/// @param outlineThickness outline radius in pixel units.
+///
+/// @return rasterized_glyph with bitmap_format::outlined, or nullopt on failure.
+optional<rasterized_glyph> rasterizeOutlined(
+    FT_Library ftLib, FT_Face ftFace, glyph_key const& glyph, glyph_index glyphIndex, float outlineThickness)
+{
+    // Load the glyph outline (vector, not bitmap).
+    auto ec = FT_Load_Glyph(ftFace, glyphIndex.value, FT_LOAD_NO_BITMAP);
+    if (ec != FT_Err_Ok)
+    {
+        rasterizerLog()("rasterizeOutlined: FT_Load_Glyph failed for {}.", glyph);
+        return nullopt;
+    }
+
+    // FT_Stroker requires vector outlines. Bail if the glyph is already a bitmap.
+    if (ftFace->glyph->format != FT_GLYPH_FORMAT_OUTLINE)
+    {
+        rasterizerLog()("rasterizeOutlined: glyph {} is not an outline glyph, skipping stroke.", glyph);
+        return nullopt;
+    }
+
+    // Extract two copies of the glyph: one for fill, one for outline.
+    FT_Glyph fillGlyph = nullptr;
+    FT_Glyph outlineGlyph = nullptr;
+    ec = FT_Get_Glyph(ftFace->glyph, &fillGlyph);
+    if (ec != FT_Err_Ok)
+        return nullopt;
+
+    ec = FT_Get_Glyph(ftFace->glyph, &outlineGlyph);
+    if (ec != FT_Err_Ok)
+    {
+        FT_Done_Glyph(fillGlyph);
+        return nullopt;
+    }
+
+    // Rasterize the fill glyph (grayscale).
+    // Outlined glyphs always use FT_RENDER_MODE_NORMAL regardless of the configured
+    // render_mode because the fill and outline are composited as separate alpha channels
+    // in the shader. Sub-pixel (LCD) rendering is not applicable to this two-channel format.
+    ec = FT_Glyph_To_Bitmap(&fillGlyph, FT_RENDER_MODE_NORMAL, nullptr, true);
+    if (ec != FT_Err_Ok)
+    {
+        FT_Done_Glyph(fillGlyph);
+        FT_Done_Glyph(outlineGlyph);
+        return nullopt;
+    }
+
+    // Create the stroker and apply it to the outline glyph.
+    FT_Stroker stroker = nullptr;
+    ec = FT_Stroker_New(ftLib, &stroker);
+    if (ec != FT_Err_Ok)
+    {
+        rasterizerLog()("rasterizeOutlined: FT_Stroker_New failed for {} (ec={}).", glyph, ec);
+        FT_Done_Glyph(fillGlyph);
+        FT_Done_Glyph(outlineGlyph);
+        return nullopt;
+    }
+    FT_Stroker_Set(stroker,
+                   static_cast<FT_Fixed>(outlineThickness * 64.0f), // 26.6 fixed-point
+                   FT_STROKER_LINECAP_ROUND,
+                   FT_STROKER_LINEJOIN_ROUND,
+                   0);
+
+    // Apply the full stroke (both inside and outside borders).
+    // Using FT_Glyph_Stroke rather than FT_Glyph_StrokeBorder for robustness:
+    // the full stroke always produces a well-formed closed outline regardless of
+    // the glyph's winding direction. The overlap with the fill area is harmless
+    // because the shader composites fill OVER outline.
+    ec = FT_Glyph_Stroke(&outlineGlyph, stroker, true /*destroy*/);
+    FT_Stroker_Done(stroker);
+    if (ec != FT_Err_Ok)
+    {
+        rasterizerLog()("rasterizeOutlined: FT_Glyph_Stroke failed for {} (ec={}).", glyph, ec);
+        FT_Done_Glyph(fillGlyph);
+        FT_Done_Glyph(outlineGlyph);
+        return nullopt;
+    }
+
+    // Rasterize the stroked outline glyph (grayscale).
+    ec = FT_Glyph_To_Bitmap(&outlineGlyph, FT_RENDER_MODE_NORMAL, nullptr, true);
+    if (ec != FT_Err_Ok)
+    {
+        rasterizerLog()("rasterizeOutlined: FT_Glyph_To_Bitmap failed for outline of {} (ec={}).", glyph, ec);
+        FT_Done_Glyph(fillGlyph);
+        FT_Done_Glyph(outlineGlyph);
+        return nullopt;
+    }
+
+    auto* fillBitmapGlyph = reinterpret_cast<FT_BitmapGlyph>(fillGlyph);
+    auto* outlineBitmapGlyph = reinterpret_cast<FT_BitmapGlyph>(outlineGlyph);
+
+    auto const& fillBmp = fillBitmapGlyph->bitmap;
+    auto const& outlineBmp = outlineBitmapGlyph->bitmap;
+
+    // Guard against empty outline bitmap (degenerate glyph or stroker failure).
+    if (outlineBmp.width == 0 || outlineBmp.rows == 0 || outlineBmp.buffer == nullptr)
+    {
+        rasterizerLog()("rasterizeOutlined: outline bitmap is empty for {}.", glyph);
+        FT_Done_Glyph(fillGlyph);
+        FT_Done_Glyph(outlineGlyph);
+        return nullopt;
+    }
+
+    // The outline bitmap is larger than the fill (extends outward).
+    // Compute the offset of the fill within the outline bitmap using their bearings.
+    auto const fillOffsetX = fillBitmapGlyph->left - outlineBitmapGlyph->left;
+    auto const fillOffsetY = outlineBitmapGlyph->top - fillBitmapGlyph->top;
+
+    auto const outWidth = static_cast<int>(outlineBmp.width);
+    auto const outHeight = static_cast<int>(outlineBmp.rows);
+
+    // Composite into RGBA: R=fill, G=outline, B=0, A=max(fill,outline)
+    auto output = rasterized_glyph {};
+    output.index = glyphIndex;
+    output.bitmapSize.width = vtbackend::Width::cast_from(outWidth);
+    output.bitmapSize.height = vtbackend::Height::cast_from(outHeight);
+    output.position.x = outlineBitmapGlyph->left;
+    output.position.y = outlineBitmapGlyph->top;
+    output.format = bitmap_format::outlined;
+    output.bitmap.resize(static_cast<size_t>(outWidth) * static_cast<size_t>(outHeight) * 4);
+
+    // FT_Bitmap::pitch is signed: positive means rows are top-down, negative means bottom-up.
+    // In both cases, buffer points to the first scanline (top row) and row * pitch + col
+    // correctly addresses each pixel regardless of pitch sign.
+    auto const outPitch = static_cast<int>(outlineBmp.pitch);
+    auto const fillPitch = static_cast<int>(fillBmp.pitch);
+    auto const fillW = static_cast<int>(fillBmp.width);
+    auto const fillH = static_cast<int>(fillBmp.rows);
+
+    for (auto const row: iota(0, outHeight))
+    {
+        for (auto const col: iota(0, outWidth))
+        {
+            auto const pixelIdx = static_cast<size_t>((row * outWidth) + col) * 4;
+
+            // Outline alpha from G channel
+            auto const outlineAlpha = outlineBmp.buffer[row * outPitch + col];
+
+            // Fill alpha from R channel (offset into the outline bitmap)
+            auto const fillRow = row - fillOffsetY;
+            auto const fillCol = col - fillOffsetX;
+            uint8_t fillAlpha = 0;
+            if (fillRow >= 0 && fillRow < fillH && fillCol >= 0 && fillCol < fillW)
+                fillAlpha = fillBmp.buffer[fillRow * fillPitch + fillCol];
+
+            output.bitmap[pixelIdx + 0] = fillAlpha;                    // R = fill
+            output.bitmap[pixelIdx + 1] = outlineAlpha;                 // G = outline
+            output.bitmap[pixelIdx + 2] = 0;                            // B = unused
+            output.bitmap[pixelIdx + 3] = max(fillAlpha, outlineAlpha); // A = max
+        }
+    }
+
+    FT_Done_Glyph(fillGlyph);
+    FT_Done_Glyph(outlineGlyph);
+
+    Ensures(output.valid());
+
+    if (rasterizerLog)
+        rasterizerLog()("rasterizeOutlined {} to {}", glyph, output);
+
+    return output;
+}
+
+optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode mode, float outlineThickness)
 {
     auto const font = glyph.font;
     auto* ftFace = _d->fontKeyToHbFontInfoMapping.at(font).ftFace.get();
     auto const glyphIndex = glyph.index;
+
+    // When outline is requested, try the FT_Stroker path first.
+    // This requires vector outlines; bitmap/emoji fonts fall through to normal rendering.
+    if (outlineThickness > 0.0f && !FT_HAS_COLOR(ftFace))
+    {
+        if (auto result = rasterizeOutlined(_d->ft, ftFace, glyph, glyphIndex, outlineThickness))
+            return result;
+        rasterizerLog()("WARNING: rasterizeOutlined failed for glyph {}, falling back to normal rendering.",
+                        glyph);
+        // Fall through to normal rendering if stroking fails (e.g., bitmap-only font).
+    }
+
     auto const flags = static_cast<FT_Int32>(FT_HAS_COLOR(ftFace) ? FT_LOAD_COLOR : ftRenderFlag(mode));
 
     FT_Error ec = FT_Load_Glyph(ftFace, glyphIndex.value, flags);
@@ -1116,12 +1303,6 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
         }
         case FT_PIXEL_MODE_LCD: {
             auto const& ftBitmap = ftFace->glyph->bitmap;
-            // rasterizerLog()("Rasterizing using pixel mode: {}, rows={}, width={}, pitch={}, mode={}",
-            //                 "lcd",
-            //                 ftBitmap.rows,
-            //                 ftBitmap.width / 3,
-            //                 ftBitmap.pitch,
-            //                 ftBitmap.pixel_mode);
 
             output.format = bitmap_format::rgb; // LCD
             output.bitmap.resize(static_cast<size_t>(ftBitmap.width) * static_cast<size_t>(ftBitmap.rows));

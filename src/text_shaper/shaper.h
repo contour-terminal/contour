@@ -32,9 +32,10 @@ auto const inline textShapingLog = logstore::category("font.textshaping", "Logs 
 // NOLINTBEGIN(readability-identifier-naming)
 enum class bitmap_format : uint8_t
 {
-    alpha_mask,
-    rgb,
-    rgba
+    alpha_mask, ///< 1 byte/pixel (R = coverage)
+    rgb,        ///< 3 bytes/pixel (LCD subpixel)
+    rgba,       ///< 4 bytes/pixel (color emoji/images)
+    outlined,   ///< 4 bytes/pixel RGBA (R=fill alpha, G=outline alpha, B=0, A=max)
 };
 // NOLINTEND(readability-identifier-naming)
 
@@ -43,6 +44,7 @@ constexpr size_t pixel_size(bitmap_format format) noexcept
     switch (format)
     {
         case bitmap_format::rgba: return 4;
+        case bitmap_format::outlined: return 4;
         case bitmap_format::rgb: return 3;
         case bitmap_format::alpha_mask: return 1;
     }
@@ -148,10 +150,13 @@ class shaper
     /**
      * Rasterizes (renders) the glyph using the given render mode.
      *
-     * @param glyph glyph identifier.
-     * @param mode  render technique to use.
+     * @param glyph             glyph identifier.
+     * @param mode              render technique to use.
+     * @param outlineThickness  outline thickness in pixel units (0 = no outline).
      */
-    [[nodiscard]] virtual std::optional<rasterized_glyph> rasterize(glyph_key glyph, render_mode mode) = 0;
+    [[nodiscard]] virtual std::optional<rasterized_glyph> rasterize(glyph_key glyph,
+                                                                    render_mode mode,
+                                                                    float outlineThickness = 0.0f) = 0;
 };
 
 } // end namespace text
@@ -168,6 +173,7 @@ struct std::formatter<text::bitmap_format>: std::formatter<std::string_view>
             case text::bitmap_format::alpha_mask: name = "alpha_mask"; break;
             case text::bitmap_format::rgb: name = "rgb"; break;
             case text::bitmap_format::rgba: name = "rgba"; break;
+            case text::bitmap_format::outlined: name = "outlined"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

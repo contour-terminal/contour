@@ -87,6 +87,8 @@ class OpenGLRenderer final:
 
     void inspect(std::ostream& output) const override;
 
+    void setTextOutline(float thickness, vtbackend::RGBAColor color) override;
+
     float uptime(std::chrono::steady_clock::time_point now) noexcept
     {
         using namespace std::chrono;
@@ -174,6 +176,9 @@ class OpenGLRenderer final:
     int _textProjectionLocation = -1;
     int _textTextureAtlasLocation = -1;
     int _textTimeLocation = -1;
+    int _textOutlineColorLocation = -1;
+
+    vtbackend::RGBAColor _textOutlineColor { 0x00, 0x00, 0x00, 0xFF };
 
     // private data members for rendering textures
     //

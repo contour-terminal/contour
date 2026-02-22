@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vtbackend/Color.h>
+
 #include <text_shaper/font.h>
 
 #include <crispy/flags.h>
@@ -7,6 +9,18 @@
 
 namespace vtrasterizer
 {
+
+/// Configuration for text outline rendering to improve readability on transparent backgrounds.
+struct TextOutlineConfig
+{
+    /// Outline thickness in texel units (0 = disabled).
+    float thickness = 0.0f;
+
+    /// Outline color (default: opaque black).
+    vtbackend::RGBAColor color { 0x00, 0x00, 0x00, 0xFF };
+
+    constexpr auto operator<=>(TextOutlineConfig const&) const noexcept = default;
+};
 
 enum class TextShapingEngine : uint8_t
 {
@@ -41,7 +55,8 @@ struct FontDescriptions
     FontLocatorEngine fontLocator = FontLocatorEngine::Native;
     bool builtinBoxDrawing = true;
     int maxFallbackCount =
-        DefaultMaxFallbackCount; ///< Maximum fallback fonts per key. -1 = unlimited, 0 = disabled.
+        DefaultMaxFallbackCount;   ///< Maximum fallback fonts per key. -1 = unlimited, 0 = disabled.
+    TextOutlineConfig textOutline; ///< Text outline for readability on transparent backgrounds.
 };
 
 inline bool operator==(FontDescriptions const& a, FontDescriptions const& b) noexcept
@@ -59,7 +74,8 @@ inline bool operator==(FontDescriptions const& a, FontDescriptions const& b) noe
         && a.textShapingEngine == b.textShapingEngine
         && a.fontLocator == b.fontLocator
         && a.builtinBoxDrawing == b.builtinBoxDrawing
-        && a.maxFallbackCount == b.maxFallbackCount;
+        && a.maxFallbackCount == b.maxFallbackCount
+        && a.textOutline == b.textOutline;
     // clang-format on
 }
 

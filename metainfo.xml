@@ -145,6 +145,7 @@
           <li>Adds Kitty OSC 99 desktop notification protocol with D-Bus backend on Linux, supporting structured metadata, chunked payloads, base64 encoding, urgency levels, display occasion filtering, bidirectional close/activation events, and query/alive responses</li>
           <li>Adds complete DECCIR (Cursor Information Report) response including character set designations, GL/GR mappings, and wrap-pending state (#97)</li>
           <li>Adds environment variable expansion (${VAR_NAME} syntax) in configuration file paths for cross-platform config reuse (#1278)</li>
+          <li>Adds configurable text outline rendering to improve glyph readability on transparent or low-opacity backgrounds (#1895)</li>
         </ul>
       </description>
     </release>

@@ -303,6 +303,7 @@ void OpenGLRenderer::initialize()
     CHECKED_GL(_textProjectionLocation = _textShader->uniformLocation("vs_projection")); // NOLINT(cppcoreguidelines-prefer-member-initializer)
     CHECKED_GL(_textTextureAtlasLocation = _textShader->uniformLocation("fs_textureAtlas"));
     CHECKED_GL(_textTimeLocation = _textShader->uniformLocation("u_time")); // NOLINT(cppcoreguidelines-prefer-member-initializer)
+    CHECKED_GL(_textOutlineColorLocation = _textShader->uniformLocation("u_textOutlineColor"));
     CHECKED_GL(_rectShader = createShader(_rectShaderConfig));
     CHECKED_GL(_rectProjectionLocation = _rectShader->uniformLocation("u_projection")); // NOLINT(cppcoreguidelines-prefer-member-initializer)
     CHECKED_GL(_rectTimeLocation = _rectShader->uniformLocation("u_time")); // NOLINT(cppcoreguidelines-prefer-member-initializer)
@@ -319,6 +320,8 @@ void OpenGLRenderer::initialize()
         auto const textureAtlasWidth = unbox<GLfloat>(_textureAtlas.textureSize.width);
         CHECKED_GL(_textShader->setUniformValue("pixel_x", 1.0f / textureAtlasWidth));
         CHECKED_GL(_textShader->setUniformValue(_textTextureAtlasLocation, 0)); // GL_TEXTURE0?
+        auto const [cr, cg, cb, ca] = atlas::normalize(_textOutlineColor);
+        CHECKED_GL(_textShader->setUniformValue(_textOutlineColorLocation, QVector4D(cr, cg, cb, ca)));
     });
 
     initializeRectRendering();
@@ -653,6 +656,12 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     stubData.fill(qRgba(0x00, 0xA0, 0x00, 0xC0));
     _textureAtlas.gpuTexture.setData(stubData);
 
+    // Update texel size uniforms for the new atlas dimensions.
+    bound(*_textShader, [&]() {
+        auto const w = unbox<GLfloat>(param.size.width);
+        CHECKED_GL(_textShader->setUniformValue("pixel_x", 1.0f / w));
+    });
+
     displayLog()(
         "GL configure atlas: {} {} GL texture Id {}", param.size, param.properties.format, textureAtlasId());
 }
@@ -810,6 +819,19 @@ pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
     return { imageSize, buffer };
 }
 // }}}
+
+void OpenGLRenderer::setTextOutline(float /*thickness*/, vtbackend::RGBAColor color)
+{
+    _textOutlineColor = color;
+
+    if (!_initialized || !_textShader)
+        return;
+
+    bound(*_textShader, [&]() {
+        auto const [cr, cg, cb, ca] = atlas::normalize(_textOutlineColor);
+        CHECKED_GL(_textShader->setUniformValue(_textOutlineColorLocation, QVector4D(cr, cg, cb, ca)));
+    });
+}
 
 void OpenGLRenderer::inspect(std::ostream& /*output*/) const
 {

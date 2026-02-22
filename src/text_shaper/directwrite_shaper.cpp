@@ -460,7 +460,9 @@ void directwrite_shaper::shape(font_key _font,
     }
 }
 
-std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, render_mode _mode)
+std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph,
+                                                              render_mode _mode,
+                                                              float /*outlineThickness*/)
 {
     DxFontInfo const& fontInfo = d->fonts.at(_glyph.font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace;

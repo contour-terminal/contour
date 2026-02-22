@@ -119,6 +119,7 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::
     switch (bitmap.format)
     {
         case bitmap_format::rgba:
+        case bitmap_format::outlined:
             dest = scaleDown<4>(bitmap.bitmap, bitmap.bitmapSize, newSize, ratio);
             break;
         case bitmap_format::rgb: //

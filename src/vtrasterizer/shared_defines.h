@@ -17,5 +17,8 @@
 // Render an LCD-subpixel antialiased glyph (advanced algorithm)
 #define FRAGMENT_SELECTOR_GLYPH_LCD 3
 
+// Render a glyph with pre-rasterized outline (R=fill, G=outline, B=0, A=max)
+#define FRAGMENT_SELECTOR_GLYPH_OUTLINED 4
+
 // NOLINTEND(modernize-macro-to-enum)
 // NOLINTEND(cppcoreguidelines-macro-to-enum)

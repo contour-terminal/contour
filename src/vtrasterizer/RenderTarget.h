@@ -135,6 +135,16 @@ class RenderTarget
     virtual std::optional<vtrasterizer::AtlasTextureScreenshot> readAtlas() = 0;
 
     virtual void inspect(std::ostream& output) const = 0;
+
+    /// Sets the text outline rendering parameters.
+    ///
+    /// @param thickness  Outline thickness in texel units (0 = disabled).
+    /// @param color      Outline color (RGBA).
+    virtual void setTextOutline(float thickness, vtbackend::RGBAColor color)
+    {
+        (void) thickness;
+        (void) color;
+    }
 };
 
 /**

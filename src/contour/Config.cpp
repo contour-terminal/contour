@@ -1402,6 +1402,37 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         where.bold.strictSpacing = strictSpacing;
         where.italic.strictSpacing = strictSpacing;
         where.boldItalic.strictSpacing = strictSpacing;
+
+        loadFromEntry(child, "text_outline", where.textOutline);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::TextOutlineConfig& where)
+{
+    if (auto const child = node[entry])
+    {
+        if (child.IsMap())
+        {
+            if (auto const thicknessNode = child["thickness"])
+            {
+                where.thickness = std::clamp(thicknessNode.as<float>(0.0f), 0.0f, 10.0f);
+                logger()("Loading text_outline.thickness: {}", where.thickness);
+            }
+            if (auto const colorNode = child["color"])
+            {
+                auto const colorStr = colorNode.as<std::string>();
+                where.color = vtbackend::RGBAColor(vtbackend::RGBColor(colorStr));
+                logger()("Loading text_outline.color: {}", colorStr);
+            }
+        }
+        else if (child.IsScalar())
+        {
+            // Simple form: text_outline: 1.0 (thickness only)
+            where.thickness = std::clamp(child.as<float>(0.0f), 0.0f, 10.0f);
+            logger()("Loading text_outline (scalar): {}", where.thickness);
+        }
     }
 }
 

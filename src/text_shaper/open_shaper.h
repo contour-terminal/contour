@@ -42,7 +42,9 @@ class open_shaper: public shaper
 
     [[nodiscard]] std::optional<glyph_position> shape(font_key font, char32_t codepoint) override;
 
-    [[nodiscard]] std::optional<rasterized_glyph> rasterize(glyph_key glyph, render_mode mode) override;
+    [[nodiscard]] std::optional<rasterized_glyph> rasterize(glyph_key glyph,
+                                                            render_mode mode,
+                                                            float outlineThickness = 0.0f) override;
 
   private:
     struct private_open_shaper;

@@ -199,6 +199,7 @@ namespace
             case text::bitmap_format::alpha_mask: return atlas::Format::Red;
             case text::bitmap_format::rgb: return atlas::Format::RGB;
             case text::bitmap_format::rgba: return atlas::Format::RGBA;
+            case text::bitmap_format::outlined: return atlas::Format::RGBA;
         }
 
         (void) SoftRequire(false);
@@ -214,6 +215,7 @@ namespace
             case text::bitmap_format::alpha_mask: return FRAGMENT_SELECTOR_GLYPH_ALPHA;
             case text::bitmap_format::rgb: return lcdShaderId;
             case text::bitmap_format::rgba: return FRAGMENT_SELECTOR_IMAGE_BGRA;
+            case text::bitmap_format::outlined: return FRAGMENT_SELECTOR_GLYPH_OUTLINED;
         }
         (void) SoftRequire(false);
         return FRAGMENT_SELECTOR_IMAGE_BGRA;
@@ -780,7 +782,8 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                                          unicode::PresentationStyle presentation)
     -> optional<TextureAtlas::TileCreateData>
 {
-    auto theGlyphOpt = _textShaper.rasterize(glyphKey, _fontDescriptions.renderMode);
+    auto theGlyphOpt = _textShaper.rasterize(
+        glyphKey, _fontDescriptions.renderMode, _fontDescriptions.textOutline.thickness);
     if (!theGlyphOpt.has_value())
         return nullopt;
 
