@@ -526,34 +526,6 @@ constexpr pair<unsigned, char> mapKey(Key key) noexcept
     crispy::unreachable();
 }
 
-constexpr bool isModifierKey(Key key) noexcept
-{
-    // clang-format off
-    switch (key)
-    {
-        case Key::LeftShift:
-        case Key::LeftControl:
-        case Key::LeftAlt:
-        case Key::LeftSuper:
-        case Key::LeftHyper:
-        case Key::LeftMeta:
-        case Key::RightShift:
-        case Key::RightControl:
-        case Key::RightAlt:
-        case Key::RightSuper:
-        case Key::RightHyper:
-        case Key::RightMeta:
-        case Key::IsoLevel3Shift:
-        case Key::IsoLevel5Shift:
-        case Key::CapsLock:
-        case Key::NumLock:
-            return true;
-        default:
-            return false;
-    }
-    // clang-format on
-}
-
 bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
     if (!enabled(eventType))
