@@ -47,6 +47,7 @@
 #include <mutex>
 #include <numbers>
 #include <optional>
+#include <span>
 #include <stack>
 #include <string_view>
 #include <utility>
@@ -475,6 +476,26 @@ class Terminal
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
     void sendPaste(std::string_view text); // Sends verbatim text in bracketed mode to application.
+
+    /// Sends binary data with a given MIME type via DCS binary paste if mode is enabled.
+    void sendBinaryPaste(std::string_view mimeType, std::span<uint8_t const> binaryData);
+
+    /// Returns true if binary paste mode (DECMode 2033) is currently active.
+    [[nodiscard]] bool isBinaryPasteModeEnabled() const noexcept;
+
+    /// Sets the application's MIME type preferences for binary paste mode.
+    /// Types are listed in priority order. On paste, the terminal delivers the
+    /// highest-priority match from the system clipboard.
+    /// An empty list resets to terminal defaults.
+    void setBinaryPasteMimePreferences(std::vector<std::string> preferences);
+
+    /// Returns the application's MIME type preferences, or an empty span if using defaults.
+    [[nodiscard]] std::span<std::string const> binaryPasteMimePreferences() const noexcept;
+
+    /// Default MIME types used when no application preferences are configured.
+    static constexpr std::array<std::string_view, 5> DefaultBinaryPasteMimeTypes = {
+        "image/png", "image/jpeg", "image/gif", "image/bmp", "image/svg+xml"
+    };
     void sendPasteFromClipboard(unsigned count, bool strip)
     {
         _eventListener.pasteFromClipboard(count, strip);
@@ -928,6 +949,7 @@ class Terminal
     void requestWindowResize(ImageSize);
     void setApplicationkeypadMode(bool enabled);
     void setBracketedPaste(bool enabled);
+    void setBinaryPaste(bool enabled);
     void setCursorStyle(CursorDisplay display, CursorShape shape);
     void setCursorVisibility(bool visible);
     void setGenerateFocusEvents(bool enabled);
@@ -1479,6 +1501,7 @@ class Terminal
     uint64_t _instructionCounter = 0;
 
     InputGenerator _inputGenerator {};
+    std::vector<std::string> _binaryPasteMimePreferences;
 
     ViCommands _viCommands;
     ViInputHandler _inputHandler;

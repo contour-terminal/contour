@@ -657,6 +657,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookBinaryPaste(Sequence const& seq);
 
     void processShellIntegration(Sequence const& seq);
 

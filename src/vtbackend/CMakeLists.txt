@@ -125,6 +125,7 @@ if(LIBTERMINAL_TESTING)
     enable_testing()
     add_executable(vtbackend_test
         Animation_test.cpp
+        BinaryPaste_test.cpp
         Capabilities_test.cpp
         DesktopNotification_test.cpp
         Color_test.cpp

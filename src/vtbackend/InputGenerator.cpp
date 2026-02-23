@@ -4,6 +4,7 @@
 #include <vtbackend/logging.h>
 
 #include <crispy/assert.h>
+#include <crispy/base64.h>
 #include <crispy/utils.h>
 
 #include <libunicode/case_mapping.h>
@@ -594,6 +595,7 @@ void InputGenerator::reset()
 {
     _keyboardInputGenerator.reset();
     _bracketedPaste = false;
+    _binaryPaste = false;
     _generateFocusEvents = false;
     _mouseProtocol = std::nullopt;
     _mouseTransport = MouseTransport::Default;
@@ -691,6 +693,19 @@ void InputGenerator::generatePaste(std::string_view const& text)
 
     if (_bracketedPaste)
         append("\033[201~"sv);
+}
+
+void InputGenerator::generateBinaryPaste(std::string_view mimeType, std::span<uint8_t const> binaryData)
+{
+    inputLog()("Sending binary paste: {} bytes, MIME: {}.", binaryData.size(), mimeType);
+
+    if (binaryData.empty())
+        return;
+
+    auto const encoded = crispy::base64::encode(binaryData.begin(), binaryData.end());
+    // DCS 2033 ; <size> b d <mime-type> ; <base64-data> ST
+    // Sub-command 'd' = data delivery
+    append(std::format("\033P2033;{}bd{};{}\033\\", binaryData.size(), mimeType, encoded));
 }
 
 inline bool InputGenerator::append(std::string_view sequence)

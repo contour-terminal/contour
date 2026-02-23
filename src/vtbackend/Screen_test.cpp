@@ -6,6 +6,7 @@
 #include <vtbackend/primitives.h>
 #include <vtbackend/test_helpers.h>
 
+#include <crispy/base64.h>
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 

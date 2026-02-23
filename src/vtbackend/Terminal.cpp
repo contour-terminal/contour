@@ -2152,6 +2152,37 @@ void Terminal::setBracketedPaste(bool enabled)
     _inputGenerator.setBracketedPaste(enabled);
 }
 
+void Terminal::setBinaryPaste(bool enabled)
+{
+    _inputGenerator.setBinaryPaste(enabled);
+    if (!enabled)
+        _binaryPasteMimePreferences.clear();
+}
+
+bool Terminal::isBinaryPasteModeEnabled() const noexcept
+{
+    return isModeEnabled(DECMode::BinaryPaste);
+}
+
+void Terminal::setBinaryPasteMimePreferences(std::vector<std::string> preferences)
+{
+    _binaryPasteMimePreferences = std::move(preferences);
+}
+
+std::span<std::string const> Terminal::binaryPasteMimePreferences() const noexcept
+{
+    return _binaryPasteMimePreferences;
+}
+
+void Terminal::sendBinaryPaste(std::string_view mimeType, std::span<uint8_t const> binaryData)
+{
+    if (!allowInput())
+        return;
+
+    _inputGenerator.generateBinaryPaste(mimeType, binaryData);
+    flushInput();
+}
+
 void Terminal::setModifyOtherKeys(int mode)
 {
     _inputGenerator.setModifyOtherKeys(mode);
@@ -2365,6 +2396,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             }
             break;
         case DECMode::BracketedPaste: setBracketedPaste(enable); break;
+        case DECMode::BinaryPaste: setBinaryPaste(enable); break;
         case DECMode::MouseSGR:
             if (enable)
                 setMouseTransport(MouseTransport::SGR);
@@ -2507,6 +2539,9 @@ void Terminal::softReset()
     // TODO: DECSASD (Select active status display)
     // TODO: DECKPM (Keyboard position mode)
     // TODO: DECPCTERM (PCTerm mode)
+
+    setMode(DECMode::BinaryPaste, false);
+    _binaryPasteMimePreferences.clear();
 }
 
 void Terminal::setGraphicsRendition(GraphicsRendition rendition)
@@ -2559,6 +2594,7 @@ void Terminal::hardReset()
 
     _imagePool.clear();
     _tabs.clear();
+    _binaryPasteMimePreferences.clear();
 
     resetColorPalette();
 
@@ -3267,6 +3303,7 @@ std::string to_string(DECMode mode)
         case DECMode::TextReflow: return "TextReflow";
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
+        case DECMode::BinaryPaste: return "BinaryPaste";
     }
     return std::format("({})", static_cast<unsigned>(mode));
 }

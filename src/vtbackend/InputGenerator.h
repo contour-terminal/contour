@@ -9,9 +9,11 @@
 
 #include <libunicode/convert.h>
 
+#include <cstdint>
 #include <format>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -458,6 +460,9 @@ class InputGenerator
     [[nodiscard]] bool bracketedPaste() const noexcept { return _bracketedPaste; }
     void setBracketedPaste(bool enable) { _bracketedPaste = enable; }
 
+    [[nodiscard]] bool binaryPaste() const noexcept { return _binaryPaste; }
+    void setBinaryPaste(bool enable) { _binaryPaste = enable; }
+
     void setMouseProtocol(MouseProtocol mouseProtocol, bool enabled);
     [[nodiscard]] std::optional<MouseProtocol> mouseProtocol() const noexcept { return _mouseProtocol; }
 
@@ -502,6 +507,15 @@ class InputGenerator
     }
     bool generate(Key key, Modifiers modifier, KeyboardEventType eventType);
     void generatePaste(std::string_view const& text);
+
+    /// Generates a binary paste DCS data delivery sequence with MIME type and base64-encoded data.
+    ///
+    /// Format: DCS 2033 ; <size> b d <mime-type> ; <base64-data> ST
+    /// Sub-command 'd' indicates data delivery.
+    ///
+    /// @param mimeType  The MIME type of the binary data (e.g., "image/png").
+    /// @param binaryData  The raw binary data to encode and send.
+    void generateBinaryPaste(std::string_view mimeType, std::span<uint8_t const> binaryData);
     bool generateMousePress(Modifiers modifier,
                             MouseButton button,
                             CellLocation pos,
@@ -593,6 +607,7 @@ class InputGenerator
     // private fields
     //
     bool _bracketedPaste = false;
+    bool _binaryPaste = false;
     bool _generateFocusEvents = false;
     std::optional<MouseProtocol> _mouseProtocol = std::nullopt;
     bool _passiveMouseTracking = false;

@@ -4099,6 +4099,7 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case STP: _terminal->hookParser(hookSTP(seq)); break;
         case DECRQSS: _terminal->hookParser(hookDECRQSS(seq)); break;
         case XTGETTCAP: _terminal->hookParser(hookXTGETTCAP(seq)); break;
+        case BINARYPASTE: _terminal->hookParser(hookBinaryPaste(seq)); break;
 
         default: return ApplyResult::Unsupported;
     }
@@ -4250,6 +4251,50 @@ unique_ptr<ParserExtension> Screen<Cell>::hookDECRQSS(Sequence const& /*seq*/)
             requestStatusString(s.value());
 
         // TODO: handle batching
+    });
+}
+
+template <CellConcept Cell>
+unique_ptr<ParserExtension> Screen<Cell>::hookBinaryPaste(Sequence const& seq)
+{
+    // DCS 2033 b <sub-cmd><payload> ST
+    // Verify the first parameter is 2033 (our binary paste mode number).
+    if (seq.parameterCount() < 1 || seq.param(0) != 2033)
+        return {};
+
+    return make_unique<SimpleStringCollector>([this](string_view data) {
+        if (data.empty())
+            return;
+
+        // Silently ignore if mode 2033 is not enabled.
+        if (!_terminal->isBinaryPasteModeEnabled())
+            return;
+
+        auto const subCommand = data.front();
+        auto const payload = data.substr(1);
+
+        switch (subCommand)
+        {
+            case 'c': {
+                // Configure MIME preferences: comma-separated MIME types in priority order.
+                auto preferences = std::vector<std::string>();
+                if (!payload.empty())
+                {
+                    auto const parts = crispy::split(payload, ',');
+                    for (auto const& part: parts)
+                    {
+                        auto const mimeType = std::string(part);
+                        if (!mimeType.empty())
+                            preferences.emplace_back(mimeType);
+                    }
+                }
+                _terminal->setBinaryPasteMimePreferences(std::move(preferences));
+                break;
+            }
+            default:
+                // Unknown sub-command — silently ignore for forward compatibility.
+                break;
+        }
     });
 }
 

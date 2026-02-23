@@ -732,6 +732,11 @@ enum class DECMode : std::uint16_t
     // if modified by the user or operating system (e.g. dark/light mode adaption).
     ReportColorPaletteUpdated = 2031,
 
+    // If enabled, the terminal will deliver binary clipboard data (e.g. images) to the
+    // application via DCS sequences with MIME type metadata and base64 encoding.
+    // Applications opt in to receive binary paste data instead of text-only paste.
+    BinaryPaste = 2033,
+
     // If enabled (default, as per spec), then the cursor is left next to the graphic,
     // that is, the text cursor is placed at the position of the sixel cursor.
     // If disabled otherwise, the cursor is placed below the image, as if CR LF was sent,
@@ -844,6 +849,7 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::MousePassiveTracking: return 2029;
         case DECMode::ReportGridCellSelection: return 2030;
         case DECMode::ReportColorPaletteUpdated: return 2031;
+        case DECMode::BinaryPaste: return 2033;
         case DECMode::BatchedRendering: return 2026;
         case DECMode::Unicode: return 2027;
         case DECMode::TextReflow: return 2028;
@@ -903,6 +909,7 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         case 2029: return DECMode::MousePassiveTracking;
         case 2030: return DECMode::ReportGridCellSelection;
         case 2031: return DECMode::ReportColorPaletteUpdated;
+        case 2033: return DECMode::BinaryPaste;
         case 8452: return DECMode::SixelCursorNextToGraphic;
         default: return std::nullopt;
     }

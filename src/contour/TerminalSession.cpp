@@ -818,15 +818,68 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
         for (int i = 0; i < md->formats().size(); ++i)
             sessionLog()("pasteFromClipboard[{}]: {}\n", i, md->formats().at(i).toStdString());
 
+        // Binary paste path: when mode 2033 is enabled, check for MIME types.
+        // Use the app's configured preferences if available, otherwise fall back to defaults.
+        if (terminal().isBinaryPasteModeEnabled())
+        {
+            auto const appPrefs = terminal().binaryPasteMimePreferences();
+
+            // Build a flat list of MIME types to try, in priority order.
+            auto mimeTypesToTry = std::vector<std::string_view>();
+            if (!appPrefs.empty())
+                for (auto const& mime: appPrefs)
+                    mimeTypesToTry.emplace_back(mime);
+            else
+                for (auto const& mime: vtbackend::Terminal::DefaultBinaryPasteMimeTypes)
+                    mimeTypesToTry.emplace_back(mime);
+
+            for (auto const& mimeType: mimeTypesToTry)
+            {
+                auto const qMime = QString::fromUtf8(mimeType.data(), static_cast<int>(mimeType.size()));
+                if (!md->hasFormat(qMime))
+                    continue;
+
+                auto const data = md->data(qMime);
+
+                // 10 MB hard limit for binary paste
+                if (data.size() > 10 * 1024 * 1024)
+                {
+                    sessionLog()("Binary clipboard data too large ({} bytes). Ignoring.", data.size());
+                    _display->post([this]() {
+                        emit showNotification("Paste", QString::fromStdString("Binary paste is too large"));
+                    });
+                    return;
+                }
+
+                // 5 MB soft limit: request user permission
+                if (data.size() > 5 * 1024 * 1024)
+                {
+                    _pendingBinaryPaste = PendingBinaryPaste {
+                        .mimeType = std::string(mimeType),
+                        .data = data,
+                    };
+                    emit requestPermissionForPasteLargeFile();
+                    sessionLog()("Binary clipboard data large ({} bytes). Requesting permission.",
+                                 data.size());
+                    return;
+                }
+
+                auto const dataSpan = std::span<uint8_t const>(
+                    reinterpret_cast<uint8_t const*>(data.constData()), static_cast<size_t>(data.size()));
+                terminal().sendBinaryPaste(mimeType, dataSpan);
+                return;
+            }
+            // No matching MIME type found — fall through to text paste below.
+        }
+
         auto const text = clipboard->text(QClipboard::Clipboard);
 
         // 1 MB hard limit
         if (text.size() > 1024 * 1024)
         {
             sessionLog()("Clipboard contains huge text. Ignoring.");
-            _display->post([this]() {
-                emit showNotification("Screenshot", QString::fromStdString("Paste is too big"));
-            });
+            _display->post(
+                [this]() { emit showNotification("Paste", QString::fromStdString("Paste is too big")); });
             return;
         }
         // 512 KB soft limit to ask user for permission
@@ -874,6 +927,28 @@ void TerminalSession::applyPendingPaste(bool allow, bool remember)
     auto* clipboard = _pendingBigPaste.value();
     auto text = clipboard->text(QClipboard::Clipboard);
     terminal().sendPaste(string_view { text.toStdString() });
+}
+
+void TerminalSession::applyPendingBinaryPaste(bool allow, bool remember)
+{
+    sessionLog()("applyPendingBinaryPaste: allow={}, remember={}", allow, remember);
+    if (remember)
+        _rememberedPermissions[GuardedRole::BigPaste] = allow;
+
+    if (!_pendingBinaryPaste)
+        return;
+
+    if (!allow)
+    {
+        _pendingBinaryPaste = std::nullopt;
+        return;
+    }
+
+    auto const& pending = _pendingBinaryPaste.value();
+    auto const dataSpan = std::span<uint8_t const>(reinterpret_cast<uint8_t const*>(pending.data.constData()),
+                                                   static_cast<size_t>(pending.data.size()));
+    terminal().sendBinaryPaste(pending.mimeType, dataSpan);
+    _pendingBinaryPaste = std::nullopt;
 }
 
 void TerminalSession::onSelectionCompleted()
@@ -1213,7 +1288,7 @@ void TerminalSession::playSound(vtbackend::Sequence::Parameters const& params)
     auto range = params.range();
     _musicalNotesBuffer.clear();
     _musicalNotesBuffer.insert(_musicalNotesBuffer.begin(), range.begin() + 2, range.end());
-    emit _audio->play(params.at(0), params.at(1), _musicalNotesBuffer);
+    emit _audio->play(static_cast<int>(params.at(0)), static_cast<int>(params.at(1)), _musicalNotesBuffer);
 }
 
 void TerminalSession::cursorPositionChanged()
