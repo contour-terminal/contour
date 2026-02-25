@@ -9,6 +9,7 @@
 #include <cassert>
 #include <concepts>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -29,9 +30,9 @@ class SequenceParameterBuilder;
 class SequenceParameters
 {
   public:
-    using Storage = std::array<uint16_t, 16>;
+    using Storage = std::array<uint32_t, 16>;
 
-    [[nodiscard]] constexpr uint16_t at(size_t index) const noexcept { return _values[index]; }
+    [[nodiscard]] constexpr uint32_t at(size_t index) const noexcept { return _values[index]; }
 
     [[nodiscard]] constexpr bool isSubParameter(size_t index) const noexcept
     {
@@ -67,12 +68,12 @@ class SequenceParameters
         return std::format("{:016b}: ", _subParameterTest);
     }
 
-    [[nodiscard]] constexpr gsl::span<std::uint16_t> range() noexcept
+    [[nodiscard]] constexpr gsl::span<std::uint32_t> range() noexcept
     {
         return gsl::span { _values.data(), _count };
     }
 
-    [[nodiscard]] constexpr gsl::span<std::uint16_t const> range() const noexcept
+    [[nodiscard]] constexpr gsl::span<std::uint32_t const> range() const noexcept
     {
         return gsl::span { _values.data(), _count };
     }
@@ -148,21 +149,21 @@ class SequenceParameterBuilder
 
     constexpr void multiplyBy10AndAdd(uint8_t value) noexcept
     {
-        unsigned const newValue = (*_currentParameter * 10) + value;
-        if (newValue > 0xFFFF)
-            *_currentParameter = 0xFFFF;
+        uint64_t const newValue = (static_cast<uint64_t>(*_currentParameter) * 10) + value;
+        if (newValue > std::numeric_limits<uint32_t>::max())
+            *_currentParameter = std::numeric_limits<uint32_t>::max();
         else
-            *_currentParameter = static_cast<uint16_t>(newValue);
+            *_currentParameter = static_cast<uint32_t>(newValue);
     }
 
-    constexpr void apply(uint16_t value) noexcept
+    constexpr void apply(uint32_t value) noexcept
     {
         if (value >= 10)
             multiplyBy10AndAdd(static_cast<uint8_t>(value / 10));
         multiplyBy10AndAdd(static_cast<uint8_t>(value % 10));
     }
 
-    constexpr void set(uint16_t value) noexcept { *_currentParameter = value; }
+    constexpr void set(uint32_t value) noexcept { *_currentParameter = value; }
 
     [[nodiscard]] constexpr bool isSubParameter(size_t index) const noexcept
     {
@@ -202,7 +203,7 @@ class Sequence
     // and the clipboard can contain large amounts of text.
     size_t constexpr static MaxOscLength = 1024 * 50; // NOLINT(readability-identifier-naming)
 
-    using Parameter = uint16_t;
+    using Parameter = uint32_t;
     using Intermediaries = std::string;
     using DataString = std::string;
     using Parameters = SequenceParameters;

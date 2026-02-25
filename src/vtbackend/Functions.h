@@ -134,6 +134,7 @@ constexpr inline auto DECRQSS = FunctionDocumentation { .mnemonic = "DECRQSS", .
 constexpr inline auto DECSIXEL = FunctionDocumentation { .mnemonic = "DECSIXEL", .comment = "Sixel Graphics Image" };
 constexpr inline auto STP = FunctionDocumentation { .mnemonic = "STP", .comment = "Set Terminal Profile" };
 constexpr inline auto XTGETTCAP = FunctionDocumentation { .mnemonic = "XTGETTCAP", .comment = "Request Termcap/Terminfo String" };
+constexpr inline auto BINARYPASTE = FunctionDocumentation { .mnemonic = "BINARYPASTE", .comment = "Binary Paste Mode (DEC 2033) sub-commands" };
 
 // OSC
 constexpr inline auto CLIPBOARD = FunctionDocumentation { .mnemonic = "CLIPBOARD", .comment = "Clipboard management." };
@@ -623,6 +624,7 @@ constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VT
 constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, documentation::DECSIXEL);
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTExtension::Contour, documentation::STP);
 constexpr inline auto XTGETTCAP   = detail::DCS(std::nullopt, 0, 0, '+', 'q', VTExtension::XTerm, documentation::XTGETTCAP);
+constexpr inline auto BINARYPASTE = detail::DCS(std::nullopt, 1, 2, std::nullopt, 'b', VTExtension::Contour, documentation::BINARYPASTE);
 
 // OSC
 constexpr inline auto CLIPBOARD         = detail::OSC(52, VTExtension::XTerm, documentation::CLIPBOARD);
@@ -795,6 +797,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECRQSS,
         DECSIXEL,
         XTGETTCAP,
+        BINARYPASTE,
 
         // OSC
         SETICON,

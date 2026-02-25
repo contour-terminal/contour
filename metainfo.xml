@@ -148,6 +148,7 @@
           <li>Adds complete DECCIR (Cursor Information Report) response including character set designations, GL/GR mappings, and wrap-pending state (#97)</li>
           <li>Adds environment variable expansion (${VAR_NAME} syntax) in configuration file paths for cross-platform config reuse (#1278)</li>
           <li>Adds configurable text outline rendering to improve glyph readability on transparent or low-opacity backgrounds (#1895)</li>
+          <li>Adds Binary Paste Mode (DEC mode 2033) for receiving binary clipboard data (e.g., images) with MIME type metadata via DCS sequences, with DECRQM feature detection and size validation up to 10 MB</li>
         </ul>
       </description>
     </release>
