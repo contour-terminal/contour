@@ -134,6 +134,7 @@ if(LIBTERMINAL_TESTING)
         Selector_test.cpp
         Functions_test.cpp
         Grid_test.cpp
+        HudScreen_test.cpp
         HintModeHandler_test.cpp
         Line_test.cpp
         Screen_test.cpp

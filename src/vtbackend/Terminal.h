@@ -725,6 +725,9 @@ class Terminal
     [[nodiscard]] Screen<PrimaryScreenCell>& primaryScreen() noexcept { return _primaryScreen; }
     [[nodiscard]] Screen<AlternateScreenCell> const& alternateScreen() const noexcept { return _alternateScreen; }
     [[nodiscard]] Screen<AlternateScreenCell>& alternateScreen() noexcept { return _alternateScreen; }
+    [[nodiscard]] bool isHudActive() const noexcept { return _hud.active; }
+    [[nodiscard]] Screen<HudScreenCell> const& hudScreen() const noexcept { return _hud.screen; }
+    [[nodiscard]] Screen<HudScreenCell>& hudScreen() noexcept { return _hud.screen; }
     [[nodiscard]] Screen<StatusDisplayCell> const& hostWritableStatusLineDisplay() const noexcept { return _hostWritableStatusLineScreen; }
     [[nodiscard]] Screen<StatusDisplayCell> const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
     // clang-format on
@@ -1164,6 +1167,14 @@ class Terminal
   private:
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
+
+    /// Composites the HUD overlay screen on top of the primary screen render buffer.
+    void compositeHudOverlay(RenderBuffer& output,
+                             LineOffset baseLine,
+                             bool reverseVideo,
+                             std::optional<CellLocation> theCursorPosition,
+                             bool includeSelection);
+
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
@@ -1350,9 +1361,35 @@ class Terminal
     VelocityTracker _scrollVelocityTracker;
     // }}}
 
+    // {{{ HUD (Heads-Up Display) overlay state
+    /// Encapsulates HUD overlay state, keeping the active flag and
+    /// the previous-screen pointer synchronized as a class invariant.
+    struct HudState
+    {
+        Screen<HudScreenCell> screen;
+        bool active = false;
+        ScreenBase* previousScreen = nullptr;
+
+        /// Activates HUD mode, recording the previously active screen.
+        void activate(ScreenBase* prevScreen) noexcept
+        {
+            active = true;
+            previousScreen = prevScreen;
+        }
+
+        /// Deactivates HUD mode, clearing all state.
+        void deactivate() noexcept
+        {
+            active = false;
+            previousScreen = nullptr;
+        }
+    };
+    // }}}
+
     // {{{ Displays this terminal manages
     Screen<PrimaryScreenCell> _primaryScreen;
     Screen<AlternateScreenCell> _alternateScreen;
+    HudState _hud;
     Screen<StatusDisplayCell> _hostWritableStatusLineScreen;
     Screen<StatusDisplayCell> _indicatorStatusScreen;
     gsl::not_null<ScreenBase*> _currentScreen;

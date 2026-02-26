@@ -121,6 +121,7 @@ Terminal::Terminal(Events& eventListener,
                      _settings.maxHistoryLineCount,
                      "primary" },
     _alternateScreen { *this, &_mainScreenMargin, _settings.pageSize, false, LineCount(0), "alternate" },
+    _hud { .screen = { *this, &_mainScreenMargin, _settings.pageSize, false, LineCount(0), "hud" } },
     _hostWritableStatusLineScreen { *this,
                                     &_hostWritableScreenMargin,
                                     PageSize { LineCount(1), _settings.pageSize.columns },
@@ -498,18 +499,28 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     auto const smoothScrollExtra = smoothScrollExtraLines();
 
     if (isPrimaryScreen())
-        _lastRenderPassHints =
-            _primaryScreen.render(RenderBufferBuilder<PrimaryScreenCell> { *this,
-                                                                           output,
-                                                                           baseLine,
-                                                                           mainDisplayReverseVideo,
-                                                                           HighlightSearchMatches::Yes,
-                                                                           _inputMethodData,
-                                                                           theCursorPosition,
-                                                                           includeSelection },
-                                  _viewport.scrollOffset(),
-                                  highlightSearchMatches,
-                                  smoothScrollExtra);
+    {
+        // When HUD is active, force cell-by-cell rendering so compositing can
+        // do an O(N) linear merge over identically-ordered cells.
+        auto const gridHighlight = _hud.active ? HighlightSearchMatches::Yes : highlightSearchMatches;
+
+        _lastRenderPassHints = _primaryScreen.render(
+            RenderBufferBuilder<PrimaryScreenCell> { *this,
+                                                     output,
+                                                     baseLine,
+                                                     mainDisplayReverseVideo,
+                                                     HighlightSearchMatches::Yes,
+                                                     _inputMethodData,
+                                                     _hud.active ? std::nullopt : theCursorPosition,
+                                                     includeSelection },
+            _viewport.scrollOffset(),
+            gridHighlight,
+            smoothScrollExtra);
+
+        if (_hud.active)
+            compositeHudOverlay(
+                output, baseLine, mainDisplayReverseVideo, theCursorPosition, includeSelection);
+    }
     else
         _lastRenderPassHints =
             _alternateScreen.render(RenderBufferBuilder<AlternateScreenCell> { *this,
@@ -535,6 +546,39 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     applyHintOverlay(output, mainScreenBaseLine);
     updateCursorMotionAnimation(output);
     applyScreenTransitionBlending(output);
+}
+
+void Terminal::compositeHudOverlay(RenderBuffer& output,
+                                   LineOffset baseLine,
+                                   bool reverseVideo,
+                                   std::optional<CellLocation> theCursorPosition,
+                                   bool includeSelection)
+{
+    // Render HUD screen into temporary buffer (also force cell-by-cell).
+    RenderBuffer hudBuffer;
+    _hud.screen.render(RenderBufferBuilder<HudScreenCell> { *this,
+                                                            hudBuffer,
+                                                            baseLine,
+                                                            reverseVideo,
+                                                            HighlightSearchMatches::Yes,
+                                                            InputMethodData {},
+                                                            theCursorPosition,
+                                                            includeSelection },
+                       ScrollOffset(0),
+                       HighlightSearchMatches::Yes);
+
+    // Both renders produce cells in identical position order (same page size,
+    // same cell-by-cell mode). Linear merge: overlay non-empty HUD cells.
+    auto const count = std::min(output.cells.size(), hudBuffer.cells.size());
+    for (auto const i: std::views::iota(size_t { 0 }, count))
+    {
+        if (!hudBuffer.cells[i].codepoints.empty())
+            output.cells[i] = hudBuffer.cells[i];
+    }
+
+    // Use HUD cursor.
+    if (hudBuffer.cursor.has_value())
+        output.cursor = hudBuffer.cursor;
 }
 
 void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
@@ -2349,6 +2393,8 @@ void Terminal::setMode(DECMode mode, bool enable)
                 category.get().enable(enable);
             break;
         case DECMode::UseAlternateScreen:
+            if (_hud.active)
+                setMode(DECMode::HudScreen, false);
             if (enable)
                 setScreen(ScreenType::Alternate);
             else
@@ -2434,6 +2480,24 @@ void Terminal::setMode(DECMode mode, bool enable)
             {
                 auto const& t = *_semanticBlockTracker.token();
                 reply("\033P>2034;1b{};{};{};{}\033\\", t[0], t[1], t[2], t[3]);
+            }
+            break;
+        case DECMode::HudScreen:
+            if (enable)
+            {
+                if (!isPrimaryScreen() || _hud.active)
+                    break;
+                _hud.screen.hardReset();
+                _hud.activate(_currentScreen.get());
+                _currentScreen = &_hud.screen;
+            }
+            else
+            {
+                if (!_hud.active)
+                    break;
+                _currentScreen = _hud.previousScreen ? gsl::not_null(_hud.previousScreen)
+                                                     : gsl::not_null<ScreenBase*>(&_primaryScreen);
+                _hud.deactivate();
             }
             break;
         default: break;
@@ -2544,6 +2608,11 @@ void Terminal::setUnderlineColor(Color color)
 void Terminal::hardReset()
 {
     // TODO: make use of _factorySettings
+    if (_hud.active)
+    {
+        _currentScreen = &_primaryScreen;
+        _hud.deactivate();
+    }
     setScreen(ScreenType::Primary);
 
     // Ensure that the alternate screen buffer is having the correct size, as well.
@@ -2562,6 +2631,7 @@ void Terminal::hardReset()
 
     _primaryScreen.hardReset();
     _alternateScreen.hardReset();
+    _hud.screen.hardReset();
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
 
@@ -2717,6 +2787,8 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
             _alternateScreen.applyPageSizeToMainDisplay(mainDisplayPageSize);
             break;
     }
+
+    _hud.screen.applyPageSizeToMainDisplay(mainDisplayPageSize);
 
     (void) _hostWritableStatusLineScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, CellLocation {}, false);
     (void) _indicatorStatusScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, CellLocation {}, false);
@@ -3276,6 +3348,7 @@ std::string to_string(DECMode mode)
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
+        case DECMode::HudScreen: return "HudScreen";
     }
     return std::format("({})", static_cast<unsigned>(mode));
 }

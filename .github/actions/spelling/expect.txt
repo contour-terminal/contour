@@ -1,3 +1,4 @@
+ABCDXFGHIJ
 ABCDEFGHIX
 ABCXDEFGHI
 ABCXYDEFGH
@@ -20,7 +21,9 @@ FFFFF
 GGGGG
 gitbranch
 gitgraph
+HFIRST
 HHHHH
+HHUD
 HTP
 isakbm
 NCommands

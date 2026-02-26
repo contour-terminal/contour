@@ -13,6 +13,9 @@ using PrimaryScreenCell = CompactCell;
 /// Type of cell to be used with the alternate screen.
 using AlternateScreenCell = CompactCell;
 
+/// Type of cell to be used with the HUD (Heads-Up Display) overlay screen.
+using HudScreenCell = CompactCell;
+
 /// The Cell to be used with the indicator (and host writable) status line.
 using StatusDisplayCell = SimpleCell;
 

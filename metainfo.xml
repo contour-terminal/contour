@@ -148,6 +148,7 @@
           <li>Adds complete DECCIR (Cursor Information Report) response including character set designations, GL/GR mappings, and wrap-pending state (#97)</li>
           <li>Adds environment variable expansion (${VAR_NAME} syntax) in configuration file paths for cross-platform config reuse (#1278)</li>
           <li>Adds configurable text outline rendering to improve glyph readability on transparent or low-opacity backgrounds (#1895)</li>
+          <li>Adds HUD (Heads-Up Display) overlay screen (DEC mode 2035) for transparent popup-like overlays on top of the primary screen without destroying underlying content</li>
         </ul>
       </description>
     </release>
