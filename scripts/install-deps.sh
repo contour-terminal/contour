@@ -40,7 +40,7 @@ fetch_and_unpack() {
 
     if ! test -f "$FULL_DISTFILE"; then
         if command -v curl >/tmp/word 2>&1; then
-            curl -L -o "$FULL_DISTFILE" "$URL"
+            curl --fail -L -o "$FULL_DISTFILE" "$URL"
         elif command -v wget >/tmp/word 2>&1; then
             wget -O "$FULL_DISTFILE" "$URL"
         elif command -v fetch >/tmp/word 2>&1; then
