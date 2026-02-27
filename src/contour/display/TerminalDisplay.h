@@ -262,6 +262,8 @@ class TerminalDisplay: public QQuickItem
     TerminalSession* _session = nullptr;
     std::chrono::steady_clock::time_point _startTime;
     std::chrono::steady_clock::time_point _initialResizeDeadline {};
+    double _staleVirtualWidth {};
+    double _staleVirtualHeight {};
     text::DPI _lastFontDPI;
 #if !defined(__APPLE__) && !defined(_WIN32)
     mutable std::optional<double> _lastReportedContentScale;
