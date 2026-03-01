@@ -107,6 +107,11 @@
     <release version="0.6.3" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Adds DEC VT420 multi-page support with 16 pages, navigable via NP (CSI Pn U), PP (CSI Pn V), PPA (CSI Pn SP P), PPR (CSI Pn SP Q), and PPB (CSI Pn SP R) sequences</li>
+          <li>Adds DECPCCM (DEC mode 64) page cursor coupling mode to control whether the displayed page follows the cursor page</li>
+          <li>Adds DECRQDE (CSI " v) display extent report for querying page dimensions and current page number</li>
+          <li>Adds cross-page DECCRA (Copy Rectangular Area) support for copying cell content and attributes between pages</li>
+          <li>Fixes DECXCPR (Extended Cursor Position Report) to report the correct page number instead of hardcoded page 1</li>
           <li>Fixes modifier-only key presses (Shift, Ctrl, Alt, etc.) incorrectly scrolling the viewport to the bottom when Kitty keyboard protocol ReportAllKeysAsEscapeCodes is enabled</li>
           <li>Fixes keyboard input being swallowed in programs like less and bat due to empty-string terminfo capabilities (#1861)</li>
           <li>Fixes ESC key not being sent to the application when CancelSelection input mapping has no mode restriction (#1839)</li>

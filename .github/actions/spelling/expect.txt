@@ -10,9 +10,11 @@ circleval
 ctrled
 dcx
 DDDDD
-Decset
+DECPCCM
+DECRQDE
 DECRST
 DECSET
+Decset
 ellips
 emantic
 emtpy
@@ -26,6 +28,10 @@ isakbm
 NCommands
 ndrwxr
 nfile
+Phe
+Pld
+Ptd
+Pwe
 pseudoconsole
 rbong
 SBQUERY

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /// @file multi-page-demo.cpp
-/// Demonstrates a command palette / modal dialog overlay using DEC VT510 multi-page
+/// Demonstrates a command palette / modal dialog overlay using DEC VT420 multi-page
 /// support and DECCRA (Copy Rectangular Area).
 ///
 /// The demo copies the current page's content to a scratch page (page 2) using DECCRA,
