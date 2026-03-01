@@ -51,6 +51,7 @@
 #include <stack>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace vtbackend
 {
@@ -685,11 +686,39 @@ class Terminal
     {
         switch (type)
         {
-            case ScreenType::Primary: return _primaryScreen;
-            case ScreenType::Alternate: return _alternateScreen;
+            case ScreenType::Primary: return *_pages[0];
+            case ScreenType::Alternate: return *_pages[AlternateScreenPageIndex.value];
         }
         crispy::unreachable();
     }
+
+    /// Returns a reference to the screen at the given page index.
+    [[nodiscard]] Screen<PageCell>& pageAt(PageIndex index) noexcept { return *_pages[index.value]; }
+    [[nodiscard]] Screen<PageCell> const& pageAt(PageIndex index) const noexcept
+    {
+        return *_pages[index.value];
+    }
+
+    /// Returns the zero-based page index where the cursor is currently active.
+    [[nodiscard]] PageIndex cursorPageIndex() const noexcept { return _cursorPage; }
+
+    /// Returns the zero-based page index of the displayed page.
+    [[nodiscard]] PageIndex displayedPageIndex() const noexcept { return _displayedPage; }
+
+    /// Returns the 1-based page number where the cursor is active (for VT replies).
+    [[nodiscard]] int cursorPageNumber() const noexcept { return _cursorPage.value + 1; }
+
+    /// Returns the 1-based page number of the displayed page (for VT replies).
+    [[nodiscard]] int displayedPageNumber() const noexcept { return _displayedPage.value + 1; }
+
+    /// Switches the active cursor page. See Phase 2 for full implementation.
+    void setPage(PageIndex target, bool moveCursorHome);
+
+    /// Saves the current cursor page index (called by DECSC).
+    void saveCursorPage();
+
+    /// Restores the previously saved cursor page index (called by DECRC).
+    void restoreCursorPage();
 
     /// Returns true if a screen crossfade transition is currently active.
     [[nodiscard]] bool isScreenTransitionActive() const noexcept { return _screenTransition.active; }
@@ -721,17 +750,17 @@ class Terminal
     }
 
     // clang-format off
-    [[nodiscard]] Screen<PrimaryScreenCell> const& primaryScreen() const noexcept { return _primaryScreen; }
-    [[nodiscard]] Screen<PrimaryScreenCell>& primaryScreen() noexcept { return _primaryScreen; }
-    [[nodiscard]] Screen<AlternateScreenCell> const& alternateScreen() const noexcept { return _alternateScreen; }
-    [[nodiscard]] Screen<AlternateScreenCell>& alternateScreen() noexcept { return _alternateScreen; }
+    [[nodiscard]] Screen<PageCell> const& primaryScreen() const noexcept { return *_pages[0]; }
+    [[nodiscard]] Screen<PageCell>& primaryScreen() noexcept { return *_pages[0]; }
+    [[nodiscard]] Screen<PageCell> const& alternateScreen() const noexcept { return *_pages[AlternateScreenPageIndex.value]; }
+    [[nodiscard]] Screen<PageCell>& alternateScreen() noexcept { return *_pages[AlternateScreenPageIndex.value]; }
     [[nodiscard]] Screen<StatusDisplayCell> const& hostWritableStatusLineDisplay() const noexcept { return _hostWritableStatusLineScreen; }
     [[nodiscard]] Screen<StatusDisplayCell> const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
     // clang-format on
 
     [[nodiscard]] bool isLineWrapped(LineOffset lineNumber) const noexcept
     {
-        return isPrimaryScreen() && _primaryScreen.isLineWrapped(lineNumber);
+        return isPrimaryScreen() && primaryScreen().isLineWrapped(lineNumber);
     }
 
     [[nodiscard]] CellLocation currentMousePosition() const noexcept { return _currentMousePosition; }
@@ -815,10 +844,10 @@ class Terminal
 
         if (isPrimaryScreen())
             vtbackend::renderSelection(*_selection,
-                                       [&](CellLocation pos) { renderTarget(pos, _primaryScreen.at(pos)); });
+                                       [&](CellLocation pos) { renderTarget(pos, primaryScreen().at(pos)); });
         else
             vtbackend::renderSelection(
-                *_selection, [&](CellLocation pos) { renderTarget(pos, _alternateScreen.at(pos)); });
+                *_selection, [&](CellLocation pos) { renderTarget(pos, alternateScreen().at(pos)); });
     }
 
     void clearSelection();
@@ -1351,8 +1380,11 @@ class Terminal
     // }}}
 
     // {{{ Displays this terminal manages
-    Screen<PrimaryScreenCell> _primaryScreen;
-    Screen<AlternateScreenCell> _alternateScreen;
+    std::vector<std::unique_ptr<Screen<PageCell>>>
+        _pages;                       ///< 16 pages: page 0 = primary, page 15 = alt screen
+    PageIndex _cursorPage { 0 };      ///< Page where cursor/VT output goes
+    PageIndex _displayedPage { 0 };   ///< Page shown to user (== _cursorPage when DECPCCM set)
+    PageIndex _savedCursorPage { 0 }; ///< Page index saved by DECSC
     Screen<StatusDisplayCell> _hostWritableStatusLineScreen;
     Screen<StatusDisplayCell> _indicatorStatusScreen;
     gsl::not_null<ScreenBase*> _currentScreen;

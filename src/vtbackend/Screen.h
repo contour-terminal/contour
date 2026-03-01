@@ -234,6 +234,14 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     void copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int targetPage);
 
+    // DEC Multi-Page Navigation (VT420)
+    void nextPage(int count);             ///< NP — Move to next page(s), cursor to home.
+    void previousPage(int count);         ///< PP — Move to previous page(s), cursor to home.
+    void pagePositionAbsolute(int page);  ///< PPA — Move to absolute page, preserve cursor.
+    void pagePositionRelative(int count); ///< PPR — Move forward by count pages, preserve cursor.
+    void pagePositionBackward(int count); ///< PPB — Move backward by count pages, preserve cursor.
+    void requestDisplayedExtent();        ///< DECRQDE — Report displayed page extent.
+
     void eraseArea(int top, int left, int bottom, int right);
 
     void fillArea(char32_t ch, int top, int left, int bottom, int right);
@@ -268,6 +276,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void deviceStatusReport();           // DSR
     void reportCursorPosition();         // CPR
     void reportExtendedCursorPosition(); // DECXCPR
+    void reportCursorInformation();      // DECCIR
     void reportColorPaletteUpdate() override;
     void selectConformanceLevel(VTType level);
     void requestDynamicColor(DynamicColorName name);

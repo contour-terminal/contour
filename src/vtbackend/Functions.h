@@ -167,6 +167,14 @@ constexpr inline auto SETTABNAME = FunctionDocumentation { .mnemonic = "SETTABNA
 constexpr inline auto CONEMU = FunctionDocumentation { .mnemonic = "CONEMU", .comment = "ConEmu-style notification or progress indicator" };
 constexpr inline auto DESKTOPNOTIFY = FunctionDocumentation { .mnemonic = "DESKTOPNOTIFY", .comment = "Kitty Desktop Notification." };
 
+// DEC Multi-Page Navigation (VT420)
+constexpr inline auto NP = FunctionDocumentation { .mnemonic = "NP", .comment = "Next Page", .parameters = "Pn", .description = "Moves the cursor to the home position on one of the following pages in page memory." };
+constexpr inline auto PP = FunctionDocumentation { .mnemonic = "PP", .comment = "Previous Page", .parameters = "Pn", .description = "Moves the cursor to the home position on one of the preceding pages in page memory." };
+constexpr inline auto PPA = FunctionDocumentation { .mnemonic = "PPA", .comment = "Page Position Absolute", .parameters = "Pn", .description = "Moves the data cursor to a specific page in page memory. Cursor position is preserved." };
+constexpr inline auto PPR = FunctionDocumentation { .mnemonic = "PPR", .comment = "Page Position Relative", .parameters = "Pn", .description = "Moves the data cursor forward by Pn pages. Cursor position is preserved." };
+constexpr inline auto PPB = FunctionDocumentation { .mnemonic = "PPB", .comment = "Page Position Backward", .parameters = "Pn", .description = "Moves the data cursor backward by Pn pages. Cursor position is preserved." };
+constexpr inline auto DECRQDE = FunctionDocumentation { .mnemonic = "DECRQDE", .comment = "Request Displayed Extent", .description = "Reports the dimensions and position of the displayed page." };
+
 // CSI additions
 constexpr inline auto DECRARA = FunctionDocumentation { .mnemonic = "DECRARA", .comment = "Reverse Attributes in Rectangular Area" };
 constexpr inline auto DECSACE = FunctionDocumentation { .mnemonic = "DECSACE", .comment = "Select Attribute Change Extent" };
@@ -620,6 +628,14 @@ constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VT
 constexpr inline auto MODIFYOTHERKEYS = detail::CSI('>', 0, 1, std::nullopt, 'm', VTExtension::XTerm, documentation::MODIFYOTHERKEYS);
 constexpr inline auto SBQUERY         = detail::CSI('>', 0, 6, std::nullopt, 'b', VTExtension::Contour, documentation::SBQUERY);
 
+// DEC Multi-Page Navigation (VT420)
+constexpr inline auto NP              = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'U', VTType::VT420, documentation::NP);
+constexpr inline auto PP              = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'V', VTType::VT420, documentation::PP);
+constexpr inline auto PPA             = detail::CSI(std::nullopt, 0, 1, ' ', 'P', VTType::VT420, documentation::PPA);
+constexpr inline auto PPR             = detail::CSI(std::nullopt, 0, 1, ' ', 'Q', VTType::VT420, documentation::PPR);
+constexpr inline auto PPB             = detail::CSI(std::nullopt, 0, 1, ' ', 'R', VTType::VT420, documentation::PPB);
+constexpr inline auto DECRQDE         = detail::CSI(std::nullopt, 0, 0, '"', 'v', VTType::VT420, documentation::DECRQDE);
+
 // DCS functions
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
 constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, documentation::DECSIXEL);
@@ -792,6 +808,12 @@ constexpr static auto allFunctionsArray() noexcept
         XTVERSION,
         MODIFYOTHERKEYS,
         SBQUERY,
+        NP,
+        PP,
+        PPA,
+        PPR,
+        PPB,
+        DECRQDE,
 
         // DCS
         STP,

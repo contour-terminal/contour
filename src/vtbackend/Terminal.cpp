@@ -114,13 +114,6 @@ Terminal::Terminal(Events& eventListener,
     _ptyReadBufferSize { crispy::nextPowerOfTwo(_settings.ptyReadBufferSize) },
     _pty { std::move(pty) },
     _lastCursorBlink { now },
-    _primaryScreen { *this,
-                     &_mainScreenMargin,
-                     _settings.pageSize,
-                     _settings.primaryScreen.allowReflowOnResize,
-                     _settings.maxHistoryLineCount,
-                     "primary" },
-    _alternateScreen { *this, &_mainScreenMargin, _settings.pageSize, false, LineCount(0), "alternate" },
     _hostWritableStatusLineScreen { *this,
                                     &_hostWritableScreenMargin,
                                     PageSize { LineCount(1), _settings.pageSize.columns },
@@ -131,7 +124,7 @@ Terminal::Terminal(Events& eventListener,
         *this,        &_indicatorScreenMargin, PageSize { LineCount(1), _settings.pageSize.columns }, false,
         LineCount(0), "indicator-status-line"
     },
-    _currentScreen { &_primaryScreen },
+    _currentScreen { &_hostWritableStatusLineScreen }, // temporary; reassigned after _pages is populated
     _viewport { *this, std::bind(&Terminal::onViewportChanged, this) },
     _indicatorStatusLineDefinition { parseStatusLineDefinition(_settings.indicatorStatusLine.left,
                                                                _settings.indicatorStatusLine.middle,
@@ -168,6 +161,23 @@ Terminal::Terminal(Events& eventListener,
     _inputHandler { _viCommands, ViMode::Insert },
     _shellIntegration { std::make_unique<NullShellIntegration>() }
 {
+    // Populate the 16-page array: page 0 (primary) gets scrollback/reflow, pages 1-15 do not.
+    _pages.reserve(MaxPageCount);
+    _pages.push_back(std::make_unique<Screen<PageCell>>(*this,
+                                                        &_mainScreenMargin,
+                                                        _settings.pageSize,
+                                                        _settings.primaryScreen.allowReflowOnResize,
+                                                        _settings.maxHistoryLineCount,
+                                                        "page-1"));
+    for (auto const i: std::views::iota(1, MaxPageCount))
+        _pages.push_back(std::make_unique<Screen<PageCell>>(*this,
+                                                            &_mainScreenMargin,
+                                                            _settings.pageSize,
+                                                            false,
+                                                            LineCount(0),
+                                                            std::format("page-{}", i + 1)));
+    _currentScreen = _pages[0].get();
+
     _savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
 
     // TODO(should be this instead?): hardReset();
@@ -177,6 +187,7 @@ Terminal::Terminal(Events& eventListener,
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::Unicode, true);
     setMode(DECMode::VisibleCursor, true);
+    setMode(DECMode::PageCursorCoupling, true);
     setMode(DECMode::LeftRightMargin, false);
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
@@ -497,31 +508,37 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // render one extra line at the bottom to fill the gap caused by the sub-cell shift.
     auto const smoothScrollExtra = smoothScrollExtraLines();
 
-    if (isPrimaryScreen())
+    // When DECPCCM is reset and cursor/display pages differ, hide the cursor from rendering.
+    auto const effectiveCursorPosition =
+        (_cursorPage != _displayedPage) ? std::optional<CellLocation> {} : theCursorPosition;
+
+    auto& displayedScreen = pageAt(_displayedPage);
+
+    if (_displayedPage == PageIndex(0))
         _lastRenderPassHints =
-            _primaryScreen.render(RenderBufferBuilder<PrimaryScreenCell> { *this,
-                                                                           output,
-                                                                           baseLine,
-                                                                           mainDisplayReverseVideo,
-                                                                           HighlightSearchMatches::Yes,
-                                                                           _inputMethodData,
-                                                                           theCursorPosition,
-                                                                           includeSelection },
-                                  _viewport.scrollOffset(),
-                                  highlightSearchMatches,
-                                  smoothScrollExtra);
+            displayedScreen.render(RenderBufferBuilder<PageCell> { *this,
+                                                                   output,
+                                                                   baseLine,
+                                                                   mainDisplayReverseVideo,
+                                                                   HighlightSearchMatches::Yes,
+                                                                   _inputMethodData,
+                                                                   effectiveCursorPosition,
+                                                                   includeSelection },
+                                   _viewport.scrollOffset(),
+                                   highlightSearchMatches,
+                                   smoothScrollExtra);
     else
         _lastRenderPassHints =
-            _alternateScreen.render(RenderBufferBuilder<AlternateScreenCell> { *this,
-                                                                               output,
-                                                                               baseLine,
-                                                                               mainDisplayReverseVideo,
-                                                                               HighlightSearchMatches::Yes,
-                                                                               _inputMethodData,
-                                                                               theCursorPosition,
-                                                                               includeSelection },
-                                    _viewport.scrollOffset(),
-                                    highlightSearchMatches);
+            displayedScreen.render(RenderBufferBuilder<PageCell> { *this,
+                                                                   output,
+                                                                   baseLine,
+                                                                   mainDisplayReverseVideo,
+                                                                   HighlightSearchMatches::Yes,
+                                                                   _inputMethodData,
+                                                                   effectiveCursorPosition,
+                                                                   includeSelection },
+                                   _viewport.scrollOffset(),
+                                   highlightSearchMatches);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
     auto const mainScreenBaseLine = baseLine;
@@ -1278,7 +1295,7 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
     if (!isPrimaryScreen())
         return 0;
 
-    if (!_primaryScreen.currentLine().isTrivialBuffer())
+    if (!primaryScreen().currentLine().isTrivialBuffer())
         return 0;
 
     assert(_mainScreenMargin.horizontal.to >= _currentScreen->cursor().position.column);
@@ -1587,7 +1604,7 @@ SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
     auto const linesDelta = static_cast<int>(std::floor(totalPixels / cellHeight));
     auto const remainder = totalPixels - static_cast<float>(linesDelta) * cellHeight;
 
-    auto const maxOffset = boxed_cast<ScrollOffset>(_primaryScreen.historyLineCount());
+    auto const maxOffset = boxed_cast<ScrollOffset>(primaryScreen().historyLineCount());
     auto const unclampedOffset = _viewport.scrollOffset().value + linesDelta;
     auto const newScrollOffset = std::clamp(unclampedOffset, 0, maxOffset.value);
 
@@ -1632,13 +1649,12 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
     if (pixels)
         setCellPixelSize(pixels.value() / mainDisplayPageSize);
 
-    // Reset margin to their default.
-    _primaryScreen.margin() = Margin {
+    // Reset margin to their default (shared by all pages via _mainScreenMargin pointer).
+    _mainScreenMargin = Margin {
         .vertical = Margin::Vertical { .from = {}, .to = mainDisplayPageSize.lines.as<LineOffset>() - 1 },
         .horizontal =
             Margin::Horizontal { .from = {}, .to = mainDisplayPageSize.columns.as<ColumnOffset>() - 1 }
     };
-    _alternateScreen.margin() = _primaryScreen.margin();
 
     applyPageSizeToCurrentBuffer();
 
@@ -1759,18 +1775,10 @@ string Terminal::extractSelectionText() const
     if (!_selection || _selection->state() == Selection::State::Waiting)
         return "";
 
-    if (isPrimaryScreen())
-    {
-        auto se = SelectionRenderer<PrimaryScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
-        vtbackend::renderSelection(*_selection, [&](CellLocation pos) { se(pos, _primaryScreen.at(pos)); });
-        return se.finish();
-    }
-    else
-    {
-        auto se = SelectionRenderer<AlternateScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
-        vtbackend::renderSelection(*_selection, [&](CellLocation pos) { se(pos, _alternateScreen.at(pos)); });
-        return se.finish();
-    }
+    auto const& screen = pageAt(_displayedPage);
+    auto se = SelectionRenderer<PageCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
+    vtbackend::renderSelection(*_selection, [&](CellLocation pos) { se(pos, screen.at(pos)); });
+    return se.finish();
 }
 
 string Terminal::extractLastMarkRange() const
@@ -1781,7 +1789,7 @@ string Terminal::extractLastMarkRange() const
 
     auto const marker1 = optional { bottomLine };
 
-    auto const marker0 = _primaryScreen.findMarkerUpwards(marker1.value());
+    auto const marker0 = primaryScreen().findMarkerUpwards(marker1.value());
     if (!marker0.has_value())
         return {};
 
@@ -1793,7 +1801,7 @@ string Terminal::extractLastMarkRange() const
 
     for (auto lineNum = firstLine; lineNum <= lastLine; ++lineNum)
     {
-        text += _primaryScreen.grid().lineAt(lineNum).toUtf8Trimmed();
+        text += primaryScreen().grid().lineAt(lineNum).toUtf8Trimmed();
         text += '\n';
     }
 
@@ -2339,7 +2347,7 @@ void Terminal::setMode(DECMode mode, bool enable)
                 // Disabling reflow only affects currently line and below.
                 auto const startLine = enable ? LineOffset(0) : currentScreen().cursor().position.line;
                 for (auto line = startLine; line < boxed_cast<LineOffset>(_settings.pageSize.lines); ++line)
-                    _primaryScreen.grid().lineAt(line).setWrappable(enable);
+                    primaryScreen().grid().lineAt(line).setWrappable(enable);
             }
             break;
         case DECMode::DebugLogging:
@@ -2425,6 +2433,10 @@ void Terminal::setMode(DECMode mode, bool enable)
                 // because it's local to the screen buffer.
             }
             break;
+        case DECMode::PageCursorCoupling:
+            if (enable && _displayedPage != _cursorPage)
+                _displayedPage = _cursorPage;
+            break;
         case DECMode::ApplicationKeypad: setApplicationkeypadMode(enable); break;
         case DECMode::AutoRepeat: break;
         case DECMode::BackarrowKey: _inputGenerator.setBackarrowKeyMode(enable); break;
@@ -2471,10 +2483,7 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOf
 
 void Terminal::clearScreen()
 {
-    if (isPrimaryScreen())
-        _primaryScreen.clearScreen();
-    else
-        _alternateScreen.clearScreen();
+    pageAt(_cursorPage).clearScreen();
 }
 
 void Terminal::moveCursorTo(LineOffset line, ColumnOffset column)
@@ -2556,12 +2565,16 @@ void Terminal::hardReset()
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::Unicode, true);
     setMode(DECMode::VisibleCursor, true);
+    setMode(DECMode::PageCursorCoupling, true);
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
 
-    _primaryScreen.hardReset();
-    _alternateScreen.hardReset();
+    // Reset all pages.
+    for (auto& page: _pages)
+        page->hardReset();
+    _cursorPage = PageIndex(0);
+    _displayedPage = PageIndex(0);
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
 
@@ -2588,23 +2601,14 @@ void Terminal::hardReset()
 
     auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
-    _primaryScreen.margin() = Margin {
+    // All pages share the same margin (via _mainScreenMargin pointer).
+    _mainScreenMargin = Margin {
         .vertical =
             Margin::Vertical { .from = {}, .to = boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
         .horizontal = Margin::Horizontal { .from = {},
                                            .to = boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 },
     };
-    _primaryScreen.verifyState();
-
-    _alternateScreen.margin() = Margin {
-        .vertical =
-            Margin::Vertical { .from = {}, .to = boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
-        .horizontal = Margin::Horizontal { .from = {},
-                                           .to = boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 },
-    };
-    alternateScreen().margin() = _primaryScreen.margin();
-    // NB: We do *NOT* verify alternate screen, because the page size would probably fail as it is
-    // designed to be adjusted when the given screen is activated.
+    primaryScreen().verifyState();
 
     setStatusDisplay(_factorySettings.statusDisplayType);
 
@@ -2630,72 +2634,84 @@ void Terminal::finalizeScreenTransition() noexcept
     _screenTransition.snapshotCursor.reset();
 }
 
-void Terminal::setScreen(ScreenType type)
+void Terminal::setPage(PageIndex target, bool moveCursorHome)
 {
-    if (type == _currentScreenType)
+    // Clamp target to valid range.
+    auto const clamped = PageIndex(std::clamp(target.value, 0, MaxPageCount - 1));
+    if (clamped == _cursorPage)
         return;
 
-    // Cancel any active cursor motion animation on screen change.
+    // Cancel any active cursor motion animation on page change.
     _cursorMotion.active = false;
 
-    // Reset smooth scroll state on screen change.
+    // Reset smooth scroll state on page change.
     resetSmoothScroll();
 
     // Capture snapshot of the outgoing screen for crossfade transition.
-    if (_settings.screenTransitionStyle == ScreenTransitionStyle::Fade)
+    if (isModeEnabled(DECMode::PageCursorCoupling)
+        && _settings.screenTransitionStyle == ScreenTransitionStyle::Fade)
     {
-        // If a transition is already active, finalize it first.
         if (_screenTransition.active)
             finalizeScreenTransition();
 
-        // Save render state that fillRenderBufferInternal() will modify as side effects.
-        // PRECONDITION: Must be called from the writer thread under terminal lock.
-        // The save/restore of atomics is safe because no concurrent reader can observe
-        // intermediate states while we hold the lock.
         auto const savedChanges = _changes.load();
         auto const savedScreenDirty = _screenDirty;
         auto const savedFrameID = _lastFrameID.load();
 
-        // Capture the outgoing screen's render cells.
         RenderBuffer snapshotBuffer;
         fillRenderBufferInternal(snapshotBuffer, false);
 
-        // Restore render state so the actual rendering pipeline is not disrupted.
         _changes.store(savedChanges);
         _screenDirty = savedScreenDirty;
         _lastFrameID.store(savedFrameID);
 
         _screenTransition.snapshotCells = std::move(snapshotBuffer.cells);
         _screenTransition.snapshotCursor = snapshotBuffer.cursor;
-        // Use _currentTime rather than steady_clock::now() because all animation progress
-        // is computed relative to _currentTime; using wall-clock time could produce negative
-        // elapsed values if tick() has not been called since the last frame.
         _screenTransition.startTime = _currentTime;
         _screenTransition.duration = _settings.screenTransitionDuration;
         _screenTransition.active = true;
     }
 
-    switch (type)
-    {
-        case ScreenType::Primary:
-            _currentScreen = &_primaryScreen;
-            setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
-            break;
-        case ScreenType::Alternate:
-            _currentScreen = &_alternateScreen;
-            if (isModeEnabled(DECMode::MouseAlternateScroll))
-                setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
-            else
-                setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
-            break;
-    }
+    _cursorPage = clamped;
+    _currentScreen = _pages[clamped.value].get();
 
-    _currentScreenType = type;
+    // Update mouse wheel mode based on whether this is the primary page.
+    if (clamped == PageIndex(0))
+        setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
+    else if (isModeEnabled(DECMode::MouseAlternateScroll))
+        setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+    else
+        setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+
+    // When DECPCCM is set, the displayed page follows the cursor page.
+    if (isModeEnabled(DECMode::PageCursorCoupling))
+        _displayedPage = clamped;
+
+    _currentScreenType = screenTypeFromPage(clamped);
 
     // Ensure correct screen buffer size for the buffer we've just switched to.
     applyPageSizeToCurrentBuffer();
 
-    bufferChanged(type);
+    if (moveCursorHome)
+        _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0));
+
+    bufferChanged(_currentScreenType);
+}
+
+void Terminal::saveCursorPage()
+{
+    _savedCursorPage = _cursorPage;
+}
+
+void Terminal::restoreCursorPage()
+{
+    if (_savedCursorPage != _cursorPage)
+        setPage(_savedCursorPage, false);
+}
+
+void Terminal::setScreen(ScreenType type)
+{
+    setPage(type == ScreenType::Primary ? PageIndex(0) : AlternateScreenPageIndex, false);
 }
 
 void Terminal::applyPageSizeToCurrentBuffer()
@@ -2707,14 +2723,15 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
 {
     auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
+    // Apply page size to the appropriate page buffer.
     // clang-format off
     switch (screenType)
     {
         case ScreenType::Primary:
-            _primaryScreen.applyPageSizeToMainDisplay(mainDisplayPageSize);
+            pageAt(_cursorPage).applyPageSizeToMainDisplay(mainDisplayPageSize);
             break;
         case ScreenType::Alternate:
-            _alternateScreen.applyPageSizeToMainDisplay(mainDisplayPageSize);
+            pageAt(_cursorPage).applyPageSizeToMainDisplay(mainDisplayPageSize);
             break;
     }
 
@@ -2800,9 +2817,9 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
     if (!_selection)
         return;
 
-    auto const top = -boxed_cast<LineOffset>(_primaryScreen.historyLineCount());
+    auto const top = -boxed_cast<LineOffset>(primaryScreen().historyLineCount());
     if (_selection->from().line > top && _selection->to().line > top)
-        _selection->applyScroll(boxed_cast<LineOffset>(n), _primaryScreen.historyLineCount());
+        _selection->applyScroll(boxed_cast<LineOffset>(n), primaryScreen().historyLineCount());
     else
         clearSelection();
 }
@@ -2810,12 +2827,12 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
 
 void Terminal::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
 {
-    _primaryScreen.grid().setMaxHistoryLineCount(maxHistoryLineCount);
+    primaryScreen().grid().setMaxHistoryLineCount(maxHistoryLineCount);
 }
 
 LineCount Terminal::maxHistoryLineCount() const noexcept
 {
-    return _primaryScreen.grid().maxHistoryLineCount();
+    return primaryScreen().grid().maxHistoryLineCount();
 }
 
 void Terminal::setTerminalId(VTType id) noexcept
@@ -2852,15 +2869,7 @@ void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
     switch (activeDisplay)
     {
         case ActiveStatusDisplay::Main:
-            switch (_currentScreenType)
-            {
-                case ScreenType::Primary:
-                    _currentScreen = &_primaryScreen;
-                    break;
-                case ScreenType::Alternate:
-                    _currentScreen = &_alternateScreen;
-                    break;
-            }
+            _currentScreen = _pages[_cursorPage.value].get();
             break;
         case ActiveStatusDisplay::StatusLine:
             _currentScreen = &_hostWritableStatusLineScreen;
@@ -2980,27 +2989,15 @@ bool Terminal::wordDelimited(CellLocation position, std::u32string_view wordDeli
     // Word selection may be off by one
     position.column = std::min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
 
-    if (isPrimaryScreen())
-        return _primaryScreen.grid().cellEmptyOrContainsOneOf(position, wordDelimiters);
-    else
-        return _alternateScreen.grid().cellEmptyOrContainsOneOf(position, wordDelimiters);
+    return pageAt(_cursorPage).grid().cellEmptyOrContainsOneOf(position, wordDelimiters);
 }
 
 std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
     CellLocation position) const noexcept
 {
-    if (isPrimaryScreen())
-    {
-        auto const range =
-            _primaryScreen.grid().wordRangeUnderCursor(position, u32string_view(_settings.wordDelimiters));
-        return { _primaryScreen.grid().extractText(range), range };
-    }
-    else
-    {
-        auto const range =
-            _alternateScreen.grid().wordRangeUnderCursor(position, u32string_view(_settings.wordDelimiters));
-        return { _alternateScreen.grid().extractText(range), range };
-    }
+    auto const& screen = pageAt(_cursorPage);
+    auto const range = screen.grid().wordRangeUnderCursor(position, u32string_view(_settings.wordDelimiters));
+    return { screen.grid().extractText(range), range };
 }
 
 optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
@@ -3256,6 +3253,7 @@ std::string to_string(DECMode mode)
         case DECMode::AllowColumns80to132: return "AllowColumns80to132";
         case DECMode::DebugLogging: return "DebugLogging";
         case DECMode::UseAlternateScreen: return "UseAlternateScreen";
+        case DECMode::PageCursorCoupling: return "PageCursorCoupling";
         case DECMode::ApplicationKeypad: return "ApplicationKeypad";
         case DECMode::AutoRepeat: return "AutoRepeat";
         case DECMode::BackarrowKey: return "BackarrowKey";
