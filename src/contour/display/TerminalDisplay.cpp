@@ -363,13 +363,15 @@ void TerminalDisplay::sizeChanged()
 
     // During initial display setup, the Wayland compositor may revert the window to
     // the stale pre-DPR-correction geometry via a configure event (e.g. in response to
-    // showNormal()). Detect this by checking if BOTH dimensions mismatch the implicit
-    // size — single-dimension mismatch indicates normal QML binding propagation
-    // (which updates width and height sequentially, not atomically).
-    if (steady_clock::now() < _initialResizeDeadline && std::abs(width() - implicitWidth()) > 0.5
-        && std::abs(height() - implicitHeight()) > 0.5)
+    // showNormal()). Detect this by checking if BOTH dimensions match the saved stale
+    // size (the window dimensions before DPR correction in createRenderer). This is more
+    // specific than checking against implicitSize, which would also falsely trigger on
+    // intentional WM-driven resizes (e.g. tiling WM assigning the window a tile size).
+    if (steady_clock::now() < _initialResizeDeadline
+        && std::abs(width() - _staleVirtualWidth) <= 0.5
+        && std::abs(height() - _staleVirtualHeight) <= 0.5)
     {
-        displayLog()("Correcting initial window size from {}x{} to {}x{}",
+        displayLog()("Correcting initial window size from {}x{} (stale) to {}x{} (implicit)",
                      width(),
                      height(),
                      implicitWidth(),
@@ -670,6 +672,13 @@ void TerminalDisplay::createRenderer()
     Require(_renderer);
     Require(_session);
     Require(window());
+
+    // Save the stale (pre-DPR-correction) window dimensions so sizeChanged() can
+    // identify Wayland compositor configure reversions specifically, without
+    // misidentifying intentional WM-driven resizes (e.g. tiling WM assigning a
+    // tile size) as reversions.
+    _staleVirtualWidth = width();
+    _staleVirtualHeight = height();
 
     // Catch DPR corrections that occurred between setSession() and first render
     // (e.g., Qt correcting from integer-ceiling DPR=2 to actual fractional DPR=1.5
