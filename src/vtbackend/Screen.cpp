@@ -338,17 +338,22 @@ void Screen<Cell>::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
 {
     auto cursorPosition = _cursor.position;
 
+    // Only reset margins when the page size actually changes (during a resize),
+    // not during a simple page switch where the grid size already matches.
+    auto const sizeChanged = (_grid.pageSize() != mainDisplayPageSize);
+
     // Ensure correct screen buffer size for the buffer we've just switched to.
     cursorPosition = _grid.resize(mainDisplayPageSize, cursorPosition, _cursor.wrapPending);
     cursorPosition = clampCoordinate(cursorPosition);
 
-    auto const margin = Margin {
-        .vertical = Margin::Vertical { .from = {}, .to = mainDisplayPageSize.lines.as<LineOffset>() - 1 },
-        .horizontal =
-            Margin::Horizontal { .from = {}, .to = mainDisplayPageSize.columns.as<ColumnOffset>() - 1 }
-    };
-
-    *_margin = margin;
+    if (sizeChanged)
+    {
+        *_margin = Margin {
+            .vertical = Margin::Vertical { .from = {}, .to = mainDisplayPageSize.lines.as<LineOffset>() - 1 },
+            .horizontal =
+                Margin::Horizontal { .from = {}, .to = mainDisplayPageSize.columns.as<ColumnOffset>() - 1 }
+        };
+    }
 
     if (_cursor.position.column < boxed_cast<ColumnOffset>(mainDisplayPageSize.columns))
         _cursor.wrapPending = false;

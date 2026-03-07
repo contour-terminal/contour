@@ -137,13 +137,7 @@ Terminal::Terminal(Events& eventListener,
     _cellPixelSize {},
     _defaultColorPalette { _settings.colorPalette },
     _colorPalette { _settings.colorPalette },
-    _mainScreenMargin {
-        .vertical =
-            Margin::Vertical { .from = {}, .to = _settings.pageSize.lines.as<LineOffset>() - LineOffset(1) },
-        .horizontal =
-            Margin::Horizontal { .from = {},
-                                 .to = _settings.pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) }
-    },
+    _pageMargins {},
     _hostWritableScreenMargin { .vertical = Margin::Vertical { .from = {}, .to = LineOffset(0) },
                                 .horizontal =
                                     Margin::Horizontal { .from = {},
@@ -161,21 +155,20 @@ Terminal::Terminal(Events& eventListener,
     _inputHandler { _viCommands, ViMode::Insert },
     _shellIntegration { std::make_unique<NullShellIntegration>() }
 {
+    // Initialize all page margins to defaults.
+    _pageMargins.fill(makeDefaultMargin(_settings.pageSize));
+
     // Populate the 16-page array: page 0 (primary) gets scrollback/reflow, pages 1-15 do not.
     _pages.reserve(MaxPageCount);
     _pages.push_back(std::make_unique<Screen<PageCell>>(*this,
-                                                        &_mainScreenMargin,
+                                                        _pageMargins.data(),
                                                         _settings.pageSize,
                                                         _settings.primaryScreen.allowReflowOnResize,
                                                         _settings.maxHistoryLineCount,
                                                         "page-1"));
     for (auto const i: std::views::iota(1, MaxPageCount))
-        _pages.push_back(std::make_unique<Screen<PageCell>>(*this,
-                                                            &_mainScreenMargin,
-                                                            _settings.pageSize,
-                                                            false,
-                                                            LineCount(0),
-                                                            std::format("page-{}", i + 1)));
+        _pages.push_back(std::make_unique<Screen<PageCell>>(
+            *this, &_pageMargins[i], _settings.pageSize, false, LineCount(0), std::format("page-{}", i + 1)));
     _currentScreen = _pages[0].get();
 
     _savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
@@ -1298,9 +1291,9 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
     if (!primaryScreen().currentLine().isTrivialBuffer())
         return 0;
 
-    assert(_mainScreenMargin.horizontal.to >= _currentScreen->cursor().position.column);
+    assert(currentPageMargin().horizontal.to >= _currentScreen->cursor().position.column);
 
-    return unbox<size_t>(_mainScreenMargin.horizontal.to - _currentScreen->cursor().position.column);
+    return unbox<size_t>(currentPageMargin().horizontal.to - _currentScreen->cursor().position.column);
 }
 
 // {{{ SimpleSequenceHandler
@@ -1649,12 +1642,8 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
     if (pixels)
         setCellPixelSize(pixels.value() / mainDisplayPageSize);
 
-    // Reset margin to their default (shared by all pages via _mainScreenMargin pointer).
-    _mainScreenMargin = Margin {
-        .vertical = Margin::Vertical { .from = {}, .to = mainDisplayPageSize.lines.as<LineOffset>() - 1 },
-        .horizontal =
-            Margin::Horizontal { .from = {}, .to = mainDisplayPageSize.columns.as<ColumnOffset>() - 1 }
-    };
+    // Reset margins for all pages to defaults on resize.
+    _pageMargins.fill(makeDefaultMargin(mainDisplayPageSize));
 
     applyPageSizeToCurrentBuffer();
 
@@ -1693,9 +1682,9 @@ void Terminal::verifyState()
 
     _currentScreen->verifyState();
 
-    Require(0 <= *_mainScreenMargin.horizontal.from
-            && *_mainScreenMargin.horizontal.to < *pageSize().columns);
-    Require(0 <= *_mainScreenMargin.vertical.from && *_mainScreenMargin.vertical.to < *pageSize().lines);
+    Require(0 <= *currentPageMargin().horizontal.from
+            && *currentPageMargin().horizontal.to < *pageSize().columns);
+    Require(0 <= *currentPageMargin().vertical.from && *currentPageMargin().vertical.to < *pageSize().lines);
 #endif
 }
 
@@ -2293,7 +2282,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!enable)
             {
-                _mainScreenMargin.horizontal =
+                currentPageMargin().horizontal =
                     Margin::Horizontal { .from = ColumnOffset(0),
                                          .to = boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1) };
                 _supportedVTSequences.enableSequence(SCOSC);
@@ -2358,7 +2347,12 @@ void Terminal::setMode(DECMode mode, bool enable)
             break;
         case DECMode::UseAlternateScreen:
             if (enable)
+            {
+                // Copy the originating page's margins to the alternate screen page,
+                // because xterm alt screen traditionally inherits the primary screen's margins.
+                _pageMargins[AlternateScreenPageIndex.value] = currentPageMargin();
                 setScreen(ScreenType::Alternate);
+            }
             else
                 setScreen(ScreenType::Primary);
             break;
@@ -2463,8 +2457,8 @@ void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset>
 
     if (sanitizedTop < sanitizedBottom)
     {
-        _mainScreenMargin.vertical.from = sanitizedTop;
-        _mainScreenMargin.vertical.to = sanitizedBottom;
+        currentPageMargin().vertical.from = sanitizedTop;
+        currentPageMargin().vertical.to = sanitizedBottom;
     }
 }
 
@@ -2476,8 +2470,8 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOf
     auto const sanitizedLeft = std::max(left.value_or(defaultLeft), defaultLeft);
     if (sanitizedLeft < sanitizedRight)
     {
-        _mainScreenMargin.horizontal.from = sanitizedLeft;
-        _mainScreenMargin.horizontal.to = sanitizedRight;
+        currentPageMargin().horizontal.from = sanitizedLeft;
+        currentPageMargin().horizontal.to = sanitizedRight;
     }
 }
 
@@ -2601,13 +2595,8 @@ void Terminal::hardReset()
 
     auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
-    // All pages share the same margin (via _mainScreenMargin pointer).
-    _mainScreenMargin = Margin {
-        .vertical =
-            Margin::Vertical { .from = {}, .to = boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
-        .horizontal = Margin::Horizontal { .from = {},
-                                           .to = boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 },
-    };
+    // Reset margins for all pages to defaults.
+    _pageMargins.fill(makeDefaultMargin(mainDisplayPageSize));
     primaryScreen().verifyState();
 
     setStatusDisplay(_factorySettings.statusDisplayType);

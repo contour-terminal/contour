@@ -36,6 +36,7 @@
 
 #include <gsl/pointers>
 
+#include <array>
 #include <atomic>
 #include <bitset>
 #include <chrono>
@@ -719,6 +720,19 @@ class Terminal
 
     /// Restores the previously saved cursor page index (called by DECRC).
     void restoreCursorPage();
+
+    /// Returns the margin for the page where the cursor is currently active.
+    [[nodiscard]] Margin& currentPageMargin() noexcept { return _pageMargins[_cursorPage.value]; }
+    [[nodiscard]] Margin const& currentPageMargin() const noexcept { return _pageMargins[_cursorPage.value]; }
+
+    /// Creates a default margin for the given page size (full-screen, no restriction).
+    [[nodiscard]] static Margin makeDefaultMargin(PageSize pageSize) noexcept
+    {
+        return Margin { .vertical =
+                            Margin::Vertical { .from = {}, .to = boxed_cast<LineOffset>(pageSize.lines) - 1 },
+                        .horizontal = Margin::Horizontal {
+                            .from = {}, .to = boxed_cast<ColumnOffset>(pageSize.columns) - 1 } };
+    }
 
     /// Returns true if a screen crossfade transition is currently active.
     [[nodiscard]] bool isScreenTransitionActive() const noexcept { return _screenTransition.active; }
@@ -1439,10 +1453,10 @@ class Terminal
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
 
-    // Screen margin - shared across all screens that are covering the main area,
-    // i.e. the primary screen and alternate screen.
-    // This excludes all status lines, title lines, etc.
-    Margin _mainScreenMargin;
+    /// Per-page screen margins for DEC multi-page support.
+    /// Each page has its own independent margin (DECSTBM/DECSLRM apply per-page).
+    /// This excludes all status lines, title lines, etc.
+    std::array<Margin, MaxPageCount> _pageMargins;
     Margin _hostWritableScreenMargin;
     Margin _indicatorScreenMargin;
 

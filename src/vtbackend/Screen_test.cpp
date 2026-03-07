@@ -4634,5 +4634,112 @@ TEST_CASE("MultiPage.page_content_isolation", "[screen]")
     CHECK(terminal.pageAt(PageIndex(2)).renderMainPageText() == "Page3\n     \n");
 }
 
+TEST_CASE("MultiPage.PerPageMargins", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+
+    // Set custom top/bottom margins on page 1.
+    mock.writeToScreen("\033[2;4r"); // DECSTBM(2, 4)
+    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+
+    // Switch to page 2 — it should have default (full-screen) margins.
+    mock.writeToScreen("\033[2 P"); // PPA 2
+    auto& page2 = terminal.pageAt(PageIndex(1));
+    CHECK(page2.margin().vertical == Margin::Vertical { LineOffset(0), LineOffset(4) });
+    CHECK(page2.margin().horizontal == Margin::Horizontal { ColumnOffset(0), ColumnOffset(9) });
+
+    // Set different margins on page 2.
+    mock.writeToScreen("\033[3;5r"); // DECSTBM(3, 5)
+    CHECK(page2.margin().vertical == Margin::Vertical { LineOffset(2), LineOffset(4) });
+
+    // Switch back to page 1 — its custom margins should still be intact.
+    mock.writeToScreen("\033[1 P"); // PPA 1
+    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+
+    // Page 2 margins should still be independently preserved.
+    CHECK(page2.margin().vertical == Margin::Vertical { LineOffset(2), LineOffset(4) });
+}
+
+TEST_CASE("MultiPage.AltScreenMarginCopy", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+
+    // Set custom margins on primary screen (page 1).
+    mock.writeToScreen("\033[2;4r"); // DECSTBM(2, 4)
+    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+
+    // Enter alternate screen (DECSET 1049) — alt screen should inherit primary margins.
+    mock.writeToScreen("\033[?1049h");
+    CHECK(terminal.isAlternateScreen());
+    CHECK(terminal.alternateScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+
+    // Modify margins on the alternate screen.
+    mock.writeToScreen("\033[1;5r"); // DECSTBM(1, 5) — reset to full screen
+    CHECK(terminal.alternateScreen().margin().vertical == Margin::Vertical { LineOffset(0), LineOffset(4) });
+
+    // Leave alternate screen (DECSET 1049 off) — primary margins should be unchanged.
+    mock.writeToScreen("\033[?1049l");
+    CHECK(terminal.isPrimaryScreen());
+    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+}
+
+TEST_CASE("MultiPage.ResizeResetsAllPageMargins", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+
+    // Set custom margins on page 1.
+    mock.writeToScreen("\033[2;4r"); // DECSTBM(2, 4)
+    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+
+    // Switch to page 4 and set custom margins.
+    mock.writeToScreen("\033[4 P");  // PPA 4
+    mock.writeToScreen("\033[2;3r"); // DECSTBM(2, 3)
+    CHECK(terminal.pageAt(PageIndex(3)).margin().vertical
+          == Margin::Vertical { LineOffset(1), LineOffset(2) });
+
+    // Resize terminal — all margins should reset to defaults.
+    terminal.resizeScreen(PageSize { LineCount(6), ColumnCount(10) });
+
+    // Page 1 margins should be reset.
+    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(0), LineOffset(5) });
+    CHECK(terminal.primaryScreen().margin().horizontal
+          == Margin::Horizontal { ColumnOffset(0), ColumnOffset(9) });
+
+    // Page 4 margins should also be reset.
+    CHECK(terminal.pageAt(PageIndex(3)).margin().vertical
+          == Margin::Vertical { LineOffset(0), LineOffset(5) });
+}
+
+TEST_CASE("MultiPage.HardResetResetsAllPageMargins", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+
+    // Set custom margins on page 1.
+    mock.writeToScreen("\033[2;4r"); // DECSTBM(2, 4)
+    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+
+    // Switch to page 3 and set custom margins.
+    mock.writeToScreen("\033[3 P");  // PPA 3
+    mock.writeToScreen("\033[3;5r"); // DECSTBM(3, 5)
+    CHECK(terminal.pageAt(PageIndex(2)).margin().vertical
+          == Margin::Vertical { LineOffset(2), LineOffset(4) });
+
+    // Hard reset.
+    mock.writeToScreen("\033c"); // RIS
+
+    // Page 1 margins should be reset to defaults.
+    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(0), LineOffset(4) });
+    CHECK(terminal.primaryScreen().margin().horizontal
+          == Margin::Horizontal { ColumnOffset(0), ColumnOffset(9) });
+
+    // Page 3 margins should also be reset.
+    CHECK(terminal.pageAt(PageIndex(2)).margin().vertical
+          == Margin::Vertical { LineOffset(0), LineOffset(4) });
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests
