@@ -36,6 +36,7 @@
 
 #include <gsl/pointers>
 
+#include <array>
 #include <atomic>
 #include <bitset>
 #include <chrono>
@@ -51,6 +52,7 @@
 #include <stack>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace vtbackend
 {
@@ -685,10 +687,51 @@ class Terminal
     {
         switch (type)
         {
-            case ScreenType::Primary: return _primaryScreen;
-            case ScreenType::Alternate: return _alternateScreen;
+            case ScreenType::Primary: return *_pages[0];
+            case ScreenType::Alternate: return *_pages[AlternateScreenPageIndex.value];
         }
         crispy::unreachable();
+    }
+
+    /// Returns a reference to the screen at the given page index.
+    [[nodiscard]] Screen<PageCell>& pageAt(PageIndex index) noexcept { return *_pages[index.value]; }
+    [[nodiscard]] Screen<PageCell> const& pageAt(PageIndex index) const noexcept
+    {
+        return *_pages[index.value];
+    }
+
+    /// Returns the zero-based page index where the cursor is currently active.
+    [[nodiscard]] PageIndex cursorPageIndex() const noexcept { return _cursorPage; }
+
+    /// Returns the zero-based page index of the displayed page.
+    [[nodiscard]] PageIndex displayedPageIndex() const noexcept { return _displayedPage; }
+
+    /// Returns the 1-based page number where the cursor is active (for VT replies).
+    [[nodiscard]] int cursorPageNumber() const noexcept { return _cursorPage.value + 1; }
+
+    /// Returns the 1-based page number of the displayed page (for VT replies).
+    [[nodiscard]] int displayedPageNumber() const noexcept { return _displayedPage.value + 1; }
+
+    /// Switches the active cursor page. See Phase 2 for full implementation.
+    void setPage(PageIndex target, bool moveCursorHome);
+
+    /// Saves the current cursor page index (called by DECSC).
+    void saveCursorPage();
+
+    /// Restores the previously saved cursor page index (called by DECRC).
+    void restoreCursorPage();
+
+    /// Returns the margin for the page where the cursor is currently active.
+    [[nodiscard]] Margin& currentPageMargin() noexcept { return _pageMargins[_cursorPage.value]; }
+    [[nodiscard]] Margin const& currentPageMargin() const noexcept { return _pageMargins[_cursorPage.value]; }
+
+    /// Creates a default margin for the given page size (full-screen, no restriction).
+    [[nodiscard]] static Margin makeDefaultMargin(PageSize pageSize) noexcept
+    {
+        return Margin { .vertical =
+                            Margin::Vertical { .from = {}, .to = boxed_cast<LineOffset>(pageSize.lines) - 1 },
+                        .horizontal = Margin::Horizontal {
+                            .from = {}, .to = boxed_cast<ColumnOffset>(pageSize.columns) - 1 } };
     }
 
     /// Returns true if a screen crossfade transition is currently active.
@@ -721,17 +764,17 @@ class Terminal
     }
 
     // clang-format off
-    [[nodiscard]] Screen<PrimaryScreenCell> const& primaryScreen() const noexcept { return _primaryScreen; }
-    [[nodiscard]] Screen<PrimaryScreenCell>& primaryScreen() noexcept { return _primaryScreen; }
-    [[nodiscard]] Screen<AlternateScreenCell> const& alternateScreen() const noexcept { return _alternateScreen; }
-    [[nodiscard]] Screen<AlternateScreenCell>& alternateScreen() noexcept { return _alternateScreen; }
+    [[nodiscard]] Screen<PageCell> const& primaryScreen() const noexcept { return *_pages[0]; }
+    [[nodiscard]] Screen<PageCell>& primaryScreen() noexcept { return *_pages[0]; }
+    [[nodiscard]] Screen<PageCell> const& alternateScreen() const noexcept { return *_pages[AlternateScreenPageIndex.value]; }
+    [[nodiscard]] Screen<PageCell>& alternateScreen() noexcept { return *_pages[AlternateScreenPageIndex.value]; }
     [[nodiscard]] Screen<StatusDisplayCell> const& hostWritableStatusLineDisplay() const noexcept { return _hostWritableStatusLineScreen; }
     [[nodiscard]] Screen<StatusDisplayCell> const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
     // clang-format on
 
     [[nodiscard]] bool isLineWrapped(LineOffset lineNumber) const noexcept
     {
-        return isPrimaryScreen() && _primaryScreen.isLineWrapped(lineNumber);
+        return isPrimaryScreen() && primaryScreen().isLineWrapped(lineNumber);
     }
 
     [[nodiscard]] CellLocation currentMousePosition() const noexcept { return _currentMousePosition; }
@@ -815,10 +858,10 @@ class Terminal
 
         if (isPrimaryScreen())
             vtbackend::renderSelection(*_selection,
-                                       [&](CellLocation pos) { renderTarget(pos, _primaryScreen.at(pos)); });
+                                       [&](CellLocation pos) { renderTarget(pos, primaryScreen().at(pos)); });
         else
             vtbackend::renderSelection(
-                *_selection, [&](CellLocation pos) { renderTarget(pos, _alternateScreen.at(pos)); });
+                *_selection, [&](CellLocation pos) { renderTarget(pos, alternateScreen().at(pos)); });
     }
 
     void clearSelection();
@@ -1351,8 +1394,11 @@ class Terminal
     // }}}
 
     // {{{ Displays this terminal manages
-    Screen<PrimaryScreenCell> _primaryScreen;
-    Screen<AlternateScreenCell> _alternateScreen;
+    std::vector<std::unique_ptr<Screen<PageCell>>>
+        _pages;                       ///< 16 pages: page 0 = primary, page 15 = alt screen
+    PageIndex _cursorPage { 0 };      ///< Page where cursor/VT output goes
+    PageIndex _displayedPage { 0 };   ///< Page shown to user (== _cursorPage when DECPCCM set)
+    PageIndex _savedCursorPage { 0 }; ///< Page index saved by DECSC
     Screen<StatusDisplayCell> _hostWritableStatusLineScreen;
     Screen<StatusDisplayCell> _indicatorStatusScreen;
     gsl::not_null<ScreenBase*> _currentScreen;
@@ -1407,10 +1453,10 @@ class Terminal
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
 
-    // Screen margin - shared across all screens that are covering the main area,
-    // i.e. the primary screen and alternate screen.
-    // This excludes all status lines, title lines, etc.
-    Margin _mainScreenMargin;
+    /// Per-page screen margins for DEC multi-page support.
+    /// Each page has its own independent margin (DECSTBM/DECSLRM apply per-page).
+    /// This excludes all status lines, title lines, etc.
+    std::array<Margin, MaxPageCount> _pageMargins;
     Margin _hostWritableScreenMargin;
     Margin _indicatorScreenMargin;
 

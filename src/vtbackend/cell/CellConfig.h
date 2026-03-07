@@ -13,6 +13,9 @@ using PrimaryScreenCell = CompactCell;
 /// Type of cell to be used with the alternate screen.
 using AlternateScreenCell = CompactCell;
 
+/// Unified cell type for all DEC multi-page buffers (pages 1-16).
+using PageCell = CompactCell;
+
 /// The Cell to be used with the indicator (and host writable) status line.
 using StatusDisplayCell = SimpleCell;
 

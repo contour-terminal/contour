@@ -338,17 +338,22 @@ void Screen<Cell>::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
 {
     auto cursorPosition = _cursor.position;
 
+    // Only reset margins when the page size actually changes (during a resize),
+    // not during a simple page switch where the grid size already matches.
+    auto const sizeChanged = (_grid.pageSize() != mainDisplayPageSize);
+
     // Ensure correct screen buffer size for the buffer we've just switched to.
     cursorPosition = _grid.resize(mainDisplayPageSize, cursorPosition, _cursor.wrapPending);
     cursorPosition = clampCoordinate(cursorPosition);
 
-    auto const margin = Margin {
-        .vertical = Margin::Vertical { .from = {}, .to = mainDisplayPageSize.lines.as<LineOffset>() - 1 },
-        .horizontal =
-            Margin::Horizontal { .from = {}, .to = mainDisplayPageSize.columns.as<ColumnOffset>() - 1 }
-    };
-
-    *_margin = margin;
+    if (sizeChanged)
+    {
+        *_margin = Margin {
+            .vertical = Margin::Vertical { .from = {}, .to = mainDisplayPageSize.lines.as<LineOffset>() - 1 },
+            .horizontal =
+                Margin::Horizontal { .from = {}, .to = mainDisplayPageSize.columns.as<ColumnOffset>() - 1 }
+        };
+    }
 
     if (_cursor.position.column < boxed_cast<ColumnOffset>(mainDisplayPageSize.columns))
         _cursor.wrapPending = false;
@@ -943,8 +948,82 @@ void Screen<Cell>::reportColorPaletteUpdate()
 template <CellConcept Cell>
 void Screen<Cell>::reportExtendedCursorPosition()
 {
-    auto const pageNum = 1;
-    reply("\033[{};{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1, pageNum);
+    auto const pageNum = _terminal->cursorPageNumber();
+    reply("\033[?{};{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1, pageNum);
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::reportCursorInformation()
+{
+    // DECCIR — Cursor Information Report
+    // Response: DCS 1 $ u Pr;Pc;Pp;Srend;Satt;Sflag;Pgl;Pgr;Scss;Sdesig ST
+    // See: https://vt100.net/docs/vt510-rm/DECCIR.html
+    auto const& cursor = _cursor;
+    auto const line = *cursor.position.line + 1;
+    auto const column = *cursor.position.column + 1;
+    auto const page = _terminal->cursorPageNumber();
+
+    // Srend: visual attributes bitmask (0x40 base)
+    // Bit 1=Bold, Bit 2=Underline, Bit 3=Blinking, Bit 4=Inverse
+    auto const& flags = cursor.graphicsRendition.flags;
+    auto srendBits = 0;
+    if (flags.test(CellFlag::Bold))
+        srendBits |= 1;
+    if (flags.test(CellFlag::Underline))
+        srendBits |= 2;
+    if (flags.test(CellFlag::Blinking))
+        srendBits |= 4;
+    if (flags.test(CellFlag::Inverse))
+        srendBits |= 8;
+    auto const srend = static_cast<char>(0x40 + srendBits);
+
+    // Satt: protection attribute (Bit 1 = DECSCA protection)
+    auto const satt =
+        flags.test(CellFlag::CharacterProtected) ? static_cast<char>(0x41) : static_cast<char>(0x40);
+
+    // Sflag: Bit 1=DECOM, Bit 2=SS2, Bit 3=SS3, Bit 4=wrap pending
+    auto const& charsets = cursor.charsets;
+    auto sflagBits = 0;
+    if (cursor.originMode)
+        sflagBits |= 1;
+    if (charsets.tableForNextGraphic() != charsets.selectedTable())
+    {
+        if (charsets.tableForNextGraphic() == CharsetTable::G2)
+            sflagBits |= 2; // SS2 active
+        else if (charsets.tableForNextGraphic() == CharsetTable::G3)
+            sflagBits |= 4; // SS3 active
+    }
+    if (cursor.wrapPending)
+        sflagBits |= 8;
+    auto const sflag = static_cast<char>(0x40 + sflagBits);
+
+    // Pgl: GL charset table index (0=G0, 1=G1, 2=G2, 3=G3)
+    auto const pgl = static_cast<int>(charsets.selectedTable());
+
+    // Pgr: GR charset table index (GR not tracked; default to G2 per VT standard)
+    auto const pgr = 2;
+
+    // Scss: character set size for each G-set (0x40 base)
+    // Bit N = G(N-1) size: 0=94-char, 1=96-char. All supported charsets are 94-char.
+    auto const scss = static_cast<char>(0x40);
+
+    // Sdesig: SCS designation final characters for G0 through G3
+    auto const sdesig = std::string { charsetDesignation(charsets.charsetIdOf(CharsetTable::G0)),
+                                      charsetDesignation(charsets.charsetIdOf(CharsetTable::G1)),
+                                      charsetDesignation(charsets.charsetIdOf(CharsetTable::G2)),
+                                      charsetDesignation(charsets.charsetIdOf(CharsetTable::G3)) };
+
+    reply("\033P1$u{};{};{};{};{};{};{};{};{};{}\033\\",
+          line,
+          column,
+          page,
+          srend,
+          satt,
+          sflag,
+          pgl,
+          pgr,
+          scss,
+          sdesig);
 }
 
 template <CellConcept Cell>
@@ -1375,29 +1454,36 @@ void Screen<Cell>::scrollRight(ColumnCount n)
 template <CellConcept Cell>
 void Screen<Cell>::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int targetPage)
 {
-    (void) page;
-    (void) targetPage;
-
-    // The space at https://vt100.net/docs/vt510-rm/DECCRA.html states:
-    // "If Pbs is greater than Pts, // or Pls is greater than Prs, the terminal ignores DECCRA."
-    //
-    // However, the first part "Pbs is greater than Pts" does not make sense.
     if (*sourceArea.bottom < *sourceArea.top || *sourceArea.right < *sourceArea.left)
         return;
 
-    if (*sourceArea.top == *targetTopLeft.line && *sourceArea.left == *targetTopLeft.column)
-        // Copy to its own location => no-op.
+    // Resolve page indices: 0 means "current page", otherwise 1-based page number.
+    auto const sourcePageIndex = PageIndex(page == 0 ? _terminal->cursorPageIndex().value : page - 1);
+    auto const targetPageIndex =
+        PageIndex(targetPage == 0 ? _terminal->cursorPageIndex().value : targetPage - 1);
+
+    // Clamp to valid range.
+    if (sourcePageIndex.value < 0 || sourcePageIndex.value >= MaxPageCount)
+        return;
+    if (targetPageIndex.value < 0 || targetPageIndex.value >= MaxPageCount)
         return;
 
+    auto const samePage = (sourcePageIndex == targetPageIndex);
+    if (samePage && *sourceArea.top == *targetTopLeft.line && *sourceArea.left == *targetTopLeft.column)
+        return; // Copy to its own location on same page => no-op.
+
+    auto& srcGrid = _terminal->pageAt(sourcePageIndex).grid();
+    auto& dstGrid = _terminal->pageAt(targetPageIndex).grid();
+
     auto const [x0, xInc, xEnd] = [&]() {
-        if (*targetTopLeft.column > *sourceArea.left) // moving right
+        if (samePage && *targetTopLeft.column > *sourceArea.left) // moving right on same page
             return std::tuple { *sourceArea.right - *sourceArea.left, -1, -1 };
         else
             return std::tuple { 0, +1, *sourceArea.right - *sourceArea.left + 1 };
     }();
 
     auto const [y0, yInc, yEnd] = [&]() {
-        if (*targetTopLeft.line > *sourceArea.top) // moving down
+        if (samePage && *targetTopLeft.line > *sourceArea.top) // moving down on same page
             return std::tuple { *sourceArea.bottom - *sourceArea.top, -1, -1 };
         else
             return std::tuple { 0, +1, *sourceArea.bottom - *sourceArea.top + 1 };
@@ -1407,13 +1493,70 @@ void Screen<Cell>::copyArea(Rect sourceArea, int page, CellLocation targetTopLef
     {
         for (auto x = x0; x != xEnd; x += xInc)
         {
-            Cell const& sourceCell =
-                at(LineOffset::cast_from(*sourceArea.top + y), ColumnOffset::cast_from(sourceArea.left + x));
-            Cell& targetCell = at(LineOffset::cast_from(targetTopLeft.line + y),
-                                  ColumnOffset::cast_from(targetTopLeft.column + x));
+            auto const srcLine = LineOffset::cast_from(*sourceArea.top + y);
+            auto const srcCol = ColumnOffset::cast_from(sourceArea.left + x);
+            auto const dstLine = LineOffset::cast_from(targetTopLeft.line + y);
+            auto const dstCol = ColumnOffset::cast_from(targetTopLeft.column + x);
+
+            auto const& sourceCell = srcGrid.at(srcLine, srcCol);
+            auto& targetCell = dstGrid.at(dstLine, dstCol);
             targetCell = sourceCell;
         }
     }
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::nextPage(int count)
+{
+    // NP: Move forward by count pages, cursor goes to home position.
+    // Clamp within DEC page range [0, MaxPageCount-2], never entering the alternate screen page.
+    auto const target =
+        PageIndex(std::clamp(_terminal->cursorPageIndex().value + count, 0, MaxPageCount - 2));
+    _terminal->setPage(target, true);
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::previousPage(int count)
+{
+    // PP: Move backward by count pages, cursor goes to home position.
+    auto const target =
+        PageIndex(std::clamp(_terminal->cursorPageIndex().value - count, 0, MaxPageCount - 2));
+    _terminal->setPage(target, true);
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::pagePositionAbsolute(int pageNumber)
+{
+    // PPA: Move to absolute 1-based page number, preserve cursor position.
+    auto const target = PageIndex(std::clamp(pageNumber - 1, 0, MaxPageCount - 2));
+    _terminal->setPage(target, false);
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::pagePositionRelative(int count)
+{
+    // PPR: Move forward by count pages, preserve cursor position.
+    auto const target =
+        PageIndex(std::clamp(_terminal->cursorPageIndex().value + count, 0, MaxPageCount - 2));
+    _terminal->setPage(target, false);
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::pagePositionBackward(int count)
+{
+    // PPB: Move backward by count pages, preserve cursor position.
+    auto const target =
+        PageIndex(std::clamp(_terminal->cursorPageIndex().value - count, 0, MaxPageCount - 2));
+    _terminal->setPage(target, false);
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::requestDisplayedExtent()
+{
+    // DECRQDE: Reply with CSI Phe ; Pwe ; 1 ; 1 ; Pp " w
+    // Phe = page height, Pwe = page width, Pp = displayed page number (1-based).
+    auto const ps = pageSize();
+    reply("\033[{};{};1;1;{}\"w", *ps.lines, *ps.columns, _terminal->displayedPageNumber());
 }
 
 template <CellConcept Cell>
@@ -2766,76 +2909,7 @@ namespace impl
                 return ApplyResult::Invalid; // -> error
             else if (seq.param(0) == 1)
             {
-                // DECCIR — Cursor Information Report
-                // Response: DCS 1 $ u Pr;Pc;Pp;Srend;Satt;Sflag;Pgl;Pgr;Scss;Sdesig ST
-                // See: https://vt100.net/docs/vt510-rm/DECCIR.html
-                auto const& cursor = screen.cursor();
-                auto const line = *cursor.position.line + 1;
-                auto const column = *cursor.position.column + 1;
-                auto const page = 1; // We only support one page
-
-                // Srend: visual attributes bitmask (0x40 base)
-                // Bit 1=Bold, Bit 2=Underline, Bit 3=Blinking, Bit 4=Inverse
-                auto const& flags = cursor.graphicsRendition.flags;
-                int srendBits = 0;
-                if (flags.test(CellFlag::Bold))
-                    srendBits |= 1;
-                if (flags.test(CellFlag::Underline))
-                    srendBits |= 2;
-                if (flags.test(CellFlag::Blinking))
-                    srendBits |= 4;
-                if (flags.test(CellFlag::Inverse))
-                    srendBits |= 8;
-                auto const srend = static_cast<char>(0x40 + srendBits);
-
-                // Satt: protection attribute (Bit 1 = DECSCA protection)
-                auto const satt = flags.test(CellFlag::CharacterProtected) ? static_cast<char>(0x41)
-                                                                           : static_cast<char>(0x40);
-
-                // Sflag: Bit 1=DECOM, Bit 2=SS2, Bit 3=SS3, Bit 4=wrap pending
-                auto const& charsets = cursor.charsets;
-                int sflagBits = 0;
-                if (cursor.originMode)
-                    sflagBits |= 1;
-                if (charsets.tableForNextGraphic() != charsets.selectedTable())
-                {
-                    if (charsets.tableForNextGraphic() == CharsetTable::G2)
-                        sflagBits |= 2; // SS2 active
-                    else if (charsets.tableForNextGraphic() == CharsetTable::G3)
-                        sflagBits |= 4; // SS3 active
-                }
-                if (cursor.wrapPending)
-                    sflagBits |= 8;
-                auto const sflag = static_cast<char>(0x40 + sflagBits);
-
-                // Pgl: GL charset table index (0=G0, 1=G1, 2=G2, 3=G3)
-                auto const pgl = static_cast<int>(charsets.selectedTable());
-
-                // Pgr: GR charset table index (GR not tracked; default to G2 per VT standard)
-                auto const pgr = 2;
-
-                // Scss: character set size for each G-set (0x40 base)
-                // Bit N = G(N-1) size: 0=94-char, 1=96-char. All supported charsets are 94-char.
-                auto const scss = static_cast<char>(0x40);
-
-                // Sdesig: SCS designation final characters for G0 through G3
-                auto const sdesig =
-                    std::string { charsetDesignation(charsets.charsetIdOf(CharsetTable::G0)),
-                                  charsetDesignation(charsets.charsetIdOf(CharsetTable::G1)),
-                                  charsetDesignation(charsets.charsetIdOf(CharsetTable::G2)),
-                                  charsetDesignation(charsets.charsetIdOf(CharsetTable::G3)) };
-
-                screen.reply("\033P1$u{};{};{};{};{};{};{};{};{};{}\033\\",
-                             line,
-                             column,
-                             page,
-                             srend,
-                             satt,
-                             sflag,
-                             pgl,
-                             pgr,
-                             scss,
-                             sdesig);
+                screen.reportCursorInformation();
                 return ApplyResult::Ok;
             }
             else if (seq.param(0) == 2)
@@ -3407,12 +3481,14 @@ void Screen<Cell>::saveCursor()
 {
     // https://vt100.net/docs/vt510-rm/DECSC.html
     _savedCursor = _cursor;
+    _terminal->saveCursorPage();
 }
 
 template <CellConcept Cell>
 void Screen<Cell>::restoreCursor()
 {
     // https://vt100.net/docs/vt510-rm/DECRC.html
+    _terminal->restoreCursorPage();
     restoreCursor(_savedCursor);
 }
 
@@ -4224,6 +4300,12 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
             _terminal->softReset();
             break;
         case DECXCPR: reportExtendedCursorPosition(); break;
+        case NP: nextPage(seq.param_or(0, 1)); break;
+        case PP: previousPage(seq.param_or(0, 1)); break;
+        case PPA: pagePositionAbsolute(seq.param_or(0, 1)); break;
+        case PPR: pagePositionRelative(seq.param_or(0, 1)); break;
+        case PPB: pagePositionBackward(seq.param_or(0, 1)); break;
+        case DECRQDE: requestDisplayedExtent(); break;
         case DL: deleteLines(seq.param_or(0, LineCount(1))); break;
         case ECH: eraseCharacters(seq.param_or(0, ColumnCount(1))); break;
         case ED:

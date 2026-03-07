@@ -48,6 +48,9 @@ namespace detail::tags // {{{
     // misc.
     struct TabStopCount {};
 
+    // page
+    struct PageIndex {};
+
     // generic length
     struct Length {};
 
@@ -421,6 +424,16 @@ constexpr GridSize::iterator end(GridSize const& s) noexcept
 
 using TabStopCount = boxed::boxed<int, detail::tags::TabStopCount>;
 
+/// Zero-based page index for DEC multi-page support.
+/// Pages 0..14 map to DEC pages 1..15. Page 15 (index) is the Xterm alternate screen.
+using PageIndex = boxed::boxed<int, detail::tags::PageIndex>;
+
+/// Maximum number of pages supported (DEC pages 1-15 + Xterm alternate screen at index 15).
+constexpr int MaxPageCount = 16;
+
+/// The page index reserved for the Xterm alternate screen buffer.
+constexpr PageIndex AlternateScreenPageIndex { MaxPageCount - 1 };
+
 // }}}
 // {{{ convenience methods
 
@@ -489,6 +502,12 @@ enum class ScreenType : uint8_t
     Primary = 0,
     Alternate = 1,
 };
+
+/// Returns the ScreenType for a given page index.
+constexpr ScreenType screenTypeFromPage(PageIndex page) noexcept
+{
+    return page == PageIndex(0) ? ScreenType::Primary : ScreenType::Alternate;
+}
 
 // TODO: Maybe make boxed.h into its own C++ github repo?
 // TODO: Differentiate Line/Column types for DECOM enabled/disabled coordinates?
@@ -675,6 +694,12 @@ enum class DECMode : std::uint16_t
      */
     AutoWrap = 13,
 
+    /// DECPCCM — Page Cursor Coupling Mode (VT420).
+    ///
+    /// When set (default), switching the cursor to a different page also updates the displayed page.
+    /// When reset, the displayed page and cursor page can be independent.
+    PageCursorCoupling = 30,
+
     PrinterExtend = 14,
     LeftRightMargin = 15,
 
@@ -830,6 +855,7 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::AllowColumns80to132: return 40;
         case DECMode::DebugLogging: return 46;
         case DECMode::UseAlternateScreen: return 47;
+        case DECMode::PageCursorCoupling: return 64;
         case DECMode::ApplicationKeypad: return 66;
         case DECMode::BackarrowKey: return 67;
         case DECMode::LeftRightMargin: return 69;
@@ -887,6 +913,7 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
         case 46: return DECMode::DebugLogging;
         case 47: return DECMode::UseAlternateScreen;
+        case 64: return DECMode::PageCursorCoupling;
         case 66: return DECMode::ApplicationKeypad;
         case 67: return DECMode::BackarrowKey;
         case 69: return DECMode::LeftRightMargin;
