@@ -835,14 +835,35 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         glyph.position.y = (unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2
                            - _gridMetrics.baseline;
     }
+    else if (glyph.bitmapSize.width > _gridMetrics.cellSize.width
+             || glyph.bitmapSize.height > _gridMetrics.cellSize.height)
+    {
+        // Scale down oversized non-RGBA glyphs (e.g. Nerd Font icons in alpha_mask format)
+        // to fit within a single cell, preventing invalid cropping math downstream.
+        auto const cellBoundingBox = ImageSize { _gridMetrics.cellSize.width, _gridMetrics.cellSize.height };
+        auto const originalPosition = glyph.position;
+        if (rasterizerLog)
+            rasterizerLog()("Scaling oversized non-RGBA glyph of {}+{} down to cell size {}.",
+                            glyph.bitmapSize,
+                            glyph.position,
+                            cellBoundingBox);
+        auto [scaledGlyph, scaleFactor] = text::scale(glyph, cellBoundingBox);
+        glyph = std::move(scaledGlyph);
+        // Restore baseline-relative positioning instead of emoji-style centering.
+        glyph.position.y = static_cast<int>(static_cast<float>(originalPosition.y) / scaleFactor);
+        glyph.position.x = (unbox<int>(_gridMetrics.cellSize.width) - glyph.bitmapSize.width.as<int>()) / 2;
+        if (rasterizerLog)
+            rasterizerLog()(" ==> scaled: {}/{}, factor {}", glyph, cellBoundingBox, scaleFactor);
+    }
 
     // y-position relative to cell-bottom of glyphs top.
     auto yMax = _gridMetrics.baseline + glyph.position.y;
 
-    if (yMax < 0)
+    if (yMax <= 0)
     {
-        rasterizerLog()("Encountered glyph with inverted direction, swaping to normal");
-        yMax = std::abs(yMax);
+        // Glyph's top is at or below cell bottom — not visible.
+        rasterizerLog()("Skipping glyph with yMax={} (not visible within cell).", yMax);
+        return nullopt;
     }
 
     // y-position relative to cell-bottom of the glyphs bottom.
