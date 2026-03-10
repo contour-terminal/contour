@@ -835,8 +835,10 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         glyph.position.y = (unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2
                            - _gridMetrics.baseline;
     }
-    else if (glyph.bitmapSize.width > _gridMetrics.cellSize.width
-             || glyph.bitmapSize.height > _gridMetrics.cellSize.height)
+    else if (glyph.bitmapSize.width
+                 > vtbackend::Width::cast_from(unbox<double>(_gridMetrics.cellSize.width) * 1.3)
+             || glyph.bitmapSize.height
+                    > vtbackend::Height::cast_from(unbox<double>(_gridMetrics.cellSize.height) * 1.1))
     {
         // Scale down oversized non-RGBA glyphs (e.g. Nerd Font icons in alpha_mask format)
         // to fit within a single cell, preventing invalid cropping math downstream.
@@ -862,7 +864,8 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     if (yMax <= 0)
     {
         // Glyph's top is at or below cell bottom — not visible.
-        rasterizerLog()("Skipping glyph with yMax={} (not visible within cell).", yMax);
+        if (rasterizerLog)
+            rasterizerLog()("Skipping glyph with yMax={} (not visible within cell).", yMax);
         return nullopt;
     }
 
