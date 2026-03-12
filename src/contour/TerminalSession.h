@@ -295,12 +295,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void sendKeyEvent(vtbackend::Key key,
                       vtbackend::Modifiers modifiers,
                       vtbackend::KeyboardEventType eventType,
-                      Timestamp now);
+                      Timestamp now,
+                      uint32_t physicalKey = 0,
+                      uint32_t scanCode = 0);
     void sendCharEvent(char32_t value,
                        uint32_t physicalKey,
                        vtbackend::Modifiers modifiers,
                        vtbackend::KeyboardEventType eventType,
-                       Timestamp now);
+                       Timestamp now,
+                       uint32_t scanCode = 0);
 
     void sendMousePressEvent(vtbackend::Modifiers modifiers,
                              vtbackend::MouseButton button,

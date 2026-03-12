@@ -147,7 +147,9 @@ Terminal::Terminal(Events& eventListener,
     _effectiveImageCanvasSize { _settings.maxImageSize },
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
                                                              _maxSixelColorRegisters) },
-    _imagePool { [this](Image const* image) { discardImage(*image); } },
+    _imagePool { [this](Image const* image) {
+        discardImage(*image);
+    } },
     _hyperlinks { .cache = HyperlinkCache { 1024 } },
     _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
     _parser { std::ref(_sequenceBuilder) },
@@ -808,7 +810,12 @@ void Terminal::updateIndicatorStatusLine()
     }
 }
 
-Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
+Handled Terminal::sendKeyEvent(Key key,
+                               Modifiers modifiers,
+                               KeyboardEventType eventType,
+                               Timestamp now,
+                               uint32_t physicalKey,
+                               uint32_t scanCode)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
@@ -830,7 +837,7 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     if (_inputHandler.sendKeyPressEvent(key, modifiers, eventType))
         return Handled { true };
 
-    bool const success = _inputGenerator.generate(key, modifiers, eventType);
+    bool const success = _inputGenerator.generate(key, modifiers, eventType, physicalKey, scanCode);
     if (success)
     {
         flushInput();
@@ -840,8 +847,12 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     return Handled { success };
 }
 
-Handled Terminal::sendCharEvent(
-    char32_t ch, uint32_t physicalKey, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
+Handled Terminal::sendCharEvent(char32_t ch,
+                                uint32_t physicalKey,
+                                Modifiers modifiers,
+                                KeyboardEventType eventType,
+                                Timestamp now,
+                                uint32_t scanCode)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
@@ -866,7 +877,7 @@ Handled Terminal::sendCharEvent(
     if (_inputHandler.sendCharPressEvent(ch, modifiers, eventType))
         return Handled { true };
 
-    auto const success = _inputGenerator.generate(ch, physicalKey, modifiers, eventType);
+    auto const success = _inputGenerator.generate(ch, physicalKey, modifiers, eventType, scanCode);
     if (success)
     {
         flushInput();
@@ -2442,6 +2453,7 @@ void Terminal::setMode(DECMode mode, bool enable)
                 reply("\033P>2034;1b{};{};{};{}\033\\", t[0], t[1], t[2], t[3]);
             }
             break;
+        case DECMode::Win32InputMode: _inputGenerator.setWin32InputMode(enable); break;
         default: break;
     }
 
@@ -3263,6 +3275,7 @@ std::string to_string(DECMode mode)
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
+        case DECMode::Win32InputMode: return "Win32InputMode";
     }
     return std::format("({})", static_cast<unsigned>(mode));
 }

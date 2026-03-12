@@ -481,6 +481,12 @@ class InputGenerator
     void setGenerateFocusEvents(bool enable) noexcept { _generateFocusEvents = enable; }
     [[nodiscard]] bool generateFocusEvents() const noexcept { return _generateFocusEvents; }
 
+    /// Enables or disables Win32 keyboard input mode (DECSET 9001).
+    void setWin32InputMode(bool enable) noexcept { _win32InputMode = enable; }
+
+    /// @returns true if Win32 keyboard input mode is active.
+    [[nodiscard]] bool win32InputMode() const noexcept { return _win32InputMode; }
+
     void setPassiveMouseTracking(bool v) noexcept { _passiveMouseTracking = v; }
     [[nodiscard]] bool passiveMouseTracking() const noexcept { return _passiveMouseTracking; }
 
@@ -493,14 +499,19 @@ class InputGenerator
     bool generate(char32_t characterEvent,
                   uint32_t physicalKey,
                   Modifiers modifier,
-                  KeyboardEventType eventType);
+                  KeyboardEventType eventType,
+                  uint32_t scanCode = 0);
     bool generate(char32_t characterEvent, Modifiers modifier, KeyboardEventType eventType)
     {
         // Simulate physical key here.
         auto const physicalKey = static_cast<uint32_t>(characterEvent);
         return generate(characterEvent, physicalKey, modifier, eventType);
     }
-    bool generate(Key key, Modifiers modifier, KeyboardEventType eventType);
+    bool generate(Key key,
+                  Modifiers modifier,
+                  KeyboardEventType eventType,
+                  uint32_t physicalKey = 0,
+                  uint32_t scanCode = 0);
     void generatePaste(std::string_view const& text);
     bool generateMousePress(Modifiers modifier,
                             MouseButton button,
@@ -590,10 +601,14 @@ class InputGenerator
     inline bool append(uint8_t byte);
     inline bool append(unsigned int asciiChar);
 
+    bool generateWin32Input(
+        uint32_t vk, uint32_t sc, char32_t uc, bool keyDown, Modifiers mods, uint16_t repeat = 1);
+
     // private fields
     //
     bool _bracketedPaste = false;
     bool _generateFocusEvents = false;
+    bool _win32InputMode = false;
     std::optional<MouseProtocol> _mouseProtocol = std::nullopt;
     bool _passiveMouseTracking = false;
     MouseTransport _mouseTransport = MouseTransport::Default;

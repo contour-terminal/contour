@@ -1041,7 +1041,12 @@ void handleAction(auto const& actions, auto eventType, auto callback)
     }
 }
 
-void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
+void TerminalSession::sendKeyEvent(Key key,
+                                   Modifiers modifiers,
+                                   KeyboardEventType eventType,
+                                   Timestamp now,
+                                   uint32_t physicalKey,
+                                   uint32_t scanCode)
 {
     inputLog()("Key {} event received: {} {}", eventType, modifiers, key);
 
@@ -1068,11 +1073,15 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
                 return;
         }
     }
-    terminal().sendKeyEvent(key, modifiers, eventType, now);
+    terminal().sendKeyEvent(key, modifiers, eventType, now, physicalKey, scanCode);
 }
 
-void TerminalSession::sendCharEvent(
-    char32_t value, uint32_t physicalKey, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
+void TerminalSession::sendCharEvent(char32_t value,
+                                    uint32_t physicalKey,
+                                    Modifiers modifiers,
+                                    KeyboardEventType eventType,
+                                    Timestamp now,
+                                    uint32_t scanCode)
 {
     inputLog()("Character {} event received: {} '{}'",
                eventType,
@@ -1107,7 +1116,7 @@ void TerminalSession::sendCharEvent(
                 return;
         }
     }
-    terminal().sendCharEvent(value, physicalKey, modifiers, eventType, now);
+    terminal().sendCharEvent(value, physicalKey, modifiers, eventType, now, scanCode);
 }
 
 void TerminalSession::sendMousePressEvent(Modifiers modifiers,

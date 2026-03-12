@@ -260,6 +260,112 @@ TEST_CASE("InputGenerator.Shift+Tab_with_NumLock", "[terminal,input]")
 
 // }}}
 
+// {{{ Win32 keyboard input mode
+
+TEST_CASE("InputGenerator.Win32.BasicCharKeyDown", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+
+    // 'a' with VK_A=0x41, no modifiers, key-down
+    input.generate(U'a', uint32_t { 0x41 }, Modifiers {}, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[65;0;97;1;0;1_"sv));
+}
+
+TEST_CASE("InputGenerator.Win32.KeyUpEvent", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+
+    // Key-up event for 'a' must be sent (not filtered)
+    input.generate(U'a', uint32_t { 0x41 }, Modifiers {}, KeyboardEventType::Release);
+    CHECK(escape(input.peek()) == escape("\033[65;0;97;0;0;1_"sv));
+}
+
+TEST_CASE("InputGenerator.Win32.CtrlShiftModifiers", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+
+    // Ctrl+Shift: Cs = LEFT_CTRL_PRESSED(0x08) | SHIFT_PRESSED(0x10) = 0x18 = 24
+    auto const ctrlShift = Modifiers { Modifier::Control } | Modifier::Shift;
+    input.generate(U'A', uint32_t { 0x41 }, ctrlShift, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[65;0;65;1;24;1_"sv));
+}
+
+TEST_CASE("InputGenerator.Win32.SpecialKeyViaEnum", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+
+    // F5 via Key enum: VK_F5=0x74=116, uc=0
+    input.generate(Key::F5, Modifiers {}, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[116;0;0;1;0;1_"sv));
+}
+
+TEST_CASE("InputGenerator.Win32.ArrowKeyEnhanced", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+
+    // UpArrow: VK_UP=0x26=38, ENHANCED_KEY flag=0x100=256
+    input.generate(Key::UpArrow, Modifiers {}, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[38;0;0;1;256;1_"sv));
+}
+
+TEST_CASE("InputGenerator.Win32.SuppressedByCSIu", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+    input.keyboardProtocol().enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    // With CSIu flags active, Win32 mode is suppressed; CSIu format used instead
+    input.generate(Key::Escape, Modifier::Shift, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[27;2u"sv));
+}
+
+TEST_CASE("InputGenerator.Win32.FallbackVkMapping", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+
+    // Key::Escape with physicalKey=0 falls back to keyToVirtualKeyCode mapping (VK=0x1B=27)
+    // uc for Escape = 0x1B = 27
+    input.generate(Key::Escape, Modifiers {}, KeyboardEventType::Press, 0, 0);
+    CHECK(escape(input.peek()) == escape("\033[27;0;27;1;0;1_"sv));
+}
+
+TEST_CASE("InputGenerator.Win32.ResetClearsFlag", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+    CHECK(input.win32InputMode() == true);
+
+    input.reset();
+    CHECK(input.win32InputMode() == false);
+}
+
+TEST_CASE("InputGenerator.Win32.EnterKeyUnicode", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+
+    // Enter: VK=0x0D=13, uc=0x0D=13
+    input.generate(Key::Enter, Modifiers {}, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[13;0;13;1;0;1_"sv));
+}
+
+TEST_CASE("InputGenerator.Win32.WithScanCode", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+
+    // 'a' with scanCode=30
+    input.generate(U'a', uint32_t { 0x41 }, Modifiers {}, KeyboardEventType::Press, 30);
+    CHECK(escape(input.peek()) == escape("\033[65;30;97;1;0;1_"sv));
+}
+
+// }}}
 // {{{ ExtendedKeyboardInputGenerator
 
 TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Ctrl+L", "[terminal,input]")

@@ -764,6 +764,10 @@ enum class DECMode : std::uint16_t
     /// JSON blocks of semantic command data.
     SemanticBlockProtocol = 2034,
 
+    /// Win32 keyboard input mode (Windows Terminal extension).
+    /// When enabled, raw KEY_EVENT_RECORD data is sent as VT sequences:
+    /// ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _
+    Win32InputMode = 9001,
     // If enabled (default, as per spec), then the cursor is left next to the graphic,
     // that is, the text cursor is placed at the position of the sixel cursor.
     // If disabled otherwise, the cursor is placed below the image, as if CR LF was sent,
@@ -882,6 +886,7 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::Unicode: return 2027;
         case DECMode::TextReflow: return 2028;
         case DECMode::SixelCursorNextToGraphic: return 8452;
+        case DECMode::Win32InputMode: return 9001;
     }
     return static_cast<unsigned>(m);
 }
@@ -940,6 +945,7 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         case 2031: return DECMode::ReportColorPaletteUpdated;
         case 2034: return DECMode::SemanticBlockProtocol;
         case 8452: return DECMode::SixelCursorNextToGraphic;
+        case 9001: return DECMode::Win32InputMode;
         default: return std::nullopt;
     }
 }

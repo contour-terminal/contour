@@ -628,11 +628,178 @@ bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
 }
 // }}}
 
+// {{{ Win32 keyboard input mode helpers
+
+/// Maps a Key enum value to a Win32 virtual key code.
+constexpr uint32_t keyToVirtualKeyCode(Key key) noexcept
+{
+    // clang-format off
+    switch (key)
+    {
+        case Key::Escape:       return 0x1B;
+        case Key::Enter:        return 0x0D;
+        case Key::Tab:          return 0x09;
+        case Key::Backspace:    return 0x08;
+        case Key::UpArrow:      return 0x26;
+        case Key::DownArrow:    return 0x28;
+        case Key::LeftArrow:    return 0x25;
+        case Key::RightArrow:   return 0x27;
+        case Key::Home:         return 0x24;
+        case Key::End:          return 0x23;
+        case Key::PageUp:       return 0x21;
+        case Key::PageDown:     return 0x22;
+        case Key::Insert:       return 0x2D;
+        case Key::Delete:       return 0x2E;
+        case Key::F1:           return 0x70;
+        case Key::F2:           return 0x71;
+        case Key::F3:           return 0x72;
+        case Key::F4:           return 0x73;
+        case Key::F5:           return 0x74;
+        case Key::F6:           return 0x75;
+        case Key::F7:           return 0x76;
+        case Key::F8:           return 0x77;
+        case Key::F9:           return 0x78;
+        case Key::F10:          return 0x79;
+        case Key::F11:          return 0x7A;
+        case Key::F12:          return 0x7B;
+        case Key::F13:          return 0x7C;
+        case Key::F14:          return 0x7D;
+        case Key::F15:          return 0x7E;
+        case Key::F16:          return 0x7F;
+        case Key::F17:          return 0x80;
+        case Key::F18:          return 0x81;
+        case Key::F19:          return 0x82;
+        case Key::F20:          return 0x83;
+        case Key::F21:          return 0x84;
+        case Key::F22:          return 0x85;
+        case Key::F23:          return 0x86;
+        case Key::F24:          return 0x87;
+        case Key::F25:
+        case Key::F26:
+        case Key::F27:
+        case Key::F28:
+        case Key::F29:
+        case Key::F30:
+        case Key::F31:
+        case Key::F32:
+        case Key::F33:
+        case Key::F34:
+        case Key::F35:          return 0; // No Win32 equivalent beyond F24
+        case Key::LeftShift:    return 0xA0;
+        case Key::RightShift:   return 0xA1;
+        case Key::LeftControl:  return 0xA2;
+        case Key::RightControl: return 0xA3;
+        case Key::LeftAlt:      return 0xA4;
+        case Key::RightAlt:     return 0xA5;
+        case Key::LeftSuper:    return 0x5B;
+        case Key::RightSuper:   return 0x5C;
+        case Key::Menu:         return 0x5D;
+        case Key::CapsLock:     return 0x14;
+        case Key::ScrollLock:   return 0x91;
+        case Key::NumLock:      return 0x90;
+        case Key::PrintScreen:  return 0x2C;
+        case Key::Pause:        return 0x13;
+        case Key::Numpad_0:         return 0x60;
+        case Key::Numpad_1:         return 0x61;
+        case Key::Numpad_2:         return 0x62;
+        case Key::Numpad_3:         return 0x63;
+        case Key::Numpad_4:         return 0x64;
+        case Key::Numpad_5:         return 0x65;
+        case Key::Numpad_6:         return 0x66;
+        case Key::Numpad_7:         return 0x67;
+        case Key::Numpad_8:         return 0x68;
+        case Key::Numpad_9:         return 0x69;
+        case Key::Numpad_Multiply:  return 0x6A;
+        case Key::Numpad_Add:       return 0x6B;
+        case Key::Numpad_Subtract:  return 0x6D;
+        case Key::Numpad_Decimal:   return 0x6E;
+        case Key::Numpad_Divide:    return 0x6F;
+        case Key::Numpad_Enter:     return 0x0D;
+        case Key::Numpad_Equal:     return 0;
+        case Key::MediaPlay:            return 0xB5;
+        case Key::MediaStop:            return 0xB2;
+        case Key::MediaPrevious:        return 0xB1;
+        case Key::MediaNext:            return 0xB0;
+        case Key::MediaPause:           return 0xB5;
+        case Key::MediaTogglePlayPause: return 0xB5;
+        case Key::VolumeUp:             return 0xAF;
+        case Key::VolumeDown:           return 0xAE;
+        case Key::VolumeMute:           return 0xAD;
+        case Key::LeftHyper:
+        case Key::RightHyper:
+        case Key::LeftMeta:
+        case Key::RightMeta:
+        case Key::IsoLevel3Shift:
+        case Key::IsoLevel5Shift:   return 0;
+    }
+    // clang-format on
+    return 0;
+}
+
+/// Maps Contour modifiers to Win32 dwControlKeyState bitfield.
+constexpr uint32_t modifiersToControlKeyState(Modifiers mods) noexcept
+{
+    uint32_t state = 0;
+    if (mods.contains(Modifier::Alt))
+        state |= 0x02; // LEFT_ALT_PRESSED
+    if (mods.contains(Modifier::Control))
+        state |= 0x08; // LEFT_CTRL_PRESSED
+    if (mods.contains(Modifier::Shift))
+        state |= 0x10; // SHIFT_PRESSED
+    if (mods.contains(Modifier::NumLock))
+        state |= 0x20; // NUMLOCK_ON
+    if (mods.contains(Modifier::CapsLock))
+        state |= 0x80; // CAPSLOCK_ON
+    return state;
+}
+
+/// Returns true for keys that set the ENHANCED_KEY flag (0x100) in dwControlKeyState.
+constexpr bool isEnhancedKey(uint32_t vk) noexcept
+{
+    switch (vk)
+    {
+        case 0x25: // VK_LEFT
+        case 0x26: // VK_UP
+        case 0x27: // VK_RIGHT
+        case 0x28: // VK_DOWN
+        case 0x24: // VK_HOME
+        case 0x23: // VK_END
+        case 0x21: // VK_PRIOR (PageUp)
+        case 0x22: // VK_NEXT (PageDown)
+        case 0x2D: // VK_INSERT
+        case 0x2E: // VK_DELETE
+        case 0x5B: // VK_LWIN
+        case 0x5C: // VK_RWIN
+        case 0x5D: // VK_APPS
+        case 0x6F: // VK_DIVIDE (Numpad)
+        case 0xA3: // VK_RCONTROL
+        case 0xA5: // VK_RMENU (RAlt)
+            return true;
+        default: return false;
+    }
+}
+
+/// Returns the Unicode character for special keys in Win32 input mode.
+constexpr char32_t keyToUnicodeChar(Key key) noexcept
+{
+    switch (key)
+    {
+        case Key::Enter: return 0x0D;
+        case Key::Tab: return 0x09;
+        case Key::Backspace: return 0x08;
+        case Key::Escape: return 0x1B;
+        default: return 0;
+    }
+}
+
+// }}}
+
 void InputGenerator::reset()
 {
     _keyboardInputGenerator.reset();
     _bracketedPaste = false;
     _generateFocusEvents = false;
+    _win32InputMode = false;
     _mouseProtocol = std::nullopt;
     _mouseTransport = MouseTransport::Default;
     _mouseWheelMode = MouseWheelMode::Default;
@@ -667,11 +834,33 @@ void InputGenerator::setBackarrowKeyMode(bool enable)
     inputLog()("set backarrow key mode: {}", enable);
 }
 
+bool InputGenerator::generateWin32Input(
+    uint32_t vk, uint32_t sc, char32_t uc, bool keyDown, Modifiers mods, uint16_t repeat)
+{
+    auto cs = modifiersToControlKeyState(mods);
+    if (isEnhancedKey(vk))
+        cs |= 0x100; // ENHANCED_KEY
+
+    auto const seq = std::format(
+        "\033[{};{};{};{};{};{}_", vk, sc, static_cast<uint32_t>(uc), keyDown ? 1 : 0, cs, repeat);
+
+    inputLog()("Win32 input: {}", crispy::escape(seq));
+    return append(seq);
+}
 bool InputGenerator::generate(char32_t characterEvent,
                               uint32_t physicalKey,
                               Modifiers modifiers,
-                              KeyboardEventType eventType)
+                              KeyboardEventType eventType,
+                              uint32_t scanCode)
 {
+    // Win32 input mode takes priority over standard/CSIu when CSIu flags are not active.
+    if (_win32InputMode && _keyboardInputGenerator.flags().value() == 0)
+    {
+        auto const vk = physicalKey;
+        auto const keyDown = eventType != KeyboardEventType::Release;
+        return generateWin32Input(vk, scanCode, characterEvent, keyDown, modifiers);
+    }
+
     // modifyOtherKeys mode 2: emit CSI 27 ; modifier ; codepoint ~ for modified keys.
     // This takes precedence over the CSI u keyboard protocol but only when no CSI u flags are active.
     if (_modifyOtherKeys == 2 && !_keyboardInputGenerator.flags().any()
@@ -686,7 +875,6 @@ bool InputGenerator::generate(char32_t characterEvent,
                    eventType);
         return true;
     }
-
     bool const success =
         _keyboardInputGenerator.generateChar(characterEvent, physicalKey, modifiers, eventType);
 
@@ -702,8 +890,18 @@ bool InputGenerator::generate(char32_t characterEvent,
     return success;
 }
 
-bool InputGenerator::generate(Key key, Modifiers modifiers, KeyboardEventType eventType)
+bool InputGenerator::generate(
+    Key key, Modifiers modifiers, KeyboardEventType eventType, uint32_t physicalKey, uint32_t scanCode)
 {
+    // Win32 input mode takes priority over standard/CSIu when CSIu flags are not active.
+    if (_win32InputMode && _keyboardInputGenerator.flags().value() == 0)
+    {
+        auto const vk = physicalKey != 0 ? physicalKey : keyToVirtualKeyCode(key);
+        auto const uc = keyToUnicodeChar(key);
+        auto const keyDown = eventType != KeyboardEventType::Release;
+        return generateWin32Input(vk, scanCode, uc, keyDown, modifiers);
+    }
+
     bool const success = _keyboardInputGenerator.generateKey(key, modifiers, eventType);
 
     if (success)

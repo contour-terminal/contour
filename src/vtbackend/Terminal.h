@@ -460,9 +460,18 @@ class Terminal
 
     // {{{ input proxy
     using Timestamp = std::chrono::steady_clock::time_point;
-    Handled sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType eventType, Timestamp now);
-    Handled sendCharEvent(
-        char32_t ch, uint32_t physicalKey, Modifiers modifiers, KeyboardEventType eventType, Timestamp now);
+    Handled sendKeyEvent(Key key,
+                         Modifiers modifiers,
+                         KeyboardEventType eventType,
+                         Timestamp now,
+                         uint32_t physicalKey = 0,
+                         uint32_t scanCode = 0);
+    Handled sendCharEvent(char32_t ch,
+                          uint32_t physicalKey,
+                          Modifiers modifiers,
+                          KeyboardEventType eventType,
+                          Timestamp now,
+                          uint32_t scanCode = 0);
     Handled sendMousePressEvent(Modifiers modifiers,
                                 MouseButton button,
                                 PixelCoordinate pixelPosition,

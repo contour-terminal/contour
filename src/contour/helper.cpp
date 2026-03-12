@@ -443,6 +443,8 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
     auto const modifiers = makeModifiers(event->modifiers(), event->nativeModifiers());
     auto const key = event->key();
+    auto const physicalKey = static_cast<uint32_t>(event->nativeVirtualKey());
+    auto const scanCode = static_cast<uint32_t>(event->nativeScanCode());
 
     if (event->modifiers().testFlag(Qt::KeypadModifier))
     {
@@ -481,7 +483,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
             // For operator/Enter keys, infer NumLock from non-empty text
             if (!event->text().isEmpty())
                 inferredModifiers |= Modifier::NumLock;
-            session.sendKeyEvent(*mappedKey, inferredModifiers, eventType, now);
+            session.sendKeyEvent(*mappedKey, inferredModifiers, eventType, now, physicalKey, scanCode);
             return true;
         }
     }
@@ -491,12 +493,10 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
             std::ranges::find_if(KeyMappings, [event](auto const& x) { return x.first == event->key(); });
         i != end(KeyMappings))
     {
-        session.sendKeyEvent(i->second, modifiers, eventType, now);
+        session.sendKeyEvent(i->second, modifiers, eventType, now, physicalKey, scanCode);
         event->accept();
         return true;
     }
-
-    auto const physicalKey = event->nativeVirtualKey();
     if (event->text().isEmpty())
     {
         // NOLINTNEXTLINE(readability-qualified-auto)
@@ -504,7 +504,8 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
                                                 [event](auto const& x) { return x.first == event->key(); });
             i != end(CharMappings))
         {
-            session.sendCharEvent(static_cast<char32_t>(i->second), physicalKey, modifiers, eventType, now);
+            session.sendCharEvent(
+                static_cast<char32_t>(i->second), physicalKey, modifiers, eventType, now, scanCode);
             event->accept();
             return true;
         }
@@ -512,7 +513,8 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
     if (key == Qt::Key_Backtab)
     {
-        session.sendKeyEvent(Key::Tab, modifiers.with(Modifier::Shift), eventType, now);
+        session.sendKeyEvent(
+            Key::Tab, modifiers.with(Modifier::Shift), eventType, now, physicalKey, scanCode);
         event->accept();
         return true;
     }
@@ -523,7 +525,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     {
         bool const shiftPressed = modifiers.test(Modifier::Shift) ^ modifiers.test(Modifier::CapsLock);
         auto const ch = static_cast<char32_t>(shiftPressed ? std::toupper(key) : std::tolower(key));
-        session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
+        session.sendCharEvent(ch, physicalKey, modifiers, eventType, now, scanCode);
         event->accept();
         return true;
     }
@@ -531,7 +533,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
     if (0x20 <= key && key < 0x80 && (modifiers & Modifier::Control))
     {
-        session.sendCharEvent(static_cast<char32_t>(key), physicalKey, modifiers, eventType, now);
+        session.sendCharEvent(static_cast<char32_t>(key), physicalKey, modifiers, eventType, now, scanCode);
         event->accept();
         return true;
     }
@@ -544,10 +546,11 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         // On macOS the Alt-modifier does not seem to be passed to the terminal apps
         // but rather remapped to whatever macOS is mapping them to.
         for (char32_t const ch: codepoints)
-            session.sendCharEvent(ch, physicalKey, modifiers.without(Modifier::Alt), eventType, now);
+            session.sendCharEvent(
+                ch, physicalKey, modifiers.without(Modifier::Alt), eventType, now, scanCode);
 #else
         for (char32_t const ch: codepoints)
-            session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
+            session.sendCharEvent(ch, physicalKey, modifiers, eventType, now, scanCode);
 #endif
         event->accept();
         return true;
