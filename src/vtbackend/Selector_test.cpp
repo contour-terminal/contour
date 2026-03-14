@@ -254,4 +254,5 @@ TEST_CASE("Selector.Rectangular", "[selector]")
 {
     // TODO
 }
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

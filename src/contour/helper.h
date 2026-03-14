@@ -144,6 +144,18 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session);
 void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session);
 void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session);
 
+/// Result of computing auto-scroll parameters from the mouse position.
+struct AutoScrollInfo
+{
+    int direction = 0;    ///< -1 = up (into history), 0 = inactive, +1 = down
+    int linesPerTick = 0; ///< Number of lines to scroll per timer tick.
+};
+
+/// Computes auto-scroll direction and speed based on mouse pixel position vs content area bounds.
+///
+/// @return AutoScrollInfo with direction and speed; direction == 0 means mouse is inside content area.
+AutoScrollInfo computeAutoScrollInfo(QMouseEvent const* event, TerminalSession const& session) noexcept;
+
 void spawnNewTerminal(std::string const& programPath,
                       std::string const& configPath,
                       std::string const& profileName,

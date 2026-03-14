@@ -240,6 +240,7 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
     _startTime { steady_clock::time_point::min() },
     _lastFontDPI { fontDPI() },
     _updateTimer(this),
+    _autoScrollTimer(this),
     _filesystemWatcher(this)
 {
     startupLog()("TerminalDisplay constructed (QML component instantiation reached)");
@@ -267,6 +268,10 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
 
     _updateTimer.setSingleShot(true);
     connect(&_updateTimer, &QTimer::timeout, this, &TerminalDisplay::scheduleRedraw, Qt::QueuedConnection);
+
+    _autoScrollTimer.setInterval(50);
+    connect(
+        &_autoScrollTimer, &QTimer::timeout, this, &TerminalDisplay::onAutoScrollTick, Qt::QueuedConnection);
 }
 
 TerminalDisplay::~TerminalDisplay()
@@ -490,6 +495,13 @@ void TerminalDisplay::cleanup()
     displayLog()("Cleaning up.");
     delete _renderTarget;
     _renderTarget = nullptr;
+}
+
+void TerminalDisplay::onAutoScrollTick()
+{
+    if (_autoScrollState.direction != 0 && _session)
+        _session->performAutoScroll(_autoScrollState.direction,
+                                    vtbackend::LineCount(_autoScrollState.linesPerTick));
 }
 
 void TerminalDisplay::onRefreshRateChanged()
@@ -913,6 +925,22 @@ void TerminalDisplay::mousePressEvent(QMouseEvent* event)
 void TerminalDisplay::mouseMoveEvent(QMouseEvent* event)
 {
     sendMouseMoveEvent(event, *_session);
+
+    // Start, update, or stop auto-scroll based on whether the mouse is outside the content area
+    // while the left button is pressed (i.e., during a drag-selection).
+    if (event->buttons() & Qt::LeftButton)
+    {
+        _autoScrollState = computeAutoScrollInfo(event, *_session);
+        if (_autoScrollState.direction != 0)
+        {
+            if (!_autoScrollTimer.isActive())
+                _autoScrollTimer.start();
+        }
+        else
+        {
+            _autoScrollTimer.stop();
+        }
+    }
 }
 
 void TerminalDisplay::hoverMoveEvent(QHoverEvent* event)
@@ -923,6 +951,8 @@ void TerminalDisplay::hoverMoveEvent(QHoverEvent* event)
 
 void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
 {
+    _autoScrollTimer.stop();
+    _autoScrollState = {};
     sendMouseReleaseEvent(event, *_session);
 }
 

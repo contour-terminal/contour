@@ -511,6 +511,14 @@ class Terminal
     [[nodiscard]] Viewport& viewport() noexcept { return _viewport; }
     [[nodiscard]] Viewport const& viewport() const noexcept { return _viewport; }
 
+    /// Scrolls the viewport and extends the active selection to the boundary cell.
+    ///
+    /// Used by the GUI layer's auto-scroll timer when the mouse is dragged outside the terminal window.
+    ///
+    /// @param direction  Negative = scroll up (into history), positive = scroll down (toward present).
+    /// @param lineCount  Number of lines to scroll per tick.
+    void performAutoScroll(int direction, LineCount lineCount);
+
     // {{{ Smooth scrolling API
 
     /// Applies a pixel delta for smooth scrolling.
@@ -1038,6 +1046,12 @@ class Terminal
 
     void onViewportChanged();
 
+    /// Extends the active selection to the current mouse position after a viewport scroll.
+    ///
+    /// Called from onViewportChanged() so that wheel-scrolling while the left mouse button
+    /// is held automatically extends the selection without requiring mouse movement.
+    void extendSelectionAfterScroll();
+
     /// @returns either an empty string or a file:// URL of the last set working directory.
     [[nodiscard]] std::string const& currentWorkingDirectory() const noexcept
     {
@@ -1288,6 +1302,7 @@ class Terminal
     vtbackend::PixelCoordinate _lastMousePixelPositionOnLeftClick {};
     bool _leftMouseButtonPressed = false; // tracks left-mouse button pressed state (used for cell selection).
     bool _respectMouseProtocol = true;    // shift-click can disable that, button release sets it back to true
+    bool _isAutoScrolling = false;        // suppresses extendSelectionAfterScroll during performAutoScroll
     // }}}
 
     // {{{ blinking state helpers

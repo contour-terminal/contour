@@ -162,6 +162,7 @@ class TerminalDisplay: public QQuickItem
     void setProfileName(QString const& name) { _profileName = name.toStdString(); }
 
   public Q_SLOTS:
+    void onAutoScrollTick();
     void onSceneGrapheInitialized();
     void onBeforeSynchronize();
     void onBeforeRendering();
@@ -274,6 +275,11 @@ class TerminalDisplay: public QQuickItem
     bool _sessionChanged = false;
     // update() timer used to animate the blinking cursor.
     QTimer _updateTimer;
+
+    // {{{ Auto-scroll state for drag-selection outside window
+    QTimer _autoScrollTimer;
+    AutoScrollInfo _autoScrollState;
+    // }}}
 
     RenderStateManager _state;
     bool _doDumpState = false;

@@ -312,6 +312,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                                vtbackend::MouseButton button,
                                vtbackend::PixelCoordinate pixelPosition);
 
+    /// Scrolls the viewport and extends the active selection during auto-scroll.
+    ///
+    /// @param direction  Negative = scroll up (into history), positive = scroll down.
+    /// @param lineCount  Number of lines to scroll per tick.
+    void performAutoScroll(int direction, vtbackend::LineCount lineCount);
+
     void sendFocusInEvent();
     void sendFocusOutEvent();
 
