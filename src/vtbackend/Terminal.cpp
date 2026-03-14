@@ -203,17 +203,14 @@ void Terminal::onViewportChanged()
 
 void Terminal::extendSelectionAfterScroll()
 {
-    if (!_leftMouseButtonPressed || !selectionAvailable()
+    if (_isAutoScrolling || !_leftMouseButtonPressed || !selectionAvailable()
         || selector()->state() == Selection::State::Complete)
         return;
 
     auto const relativePos = _viewport.translateScreenToGridCoordinate(_currentMousePosition);
     _viCommands.cursorPosition = relativePos;
     if (selector()->extend(relativePos))
-    {
         updateSelectionMatches();
-        breakLoopAndRefreshRenderBuffer();
-    }
 }
 
 void Terminal::setRefreshRate(RefreshRate refreshRate)
@@ -967,24 +964,20 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
     };
 
     // Shift+Click extends a completed selection to the new click position.
+    // Re-create as LinearSelection to avoid breaking WordWise/FullLine invariants.
     if (modifiers.contains(Modifier::Shift) && selectionAvailable()
         && selector()->state() == Selection::State::Complete)
     {
         _speedClicks = 0; // Don't count Shift+Click in the speed-click sequence.
-        selector()->reactivate();
 
         // Anchor at the farthest endpoint so the selection grows in either direction.
         auto const [selStart, selEnd] = std::minmax(selector()->from(), selector()->to());
-        if (startPos < selStart)
-            selector()->setAnchor(selEnd);
-        else
-            selector()->setAnchor(selStart);
+        auto const anchor = (startPos < selStart) ? selEnd : selStart;
 
+        setSelector(std::make_unique<LinearSelection>(_selectionHelper, anchor, selectionUpdatedHelper()));
         if (selector()->extend(startPos))
-        {
             updateSelectionMatches();
-            onSelectionUpdated();
-        }
+
         breakLoopAndRefreshRenderBuffer();
         return true;
     }
@@ -1054,7 +1047,11 @@ void Terminal::performAutoScroll(int direction, LineCount lineCount)
     if (!selectionAvailable() || selector()->state() == Selection::State::Complete)
         return;
 
+    // Suppress extendSelectionAfterScroll() in onViewportChanged() — we handle
+    // selection extension ourselves with the boundary position, not the mouse position.
+    _isAutoScrolling = true;
     auto const scrolled = (direction < 0) ? _viewport.scrollUp(lineCount) : _viewport.scrollDown(lineCount);
+    _isAutoScrolling = false;
 
     if (!scrolled)
         return;
@@ -1069,10 +1066,7 @@ void Terminal::performAutoScroll(int direction, LineCount lineCount)
 
     _viCommands.cursorPosition = gridPos;
     if (selector()->extend(gridPos))
-    {
         updateSelectionMatches();
-        breakLoopAndRefreshRenderBuffer();
-    }
 }
 
 void Terminal::clearSelection()

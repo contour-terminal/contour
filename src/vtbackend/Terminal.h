@@ -1302,6 +1302,7 @@ class Terminal
     vtbackend::PixelCoordinate _lastMousePixelPositionOnLeftClick {};
     bool _leftMouseButtonPressed = false; // tracks left-mouse button pressed state (used for cell selection).
     bool _respectMouseProtocol = true;    // shift-click can disable that, button release sets it back to true
+    bool _isAutoScrolling = false;        // suppresses extendSelectionAfterScroll during performAutoScroll
     // }}}
 
     // {{{ blinking state helpers
