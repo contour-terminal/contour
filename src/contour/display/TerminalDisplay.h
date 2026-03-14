@@ -278,8 +278,7 @@ class TerminalDisplay: public QQuickItem
 
     // {{{ Auto-scroll state for drag-selection outside window
     QTimer _autoScrollTimer;
-    int _autoScrollDirection = 0; ///< -1 = up (into history), 0 = inactive, +1 = down
-    int _autoScrollLinesPerTick = 0;
+    AutoScrollInfo _autoScrollState;
     // }}}
 
     RenderStateManager _state;

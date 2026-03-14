@@ -499,8 +499,9 @@ void TerminalDisplay::cleanup()
 
 void TerminalDisplay::onAutoScrollTick()
 {
-    if (_autoScrollDirection != 0 && _session)
-        _session->performAutoScroll(_autoScrollDirection, vtbackend::LineCount(_autoScrollLinesPerTick));
+    if (_autoScrollState.direction != 0 && _session)
+        _session->performAutoScroll(_autoScrollState.direction,
+                                    vtbackend::LineCount(_autoScrollState.linesPerTick));
 }
 
 void TerminalDisplay::onRefreshRateChanged()
@@ -929,18 +930,15 @@ void TerminalDisplay::mouseMoveEvent(QMouseEvent* event)
     // while the left button is pressed (i.e., during a drag-selection).
     if (event->buttons() & Qt::LeftButton)
     {
-        auto const info = computeAutoScrollInfo(event, *_session);
-        if (info.direction != 0)
+        _autoScrollState = computeAutoScrollInfo(event, *_session);
+        if (_autoScrollState.direction != 0)
         {
-            _autoScrollDirection = info.direction;
-            _autoScrollLinesPerTick = info.linesPerTick;
             if (!_autoScrollTimer.isActive())
                 _autoScrollTimer.start();
         }
         else
         {
             _autoScrollTimer.stop();
-            _autoScrollDirection = 0;
         }
     }
 }
@@ -954,7 +952,7 @@ void TerminalDisplay::hoverMoveEvent(QHoverEvent* event)
 void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
 {
     _autoScrollTimer.stop();
-    _autoScrollDirection = 0;
+    _autoScrollState = {};
     sendMouseReleaseEvent(event, *_session);
 }
 

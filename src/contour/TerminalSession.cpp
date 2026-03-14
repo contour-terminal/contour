@@ -1177,7 +1177,6 @@ void TerminalSession::performAutoScroll(int direction, vtbackend::LineCount line
 {
     terminal().tick(steady_clock::now());
     crispy::locked(_terminal, [&]() { _terminal.performAutoScroll(direction, lineCount); });
-    scheduleRedraw();
 }
 
 void TerminalSession::sendFocusInEvent()

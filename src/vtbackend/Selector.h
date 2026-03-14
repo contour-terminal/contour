@@ -104,17 +104,6 @@ class Selection
     /// Marks the selection as completed.
     void complete();
 
-    /// Re-activates a completed selection so it can be extended again.
-    ///
-    /// This is used for Shift+Click to extend a finished selection to a new position.
-    void reactivate();
-
-    /// Sets the anchor point (from-position) of the selection.
-    ///
-    /// Used by Shift+Click to choose which end of the selection stays fixed
-    /// when extending in the opposite direction.
-    void setAnchor(CellLocation pos) noexcept { _from = pos; }
-
     /// Applies any scroll action to the line offsets.
     void applyScroll(LineOffset value, LineCount historyLineCount);
 
