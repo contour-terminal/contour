@@ -1753,6 +1753,40 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         REQUIRE(mock.terminal.selectionAvailable());
         CHECK(mock.terminal.selector()->state() == Selection::State::Waiting);
     }
+
+    SECTION("click to deselect after Shift+Click extend")
+    {
+        // Regression test: a normal click shortly after Shift+Click extend
+        // must deselect rather than trigger a word-wise selection.
+
+        // 1. Create and complete a selection: "7890\nABC" (row 1 col 1 → row 2 col 2)
+        mock.terminal.tick(1s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(2s);
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.tick(3s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 2_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(4s);
+        mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        CHECK(mock.terminal.extractSelectionText() == "7890\nABC");
+
+        // 2. Shift+Click to extend the selection.
+        mock.terminal.tick(4s + 300ms);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 3_lineOffset + 3_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(4s + 500ms);
+        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMouseReleaseEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+        CHECK_FALSE(mock.terminal.extractSelectionText().empty());
+
+        // 3. Normal click shortly after (within 1s) to deselect — must clear selection.
+        mock.terminal.tick(4s + 800ms);
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        CHECK(mock.terminal.extractSelectionText().empty());
+    }
 }
 
 TEST_CASE("Terminal.PerformAutoScroll", "[terminal]")

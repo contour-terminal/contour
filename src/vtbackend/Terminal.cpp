@@ -940,6 +940,10 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
 {
     verifyState();
 
+    double const diffMs = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
+    _lastClick = _currentTime;
+    _speedClicks = (diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4 + 1;
+
     auto const startPos = CellLocation {
         .line = _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
         .column = _currentMousePosition.column,
@@ -958,10 +962,6 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
         breakLoopAndRefreshRenderBuffer();
         return true;
     }
-
-    double const diffMs = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
-    _lastClick = _currentTime;
-    _speedClicks = (diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4 + 1;
 
     if (_inputHandler.mode() != ViMode::Insert)
         _viCommands.cursorPosition = startPos;
