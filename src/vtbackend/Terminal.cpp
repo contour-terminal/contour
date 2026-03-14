@@ -940,14 +940,28 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
 {
     verifyState();
 
-    double const diffMs = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
-    _lastClick = _currentTime;
-    _speedClicks = (diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4 + 1;
-
     auto const startPos = CellLocation {
         .line = _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
         .column = _currentMousePosition.column,
     };
+
+    // Shift+Click extends a completed selection to the new click position.
+    if (modifiers.contains(Modifier::Shift) && selectionAvailable()
+        && selector()->state() == Selection::State::Complete)
+    {
+        selector()->reactivate();
+        if (selector()->extend(startPos))
+        {
+            updateSelectionMatches();
+            onSelectionUpdated();
+        }
+        breakLoopAndRefreshRenderBuffer();
+        return true;
+    }
+
+    double const diffMs = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
+    _lastClick = _currentTime;
+    _speedClicks = (diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4 + 1;
 
     if (_inputHandler.mode() != ViMode::Insert)
         _viCommands.cursorPosition = startPos;
@@ -1007,6 +1021,32 @@ void Terminal::setSelector(std::unique_ptr<Selection> selector)
     Require(selector.get() != nullptr);
     inputLog()("Creating cell selector: {}", *selector);
     _selection = std::move(selector);
+}
+
+void Terminal::performAutoScroll(int direction, LineCount lineCount)
+{
+    if (!selectionAvailable() || selector()->state() == Selection::State::Complete)
+        return;
+
+    auto const scrolled = (direction < 0) ? _viewport.scrollUp(lineCount) : _viewport.scrollDown(lineCount);
+
+    if (!scrolled)
+        return;
+
+    // Extend selection to the boundary row (top when scrolling up, bottom when scrolling down).
+    auto const boundaryLine = (direction < 0) ? LineOffset(0) : LineOffset(*_settings.pageSize.lines - 1);
+    auto const boundaryCol =
+        (direction < 0) ? ColumnOffset(0) : ColumnOffset(*_settings.pageSize.columns - 1);
+
+    auto const gridPos = _viewport.translateScreenToGridCoordinate(
+        CellLocation { .line = boundaryLine, .column = boundaryCol });
+
+    _viCommands.cursorPosition = gridPos;
+    if (selector()->extend(gridPos))
+    {
+        updateSelectionMatches();
+        breakLoopAndRefreshRenderBuffer();
+    }
 }
 
 void Terminal::clearSelection()

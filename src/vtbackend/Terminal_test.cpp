@@ -1668,4 +1668,183 @@ TEST_CASE("Terminal.CancelSelection_double_clear", "[terminal]")
 
 // }}}
 
+// {{{ Selection: Shift+Click extend and auto-scroll
+
+TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
+{
+    // Create TE with some content.
+    auto mock = MockTerm { ColumnCount(5), LineCount(5) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal.tick(ClockBase);
+    mock.writeToScreen("12345\r\n"
+                       "67890\r\n"
+                       "ABCDE\r\n"
+                       "abcde\r\n"
+                       "fghij");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoord = vtbackend::PixelCoordinate {};
+
+    SECTION("extends completed selection forward")
+    {
+        // Select "7890\nABC" (row 1 col 1 → row 2 col 2)
+        mock.terminal.tick(1s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(2s);
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.tick(3s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 2_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(4s);
+        mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        CHECK(mock.terminal.extractSelectionText() == "7890\nABC");
+        CHECK(mock.terminal.selector()->state() == Selection::State::Complete);
+
+        // Shift+Click at row 3, col 3 to extend selection.
+        mock.terminal.tick(6s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 3_lineOffset + 3_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(7s);
+        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+
+        // Selection should now span from original start to new click position.
+        CHECK(mock.terminal.extractSelectionText() == "7890\nABCDE\nabcd");
+    }
+
+    SECTION("extends completed selection backward")
+    {
+        // Select "BCDE\nabcd" (row 2 col 1 → row 3 col 3)
+        mock.terminal.tick(1s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 2_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(2s);
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.tick(3s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 3_lineOffset + 3_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(4s);
+        mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        CHECK(mock.terminal.extractSelectionText() == "BCDE\nabcd");
+        CHECK(mock.terminal.selector()->state() == Selection::State::Complete);
+
+        // Shift+Click at row 0 col 0 to extend backward.
+        mock.terminal.tick(6s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(7s);
+        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+
+        // Selection from (2,1) extended to (0,0): "12345\n67890\nAB"
+        CHECK(mock.terminal.extractSelectionText() == "12345\n67890\nAB");
+    }
+
+    SECTION("no selection starts new selection on Shift+Click")
+    {
+        // No prior selection exists. Shift+Click should start a new selection.
+        mock.terminal.tick(1s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(2s);
+        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+
+        // Should create a new selection (Waiting state), not crash.
+        REQUIRE(mock.terminal.selectionAvailable());
+        CHECK(mock.terminal.selector()->state() == Selection::State::Waiting);
+    }
+}
+
+TEST_CASE("Terminal.PerformAutoScroll", "[terminal]")
+{
+    // Create TE with scrollback history.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(10) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal.tick(ClockBase);
+    // Write enough lines to fill history.
+    mock.writeToScreen("AAAAA\r\n"
+                       "BBBBB\r\n"
+                       "CCCCC\r\n"
+                       "DDDDD\r\n"
+                       "EEEEE\r\n"
+                       "FFFFF");
+    // History: AAAAA, BBBBB, CCCCC. Main page: DDDDD, EEEEE, FFFFF
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoord = vtbackend::PixelCoordinate {};
+
+    SECTION("scrolls up and extends selection")
+    {
+        // Start a selection on the main page.
+        mock.terminal.tick(1s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(2s);
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.tick(3s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
+        // Selection should be in progress now.
+        REQUIRE(mock.terminal.selectionAvailable());
+        CHECK(mock.terminal.selector()->state() == Selection::State::InProgress);
+
+        // Perform auto-scroll up by 1 line.
+        mock.terminal.performAutoScroll(-1, LineCount(1));
+        CHECK(mock.terminal.viewport().scrollOffset() == ScrollOffset(1));
+
+        // Perform auto-scroll up by 2 more lines.
+        mock.terminal.performAutoScroll(-1, LineCount(2));
+        CHECK(mock.terminal.viewport().scrollOffset() == ScrollOffset(3));
+    }
+
+    SECTION("does nothing without active selection")
+    {
+        // No selection → performAutoScroll should be a no-op.
+        CHECK_FALSE(mock.terminal.selectionAvailable());
+        mock.terminal.performAutoScroll(-1, LineCount(1));
+        CHECK(mock.terminal.viewport().scrollOffset() == ScrollOffset(0));
+    }
+
+    SECTION("does nothing with completed selection")
+    {
+        // Create and complete a selection.
+        mock.terminal.tick(1s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(2s);
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.tick(3s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(4s);
+        mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        CHECK(mock.terminal.selector()->state() == Selection::State::Complete);
+
+        // Auto-scroll should be a no-op for completed selections.
+        mock.terminal.performAutoScroll(-1, LineCount(1));
+        CHECK(mock.terminal.viewport().scrollOffset() == ScrollOffset(0));
+    }
+
+    SECTION("stops at history boundary")
+    {
+        // Start a selection.
+        mock.terminal.tick(1s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 1_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
+        mock.terminal.tick(2s);
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.tick(3s);
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
+
+        // Try to scroll way past history.
+        mock.terminal.performAutoScroll(-1, LineCount(100));
+        // Should be capped at the available history.
+        CHECK(mock.terminal.viewport().scrollOffset() <= ScrollOffset(3));
+    }
+}
+
+// }}}
+
 // NOLINTEND(misc-const-correctness)

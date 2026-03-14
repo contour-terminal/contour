@@ -641,6 +641,31 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
     event->accept();
 }
 
+AutoScrollInfo computeAutoScrollInfo(QMouseEvent const* event, TerminalSession const& session) noexcept
+{
+    auto const dpr = session.display()->contentScale();
+    auto const cellHeight = session.display()->cellSize().height.as<int>();
+    auto const marginTop = static_cast<int>(unbox(session.profile().margins.value().vertical) * dpr);
+    auto const pageLines = *session.terminal().totalPageSize().lines;
+    auto const contentBottom = marginTop + pageLines * cellHeight;
+
+    auto const mouseY = static_cast<int>(event->position().y() * dpr);
+
+    if (mouseY < marginTop)
+    {
+        auto const distance = marginTop - mouseY;
+        return { .direction = -1, .linesPerTick = std::max(1, distance / cellHeight) };
+    }
+
+    if (mouseY > contentBottom)
+    {
+        auto const distance = mouseY - contentBottom;
+        return { .direction = 1, .linesPerTick = std::max(1, distance / cellHeight) };
+    }
+
+    return {};
+}
+
 void spawnNewTerminal(string const& programPath,
                       string const& configPath,
                       string const& profileName,

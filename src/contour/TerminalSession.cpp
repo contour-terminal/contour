@@ -1173,6 +1173,13 @@ void TerminalSession::sendMouseReleaseEvent(Modifiers modifiers,
     scheduleRedraw();
 }
 
+void TerminalSession::performAutoScroll(int direction, vtbackend::LineCount lineCount)
+{
+    terminal().tick(steady_clock::now());
+    crispy::locked(_terminal, [&]() { _terminal.performAutoScroll(direction, lineCount); });
+    scheduleRedraw();
+}
+
 void TerminalSession::sendFocusInEvent()
 {
     // as per Qt-documentation, some platform implementations reset the cursor when leaving the

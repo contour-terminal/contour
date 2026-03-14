@@ -154,6 +154,7 @@
           <li>Adds complete DECCIR (Cursor Information Report) response including character set designations, GL/GR mappings, and wrap-pending state (#97)</li>
           <li>Adds environment variable expansion (${VAR_NAME} syntax) in configuration file paths for cross-platform config reuse (#1278)</li>
           <li>Adds configurable text outline rendering to improve glyph readability on transparent or low-opacity backgrounds (#1895)</li>
+          <li>Adds auto-scroll when dragging selection past window edges, and Shift+Click to extend existing selections (#1911)</li>
         </ul>
       </description>
     </release>

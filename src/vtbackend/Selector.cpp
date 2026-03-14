@@ -52,6 +52,12 @@ void Selection::complete()
         _state = State::Complete;
 }
 
+void Selection::reactivate()
+{
+    if (_state == State::Complete)
+        _state = State::InProgress;
+}
+
 CellLocation Selection::stretchedColumn(SelectionHelper const& gridHelper, CellLocation coord) noexcept
 {
     CellLocation stretched = coord;

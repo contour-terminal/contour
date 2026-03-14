@@ -511,6 +511,14 @@ class Terminal
     [[nodiscard]] Viewport& viewport() noexcept { return _viewport; }
     [[nodiscard]] Viewport const& viewport() const noexcept { return _viewport; }
 
+    /// Scrolls the viewport and extends the active selection to the boundary cell.
+    ///
+    /// Used by the GUI layer's auto-scroll timer when the mouse is dragged outside the terminal window.
+    ///
+    /// @param direction  Negative = scroll up (into history), positive = scroll down (toward present).
+    /// @param lineCount  Number of lines to scroll per tick.
+    void performAutoScroll(int direction, LineCount lineCount);
+
     // {{{ Smooth scrolling API
 
     /// Applies a pixel delta for smooth scrolling.
