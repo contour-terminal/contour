@@ -68,7 +68,7 @@ STARTPROPERTIES 1
 FONT_ASCENT 10
 FONT_DESCENT 2
 ENDPROPERTIES
-CHARS 4
+CHARS 5
 STARTCHAR A
 ENCODING 65
 SWIDTH 500 0
@@ -144,6 +144,37 @@ BITMAP
 02
 42
 3C
+ENDCHAR
+STARTCHAR U+E000
+ENCODING 57344
+SWIDTH 500 0
+DWIDTH 16 0
+BBX 16 24 0 -4
+BITMAP
+0000
+0000
+07E0
+0C30
+1818
+300C
+300C
+3FFC
+3FFC
+300C
+300C
+300C
+300C
+300C
+300C
+1818
+0C30
+07E0
+0000
+0000
+0000
+0000
+0000
+0000
 ENDCHAR
 ENDFONT
 )";
@@ -347,6 +378,19 @@ TEST_CASE("TextRenderer", "[renderer]")
                                        ".#....#.", // 42
                                        "..####.."  // 3C
                                    });
+    }
+
+    SECTION("rasterize oversized non-RGBA glyph U+E000")
+    {
+        // U+E000 is a 16x24 glyph (BBX 16 24 0 -4), larger than the cell size (10x20).
+        // This simulates Nerd Font icons that exceed cell dimensions in alpha_mask format.
+        // Before the fix, such glyphs would crash in the cropping path.
+        auto const buffer = renderGlyph(U'\uE000');
+        REQUIRE(buffer.has_value());
+
+        // Verify the scaled bitmap fits within cell dimensions.
+        CHECK(buffer->bitmapSize.width <= gridMetrics.cellSize.width);
+        CHECK(buffer->bitmapSize.height <= gridMetrics.cellSize.height);
     }
 
     auto const renderAndCapture = [&](char32_t codepoint, vtbackend::LineFlags flags) {
