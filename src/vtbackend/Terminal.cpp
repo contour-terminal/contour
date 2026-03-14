@@ -195,8 +195,25 @@ void Terminal::onViewportChanged()
     if (_hintModeHandler.isActive())
         refreshHints();
 
+    extendSelectionAfterScroll();
+
     _eventListener.onScrollOffsetChanged(_viewport.scrollOffset());
     breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::extendSelectionAfterScroll()
+{
+    if (!_leftMouseButtonPressed || !selectionAvailable()
+        || selector()->state() == Selection::State::Complete)
+        return;
+
+    auto const relativePos = _viewport.translateScreenToGridCoordinate(_currentMousePosition);
+    _viCommands.cursorPosition = relativePos;
+    if (selector()->extend(relativePos))
+    {
+        updateSelectionMatches();
+        breakLoopAndRefreshRenderBuffer();
+    }
 }
 
 void Terminal::setRefreshRate(RefreshRate refreshRate)
@@ -953,7 +970,16 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
     if (modifiers.contains(Modifier::Shift) && selectionAvailable()
         && selector()->state() == Selection::State::Complete)
     {
+        _speedClicks = 0; // Don't count Shift+Click in the speed-click sequence.
         selector()->reactivate();
+
+        // Anchor at the farthest endpoint so the selection grows in either direction.
+        auto const [selStart, selEnd] = std::minmax(selector()->from(), selector()->to());
+        if (startPos < selStart)
+            selector()->setAnchor(selEnd);
+        else
+            selector()->setAnchor(selStart);
+
         if (selector()->extend(startPos))
         {
             updateSelectionMatches();

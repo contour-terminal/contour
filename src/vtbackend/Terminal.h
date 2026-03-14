@@ -1046,6 +1046,12 @@ class Terminal
 
     void onViewportChanged();
 
+    /// Extends the active selection to the current mouse position after a viewport scroll.
+    ///
+    /// Called from onViewportChanged() so that wheel-scrolling while the left mouse button
+    /// is held automatically extends the selection without requiring mouse movement.
+    void extendSelectionAfterScroll();
+
     /// @returns either an empty string or a file:// URL of the last set working directory.
     [[nodiscard]] std::string const& currentWorkingDirectory() const noexcept
     {
