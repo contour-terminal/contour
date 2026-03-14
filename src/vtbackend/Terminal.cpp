@@ -971,7 +971,11 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
         _speedClicks = 0; // Don't count Shift+Click in the speed-click sequence.
 
         // Anchor at the farthest endpoint so the selection grows in either direction.
-        auto const [selStart, selEnd] = std::minmax(selector()->from(), selector()->to());
+        // NB: Store values before std::minmax — minmax returns references, and
+        //     selector()->from()/to() return temporaries that would dangle.
+        auto const fromPos = selector()->from();
+        auto const toPos = selector()->to();
+        auto const [selStart, selEnd] = std::minmax(fromPos, toPos);
         auto const anchor = (startPos < selStart) ? selEnd : selStart;
 
         setSelector(std::make_unique<LinearSelection>(_selectionHelper, anchor, selectionUpdatedHelper()));
@@ -1098,6 +1102,8 @@ bool Terminal::shouldExtendSelectionByMouse(CellLocation newPosition,
 
     auto selectionCorner = selector()->to();
     auto const cellPixelWidth = unbox<int>(cellPixelSize().width);
+    if (cellPixelWidth == 0)
+        return newPosition != selectionCorner;
     if (selector()->state() == Selection::State::Waiting)
     {
         if (!(newPosition.line != selectionCorner.line

@@ -2,6 +2,7 @@ ABCDEFGHIX
 ABCXDEFGHI
 ABCXYDEFGH
 ABCXZEFGHI
+BCDE
 BBBBB
 BLval
 BRval
@@ -25,6 +26,7 @@ gitgraph
 HHHHH
 HTP
 isakbm
+nabcd
 NCommands
 ndrwxr
 nfile
