@@ -835,13 +835,13 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         glyph.position.y = (unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2
                            - _gridMetrics.baseline;
     }
-    else if (glyph.bitmapSize.width
-                 > vtbackend::Width::cast_from(unbox<double>(_gridMetrics.cellSize.width) * 1.3)
-             || glyph.bitmapSize.height
-                    > vtbackend::Height::cast_from(unbox<double>(_gridMetrics.cellSize.height) * 1.1))
+    else if (glyph.bitmapSize.height
+             > vtbackend::Height::cast_from(unbox<double>(_gridMetrics.cellSize.height) * 1.1))
     {
-        // Scale down oversized non-RGBA glyphs (e.g. Nerd Font icons in alpha_mask format)
-        // to fit within a single cell, preventing invalid cropping math downstream.
+        // Scale down vertically oversized non-RGBA glyphs (e.g. Nerd Font icons in alpha_mask format)
+        // to fit within cell height, preventing invalid cropping math downstream.
+        // NOTE: Width overflow is intentionally NOT checked here, because horizontally oversized glyphs
+        // (e.g. programming ligatures) are handled by the tiling system in createSlicedRasterizedGlyph().
         auto const cellBoundingBox = ImageSize { _gridMetrics.cellSize.width, _gridMetrics.cellSize.height };
         auto const originalPosition = glyph.position;
         if (rasterizerLog)

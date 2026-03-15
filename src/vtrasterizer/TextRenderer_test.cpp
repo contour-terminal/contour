@@ -68,7 +68,7 @@ STARTPROPERTIES 1
 FONT_ASCENT 10
 FONT_DESCENT 2
 ENDPROPERTIES
-CHARS 5
+CHARS 6
 STARTCHAR A
 ENCODING 65
 SWIDTH 500 0
@@ -175,6 +175,31 @@ BITMAP
 0000
 0000
 0000
+ENDCHAR
+STARTCHAR U+E001
+ENCODING 57345
+SWIDTH 500 0
+DWIDTH 30 0
+BBX 30 18 0 -2
+BITMAP
+00000000
+3FFFFFFC
+3FFFFFFC
+3000000C
+3000000C
+3000000C
+3000000C
+3000000C
+3000000C
+3000000C
+3000000C
+3000000C
+3000000C
+3000000C
+3000000C
+3FFFFFFC
+3FFFFFFC
+00000000
 ENDCHAR
 ENDFONT
 )";
@@ -390,6 +415,21 @@ TEST_CASE("TextRenderer", "[renderer]")
 
         // Verify the scaled bitmap fits within cell dimensions.
         CHECK(buffer->bitmapSize.width <= gridMetrics.cellSize.width);
+        CHECK(buffer->bitmapSize.height <= gridMetrics.cellSize.height);
+    }
+
+    SECTION("wide-but-not-tall non-RGBA glyph is not scaled down")
+    {
+        // U+E001 is a 30x18 glyph (BBX 30 18 0 -2), wider than cell but fits in cell height.
+        // This simulates a programming ligature that spans multiple cells.
+        // The glyph must NOT be scaled down — it should remain wide so that
+        // createSlicedRasterizedGlyph() can tile it into multiple atlas tiles.
+        auto const buffer = renderGlyph(U'\uE001');
+        REQUIRE(buffer.has_value());
+
+        // The bitmap width must remain wider than cell width (not scaled down).
+        CHECK(buffer->bitmapSize.width > gridMetrics.cellSize.width);
+        // The bitmap height must fit within cell height.
         CHECK(buffer->bitmapSize.height <= gridMetrics.cellSize.height);
     }
 
