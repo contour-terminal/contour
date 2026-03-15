@@ -422,8 +422,8 @@ TEST_CASE("TextRenderer", "[renderer]")
     {
         // U+E001 is a 30x18 glyph (BBX 30 18 0 -2), wider than cell but fits in cell height.
         // This simulates a programming ligature that spans multiple cells.
-        // The glyph must NOT be scaled down — it should remain wide so that
-        // createSlicedRasterizedGlyph() can tile it into multiple atlas tiles.
+        // The glyph must NOT be scaled down — the wide bitmap must be preserved so that
+        // createSlicedRasterizedGlyph() can handle it for proper rendering across multiple cells.
         auto const buffer = renderGlyph(U'\uE001');
         REQUIRE(buffer.has_value());
 

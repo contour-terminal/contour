@@ -841,7 +841,8 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         // Scale down vertically oversized non-RGBA glyphs (e.g. Nerd Font icons in alpha_mask format)
         // to fit within cell height, preventing invalid cropping math downstream.
         // NOTE: Width overflow is intentionally NOT checked here, because horizontally oversized glyphs
-        // (e.g. programming ligatures) are handled by the tiling system in createSlicedRasterizedGlyph().
+        // (e.g. programming ligatures) are kept wide and handled by createSlicedRasterizedGlyph(),
+        // which slices them into multiple tiles when they exceed the atlas tile size.
         auto const cellBoundingBox = ImageSize { _gridMetrics.cellSize.width, _gridMetrics.cellSize.height };
         auto const originalPosition = glyph.position;
         if (rasterizerLog)
