@@ -898,7 +898,7 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     {
         _leftMouseButtonPressed = true;
         _lastMousePixelPositionOnLeftClick = pixelPosition;
-        if (!allowPassMouseEventToApp(modifiers))
+        if (!allowPassMouseEventToApp(modifiers) || isModeEnabled(DECMode::MousePassiveTracking))
             uiHandledHint = handleMouseSelection(modifiers) || uiHandledHint;
     }
 
