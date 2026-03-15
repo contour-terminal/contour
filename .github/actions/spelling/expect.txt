@@ -20,6 +20,7 @@ ellips
 emantic
 emtpy
 FFFFF
+FFFFFFC
 GGGGG
 gitbranch
 gitgraph
