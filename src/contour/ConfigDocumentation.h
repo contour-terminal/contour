@@ -779,6 +779,10 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - FollowHyperlink   Follows the hyperlink that is exposed via OSC 8 under the current "
     "cursor "
     "position.\n"
+    "{comment} - HintMode          Activates hint mode to scan for patterns (URLs, file paths, etc.).\n"
+    "{comment}                     Parameters: patterns (url, filepath, githash, ipv4, ipv6, all, or "
+    "names joined with |),\n"
+    "{comment}                     hint_action (Copy, Open, Paste, CopyAndPaste, Select).\n"
     "{comment} - IncreaseFontSize  Increases the font size by 1 pixel.\n"
     "{comment} - IncreaseOpacity   Increases the default-background opacity by 5%.\n"
     "{comment} - MoveTabToLeft     Moves the current tab to the left.\n"
@@ -1050,6 +1054,19 @@ constexpr StringLiteral HintMatchConfig {
     "    foreground_alpha: {}\n"
     "    background: {}\n"
     "    background_alpha: {}\n"
+};
+
+constexpr StringLiteral HintPatternsConfig {
+    "\n"
+    "{comment} Custom hint patterns for hint mode.\n"
+    "{comment} Each entry defines a named regex pattern that hint mode will scan for.\n"
+    "{comment} User-defined patterns with the same name as a builtin pattern override the builtin.\n"
+    "{comment} Built-in patterns: url, filepath, githash, ipv4, ipv6.\n"
+    "{comment} Example:\n"
+    "{comment} hint_patterns:\n"
+    "{comment}     - name: uuid\n"
+    "{comment}       regex: "
+    "'\\b[0-9a-fA-F]{{8}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{12}}\\b'\n"
 };
 
 constexpr StringLiteral IndicatorStatusLineConfig {
@@ -2041,6 +2058,7 @@ using WordHighlightCurrent = DocumentationEntry<WordHighlightCurrentConfig, Dumm
 using WordHighlight = DocumentationEntry<WordHighlightConfig, Dummy>;
 using HintLabel = DocumentationEntry<HintLabelConfig, Dummy>;
 using HintMatch = DocumentationEntry<HintMatchConfig, Dummy>;
+using HintPatterns = DocumentationEntry<HintPatternsConfig, Dummy>;
 using IndicatorStatusLine = DocumentationEntry<IndicatorStatusLineConfig, Dummy>;
 using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
 using InputMethodEditorSupport = DocumentationEntry<InputMethodEditorSupportConfig, Dummy>;

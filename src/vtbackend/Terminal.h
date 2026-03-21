@@ -1558,7 +1558,10 @@ class Terminal
         std::optional<ViMode> previousViMode;
 
         explicit HintModeExecutor(Terminal& t): terminal { t } {}
-        void onHintSelected(std::string const& matchedText, HintAction action) override;
+        void onHintSelected(std::string const& matchedText,
+                            HintAction action,
+                            CellLocation start,
+                            CellLocation end) override;
         void onHintModeEntered() override;
         void onHintModeExited() override;
         void requestRedraw() override;

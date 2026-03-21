@@ -29,6 +29,10 @@ struct HintPattern
     /// Optional post-match validator. When set, only matches for which
     /// this returns true are kept. Used e.g. to check filesystem existence.
     std::function<bool(std::string const&)> validator;
+    /// Optional post-match transformer. When set, the matched text is rewritten
+    /// before being stored in HintMatch. Used e.g. to resolve relative paths
+    /// to absolute paths. The overlay still shows the original terminal text.
+    std::function<std::string(std::string const&)> transformer;
 };
 
 /// A single match found during hint scanning, with its label and grid positions.
@@ -52,7 +56,17 @@ class HintModeHandler
         virtual ~Executor() = default;
 
         /// Called when a hint has been selected by the user.
-        virtual void onHintSelected(std::string const& matchedText, HintAction action) = 0;
+        ///
+        /// @param matchedText The text that was matched by the hint pattern.
+        /// @param action      The action to perform on the match.
+        /// @param start       The start position of the match, relative to the visible viewport
+        ///                    area (line 0 = first visible line).
+        /// @param end         The end position of the match (inclusive), relative to the visible
+        ///                    viewport area.
+        virtual void onHintSelected(std::string const& matchedText,
+                                    HintAction action,
+                                    CellLocation start,
+                                    CellLocation end) = 0;
 
         /// Called when hint mode is entered.
         virtual void onHintModeEntered() = 0;

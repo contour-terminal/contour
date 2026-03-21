@@ -18,15 +18,22 @@ class MockExecutor: public HintModeHandler::Executor
   public:
     std::string lastSelectedText;
     HintAction lastAction = HintAction::Copy;
+    CellLocation lastStart {};
+    CellLocation lastEnd {};
     int hintSelectedCount = 0;
     int hintEnteredCount = 0;
     int hintExitedCount = 0;
     int redrawCount = 0;
 
-    void onHintSelected(std::string const& matchedText, HintAction action) override
+    void onHintSelected(std::string const& matchedText,
+                        HintAction action,
+                        CellLocation start,
+                        CellLocation end) override
     {
         lastSelectedText = matchedText;
         lastAction = action;
+        lastStart = start;
+        lastEnd = end;
         ++hintSelectedCount;
     }
 
@@ -156,6 +163,11 @@ TEST_CASE("HintModeHandler.ProgressiveFiltering", "[hintmode]")
 
     CHECK(executor.hintSelectedCount == 1);
     CHECK(executor.lastSelectedText == "https://beta.com");
+    // Verify forwarded coordinates: "https://beta.com" starts at column 18, ends at column 33.
+    CHECK(executor.lastStart.line == LineOffset(0));
+    CHECK(executor.lastStart.column == ColumnOffset(18));
+    CHECK(executor.lastEnd.line == LineOffset(0));
+    CHECK(executor.lastEnd.column == ColumnOffset(33));
     CHECK(!handler.isActive()); // Should have deactivated after selection.
 }
 
@@ -440,6 +452,7 @@ TEST_CASE("HintModeHandler.BareFilenameWithValidatedPattern", "[hintmode]")
                 return matchStr == "main.cpp" || matchStr == "README.md" || matchStr == "Makefile"
                        || matchStr == "src";
             },
+            .transformer = {},
         },
     };
 
@@ -471,6 +484,7 @@ TEST_CASE("HintModeHandler.BareFilenameFilteredByValidator", "[hintmode]")
                 // Only real.txt "exists".
                 return matchStr == "real.txt";
             },
+            .transformer = {},
         },
     };
 
@@ -495,6 +509,7 @@ TEST_CASE("HintModeHandler.SingleCharTokensNotMatched", "[hintmode]")
             .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
                                 std::regex_constants::ECMAScript | std::regex_constants::optimize),
             .validator = [](std::string const&) -> bool { return true; }, // Accept everything.
+            .transformer = {},
         },
     };
 
@@ -578,6 +593,7 @@ TEST_CASE("HintModeHandler.CwdRelativeFilesystemValidation", "[hintmode]")
                     resolved = cwd + "/" + matchStr;
                 return fs::exists(resolved);
             },
+            .transformer = {},
         },
     };
 
@@ -625,6 +641,7 @@ TEST_CASE("HintModeHandler.HiddenFilesWithValidatedPattern", "[hintmode]")
                 return matchStr == ".gitignore" || matchStr == ".bashrc" || matchStr == ".config"
                        || matchStr == "README.md";
             },
+            .transformer = {},
         },
     };
 
@@ -659,6 +676,7 @@ TEST_CASE("HintModeHandler.DotPrefixedRelativePath", "[hintmode]")
             .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
                                 std::regex_constants::ECMAScript | std::regex_constants::optimize),
             .validator = [](std::string const&) -> bool { return true; }, // Accept everything.
+            .transformer = {},
         },
     };
 
@@ -672,6 +690,38 @@ TEST_CASE("HintModeHandler.DotPrefixedRelativePath", "[hintmode]")
 
     CHECK(std::ranges::find(matchedTexts, ".config/settings") != matchedTexts.end());
     CHECK(std::ranges::find(matchedTexts, ".local/bin/tool") != matchedTexts.end());
+}
+
+TEST_CASE("HintModeHandler.TransformerRewritesMatchedText", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    auto lines = std::vector<std::string> { "open src/foo.cpp for editing" };
+
+    auto patterns = std::vector<HintPattern> {
+        HintPattern {
+            .name = "filepath",
+            .regex = std::regex(R"([\w./]+)", std::regex_constants::ECMAScript),
+            .validator = [](std::string const& matchStr) -> bool {
+                return matchStr.find('/') != std::string::npos;
+            },
+            .transformer = [](std::string const& matchStr) -> std::string { return "/project/" + matchStr; },
+        },
+    };
+
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, patterns, HintAction::Copy);
+
+    REQUIRE(handler.isActive());
+    REQUIRE(handler.matches().size() == 1);
+
+    // The matched text should be transformed (absolute path), not the raw terminal text.
+    CHECK(handler.matches()[0].matchedText == "/project/src/foo.cpp");
+
+    // Selecting the hint should forward the transformed text.
+    handler.processInput(U'a');
+    CHECK(executor.hintSelectedCount == 1);
+    CHECK(executor.lastSelectedText == "/project/src/foo.cpp");
 }
 
 TEST_CASE("HintModeHandler.IPv6FullAddress", "[hintmode]")

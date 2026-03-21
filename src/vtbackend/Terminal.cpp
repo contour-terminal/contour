@@ -1988,28 +1988,26 @@ void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAc
                 std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
                            std::regex_constants::ECMAScript | std::regex_constants::optimize);
 
-            pattern.validator = [cwd, home](std::string const& matchStr) -> bool {
-                namespace fs = std::filesystem;
-                auto resolved = std::string {};
+            // Resolve a matched path to an absolute filesystem path.
+            // When HOME is unset and the path starts with ~/, return it unchanged.
+            auto const resolvePath = [cwd, home](std::string const& matchStr) -> std::string {
                 if (matchStr.starts_with("/"))
-                {
-                    // Absolute path — use as-is.
-                    resolved = matchStr;
-                }
-                else if (matchStr.starts_with("~/"))
-                {
-                    // Home-relative path.
-                    if (home.empty())
-                        return true; // Cannot resolve — let it through.
-                    resolved = home + matchStr.substr(1);
-                }
-                else
-                {
-                    // Relative path (./foo, ../foo, or bare relative like src/foo).
-                    resolved = cwd + "/" + matchStr;
-                }
-                return fs::exists(resolved);
+                    return matchStr;
+                if (matchStr.starts_with("~/"))
+                    return home.empty() ? matchStr : home + matchStr.substr(1);
+                return cwd + "/" + matchStr;
             };
+
+            pattern.validator = [resolvePath, home](std::string const& matchStr) -> bool {
+                // Cannot resolve ~/ paths when HOME is unset — let them through unvalidated.
+                if (matchStr.starts_with("~/") && home.empty())
+                    return true;
+                auto ec = std::error_code {};
+                return std::filesystem::exists(resolvePath(matchStr), ec);
+            };
+
+            // Transform matched text to absolute path so Copy/Open actions work correctly.
+            pattern.transformer = resolvePath;
         }
     }
 
@@ -2118,7 +2116,10 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
     }
 }
 
-void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText, HintAction action)
+void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText,
+                                                HintAction action,
+                                                CellLocation start,
+                                                CellLocation end)
 {
     switch (action)
     {
@@ -2129,11 +2130,22 @@ void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText, 
             terminal._eventListener.copyToClipboard(matchedText);
             terminal.sendRawInput(matchedText);
             break;
-        case HintAction::Select:
-            // TODO: Implement visual-mode pre-selection of the match range.
-            // Currently falls back to clipboard copy as an interim behavior.
-            terminal._eventListener.copyToClipboard(matchedText);
+        case HintAction::Select: {
+            // Convert viewport-relative coordinates to grid-relative coordinates.
+            auto const scrollOff = LineOffset::cast_from(terminal._viewport.scrollOffset());
+            auto const gridStart = CellLocation { .line = start.line - scrollOff, .column = start.column };
+            auto const gridEnd = CellLocation { .line = end.line - scrollOff, .column = end.column };
+
+            // Clear any existing selection so that entering Visual mode uses our
+            // cursor position as the anchor, not a stale selection start.
+            terminal.clearSelection();
+
+            // Enter vi visual mode with the match range pre-selected.
+            terminal._viCommands.cursorPosition = gridStart;
+            terminal._inputHandler.setMode(ViMode::Visual);
+            terminal._viCommands.moveCursorTo(gridEnd);
             break;
+        }
     }
 }
 

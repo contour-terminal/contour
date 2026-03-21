@@ -37,6 +37,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <regex>
 
 #if defined(__OpenBSD__)
     #include <pthread_np.h>
@@ -1358,19 +1359,54 @@ bool TerminalSession::operator()(actions::HintMode const& action)
 {
     sessionLog()("Activating hint mode with patterns: '{}', action: {}", action.patterns, action.hintAction);
 
-    // Resolve patterns: if empty or "all", use all builtin patterns.
+    // Start with builtin patterns.
     auto patterns = vtbackend::HintModeHandler::builtinPatterns();
+
+    // Merge user-configured patterns: override builtins with same name, append new ones.
+    for (auto const& userPattern: profile().hintPatterns.value())
+    {
+        try
+        {
+            auto compiled = vtbackend::HintPattern {
+                .name = userPattern.name,
+                .regex = std::regex(userPattern.regex,
+                                    std::regex_constants::ECMAScript | std::regex_constants::optimize),
+                .validator = {},
+                .transformer = {},
+            };
+            auto const it =
+                std::ranges::find_if(patterns, [&](auto const& p) { return p.name == userPattern.name; });
+            if (it != patterns.end())
+                *it = std::move(compiled); // Override builtin with same name.
+            else
+                patterns.push_back(std::move(compiled)); // Append new user pattern.
+        }
+        catch (std::regex_error const& e)
+        {
+            sessionLog()("Skipping hint pattern '{}': invalid regex '{}': {}",
+                         userPattern.name,
+                         userPattern.regex,
+                         e.what());
+        }
+    }
+
+    // Filter by requested pattern name(s) if specified.
     if (!action.patterns.empty() && action.patterns != "all")
     {
-        // Filter to only the named pattern(s).
-        auto filtered = std::vector<vtbackend::HintPattern>();
-        for (auto& p: patterns)
+        auto const requestedNames = crispy::split(std::string_view(action.patterns), '|');
+        auto const nameMatches = [&](auto const& p) {
+            return std::ranges::find(requestedNames, std::string_view(p.name)) != requestedNames.end();
+        };
+
+        if (std::ranges::any_of(patterns, nameMatches))
         {
-            if (p.name == action.patterns)
-                filtered.push_back(std::move(p));
+            std::erase_if(patterns, [&](auto const& p) { return !nameMatches(p); });
+            sessionLog()("Filtered to {} hint pattern(s) matching '{}'", patterns.size(), action.patterns);
         }
-        if (!filtered.empty())
-            patterns = std::move(filtered);
+        else
+        {
+            sessionLog()("No hint patterns matched '{}', falling back to all patterns", action.patterns);
+        }
     }
 
     auto const hintAction = action.hintAction;

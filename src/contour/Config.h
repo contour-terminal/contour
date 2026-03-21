@@ -209,6 +209,13 @@ struct HyperlinkDecorationConfig
     vtrasterizer::Decorator hover { vtrasterizer::Decorator::Underline };
 };
 
+/// A user-defined hint pattern for hint mode scanning.
+struct HintPatternConfig
+{
+    std::string name;  ///< Pattern identifier (e.g. "uuid", "docker_id").
+    std::string regex; ///< ECMAScript regex to match against visible text.
+};
+
 struct PermissionsConfig
 {
     Permission captureBuffer { Permission::Ask };
@@ -457,6 +464,7 @@ struct TerminalProfile
     ConfigEntry<BackgroundConfig, documentation::Background> background {};
     ConfigEntry<ColorConfig, documentation::Colors> colors { SimpleColorConfig {} };
     ConfigEntry<HyperlinkDecorationConfig, documentation::HyperlinkDecoration> hyperlinkDecoration {};
+    ConfigEntry<std::vector<HintPatternConfig>, documentation::HintPatterns> hintPatterns {};
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
@@ -1047,6 +1055,9 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, BackgroundConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HyperlinkDecorationConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PermissionsConfig& where);
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       std::vector<HintPatternConfig>& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::ArcStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::BrailleStyle& where);
@@ -1226,6 +1237,43 @@ struct Writer
     [[nodiscard]] std::string format(std::string_view doc, vtpty::SshHostConfig const& v)
     {
         return format(doc, v.hostname);
+    }
+
+    /// Serializes hint patterns: outputs the doc template (pure comment) followed by any user entries.
+    [[nodiscard]] std::string format(std::string_view doc, std::vector<HintPatternConfig> const& patterns)
+    {
+        // doc is already processed by process() (comment placeholders replaced, indentation applied).
+        auto result = std::string { doc };
+        if (!patterns.empty())
+        {
+            // Derive indentation from the first non-empty line in doc.
+            auto indent = std::string {};
+            for (auto const ch: doc)
+            {
+                if (ch == '\n')
+                {
+                    indent.clear();
+                    continue;
+                }
+                if (ch == ' ' || ch == '\t')
+                    indent.push_back(ch);
+                else
+                    break;
+            }
+            result += indent + "hint_patterns:\n";
+            for (auto const& p: patterns)
+            {
+                // Escape single quotes for YAML single-quoted scalars by doubling them.
+                auto escapedRegex = p.regex;
+                for (auto pos = escapedRegex.find('\''); pos != std::string::npos;
+                     pos = escapedRegex.find('\'', pos + 2))
+                    escapedRegex.insert(pos, 1, '\'');
+
+                result += std::format(
+                    "{}    - name: {}\n{}      regex: '{}'\n", indent, p.name, indent, escapedRegex);
+            }
+        }
+        return result;
     }
 
     [[nodiscard]] std::string static format(vtbackend::CellRGBColor const& v)
