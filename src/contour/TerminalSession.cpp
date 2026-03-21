@@ -1402,8 +1402,7 @@ bool TerminalSession::operator()(actions::HintMode const& action)
 
         if (patterns.empty())
         {
-            sessionLog()("No hint patterns matched '{}', falling back to all patterns",
-                         action.patterns);
+            sessionLog()("No hint patterns matched '{}', falling back to all patterns", action.patterns);
             patterns = vtbackend::HintModeHandler::builtinPatterns();
         }
         else if (patterns.size() < previousSize)
