@@ -508,6 +508,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         }
 
         loadFromEntry(child, "hyperlink_decoration", where.hyperlinkDecoration);
+        loadFromEntry(child, "hint_patterns", where.hintPatterns);
     }
 }
 
@@ -1175,6 +1176,29 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     {
         loadFromEntry(child, "position", where.position);
         loadFromEntry(child, "hide_in_alt_screen", where.hideScrollbarInAltScreen);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::vector<HintPatternConfig>& where)
+{
+    auto const child = node[entry];
+    if (child && child.IsSequence())
+    {
+        where.clear();
+        for (auto const& item: child)
+        {
+            auto patternConfig = HintPatternConfig {};
+            if (auto const nameNode = item["name"])
+                patternConfig.name = nameNode.as<std::string>();
+            if (auto const regexNode = item["regex"])
+                patternConfig.regex = regexNode.as<std::string>();
+            if (!patternConfig.name.empty() && !patternConfig.regex.empty())
+                where.push_back(std::move(patternConfig));
+            else
+                logger()("Skipping hint pattern with missing name or regex\n");
+        }
     }
 }
 

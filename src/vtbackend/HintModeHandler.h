@@ -52,7 +52,15 @@ class HintModeHandler
         virtual ~Executor() = default;
 
         /// Called when a hint has been selected by the user.
-        virtual void onHintSelected(std::string const& matchedText, HintAction action) = 0;
+        ///
+        /// @param matchedText The text that was matched by the hint pattern.
+        /// @param action      The action to perform on the match.
+        /// @param start       The start position of the match in the grid.
+        /// @param end         The end position of the match in the grid (inclusive).
+        virtual void onHintSelected(std::string const& matchedText,
+                                    HintAction action,
+                                    CellLocation start,
+                                    CellLocation end) = 0;
 
         /// Called when hint mode is entered.
         virtual void onHintModeEntered() = 0;

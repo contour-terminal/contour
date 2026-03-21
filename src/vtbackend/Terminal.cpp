@@ -2118,7 +2118,10 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
     }
 }
 
-void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText, HintAction action)
+void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText,
+                                                HintAction action,
+                                                CellLocation start,
+                                                CellLocation end)
 {
     switch (action)
     {
@@ -2130,9 +2133,10 @@ void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText, 
             terminal.sendRawInput(matchedText);
             break;
         case HintAction::Select:
-            // TODO: Implement visual-mode pre-selection of the match range.
-            // Currently falls back to clipboard copy as an interim behavior.
-            terminal._eventListener.copyToClipboard(matchedText);
+            // Enter vi visual mode with the match range pre-selected.
+            terminal._viCommands.cursorPosition = start;
+            terminal._inputHandler.setMode(ViMode::Visual);
+            terminal._viCommands.moveCursorTo(end);
             break;
     }
 }

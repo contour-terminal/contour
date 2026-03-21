@@ -183,10 +183,10 @@ bool HintModeHandler::processInput(char32_t ch)
     // Auto-select when exactly one match remains.
     if (_filteredMatches.size() == 1 && _filteredMatches[0].label == _filter)
     {
-        auto const matchedText = _filteredMatches[0].matchedText;
+        auto match = std::move(_filteredMatches[0]);
         auto const action = _action;
         deactivate();
-        _executor.onHintSelected(matchedText, action);
+        _executor.onHintSelected(match.matchedText, action, match.start, match.end);
         return true;
     }
 

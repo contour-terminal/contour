@@ -18,15 +18,22 @@ class MockExecutor: public HintModeHandler::Executor
   public:
     std::string lastSelectedText;
     HintAction lastAction = HintAction::Copy;
+    CellLocation lastStart {};
+    CellLocation lastEnd {};
     int hintSelectedCount = 0;
     int hintEnteredCount = 0;
     int hintExitedCount = 0;
     int redrawCount = 0;
 
-    void onHintSelected(std::string const& matchedText, HintAction action) override
+    void onHintSelected(std::string const& matchedText,
+                        HintAction action,
+                        CellLocation start,
+                        CellLocation end) override
     {
         lastSelectedText = matchedText;
         lastAction = action;
+        lastStart = start;
+        lastEnd = end;
         ++hintSelectedCount;
     }
 
