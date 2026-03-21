@@ -1197,7 +1197,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             if (!patternConfig.name.empty() && !patternConfig.regex.empty())
                 where.push_back(std::move(patternConfig));
             else
-                logger()("Skipping hint pattern with missing name or regex\n");
+                logger()("Skipping hint pattern with missing name or regex: name='{}', regex='{}'",
+                         patternConfig.name.empty() ? "<unnamed>" : patternConfig.name,
+                         patternConfig.regex);
         }
     }
 }

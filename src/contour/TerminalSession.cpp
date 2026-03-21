@@ -1397,15 +1397,15 @@ bool TerminalSession::operator()(actions::HintMode const& action)
             return std::ranges::find(requestedNames, std::string_view(p.name)) != requestedNames.end();
         };
 
-        auto const previousSize = patterns.size();
+        auto const allConfiguredPatterns = patterns; // Preserve merged set for fallback.
         std::erase_if(patterns, [&](auto const& p) { return !nameMatches(p); });
 
         if (patterns.empty())
         {
             sessionLog()("No hint patterns matched '{}', falling back to all patterns", action.patterns);
-            patterns = vtbackend::HintModeHandler::builtinPatterns();
+            patterns = allConfiguredPatterns;
         }
-        else if (patterns.size() < previousSize)
+        else if (patterns.size() < allConfiguredPatterns.size())
         {
             sessionLog()("Filtered to {} hint pattern(s) matching '{}'", patterns.size(), action.patterns);
         }

@@ -163,6 +163,11 @@ TEST_CASE("HintModeHandler.ProgressiveFiltering", "[hintmode]")
 
     CHECK(executor.hintSelectedCount == 1);
     CHECK(executor.lastSelectedText == "https://beta.com");
+    // Verify forwarded coordinates: "https://beta.com" starts at column 18, ends at column 33.
+    CHECK(executor.lastStart.line == LineOffset(0));
+    CHECK(executor.lastStart.column == ColumnOffset(18));
+    CHECK(executor.lastEnd.line == LineOffset(0));
+    CHECK(executor.lastEnd.column == ColumnOffset(33));
     CHECK(!handler.isActive()); // Should have deactivated after selection.
 }
 

@@ -1242,12 +1242,36 @@ struct Writer
     /// Serializes hint patterns: outputs the doc template (pure comment) followed by any user entries.
     [[nodiscard]] std::string format(std::string_view doc, std::vector<HintPatternConfig> const& patterns)
     {
-        auto result = replaceCommentPlaceholder(std::string { doc });
+        // doc is already processed by process() (comment placeholders replaced, indentation applied).
+        auto result = std::string { doc };
         if (!patterns.empty())
         {
-            result += "hint_patterns:\n";
+            // Derive indentation from the first non-empty line in doc.
+            auto indent = std::string {};
+            for (auto const ch: doc)
+            {
+                if (ch == '\n')
+                {
+                    indent.clear();
+                    continue;
+                }
+                if (ch == ' ' || ch == '\t')
+                    indent.push_back(ch);
+                else
+                    break;
+            }
+            result += indent + "hint_patterns:\n";
             for (auto const& p: patterns)
-                result += std::format("    - name: {}\n      regex: '{}'\n", p.name, p.regex);
+            {
+                // Escape single quotes for YAML single-quoted scalars by doubling them.
+                auto escapedRegex = p.regex;
+                for (auto pos = escapedRegex.find('\''); pos != std::string::npos;
+                     pos = escapedRegex.find('\'', pos + 2))
+                    escapedRegex.insert(pos, 1, '\'');
+
+                result += std::format(
+                    "{}    - name: {}\n{}      regex: '{}'\n", indent, p.name, indent, escapedRegex);
+            }
         }
         return result;
     }

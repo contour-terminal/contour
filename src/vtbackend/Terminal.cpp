@@ -2132,12 +2132,22 @@ void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText,
             terminal._eventListener.copyToClipboard(matchedText);
             terminal.sendRawInput(matchedText);
             break;
-        case HintAction::Select:
+        case HintAction::Select: {
+            // Convert viewport-relative coordinates to grid-relative coordinates.
+            auto const scrollOff = LineOffset::cast_from(terminal._viewport.scrollOffset());
+            auto const gridStart = CellLocation { .line = start.line - scrollOff, .column = start.column };
+            auto const gridEnd = CellLocation { .line = end.line - scrollOff, .column = end.column };
+
+            // Clear any existing selection so that entering Visual mode uses our
+            // cursor position as the anchor, not a stale selection start.
+            terminal.clearSelection();
+
             // Enter vi visual mode with the match range pre-selected.
-            terminal._viCommands.cursorPosition = start;
+            terminal._viCommands.cursorPosition = gridStart;
             terminal._inputHandler.setMode(ViMode::Visual);
-            terminal._viCommands.moveCursorTo(end);
+            terminal._viCommands.moveCursorTo(gridEnd);
             break;
+        }
     }
 }
 

@@ -55,8 +55,10 @@ class HintModeHandler
         ///
         /// @param matchedText The text that was matched by the hint pattern.
         /// @param action      The action to perform on the match.
-        /// @param start       The start position of the match in the grid.
-        /// @param end         The end position of the match in the grid (inclusive).
+        /// @param start       The start position of the match, relative to the visible viewport
+        ///                    area (line 0 = first visible line).
+        /// @param end         The end position of the match (inclusive), relative to the visible
+        ///                    viewport area.
         virtual void onHintSelected(std::string const& matchedText,
                                     HintAction action,
                                     CellLocation start,
