@@ -39,9 +39,6 @@ string to_string(MouseButton button)
     return std::format("{}", button);
 }
 
-/// Lock modifiers (CapsLock, NumLock) that should not trigger CSI u encoding on their own.
-constexpr auto LockModifiers = Modifiers { Modifier::CapsLock } | Modifiers { Modifier::NumLock };
-
 /// Returns true if the given modifiers consist only of lock modifiers (CapsLock/NumLock) or no modifiers.
 constexpr bool hasOnlyLockModifiers(Modifiers modifiers) noexcept
 {

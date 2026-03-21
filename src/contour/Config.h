@@ -142,9 +142,10 @@ std::vector<actions::Action> const* apply(
     vtbackend::Modifiers modifiers,
     uint8_t actualModeFlags)
 {
+    auto const effectiveModifiers = modifiers.without(vtbackend::LockModifiers);
     for (vtbackend::InputBinding<Input, ActionList> const& mapping: mappings)
     {
-        if (mapping.modifiers == modifiers && mapping.input == input
+        if (mapping.modifiers == effectiveModifiers && mapping.input == input
             && helper::testMatchMode(actualModeFlags, mapping.modes))
         {
             return &mapping.binding;
