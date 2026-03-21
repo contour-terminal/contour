@@ -16,6 +16,7 @@ DECRQDE
 DECRST
 DECSET
 Decset
+ecmascript
 ellips
 emantic
 emtpy

@@ -84,7 +84,7 @@ The `hint_action` parameter controls what happens when you select a match:
 | `Open`         | Open the match — URLs open in the browser, files open in the configured editor |
 | `Paste`        | Paste the matched text into the terminal input               |
 | `CopyAndPaste` | Copy to clipboard **and** paste into the terminal            |
-| `Select`       | Copy the matched text to clipboard (visual mode pre-selection is planned) |
+| `Select`       | Enter vi visual mode with the match range pre-selected for manual adjustment |
 
 ## Configuration
 
@@ -109,7 +109,8 @@ input_mapping:
 
 The `patterns` parameter accepts:
 
-- A pattern name: `url`, `filepath`, `githash`, `ipv4`, `ipv6`
+- A single pattern name: `url`, `filepath`, `githash`, `ipv4`, `ipv6`
+- Multiple pattern names separated by `|`: `filepath|githash`
 - `all` or empty: scan for all builtin patterns at once
 
 ### Colors
@@ -134,6 +135,39 @@ color_schemes:
             background: '#3E4452'
             background_alpha: 0.8
 ```
+
+### Custom Patterns
+
+You can define your own hint patterns in the profile configuration. Each pattern
+needs a `name` (used to reference it in key bindings) and a `regex`
+([ECMAScript syntax](https://en.cppreference.com/w/cpp/regex/ecmascript)):
+
+```yaml
+profiles:
+  main:
+    hint_patterns:
+      - name: uuid
+        regex: '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'
+      - name: docker_id
+        regex: '\b[0-9a-f]{12,64}\b'
+```
+
+Custom patterns with the same name as a builtin override the builtin definition.
+You can then reference custom patterns in key bindings just like builtins:
+
+```yaml
+input_mapping:
+    - { mods: [Control, Shift], key: I, action: HintMode, patterns: uuid, hint_action: Copy }
+```
+
+### Path Resolution
+
+When copying or opening file paths, Contour resolves relative paths to absolute
+using the terminal's current working directory. For example, copying a hint for
+`src/main.cpp` gives you `/home/user/project/src/main.cpp` in the clipboard, and
+opening it passes the full path to your editor or file manager.
+
+Home-relative paths (`~/...`) are expanded using the `HOME` environment variable.
 
 ## Tips and Tricks
 
