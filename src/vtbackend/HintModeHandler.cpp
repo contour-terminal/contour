@@ -71,9 +71,11 @@ void HintModeHandler::rescanLines(vector<string> const& visibleLines, PageSize p
                     utf8ByteOffsetToCodepointIndex(lineText, match.position() + match.length());
                 auto const endCol = ColumnOffset::cast_from(endCodepointIndex - 1);
 
+                auto const actionText = pattern.transformer ? pattern.transformer(matchStr) : matchStr;
+
                 _allMatches.push_back(HintMatch {
                     .label = {},
-                    .matchedText = matchStr,
+                    .matchedText = actionText,
                     .start = CellLocation { .line = lineOffset, .column = startCol },
                     .end = CellLocation { .line = lineOffset, .column = endCol },
                 });
@@ -238,19 +240,23 @@ vector<HintPattern> HintModeHandler::builtinPatterns()
         HintPattern { .name = "url",
                       .regex = regex(R"(https?://[^\s<>\"'\])\}]+)",
                                      regex_constants::ECMAScript | regex_constants::optimize),
-                      .validator = {} },
+                      .validator = {},
+                      .transformer = {} },
         HintPattern { .name = "filepath",
                       .regex = regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w][\w.-]*/[\w./-]+))",
                                      regex_constants::ECMAScript | regex_constants::optimize),
-                      .validator = {} },
+                      .validator = {},
+                      .transformer = {} },
         HintPattern {
             .name = "githash",
             .regex = regex(R"(\b[0-9a-f]{7,40}\b)", regex_constants::ECMAScript | regex_constants::optimize),
-            .validator = {} },
+            .validator = {},
+            .transformer = {} },
         HintPattern { .name = "ipv4",
                       .regex = regex(R"(\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?\b)",
                                      regex_constants::ECMAScript | regex_constants::optimize),
-                      .validator = {} },
+                      .validator = {},
+                      .transformer = {} },
         HintPattern {
             .name = "ipv6",
             .regex =
@@ -261,7 +267,8 @@ vector<HintPattern> HintModeHandler::builtinPatterns()
                       R"(|\b(?:[0-9a-fA-F]{1,4}:)+:(?![0-9a-fA-F:]))"
                       R"())",
                       regex_constants::ECMAScript | regex_constants::optimize),
-            .validator = {} },
+            .validator = {},
+            .transformer = {} },
     };
     return cached;
 }

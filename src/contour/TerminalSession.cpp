@@ -1372,6 +1372,7 @@ bool TerminalSession::operator()(actions::HintMode const& action)
                 .regex = std::regex(userPattern.regex,
                                     std::regex_constants::ECMAScript | std::regex_constants::optimize),
                 .validator = {},
+                .transformer = {},
             };
             auto const it =
                 std::ranges::find_if(patterns, [&](auto const& p) { return p.name == userPattern.name; });

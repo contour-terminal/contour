@@ -29,6 +29,10 @@ struct HintPattern
     /// Optional post-match validator. When set, only matches for which
     /// this returns true are kept. Used e.g. to check filesystem existence.
     std::function<bool(std::string const&)> validator;
+    /// Optional post-match transformer. When set, the matched text is rewritten
+    /// before being stored in HintMatch. Used e.g. to resolve relative paths
+    /// to absolute paths. The overlay still shows the original terminal text.
+    std::function<std::string(std::string const&)> transformer;
 };
 
 /// A single match found during hint scanning, with its label and grid positions.

@@ -1988,28 +1988,21 @@ void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAc
                 std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
                            std::regex_constants::ECMAScript | std::regex_constants::optimize);
 
-            pattern.validator = [cwd, home](std::string const& matchStr) -> bool {
-                namespace fs = std::filesystem;
-                auto resolved = std::string {};
+            // Resolve a matched path to an absolute filesystem path.
+            auto const resolvePath = [cwd, home](std::string const& matchStr) -> std::string {
                 if (matchStr.starts_with("/"))
-                {
-                    // Absolute path — use as-is.
-                    resolved = matchStr;
-                }
-                else if (matchStr.starts_with("~/"))
-                {
-                    // Home-relative path.
-                    if (home.empty())
-                        return true; // Cannot resolve — let it through.
-                    resolved = home + matchStr.substr(1);
-                }
-                else
-                {
-                    // Relative path (./foo, ../foo, or bare relative like src/foo).
-                    resolved = cwd + "/" + matchStr;
-                }
-                return fs::exists(resolved);
+                    return matchStr;
+                if (matchStr.starts_with("~/") && !home.empty())
+                    return home + matchStr.substr(1);
+                return cwd + "/" + matchStr;
             };
+
+            pattern.validator = [resolvePath](std::string const& matchStr) -> bool {
+                return std::filesystem::exists(resolvePath(matchStr));
+            };
+
+            // Transform matched text to absolute path so Copy/Open actions work correctly.
+            pattern.transformer = resolvePath;
         }
     }
 
