@@ -1398,17 +1398,14 @@ bool TerminalSession::operator()(actions::HintMode const& action)
             return std::ranges::find(requestedNames, std::string_view(p.name)) != requestedNames.end();
         };
 
-        auto const allConfiguredPatterns = patterns; // Preserve merged set for fallback.
-        std::erase_if(patterns, [&](auto const& p) { return !nameMatches(p); });
-
-        if (patterns.empty())
+        if (std::ranges::any_of(patterns, nameMatches))
+        {
+            std::erase_if(patterns, [&](auto const& p) { return !nameMatches(p); });
+            sessionLog()("Filtered to {} hint pattern(s) matching '{}'", patterns.size(), action.patterns);
+        }
+        else
         {
             sessionLog()("No hint patterns matched '{}', falling back to all patterns", action.patterns);
-            patterns = allConfiguredPatterns;
-        }
-        else if (patterns.size() < allConfiguredPatterns.size())
-        {
-            sessionLog()("Filtered to {} hint pattern(s) matching '{}'", patterns.size(), action.patterns);
         }
     }
 

@@ -1989,16 +1989,21 @@ void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAc
                            std::regex_constants::ECMAScript | std::regex_constants::optimize);
 
             // Resolve a matched path to an absolute filesystem path.
+            // When HOME is unset and the path starts with ~/, return it unchanged.
             auto const resolvePath = [cwd, home](std::string const& matchStr) -> std::string {
                 if (matchStr.starts_with("/"))
                     return matchStr;
-                if (matchStr.starts_with("~/") && !home.empty())
-                    return home + matchStr.substr(1);
+                if (matchStr.starts_with("~/"))
+                    return home.empty() ? matchStr : home + matchStr.substr(1);
                 return cwd + "/" + matchStr;
             };
 
-            pattern.validator = [resolvePath](std::string const& matchStr) -> bool {
-                return std::filesystem::exists(resolvePath(matchStr));
+            pattern.validator = [resolvePath, home](std::string const& matchStr) -> bool {
+                // Cannot resolve ~/ paths when HOME is unset — let them through unvalidated.
+                if (matchStr.starts_with("~/") && home.empty())
+                    return true;
+                auto ec = std::error_code {};
+                return std::filesystem::exists(resolvePath(matchStr), ec);
             };
 
             // Transform matched text to absolute path so Copy/Open actions work correctly.
