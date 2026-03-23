@@ -82,14 +82,12 @@ namespace
         Boolean { "Tc"_tcap, "Tc"sv, true },    // RGB color support (introduced by Tmux in 2016)
     };
 
-    constexpr inline auto Int16Max = std::numeric_limits<int16_t>::max();
-
     constexpr inline auto NumericalCaps = std::array {
-        Numeric { "co"_tcap, "cols"sv, 80 },         // number of columns in a line
-        Numeric { "it"_tcap, "it"sv, 8 },            // tabs initially every # spaces
-        Numeric { "Co"_tcap, "colors"sv, Int16Max }, // maximum number of colors on screen
-        Numeric { "pa"_tcap, "pairs"sv, Int16Max },  // maximum number of color-pairs on the screen
-        Numeric { "li"_tcap, "lines"sv, 24 },        // default number of lines in a terminal
+        Numeric { "co"_tcap, "cols"sv, 80 },     // number of columns in a line
+        Numeric { "it"_tcap, "it"sv, 8 },        // tabs initially every # spaces
+        Numeric { "Co"_tcap, "colors"sv, 256 },  // indexed color palette size (truecolor via Tc/RGB)
+        Numeric { "pa"_tcap, "pairs"sv, 65536 }, // maximum number of color-pairs (256*256)
+        Numeric { "li"_tcap, "lines"sv, 24 },    // default number of lines in a terminal
     };
 
     constexpr auto inline Undefined = Code {};
