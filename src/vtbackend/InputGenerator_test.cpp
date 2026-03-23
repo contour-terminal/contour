@@ -830,8 +830,9 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Numpad_AssociatedText_no_mods", "
 // }}}
 
 // {{{ InputBinding lock modifier tests
-// These tests verify that stripping LockModifiers before matching makes bindings
-// NumLock/CapsLock-agnostic, which is the pattern used by config::apply().
+// These tests verify that lock modifiers (NumLock/CapsLock) cause matching failures
+// when not stripped, and that stripping them via without(LockModifiers) restores correct
+// matching — the same pattern used by config::apply().
 
 TEST_CASE("InputBinding.match_with_NumLock_stripped", "[terminal,input]")
 {
@@ -842,6 +843,9 @@ TEST_CASE("InputBinding.match_with_NumLock_stripped", "[terminal,input]")
         .binding = 42,
     };
     auto const modsWithNumLock = Modifiers { Modifier::Shift } | Modifier::Control | Modifier::NumLock;
+    // NumLock causes a false negative — the binding should match but doesn't without stripping
+    CHECK_FALSE(match(binding, MatchModes {}, modsWithNumLock, Key::Enter));
+    // After stripping lock modifiers, the binding matches correctly
     CHECK(match(binding, MatchModes {}, modsWithNumLock.without(LockModifiers), Key::Enter));
 }
 
@@ -854,6 +858,9 @@ TEST_CASE("InputBinding.match_with_CapsLock_stripped", "[terminal,input]")
         .binding = 1,
     };
     auto const modsWithCapsLock = Modifiers { Modifier::Control } | Modifier::CapsLock;
+    // CapsLock causes a false negative
+    CHECK_FALSE(match(binding, MatchModes {}, modsWithCapsLock, Key::F5));
+    // After stripping lock modifiers, the binding matches correctly
     CHECK(match(binding, MatchModes {}, modsWithCapsLock.without(LockModifiers), Key::F5));
 }
 
@@ -867,6 +874,9 @@ TEST_CASE("InputBinding.match_with_NumLock_and_CapsLock_stripped", "[terminal,in
     };
     auto const modsWithBothLocks =
         Modifiers { Modifier::Shift } | Modifier::Control | Modifier::NumLock | Modifier::CapsLock;
+    // Both lock modifiers cause a false negative
+    CHECK_FALSE(match(binding, MatchModes {}, modsWithBothLocks, U'N'));
+    // After stripping lock modifiers, the binding matches correctly
     CHECK(match(binding, MatchModes {}, modsWithBothLocks.without(LockModifiers), U'N'));
 }
 
