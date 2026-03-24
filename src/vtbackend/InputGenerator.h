@@ -52,6 +52,10 @@ enum Modifier : uint8_t
 
 using Modifiers = crispy::flags<Modifier>;
 
+/// Lock modifiers (CapsLock, NumLock) — stripped when matching key bindings and during legacy input
+/// generation.
+constexpr auto LockModifiers = Modifiers { Modifier::CapsLock } | Modifiers { Modifier::NumLock };
+
 /// @returns CSI parameter for given function key modifier
 constexpr size_t makeVirtualTerminalParam(Modifiers modifier) noexcept
 {

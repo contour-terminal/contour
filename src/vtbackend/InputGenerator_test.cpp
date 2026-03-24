@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/InputBinding.h>
 #include <vtbackend/InputGenerator.h>
 
 #include <crispy/escape.h>
@@ -824,6 +825,74 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Numpad_AssociatedText_no_mods", "
 
     input.generateKey(Key::Numpad_5, Modifiers {}, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[57404;1;53u"sv));
+}
+
+// }}}
+
+// {{{ InputBinding lock modifier tests
+// These tests verify that lock modifiers (NumLock/CapsLock) cause matching failures
+// when not stripped, and that stripping them via without(LockModifiers) restores correct
+// matching — the same pattern used by config::apply().
+
+TEST_CASE("InputBinding.match_with_NumLock_stripped", "[terminal,input]")
+{
+    auto const binding = InputBinding<Key, int> {
+        .modes = MatchModes {},
+        .modifiers = Modifiers { Modifier::Shift } | Modifier::Control,
+        .input = Key::Enter,
+        .binding = 42,
+    };
+    auto const modsWithNumLock = Modifiers { Modifier::Shift } | Modifier::Control | Modifier::NumLock;
+    // NumLock causes a false negative — the binding should match but doesn't without stripping
+    CHECK_FALSE(match(binding, MatchModes {}, modsWithNumLock, Key::Enter));
+    // After stripping lock modifiers, the binding matches correctly
+    CHECK(match(binding, MatchModes {}, modsWithNumLock.without(LockModifiers), Key::Enter));
+}
+
+TEST_CASE("InputBinding.match_with_CapsLock_stripped", "[terminal,input]")
+{
+    auto const binding = InputBinding<Key, int> {
+        .modes = MatchModes {},
+        .modifiers = Modifiers { Modifier::Control },
+        .input = Key::F5,
+        .binding = 1,
+    };
+    auto const modsWithCapsLock = Modifiers { Modifier::Control } | Modifier::CapsLock;
+    // CapsLock causes a false negative
+    CHECK_FALSE(match(binding, MatchModes {}, modsWithCapsLock, Key::F5));
+    // After stripping lock modifiers, the binding matches correctly
+    CHECK(match(binding, MatchModes {}, modsWithCapsLock.without(LockModifiers), Key::F5));
+}
+
+TEST_CASE("InputBinding.match_with_NumLock_and_CapsLock_stripped", "[terminal,input]")
+{
+    auto const binding = InputBinding<char32_t, int> {
+        .modes = MatchModes {},
+        .modifiers = Modifiers { Modifier::Shift } | Modifier::Control,
+        .input = U'N',
+        .binding = 0,
+    };
+    auto const modsWithBothLocks =
+        Modifiers { Modifier::Shift } | Modifier::Control | Modifier::NumLock | Modifier::CapsLock;
+    // Both lock modifiers cause a false negative
+    CHECK_FALSE(match(binding, MatchModes {}, modsWithBothLocks, U'N'));
+    // After stripping lock modifiers, the binding matches correctly
+    CHECK(match(binding, MatchModes {}, modsWithBothLocks.without(LockModifiers), U'N'));
+}
+
+TEST_CASE("InputBinding.match_still_requires_real_modifiers", "[terminal,input]")
+{
+    auto const binding = InputBinding<Key, int> {
+        .modes = MatchModes {},
+        .modifiers = Modifiers { Modifier::Shift } | Modifier::Control,
+        .input = Key::Enter,
+        .binding = 42,
+    };
+    // NumLock alone, after stripping locks, leaves no modifiers — should NOT match Shift+Control
+    CHECK_FALSE(
+        match(binding, MatchModes {}, Modifiers { Modifier::NumLock }.without(LockModifiers), Key::Enter));
+    // No modifiers should NOT match
+    CHECK_FALSE(match(binding, MatchModes {}, Modifiers {}, Key::Enter));
 }
 
 // }}}
