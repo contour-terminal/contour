@@ -293,6 +293,8 @@ bool Renderer::setFontSize(text::font_size fontSize)
 
 void Renderer::updateFontMetrics()
 {
+    auto const l = std::scoped_lock { _renderMutex };
+
     rendererLog()("Updating grid metrics: {}", _gridMetrics);
 
     _gridMetrics = loadGridMetrics(_fonts.regular, _gridMetrics.pageSize, *_textShaper);
@@ -324,8 +326,9 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 
 void Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 {
+    auto const renderLock = std::scoped_lock { _renderMutex };
+
     auto const statusLineHeight = terminal.statusLineHeight();
-    _gridMetrics.pageSize = terminal.pageSize() + statusLineHeight;
 
     executeImageDiscards();
 

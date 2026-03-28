@@ -1213,7 +1213,11 @@ class Terminal
     void resetStatusLineDefinition();
 
     TabsInfo guiTabsInfoForStatusLine() const noexcept { return _guiTabInfoForStatusLine; }
-    void setGuiTabInfoForStatusLine(TabsInfo&& info) { _guiTabInfoForStatusLine = std::move(info); }
+    void setGuiTabInfoForStatusLine(TabsInfo&& info)
+    {
+        auto const l = std::lock_guard { _stateMutex };
+        _guiTabInfoForStatusLine = std::move(info);
+    }
 
     TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
     void requestTabName();
