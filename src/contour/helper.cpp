@@ -781,14 +781,12 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     vtbackend::Terminal& terminal = session.terminal();
     vtbackend::ImageSize const cellSize = renderer.gridMetrics().cellSize;
 
-    if (renderer.hasRenderTarget())
-        renderer.renderTarget().setRenderSize(newPixelSize);
-    renderer.setPageSize(newPageSize);
-    renderer.setMargin(computeMargin(
+    auto const newMargin = computeMargin(
         renderer.gridMetrics().cellSize,
         newPageSize,
         newPixelSize,
-        applyContentScale(session.profile().margins.value(), session.display()->contentScale())));
+        applyContentScale(session.profile().margins.value(), session.display()->contentScale()));
+    renderer.applyResize(newPixelSize, newPageSize, newMargin);
 
     if (oldPageSize.lines != newPageSize.lines)
         emit session.lineCountChanged(newPageSize.lines.as<int>());

@@ -21,6 +21,7 @@
 
 #include <format>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <vector>
 
@@ -83,13 +84,32 @@ class Renderer
         _decorationRenderer.setHyperlinkDecoration(normal, hover);
     }
 
-    void setPageSize(vtbackend::PageSize screenSize) noexcept { _gridMetrics.pageSize = screenSize; }
+    void setPageSize(vtbackend::PageSize screenSize) noexcept
+    {
+        auto const l = std::scoped_lock { _renderMutex };
+        _gridMetrics.pageSize = screenSize;
+    }
 
     void setMargin(PageMargin margin) noexcept
     {
+        auto const l = std::scoped_lock { _renderMutex };
         if (_renderTarget)
             _renderTarget->setMargin(margin);
         _gridMetrics.pageMargin = margin;
+    }
+
+    void applyResize(vtbackend::ImageSize newPixelSize,
+                     vtbackend::PageSize newPageSize,
+                     PageMargin newMargin) noexcept
+    {
+        auto const l = std::scoped_lock { _renderMutex };
+        if (_renderTarget)
+        {
+            _renderTarget->setRenderSize(newPixelSize);
+            _renderTarget->setMargin(newMargin);
+        }
+        _gridMetrics.pageSize = newPageSize;
+        _gridMetrics.pageMargin = newMargin;
     }
 
     /**
@@ -182,6 +202,7 @@ class Renderer
 
     GridMetrics _gridMetrics;
 
+    mutable std::mutex _renderMutex;                    //!< Protects _gridMetrics during resize/render.
     std::mutex _imageDiscardLock;                       //!< Lock guard for accessing _discardImageQueue.
     std::vector<vtbackend::ImageId> _discardImageQueue; //!< List of images to be discarded.
 
