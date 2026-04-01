@@ -2115,7 +2115,7 @@ TEST_CASE("Terminal.KittyKeyRelease.sendKeyEvent", "[terminal]")
     terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
     terminal.keyboardProtocol().flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes);
 
-    auto const now = std::chrono::steady_clock::now();
+    auto constexpr now = std::chrono::steady_clock::time_point {};
 
     mc.resetReplyData();
     terminal.sendKeyEvent(
@@ -2137,7 +2137,7 @@ TEST_CASE("Terminal.KittyKeyRelease.sendCharEvent", "[terminal]")
     terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
     terminal.keyboardProtocol().flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes);
 
-    auto const now = std::chrono::steady_clock::now();
+    auto constexpr now = std::chrono::steady_clock::time_point {};
 
     mc.resetReplyData();
     terminal.sendCharEvent('a', 'a', vtbackend::Modifier::Control, vtbackend::KeyboardEventType::Press, now);
@@ -2157,7 +2157,7 @@ TEST_CASE("Terminal.KittyKeyRelease.NoOutputWithoutFlag", "[terminal]")
 
     terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
 
-    auto const now = std::chrono::steady_clock::now();
+    auto constexpr now = std::chrono::steady_clock::time_point {};
 
     mc.resetReplyData();
     terminal.sendCharEvent('a', 'a', vtbackend::Modifier::Control, vtbackend::KeyboardEventType::Press, now);
@@ -2177,7 +2177,7 @@ TEST_CASE("Terminal.KittyKeyRelease.RepeatStillWorks", "[terminal]")
     terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
     terminal.keyboardProtocol().flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes);
 
-    auto const now = std::chrono::steady_clock::now();
+    auto constexpr now = std::chrono::steady_clock::time_point {};
 
     mc.resetReplyData();
     terminal.sendKeyEvent(
