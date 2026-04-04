@@ -144,3 +144,34 @@ TEST_CASE("Parser.BulkText_MultipleIncompleteUtf8Splits", "[Parser]")
              "B\xE2\x94\x9C"
              "C");
 }
+
+TEST_CASE("Parser.precedingGraphicCharacter.ascii", "[Parser]")
+{
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+
+    p.parseFragment("Hello"sv);
+    CHECK(p.precedingGraphicCharacter() == U'o');
+}
+
+TEST_CASE("Parser.precedingGraphicCharacter.nonascii", "[Parser]")
+{
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+
+    // U+2502 "│" is E2 94 82 in UTF-8
+    p.parseFragment("\xE2\x94\x82"sv);
+    CHECK(p.precedingGraphicCharacter() == U'\u2502');
+}
+
+TEST_CASE("Parser.precedingGraphicCharacter.persists_through_escape", "[Parser]")
+{
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+
+    // Send "A" then ESC to start an escape sequence.
+    // precedingGraphicCharacter should retain 'A' because GroundStart
+    // only fires when entering Ground, not when leaving it.
+    p.parseFragment("A\033"sv);
+    CHECK(p.precedingGraphicCharacter() == U'A');
+}

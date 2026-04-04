@@ -147,6 +147,7 @@
           <li>Fixes tab characters (HT) intermittently lost in terminal output due to bulk text parser skipping trailing C0 controls and tab cursor movement not filling intermediate cells with spaces (#1876)</li>
           <li>Fixes text rendering artifacts and corruption when rapidly outputting content</li>
           <li>Fixes garbled or missing characters when displaying Unicode text</li>
+          <li>Fixes REP (repeat character) VT sequence being silently discarded when preceded by text processed via the parser's bulk text fast path, causing visual gaps in ncurses applications like htop</li>
           <li>Fixes glyph scaling and vertical centering of colored emoji</li>
           <li>Fixes Sixel images not rendering on non-first tabs</li>
           <li>Fixes selective erase (DECSED/DECSEL) incorrectly erasing the cursor line instead of the target line when erasing lines without protected characters (#28)</li>

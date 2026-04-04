@@ -4741,5 +4741,55 @@ TEST_CASE("MultiPage.HardResetResetsAllPageMargins", "[screen]")
           == Margin::Vertical { LineOffset(0), LineOffset(4) });
 }
 
+// {{{ REP (Repeat Character) Tests
+
+TEST_CASE("REP.basic_ascii", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Send "|" followed by CSI 9 b (repeat '|' 9 more times).
+    // This mimics what ncurses sends via the rep terminfo capability.
+    mock.writeToScreen("|\033[9b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "||||||||||          ");
+}
+
+TEST_CASE("REP.after_bulk_text", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Send a longer ASCII string to exercise the bulk text path,
+    // then immediately follow with REP.
+    mock.writeToScreen("Hello|\033[3b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "Hello||||           ");
+}
+
+TEST_CASE("REP.respects_margin", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // "A" at column 0, then repeat 10 times. Clamped to available columns.
+    mock.writeToScreen("A\033[10b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "AAAA ");
+}
+
+TEST_CASE("REP.no_preceding_char", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // CSI 5 b with no preceding graphic character does nothing.
+    mock.writeToScreen("\033[5b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "          ");
+}
+
+// }}} REP (Repeat Character) Tests
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests
