@@ -4791,5 +4791,29 @@ TEST_CASE("REP.no_preceding_char", "[screen]")
 
 // }}} REP (Repeat Character) Tests
 
+// {{{ HT (Horizontal Tab) Tests
+
+TEST_CASE("HT.does_not_overwrite_existing_content", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Write text across the full line, then use CUP to reposition and HT.
+    // HT must NOT overwrite existing cell content — it only moves the cursor.
+    mock.writeToScreen("ABCDEFGHIJKLMNOPQRST");
+
+    // Move cursor to column 2 (1-based col 3) and tab to column 8
+    mock.writeToScreen("\033[1;3H\t");
+
+    // Write 'X' at the tab stop position (column 8)
+    mock.writeToScreen("X");
+
+    // Columns 2-7 (0-based) should retain their original content (CDEFGH),
+    // not be overwritten with spaces by the tab.
+    CHECK(screen.grid().lineText(LineOffset(0)) == "ABCDEFGHXJKLMNOPQRST");
+}
+
+// }}} HT (Horizontal Tab) Tests
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests

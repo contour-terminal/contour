@@ -1795,13 +1795,16 @@ void Screen<Cell>::moveCursorToNextTab()
 
     if (columnsToAdvance > ColumnCount(0))
     {
-        // Fill intermediate cells with spaces to ensure TrivialLineBuffer consistency.
-        // Without this, the cursor advances but the cell buffer doesn't reflect the gap,
-        // causing tabs to be visually lost during rendering.
-        auto const startCol = _cursor.position.column;
+        // HT must NOT overwrite existing cell content — it only moves the cursor.
+        // However, TrivialLineBuffer stores text as a contiguous byte sequence and
+        // cannot represent gaps, so we must fill with spaces there to keep it consistent.
         auto& line = currentLine();
-        for (auto const i: std::views::iota(0, unbox(columnsToAdvance)))
-            line.useCellAt(startCol + ColumnOffset(i)).write(_cursor.graphicsRendition, L' ', 1);
+        if (line.isTrivialBuffer())
+        {
+            auto const startCol = _cursor.position.column;
+            for (auto const i: std::views::iota(0, unbox(columnsToAdvance)))
+                line.useCellAt(startCol + ColumnOffset(i)).write(_cursor.graphicsRendition, L' ', 1);
+        }
 
         moveCursorForward(columnsToAdvance);
     }
