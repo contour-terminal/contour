@@ -4741,5 +4741,79 @@ TEST_CASE("MultiPage.HardResetResetsAllPageMargins", "[screen]")
           == Margin::Vertical { LineOffset(0), LineOffset(4) });
 }
 
+// {{{ REP (Repeat Character) Tests
+
+TEST_CASE("REP.basic_ascii", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Send "|" followed by CSI 9 b (repeat '|' 9 more times).
+    // This mimics what ncurses sends via the rep terminfo capability.
+    mock.writeToScreen("|\033[9b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "||||||||||          ");
+}
+
+TEST_CASE("REP.after_bulk_text", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Send a longer ASCII string to exercise the bulk text path,
+    // then immediately follow with REP.
+    mock.writeToScreen("Hello|\033[3b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "Hello||||           ");
+}
+
+TEST_CASE("REP.respects_margin", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // "A" at column 0, then repeat 10 times. Clamped to available columns.
+    mock.writeToScreen("A\033[10b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "AAAA ");
+}
+
+TEST_CASE("REP.no_preceding_char", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // CSI 5 b with no preceding graphic character does nothing.
+    mock.writeToScreen("\033[5b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "          ");
+}
+
+// }}} REP (Repeat Character) Tests
+
+// {{{ HT (Horizontal Tab) Tests
+
+TEST_CASE("HT.does_not_overwrite_existing_content", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Write text across the full line, then use CUP to reposition and HT.
+    // HT must NOT overwrite existing cell content — it only moves the cursor.
+    mock.writeToScreen("ABCDEFGHIJKLMNOPQRST");
+
+    // Move cursor to column 2 (1-based col 3) and tab to column 8
+    mock.writeToScreen("\033[1;3H\t");
+
+    // Write 'X' at the tab stop position (column 8)
+    mock.writeToScreen("X");
+
+    // Columns 2-7 (0-based) should retain their original content (CDEFGH),
+    // not be overwritten with spaces by the tab.
+    CHECK(screen.grid().lineText(LineOffset(0)) == "ABCDEFGHXJKLMNOPQRST");
+}
+
+// }}} HT (Horizontal Tab) Tests
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests

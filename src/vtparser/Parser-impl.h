@@ -470,7 +470,15 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     // BUG FIX: Previously, when utf8.expectedLength != 0, the entire text was
     // skipped but bytes were still consumed, causing text corruption.
     if (!text.empty())
+    {
         _eventListener.print(text, cellCount);
+
+        // Update lastCodepointHint for REP (CSI Ps b) support.
+        // scan_text's ASCII fast-path (scan_for_text_ascii) doesn't update this field.
+        // The non-ASCII path (scan_for_text_nonascii) already sets it correctly.
+        if (auto const lastByte = static_cast<uint8_t>(text.back()); lastByte < 0x80)
+            _scanState.lastCodepointHint = static_cast<char32_t>(lastByte);
+    }
 
     if (_scanState.utf8.expectedLength == 0)
     {
