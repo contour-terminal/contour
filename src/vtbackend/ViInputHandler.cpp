@@ -337,11 +337,10 @@ void ViInputHandler::setMode(ViMode theMode)
 
 Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
-    if (eventType == KeyboardEventType::Release)
-        return Handled { true };
-
     if (_promptEditMode != PromptMode::Disabled)
     {
+        if (eventType == KeyboardEventType::Release)
+            return Handled { true };
         // TODO: support cursor movements.
         switch (key)
         {
@@ -355,6 +354,8 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
 
     if (_searchEditMode != PromptMode::Disabled)
     {
+        if (eventType == KeyboardEventType::Release)
+            return Handled { true };
         // TODO: support cursor movements.
         switch (key)
         {
@@ -374,11 +375,16 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
             // The terminal will handle them and send them to the application.
             return Handled { false };
         case ViMode::Hint:
-            // Hint mode input is handled by HintModeHandler, not the vi handler.
+            // Hint mode presses are consumed by HintModeHandler, so suppress releases
+            // to avoid unmatched release events reaching the application.
+            if (eventType == KeyboardEventType::Release)
+                return Handled { true };
             return Handled { false };
         case ViMode::Visual:
         case ViMode::VisualLine:
         case ViMode::VisualBlock:
+            if (eventType == KeyboardEventType::Release)
+                return Handled { true };
             if (key == Key::Escape && modifiers.none())
             {
                 clearPendingInput();
@@ -387,6 +393,8 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
             }
             [[fallthrough]];
         case ViMode::Normal:
+            if (eventType == KeyboardEventType::Release)
+                return Handled { true };
             // We keep on handling key events below.
             break;
     }
@@ -561,17 +569,34 @@ Handled ViInputHandler::handlePromptEditor(char32_t ch, Modifiers modifiers)
 
 Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers, KeyboardEventType eventType)
 {
-    if (eventType == KeyboardEventType::Release)
-        return Handled { true };
-
     if (_searchEditMode != PromptMode::Disabled)
+    {
+        if (eventType == KeyboardEventType::Release)
+            return Handled { true };
         return handleSearchEditor(ch, modifiers);
+    }
 
     if (_promptEditMode != PromptMode::Disabled)
+    {
+        if (eventType == KeyboardEventType::Release)
+            return Handled { true };
         return handlePromptEditor(ch, modifiers);
+    }
 
-    if (_viMode == ViMode::Insert || _viMode == ViMode::Hint)
+    if (_viMode == ViMode::Insert)
         return Handled { false };
+
+    if (_viMode == ViMode::Hint)
+    {
+        // Hint mode presses are consumed by HintModeHandler, so suppress releases
+        // to avoid unmatched release events reaching the application.
+        if (eventType == KeyboardEventType::Release)
+            return Handled { true };
+        return Handled { false };
+    }
+
+    if (eventType == KeyboardEventType::Release)
+        return Handled { true };
 
     if (ch == 033 && modifiers.none())
     {

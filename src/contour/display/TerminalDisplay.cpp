@@ -917,6 +917,8 @@ void TerminalDisplay::keyPressEvent(QKeyEvent* keyEvent)
 
 void TerminalDisplay::keyReleaseEvent(QKeyEvent* keyEvent)
 {
+    if (keyEvent->isAutoRepeat())
+        return;
     sendKeyEvent(keyEvent, vtbackend::KeyboardEventType::Release, *_session);
 }
 

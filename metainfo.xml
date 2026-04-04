@@ -160,6 +160,7 @@
           <li>Fixes build failure on Alpine Linux (musl libc) due to missing close_range() function (#1879)</li>
           <li>Fixes third-party dependency files (headers, libraries) leaking into install tree (#1788)</li>
           <li>Fixes size of the window when using tiling WM (#1908)</li>
+          <li>Fixes missing kitty keyboard protocol release events (#1924)</li>
           <li>Fixes terminfo colors capability (32767 → 256) so Midnight Commander and other S-Lang applications correctly detect 256-color support</li>
         </ul>
       </description>

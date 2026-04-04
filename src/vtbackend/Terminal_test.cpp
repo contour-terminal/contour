@@ -2107,4 +2107,82 @@ TEST_CASE("Terminal.PassiveMouseTracking_Selection", "[terminal]")
     }
 }
 
+TEST_CASE("Terminal.KittyKeyRelease.sendKeyEvent", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+    auto& terminal = mc.terminal;
+
+    terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
+    terminal.keyboardProtocol().flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes);
+
+    auto constexpr Now = std::chrono::steady_clock::time_point {};
+
+    mc.resetReplyData();
+    terminal.sendKeyEvent(
+        vtbackend::Key::UpArrow, vtbackend::Modifier::None, vtbackend::KeyboardEventType::Press, Now);
+    CHECK(e(mc.replyData()) == e("\033[A"s));
+
+    mc.resetReplyData();
+    terminal.sendKeyEvent(
+        vtbackend::Key::UpArrow, vtbackend::Modifier::None, vtbackend::KeyboardEventType::Release, Now);
+    CHECK(!mc.replyData().empty());
+    CHECK(e(mc.replyData()) == e("\033[1;1:3A"s));
+}
+
+TEST_CASE("Terminal.KittyKeyRelease.sendCharEvent", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+    auto& terminal = mc.terminal;
+
+    terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
+    terminal.keyboardProtocol().flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes);
+
+    auto constexpr Now = std::chrono::steady_clock::time_point {};
+
+    mc.resetReplyData();
+    terminal.sendCharEvent('a', 'a', vtbackend::Modifier::Control, vtbackend::KeyboardEventType::Press, Now);
+    CHECK(e(mc.replyData()) == e("\033[97;5u"s));
+
+    mc.resetReplyData();
+    terminal.sendCharEvent(
+        'a', 'a', vtbackend::Modifier::Control, vtbackend::KeyboardEventType::Release, Now);
+    CHECK(!mc.replyData().empty());
+    CHECK(e(mc.replyData()) == e("\033[97;5:3u"s));
+}
+
+TEST_CASE("Terminal.KittyKeyRelease.NoOutputWithoutFlag", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+    auto& terminal = mc.terminal;
+
+    terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
+
+    auto constexpr Now = std::chrono::steady_clock::time_point {};
+
+    mc.resetReplyData();
+    terminal.sendCharEvent('a', 'a', vtbackend::Modifier::Control, vtbackend::KeyboardEventType::Press, Now);
+    CHECK(!mc.replyData().empty());
+
+    mc.resetReplyData();
+    terminal.sendCharEvent(
+        'a', 'a', vtbackend::Modifier::Control, vtbackend::KeyboardEventType::Release, Now);
+    CHECK(mc.replyData().empty());
+}
+
+TEST_CASE("Terminal.KittyKeyRelease.RepeatStillWorks", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+    auto& terminal = mc.terminal;
+
+    terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
+    terminal.keyboardProtocol().flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes);
+
+    auto constexpr Now = std::chrono::steady_clock::time_point {};
+
+    mc.resetReplyData();
+    terminal.sendKeyEvent(
+        vtbackend::Key::UpArrow, vtbackend::Modifier::None, vtbackend::KeyboardEventType::Repeat, Now);
+    CHECK(e(mc.replyData()) == e("\033[1;1:2A"s));
+}
+
 // NOLINTEND(misc-const-correctness)
