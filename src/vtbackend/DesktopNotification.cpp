@@ -215,20 +215,20 @@ void DesktopNotificationManager::handleOSC99(string_view payload, Terminal& term
                     else if (notification.currentPayload == NotificationPayloadType::Body)
                         pending.body += notification.body;
                     // Only overwrite fields that were explicitly set (differ from defaults).
-                    static constexpr DesktopNotification Defaults {};
+                    static const DesktopNotification notificationDefaults {};
                     if (!notification.applicationName.empty())
                         pending.applicationName = std::move(notification.applicationName);
-                    if (notification.urgency != Defaults.urgency)
+                    if (notification.urgency != notificationDefaults.urgency)
                         pending.urgency = notification.urgency;
-                    if (notification.occasion != Defaults.occasion)
+                    if (notification.occasion != notificationDefaults.occasion)
                         pending.occasion = notification.occasion;
                     pending.closeEventRequested =
                         pending.closeEventRequested || notification.closeEventRequested;
-                    if (notification.focusOnActivation != Defaults.focusOnActivation)
+                    if (notification.focusOnActivation != notificationDefaults.focusOnActivation)
                         pending.focusOnActivation = notification.focusOnActivation;
-                    if (notification.reportOnActivation != Defaults.reportOnActivation)
+                    if (notification.reportOnActivation != notificationDefaults.reportOnActivation)
                         pending.reportOnActivation = notification.reportOnActivation;
-                    if (notification.timeout != Defaults.timeout)
+                    if (notification.timeout != notificationDefaults.timeout)
                         pending.timeout = notification.timeout;
                 }
                 return;
