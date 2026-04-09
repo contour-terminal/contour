@@ -21,9 +21,10 @@ option(VTPARSER_TESTING "Enables building of unittests for vtparser [default: ON
 if(VTPARSER_TESTING)
     enable_testing()
     add_executable(vtparser_test
+        test_main.cpp
         Parser_test.cpp
     )
-    target_link_libraries(vtparser_test vtparser Catch2::Catch2WithMain)
+    target_link_libraries(vtparser_test vtparser crispy::core Catch2::Catch2)
     add_test(NAME vtparser_test COMMAND $<TARGET_FILE:vtparser_test>)
 
     if(NOT WIN32)

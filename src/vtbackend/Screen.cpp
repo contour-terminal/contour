@@ -596,7 +596,14 @@ void Screen<Cell>::writeTextInternal(char32_t sourceCodepoint)
 
     char32_t const codepoint = _cursor.charsets.map(sourceCodepoint);
 
-    if (unicode::grapheme_segmenter::is_breakable(_terminal->parser().precedingGraphicCharacter(), codepoint))
+    auto const precedingChar = _terminal->parser().precedingGraphicCharacter();
+    auto& graphemeState = _terminal->parser().graphemeSegmenterState();
+    if (!precedingChar)
+    {
+        unicode::grapheme_process_init(codepoint, graphemeState);
+        writeCharToCurrentAndAdvance(codepoint);
+    }
+    else if (unicode::grapheme_process_breakable(codepoint, graphemeState))
     {
         writeCharToCurrentAndAdvance(codepoint);
     }
@@ -1362,10 +1369,10 @@ void Screen<Cell>::insertChars(LineOffset lineOffset, ColumnCount columnsToInser
     auto const sanitizedN =
         std::min(*columnsToInsert, *margin().horizontal.to - *logicalCursorPosition().column + 1);
 
-    auto column0 = _grid.lineAt(lineOffset).inflatedBuffer().begin() + *realCursorPosition().column;
-    auto column1 =
-        _grid.lineAt(lineOffset).inflatedBuffer().begin() + *margin().horizontal.to - sanitizedN + 1;
-    auto column2 = _grid.lineAt(lineOffset).inflatedBuffer().begin() + *margin().horizontal.to + 1;
+    auto& buffer = _grid.lineAt(lineOffset).inflatedBuffer();
+    auto column0 = buffer.begin() + *realCursorPosition().column;
+    auto column1 = buffer.begin() + (*margin().horizontal.to - sanitizedN + 1);
+    auto column2 = buffer.begin() + (*margin().horizontal.to + 1);
 
     rotate(column0, column1, column2);
 

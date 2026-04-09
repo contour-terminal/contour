@@ -693,6 +693,14 @@ class Parser
 
     [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept { return _scanState.lastCodepointHint; }
 
+    /// Returns a mutable reference to the grapheme segmenter state maintained by the parser's scan state.
+    /// This is used by Screen to properly detect grapheme cluster boundaries across both
+    /// the bulk text path (scan_text) and the character-by-character path (printUtf8Byte).
+    [[nodiscard]] unicode::grapheme_segmenter_state& graphemeSegmenterState() noexcept
+    {
+        return _scanState.graphemeState;
+    }
+
     void printUtf8Byte(char ch);
 
   private:

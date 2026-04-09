@@ -126,6 +126,7 @@ endif()
 if(LIBTERMINAL_TESTING)
     enable_testing()
     add_executable(vtbackend_test
+        test_main.cpp
         Animation_test.cpp
         Capabilities_test.cpp
         DesktopNotification_test.cpp
@@ -144,7 +145,7 @@ if(LIBTERMINAL_TESTING)
         SixelParser_test.cpp
         ViCommands_test.cpp
     )
-    target_link_libraries(vtbackend_test Catch2::Catch2WithMain vtbackend)
+    target_link_libraries(vtbackend_test Catch2::Catch2 vtbackend)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
 
     if(NOT WIN32)

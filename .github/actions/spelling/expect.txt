@@ -9,6 +9,8 @@ BLval
 BRval
 CCCCC
 CDEFGH
+crtdbg
+CRTDBG
 circleval
 ctrled
 dcx
@@ -22,6 +24,7 @@ ecmascript
 ellips
 emantic
 emtpy
+FAILCRITICALERRORS
 FFFFF
 FFFFFFC
 GGGGG
@@ -34,12 +37,14 @@ nabcd
 NCommands
 ndrwxr
 nfile
+NOGPFAULTERRORBOX
 Phe
 Pld
 Ptd
 Pwe
 pseudoconsole
 rbong
+REPORTFAULT
 SBQUERY
 ULval
 unscroll

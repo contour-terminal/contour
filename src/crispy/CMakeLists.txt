@@ -122,6 +122,7 @@ option(CRISPY_TESTING "Enables building of unittests for crispy library [default
 if(CRISPY_TESTING)
     enable_testing()
     add_executable(crispy_test
+        test_main.cpp
         BufferObject_test.cpp
         CLI_test.cpp
         LRUCache_test.cpp
@@ -137,7 +138,7 @@ if(CRISPY_TESTING)
         sort_test.cpp
         times_test.cpp
     )
-    target_link_libraries(crispy_test Catch2::Catch2WithMain crispy::core)
+    target_link_libraries(crispy_test Catch2::Catch2 crispy::core)
     add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)
 
     if(NOT WIN32)
