@@ -161,7 +161,8 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
     auto columns = InflatedLineBuffer<Cell> {};
     columns.reserve(unbox<size_t>(input.displayWidth));
 
-    auto lastChar = char32_t { 0 };
+    auto graphemeState = unicode::grapheme_segmenter_state {};
+    auto firstCodepoint = true;
     auto utf8DecoderState = unicode::utf8_decoder_state {};
     auto gapPending = 0;
 
@@ -174,7 +175,17 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
         auto const nextChar =
             holds_alternative<unicode::Success>(r) ? get<unicode::Success>(r).value : ReplacementCharacter;
 
-        if (unicode::grapheme_segmenter::is_breakable(lastChar, nextChar))
+        auto const isBreakable = [&] {
+            if (firstCodepoint)
+            {
+                unicode::grapheme_process_init(nextChar, graphemeState);
+                firstCodepoint = false;
+                return true;
+            }
+            return unicode::grapheme_process_breakable(nextChar, graphemeState);
+        }();
+
+        if (isBreakable)
         {
             while (gapPending > 0)
             {
@@ -203,7 +214,6 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
                 }
             }
         }
-        lastChar = nextChar;
     }
 
     // Handle trailing incomplete UTF-8 sequence by emitting a replacement character.
