@@ -9,6 +9,7 @@
 #include <text_shaper/mock_font_locator.h>
 #include <text_shaper/open_shaper.h>
 
+#include <crispy/SuppressWindowsDialogs.hpp>
 #include <crispy/utils.h>
 
 #include <catch2/catch_approx.hpp>
@@ -684,6 +685,8 @@ TEST_CASE("Renderer.findLinePartitionPoint", "[renderer]")
 
 int main(int argc, char* argv[])
 {
+    crispy::testing::suppressWindowsDialogs();
+
     auto const tempDir = std::filesystem::temp_directory_path();
     auto const _ = crispy::finally { [&] { std::filesystem::remove(testFontPath); } };
 
