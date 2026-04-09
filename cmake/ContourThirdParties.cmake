@@ -58,7 +58,7 @@ endmacro()
 message(STATUS "==============================================================================")
 message(STATUS "    Contour ThirdParties: ${ContourThirdParties}")
 
-set(LIBUNICODE_MINIMAL_VERSION "0.8.0")
+set(LIBUNICODE_MINIMAL_VERSION "0.9.0")
 set(BOXED_CPP_MINIMAL_VERSION "1.4.3")
 set(TERMBENCH_PRO_COMMIT_HASH "f6c37988e6481b48a8b8acaf1575495e018e9747")
 set(CATCH_VERSION "3.4.0")
