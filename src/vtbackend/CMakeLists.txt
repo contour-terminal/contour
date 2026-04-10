@@ -19,6 +19,7 @@ set(vtbackend_HEADERS
     cell/CellConfig.h
     cell/SimpleCell.h
     cell/CompactCell.h
+    CellProxy.h
     CellUtil.h
     Charset.h
     Color.h
@@ -32,6 +33,8 @@ set(vtbackend_HEADERS
     InputBinding.h
     InputGenerator.h
     Line.h
+    LineFlags.h
+    LineSoA.h
     MatchModes.h
     MockTerm.h
     RenderBuffer.h
@@ -42,6 +45,7 @@ set(vtbackend_HEADERS
     Sequence.h
     SequenceBuilder.h
     SixelParser.h
+    SoAClusterWriter.h
     StatusLineBuilder.h
     Terminal.h
     VTType.h
@@ -67,6 +71,7 @@ set(vtbackend_SOURCES
     InputBinding.cpp
     InputGenerator.cpp
     Line.cpp
+    LineSoA.cpp
     MatchModes.cpp
     MockTerm.cpp
     RenderBuffer.cpp
@@ -74,6 +79,7 @@ set(vtbackend_SOURCES
     Screen.cpp
     SemanticBlockTracker.cpp
     Selector.cpp
+    SoAClusterWriter.cpp
     Sequence.cpp
     SixelParser.cpp
     StatusLineBuilder.cpp
@@ -142,6 +148,8 @@ if(LIBTERMINAL_TESTING)
         Sequence_test.cpp
         Terminal_test.cpp
         ShellIntegration_test.cpp
+        LineSoA_test.cpp
+        SoAClusterWriter_test.cpp
         SixelParser_test.cpp
         ViCommands_test.cpp
     )

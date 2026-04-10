@@ -3,6 +3,8 @@ ABCDEFGHXJKLMNOPQRST
 ABCXDEFGHI
 ABCXYDEFGH
 ABCXZEFGHI
+ACluster
+AWriter
 BCDE
 BBBBB
 BLval
@@ -42,11 +44,14 @@ Phe
 Pld
 Ptd
 Pwe
+precomposed
 pseudoconsole
 rbong
 REPORTFAULT
 SBQUERY
+soa
 ULval
 unscroll
 URval
+vectorizable
 xad
