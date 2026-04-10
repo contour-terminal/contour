@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/CellProxy.h>
 #include <vtbackend/GraphicsAttributes.h>
 #include <vtbackend/Line.h>
-#include <vtbackend/cell/CellConcept.h>
 #include <vtbackend/primitives.h>
 
 #include <crispy/algorithm.h>
@@ -12,9 +12,6 @@
 #include <crispy/ring.h>
 
 #include <libunicode/convert.h>
-
-#include <gsl/span>
-#include <gsl/span_ext>
 
 #include <algorithm>
 #include <string>
@@ -97,8 +94,7 @@ constexpr bool operator!=(Margin const& a, PageSize b) noexcept
 }
 // }}}
 
-template <CellConcept Cell>
-using Lines = crispy::ring<Line<Cell>>;
+using Lines = crispy::ring<Line>;
 
 struct RenderPassHints
 {
@@ -109,27 +105,11 @@ struct RenderPassHints
  * Represents a logical grid line, i.e. a sequence lines that were written without
  * an explicit linefeed, triggering an auto-wrap.
  */
-template <CellConcept Cell>
 struct LogicalLine
 {
     LineOffset top {};
     LineOffset bottom {};
-    std::vector<std::reference_wrapper<Line<Cell>>> lines {};
-
-    [[nodiscard]] Line<Cell> joinWithRightTrimmed() const
-    {
-        // TODO: determine final line's column count and pass it to ctor.
-        typename Line<Cell>::Buffer output;
-        auto lineFlags = lines.front().get().flags();
-        for (Line<Cell> const& line: lines)
-            for (Cell const& cell: line.cells())
-                output.emplace_back(cell);
-
-        while (!output.empty() && output.back().empty())
-            output.pop_back();
-
-        return Line<Cell>(output, lineFlags);
-    }
+    std::vector<std::reference_wrapper<Line>> lines {};
 
     [[nodiscard]] std::string text() const
     {
@@ -174,7 +154,7 @@ struct LogicalLine
             if (result.has_value())
             {
                 if (result->partialMatchLength == 0)
-                    return CellLocation { i, result->column };
+                    return CellLocation { .line = i, .column = result->column };
                 auto remainingText = searchText;
                 remainingText.remove_prefix(result->partialMatchLength);
                 if (line + 1 != lines.end()
@@ -228,7 +208,8 @@ struct LogicalLine
                         static_cast<double>(remainingText.size()) / static_cast<double>(lineLength)));
 
                     if (matchTextAtReverse(remainingText, startCol, line + startLine, isCaseSensitive))
-                        return CellLocation { LineOffset::cast_from(i.value - startLine), startCol };
+                        return CellLocation { .line = LineOffset::cast_from(i.value - startLine),
+                                              .column = startCol };
                 }
                 startPosition = ColumnOffset::cast_from(lineLength - 1);
                 --i;
@@ -242,13 +223,14 @@ struct LogicalLine
             if (result.has_value())
             {
                 if (result->partialMatchLength == 0)
-                    return CellLocation { i, result->column };
+                    return CellLocation { .line = i, .column = result->column };
                 auto remainingText = searchText;
                 remainingText.remove_suffix(result->partialMatchLength);
                 if (line + 1 != lines.rend()
                     && (line + 1)->get().matchTextAtWithSensetivityMode(
                         remainingText, lastColumn - static_cast<int>(remainingText.size()), isCaseSensitive))
-                    return CellLocation { i - 1, lastColumn - static_cast<int>(remainingText.size()) };
+                    return CellLocation { .line = i - 1,
+                                          .column = lastColumn - static_cast<int>(remainingText.size()) };
             }
             startPosition = lastColumn - 1;
             --i;
@@ -259,7 +241,7 @@ struct LogicalLine
   private:
     // Finds the maximum number of characters of searchText that can be matched from right end of line
     [[nodiscard]] size_t searchPartialMatch(std::u32string_view searchText,
-                                            const Line<Cell>& line,
+                                            const Line& line,
                                             bool isCaseSensitive) const noexcept
     {
         auto const lineLength = unbox<size_t>(line.size());
@@ -277,7 +259,7 @@ struct LogicalLine
 
     // Finds the maximum number of characters of searchText that can be matched from left end of line
     [[nodiscard]] size_t searchPartialMatchReverse(std::u32string_view searchText,
-                                                   const Line<Cell>& line,
+                                                   const Line& line,
                                                    bool isCaseSensitive) const noexcept
     {
         while (!searchText.empty())
@@ -347,38 +329,32 @@ struct LogicalLine
     }
 };
 
-template <CellConcept Cell>
-bool operator==(LogicalLine<Cell> const& a, LogicalLine<Cell> const& b) noexcept
+inline bool operator==(LogicalLine const& a, LogicalLine const& b) noexcept
 {
     return a.top == b.top && a.bottom == b.bottom;
 }
 
-template <CellConcept Cell>
-bool operator!=(LogicalLine<Cell> const& a, LogicalLine<Cell> const& b) noexcept
+inline bool operator!=(LogicalLine const& a, LogicalLine const& b) noexcept
 {
     return !(a == b);
 }
 
-template <CellConcept Cell>
 struct LogicalLines
 {
     LineOffset topMostLine;
     LineOffset bottomMostLine;
-    std::reference_wrapper<Lines<Cell>> lines;
+    std::reference_wrapper<Lines> lines;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     struct iterator // {{{
     {
-        std::reference_wrapper<Lines<Cell>> lines;
+        std::reference_wrapper<Lines> lines;
         LineOffset top;
         LineOffset next; // index to next logical line's beginning
         LineOffset bottom;
-        LogicalLine<Cell> current;
+        LogicalLine current;
 
-        iterator(std::reference_wrapper<Lines<Cell>> lines,
-                 LineOffset top,
-                 LineOffset next,
-                 LineOffset bottom):
+        iterator(std::reference_wrapper<Lines> lines, LineOffset top, LineOffset next, LineOffset bottom):
             lines { lines }, top { top }, next { next }, bottom { bottom }
         {
             Require(top <= next);
@@ -386,8 +362,8 @@ struct LogicalLines
             ++*this;
         }
 
-        LogicalLine<Cell> const& operator*() const noexcept { return current; }
-        LogicalLine<Cell> const* operator->() const noexcept { return &current; }
+        LogicalLine const& operator*() const noexcept { return current; }
+        LogicalLine const* operator->() const noexcept { return &current; }
 
         iterator& operator++()
         {
@@ -436,13 +412,13 @@ struct LogicalLines
             return *this;
         }
 
-        iterator& operator++(int)
+        iterator operator++(int)
         {
             auto c = *this;
             ++*this;
             return c;
         }
-        iterator& operator--(int)
+        iterator operator--(int)
         {
             auto c = *this;
             --*this;
@@ -460,26 +436,22 @@ struct LogicalLines
     }
 };
 
-template <CellConcept Cell>
 struct ReverseLogicalLines
 {
     LineOffset topMostLine;
     LineOffset bottomMostLine;
-    std::reference_wrapper<Lines<Cell>> lines;
+    std::reference_wrapper<Lines> lines;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     struct iterator // {{{
     {
-        std::reference_wrapper<Lines<Cell>> lines;
+        std::reference_wrapper<Lines> lines;
         LineOffset top;
         LineOffset next; // index to next logical line's beginning
         LineOffset bottom;
-        LogicalLine<Cell> current;
+        LogicalLine current;
 
-        iterator(std::reference_wrapper<Lines<Cell>> lines,
-                 LineOffset top,
-                 LineOffset next,
-                 LineOffset bottom):
+        iterator(std::reference_wrapper<Lines> lines, LineOffset top, LineOffset next, LineOffset bottom):
             lines { lines }, top { top }, next { next }, bottom { bottom }
         {
             Require(top - 1 <= next);
@@ -487,7 +459,7 @@ struct ReverseLogicalLines
             ++*this;
         }
 
-        LogicalLine<Cell> const& operator*() const noexcept { return current; }
+        LogicalLine const& operator*() const noexcept { return current; }
 
         iterator& operator--()
         {
@@ -536,13 +508,13 @@ struct ReverseLogicalLines
             return *this;
         }
 
-        iterator& operator++(int)
+        iterator operator++(int)
         {
             auto c = *this;
             ++*this;
             return c;
         }
-        iterator& operator--(int)
+        iterator operator--(int)
         {
             auto c = *this;
             --*this;
@@ -566,33 +538,10 @@ struct ReverseLogicalLines
 /**
  * Manages the screen grid buffer (main screen + scrollback history).
  *
- * <h3>Future motivations</h3>
- *
- * <ul>
- *   <li>manages text reflow upon resize
- *   <li>manages underlying disk storage for very old scrollback history lines.
- * </ul>
- *
- * <h3>Layout</h3>
- *
- * <pre>
- *      +0========================-3+   <-- scrollback top
- *      |1                        -2|
- *      |2   Scrollback history   -1|
- *      |3                         0|   <-- scrollback bottom
- *      +4-------------------------1+   <-- main page top
- *      |5                         2|
- *      |6   main page area        3|
- *      |7                         4|   <-- main page bottom
- *      +---------------------------+
- *       ^                          ^
- *       1                          pageSize.columns
- * </pre>
+ * Non-templated version using LineSoA-backed Lines.
  */
-template <CellConcept Cell>
 class Grid
 {
-    // TODO: Rename all "History" to "Scrollback"?
   public:
     Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistoryLineCount);
 
@@ -624,34 +573,18 @@ class Grid
     [[nodiscard]] PageSize pageSize() const noexcept { return _pageSize; }
 
     /// Resizes the main page area of the grid and adapts the scrollback area's width accordingly.
-    ///
-    /// @param pageSize          new size of the main page area
-    /// @param currentCursorPos  current cursor position
-    /// @param wrapPending       AutoWrap is on and a wrap is pending
-    ///
-    /// @returns updated cursor position.
     [[nodiscard]] CellLocation resize(PageSize newSize, CellLocation currentCursorPos, bool wrapPending);
     // }}}
 
     // {{{ Line API
-    /// @returns reference to Line at given relative offset @p line.
-    [[nodiscard]] Line<Cell>& lineAt(LineOffset line) noexcept;
-    [[nodiscard]] Line<Cell> const& lineAt(LineOffset line) const noexcept;
-
-    [[nodiscard]] gsl::span<Cell const> lineBuffer(LineOffset line) const noexcept
-    {
-        return lineAt(line).cells();
-    }
-    [[nodiscard]] gsl::span<Cell const> lineBufferRightTrimmed(LineOffset line) const noexcept;
+    [[nodiscard]] Line& lineAt(LineOffset line) noexcept;
+    [[nodiscard]] Line const& lineAt(LineOffset line) const noexcept;
 
     [[nodiscard]] std::string lineText(LineOffset line) const;
     [[nodiscard]] std::string lineTextTrimmed(LineOffset line) const;
-    [[nodiscard]] std::string lineText(Line<Cell> const& line) const;
+    [[nodiscard]] std::string lineText(Line const& line) const;
 
     void setLineText(LineOffset line, std::string_view text);
-
-    // void resetLine(LineOffset line, GraphicsAttributes attribs) noexcept
-    // { lineAt(line).reset(attribs); }
 
     [[nodiscard]] ColumnCount lineLength(LineOffset line) const noexcept { return lineAt(line).size(); }
     [[nodiscard]] bool isLineBlank(LineOffset line) const noexcept;
@@ -662,39 +595,43 @@ class Grid
     [[nodiscard]] size_t zero_index() const noexcept { return _lines.zero_index(); }
     // }}}
 
-    /// Gets a reference to the cell relative to screen origin (top left, 0:0).
-    [[nodiscard]] Cell& useCellAt(LineOffset line, ColumnOffset column) noexcept;
-    [[nodiscard]] Cell& at(LineOffset line, ColumnOffset column) noexcept;
-    [[nodiscard]] Cell const& at(LineOffset line, ColumnOffset column) const noexcept;
+    /// Gets a CellProxy to the cell relative to screen origin (top left, 0:0).
+    [[nodiscard]] CellProxy useCellAt(LineOffset line, ColumnOffset column) noexcept;
+    [[nodiscard]] CellProxy at(LineOffset line, ColumnOffset column) noexcept;
+    [[nodiscard]] CellProxy at(LineOffset line, ColumnOffset column) const noexcept;
 
     // page view API
-    [[nodiscard]] gsl::span<Line<Cell>> pageAtScrollOffset(ScrollOffset scrollOffset);
-    [[nodiscard]] gsl::span<Line<Cell> const> pageAtScrollOffset(ScrollOffset scrollOffset) const;
-    [[nodiscard]] gsl::span<Line<Cell>> mainPage();
-    [[nodiscard]] gsl::span<Line<Cell> const> mainPage() const;
+    [[nodiscard]] gsl::span<Line> pageAtScrollOffset(ScrollOffset scrollOffset);
+    [[nodiscard]] gsl::span<Line const> pageAtScrollOffset(ScrollOffset scrollOffset) const;
+    [[nodiscard]] gsl::span<Line> mainPage();
+    [[nodiscard]] gsl::span<Line const> mainPage() const;
 
-    [[nodiscard]] LogicalLines<Cell> logicalLines()
+    [[nodiscard]] LogicalLines logicalLines()
     {
-        return LogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()),
-                                    boxed_cast<LineOffset>(_pageSize.lines - 1),
-                                    _lines };
+        return LogicalLines { .topMostLine = boxed_cast<LineOffset>(-historyLineCount()),
+                              .bottomMostLine = boxed_cast<LineOffset>(_pageSize.lines - 1),
+                              .lines = _lines };
     }
 
-    [[nodiscard]] LogicalLines<Cell> logicalLinesFrom(LineOffset offset)
+    [[nodiscard]] LogicalLines logicalLinesFrom(LineOffset offset)
     {
-        return LogicalLines<Cell> { offset, boxed_cast<LineOffset>(_pageSize.lines - 1), _lines };
+        return LogicalLines { .topMostLine = offset,
+                              .bottomMostLine = boxed_cast<LineOffset>(_pageSize.lines - 1),
+                              .lines = _lines };
     }
 
-    [[nodiscard]] ReverseLogicalLines<Cell> logicalLinesReverse()
+    [[nodiscard]] ReverseLogicalLines logicalLinesReverse()
     {
-        return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()),
-                                           boxed_cast<LineOffset>(_pageSize.lines - 1),
-                                           _lines };
+        return ReverseLogicalLines { .topMostLine = boxed_cast<LineOffset>(-historyLineCount()),
+                                     .bottomMostLine = boxed_cast<LineOffset>(_pageSize.lines - 1),
+                                     .lines = _lines };
     }
 
-    [[nodiscard]] ReverseLogicalLines<Cell> logicalLinesReverseFrom(LineOffset offset)
+    [[nodiscard]] ReverseLogicalLines logicalLinesReverseFrom(LineOffset offset)
     {
-        return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()), offset, _lines };
+        return ReverseLogicalLines { .topMostLine = boxed_cast<LineOffset>(-historyLineCount()),
+                                     .bottomMostLine = offset,
+                                     .lines = _lines };
     }
 
     // {{{ buffer manipulation
@@ -702,39 +639,14 @@ class Grid
     /// Completely deletes all scrollback lines.
     void clearHistory();
 
-    /// Scrolls up by @p n lines within the given margin.
-    ///
-    /// @param n number of lines to scroll up within the given margin.
-    /// @param defaultAttributes SGR attributes the newly created grid cells will be initialized with.
-    /// @param margin the margin coordinates to perform the scrolling action into.
-    ///
-    /// @return Number of lines the main page has been scrolled.
     LineCount scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Margin margin) noexcept;
-
-    /// Scrolls up main page by @p n lines and re-initializes grid cells with @p defaultAttributes.
     LineCount scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defaultAttributes = {}) noexcept;
-
-    /// Scrolls down by @p n lines within the given margin.
-    ///
-    /// @param n number of lines to scroll down within the given margin.
-    /// @param defaultAttributes SGR attributes the newly created grid cells will be initialized with.
-    /// @param margin the margin coordinates to perform the scrolling action into.
     void scrollDown(LineCount n, GraphicsAttributes const& defaultAttributes, Margin const& margin);
-
-    /// Scrolls down by @p n lines, filling new top lines from scrollback history (kitty unscroll).
-    ///
-    /// Lines pulled from history are removed from the scrollback buffer. If fewer than @p n
-    /// history lines are available, the remaining top lines are blank (matching regular SD behavior).
     void unscroll(LineCount n, GraphicsAttributes const& defaultAttributes);
-
-    // Scrolls the data within the margins to the left filling the new space on the right with empty cells.
     void scrollLeft(GraphicsAttributes defaultAttributes, Margin margin) noexcept;
     // }}}
 
     // {{{ Rendering API
-    /// Renders the full screen by passing every grid cell to the callback.
-    ///
-    /// @param extraLines  Additional lines to render beyond the page size (e.g. for smooth scrolling).
     template <typename RendererT>
     [[nodiscard]] RenderPassHints render(
         RendererT&& render,
@@ -742,33 +654,23 @@ class Grid
         HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes,
         LineCount extraLines = LineCount(0)) const;
 
-    /// Takes text-screenshot of the main page.
     [[nodiscard]] std::string renderMainPageText() const;
-
-    /// Renders the full grid's text characters.
-    ///
-    /// Empty cells are represented as strings and lines split by LF.
     [[nodiscard]] std::string renderAllText() const;
     // }}}
 
     [[nodiscard]] constexpr LineFlags defaultLineFlags() const noexcept;
-
     [[nodiscard]] constexpr LineCount linesUsed() const noexcept;
 
     void verifyState() const noexcept;
 
-    // Retrieves the cell location range of the underlying word at the given cursor position.
     [[nodiscard]] CellLocationRange wordRangeUnderCursor(CellLocation position,
                                                          std::u32string_view delimiters) const noexcept;
 
     [[nodiscard]] bool cellEmptyOrContainsOneOf(CellLocation position,
                                                 std::u32string_view delimiters) const noexcept;
 
-    // Linearly extracts the text of a given grid cell range.
     [[nodiscard]] std::u32string extractText(CellLocationRange range) const noexcept;
 
-    // Conditionally extends the cell location forward if the grid cell at the given location holds a wide
-    // character.
     [[nodiscard]] CellLocation stretchedColumn(CellLocation coord) const noexcept
     {
         CellLocation stretched = coord;
@@ -784,22 +686,13 @@ class Grid
     [[nodiscard]] CellLocation rightMostNonEmptyAt(LineOffset lineOffset) const noexcept
     {
         auto const& line = lineAt(lineOffset);
+        auto const cols = unbox<size_t>(line.size());
+        auto const used = trimBlankRight(line.storage(), cols);
 
-        if (line.isTrivialBuffer())
-        {
-            if (line.empty())
-                return CellLocation { .line = lineOffset, .column = ColumnOffset(0) };
+        if (used == 0)
+            return CellLocation { .line = lineOffset, .column = ColumnOffset(0) };
 
-            auto const& trivial = line.trivialBuffer();
-            auto const columnOffset = ColumnOffset::cast_from(trivial.usedColumns - 1);
-            return CellLocation { lineOffset, columnOffset };
-        }
-
-        auto const& inflatedLine = line.cells();
-        auto columnOffset = ColumnOffset::cast_from(_pageSize.columns - 1);
-        while (columnOffset > ColumnOffset(0) && inflatedLine[unbox<size_t>(columnOffset)].empty())
-            --columnOffset;
-        return CellLocation { .line = lineOffset, .column = columnOffset };
+        return CellLocation { .line = lineOffset, .column = ColumnOffset::cast_from(used - 1) };
     }
 
     [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept
@@ -834,45 +727,32 @@ class Grid
     PageSize _pageSize;
     bool _reflowOnResize = false;
     MaxHistoryLineCount _historyLimit;
-
-    // Number of lines is at least the sum of _maxHistoryLineCount + _pageSize.lines,
-    // because shrinking the page height does not necessarily
-    // have to resize the array (as optimization).
-    Lines<Cell> _lines;
-
-    // Number of lines used in the Lines buffer.
+    Lines _lines;
     LineCount _linesUsed;
 };
 
-template <CellConcept Cell>
-std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid);
-
-template <CellConcept Cell>
-std::string dumpGrid(Grid<Cell> const& grid);
+std::ostream& dumpGrid(std::ostream& os, Grid const& grid);
+std::string dumpGrid(Grid const& grid);
 
 // {{{ impl
-template <CellConcept Cell>
-constexpr LineFlags Grid<Cell>::defaultLineFlags() const noexcept
+constexpr LineFlags Grid::defaultLineFlags() const noexcept
 {
     return _reflowOnResize ? LineFlag::Wrappable : LineFlag::None;
 }
 
-template <CellConcept Cell>
-constexpr LineCount Grid<Cell>::linesUsed() const noexcept
+constexpr LineCount Grid::linesUsed() const noexcept
 {
     return _linesUsed;
 }
 
-template <CellConcept Cell>
-bool Grid<Cell>::isLineWrapped(LineOffset line) const noexcept
+inline bool Grid::isLineWrapped(LineOffset line) const noexcept
 {
     return line >= -boxed_cast<LineOffset>(historyLineCount())
            && boxed_cast<LineCount>(line) < _pageSize.lines && lineAt(line).wrapped();
 }
 
-template <CellConcept Cell>
 template <typename RendererT>
-[[nodiscard]] RenderPassHints Grid<Cell>::render(
+[[nodiscard]] RenderPassHints Grid::render(
     RendererT&& render, // NOLINT(cppcoreguidelines-missing-std-forward)
     ScrollOffset scrollOffset,
     HighlightSearchMatches highlightSearchMatches,
@@ -880,36 +760,39 @@ template <typename RendererT>
 {
     assert(!scrollOffset || unbox<LineCount>(scrollOffset) <= historyLineCount());
 
-    // When extra lines are requested (for smooth scrolling), render them above the viewport.
-    // The extra line at y = -1 will be partially visible due to the pixel offset.
-    // Clamp extra lines to available history above the current scroll position.
     auto const availableAbove = *historyLineCount() - *scrollOffset;
     auto const extraOffset = std::min(*extraLines, std::max(0, availableAbove));
     auto y = LineOffset(-extraOffset);
     auto hints = RenderPassHints {};
     for (int i = -*scrollOffset - extraOffset, e = i + *_pageSize.lines + extraOffset; i != e; ++i, ++y)
     {
-        auto x = ColumnOffset(0);
-        Line<Cell> const& line = _lines[i];
-        // NB: trivial liner rendering only works trivially if we don't do cell-based operations
-        // on the text. Therefore, we only move to the trivial fast path here if we don't want to
-        // highlight search matches.
+        Line const& line = _lines[i];
+
+        // Fast path: uniform-attribute line — render as a single batch.
         if (line.isTrivialBuffer() && highlightSearchMatches == HighlightSearchMatches::No)
         {
-            auto const cellFlags = line.trivialBuffer().textAttributes.flags;
+            std::u32string trivialText;
+            auto const tb = line.trivialBuffer(trivialText);
+            auto const cellFlags = tb.textAttributes.flags;
             hints.containsBlinkingCells = hints.containsBlinkingCells || (cellFlags & CellFlag::Blinking)
                                           || (cellFlags & CellFlag::RapidBlinking);
-            render.renderTrivialLine(line.trivialBuffer(), y, line.flags());
+            render.renderTrivialLine(tb, y, line.flags(), trivialText);
         }
         else
         {
+            // Per-cell rendering for lines with mixed attributes or search highlighting.
+            auto x = ColumnOffset(0);
+            auto const& storage = line.storage();
+            auto const cols = unbox<size_t>(line.size());
+
             render.startLine(y, line.flags());
-            for (Cell const& cell: line.cells())
+            for (size_t col = 0; col < cols; ++col)
             {
-                hints.containsBlinkingCells = hints.containsBlinkingCells
-                                              || (cell.flags() & CellFlag::Blinking)
-                                              || (cell.flags() & CellFlag::RapidBlinking);
-                render.renderCell(cell, y, x++);
+                auto const proxy = ConstCellProxy(storage, col);
+                auto const cellFlags = proxy.flags();
+                hints.containsBlinkingCells = hints.containsBlinkingCells || (cellFlags & CellFlag::Blinking)
+                                              || (cellFlags & CellFlag::RapidBlinking);
+                render.renderCell(proxy, y, x++);
             }
             render.endLine();
         }

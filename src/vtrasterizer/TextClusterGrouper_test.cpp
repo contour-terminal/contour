@@ -220,7 +220,7 @@ TEST_CASE("TextClusterGrouper.renderLine")
 
     grouper.beginFrame();
     grouper.renderLine(
-        "Hello, World!", LineOffset(0), RGBColor { 0xF0, 0x80, 0x40 }, TextStyle::Regular, LineFlag::None);
+        U"Hello, World!", LineOffset(0), RGBColor { 0xF0, 0x80, 0x40 }, TextStyle::Regular, LineFlag::None);
     grouper.endFrame();
 
     REQUIRE(recorder.events.size() == 2);
@@ -253,7 +253,7 @@ TEST_CASE("TextClusterGrouper.renderLine.DoubleWhitespace")
 
     grouper.beginFrame();
     grouper.renderLine(
-        "Hello,  World!", LineOffset(0), RGBColor { 0xF0, 0x80, 0x40 }, TextStyle::Regular, LineFlag::None);
+        U"Hello,  World!", LineOffset(0), RGBColor { 0xF0, 0x80, 0x40 }, TextStyle::Regular, LineFlag::None);
     grouper.endFrame();
 
     REQUIRE(recorder.events.size() == 2);

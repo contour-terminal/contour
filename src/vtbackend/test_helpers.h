@@ -7,6 +7,8 @@
 
 #include <crispy/escape.h>
 
+#include <libunicode/convert.h>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <ranges>
@@ -62,7 +64,7 @@ template <typename S>
     for (vtbackend::RenderLine const& line: renderBuffer.buffer->lines)
     {
         auto& currentLine = lines.at(unbox<size_t>(line.lineOffset));
-        currentLine = line.text;
+        currentLine = unicode::convert_to<char>(std::u32string_view(line.text));
     }
 
     return lines;
@@ -87,20 +89,18 @@ template <typename S>
     return output;
 }
 
-template <typename T>
+template <typename T = vtpty::MockPty>
 [[nodiscard]] std::string trimmedTextScreenshot(MockTerm<T> const& mt)
 {
     return trimRight(join(textScreenshot(mt.terminal)));
 }
 
-template <typename T>
-[[nodiscard]] std::string mainPageText(Screen<T> const& screen)
+[[nodiscard]] inline std::string mainPageText(Screen const& screen)
 {
     return screen.renderMainPageText();
 }
 
-template <typename T>
-void logScreenTextAlways(Screen<T> const& screen, std::string const& headline = "")
+inline void logScreenTextAlways(Screen const& screen, std::string const& headline = "")
 {
     std::cout << std::format("{}: ZI={} cursor={} HM={}..{}\n",
                              headline.empty() ? "screen dump" : headline,
@@ -111,14 +111,13 @@ void logScreenTextAlways(Screen<T> const& screen, std::string const& headline = 
     std::cout << std::format("{}\n", dumpGrid(screen.grid()));
 }
 
-template <typename T>
+template <typename T = vtpty::MockPty>
 void logScreenTextAlways(MockTerm<T> const& mock, std::string const& headline = "")
 {
     logScreenTextAlways(mock.terminal.primaryScreen(), headline);
 }
 
-template <typename T>
-void logScreenText(Screen<T> const& screen, std::string const& headline = "")
+inline void logScreenText(Screen const& screen, std::string const& headline = "")
 {
     if (headline.empty())
         UNSCOPED_INFO("dump:");

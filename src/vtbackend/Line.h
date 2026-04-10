@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/CellProxy.h>
 #include <vtbackend/CellUtil.h>
 #include <vtbackend/GraphicsAttributes.h>
 #include <vtbackend/Hyperlink.h>
-#include <vtbackend/cell/CellConcept.h>
+#include <vtbackend/LineFlags.h>
+#include <vtbackend/LineSoA.h>
+#include <vtbackend/SoAClusterWriter.h>
 #include <vtbackend/primitives.h>
 
 #include <crispy/BufferObject.h>
@@ -14,32 +17,14 @@
 
 #include <libunicode/convert.h>
 
-#include <gsl/span>
-#include <gsl/span_ext>
-
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
-#include <variant>
 #include <vector>
 
 namespace vtbackend
 {
-
-enum class LineFlag : uint8_t
-{
-    None = 0x0000,
-    Wrappable = 0x0001,
-    Wrapped = 0x0002,
-    Marked = 0x0004,
-    OutputStart = 0x0008, ///< Command output begins (from OSC 133;C)
-    DoubleWidth = 0x0010,
-    DoubleHeightTop = 0x0020,
-    DoubleHeightBottom = 0x0040,
-    CommandEnd = 0x0080, ///< Command finished (from OSC 133;D)
-};
-
-using LineFlags = crispy::flags<LineFlag>;
 
 // clang-format off
 template <typename, bool> struct OptionalProperty;
@@ -47,9 +32,8 @@ template <typename T> struct OptionalProperty<T, false> {};
 template <typename T> struct OptionalProperty<T, true> { T value; };
 // clang-format on
 
-/**
- * Line storage with call columns sharing the same SGR attributes.
- */
+/// [[deprecated("Use LineSoA directly")]]
+/// Kept for backward compatibility with RenderBufferBuilder.
 struct TrivialLineBuffer
 {
     ColumnCount displayWidth;
@@ -70,171 +54,122 @@ struct TrivialLineBuffer
     }
 };
 
-template <CellConcept Cell>
-using InflatedLineBuffer = std::vector<Cell>;
-
-/// Unpacks a TrivialLineBuffer into an InflatedLineBuffer<Cell>.
-template <CellConcept Cell>
-InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input);
-
-template <CellConcept Cell>
-using LineStorage = std::variant<TrivialLineBuffer, InflatedLineBuffer<Cell>>;
-
 /**
- * Line<Cell> API.
- *
- * TODO: Use custom allocator for ensuring cache locality of Cells to sibling lines.
- * TODO: Make the line optimization work.
+ * Line API backed by LineSoA (Structure-of-Arrays storage).
  */
-template <CellConcept Cell>
 class Line
 {
   public:
-    Line() = default;
+    /// Buffer type for reflow overflow columns.
+    using InflatedBuffer = LineSoA;
+
+    Line() { initializeLineSoA(_storage, ColumnCount(0)); }
+
+    Line(ColumnCount cols, LineFlags flags = {}, GraphicsAttributes attrs = {}):
+        _columns { cols }, _flags { flags }
+    {
+        initializeLineSoA(_storage, cols, attrs);
+    }
+
+    /// Construct from TrivialLineBuffer (backward compat -- converts to SoA internally).
+    Line(LineFlags flags, TrivialLineBuffer const& buffer): _columns { buffer.displayWidth }, _flags { flags }
+    {
+        initializeLineSoA(_storage, buffer.displayWidth, buffer.fillAttributes);
+        if (!buffer.text.empty())
+        {
+            writeTextToSoA(_storage, 0, buffer.text.view(), buffer.textAttributes, buffer.hyperlink);
+        }
+    }
+
+    /// Construct from a LineSoA (used by reflow to create new lines from overflow data).
+    Line(LineFlags flags, LineSoA&& soa, ColumnCount cols):
+        _storage { std::move(soa) }, _columns { cols }, _flags { flags }
+    {
+    }
+
     Line(Line const&) = default;
     Line(Line&&) noexcept = default;
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) noexcept = default;
 
-    using TrivialBuffer = TrivialLineBuffer;
-    using InflatedBuffer = InflatedLineBuffer<Cell>;
-    using Storage = LineStorage<Cell>;
-    using value_type = Cell;
-    using iterator = typename InflatedBuffer::iterator;
-    using reverse_iterator = typename InflatedBuffer::reverse_iterator;
-    using const_iterator = typename InflatedBuffer::const_iterator;
-
-    Line(LineFlags flags, TrivialBuffer buffer): _storage { std::move(buffer) }, _flags { flags } {}
-
-    Line(LineFlags flags, InflatedBuffer buffer): _storage { std::move(buffer) }, _flags { flags } {}
-
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
     {
         _flags = flags;
-        if (isTrivialBuffer())
-            trivialBuffer().reset(attributes);
-        else
-            setBuffer(TrivialBuffer { ColumnCount::cast_from(inflatedBuffer().size()), attributes });
+        resetLine(_storage, _columns, attributes);
     }
 
     void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
     {
         _flags = flags;
-        setBuffer(TrivialBuffer { count, attributes });
+        _columns = count;
+        resizeLineSoA(_storage, count);
+        resetLine(_storage, count, attributes);
     }
 
+    /// Fill all cells with the given codepoint and attributes.
     void fill(LineFlags flags,
               GraphicsAttributes const& attributes,
               char32_t codepoint,
               uint8_t width) noexcept
     {
+        _flags = flags;
         if (codepoint == 0)
-            reset(flags, attributes);
+        {
+            resetLine(_storage, _columns, attributes);
+        }
         else
         {
-            _flags = flags;
-            for (Cell& cell: inflatedBuffer())
-            {
-                cell.reset();
-                cell.write(attributes, codepoint, width);
-            }
+            for (size_t i = 0; i < unbox<size_t>(_columns); ++i)
+                writeCellToSoA(_storage, i, codepoint, width, attributes);
         }
+    }
+
+    /// Fill from a column offset with ASCII text.
+    void fill(ColumnOffset start, GraphicsAttributes const& sgr, std::string_view ascii)
+    {
+        assert(unbox<size_t>(start) + ascii.size() <= unbox<size_t>(_columns));
+        auto constexpr AsciiWidth = 1;
+        auto col = unbox<size_t>(start);
+        for (char const ch: ascii)
+            writeCellToSoA(_storage, col++, static_cast<char32_t>(ch), AsciiWidth, sgr);
+        // Reset remaining cells on the line after the written text
+        auto const remaining = unbox<size_t>(_columns) - col;
+        if (remaining > 0)
+            clearRange(_storage, col, remaining, GraphicsAttributes {});
     }
 
     /// Tests if all cells are empty.
     [[nodiscard]] bool empty() const noexcept
     {
-        if (isTrivialBuffer())
-            return trivialBuffer().text.empty();
-
-        for (auto const& cell: inflatedBuffer())
-            if (!cell.empty())
-                return false;
-        return true;
+        return trimBlankRight(_storage, unbox<size_t>(_columns)) == 0;
     }
 
-    /**
-     * Fills this line with the given content.
-     *
-     * @p start offset into this line of the first character
-     * @p sgr graphics rendition for the line starting at @c start until the end
-     * @p ascii the US-ASCII characters to fill with
-     */
-    void fill(ColumnOffset start, GraphicsAttributes const& sgr, std::string_view ascii)
+    [[nodiscard]] ColumnCount size() const noexcept { return _columns; }
+
+    void resize(ColumnCount count)
     {
-        auto& buffer = inflatedBuffer();
-
-        assert(unbox<size_t>(start) + ascii.size() <= buffer.size());
-
-        auto constexpr ASCII_Width = 1; // NOLINT
-        auto const* s = ascii.data();
-
-        Cell* i = &buffer[unbox<size_t>(start)];
-        Cell* e = i + ascii.size();
-        while (i != e)
-            (i++)->write(sgr, static_cast<char32_t>(*s++), ASCII_Width);
-
-        auto const e2 = buffer.data() + buffer.size();
-        while (i != e2)
-            (i++)->reset();
+        _columns = count;
+        resizeLineSoA(_storage, count);
     }
 
-    [[nodiscard]] ColumnCount size() const noexcept
-    {
-        if (isTrivialBuffer())
-            return trivialBuffer().displayWidth;
-        else
-            return ColumnCount::cast_from(inflatedBuffer().size());
-    }
-
-    void resize(ColumnCount count);
-
-    [[nodiscard]] gsl::span<Cell const> trim_blank_right() const noexcept;
-
-    [[nodiscard]] gsl::span<Cell const> cells() const noexcept { return inflatedBuffer(); }
-
-    [[nodiscard]] gsl::span<Cell> useRange(ColumnOffset start, ColumnCount count) noexcept
-    {
-#if defined(__clang__) && __clang_major__ <= 11
-        auto const bufferSpan = gsl::span(inflatedBuffer());
-        return bufferSpan.subspan(unbox<size_t>(start), unbox<size_t>(count));
-#else
-        // Clang <= 11 cannot deal with this (e.g. FreeBSD 13 defaults to Clang 11).
-        return gsl::span(inflatedBuffer()).subspan(unbox<size_t>(start), unbox<size_t>(count));
-#endif
-    }
-
-    [[nodiscard]] Cell& useCellAt(ColumnOffset column) noexcept
+    [[nodiscard]] CellProxy useCellAt(ColumnOffset column) noexcept
     {
         Require(ColumnOffset(0) <= column);
         Require(column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
-        return inflatedBuffer()[unbox<size_t>(column)];
+        return CellProxy(_storage, unbox<size_t>(column));
     }
 
     [[nodiscard]] uint8_t cellEmptyAt(ColumnOffset column) const noexcept
     {
-        if (isTrivialBuffer())
-        {
-            Require(ColumnOffset(0) <= column);
-            Require(column < ColumnOffset::cast_from(size()));
-            return unbox<size_t>(column) >= trivialBuffer().text.size()
-                   || trivialBuffer().text[column.as<size_t>()] == 0x20;
-        }
-        auto const& cell = inflatedBuffer().at(unbox<size_t>(column));
-        return cell.empty() || (cell.codepointCount() == 1 && cell.codepoint(0) == 0x20);
+        Require(ColumnOffset(0) <= column);
+        Require(column < ColumnOffset::cast_from(size()));
+        auto const col = unbox<size_t>(column);
+        return _storage.codepoints[col] == 0 || _storage.codepoints[col] == 0x20;
     }
 
     [[nodiscard]] uint8_t cellWidthAt(ColumnOffset column) const noexcept
     {
-#if 0 // TODO: This optimization - but only when we return actual widths and not always 1.
-        if (isTrivialBuffer())
-        {
-            Require(ColumnOffset(0) <= column);
-            Require(column < ColumnOffset::cast_from(size()));
-            return 1; // TODO: When trivial line is to support Unicode, this should be adapted here.
-        }
-#endif
-        return inflatedBuffer().at(unbox<size_t>(column)).width();
+        return _storage.widths[unbox<size_t>(column)];
     }
 
     [[nodiscard]] LineFlags flags() const noexcept { return _flags; }
@@ -255,7 +190,7 @@ class Line
     }
     [[nodiscard]] LineFlags wrappedFlag() const noexcept
     {
-        return marked() ? LineFlag::Wrapped : LineFlag::None;
+        return wrapped() ? LineFlag::Wrapped : LineFlag::None;
     }
     [[nodiscard]] LineFlags markedFlag() const noexcept
     {
@@ -278,229 +213,138 @@ class Line
 
     [[nodiscard]] bool isFlagEnabled(LineFlags flags) const noexcept { return (_flags & flags).any(); }
 
-    [[nodiscard]] InflatedBuffer reflow(ColumnCount newColumnCount);
+    [[nodiscard]] LineSoA reflow(ColumnCount newColumnCount);
     [[nodiscard]] std::string toUtf8() const;
     [[nodiscard]] std::string toUtf8Trimmed() const;
     [[nodiscard]] std::string toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const;
 
-    /// Ensures that this line is stored in an inflated state.
-    void ensureInflatedBuffer();
+    /// Check if all cells share the same graphics attributes (uniform SGR).
+    /// O(1) — reads a cached flag maintained by writeCellToSoA/resetLine.
+    [[nodiscard]] bool isTrivialBuffer() const noexcept { return _storage.trivial; }
 
-    // Returns a reference to this mutable grid-line buffer.
-    //
-    // If this line has been stored in an optimized state, then
-    // the line will be first unpacked into a vector of grid cells.
-    [[nodiscard]] InflatedBuffer& inflatedBuffer();
-    [[nodiscard]] InflatedBuffer const& inflatedBuffer() const;
-
-    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(_storage); }
-    [[nodiscard]] TrivialBuffer const& trivialBuffer() const noexcept
+    /// Build a TrivialLineBuffer for the render fast path.
+    /// Only valid when isTrivialBuffer() returns true.
+    /// @param textOut receives the codepoints directly from SoA (no UTF-8 encoding).
+    [[nodiscard]] TrivialLineBuffer trivialBuffer(std::u32string& textOut) const
     {
-        return std::get<TrivialBuffer>(_storage);
+        auto const cols = unbox<size_t>(_columns);
+        auto const used = trimBlankRight(_storage, cols);
+
+        auto const textAttrs = (used > 0) ? _storage.sgr[0] : GraphicsAttributes {};
+
+        // Direct copy from SoA codepoints — no UTF-8 encoding needed.
+        textOut.resize(used);
+        for (size_t i = 0; i < used; ++i)
+            textOut[i] = (_storage.clusterSize[i] == 0) ? U' ' : _storage.codepoints[i];
+
+        auto tb = TrivialLineBuffer {
+            .displayWidth = _columns,
+            .textAttributes = textAttrs,
+            .fillAttributes = textAttrs,
+            .hyperlink = (used > 0) ? _storage.hyperlinks[0] : HyperlinkId {},
+            .usedColumns = ColumnCount::cast_from(used),
+        };
+        // text field left empty — caller passes textOut to the renderer directly
+        return tb;
     }
 
-    [[nodiscard]] bool isTrivialBuffer() const noexcept
-    {
-        return std::holds_alternative<TrivialBuffer>(_storage);
-    }
-    [[nodiscard]] bool isInflatedBuffer() const noexcept { return !isTrivialBuffer(); }
+    /// Access the underlying SoA storage.
+    [[nodiscard]] LineSoA& storage() noexcept { return _storage; }
+    [[nodiscard]] LineSoA const& storage() const noexcept { return _storage; }
 
-    void setBuffer(Storage buffer) noexcept { _storage = std::move(buffer); }
-
-    // Tests if the given text can be matched in this line at the exact given start column, in sensetive
+    // Tests if the given text can be matched in this line at the exact given start column, in sensitive
     // or insensitive mode.
     [[nodiscard]] bool matchTextAtWithSensetivityMode(std::u32string_view text,
                                                       ColumnOffset startColumn,
                                                       bool isCaseSensitive) const noexcept
     {
-        if (isTrivialBuffer())
-        {
-            assert(false);
-            auto const u8Text = unicode::convert_to<char>(text);
-            TrivialBuffer const& buffer = trivialBuffer();
-            if (!buffer.usedColumns)
-                return false;
-            auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
-            if (text.size() > static_cast<size_t>(column.value - buffer.usedColumns.value))
-                return false;
+        auto const cols = unbox<size_t>(size());
+        auto const baseColumn = unbox<size_t>(startColumn);
+        if (text.size() > cols - baseColumn)
+            return false;
 
-            auto bufferCopyText = std::string(buffer.text.view());
-            std::ranges::transform(bufferCopyText, bufferCopyText.begin(), ::tolower);
-            auto const resultIndex = bufferCopyText.substr(unbox<size_t>(column))
-                                         .find(std::string_view(u8Text), unbox<size_t>(column));
-            return resultIndex == 0;
-        }
-        else
+        size_t i = 0;
+        while (i < text.size())
         {
-            InflatedBuffer const& cells = inflatedBuffer();
-            if (text.size() > unbox<size_t>(size()) - unbox<size_t>(startColumn))
+            auto const col = baseColumn + i;
+            auto const proxy = ConstCellProxy(_storage, col);
+            if (!CellUtil::beginsWith(text.substr(i), proxy, isCaseSensitive))
                 return false;
-            auto const baseColumn = unbox<size_t>(startColumn);
-            size_t i = 0;
-            while (i < text.size())
-            {
-                if (!CellUtil::beginsWith(text.substr(i), cells[baseColumn + i], isCaseSensitive))
-                    return false;
-                ++i;
-            }
-            return i == text.size();
+            ++i;
         }
+        return i == text.size();
     }
 
-    // Search a line from left to right if a complete match is found it returns the Column of
-    // start of match and partialMatchLength is set to 0, since it's a full match but if a partial
-    // match is found at the right end of line it returns startColumn as it is and the partialMatchLength
-    // is set equal to match found at the left end of line.
+    // Search a line from left to right
     [[nodiscard]] std::optional<SearchResult> search(std::u32string_view text,
                                                      ColumnOffset startColumn,
                                                      bool isCaseSensitive) const noexcept
     {
+        auto const cols = unbox<size_t>(size());
+        if (cols < text.size())
+            return std::nullopt;
 
         auto matchTextAt = [&](auto text, auto baseColumn) {
             return matchTextAtWithSensetivityMode(text, baseColumn, isCaseSensitive);
         };
 
-        if (isTrivialBuffer())
+        auto baseColumn = startColumn;
+        auto rightMostSearchPosition = ColumnOffset::cast_from(cols);
+        while (baseColumn < rightMostSearchPosition)
         {
-            auto const u8Text = unicode::convert_to<char>(text);
-            TrivialBuffer const& buffer = trivialBuffer();
-            if (!buffer.usedColumns)
-                return std::nullopt;
-            auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
-            auto const resultIndex = buffer.text.view().find(std::string_view(u8Text), unbox<size_t>(column));
-            if (resultIndex != std::string_view::npos)
-                return SearchResult { .column = ColumnOffset::cast_from(resultIndex) };
-            else
-                return std::nullopt; // Not found, so stay with initial column as result.
-        }
-        else
-        {
-            InflatedBuffer const& buffer = inflatedBuffer();
-            if (buffer.size() < text.size())
-                return std::nullopt; // not found: line is smaller than search term
-
-            auto baseColumn = startColumn;
-            auto rightMostSearchPosition = ColumnOffset::cast_from(buffer.size());
-            while (baseColumn < rightMostSearchPosition)
+            if (cols - unbox<size_t>(baseColumn) < text.size())
             {
-                if (buffer.size() - unbox<size_t>(baseColumn) < text.size())
-                {
-                    text.remove_suffix(text.size() - (unbox<size_t>(size()) - unbox<size_t>(baseColumn)));
-                    if (matchTextAt(text, baseColumn))
-                        return SearchResult { .column = startColumn, .partialMatchLength = text.size() };
-                }
-                else if (matchTextAt(text, baseColumn))
-                    return SearchResult { .column = baseColumn };
-                baseColumn++;
+                auto partialText = text;
+                partialText.remove_suffix(text.size() - (unbox<size_t>(size()) - unbox<size_t>(baseColumn)));
+                if (matchTextAt(partialText, baseColumn))
+                    return SearchResult { .column = startColumn, .partialMatchLength = partialText.size() };
             }
-
-            return std::nullopt; // Not found, so stay with initial column as result.
+            else if (matchTextAt(text, baseColumn))
+                return SearchResult { .column = baseColumn };
+            baseColumn++;
         }
+
+        return std::nullopt;
     }
 
-    // Search a line from right to left if a complete match is found it returns the Column of
-    // start of match and  partialMatchLength is set to 0, since it's a full match but if a partial
-    // match is found at the left end of line it returns startColumn as it is and the partialMatchLength
-    // is set equal to match found at the left end of line.
+    // Search a line from right to left
     [[nodiscard]] std::optional<SearchResult> searchReverse(std::u32string_view text,
                                                             ColumnOffset startColumn,
                                                             bool isCaseSensitive) const noexcept
     {
+        auto const cols = unbox<size_t>(size());
+        if (cols < text.size())
+            return std::nullopt;
 
         auto matchTextAt = [&](auto text, auto baseColumn) {
             return matchTextAtWithSensetivityMode(text, baseColumn, isCaseSensitive);
         };
 
-        if (isTrivialBuffer())
+        auto baseColumn = std::min(startColumn, ColumnOffset::cast_from(cols - text.size()));
+        while (baseColumn >= ColumnOffset(0))
         {
-            auto const u8Text = unicode::convert_to<char>(text);
-            TrivialBuffer const& buffer = trivialBuffer();
-            if (!buffer.usedColumns)
-                return std::nullopt;
-            auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
-            auto const resultIndex =
-                buffer.text.view().rfind(std::string_view(u8Text), unbox<size_t>(column));
-            if (resultIndex != std::string_view::npos)
-                return SearchResult { .column = ColumnOffset::cast_from(resultIndex) };
-            else
-                return std::nullopt; // Not found, so stay with initial column as result.
+            if (matchTextAt(text, baseColumn))
+                return SearchResult { .column = baseColumn };
+            baseColumn--;
         }
-        else
+        baseColumn = ColumnOffset::cast_from(text.size() - 1);
+        auto remainingText = text;
+        while (!remainingText.empty())
         {
-            InflatedBuffer const& buffer = inflatedBuffer();
-            if (buffer.size() < text.size())
-                return std::nullopt; // not found: line is smaller than search term
-
-            // reverse search from right@column to left until match is complete.
-            auto baseColumn = std::min(startColumn, ColumnOffset::cast_from(buffer.size() - text.size()));
-            while (baseColumn >= ColumnOffset(0))
-            {
-                if (matchTextAt(text, baseColumn))
-                    return SearchResult { baseColumn };
-                baseColumn--;
-            }
-            baseColumn = ColumnOffset::cast_from(text.size() - 1);
-            while (!text.empty())
-            {
-                if (matchTextAt(text, ColumnOffset(0)))
-                    return SearchResult { .column = startColumn, .partialMatchLength = text.size() };
-                baseColumn--;
-                text.remove_prefix(1);
-            }
-            return std::nullopt; // Not found, so stay with initial column as result.
+            if (matchTextAt(remainingText, ColumnOffset(0)))
+                return SearchResult { .column = startColumn, .partialMatchLength = remainingText.size() };
+            baseColumn--;
+            remainingText.remove_prefix(1);
         }
+        return std::nullopt;
     }
 
   private:
-    Storage _storage;
-    LineFlags _flags;
+    LineSoA _storage;
+    ColumnCount _columns {};
+    LineFlags _flags {};
 };
-
-template <CellConcept Cell>
-inline void Line<Cell>::ensureInflatedBuffer()
-{
-    if (auto trivialbuffer = std::get_if<TrivialBuffer>(&_storage))
-        _storage = inflate<Cell>(*trivialbuffer);
-}
-
-template <CellConcept Cell>
-inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
-{
-    ensureInflatedBuffer();
-    return std::get<InflatedBuffer>(_storage);
-}
-
-template <CellConcept Cell>
-inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::inflatedBuffer() const
-{
-    return const_cast<Line<Cell>*>(this)->inflatedBuffer();
-}
 
 } // namespace vtbackend
 
-template <>
-struct std::formatter<vtbackend::LineFlags>: formatter<std::string>
-{
-    auto format(const vtbackend::LineFlags flags, auto& ctx) const
-    {
-        static const std::array<std::pair<vtbackend::LineFlags, std::string_view>, 6> nameMap = {
-            std::pair { vtbackend::LineFlag::Wrappable, std::string_view("Wrappable") },
-            std::pair { vtbackend::LineFlag::Wrapped, std::string_view("Wrapped") },
-            std::pair { vtbackend::LineFlag::Marked, std::string_view("Marked") },
-            std::pair { vtbackend::LineFlag::DoubleWidth, std::string_view("DoubleWidth") },
-            std::pair { vtbackend::LineFlag::DoubleHeightTop, std::string_view("DoubleHeightTop") },
-            std::pair { vtbackend::LineFlag::DoubleHeightBottom, std::string_view("DoubleHeightBottom") },
-        };
-        std::string s;
-        for (auto const& mapping: nameMap)
-        {
-            if ((mapping.first & flags) != vtbackend::LineFlag::None)
-            {
-                if (!s.empty())
-                    s += ",";
-                s += mapping.second;
-            }
-        }
-        return formatter<std::string>::format(s, ctx);
-    }
-};
+// LineFlags formatter is in LineFlags.h

@@ -46,9 +46,12 @@ struct TextRenderBuilder
     std::string text;
 
     void startLine(LineOffset lineOffset, LineFlags flags);
-    void renderCell(PrimaryScreenCell const& cell, LineOffset lineOffset, ColumnOffset columnOffset);
+    void renderCell(ConstCellProxy cell, LineOffset lineOffset, ColumnOffset columnOffset);
     void endLine();
-    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset, LineFlags flags);
+    void renderTrivialLine(TrivialLineBuffer const& lineBuffer,
+                           LineOffset lineOffset,
+                           LineFlags flags,
+                           std::u32string_view textOverride = {});
     void finish();
 };
 
@@ -58,7 +61,7 @@ void TextRenderBuilder::startLine(LineOffset lineOffset, LineFlags /*flags*/)
         text.clear();
 }
 
-void TextRenderBuilder::renderCell(CompactCell const& cell, LineOffset, ColumnOffset)
+void TextRenderBuilder::renderCell(ConstCellProxy cell, LineOffset, ColumnOffset)
 {
     text += cell.toUtf8();
 }
@@ -70,12 +73,16 @@ void TextRenderBuilder::endLine()
 
 void TextRenderBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
                                           LineOffset lineOffset,
-                                          LineFlags /*flags*/)
+                                          LineFlags /*flags*/,
+                                          std::u32string_view textOverride)
 {
     if (!*lineOffset)
         text.clear();
 
-    text.append(lineBuffer.text.data(), lineBuffer.text.size());
+    if (!textOverride.empty())
+        text.append(unicode::convert_to<char>(textOverride));
+    else
+        text.append(lineBuffer.text.data(), lineBuffer.text.size());
     text += '\n';
 }
 
@@ -3277,16 +3284,9 @@ TEST_CASE("searchReverse", "[screen]")
 
     INFO(std::format("cursor pos {}", cursorPosition));
 
-    // for (bool const inflate: { false, true })
-    for (bool const inflate: { true })
+    // With SoA storage, no inflation needed -- all lines are always "inflated".
     {
-        INFO(std::format("Perform tests via {}", inflate ? "inflated buffer" : "trivial buffer"));
-        if (inflate)
-            for (auto lineOffset = LineOffset(-3); lineOffset < LineOffset(3); ++lineOffset)
-                (void) screen.grid().lineAt(lineOffset).inflatedBuffer();
-        else
-            for (auto lineOffset = LineOffset(-3); lineOffset < LineOffset(3); ++lineOffset)
-                REQUIRE(screen.grid().lineAt(lineOffset).isTrivialBuffer());
+        [[maybe_unused]] auto const inflate = true;
 
         // Find "qr" right at in front of the cursor.
         optional<CellLocation> const qr = screen.searchReverse(U"qr", cursorPosition);

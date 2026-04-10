@@ -3,7 +3,6 @@
 
 #include <vtbackend/Color.h>
 #include <vtbackend/Line.h>
-#include <vtbackend/cell/CellConcept.h>
 #include <vtbackend/primitives.h>
 
 #include <libunicode/convert.h>
@@ -31,9 +30,8 @@ class VTWriter
 
     void crlf();
 
-    // Writes the given Line<> to the output stream without the trailing newline.
-    template <CellConcept Cell>
-    void write(Line<Cell> const& line);
+    // Writes the given Line to the output stream without the trailing newline.
+    void write(Line const& line);
 
     template <typename... T>
     void write(std::format_string<T...> fmt, T const&... args);

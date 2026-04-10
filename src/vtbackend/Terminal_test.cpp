@@ -655,18 +655,8 @@ TEST_CASE("Terminal.TrivialLineBufferIntegrity", "[terminal]")
     // Verify the text was stored correctly
     auto const& line = terminal.primaryScreen().currentLine();
 
-    // The line should be in trivial buffer form for simple ASCII text
-    if (line.isTrivialBuffer())
-    {
-        auto const& trivialBuffer = line.trivialBuffer();
-        CHECK(trivialBuffer.text.view() == "ABCDEFGHIJ");
-        CHECK(trivialBuffer.usedColumns == ColumnCount(10));
-    }
-    else
-    {
-        // If not trivial, verify via inflated content
-        CHECK(line.toUtf8().substr(0, 10) == "ABCDEFGHIJ");
-    }
+    // With SoA storage, all lines use LineSoA. Verify via toUtf8.
+    CHECK(line.toUtf8().substr(0, 10) == "ABCDEFGHIJ");
 }
 
 TEST_CASE("Terminal.BoxDrawingCharacters", "[terminal]")

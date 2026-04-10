@@ -13,11 +13,10 @@ using namespace vtbackend;
 namespace
 {
 
-template <typename T>
 struct TestSelectionHelper: public vtbackend::SelectionHelper
 {
-    Screen<T>* screen;
-    explicit TestSelectionHelper(Screen<T>& self): screen { &self } {}
+    Screen* screen;
+    explicit TestSelectionHelper(Screen& self): screen { &self } {}
 
     [[nodiscard]] PageSize pageSize() const noexcept override { return screen->pageSize(); }
     [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override
@@ -27,9 +26,6 @@ struct TestSelectionHelper: public vtbackend::SelectionHelper
     [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override { return screen->at(pos).empty(); }
     [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override { return screen->at(pos).width(); }
 };
-
-template <typename T>
-TestSelectionHelper(Screen<T>&) -> TestSelectionHelper<T>;
 
 } // namespace
 
@@ -43,8 +39,7 @@ TestSelectionHelper(Screen<T>&) -> TestSelectionHelper<T>;
 
 namespace
 {
-template <typename T>
-[[maybe_unused]] void logScreenTextAlways(Screen<T> const& screen, string const& headline = "")
+[[maybe_unused]] void logScreenTextAlwaysLocal(Screen const& screen, string const& headline = "")
 {
     std::cout << std::format("{}: ZI={} cursor={} HM={}..{}\n",
                              headline.empty() ? "screen dump"s : headline,
@@ -55,14 +50,13 @@ template <typename T>
     std::cout << std::format("{}\n", dumpGrid(screen.grid()));
 }
 
-template <typename T>
 struct TextSelection
 {
-    Screen<T> const* screen;
+    Screen const* screen;
     string text;
     ColumnOffset lastColumn = ColumnOffset(0);
 
-    explicit TextSelection(Screen<T> const& s): screen { &s } {}
+    explicit TextSelection(Screen const& s): screen { &s } {}
 
     void operator()(CellLocation const& pos)
     {
@@ -72,8 +66,6 @@ struct TextSelection
         lastColumn = pos.column;
     }
 };
-template <typename T>
-TextSelection(Screen<T> const&) -> TextSelection<T>;
 } // namespace
 
 // NOLINTBEGIN(misc-const-correctness,readability-function-cognitive-complexity)

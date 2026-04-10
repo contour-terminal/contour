@@ -77,7 +77,7 @@ struct RenderCell
  */
 struct RenderLine
 {
-    std::string_view text;
+    std::u32string text;
     LineOffset lineOffset;
     ColumnCount usedColumns;
     ColumnCount displayWidth;

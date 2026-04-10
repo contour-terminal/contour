@@ -56,7 +56,7 @@ class TextClusterGrouper
                     TextStyle style,
                     vtbackend::LineFlags flags);
 
-    void renderLine(std::string_view text,
+    void renderLine(std::u32string_view text,
                     vtbackend::LineOffset lineOffset,
                     vtbackend::RGBColor foregroundColor,
                     TextStyle style,

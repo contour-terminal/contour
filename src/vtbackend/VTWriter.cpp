@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/CellProxy.h>
 #include <vtbackend/VTWriter.h>
 
 #include <numeric>
@@ -185,45 +186,28 @@ void VTWriter::setBackgroundColor(Color color)
     }
 }
 
-template <CellConcept Cell>
-void VTWriter::write(Line<Cell> const& line)
+void VTWriter::write(Line const& line)
 {
-    if (line.isTrivialBuffer())
+    auto const cols = unbox<size_t>(line.size());
+    for (size_t i = 0; i < cols; ++i)
     {
-        TrivialLineBuffer const& lineBuffer = line.trivialBuffer();
-        setForegroundColor(lineBuffer.textAttributes.foregroundColor);
-        setBackgroundColor(lineBuffer.textAttributes.backgroundColor);
-        // TODO: hyperlinks, underlineColor and other flags (curly underline etc.)
-        write(line.toUtf8());
-        // TODO: Write fill columns.
-    }
-    else
-    {
-        for (Cell const& cell: line.inflatedBuffer())
-        {
-            if (cell.flags() & CellFlag::Bold)
-                sgrAdd(GraphicsRendition::Bold);
-            else
-                sgrAdd(GraphicsRendition::Normal);
+        auto const cell = ConstCellProxy(line.storage(), i);
+        if (cell.flags() & CellFlag::Bold)
+            sgrAdd(GraphicsRendition::Bold);
+        else
+            sgrAdd(GraphicsRendition::Normal);
 
-            setForegroundColor(cell.foregroundColor());
-            setBackgroundColor(cell.backgroundColor());
-            // TODO: other flags (such as underline), hyperlinks, image fragments.
+        setForegroundColor(cell.foregroundColor());
+        setBackgroundColor(cell.backgroundColor());
+        // TODO: other flags (such as underline), hyperlinks, image fragments.
 
-            if (!cell.codepointCount())
-                write(' ');
-            else
-                write(cell.toUtf8());
-        }
+        if (!cell.codepointCount())
+            write(' ');
+        else
+            write(cell.toUtf8());
     }
 
     sgrAdd(GraphicsRendition::Reset);
 }
 
 } // namespace vtbackend
-
-#include <vtbackend/cell/CompactCell.h>
-template void vtbackend::VTWriter::write<vtbackend::CompactCell>(Line<CompactCell> const&);
-
-#include <vtbackend/cell/SimpleCell.h>
-template void vtbackend::VTWriter::write<vtbackend::SimpleCell>(Line<SimpleCell> const&);

@@ -1,26 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/TextClusterGrouper.h>
 
-#include <libunicode/utf8_grapheme_segmenter.h>
-
 #include <cassert>
 
 namespace vtrasterizer
 {
-
-namespace
-{
-    uint8_t graphemeClusterWidth(std::u32string_view text) noexcept
-    {
-        if (!SoftRequire(!text.empty()))
-            return 1;
-        auto const baseWidth = static_cast<uint8_t>(unicode::width(text[0]));
-        for (size_t i = 1; i < text.size(); ++i)
-            if (text[i] == 0xFE0F)
-                return 2;
-        return baseWidth;
-    }
-} // namespace
 
 TextClusterGrouper::TextClusterGrouper(Events& events): _events { events }
 {
@@ -39,7 +23,7 @@ void TextClusterGrouper::beginFrame() noexcept
     _color = DefaultColor;
 }
 
-void TextClusterGrouper::renderLine(std::string_view text,
+void TextClusterGrouper::renderLine(std::u32string_view text,
                                     vtbackend::LineOffset lineOffset,
                                     vtbackend::RGBColor foregroundColor,
                                     TextStyle style,
@@ -48,27 +32,28 @@ void TextClusterGrouper::renderLine(std::string_view text,
     if (text.empty())
         return;
 
-    auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(text);
     auto columnOffset = vtbackend::ColumnOffset(0);
     auto const columnScale = flags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;
 
     _initialPenPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };
 
-    for (auto const& graphemeCluster: graphemeClusterSegmenter)
+    // Iterate char32_t codepoints directly — no UTF-8 decode needed.
+    // For trivial lines, each codepoint is a single-codepoint grapheme cluster.
+    for (auto const cp: text)
     {
         auto const gridPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };
-        auto const width = graphemeClusterWidth(graphemeCluster);
-        renderCell(gridPosition, graphemeCluster, foregroundColor, style, flags);
+        auto const width = unicode::width(cp);
+        renderCell(gridPosition, std::u32string_view(&cp, 1), foregroundColor, style, flags);
 
-        for (int i = 1; std::cmp_less(i, width); ++i)
+        for (unsigned i = 1; i < width; ++i)
             renderCell(vtbackend::CellLocation { .line = gridPosition.line,
-                                                 .column = columnOffset + i * columnScale },
+                                                 .column = columnOffset + static_cast<int>(i) * columnScale },
                        U" ",
                        foregroundColor,
                        style,
                        flags);
 
-        columnOffset += vtbackend::ColumnOffset::cast_from(width);
+        columnOffset += vtbackend::ColumnOffset::cast_from(std::max(1u, width));
     }
 
     if (!_codepoints.empty())

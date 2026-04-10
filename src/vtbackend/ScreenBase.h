@@ -21,7 +21,7 @@ namespace vtbackend
 
 // A cell type independant minimal representation of Screen.
 //
-// @see Screen<CellType>
+// @see Screen
 class ScreenBase: public SequenceHandler
 {
   public:

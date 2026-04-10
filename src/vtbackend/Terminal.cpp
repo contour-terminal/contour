@@ -160,14 +160,14 @@ Terminal::Terminal(Events& eventListener,
 
     // Populate the 16-page array: page 0 (primary) gets scrollback/reflow, pages 1-15 do not.
     _pages.reserve(MaxPageCount);
-    _pages.push_back(std::make_unique<Screen<PageCell>>(*this,
-                                                        _pageMargins.data(),
-                                                        _settings.pageSize,
-                                                        _settings.primaryScreen.allowReflowOnResize,
-                                                        _settings.maxHistoryLineCount,
-                                                        "page-1"));
+    _pages.push_back(std::make_unique<Screen>(*this,
+                                              _pageMargins.data(),
+                                              _settings.pageSize,
+                                              _settings.primaryScreen.allowReflowOnResize,
+                                              _settings.maxHistoryLineCount,
+                                              "page-1"));
     for (auto const i: std::views::iota(1, MaxPageCount))
-        _pages.push_back(std::make_unique<Screen<PageCell>>(
+        _pages.push_back(std::make_unique<Screen>(
             *this, &_pageMargins[i], _settings.pageSize, false, LineCount(0), std::format("page-{}", i + 1)));
     _currentScreen = _pages[0].get();
 
@@ -522,30 +522,28 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     auto& displayedScreen = pageAt(_displayedPage);
 
     if (_displayedPage == PageIndex(0))
-        _lastRenderPassHints =
-            displayedScreen.render(RenderBufferBuilder<PageCell> { *this,
-                                                                   output,
-                                                                   baseLine,
-                                                                   mainDisplayReverseVideo,
-                                                                   HighlightSearchMatches::Yes,
-                                                                   _inputMethodData,
-                                                                   effectiveCursorPosition,
-                                                                   includeSelection },
-                                   _viewport.scrollOffset(),
-                                   highlightSearchMatches,
-                                   smoothScrollExtra);
+        _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
+                                                                            output,
+                                                                            baseLine,
+                                                                            mainDisplayReverseVideo,
+                                                                            HighlightSearchMatches::Yes,
+                                                                            _inputMethodData,
+                                                                            effectiveCursorPosition,
+                                                                            includeSelection },
+                                                      _viewport.scrollOffset(),
+                                                      highlightSearchMatches,
+                                                      smoothScrollExtra);
     else
-        _lastRenderPassHints =
-            displayedScreen.render(RenderBufferBuilder<PageCell> { *this,
-                                                                   output,
-                                                                   baseLine,
-                                                                   mainDisplayReverseVideo,
-                                                                   HighlightSearchMatches::Yes,
-                                                                   _inputMethodData,
-                                                                   effectiveCursorPosition,
-                                                                   includeSelection },
-                                   _viewport.scrollOffset(),
-                                   highlightSearchMatches);
+        _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
+                                                                            output,
+                                                                            baseLine,
+                                                                            mainDisplayReverseVideo,
+                                                                            HighlightSearchMatches::Yes,
+                                                                            _inputMethodData,
+                                                                            effectiveCursorPosition,
+                                                                            includeSelection },
+                                                      _viewport.scrollOffset(),
+                                                      highlightSearchMatches);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
     auto const mainScreenBaseLine = baseLine;
@@ -715,27 +713,26 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
             return LineCount(0);
         case StatusDisplayType::Indicator:
             updateIndicatorStatusLine();
-            _indicatorStatusScreen.render(RenderBufferBuilder<StatusDisplayCell> { *this,
-                                                                                   output,
-                                                                                   base,
-                                                                                   !mainDisplayReverseVideo,
-                                                                                   HighlightSearchMatches::No,
-                                                                                   InputMethodData {},
-                                                                                   nullopt,
-                                                                                   includeSelection },
+            _indicatorStatusScreen.render(RenderBufferBuilder { *this,
+                                                                output,
+                                                                base,
+                                                                !mainDisplayReverseVideo,
+                                                                HighlightSearchMatches::No,
+                                                                InputMethodData {},
+                                                                nullopt,
+                                                                includeSelection },
                                           ScrollOffset(0));
             return _indicatorStatusScreen.pageSize().lines;
         case StatusDisplayType::HostWritable:
-            _hostWritableStatusLineScreen.render(
-                RenderBufferBuilder<StatusDisplayCell> { *this,
-                                                         output,
-                                                         base,
-                                                         !mainDisplayReverseVideo,
-                                                         HighlightSearchMatches::No,
-                                                         InputMethodData {},
-                                                         nullopt,
-                                                         includeSelection },
-                ScrollOffset(0));
+            _hostWritableStatusLineScreen.render(RenderBufferBuilder { *this,
+                                                                       output,
+                                                                       base,
+                                                                       !mainDisplayReverseVideo,
+                                                                       HighlightSearchMatches::No,
+                                                                       InputMethodData {},
+                                                                       nullopt,
+                                                                       includeSelection },
+                                                 ScrollOffset(0));
             return _hostWritableStatusLineScreen.pageSize().lines;
     }
     crispy::unreachable();
@@ -1354,10 +1351,12 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
     if (!isPrimaryScreen())
         return 0;
 
+    // Only use bulk write path when current line has uniform attributes.
+    // This matches the baseline behavior (isTrivialBuffer check) and avoids
+    // a timing-sensitive race in screenUpdated() where TrySwapBuffers state
+    // causes _screenDirty to not be set, leaving the display stale.
     if (!primaryScreen().currentLine().isTrivialBuffer())
         return 0;
-
-    assert(currentPageMargin().horizontal.to >= _currentScreen->cursor().position.column);
 
     return unbox<size_t>(currentPageMargin().horizontal.to - _currentScreen->cursor().position.column);
 }
@@ -1368,7 +1367,7 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
 // We use this for rendering the status line.
 struct SimpleSequenceHandler
 {
-    Screen<StatusDisplayCell>& targetScreen;
+    Screen& targetScreen;
 
     void executeControlCode(char controlCode) { targetScreen.executeControlCode(controlCode); }
 
@@ -1403,7 +1402,7 @@ struct SimpleSequenceHandler
 };
 // }}}
 
-void Terminal::writeToScreenInternal(Screen<StatusDisplayCell>& screen, std::string_view vtStream)
+void Terminal::writeToScreenInternal(Screen& screen, std::string_view vtStream)
 {
     auto sequenceHandler = SimpleSequenceHandler { screen };
     auto sequenceBuilder = SequenceBuilder { sequenceHandler, NoOpInstructionCounter() };
@@ -1785,7 +1784,6 @@ void Terminal::setExtendedWordDelimiters(string const& wordDelimiters)
 
 namespace
 {
-    template <CellConcept Cell>
     struct SelectionRenderer
     {
         gsl::not_null<Terminal const*> term;
@@ -1796,7 +1794,7 @@ namespace
 
         SelectionRenderer(Terminal const& term, ColumnOffset rightPage): term(&term), rightPage(rightPage) {}
 
-        void operator()(CellLocation pos, Cell const& cell)
+        void operator()(CellLocation pos, CellProxy const& cell)
         {
             auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
             if (isNewLine && (!term->isLineWrapped(pos.line)))
@@ -1831,7 +1829,7 @@ string Terminal::extractSelectionText() const
         return "";
 
     auto const& screen = pageAt(_displayedPage);
-    auto se = SelectionRenderer<PageCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
+    auto se = SelectionRenderer { *this, pageSize().columns.as<ColumnOffset>() - 1 };
     vtbackend::renderSelection(*_selection, [&](CellLocation pos) { se(pos, screen.at(pos)); });
     return se.finish();
 }

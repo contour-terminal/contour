@@ -15,10 +15,6 @@ set(vtbackend_HEADERS
     Animation.h
     Capabilities.h
     DesktopNotification.h
-    cell/CellConcept.h
-    cell/CellConfig.h
-    cell/SimpleCell.h
-    cell/CompactCell.h
     CellProxy.h
     CellUtil.h
     Charset.h
@@ -59,7 +55,6 @@ set(vtbackend_HEADERS
 
 set(vtbackend_SOURCES
     Capabilities.cpp
-    cell/CompactCell.cpp
     Charset.cpp
     DesktopNotification.cpp
     Color.cpp

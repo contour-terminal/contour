@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/MockTerm.h>
 #include <vtbackend/Terminal.h>
-#include <vtbackend/cell/CellConfig.h>
 #include <vtbackend/logging.h>
 
 #include <vtparser/ParserEvents.h>
@@ -174,9 +173,8 @@ class ContourHeadlessBench: public crispy::app
     static int showMetaInfo()
     {
         // Show any interesting meta information.
-        std::cout << std::format("SimpleCell  : {} bytes\n", sizeof(vtbackend::SimpleCell));
-        std::cout << std::format("CompactCell : {} bytes\n", sizeof(vtbackend::CompactCell));
-        std::cout << std::format("CellExtra   : {} bytes\n", sizeof(vtbackend::CellExtra));
+        std::cout << std::format("CellProxy   : {} bytes\n", sizeof(vtbackend::CellProxy));
+        std::cout << std::format("LineSoA     : {} bytes\n", sizeof(vtbackend::LineSoA));
         std::cout << std::format("CellFlags   : {} bytes\n", sizeof(vtbackend::CellFlags));
         std::cout << std::format("Color       : {} bytes\n", sizeof(vtbackend::Color));
         return EXIT_SUCCESS;
