@@ -10,7 +10,6 @@
 #include <vtbackend/Image.h>
 #include <vtbackend/ScreenBase.h>
 #include <vtbackend/VTType.h>
-#include <vtbackend/cell/CellConcept.h>
 
 #include <vtparser/ParserExtension.h>
 
@@ -131,7 +130,6 @@ enum class ApplyResult : uint8_t
  * allowing the object owner to control which part of the screen (or history)
  * to be viewn.
  */
-template <CellConcept Cell>
 class Screen final: public ScreenBase, public capabilities::StaticDatabase
 {
   public:
@@ -151,9 +149,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     Screen(Screen const&) = delete;
     Screen& operator=(Screen const&) = delete;
-    Screen(Screen&&) noexcept = default;
-    Screen& operator=(Screen&&) noexcept = default;
-    ~Screen() override = default;
+    Screen(Screen&&) noexcept = delete;
+    Screen& operator=(Screen&&) noexcept = delete;
+    ~Screen() override;
 
     using StaticDatabase::numericCapability;
     [[nodiscard]] unsigned numericCapability(capabilities::Code cap) const override;
@@ -361,8 +359,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         if (!_cursor.originMode)
             return realCursorPosition();
         else
-            return CellLocation { _cursor.position.line - margin().vertical.from,
-                                  _cursor.position.column - margin().horizontal.from };
+            return CellLocation { .line = _cursor.position.line - margin().vertical.from,
+                                  .column = _cursor.position.column - margin().horizontal.from };
     }
 
     [[nodiscard]] constexpr CellLocation origin() const noexcept
@@ -370,7 +368,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         if (!_cursor.originMode)
             return {};
 
-        return { margin().vertical.from, margin().horizontal.from };
+        return CellLocation { .line = margin().vertical.from, .column = margin().horizontal.from };
     }
 
     /// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is
@@ -380,7 +378,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         if (!_cursor.originMode)
             return pos;
         else
-            return { pos.line + margin().vertical.from, pos.column + margin().horizontal.from };
+            return CellLocation { .line = pos.line + margin().vertical.from,
+                                  .column = pos.column + margin().horizontal.from };
     }
 
     [[nodiscard]] LineOffset applyOriginMode(LineOffset line) const noexcept
@@ -410,7 +409,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         auto const right = Right::cast_from(area.right.value + margin().horizontal.from.value);
         // TODO: Should this automatically clamp to margin's botom/right values?
 
-        return Rect { top, left, bottom, right };
+        return Rect { .top = top, .left = left, .bottom = bottom, .right = right };
     }
 
     /// Clamps given coordinates, respecting DECOM (Origin Mode).
@@ -425,8 +424,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
     [[nodiscard]] CellLocation clampToOrigin(CellLocation coord) const noexcept
     {
-        return { std::clamp(coord.line, LineOffset { 0 }, margin().vertical.to),
-                 std::clamp(coord.column, ColumnOffset { 0 }, margin().horizontal.to) };
+        return CellLocation { .line = std::clamp(coord.line, LineOffset { 0 }, margin().vertical.to),
+                              .column =
+                                  std::clamp(coord.column, ColumnOffset { 0 }, margin().horizontal.to) };
     }
 
     [[nodiscard]] LineOffset clampedLine(LineOffset line) const noexcept
@@ -441,13 +441,14 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] CellLocation clampToScreen(CellLocation coord) const noexcept
     {
-        return { clampedLine(coord.line), clampedColumn(coord.column) };
+        return CellLocation { .line = clampedLine(coord.line), .column = clampedColumn(coord.column) };
     }
 
     [[nodiscard]] CellLocation clampToMargin(CellLocation pos) const noexcept
     {
-        return { std::clamp(pos.line, margin().vertical.from, margin().vertical.to),
-                 std::clamp(pos.column, margin().horizontal.from, margin().horizontal.to) };
+        return CellLocation { .line = std::clamp(pos.line, margin().vertical.from, margin().vertical.to),
+                              .column =
+                                  std::clamp(pos.column, margin().horizontal.from, margin().horizontal.to) };
     }
 
     // Tests if given coordinate is within the visible screen area.
@@ -463,38 +464,41 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::optional<CellLocation> searchReverse(std::u32string_view searchText,
                                                             CellLocation startPosition) override;
 
-    [[nodiscard]] Cell& usePreviousCell() noexcept
+    [[nodiscard]] CellProxy usePreviousCell() noexcept
     {
         return useCellAt(_lastCursorPosition.line, _lastCursorPosition.column);
     }
 
     void updateCursorIterator() noexcept override { _currentLine = &_grid.lineAt(_cursor.position.line); }
 
-    [[nodiscard]] Line<Cell>& currentLine() noexcept { return *_currentLine; }
+    [[nodiscard]] Line& currentLine() noexcept { return *_currentLine; }
 
-    [[nodiscard]] Line<Cell> const& currentLine() const noexcept { return *_currentLine; }
+    [[nodiscard]] Line const& currentLine() const noexcept { return *_currentLine; }
 
-    [[nodiscard]] Cell& useCurrentCell() noexcept { return currentLine().useCellAt(_cursor.position.column); }
+    [[nodiscard]] CellProxy useCurrentCell() noexcept
+    {
+        return currentLine().useCellAt(_cursor.position.column);
+    }
 
-    /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    [[nodiscard]] Cell& at(LineOffset line, ColumnOffset column) noexcept
+    /// Gets a CellProxy to the cell relative to screen origin (top left, 1:1).
+    [[nodiscard]] CellProxy at(LineOffset line, ColumnOffset column) noexcept
     {
         return _grid.useCellAt(line, column);
     }
-    [[nodiscard]] Cell& useCellAt(LineOffset line, ColumnOffset column) noexcept
+    [[nodiscard]] CellProxy useCellAt(LineOffset line, ColumnOffset column) noexcept
     {
         return _grid.lineAt(line).useCellAt(column);
     }
 
-    /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    [[nodiscard]] Cell const& at(LineOffset line, ColumnOffset column) const noexcept
+    /// Gets a CellProxy to the cell relative to screen origin (top left, 1:1).
+    [[nodiscard]] CellProxy at(LineOffset line, ColumnOffset column) const noexcept
     {
         return _grid.at(line, column);
     }
 
-    [[nodiscard]] Cell& at(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
-    [[nodiscard]] Cell& useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
-    [[nodiscard]] Cell const& at(CellLocation p) const noexcept { return _grid.at(p.line, p.column); }
+    [[nodiscard]] CellProxy at(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
+    [[nodiscard]] CellProxy useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
+    [[nodiscard]] CellProxy at(CellLocation p) const noexcept { return _grid.at(p.line, p.column); }
 
     /// Finds the next marker right after the given line position.
     ///
@@ -520,8 +524,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     void verifyState() const override;
 
-    [[nodiscard]] Grid<Cell> const& grid() const noexcept { return _grid; }
-    [[nodiscard]] Grid<Cell>& grid() noexcept { return _grid; }
+    [[nodiscard]] Grid const& grid() const noexcept { return _grid; }
+    [[nodiscard]] Grid& grid() noexcept { return _grid; }
 
     /// @returns true iff given absolute line number is wrapped, false otherwise.
     [[nodiscard]] bool isLineWrapped(LineOffset lineNumber) const noexcept
@@ -536,30 +540,32 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] bool compareCellTextAt(CellLocation position, char32_t codepoint) const noexcept override
     {
-        auto const& cell = _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>());
+        auto cell = _grid.at(position.line, position.column);
         return CellUtil::compareText(cell, codepoint);
     }
 
-    // IMPORTANT: Invokig inflatedBuffer() is expensive. This function should be invoked with caution.
     [[nodiscard]] std::string cellTextAt(CellLocation position) const noexcept override
     {
-        return _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).toUtf8();
+        auto cell = _grid.at(position.line, position.column);
+        return cell.toUtf8();
     }
 
     [[nodiscard]] CellFlags cellFlagsAt(CellLocation position) const noexcept override
     {
-        // TODO: This is not efficient. We should have a direct access to the flags.
-        return _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).flags();
+        auto cell = _grid.at(position.line, position.column);
+        return cell.flags();
     }
 
     [[nodiscard]] Color cellForegroundColorAt(CellLocation position) const noexcept override
     {
-        return at(position).foregroundColor();
+        auto cell = at(position);
+        return cell.foregroundColor();
     }
 
     [[nodiscard]] Color cellBackgroundColorAt(CellLocation position) const noexcept override
     {
-        return at(position).backgroundColor();
+        auto cell = at(position);
+        return cell.backgroundColor();
     }
 
     [[nodiscard]] LineFlags lineFlagsAt(LineOffset line) const noexcept override
@@ -598,13 +604,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept override
     {
-        auto const& line = _grid.lineAt(position.line);
-        if (line.isTrivialBuffer())
-        {
-            TrivialLineBuffer const& lineBuffer = line.trivialBuffer();
-            return lineBuffer.hyperlink;
-        }
-        return at(position).hyperlink();
+        auto cell = at(position);
+        return cell.hyperlink();
     }
 
     [[nodiscard]] std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept override;
@@ -637,13 +638,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     void configureCurrentLineSize(LineFlags enabled);
 
-    /// Attempts to emplace the given character sequence into the current cursor position, assuming
-    /// that the current line is either empty or trivial and the input character sequence is contiguous.
-    ///
-    /// @returns the string view of the UTF-8 text that could not be emplaced.
-    std::string_view tryEmplaceChars(std::string_view chars, size_t cellCount) noexcept;
-    size_t emplaceCharsIntoCurrentLine(std::string_view chars, size_t cellCount) noexcept;
-    [[nodiscard]] bool isContiguousToCurrentLine(std::string_view continuationChars) const noexcept;
     void advanceCursorAfterWrite(ColumnCount n) noexcept;
 
     void clearAllTabs();
@@ -681,13 +675,13 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     gsl::not_null<Terminal*> _terminal;
     gsl::not_null<Settings*> _settings;
     gsl::not_null<Margin*> _margin;
-    Grid<Cell> _grid;
+    Grid _grid;
 
     GraphicsAttributes _savedGraphicsRenditions {};
 
     CellLocation _lastCursorPosition {};
 
-    Line<Cell>* _currentLine = nullptr;
+    Line* _currentLine = nullptr;
     std::unique_ptr<SixelImageBuilder> _sixelImageBuilder;
 
 #if defined(LIBTERMINAL_LOG_TRACE)
@@ -704,8 +698,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     int _checksumExtension = 0;
 };
 
-template <CellConcept Cell>
-inline void Screen<Cell>::scrollUp(LineCount n, Margin margin)
+inline void Screen::scrollUp(LineCount n, Margin margin)
 {
     scrollUp(n, cursor().graphicsRendition, margin);
 }

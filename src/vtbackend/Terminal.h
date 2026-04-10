@@ -21,8 +21,6 @@
 #include <vtbackend/ViCommands.h>
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/Viewport.h>
-#include <vtbackend/cell/CellConcept.h>
-#include <vtbackend/cell/CellConfig.h>
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
 
@@ -57,7 +55,6 @@
 namespace vtbackend
 {
 
-template <CellConcept Cell>
 class Screen;
 
 class ScreenBase;
@@ -505,7 +502,7 @@ class Terminal
 
     /// Writes a given VT-sequence to screen - but without acquiring the lock (must be already acquired).
     /// This version of the function is used to write to the status line and should not be used by the shell.
-    void writeToScreenInternal(Screen<StatusDisplayCell>& screen, std::string_view vtStream);
+    void writeToScreenInternal(Screen& screen, std::string_view vtStream);
 
     // viewport management
     [[nodiscard]] Viewport& viewport() noexcept { return _viewport; }
@@ -702,11 +699,8 @@ class Terminal
     }
 
     /// Returns a reference to the screen at the given page index.
-    [[nodiscard]] Screen<PageCell>& pageAt(PageIndex index) noexcept { return *_pages[index.value]; }
-    [[nodiscard]] Screen<PageCell> const& pageAt(PageIndex index) const noexcept
-    {
-        return *_pages[index.value];
-    }
+    [[nodiscard]] Screen& pageAt(PageIndex index) noexcept { return *_pages[index.value]; }
+    [[nodiscard]] Screen const& pageAt(PageIndex index) const noexcept { return *_pages[index.value]; }
 
     /// Returns the zero-based page index where the cursor is currently active.
     [[nodiscard]] PageIndex cursorPageIndex() const noexcept { return _cursorPage; }
@@ -772,12 +766,12 @@ class Terminal
     }
 
     // clang-format off
-    [[nodiscard]] Screen<PageCell> const& primaryScreen() const noexcept { return *_pages[0]; }
-    [[nodiscard]] Screen<PageCell>& primaryScreen() noexcept { return *_pages[0]; }
-    [[nodiscard]] Screen<PageCell> const& alternateScreen() const noexcept { return *_pages[AlternateScreenPageIndex.value]; }
-    [[nodiscard]] Screen<PageCell>& alternateScreen() noexcept { return *_pages[AlternateScreenPageIndex.value]; }
-    [[nodiscard]] Screen<StatusDisplayCell> const& hostWritableStatusLineDisplay() const noexcept { return _hostWritableStatusLineScreen; }
-    [[nodiscard]] Screen<StatusDisplayCell> const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
+    [[nodiscard]] Screen const& primaryScreen() const noexcept { return *_pages[0]; }
+    [[nodiscard]] Screen& primaryScreen() noexcept { return *_pages[0]; }
+    [[nodiscard]] Screen const& alternateScreen() const noexcept { return *_pages[AlternateScreenPageIndex.value]; }
+    [[nodiscard]] Screen& alternateScreen() noexcept { return *_pages[AlternateScreenPageIndex.value]; }
+    [[nodiscard]] Screen const& hostWritableStatusLineDisplay() const noexcept { return _hostWritableStatusLineScreen; }
+    [[nodiscard]] Screen const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
     // clang-format on
 
     [[nodiscard]] bool isLineWrapped(LineOffset lineNumber) const noexcept
@@ -1409,13 +1403,12 @@ class Terminal
     // }}}
 
     // {{{ Displays this terminal manages
-    std::vector<std::unique_ptr<Screen<PageCell>>>
-        _pages;                       ///< 16 pages: page 0 = primary, page 15 = alt screen
-    PageIndex _cursorPage { 0 };      ///< Page where cursor/VT output goes
-    PageIndex _displayedPage { 0 };   ///< Page shown to user (== _cursorPage when DECPCCM set)
-    PageIndex _savedCursorPage { 0 }; ///< Page index saved by DECSC
-    Screen<StatusDisplayCell> _hostWritableStatusLineScreen;
-    Screen<StatusDisplayCell> _indicatorStatusScreen;
+    std::vector<std::unique_ptr<Screen>> _pages; ///< 16 pages: page 0 = primary, page 15 = alt screen
+    PageIndex _cursorPage { 0 };                 ///< Page where cursor/VT output goes
+    PageIndex _displayedPage { 0 };              ///< Page shown to user (== _cursorPage when DECPCCM set)
+    PageIndex _savedCursorPage { 0 };            ///< Page index saved by DECSC
+    Screen _hostWritableStatusLineScreen;
+    Screen _indicatorStatusScreen;
     gsl::not_null<ScreenBase*> _currentScreen;
     Viewport _viewport;
     StatusLineDefinition _indicatorStatusLineDefinition;

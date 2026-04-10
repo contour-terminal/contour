@@ -4,7 +4,6 @@
 
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/Terminal.h>
-#include <vtbackend/cell/CellConcept.h>
 #include <vtbackend/primitives.h>
 
 #include <gsl/pointers>
@@ -15,9 +14,8 @@ namespace vtbackend
 {
 
 /**
- * RenderBufferBuilder<Cell> renders the current screen state into a RenderBuffer.
+ * RenderBufferBuilder renders the current screen state into a RenderBuffer.
  */
-template <CellConcept Cell>
 class RenderBufferBuilder
 {
   public:
@@ -37,7 +35,7 @@ class RenderBufferBuilder
     /// A trivial line is rendered using renderTrivialLine().
     ///
     /// @see renderTrivialLine
-    void renderCell(Cell const& cell, LineOffset line, ColumnOffset column);
+    void renderCell(ConstCellProxy cell, LineOffset line, ColumnOffset column);
     void startLine(LineOffset line, LineFlags flags) noexcept;
     void endLine() noexcept;
 
@@ -49,7 +47,10 @@ class RenderBufferBuilder
     /// with their grid cells are to be rendered using renderCell().
     ///
     /// @see renderCell
-    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset, LineFlags flags);
+    void renderTrivialLine(TrivialLineBuffer const& lineBuffer,
+                           LineOffset lineOffset,
+                           LineFlags flags,
+                           std::u32string_view textOverride = {});
 
     /// This call is guaranteed to be invoked when the the full page has been rendered.
     void finish() noexcept {}
@@ -83,7 +84,7 @@ class RenderBufferBuilder
     /// Constructs a RenderCell for the given screen Cell.
     [[nodiscard]] static RenderCell makeRenderCell(ColorPalette const& colorPalette,
                                                    HyperlinkStorage const& hyperlinks,
-                                                   Cell const& cell,
+                                                   ConstCellProxy cell,
                                                    LineFlags lineFlags,
                                                    RGBColor fg,
                                                    RGBColor bg,
@@ -99,7 +100,8 @@ class RenderBufferBuilder
                                                  Color backgroundColor) const noexcept;
 
     [[nodiscard]] RenderLine createRenderLine(TrivialLineBuffer const& lineBuffer,
-                                              LineOffset lineOffset) const;
+                                              LineOffset lineOffset,
+                                              std::u32string_view textOverride = {}) const;
 
     [[nodiscard]] RenderAttributes createRenderAttributes(
         CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Line.h>
-#include <vtbackend/cell/CellConfig.h>
 
 #include <crispy/escape.h>
 
@@ -11,300 +10,115 @@ using namespace std;
 using namespace vtbackend;
 using namespace crispy;
 
-// Default cell type for testing.
-using Cell = PrimaryScreenCell;
-
-TEST_CASE("Line.BufferFragment", "[Line]")
+TEST_CASE("Line.wrappedFlag", "[Line]")
 {
-    auto constexpr TestText = "0123456789ABCDEF"sv;
-    auto pool = buffer_object_pool<char>(16);
-    auto bufferObject = pool.allocateBufferObject();
-    bufferObject->writeAtEnd(TestText);
-    auto const bufferFragment = bufferObject->ref(0, 10);
-
-    auto const externalView = string_view(bufferObject->data(), 10);
-    auto const fragment = buffer_fragment(bufferObject, externalView);
-    CHECK(fragment.view() == externalView);
+    auto line = Line(ColumnCount(10), LineFlag::Wrapped, GraphicsAttributes {});
+    CHECK(line.wrapped());
+    CHECK(line.wrappedFlag() == LineFlag::Wrapped);
 }
 
 TEST_CASE("Line.resize", "[Line]")
 {
     auto constexpr DisplayWidth = ColumnCount(4);
-    auto text = "abcd"sv;
-    auto pool = buffer_object_pool<char>(32);
-    auto bufferObject = pool.allocateBufferObject();
-    bufferObject->writeAtEnd(text);
-
-    auto const bufferFragment = bufferObject->ref(0, 4);
 
     auto const sgr = GraphicsAttributes {};
-    auto const trivial = TrivialLineBuffer { .displayWidth = DisplayWidth,
-                                             .textAttributes = sgr,
-                                             .fillAttributes = sgr,
-                                             .hyperlink = HyperlinkId {},
-                                             .usedColumns = DisplayWidth,
-                                             .text = bufferFragment };
-    CHECK(trivial.text.view() == string_view(text.data()));
-    auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
-    CHECK(lineTrivial.isTrivialBuffer());
+    auto lineSoA = Line(DisplayWidth, LineFlag::None, sgr);
+    CHECK(lineSoA.size() == DisplayWidth);
 
-    lineTrivial.resize(ColumnCount(10));
-    CHECK(lineTrivial.isTrivialBuffer());
+    lineSoA.resize(ColumnCount(10));
+    CHECK(lineSoA.size() == ColumnCount(10));
 
-    lineTrivial.resize(ColumnCount(5));
-    CHECK(lineTrivial.isTrivialBuffer());
+    lineSoA.resize(ColumnCount(5));
+    CHECK(lineSoA.size() == ColumnCount(5));
 
-    lineTrivial.resize(ColumnCount(3));
-    CHECK(lineTrivial.isTrivialBuffer());
+    lineSoA.resize(ColumnCount(3));
+    CHECK(lineSoA.size() == ColumnCount(3));
 }
 
 TEST_CASE("Line.reflow", "[Line]")
 {
     auto constexpr DisplayWidth = ColumnCount(4);
-    auto text = "abcd"sv;
-    auto pool = buffer_object_pool<char>(32);
-    auto bufferObject = pool.allocateBufferObject();
-    bufferObject->writeAtEnd(text);
-
-    auto const bufferFragment = bufferObject->ref(0, 4);
 
     auto const sgr = GraphicsAttributes {};
-    auto const trivial = TrivialLineBuffer { .displayWidth = DisplayWidth,
-                                             .textAttributes = sgr,
-                                             .fillAttributes = sgr,
-                                             .hyperlink = HyperlinkId {},
-                                             .usedColumns = DisplayWidth,
-                                             .text = bufferFragment };
-    CHECK(trivial.text.view() == string_view(text.data()));
-    auto lineTrivial = Line<Cell>(LineFlag::None, trivial);
-    CHECK(lineTrivial.isTrivialBuffer());
+    auto lineSoA = Line(DisplayWidth, LineFlag::Wrappable, sgr);
 
-    (void) lineTrivial.reflow(ColumnCount(5));
-    CHECK(lineTrivial.isTrivialBuffer());
+    // Write "abcd" into the line via SoA
+    auto& storage = lineSoA.storage();
+    storage.codepoints[0] = 'a';
+    storage.codepoints[1] = 'b';
+    storage.codepoints[2] = 'c';
+    storage.codepoints[3] = 'd';
+    for (size_t i = 0; i < 4; ++i)
+        storage.clusterSize[i] = 1;
 
-    (void) lineTrivial.reflow(ColumnCount(3));
-    CHECK(lineTrivial.isInflatedBuffer());
+    CHECK(lineSoA.toUtf8() == "abcd");
+
+    auto overflow = lineSoA.reflow(ColumnCount(5));
+    CHECK(overflow.codepoints.empty()); // no overflow
+    CHECK(lineSoA.size() == ColumnCount(5));
+
+    // Reset for reflow-shrink test
+    lineSoA = Line(DisplayWidth, LineFlag::Wrappable, sgr);
+    auto& s2 = lineSoA.storage();
+    s2.codepoints[0] = 'a';
+    s2.codepoints[1] = 'b';
+    s2.codepoints[2] = 'c';
+    s2.codepoints[3] = 'd';
+    for (size_t i = 0; i < 4; ++i)
+        s2.clusterSize[i] = 1;
+
+    overflow = lineSoA.reflow(ColumnCount(3));
+    CHECK(lineSoA.size() == ColumnCount(3));
+    CHECK(overflow.codepoints.size() == 1); // 'd' overflowed
 }
 
-TEST_CASE("Line.inflate", "[Line]")
+TEST_CASE("Line.SoA.basic", "[Line]")
 {
-    auto constexpr TestText = "0123456789ABCDEF"sv;
-    auto pool = buffer_object_pool<char>(16);
-    auto bufferObject = pool.allocateBufferObject();
-    bufferObject->writeAtEnd(TestText);
-    auto const bufferFragment = bufferObject->ref(0, 10);
+    auto constexpr DisplayWidth = ColumnCount(10);
 
     auto sgr = GraphicsAttributes {};
     sgr.foregroundColor = RGBColor(0x123456);
     sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);
     sgr.underlineColor = Color::Indexed(IndexedColor::Red);
     sgr.flags |= CellFlag::CurlyUnderlined;
-    auto const trivial = TrivialLineBuffer { .displayWidth = ColumnCount(10),
-                                             .textAttributes = sgr,
-                                             .fillAttributes = sgr,
-                                             .hyperlink = HyperlinkId {},
-                                             .usedColumns = ColumnCount(10),
-                                             .text = bufferFragment };
 
-    auto const inflated = inflate<Cell>(trivial);
+    auto line = Line(DisplayWidth, LineFlag::None, sgr);
 
-    CHECK(inflated.size() == 10);
-    for (size_t i = 0; i < inflated.size(); ++i)
+    // Write some text via CellProxy
+    for (size_t i = 0; i < 10; ++i)
     {
-        auto const& cell = inflated[i];
+        auto cell = line.useCellAt(ColumnOffset::cast_from(i));
+        cell.write(sgr, static_cast<char32_t>('0' + i), 1);
+    }
+
+    // Verify via CellProxy
+    for (size_t i = 0; i < 10; ++i)
+    {
+        auto cell = line.useCellAt(ColumnOffset::cast_from(i));
         INFO(std::format("column {} codepoint {}", i, (char) cell.codepoint(0)));
         CHECK(cell.foregroundColor() == sgr.foregroundColor);
         CHECK(cell.backgroundColor() == sgr.backgroundColor);
         CHECK(cell.underlineColor() == sgr.underlineColor);
         CHECK(cell.codepointCount() == 1);
-        CHECK(char(cell.codepoint(0)) == TestText[i]);
+        CHECK(char(cell.codepoint(0)) == char('0' + i));
     }
 }
 
-TEST_CASE("Line.inflate.Unicode", "[Line]")
+TEST_CASE("Line.toUtf8", "[Line]")
 {
-    auto constexpr DisplayWidth = ColumnCount(10);
-    auto constexpr TestTextUtf32 = U"0\u2705123456789ABCDEF"sv;
-    auto const testTextUtf8 = unicode::convert_to<char>(TestTextUtf32);
-
-    auto pool = buffer_object_pool<char>(32);
-    auto bufferObject = pool.allocateBufferObject();
-    bufferObject->writeAtEnd(testTextUtf8);
-
-    // Buffer fragment containing 9 codepoints, with one of them using display width of 2.
-    auto const bufferFragment = bufferObject->ref(0, 11);
-
-    auto sgr = GraphicsAttributes {};
-    sgr.foregroundColor = RGBColor(0x123456);
-    sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);
-    sgr.underlineColor = Color::Indexed(IndexedColor::Red);
-    sgr.flags |= CellFlag::CurlyUnderlined;
-    auto const trivial = TrivialLineBuffer { .displayWidth = DisplayWidth,
-                                             .textAttributes = sgr,
-                                             .fillAttributes = sgr,
-                                             .hyperlink = HyperlinkId {},
-                                             .usedColumns = DisplayWidth,
-                                             .text = bufferFragment };
-
-    auto const inflated = inflate<Cell>(trivial);
-
-    CHECK(inflated.size() == unbox<size_t>(DisplayWidth));
-    for (size_t i = 0, k = 0; i < inflated.size();)
-    {
-        auto const& cell = inflated[i];
-        INFO(std::format("column {}, k {}, codepoint U+{:X}", i, k, (unsigned) cell.codepoint(0)));
-        REQUIRE(cell.codepointCount() == 1);
-        REQUIRE(cell.codepoint(0) == TestTextUtf32[k]);
-        REQUIRE(cell.foregroundColor() == sgr.foregroundColor);
-        REQUIRE(cell.backgroundColor() == sgr.backgroundColor);
-        REQUIRE(cell.underlineColor() == sgr.underlineColor);
-        for (int n = 1; std::cmp_less(n, cell.width()); ++n)
-        {
-            INFO(std::format("column.sub: {}\n", n));
-            auto const& fillCell = inflated.at(i + static_cast<size_t>(n));
-            REQUIRE(fillCell.codepointCount() == 0);
-            REQUIRE(fillCell.foregroundColor() == sgr.foregroundColor);
-            REQUIRE(fillCell.backgroundColor() == sgr.backgroundColor);
-            REQUIRE(fillCell.underlineColor() == sgr.underlineColor);
-        }
-        i += cell.width();
-        k++;
-    }
-}
-
-TEST_CASE("Line.inflate.Unicode.FamilyEmoji", "[Line]")
-{
-    // Ensure inflate() is also working for reaaally complex Unicode grapheme clusters.
-
     auto constexpr DisplayWidth = ColumnCount(5);
-    auto constexpr UsedColumnCount = ColumnCount(4);
-    auto constexpr TestTextUtf32 = U"A\U0001F468\u200D\U0001F468\u200D\U0001F467B"sv;
-    auto const testTextUtf8 = unicode::convert_to<char>(TestTextUtf32);
-    auto const familyEmojiUtf8 = unicode::convert_to<char>(U"\U0001F468\u200D\U0001F468\u200D\U0001F467"sv);
 
-    auto pool = buffer_object_pool<char>(32);
-    auto bufferObject = pool.allocateBufferObject();
-    bufferObject->writeAtEnd(testTextUtf8);
+    auto line = Line(DisplayWidth, LineFlag::None, GraphicsAttributes {});
+    CHECK(line.toUtf8() == "     "); // 5 empty cells -> 5 spaces
 
-    auto const bufferFragment = bufferObject->ref(0, testTextUtf8.size());
+    auto cell0 = line.useCellAt(ColumnOffset(0));
+    cell0.write(GraphicsAttributes {}, U'H', 1);
+    auto cell1 = line.useCellAt(ColumnOffset(1));
+    cell1.write(GraphicsAttributes {}, U'i', 1);
 
-    auto sgr = GraphicsAttributes {};
-    sgr.foregroundColor = RGBColor(0x123456);
-    sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);
-    sgr.underlineColor = Color::Indexed(IndexedColor::Red);
-    sgr.flags |= CellFlag::CurlyUnderlined;
+    auto const text = line.toUtf8();
+    CHECK(text == "Hi   ");
 
-    auto fillSGR = GraphicsAttributes {};
-    fillSGR.foregroundColor = RGBColor(0x123456);
-    fillSGR.backgroundColor = Color::Indexed(IndexedColor::Yellow);
-    fillSGR.underlineColor = Color::Indexed(IndexedColor::Red);
-    fillSGR.flags |= CellFlag::CurlyUnderlined;
-
-    auto const trivial = TrivialLineBuffer { .displayWidth = DisplayWidth,
-                                             .textAttributes = sgr,
-                                             .fillAttributes = fillSGR,
-                                             .hyperlink = HyperlinkId {},
-                                             .usedColumns = UsedColumnCount,
-                                             .text = bufferFragment };
-
-    auto const inflated = inflate<Cell>(trivial);
-
-    CHECK(inflated.size() == unbox<size_t>(DisplayWidth));
-
-    // Check text in 0..3
-    // Check @4 is empty text.
-    // Check 0..3 has same SGR.
-    // Check @4 has fill-SGR.
-
-    REQUIRE(inflated[0].toUtf8() == "A");
-    REQUIRE(inflated[1].toUtf8() == familyEmojiUtf8);
-    REQUIRE(inflated[2].toUtf8().empty());
-    REQUIRE(inflated[3].toUtf8() == "B");
-    REQUIRE(inflated[4].toUtf8().empty());
-
-    for (auto const i: { 0u, 2u, 1u, 3u })
-    {
-        auto const& cell = inflated[i];
-        REQUIRE(cell.foregroundColor() == sgr.foregroundColor);
-        REQUIRE(cell.backgroundColor() == sgr.backgroundColor);
-        REQUIRE(cell.underlineColor() == sgr.underlineColor);
-    }
-
-    auto const& cell = inflated[4];
-    REQUIRE(cell.foregroundColor() == fillSGR.foregroundColor);
-    REQUIRE(cell.backgroundColor() == fillSGR.backgroundColor);
-    REQUIRE(cell.underlineColor() == fillSGR.underlineColor);
-}
-
-TEST_CASE("Line.inflate.IncompleteUtf8", "[Line]")
-{
-    // Test that incomplete UTF-8 sequences at the end of a TrivialLineBuffer
-    // are handled gracefully by emitting a replacement character (U+FFFD).
-    // This can happen when PTY data is split mid-character.
-
-    // Create a buffer with "ABC" followed by the first 2 bytes of a 3-byte UTF-8 sequence.
-    // The box-drawing character "│" (U+2502) is encoded as E2 94 82 in UTF-8.
-    // We'll include only E2 94 (incomplete).
-    auto pool = buffer_object_pool<char>(32);
-    auto bufferObject = pool.allocateBufferObject();
-
-    // "ABC" + first 2 bytes of box-drawing character (incomplete UTF-8)
-    auto const incompleteText = "ABC\xE2\x94"sv;
-    bufferObject->writeAtEnd(incompleteText);
-    auto const bufferFragment = bufferObject->ref(0, incompleteText.size());
-
-    auto sgr = GraphicsAttributes {};
-    // usedColumns = 4 because we expect: A, B, C, and replacement char for incomplete UTF-8
-    auto const trivial = TrivialLineBuffer { .displayWidth = ColumnCount(10),
-                                             .textAttributes = sgr,
-                                             .fillAttributes = sgr,
-                                             .hyperlink = HyperlinkId {},
-                                             .usedColumns = ColumnCount(4),
-                                             .text = bufferFragment };
-
-    auto const inflated = inflate<Cell>(trivial);
-
-    // Should have 10 cells (displayWidth)
-    CHECK(inflated.size() == 10);
-
-    // First 3 cells should be A, B, C
-    CHECK(inflated[0].codepoint(0) == U'A');
-    CHECK(inflated[1].codepoint(0) == U'B');
-    CHECK(inflated[2].codepoint(0) == U'C');
-
-    // Fourth cell should be the replacement character (U+FFFD) for the incomplete UTF-8
-    CHECK(inflated[3].codepoint(0) == U'\uFFFD');
-
-    // Remaining cells should be empty (fill)
-    for (size_t i = 4; i < 10; ++i)
-    {
-        INFO(std::format("cell {} should be empty", i));
-        CHECK(inflated[i].codepointCount() == 0);
-    }
-}
-
-TEST_CASE("Line.inflate.IncompleteUtf8.SingleByte", "[Line]")
-{
-    // Test with just the first byte of a multi-byte UTF-8 sequence.
-    auto pool = buffer_object_pool<char>(32);
-    auto bufferObject = pool.allocateBufferObject();
-
-    // "X" + first byte of a 3-byte UTF-8 sequence (E2 starts U+2000-U+2FFF range)
-    auto const incompleteText = "X\xE2"sv;
-    bufferObject->writeAtEnd(incompleteText);
-    auto const bufferFragment = bufferObject->ref(0, incompleteText.size());
-
-    auto sgr = GraphicsAttributes {};
-    auto const trivial = TrivialLineBuffer { .displayWidth = ColumnCount(5),
-                                             .textAttributes = sgr,
-                                             .fillAttributes = sgr,
-                                             .hyperlink = HyperlinkId {},
-                                             .usedColumns = ColumnCount(2),
-                                             .text = bufferFragment };
-
-    auto const inflated = inflate<Cell>(trivial);
-
-    CHECK(inflated.size() == 5);
-    CHECK(inflated[0].codepoint(0) == U'X');
-    CHECK(inflated[1].codepoint(0) == U'\uFFFD'); // Replacement char for incomplete sequence
+    auto const trimmed = line.toUtf8Trimmed();
+    CHECK(trimmed == "Hi");
 }

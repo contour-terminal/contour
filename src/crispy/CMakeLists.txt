@@ -16,6 +16,7 @@ set(crispy_SOURCES
     StrongLRUCache.h
     StackTrace.cpp StackTrace.h
     TrieMap.h
+    AlignedAllocator.h
     algorithm.h
     assert.h
     base64.h

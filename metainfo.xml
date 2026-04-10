@@ -107,7 +107,8 @@
     <release version="0.7.0" urgency="medium" type="development">
       <description>
         <ul>
-          <!-- <li> ... </li> -->
+          <li>Fixes Unicode characters sometimes being wrongly decoded during high-bandwidth output</li>
+          <li>Improves PTY throughput performance determinism by rewriting the internal grid cell storage</li>
         </ul>
       </description>
     </release>

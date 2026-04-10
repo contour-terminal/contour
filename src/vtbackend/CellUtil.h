@@ -4,7 +4,6 @@
 #include <vtbackend/CellFlags.h>
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
-#include <vtbackend/cell/CellConcept.h>
 
 #include <crispy/times.h>
 
@@ -74,7 +73,7 @@ namespace vtbackend::CellUtil
     return apply(colorPalette, underlineColor, ColorTarget::Foreground, mode);
 }
 
-template <CellConcept Cell>
+template <typename Cell>
 [[nodiscard]] inline RGBColor makeUnderlineColor(ColorPalette const& colorPalette,
                                                  RGBColor defaultColor,
                                                  Cell const& cell) noexcept
@@ -82,7 +81,7 @@ template <CellConcept Cell>
     return makeUnderlineColor(colorPalette, defaultColor, cell.underlineColor(), cell.flags());
 }
 
-template <CellConcept Cell>
+template <typename Cell>
 [[nodiscard]] inline bool compareText(Cell const& cell, char32_t character) noexcept
 {
     if (cell.codepointCount() != 1)
@@ -91,13 +90,13 @@ template <CellConcept Cell>
     return cell.codepoint(0) == character;
 }
 
-template <CellConcept Cell>
+template <typename Cell>
 [[nodiscard]] inline bool empty(Cell const& cell) noexcept
 {
     return (cell.codepointCount() == 0) && !cell.imageFragment();
 }
 
-template <CellConcept Cell>
+template <typename Cell>
 [[nodiscard]] inline int computeWidthChange(Cell const& cell, char32_t codepoint) noexcept
 {
     constexpr bool AllowWidthChange = false; // TODO: make configurable
@@ -117,7 +116,6 @@ template <CellConcept Cell>
 }
 
 template <typename Cell>
-    requires(std::same_as<Cell, std::u32string_view> || CellConcept<Cell>)
 [[nodiscard]] inline bool beginsWith(std::u32string_view text,
                                      Cell const& cell,
                                      bool isCaseSensitive) noexcept
@@ -224,7 +222,7 @@ template <typename Cell>
     return flags;
 }
 
-template <CellConcept Cell>
+template <typename Cell>
 inline void applyGraphicsRendition(GraphicsRendition sgr, Cell& cell) noexcept
 {
     cell.resetFlags(makeCellFlags(sgr, cell.flags()));
