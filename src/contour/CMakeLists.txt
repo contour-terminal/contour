@@ -101,10 +101,9 @@ set_target_properties(contour PROPERTIES AUTORCC ON)
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 # {{{ declare compiler definitions
-# target_compile_definitions(contour PRIVATE $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:QT_QML_DEBUG>)
-target_compile_definitions(contour PRIVATE $<$<CONFIG:Debug>:QT_QML_DEBUG>)
-target_compile_definitions(contour PRIVATE $<$<CONFIG:Debug>:QMLJSDEBUGGER>)
-target_compile_definitions(contour PRIVATE $<$<CONFIG:Debug>:QT_DECLARATIVE_DEBUG>)
+# QML debugging can be enabled at runtime via -qmljsdebugger=... or QT_QML_DEBUG env var.
+# Avoid compile-time defines that force the "QML debugging is enabled" message on every
+# invocation, including headless CLI commands like `contour cat`.
 target_compile_definitions(contour PRIVATE
     CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
