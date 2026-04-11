@@ -118,6 +118,9 @@ namespace
         {
             case vtbackend::ImageFormat::RGB: return GL_RGB;
             case vtbackend::ImageFormat::RGBA: return GL_RGBA;
+            case vtbackend::ImageFormat::Auto:
+            case vtbackend::ImageFormat::PNG:
+                crispy::unreachable(); // always resolved/decoded to RGBA before rendering
         }
         Guarantee(false);
         crispy::unreachable();

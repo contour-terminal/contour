@@ -135,6 +135,9 @@ constexpr inline auto DECSIXEL = FunctionDocumentation { .mnemonic = "DECSIXEL",
 constexpr inline auto STP = FunctionDocumentation { .mnemonic = "STP", .comment = "Set Terminal Profile" };
 constexpr inline auto XTGETTCAP = FunctionDocumentation { .mnemonic = "XTGETTCAP", .comment = "Request Termcap/Terminfo String" };
 
+// GIP (Good Image Protocol)
+constexpr inline auto GIP = FunctionDocumentation { .mnemonic = "GIP", .comment = "Good Image Protocol (upload, render, release, oneshot, query)." };
+
 // OSC
 constexpr inline auto CLIPBOARD = FunctionDocumentation { .mnemonic = "CLIPBOARD", .comment = "Clipboard management." };
 constexpr inline auto COLORBG = FunctionDocumentation { .mnemonic = "COLORBG", .comment = "Change or request text background color." };
@@ -677,6 +680,9 @@ constexpr inline auto DESKTOPNOTIFY    = detail::OSC(99, VTExtension::Unknown, d
 // NOLINTEND(readability-identifier-naming)
 // clang-format on
 
+// DCS: Good Image Protocol (single DCS ! g sequence, operation via 'o' message header)
+constexpr inline auto GIP = detail::DCS(std::nullopt, 0, 0, '!', 'g', VTType::VT525, documentation::GIP);
+
 constexpr inline auto CaptureBufferCode = 314;
 
 // HACK to get older compiler work (GCC 9.4)
@@ -816,6 +822,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECRQDE,
 
         // DCS
+        GIP,
         STP,
         DECRQSS,
         DECSIXEL,

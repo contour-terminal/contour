@@ -65,6 +65,7 @@ class ImageRenderer: public Renderable, public TextRendererEvents
 
   private:
     AtlasTileAttributes const* getOrCreateCachedTileAttributes(vtbackend::ImageFragment const& fragment);
+    std::vector<atlas::RenderTile> _pendingRenderTilesBelowText;
     std::vector<atlas::RenderTile> _pendingRenderTilesAboveText;
 
     // private data

@@ -47,6 +47,7 @@ struct Settings
     MaxHistoryLineCount maxHistoryLineCount;
     ImageSize maxImageSize { Width(800), Height(600) };
     unsigned maxImageRegisterCount = 256;
+    bool goodImageProtocol = false;
     StatusDisplayType statusDisplayType = StatusDisplayType::None;
     StatusDisplayPosition statusDisplayPosition = StatusDisplayPosition::Bottom;
     struct

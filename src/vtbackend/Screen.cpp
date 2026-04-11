@@ -2,6 +2,7 @@
 #include <vtbackend/ControlCode.h>
 #include <vtbackend/DesktopNotification.h>
 #include <vtbackend/InputGenerator.h>
+#include <vtbackend/MessageParser.h>
 #include <vtbackend/Screen.h>
 #include <vtbackend/SixelParser.h>
 #include <vtbackend/SoAClusterWriter.h>
@@ -26,6 +27,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <iostream>
 #include <iterator>
 #include <ranges>
@@ -268,7 +270,152 @@ namespace // {{{ helper
     //             return nullopt;
     //     }
     // }
+
+    std::optional<int> toNumber(string const* value)
+    {
+        if (!value)
+            return std::nullopt;
+        return crispy::to_integer<10, int>(string_view(*value));
+    }
+
+    optional<ImageAlignment> toImageAlignmentPolicy(string const* value, ImageAlignment defaultValue)
+    {
+        if (!value)
+            return defaultValue;
+
+        if (value->size() != 1)
+            return nullopt;
+
+        switch (value->at(0))
+        {
+            case '1': return ImageAlignment::TopStart;
+            case '2': return ImageAlignment::TopCenter;
+            case '3': return ImageAlignment::TopEnd;
+            case '4': return ImageAlignment::MiddleStart;
+            case '5': return ImageAlignment::MiddleCenter;
+            case '6': return ImageAlignment::MiddleEnd;
+            case '7': return ImageAlignment::BottomStart;
+            case '8': return ImageAlignment::BottomCenter;
+            case '9': return ImageAlignment::BottomEnd;
+            default: return nullopt;
+        }
+    }
+
+    optional<ImageResize> toImageResizePolicy(string const* value, ImageResize defaultValue)
+    {
+        if (!value)
+            return defaultValue;
+
+        if (value->size() != 1)
+            return nullopt;
+
+        switch (value->at(0))
+        {
+            case '0': return ImageResize::NoResize;
+            case '1': return ImageResize::ResizeToFit;
+            case '2': return ImageResize::ResizeToFill;
+            case '3': return ImageResize::StretchToFill;
+            default: return nullopt;
+        }
+    }
+
+    optional<ImageFormat> toImageFormat(string const* value)
+    {
+        auto constexpr DefaultFormat = ImageFormat::Auto;
+
+        if (value)
+        {
+            if (value->size() == 1)
+            {
+                switch (value->at(0))
+                {
+                    case '1': return ImageFormat::Auto;
+                    case '2': return ImageFormat::RGB;
+                    case '3': return ImageFormat::RGBA;
+                    case '4': return ImageFormat::PNG;
+                    default: return nullopt;
+                }
+            }
+            else
+                return nullopt;
+        }
+        else
+            return DefaultFormat;
+    }
+
+    /// Resolves Auto format to a concrete format by inspecting the data.
+    ///
+    /// @param data  The raw image data to inspect.
+    /// @param size  The declared image dimensions (may be zero for self-describing formats).
+    /// @return The detected format, or std::nullopt if the format cannot be determined.
+    std::optional<ImageFormat> resolveAutoFormat(std::span<uint8_t const> data, ImageSize size)
+    {
+        // Check PNG magic bytes.
+        static constexpr uint8_t PngMagic[] = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+        if (data.size() >= sizeof(PngMagic) && std::memcmp(data.data(), PngMagic, sizeof(PngMagic)) == 0)
+            return ImageFormat::PNG;
+
+        // Detect RGB/RGBA from data size when dimensions are known.
+        if (*size.width > 0 && *size.height > 0)
+        {
+            auto const pixelCount = static_cast<size_t>(*size.width) * *size.height;
+            if (data.size() == pixelCount * 4)
+                return ImageFormat::RGBA;
+            if (data.size() == pixelCount * 3)
+                return ImageFormat::RGB;
+        }
+
+        return std::nullopt;
+    }
+
+    ImageLayer toImageLayer(string const* value)
+    {
+        if (!value || value->empty())
+            return ImageLayer::Replace;
+
+        switch (value->at(0))
+        {
+            case '0': return ImageLayer::Below;
+            case '1': return ImageLayer::Replace;
+            case '2': return ImageLayer::Above;
+            default: return ImageLayer::Replace;
+        }
+    }
+
+    /// Common parameters shared by GIP render and oneshot operations.
+    struct GipRenderParams
+    {
+        LineCount screenRows {};
+        ColumnCount screenCols {};
+        Width imageWidth {};
+        Height imageHeight {};
+        ImageAlignment alignmentPolicy { ImageAlignment::MiddleCenter };
+        ImageResize resizePolicy { ImageResize::NoResize };
+        ImageLayer layer { ImageLayer::Replace };
+        bool autoScroll {};
+        bool updateCursor {};
+        bool requestStatus {};
+    };
+
+    GipRenderParams parseGipRenderParams(Message const& message)
+    {
+        return GipRenderParams {
+            .screenRows = LineCount::cast_from(toNumber(message.header("r")).value_or(0)),
+            .screenCols = ColumnCount::cast_from(toNumber(message.header("c")).value_or(0)),
+            .imageWidth = Width::cast_from(toNumber(message.header("w")).value_or(0)),
+            .imageHeight = Height::cast_from(toNumber(message.header("h")).value_or(0)),
+            .alignmentPolicy = toImageAlignmentPolicy(message.header("a"), ImageAlignment::MiddleCenter)
+                                   .value_or(ImageAlignment::MiddleCenter),
+            .resizePolicy = toImageResizePolicy(message.header("z"), ImageResize::NoResize)
+                                .value_or(ImageResize::NoResize),
+            .layer = toImageLayer(message.header("L")),
+            .autoScroll = message.header("l") != nullptr,
+            .updateCursor = message.header("u") != nullptr,
+            .requestStatus = message.header("s") != nullptr,
+        };
+    }
 } // namespace
+
 // }}}
 
 Screen::~Screen() = default;
@@ -1046,15 +1193,18 @@ void Screen::sendDeviceAttributes()
         return "1"; // Should never be reached.
     }();
 
-    auto const attrs = to_params(DeviceAttributes::AnsiColor |
-                                 // DeviceAttributes::AnsiTextLocator |
-                                 DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132 |
-                                 // TODO: DeviceAttributes::NationalReplacementCharacterSets |
-                                 DeviceAttributes::RectangularEditing |
-                                 // TODO: DeviceAttributes::SelectiveErase |
-                                 DeviceAttributes::SixelGraphics |
-                                 // TODO: DeviceAttributes::TechnicalCharacters |
-                                 DeviceAttributes::UserDefinedKeys | DeviceAttributes::ClipboardExtension);
+    auto da = DeviceAttributes::AnsiColor |
+              // DeviceAttributes::AnsiTextLocator |
+              DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132 |
+              // TODO: DeviceAttributes::NationalReplacementCharacterSets |
+              DeviceAttributes::RectangularEditing |
+              // TODO: DeviceAttributes::SelectiveErase |
+              DeviceAttributes::SixelGraphics |
+              // TODO: DeviceAttributes::TechnicalCharacters |
+              DeviceAttributes::UserDefinedKeys | DeviceAttributes::ClipboardExtension;
+    if (_terminal->settings().goodImageProtocol)
+        da = da | DeviceAttributes::GoodImageProtocol;
+    auto const attrs = to_params(da);
 
     reply("\033[?{};{}c", id, attrs);
 }
@@ -2022,51 +2172,68 @@ void Screen::renderImage(shared_ptr<Image const> image,
                          ImageSize imageSize,
                          ImageAlignment alignmentPolicy,
                          ImageResize resizePolicy,
-                         bool autoScroll)
+                         bool autoScroll,
+                         bool updateCursor,
+                         ImageLayer layer)
 {
-    // TODO: make use of imageOffset
-    (void) imageOffset;
-
     auto const linesAvailable = pageSize().lines - topLeft.line.as<LineCount>();
     auto const linesToBeRendered = std::min(gridSize.lines, linesAvailable);
     auto const columnsAvailable = pageSize().columns - topLeft.column;
     auto const columnsToBeRendered = ColumnCount(std::min(columnsAvailable, gridSize.columns));
-    auto const gapColor = RGBAColor {}; // TODO: _cursor.graphicsRendition.backgroundColor;
+    auto const gapColor = RGBAColor { vtbackend::apply(_terminal->colorPalette(),
+                                                       _cursor.graphicsRendition.backgroundColor,
+                                                       ColorTarget::Background,
+                                                       ColorMode::Normal) };
 
-    // TODO: make use of imageOffset and imageSize
-    auto const rasterizedImage = make_shared<RasterizedImage>(
-        std::move(image), alignmentPolicy, resizePolicy, gapColor, gridSize, _terminal->cellPixelSize());
-    const auto lastSixelBand = unbox(imageSize.height) % 6;
-    const LineOffset offset = [&]() {
-        auto offset = LineOffset::cast_from(std::ceil((imageSize.height - lastSixelBand).as<double>()
-                                                      / _terminal->cellPixelSize().height.as<double>()))
-                      - 1 * (lastSixelBand == 0);
-        auto const h = unbox(imageSize.height) - 1;
-        // VT340 has this behavior where for some heights it text cursor is placed not
-        // at the final sixel line but a line above it.
-        // See
-        // https://github.com/hackerb9/vt340test/blob/main/glitches.md#text-cursor-is-left-one-row-too-high-for-certain-sixel-heights
-        if (h % 6 > h % unbox(_terminal->cellPixelSize().height))
-            return offset - 1;
-        return offset;
+    auto const rasterizedImage = make_shared<RasterizedImage>(std::move(image),
+                                                              alignmentPolicy,
+                                                              resizePolicy,
+                                                              gapColor,
+                                                              gridSize,
+                                                              _terminal->cellPixelSize(),
+                                                              layer,
+                                                              imageOffset,
+                                                              imageSize);
+
+    // Compute the cursor line offset after rendering.
+    // For Sixel images (identified by non-zero pixel imageSize), use VT340-compatible sixel band math.
+    // For GIP images, simply place the cursor at the last row of the rendered area.
+    auto const isSixelImage = imageSize.width.value > 0 && imageSize.height.value > 0;
+    auto const cursorLineOffset = [&]() -> LineOffset {
+        if (isSixelImage)
+        {
+            auto const lastSixelBand = unbox(imageSize.height) % 6;
+            auto lineOffset =
+                LineOffset::cast_from(std::ceil((imageSize.height - lastSixelBand).as<double>()
+                                                / _terminal->cellPixelSize().height.as<double>()))
+                - 1 * (lastSixelBand == 0);
+            auto const h = unbox(imageSize.height) - 1;
+            // VT340 quirk: for some heights the text cursor is placed one row too high.
+            // See: https://github.com/hackerb9/vt340test/blob/main/glitches.md
+            if (h % 6 > h % unbox(_terminal->cellPixelSize().height))
+                lineOffset = lineOffset - 1;
+            return lineOffset;
+        }
+        // GIP: cursor goes to the line immediately below the last rendered image row.
+        return boxed_cast<LineOffset>(linesToBeRendered);
     }();
 
     if (unbox(linesToBeRendered))
     {
-        for (GridSize::Offset const offset:
+        for (GridSize::Offset const gridOffset:
              GridSize { .lines = linesToBeRendered, .columns = columnsToBeRendered })
         {
-            auto cell = at(topLeft + offset);
+            auto cell = at(topLeft + gridOffset);
             cell.setImageFragment(rasterizedImage,
-                                  CellLocation { .line = offset.line, .column = offset.column });
+                                  CellLocation { .line = gridOffset.line, .column = gridOffset.column });
             cell.setHyperlink(_cursor.hyperlink);
         };
-        moveCursorTo(topLeft.line + offset, topLeft.column);
+        if (updateCursor)
+            moveCursorTo(topLeft.line + cursorLineOffset, topLeft.column);
     }
 
-    // If there're lines to be rendered missing (because it didn't fit onto the screen just yet)
-    // AND iff sixel !sixelScrolling  is enabled, then scroll as much as needed to render the remaining
-    // lines.
+    // If there are lines remaining (image didn't fit on screen) and autoScroll is enabled,
+    // scroll content up and render the remaining lines.
     if (linesToBeRendered != gridSize.lines && autoScroll)
     {
         auto const remainingLineCount = gridSize.lines - linesToBeRendered;
@@ -2075,17 +2242,23 @@ void Screen::renderImage(shared_ptr<Image const> image,
             linefeed(topLeft.column);
             for (auto const columnOffset: crispy::views::iota_as<ColumnOffset>(*columnsToBeRendered))
             {
-                auto const offset =
+                auto const fragOffset =
                     CellLocation { .line = boxed_cast<LineOffset>(linesToBeRendered) + lineOffset,
                                    .column = columnOffset };
                 auto cell = at(boxed_cast<LineOffset>(pageSize().lines) - 1, topLeft.column + columnOffset);
-                cell.setImageFragment(rasterizedImage, offset);
+                cell.setImageFragment(rasterizedImage, fragOffset);
                 cell.setHyperlink(_cursor.hyperlink);
             };
         }
+        // After auto-scroll, cursor is ON the last image row. Move it below.
+        // Only for GIP — Sixel handles its own cursor positioning at the call site.
+        if (updateCursor && !isSixelImage)
+            linefeed(topLeft.column);
     }
-    // move ansi text cursor to position of the sixel cursor
-    moveCursorToColumn(topLeft.column);
+
+    // Move ANSI text cursor to the correct column after image placement.
+    if (updateCursor)
+        moveCursorToColumn(topLeft.column);
 }
 
 void Screen::requestDynamicColor(DynamicColorName name)
@@ -4383,6 +4556,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case STP: _terminal->hookParser(hookSTP(seq)); break;
         case DECRQSS: _terminal->hookParser(hookDECRQSS(seq)); break;
         case XTGETTCAP: _terminal->hookParser(hookXTGETTCAP(seq)); break;
+        case GIP: _terminal->hookParser(hookGoodImageProtocol(seq)); break;
 
         default: return ApplyResult::Unsupported;
     }
@@ -4591,6 +4765,283 @@ bool Screen::isCursorInsideMargins() const noexcept
     bool const insideHorizontalMargin = !_terminal->isModeEnabled(DECMode::LeftRightMargin)
                                         || margin().horizontal.contains(_cursor.position.column);
     return insideVerticalMargin && insideHorizontalMargin;
+}
+
+unique_ptr<ParserExtension> Screen::hookGoodImageProtocol(Sequence const&)
+{
+    if (!_terminal->settings().goodImageProtocol)
+        return nullptr;
+    return make_unique<MessageParser>([this](Message message) {
+        auto const* const operation = message.header("o");
+        if (!operation || operation->empty())
+            return; // Missing operation header — silently ignore.
+
+        auto const op = (*operation)[0];
+        switch (op)
+        {
+            case 'u': handleGipUpload(std::move(message)); break;
+            case 'r': handleGipRender(message); break;
+            case 'd': handleGipRelease(message); break;
+            case 's': handleGipOneshot(std::move(message)); break;
+            case 'q': handleGipQuery(); break;
+            default: break; // Unrecognized operation — silently ignore.
+        }
+    });
+}
+
+void Screen::handleGipUpload(Message message)
+{
+    auto const* const name = message.header("n");
+    auto const imageFormat = toImageFormat(message.header("f"));
+    auto const width = Width::cast_from(toNumber(message.header("w")).value_or(0));
+    auto const height = Height::cast_from(toNumber(message.header("h")).value_or(0));
+    auto const size = ImageSize { width, height };
+    auto const requestStatus = message.header("s") != nullptr;
+
+    // Validate name: ASCII alphanumeric + underscore, 1-512 chars.
+    auto const validName = [&]() -> bool {
+        if (!name || name->empty() || name->size() > 512)
+            return false;
+        return std::ranges::all_of(*name, [](char ch) {
+            return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+                   || ch == '_';
+        });
+    }();
+
+    // Resolve Auto format from the data before validation.
+    auto const resolvedFormat = [&]() -> std::optional<ImageFormat> {
+        if (imageFormat.has_value() && *imageFormat == ImageFormat::Auto)
+            return resolveAutoFormat(std::span<uint8_t const>(message.body().data(), message.body().size()),
+                                     size);
+        return imageFormat;
+    }();
+
+    // PNG width/height are optional (extracted from PNG header).
+    bool const validImage = resolvedFormat.has_value()
+                            && (*resolvedFormat == ImageFormat::PNG || (*size.width > 0 && *size.height > 0));
+
+    // Validate RGB/RGBA data size: body must equal width * height * bytes-per-pixel.
+    auto const validDataSize = [&]() -> bool {
+        if (!validImage || !resolvedFormat.has_value())
+            return false;
+        if (*resolvedFormat == ImageFormat::PNG)
+            return true; // PNG is self-describing
+        auto const bpp = (*resolvedFormat == ImageFormat::RGBA) ? 4u : 3u;
+        auto const expectedSize = static_cast<size_t>(*size.width) * *size.height * bpp;
+        return message.body().size() == expectedSize;
+    }();
+
+    if (validName && validImage && validDataSize)
+    {
+        uploadImage(*name, resolvedFormat.value(), size, message.takeBody());
+        if (requestStatus)
+            replyGipStatus(0);
+    }
+    else if (requestStatus)
+    {
+        replyGipStatus(2); // invalid image data
+    }
+}
+
+void Screen::handleGipRender(Message const& message)
+{
+    auto const* const name = message.header("n");
+    auto const params = parseGipRenderParams(message);
+    auto const x = PixelCoordinate::X { toNumber(message.header("x")).value_or(0) };
+    auto const y = PixelCoordinate::Y { toNumber(message.header("y")).value_or(0) };
+
+    renderImageByName(name ? *name : "",
+                      GridSize { .lines = params.screenRows, .columns = params.screenCols },
+                      PixelCoordinate { .x = x, .y = y },
+                      ImageSize { params.imageWidth, params.imageHeight },
+                      params.alignmentPolicy,
+                      params.resizePolicy,
+                      params.autoScroll,
+                      params.requestStatus,
+                      params.updateCursor,
+                      params.layer);
+}
+
+void Screen::handleGipRelease(Message const& message)
+{
+    if (auto const* const name = message.header("n"); name)
+        releaseImage(*name);
+}
+
+void Screen::handleGipQuery()
+{
+    auto constexpr MaxImages = 100; // matches ImagePool LRU capacity
+    auto const maxSize = _terminal->maxImageSize();
+    auto const maxBytes =
+        static_cast<unsigned long>(*maxSize.width) * *maxSize.height * 4; // RGBA = 4 bytes per pixel
+    _terminal->reply(
+        "\033P!gs=8,m={},b={},w={},h={}\033\\", MaxImages, maxBytes, *maxSize.width, *maxSize.height);
+    _terminal->flushInput();
+}
+
+void Screen::handleGipOneshot(Message message)
+{
+    auto const params = parseGipRenderParams(message);
+    auto imageFormat = toImageFormat(message.header("f"));
+
+    // Resolve Auto format from the data before rendering.
+    if (imageFormat.has_value() && *imageFormat == ImageFormat::Auto)
+    {
+        imageFormat =
+            resolveAutoFormat(std::span<uint8_t const>(message.body().data(), message.body().size()),
+                              ImageSize { params.imageWidth, params.imageHeight });
+        if (!imageFormat.has_value())
+        {
+            if (params.requestStatus)
+                replyGipStatus(2);
+            return;
+        }
+    }
+
+    auto const success = renderImage(imageFormat.value_or(ImageFormat::RGB),
+                                     ImageSize { params.imageWidth, params.imageHeight },
+                                     message.takeBody(),
+                                     GridSize { .lines = params.screenRows, .columns = params.screenCols },
+                                     params.alignmentPolicy,
+                                     params.resizePolicy,
+                                     params.autoScroll,
+                                     params.updateCursor,
+                                     params.layer);
+
+    if (params.requestStatus)
+        replyGipStatus(success ? 0 : 2);
+}
+
+void Screen::replyGipStatus(int statusCode)
+{
+    _terminal->reply("\033P!gs={}\033\\", statusCode);
+    _terminal->flushInput();
+}
+
+std::optional<Image::Data> Screen::decodePng(std::span<uint8_t const> data, ImageSize& size) const
+{
+    if (!_terminal->imageDecoder())
+        return std::nullopt;
+    return _terminal->imageDecoder()(ImageFormat::PNG, data, size);
+}
+
+void Screen::uploadImage(string name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap)
+{
+    assert(format != ImageFormat::Auto && "Auto must be resolved before upload");
+    if (format == ImageFormat::PNG)
+    {
+        auto decodedSize = imageSize;
+        if (auto decodedData = decodePng(pixmap, decodedSize))
+            _terminal->imagePool().link(std::move(name),
+                                        uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData)));
+        else
+            errorLog()("Failed to decode PNG image for upload.");
+        return;
+    }
+
+    _terminal->imagePool().link(std::move(name), uploadImage(format, imageSize, std::move(pixmap)));
+}
+
+void Screen::renderImageByName(std::string const& name,
+                               GridSize gridSize,
+                               PixelCoordinate imageOffset,
+                               ImageSize imageSize,
+                               ImageAlignment alignmentPolicy,
+                               ImageResize resizePolicy,
+                               bool autoScroll,
+                               bool requestStatus,
+                               bool updateCursor,
+                               ImageLayer layer)
+{
+    auto const imageRef = _terminal->imagePool().findImageByName(name);
+    auto const topLeft = _cursor.position;
+
+    if (imageRef)
+        renderImage(imageRef,
+                    topLeft,
+                    gridSize,
+                    imageOffset,
+                    imageSize,
+                    alignmentPolicy,
+                    resizePolicy,
+                    autoScroll,
+                    updateCursor,
+                    layer);
+
+    if (requestStatus)
+        replyGipStatus(imageRef ? 0 : 1);
+}
+
+bool Screen::renderImage(ImageFormat format,
+                         ImageSize imageSize,
+                         Image::Data&& pixmap,
+                         GridSize gridSize,
+                         ImageAlignment alignmentPolicy,
+                         ImageResize resizePolicy,
+                         bool autoScroll,
+                         bool updateCursor,
+                         ImageLayer layer)
+{
+    assert(format != ImageFormat::Auto && "Auto must be resolved before render");
+    auto constexpr PixelOffset = PixelCoordinate {};
+    auto constexpr PixelSize = ImageSize {};
+
+    auto const topLeft = _cursor.position;
+
+    auto const computeGridSize = [&](ImageSize decodedPixelSize) -> GridSize {
+        if (*gridSize.lines && *gridSize.columns)
+            return gridSize;
+        auto const cellSize = _terminal->cellPixelSize();
+        auto const columns = ColumnCount::cast_from(
+            std::ceil(decodedPixelSize.width.as<double>() / cellSize.width.as<double>()));
+        auto const lines = LineCount::cast_from(
+            std::ceil(decodedPixelSize.height.as<double>() / cellSize.height.as<double>()));
+        return GridSize { .lines = *gridSize.lines ? gridSize.lines : lines,
+                          .columns = *gridSize.columns ? gridSize.columns : columns };
+    };
+
+    if (format == ImageFormat::PNG)
+    {
+        auto decodedSize = imageSize;
+        if (auto decodedData = decodePng(pixmap, decodedSize))
+        {
+            auto const effectiveGridSize = computeGridSize(decodedSize);
+            auto const imageRef = uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData));
+            renderImage(imageRef,
+                        topLeft,
+                        effectiveGridSize,
+                        PixelOffset,
+                        PixelSize,
+                        alignmentPolicy,
+                        resizePolicy,
+                        autoScroll,
+                        updateCursor,
+                        layer);
+            return true;
+        }
+        errorLog()("Failed to decode PNG image for oneshot render.");
+        return false;
+    }
+
+    auto const effectiveGridSize = computeGridSize(imageSize);
+    auto const imageRef = uploadImage(format, imageSize, std::move(pixmap));
+
+    renderImage(imageRef,
+                topLeft,
+                effectiveGridSize,
+                PixelOffset,
+                PixelSize,
+                alignmentPolicy,
+                resizePolicy,
+                autoScroll,
+                updateCursor,
+                layer);
+    return true;
+}
+
+void Screen::releaseImage(std::string const& name)
+{
+    _terminal->imagePool().unlink(name);
 }
 
 } // namespace vtbackend

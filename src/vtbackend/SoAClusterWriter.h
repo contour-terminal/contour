@@ -3,6 +3,7 @@
 
 #include <vtbackend/GraphicsAttributes.h>
 #include <vtbackend/Hyperlink.h>
+#include <vtbackend/Image.h>
 #include <vtbackend/LineSoA.h>
 
 #include <libunicode/convert.h>
@@ -62,6 +63,8 @@ inline void writeCellToSoA(LineSoA& line,
     // Clear cluster extras if the previous cell had a multi-codepoint grapheme cluster.
     if (oldClusterSize > 1)
         clearClusterExtras(line, col);
+
+    clearReplacedImageFragment(line.imageFragments, static_cast<uint16_t>(col));
 
     // Invalidate trivial flag if this cell's SGR or hyperlink differs from the first cell's.
     if (line.trivial && col > 0
