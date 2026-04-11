@@ -1155,6 +1155,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         uint height = 0;
         loadFromEntry(child, "max_height", height);
         where.maxImageSize = { .width = vtpty::Width { width }, .height = vtpty::Height { height } };
+        loadFromEntry(child, "good_image_protocol", where.goodImageProtocol);
     }
 }
 

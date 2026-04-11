@@ -151,6 +151,7 @@ namespace
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
         settings.maxImageSize = config.images.value().maxImageSize;
         settings.maxImageRegisterCount = config.images.value().maxImageColorRegisters;
+        settings.goodImageProtocol = config.images.value().goodImageProtocol;
         settings.statusDisplayType = profile.statusLine.value().initialType;
         settings.statusDisplayPosition = profile.statusLine.value().position;
         settings.indicatorStatusLine.left = profile.statusLine.value().indicator.left;
@@ -1963,10 +1964,12 @@ void TerminalSession::configureTerminal()
     _terminal.setMaxSixelColorRegisters(_config.images.value().maxImageColorRegisters);
     _terminal.setMaxImageSize(_config.images.value().maxImageSize);
     _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.images.value().sixelScrolling);
+    _terminal.settings().goodImageProtocol = _config.images.value().goodImageProtocol;
     _terminal.setStatusDisplay(_profile.statusLine.value().initialType);
-    sessionLog()("maxImageSize={}, sixelScrolling={}",
+    sessionLog()("maxImageSize={}, sixelScrolling={}, goodImageProtocol={}",
                  _config.images.value().maxImageSize,
-                 _config.images.value().sixelScrolling);
+                 _config.images.value().sixelScrolling,
+                 _config.images.value().goodImageProtocol);
 
     // XXX
     // if (!terminalView.renderer().renderTargetAvailable())

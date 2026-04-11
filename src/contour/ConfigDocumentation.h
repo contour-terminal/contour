@@ -890,6 +890,9 @@ constexpr StringLiteral ImagesConfig {
     "    {comment} maximum height in pixels of an image to be accepted (0 defaults to system screen pixel "
     "height)\n"
     "    max_height: {}\n"
+    "\n"
+    "    {comment} Enable or disable Good Image Protocol (GIP) support (disabled by default).\n"
+    "    good_image_protocol: {}\n"
 };
 
 constexpr StringLiteral ExperimentalFeaturesConfig {
@@ -1237,8 +1240,8 @@ constexpr StringLiteral LiveWeb { "option determines whether the instance should
 
 constexpr StringLiteral ImagesWeb {
     "section contains configuration options related to inline images. It includes options like "
-    "`sixel_scrolling`, `sixel_register_count`, `max_width`, and `max_height` to control various aspects of "
-    "image rendering and limits."
+    "`sixel_scrolling`, `sixel_register_count`, `max_width`, `max_height`, and `good_image_protocol` to "
+    "control various aspects of image rendering and limits."
 };
 
 constexpr StringLiteral ProfilesWeb { "All profiles inside configuration files share parent node `profiles`. "
