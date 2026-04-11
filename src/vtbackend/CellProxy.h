@@ -253,6 +253,7 @@ class BasicCellProxy
             _line->imageFragments.emplace();
         (*_line->imageFragments)[static_cast<uint16_t>(_col)] =
             std::make_shared<ImageFragment>(std::move(rasterizedImage), offset);
+        _line->trivial = false; // Images require per-cell rendering (RenderLine has no image support)
     }
 
     void setGraphicsRendition(GraphicsRendition sgr) noexcept
