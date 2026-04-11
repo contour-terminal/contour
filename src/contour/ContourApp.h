@@ -29,6 +29,8 @@ class ContourApp: public crispy::app
     int documentationKeyMapping();
     int documentationGlobalConfig();
     int documentationProfileConfig();
+    /// Displays an image in the terminal via GIP oneshot sequence.
+    int catAction();
 };
 
 } // namespace contour

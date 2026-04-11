@@ -11,10 +11,12 @@
 #include <crispy/App.h>
 #include <crispy/CLI.h>
 #include <crispy/StackTrace.h>
+#include <crispy/base64.h>
 #include <crispy/utils.h>
 
 #include <QtCore/QFile>
 
+#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -43,6 +45,7 @@ using std::string_view;
 using std::unique_ptr;
 
 using namespace std::string_literals;
+using namespace std::string_view_literals;
 
 namespace CLI = crispy::cli;
 
@@ -166,6 +169,7 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.documentation.keys", bind(&ContourApp::documentationKeyMapping, this));
     link("contour.documentation.configuration.global", bind(&ContourApp::documentationGlobalConfig, this));
     link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
+    link("contour.cat", bind(&ContourApp::catAction, this));
 }
 
 template <typename Callback>
@@ -466,6 +470,173 @@ int ContourApp::captureAction()
         return EXIT_FAILURE;
 }
 
+namespace
+{
+    /// Parses a size string in the format "WxH" (e.g. "80x24").
+    /// Returns {0,0} if the format is invalid.
+    crispy::size parseSize(string_view text)
+    {
+        auto const pos = text.find('x');
+        if (pos == string_view::npos || pos == 0 || pos == text.size() - 1)
+            return crispy::size {};
+
+        auto const widthStr = text.substr(0, pos);
+        auto const heightStr = text.substr(pos + 1);
+
+        int width = 0;
+        int height = 0;
+        auto [widthEnd, widthErr] =
+            std::from_chars(widthStr.data(), widthStr.data() + widthStr.size(), width);
+        auto [heightEnd, heightErr] =
+            std::from_chars(heightStr.data(), heightStr.data() + heightStr.size(), height);
+
+        if (widthErr != std::errc {} || heightErr != std::errc {})
+            return crispy::size {};
+
+        return crispy::size { .width = width, .height = height };
+    }
+
+    /// Parses an image alignment string.
+    vtbackend::ImageAlignment parseImageAlignment(string_view text)
+    {
+        if (text == "top-start")
+            return vtbackend::ImageAlignment::TopStart;
+        if (text == "top-center")
+            return vtbackend::ImageAlignment::TopCenter;
+        if (text == "top-end")
+            return vtbackend::ImageAlignment::TopEnd;
+        if (text == "middle-start")
+            return vtbackend::ImageAlignment::MiddleStart;
+        if (text == "middle-center" || text == "center")
+            return vtbackend::ImageAlignment::MiddleCenter;
+        if (text == "middle-end")
+            return vtbackend::ImageAlignment::MiddleEnd;
+        if (text == "bottom-start")
+            return vtbackend::ImageAlignment::BottomStart;
+        if (text == "bottom-center")
+            return vtbackend::ImageAlignment::BottomCenter;
+        if (text == "bottom-end")
+            return vtbackend::ImageAlignment::BottomEnd;
+        return vtbackend::ImageAlignment::MiddleCenter;
+    }
+
+    /// Parses an image resize policy string.
+    vtbackend::ImageResize parseImageResize(string_view text)
+    {
+        if (text == "no" || text == "none")
+            return vtbackend::ImageResize::NoResize;
+        if (text == "fit")
+            return vtbackend::ImageResize::ResizeToFit;
+        if (text == "fill")
+            return vtbackend::ImageResize::ResizeToFill;
+        if (text == "stretch")
+            return vtbackend::ImageResize::StretchToFill;
+        return vtbackend::ImageResize::ResizeToFit;
+    }
+
+    /// Parses an image layer value string (0/1/2).
+    int parseImageLayer(string_view text)
+    {
+        if (text == "0" || text == "below")
+            return 0;
+        if (text == "1" || text == "replace")
+            return 1;
+        if (text == "2" || text == "above")
+            return 2;
+        return 1; // default: replace
+    }
+
+    /// Reads a file in binary mode, returning its raw bytes.
+    /// Returns an empty vector on any failure or if the file exceeds @p maxSize bytes.
+    std::vector<uint8_t> readFile(std::filesystem::path const& path,
+                                  std::uintmax_t maxSize = std::numeric_limits<std::uintmax_t>::max())
+    {
+        auto ifs = std::ifstream(path.string(), std::ios::binary | std::ios::ate);
+        if (!ifs.good())
+            return {};
+
+        auto const fileSize = static_cast<std::uintmax_t>(ifs.tellg());
+        if (fileSize > maxSize)
+            return {};
+
+        ifs.seekg(0, std::ios::beg);
+        auto data = std::vector<uint8_t>(static_cast<size_t>(fileSize));
+        ifs.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(fileSize));
+        if (!ifs || static_cast<std::uintmax_t>(ifs.gcount()) != fileSize)
+            return {};
+        return data;
+    }
+
+    void displayImage(vtbackend::ImageResize resizePolicy,
+                      vtbackend::ImageAlignment alignmentPolicy,
+                      crispy::size screenSize,
+                      int layer,
+                      string_view fileName)
+    {
+        auto constexpr MaxImageFileSize = std::uintmax_t { 16 * 1024 * 1024 }; // GIP body limit
+        auto const data = readFile(std::filesystem::path(string(fileName)), MaxImageFileSize);
+        if (data.empty())
+        {
+            cerr << std::format("Error: Failed to read file '{}' (not found, unreadable, or exceeds 16 MB)\n",
+                                fileName);
+            return;
+        }
+
+        auto constexpr ST = "\033\\"sv;
+
+        cout << std::format("{}o=s,f=1,c={},r={},a={},z={},L={},u,l;!",
+                            "\033P!g"sv,
+                            screenSize.width,
+                            screenSize.height,
+                            static_cast<int>(alignmentPolicy) + 1,
+                            static_cast<int>(resizePolicy),
+                            layer);
+
+        auto encoderState = crispy::base64::encoder_state {};
+        std::vector<char> buf;
+        auto const writer = [&](char a, char b, char c, char d) {
+            buf.push_back(a);
+            buf.push_back(b);
+            buf.push_back(c);
+            buf.push_back(d);
+        };
+        auto const flush = [&]() {
+            cout.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+            buf.clear();
+        };
+
+        for (uint8_t const byte: data)
+        {
+            crispy::base64::encode(byte, encoderState, writer);
+            if (buf.size() >= 4096)
+                flush();
+        }
+        crispy::base64::finish(encoderState, writer);
+        flush();
+
+        cout << ST;
+        cout.flush();
+    }
+} // namespace
+
+int ContourApp::catAction()
+{
+    if (parameters().verbatim.empty())
+    {
+        cerr << "Error: No image file specified.\n";
+        return EXIT_FAILURE;
+    }
+
+    auto const resizePolicy = parseImageResize(parameters().get<string>("contour.cat.resize"));
+    auto const alignmentPolicy = parseImageAlignment(parameters().get<string>("contour.cat.align"));
+    auto const size = parseSize(parameters().get<string>("contour.cat.size"));
+    auto const layer = parseImageLayer(parameters().get<string>("contour.cat.layer"));
+    auto const fileName = parameters().verbatim.front();
+
+    displayImage(resizePolicy, alignmentPolicy, size, layer, fileName);
+    return EXIT_SUCCESS;
+}
+
 int ContourApp::parserTableAction()
 {
     vtparser::parserTableDot(std::cout);
@@ -575,6 +746,39 @@ crispy::cli::command ContourApp::parameterDefinition() const
                                           "FILE",
                                           CLI::presence::Required },
                         } } } },
+            CLI::command {
+                "cat",
+                "Displays an image in the terminal using the Good Image Protocol.",
+                CLI::option_list {
+                    CLI::option { "resize",
+                                  CLI::value { "fit"s },
+                                  "Sets the image resize policy.\n"
+                                  "Policies available are:\n"
+                                  " - no/none (no resize),\n"
+                                  " - fit (resize to fit),\n"
+                                  " - fill (resize to fill),\n"
+                                  " - stretch (stretch to fill)." },
+                    CLI::option { "align",
+                                  CLI::value { "center"s },
+                                  "Sets the image alignment policy.\n"
+                                  "Possible values: top-start, top-center, top-end, "
+                                  "middle-start, middle-center/center, middle-end, "
+                                  "bottom-start, bottom-center, bottom-end." },
+                    CLI::option { "size",
+                                  CLI::value { "0x0"s },
+                                  "Sets the amount of columns and rows to place the image onto "
+                                  "(format: COLSxROWS, e.g. 80x24). "
+                                  "The top-left of the area is the current cursor position." },
+                    CLI::option { "layer",
+                                  CLI::value { "1"s },
+                                  "Sets the image layer relative to text.\n"
+                                  "Values: 0/below (below text), 1/replace (replace text, default), "
+                                  "2/above (above text)." } },
+                CLI::command_list {},
+                CLI::command_select::Explicit,
+                CLI::verbatim {
+                    "IMAGE_FILE",
+                    "Path to image to be displayed. Image formats supported are at least PNG, JPG." } },
             CLI::command {
                 "capture",
                 "Captures the screen buffer of the currently running terminal.",
