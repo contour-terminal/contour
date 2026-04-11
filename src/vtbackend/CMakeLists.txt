@@ -32,6 +32,7 @@ set(vtbackend_HEADERS
     LineFlags.h
     LineSoA.h
     MatchModes.h
+    MessageParser.h
     MockTerm.h
     RenderBuffer.h
     RenderBufferBuilder.h
@@ -68,6 +69,7 @@ set(vtbackend_SOURCES
     Line.cpp
     LineSoA.cpp
     MatchModes.cpp
+    MessageParser.cpp
     MockTerm.cpp
     RenderBuffer.cpp
     RenderBufferBuilder.cpp
@@ -138,6 +140,7 @@ if(LIBTERMINAL_TESTING)
         Grid_test.cpp
         HintModeHandler_test.cpp
         Line_test.cpp
+        MessageParser_test.cpp
         Screen_test.cpp
         Image_test.cpp
         Sequence_test.cpp
