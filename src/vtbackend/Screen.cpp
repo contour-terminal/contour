@@ -546,7 +546,7 @@ void Screen::writeText(string_view text, size_t cellCount)
     auto const isPureAscii =
         std::ranges::all_of(text, [](char ch) { return static_cast<unsigned char>(ch) < 0x80; });
     if (isPureAscii && !_terminal->isModeEnabled(AnsiMode::Insert) && isFullHorizontalMargins()
-        && _cursor.charsets.isSelected(CharsetId::USASCII))
+        && _cursor.charsets.isSelected(CharsetId::USASCII) && !_cursor.charsets.activeDRCSFont().has_value())
     {
         crlfIfWrapPending();
 
@@ -648,6 +648,35 @@ void Screen::writeText(string_view text, size_t cellCount)
         for (auto const rawCp: unicode::convert_to<char32_t>(text))
         {
             crlfIfWrapPending();
+
+            // DRCS check: if the active charset is a DRCS font, render as image
+            if (auto const drcsFont = _cursor.charsets.activeDRCSFont(); drcsFont.has_value())
+            {
+                (void) _cursor.charsets.map(rawCp); // Advance single-shift state
+                if (auto const* charset = _terminal->drcsCharset(*drcsFont); charset != nullptr)
+                {
+                    auto const charPos = static_cast<int>(rawCp);
+                    if (auto const glyphIt = charset->glyphs.find(charPos); glyphIt != charset->glyphs.end())
+                    {
+                        auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
+                                                              _cursor.graphicsRendition.foregroundColor,
+                                                              ColorTarget::Foreground,
+                                                              ColorMode::Normal);
+                        auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
+                        auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
+                        cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
+                        cell.setImageFragment(
+                            rasterizedImage,
+                            CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+                        _lastCursorPosition = _cursor.position;
+                        prevCodepoint = U' ';
+                        advanceCursorAfterWrite(ColumnCount(1));
+                        _terminal->markCellDirty(_lastCursorPosition);
+                        continue;
+                    }
+                }
+            }
+
             auto const cp = _cursor.charsets.map(rawCp);
 
             if (!prevCodepoint)
@@ -721,6 +750,41 @@ void Screen::writeText(char32_t codepoint)
 void Screen::writeTextInternal(char32_t sourceCodepoint)
 {
     crlfIfWrapPending();
+
+    // Check if the active charset is a DRCS font
+    if (auto const drcsFont = _cursor.charsets.activeDRCSFont(); drcsFont.has_value())
+    {
+        if (auto const* charset = _terminal->drcsCharset(*drcsFont); charset != nullptr)
+        {
+            auto const charPos = static_cast<int>(sourceCodepoint);
+            if (auto const glyphIt = charset->glyphs.find(charPos); glyphIt != charset->glyphs.end())
+            {
+                // Resolve foreground color for the glyph
+                auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
+                                                      _cursor.graphicsRendition.foregroundColor,
+                                                      ColorTarget::Foreground,
+                                                      ColorMode::Normal);
+
+                // Create an RGBA image from the monochrome DRCS glyph
+                auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
+
+                // Write a space as placeholder, attach the DRCS image, then advance cursor.
+                {
+                    auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
+                    cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
+                    cell.setImageFragment(rasterizedImage,
+                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+                    _lastCursorPosition = _cursor.position;
+                    advanceCursorAfterWrite(ColumnCount(1));
+                    _terminal->markCellDirty(_lastCursorPosition);
+                }
+                (void) _cursor.charsets.map(sourceCodepoint); // Advance single-shift state
+                _terminal->resetInstructionCounter();
+                return;
+            }
+        }
+        // Fall through to normal rendering if glyph not found
+    }
 
     char32_t const codepoint = _cursor.charsets.map(sourceCodepoint);
 
@@ -1169,7 +1233,7 @@ void Screen::reportCursorInformation()
 
 void Screen::selectConformanceLevel(VTType level)
 {
-    _terminal->setTerminalId(level);
+    _terminal->setOperatingLevel(level);
 }
 
 void Screen::sendDeviceAttributes()
@@ -1193,17 +1257,21 @@ void Screen::sendDeviceAttributes()
         return "1"; // Should never be reached.
     }();
 
-    auto da = DeviceAttributes::AnsiColor |
-              // DeviceAttributes::AnsiTextLocator |
-              DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132 |
-              // TODO: DeviceAttributes::NationalReplacementCharacterSets |
-              DeviceAttributes::RectangularEditing |
-              // TODO: DeviceAttributes::SelectiveErase |
-              DeviceAttributes::SixelGraphics |
-              // TODO: DeviceAttributes::TechnicalCharacters |
-              DeviceAttributes::UserDefinedKeys | DeviceAttributes::ClipboardExtension;
+    auto da = DeviceAttributes::AnsiColor | DeviceAttributes::AnsiTextLocator
+              | DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132
+              | DeviceAttributes::HorizontalScrolling | DeviceAttributes::NationalReplacementCharacterSets
+              | DeviceAttributes::RectangularEditing | DeviceAttributes::SelectiveErase
+              | DeviceAttributes::SixelGraphics | DeviceAttributes::SoftCharacterSet
+              | DeviceAttributes::StatusDisplay | DeviceAttributes::TechnicalCharacters
+              | DeviceAttributes::TextMacros | DeviceAttributes::UserDefinedKeys | DeviceAttributes::Windowing
+              | DeviceAttributes::ClipboardExtension;
     if (_terminal->settings().goodImageProtocol)
         da = da | DeviceAttributes::GoodImageProtocol;
+
+    // Filter out extensions that are required at the current operating level.
+    // Required extensions are implied by the conformance level and should not be listed.
+    da = filterRequiredExtensions(da, _terminal->operatingLevel());
+
     auto const attrs = to_params(da);
 
     reply("\033[?{};{}c", id, attrs);
@@ -2117,6 +2185,80 @@ void Screen::applicationKeypadMode(bool enable)
     _terminal->setApplicationkeypadMode(enable);
 }
 
+bool Screen::tryHandleSCS(Sequence const& seq)
+{
+    auto const& intermediates = seq.intermediateCharacters();
+    if (intermediates.empty())
+        return false;
+
+    // First intermediate selects the G-set: ( = G0, ) = G1, * = G2, + = G3
+    auto const gSet = [&]() -> std::optional<CharsetTable> {
+        switch (intermediates[0])
+        {
+            case '(': return CharsetTable::G0;
+            case ')': return CharsetTable::G1;
+            case '*': return CharsetTable::G2;
+            case '+': return CharsetTable::G3;
+            default: return std::nullopt;
+        }
+    }();
+    if (!gSet)
+        return false;
+
+    // Build the designator string from remaining intermediates + final character.
+    // Single-byte designator: intermediates has 1 char, final is the designator.
+    // Two-byte designator (DRCS): intermediates has 2 chars, second is the intermediate, final is the
+    // designator.
+    auto const designator = [&]() -> std::string {
+        auto result = std::string {};
+        for (size_t i = 1; i < intermediates.size(); ++i)
+            result += intermediates[i];
+        result += seq.finalChar();
+        return result;
+    }();
+
+    // Try to map the designator to a standard charset first
+    auto const standardCharset = [&]() -> std::optional<CharsetId> {
+        if (designator.size() == 1)
+        {
+            switch (designator[0])
+            {
+                case '0': return CharsetId::Special;
+                case 'A': return CharsetId::British;
+                case 'B': return CharsetId::USASCII;
+                case 'C': return CharsetId::Finnish;
+                case '4': return CharsetId::Dutch;
+                case 'E': return CharsetId::NorwegianDanish;
+                case 'R': return CharsetId::French;
+                case 'Q': return CharsetId::FrenchCanadian;
+                case 'K': return CharsetId::German;
+                case 'Z': return CharsetId::Spanish;
+                case 'H': return CharsetId::Swedish;
+                case '=': return CharsetId::Swiss;
+                case '>': return CharsetId::Technical;
+                default: break;
+            }
+        }
+        return std::nullopt;
+    }();
+
+    if (standardCharset)
+    {
+        designateCharset(*gSet, *standardCharset);
+        return true;
+    }
+
+    // For DRCS designators: look up the font number from the Terminal's designator map.
+    if (auto const fontNumber = _terminal->drcsDesignatorToFont(designator); fontNumber.has_value())
+    {
+        _cursor.charsets.selectDRCS(*gSet, *fontNumber);
+        return true;
+    }
+
+    // Accept any other unrecognized designator silently (unknown DRCS or future extension).
+    return true;
+}
+
 void Screen::designateCharset(CharsetTable table, CharsetId charset)
 {
     // TODO: unit test SCS and see if they also behave well with reset/softreset
@@ -2339,7 +2481,7 @@ void Screen::requestStatusString(RequestStatusString value)
         {
             case RequestStatusString::DECSCL: {
                 auto level = 61;
-                switch (_terminal->terminalId())
+                switch (_terminal->operatingLevel())
                 {
                     case VTType::VT525:
                     case VTType::VT520:
@@ -2353,8 +2495,7 @@ void Screen::requestStatusString(RequestStatusString value)
                     case VTType::VT100: level = 61; break;
                 }
 
-                auto const c1TransmittionMode = ControlTransmissionMode::S7C1T;
-                auto const c1t = c1TransmittionMode == ControlTransmissionMode::S7C1T ? 1 : 0;
+                auto const c1t = _terminal->c1TransmissionMode() == ControlTransmissionMode::S7C1T ? 1 : 0;
 
                 return std::format("{};{}\"p", level, c1t);
             }
@@ -3568,6 +3709,8 @@ void Screen::processSequence(Sequence const& seq)
     _terminal->incrementInstructionCounter();
     if (Function const* funcSpec = seq.functionDefinition(_terminal->activeSequences()); funcSpec != nullptr)
         applyAndLog(*funcSpec, seq);
+    else if (seq.category() == FunctionCategory::ESC && tryHandleSCS(seq))
+        ; // Handled as SCS designation (e.g., DRCS two-byte designators)
     else if (vtParserLog)
         vtParserLog()("Unknown VT sequence: {}", seq);
 }
@@ -4002,10 +4145,41 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case CR: moveCursorToBeginOfLine(); break;
 
         // ESC
+        // SCS — G0
         case SCS_G0_SPECIAL: designateCharset(CharsetTable::G0, CharsetId::Special); break;
+        case SCS_G0_BRITISH: designateCharset(CharsetTable::G0, CharsetId::British); break;
         case SCS_G0_USASCII: designateCharset(CharsetTable::G0, CharsetId::USASCII); break;
+        case SCS_G0_FINNISH: designateCharset(CharsetTable::G0, CharsetId::Finnish); break;
+        case SCS_G0_DUTCH: designateCharset(CharsetTable::G0, CharsetId::Dutch); break;
+        case SCS_G0_NORWEGIAN: designateCharset(CharsetTable::G0, CharsetId::NorwegianDanish); break;
+        case SCS_G0_FRENCH: designateCharset(CharsetTable::G0, CharsetId::French); break;
+        case SCS_G0_FRENCHCANADIAN: designateCharset(CharsetTable::G0, CharsetId::FrenchCanadian); break;
+        case SCS_G0_GERMAN: designateCharset(CharsetTable::G0, CharsetId::German); break;
+        case SCS_G0_SPANISH: designateCharset(CharsetTable::G0, CharsetId::Spanish); break;
+        case SCS_G0_SWEDISH: designateCharset(CharsetTable::G0, CharsetId::Swedish); break;
+        case SCS_G0_SWISS: designateCharset(CharsetTable::G0, CharsetId::Swiss); break;
+        case SCS_G0_TECHNICAL: designateCharset(CharsetTable::G0, CharsetId::Technical); break;
+        // SCS — G1
         case SCS_G1_SPECIAL: designateCharset(CharsetTable::G1, CharsetId::Special); break;
+        case SCS_G1_BRITISH: designateCharset(CharsetTable::G1, CharsetId::British); break;
         case SCS_G1_USASCII: designateCharset(CharsetTable::G1, CharsetId::USASCII); break;
+        case SCS_G1_FINNISH: designateCharset(CharsetTable::G1, CharsetId::Finnish); break;
+        case SCS_G1_DUTCH: designateCharset(CharsetTable::G1, CharsetId::Dutch); break;
+        case SCS_G1_NORWEGIAN: designateCharset(CharsetTable::G1, CharsetId::NorwegianDanish); break;
+        case SCS_G1_FRENCH: designateCharset(CharsetTable::G1, CharsetId::French); break;
+        case SCS_G1_FRENCHCANADIAN: designateCharset(CharsetTable::G1, CharsetId::FrenchCanadian); break;
+        case SCS_G1_GERMAN: designateCharset(CharsetTable::G1, CharsetId::German); break;
+        case SCS_G1_SPANISH: designateCharset(CharsetTable::G1, CharsetId::Spanish); break;
+        case SCS_G1_SWEDISH: designateCharset(CharsetTable::G1, CharsetId::Swedish); break;
+        case SCS_G1_SWISS: designateCharset(CharsetTable::G1, CharsetId::Swiss); break;
+        case SCS_G1_TECHNICAL: designateCharset(CharsetTable::G1, CharsetId::Technical); break;
+        // SCS — G2/G3
+        case SCS_G2_SPECIAL: designateCharset(CharsetTable::G2, CharsetId::Special); break;
+        case SCS_G2_USASCII: designateCharset(CharsetTable::G2, CharsetId::USASCII); break;
+        case SCS_G2_BRITISH: designateCharset(CharsetTable::G2, CharsetId::British); break;
+        case SCS_G3_SPECIAL: designateCharset(CharsetTable::G3, CharsetId::Special); break;
+        case SCS_G3_USASCII: designateCharset(CharsetTable::G3, CharsetId::USASCII); break;
+        case SCS_G3_BRITISH: designateCharset(CharsetTable::G3, CharsetId::British); break;
         case DECALN: screenAlignmentPattern(); break;
         case DECBI: backIndex(); break;
         case DECDHL_Top:
@@ -4199,7 +4373,17 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         break;
         case DECDC: deleteColumns(seq.param_or(0, ColumnCount(1))); break;
+        case DECELR: _terminal->setLocatorMode(seq.param_or(0, 0), seq.param_or(1, 0)); break;
+        case DECSLE: {
+            auto params = std::vector<int> {};
+            for (size_t i = 0; i < seq.parameterCount(); ++i)
+                params.push_back(seq.param_or(i, 0));
+            _terminal->selectLocatorEvents(params);
+            break;
+        }
+        case DECRQLP: _terminal->requestLocatorPosition(); break;
         case DECIC: insertColumns(seq.param_or(0, ColumnCount(1))); break;
+        case DECINVM: _terminal->invokeMacro(seq.param_or(0, 0)); break;
         case DECSACE:
             // Ps=0 or 1 → stream mode, Ps=2 → rectangle mode
             _rectangularAttributeMode = (seq.param_or(0, 1) == 2);
@@ -4288,6 +4472,39 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         }
         case DECRQPSR: return impl::DECRQPSR(seq, *this);
+        case DECSCL: {
+            // DECSCL — Set Conformance Level
+            // CSI Ps1 ; Ps2 " p
+            auto const level = seq.param_or(0, 65);
+            auto const c1Mode = seq.param_or(1, 0);
+            auto const vtType = [&]() -> std::optional<VTType> {
+                switch (level)
+                {
+                    case 61: return VTType::VT100;
+                    case 62: return VTType::VT220;
+                    case 63: return VTType::VT320;
+                    case 64: return VTType::VT420;
+                    case 65: return VTType::VT525;
+                    default: return std::nullopt;
+                }
+            }();
+            if (!vtType)
+                return ApplyResult::Invalid;
+
+            selectConformanceLevel(*vtType);
+
+            // DECSCL implies a soft reset (per DEC spec)
+            _terminal->softReset();
+
+            // Set C1 transmission mode: Ps2=1 → 7-bit, Ps2=0 or 2 → 8-bit
+            // (For level 61/VT100, C1 mode is always 7-bit)
+            if (level == 61 || c1Mode == 1)
+                _terminal->setC1TransmissionMode(ControlTransmissionMode::S7C1T);
+            else
+                _terminal->setC1TransmissionMode(ControlTransmissionMode::S8C1T);
+
+            return ApplyResult::Ok;
+        }
         case DECSCUSR: return impl::DECSCUSR(seq, *_terminal);
         case DECSCPP:
             if (auto const columnCount = seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
@@ -4332,7 +4549,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             break;
         case DECSTR:
             // For VTType VT100 and VT52 ignore this sequence
-            if (_terminal->terminalId() == VTType::VT100)
+            if (_terminal->operatingLevel() == VTType::VT100)
                 return ApplyResult::Invalid;
             _terminal->softReset();
             break;
@@ -4552,9 +4769,12 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SEMA: processShellIntegration(seq); break;
 
         // hooks
+        case DECDLD: _terminal->hookParser(hookDECDLD(seq)); break;
+        case DECDMAC: _terminal->hookParser(hookDECDMAC(seq)); break;
         case DECSIXEL: _terminal->hookParser(hookSixel(seq)); break;
         case STP: _terminal->hookParser(hookSTP(seq)); break;
         case DECRQSS: _terminal->hookParser(hookDECRQSS(seq)); break;
+        case DECUDK: _terminal->hookParser(hookDECUDK(seq)); break;
         case XTGETTCAP: _terminal->hookParser(hookXTGETTCAP(seq)); break;
         case GIP: _terminal->hookParser(hookGoodImageProtocol(seq)); break;
 
@@ -4704,6 +4924,106 @@ unique_ptr<ParserExtension> Screen::hookDECRQSS(Sequence const& /*seq*/)
 
         // TODO: handle batching
     });
+}
+
+unique_ptr<ParserExtension> Screen::hookDECDLD(Sequence const& seq)
+{
+    // DECDLD — Down-Line-Load Character Set (DRCS)
+    // DCS Pfn;Pcn;Pe;Pcmw;Pw;Pt;Pcmh;Pcss { Dscs Sxbp1;Sxbp2;...ST
+    auto const fontNumber = seq.param_or(0, 0);
+    auto const startingChar = seq.param_or(1, 0);
+    auto const eraseControl = seq.param_or(2, 0);
+    auto const charMatrixWidth = seq.param_or(3, 0);
+    auto const fontWidth = seq.param_or(4, 0);
+    auto const textOrFullCell = seq.param_or(5, 0);
+    auto const charMatrixHeight = seq.param_or(6, 0);
+    auto const charsetSize = seq.param_or(7, 0);
+
+    return make_unique<SimpleStringCollector>([this,
+                                               fontNumber,
+                                               startingChar,
+                                               eraseControl,
+                                               charMatrixWidth,
+                                               fontWidth,
+                                               textOrFullCell,
+                                               charMatrixHeight,
+                                               charsetSize](string_view data) {
+        // Data starts with Dscs (charset designator), followed by sixel glyph data.
+        // Dscs is either 1 byte (final only) or 2 bytes (intermediate 0x20-0x2F + final).
+        auto designator = string_view {};
+        auto glyphData = data;
+        if (data.size() >= 2 && data[0] >= 0x20 && data[0] <= 0x2F)
+        {
+            // Two-byte designator: intermediate + final
+            designator = data.substr(0, 2);
+            glyphData = data.substr(2);
+        }
+        else if (!data.empty())
+        {
+            designator = data.substr(0, 1);
+            glyphData = data.substr(1);
+        }
+        _terminal->defineDRCS(fontNumber,
+                              startingChar,
+                              eraseControl,
+                              charMatrixWidth,
+                              fontWidth,
+                              textOrFullCell,
+                              charMatrixHeight,
+                              charsetSize,
+                              designator,
+                              glyphData);
+    });
+}
+
+unique_ptr<ParserExtension> Screen::hookDECDMAC(Sequence const& seq)
+{
+    // DECDMAC — Define Macro
+    // DCS Pid ; Pdt ; Pen ! z D...D ST
+    auto const macroId = seq.param_or(0, 0);
+    auto const deleteAll = seq.param_or(1, 0) == 1;
+    auto const hexEncoded = seq.param_or(2, 0) == 1;
+
+    return make_unique<SimpleStringCollector>([this, macroId, deleteAll, hexEncoded](string_view data) {
+        auto body = std::string {};
+        if (hexEncoded)
+        {
+            // Decode hex-encoded data: pairs of hex digits → bytes
+            body.reserve(data.size() / 2);
+            for (size_t i = 0; i + 1 < data.size(); i += 2)
+            {
+                auto const hi = data[i];
+                auto const lo = data[i + 1];
+                auto const hexToByte = [](char ch) -> uint8_t {
+                    if (ch >= '0' && ch <= '9')
+                        return static_cast<uint8_t>(ch - '0');
+                    if (ch >= 'A' && ch <= 'F')
+                        return static_cast<uint8_t>(ch - 'A' + 10);
+                    if (ch >= 'a' && ch <= 'f')
+                        return static_cast<uint8_t>(ch - 'a' + 10);
+                    return 0;
+                };
+                body.push_back(static_cast<char>((hexToByte(hi) << 4) | hexToByte(lo)));
+            }
+        }
+        else
+        {
+            body = std::string(data);
+        }
+
+        _terminal->defineMacro(macroId, deleteAll, std::move(body));
+    });
+}
+
+unique_ptr<ParserExtension> Screen::hookDECUDK(Sequence const& seq)
+{
+    // DECUDK — User-Defined Keys
+    // DCS Pc ; Pl | Ky1/St1 ; Ky2/St2 ; ... ST
+    auto const clearAll = seq.param_or(0, 0) == 0;
+    auto const locked = seq.param_or(1, 0) == 0;
+
+    return make_unique<SimpleStringCollector>(
+        [this, clearAll, locked](string_view data) { _terminal->programUDK(clearAll, locked, data); });
 }
 
 optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocation startPosition)

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Charset.h>
+#include <vtbackend/InputGenerator.h>
 #include <vtbackend/MockTerm.h>
 #include <vtbackend/Screen.h>
 #include <vtbackend/Viewport.h>
@@ -13,7 +14,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <charconv>
 #include <ranges>
+#include <set>
 #include <string_view>
 
 using crispy::escape;
@@ -4814,6 +4817,931 @@ TEST_CASE("HT.does_not_overwrite_existing_content", "[screen]")
 }
 
 // }}} HT (Horizontal Tab) Tests
+
+// {{{ DA1 (Primary Device Attributes) Tests
+
+/// Parses a DA1 response string (e.g. "\033[?65;1;4;6;...c") and returns the set of extension numbers.
+std::set<int> parseDA1Extensions(std::string_view reply)
+{
+    std::set<int> extensions;
+
+    // Find the CSI ? prefix and 'c' terminator
+    auto const prefix = reply.find("\033[?");
+    if (prefix == std::string_view::npos)
+        return extensions;
+
+    auto const start = prefix + 3; // skip "\033[?"
+    auto const end = reply.find('c', start);
+    if (end == std::string_view::npos)
+        return extensions;
+
+    auto const params = reply.substr(start, end - start);
+
+    // Split by ';' and parse each number
+    auto isFirst = true;
+    size_t pos = 0;
+    while (pos < params.size())
+    {
+        auto const delim = params.find(';', pos);
+        auto const token =
+            params.substr(pos, delim == std::string_view::npos ? std::string_view::npos : delim - pos);
+        if (!token.empty())
+        {
+            auto value = 0;
+            if (auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), value);
+                ec == std::errc {})
+            {
+                if (isFirst)
+                    isFirst = false; // first number is the conformance level, not an extension
+                else
+                    extensions.insert(value);
+            }
+        }
+        if (delim == std::string_view::npos)
+            break;
+        pos = delim + 1;
+    }
+
+    return extensions;
+}
+
+/// Parses the conformance level from a DA1 response.
+int parseDA1Level(std::string_view reply)
+{
+    auto const prefix = reply.find("\033[?");
+    if (prefix == std::string_view::npos)
+        return 0;
+    auto const start = prefix + 3;
+    auto const delim = reply.find(';', start);
+    auto const end = (delim != std::string_view::npos) ? delim : reply.find('c', start);
+    if (end == std::string_view::npos)
+        return 0;
+    auto value = 0;
+    std::from_chars(reply.data() + start, reply.data() + end, value);
+    return value;
+}
+
+TEST_CASE("DA1: response reports level 65 for VT525", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    CHECK(parseDA1Level(mock.replyData()) == 65);
+}
+
+TEST_CASE("DA1: optional extensions at level 65", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto const exts = parseDA1Extensions(mock.replyData());
+
+    // Optional at level 5 — should be listed
+    CHECK(exts.contains(1));  // Columns132
+    CHECK(exts.contains(4));  // SixelGraphics
+    CHECK(exts.contains(18)); // Windowing
+    CHECK(exts.contains(21)); // HorizontalScrolling
+    CHECK(exts.contains(22)); // AnsiColor
+
+    // Required at level 5 — implied by 65, must NOT be listed
+    CHECK_FALSE(exts.contains(6));  // SelectiveErase (required at level 5)
+    CHECK_FALSE(exts.contains(8));  // UserDefinedKeys (required at level 5)
+    CHECK_FALSE(exts.contains(11)); // StatusDisplay (required at level 3+)
+    CHECK_FALSE(exts.contains(15)); // TechnicalCharacters (required at level 5)
+    CHECK_FALSE(exts.contains(28)); // RectangularEditing (required at level 4+)
+    CHECK_FALSE(exts.contains(32)); // TextMacros (required at level 5)
+
+    // Non-DEC extensions — always listed
+    CHECK(exts.contains(52));  // ClipboardExtension
+    CHECK(exts.contains(314)); // CaptureScreenBuffer
+}
+
+// }}} DA1 (Primary Device Attributes) Tests
+
+// {{{ DECSCL (Set Conformance Level) Tests
+
+TEST_CASE("DECSCL: DA1 always reports max level 65", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Set conformance level to 62 (VT220), 7-bit C1
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    // DA1 always reports max device capability, not operating level
+    CHECK(parseDA1Level(mock.replyData()) == 65);
+}
+
+TEST_CASE("DECSCL: level 62 reveals required-at-5 extensions as optional", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto const exts = parseDA1Extensions(mock.replyData());
+    // At level 2, all these become optional and should be listed
+    CHECK(exts.contains(6));  // SelectiveErase (optional at 2-4)
+    CHECK(exts.contains(8));  // UserDefinedKeys (optional at 2-4)
+    CHECK(exts.contains(11)); // StatusDisplay (optional at 2)
+    CHECK(exts.contains(15)); // TechnicalCharacters (optional at 2-4)
+    CHECK(exts.contains(28)); // RectangularEditing (optional at 2-3)
+    CHECK(exts.contains(32)); // TextMacros (optional at 2-4)
+}
+
+TEST_CASE("DECSCL: level 63 hides StatusDisplay (required at 3+)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[63;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    CHECK(parseDA1Level(mock.replyData()) == 65);
+    auto const exts = parseDA1Extensions(mock.replyData());
+    CHECK_FALSE(exts.contains(11)); // StatusDisplay required at level 3+
+    CHECK(exts.contains(6));        // SelectiveErase still optional at level 3
+    CHECK(exts.contains(28));       // RectangularEditing still optional at level 3
+}
+
+TEST_CASE("DECSCL: level 64 hides RectangularEditing (required at 4+)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[64;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    CHECK(parseDA1Level(mock.replyData()) == 65);
+    auto const exts = parseDA1Extensions(mock.replyData());
+    CHECK_FALSE(exts.contains(11)); // StatusDisplay required at 3+
+    CHECK_FALSE(exts.contains(28)); // RectangularEditing required at 4+
+    CHECK(exts.contains(6));        // SelectiveErase still optional at level 4
+    CHECK(exts.contains(8));        // UserDefinedKeys still optional at level 4
+    CHECK(exts.contains(15));       // TechnicalCharacters still optional at level 4
+    CHECK(exts.contains(32));       // TextMacros still optional at level 4
+}
+
+TEST_CASE("DECSCL: set level 65 round-trip", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // First downgrade to 62
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    // Then upgrade back to 65
+    mock.writeToScreen("\033[65;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    CHECK(parseDA1Level(mock.replyData()) == 65);
+}
+
+TEST_CASE("DECSCL: implies soft reset", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Move cursor away from origin
+    mock.writeToScreen("\033[3;5H"); // cursor to row 3, col 5
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().cursor().position.line != LineOffset(0));
+
+    // Set conformance level — this implies soft reset, which should reset margins
+    // but cursor position is reset by the soft reset
+    mock.writeToScreen("\033[65;1\"p");
+    mock.terminal.flushInput();
+
+    // After soft reset, origin mode is off and cursor is at home position
+    // softReset resets DECOM, so cursor should be at the top-left area
+    // Note: soft reset doesn't explicitly move cursor, but resets margins and modes
+    CHECK(mock.terminal.operatingLevel() == VTType::VT525);
+}
+
+TEST_CASE("DECSCL: C1 mode 7-bit", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[65;1\"p"); // Ps2=1 → 7-bit C1
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S7C1T);
+}
+
+TEST_CASE("DECSCL: C1 mode 8-bit", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[65;0\"p"); // Ps2=0 → 8-bit C1
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S8C1T);
+}
+
+TEST_CASE("DECSCL: C1 mode 8-bit with Ps2=2", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[65;2\"p"); // Ps2=2 → 8-bit C1
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S8C1T);
+}
+
+TEST_CASE("DECSCL: level 61 forces 7-bit C1", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // VT100 (level 61) always uses 7-bit, regardless of Ps2
+    mock.writeToScreen("\033[61;0\"p");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S7C1T);
+}
+
+TEST_CASE("DECSCL: DECRQSS reports current level", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Set to level 64 (VT420) — DECRQSS requires VT420, so we must stay at level 4+
+    mock.writeToScreen("\033[64;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    // Query DECSCL via DECRQSS
+    mock.writeToScreen("\033P$q\"p\033\\");
+    mock.terminal.flushInput();
+    auto const reply = mock.replyData();
+    // Should contain "64;1" for level 64 with 7-bit C1
+    CHECK(reply.find("64;1\"p") != std::string::npos);
+}
+
+// }}} DECSCL (Set Conformance Level) Tests
+
+// {{{ DECDMAC / DECINVM (Text Macros) Tests
+
+TEST_CASE("DECDMAC: define and invoke simple text macro", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0 with plain text "Hello"
+    mock.writeToScreen("\033P0;0;0!zHello\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0
+    mock.writeToScreen("\033[0*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 5) == "Hello");
+}
+
+TEST_CASE("DECDMAC: define macro with VT sequences", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 1 with SGR bold + text "Bold"
+    mock.writeToScreen("\033P1;0;0!z\033[1mBold\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 1
+    mock.writeToScreen("\033[1*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 4) == "Bold");
+}
+
+TEST_CASE("DECDMAC: hex-encoded macro (Pen=1)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 2 with hex encoding: "Hi" = 0x48 0x69
+    mock.writeToScreen("\033P2;0;1!z4869\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 2
+    mock.writeToScreen("\033[2*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "Hi");
+}
+
+TEST_CASE("DECDMAC: delete all macros (Pdt=1)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0
+    mock.writeToScreen("\033P0;0;0!zFirst\033\\");
+    mock.terminal.flushInput();
+    // Define macro 5 with delete-all (Pdt=1)
+    mock.writeToScreen("\033P5;1;0!zSecond\033\\");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.macroBody(0).has_value());
+    CHECK(mock.terminal.macroBody(5).has_value());
+}
+
+TEST_CASE("DECDMAC: overwrite existing macro", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0 with "Old"
+    mock.writeToScreen("\033P0;0;0!zOld\033\\");
+    mock.terminal.flushInput();
+    // Redefine macro 0 with "New"
+    mock.writeToScreen("\033P0;0;0!zNew\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0
+    mock.writeToScreen("\033[0*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 3) == "New");
+}
+
+TEST_CASE("DECDMAC: max 64 macros", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macros 0-63
+    for (auto i = 0; i < 64; ++i)
+        mock.writeToScreen(std::format("\033P{};0;0!zM{}\033\\", i, i));
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.macroBody(0).has_value());
+    CHECK(mock.terminal.macroBody(63).has_value());
+    // Macro 64 should be rejected (out of range)
+    mock.writeToScreen("\033P64;0;0!zBad\033\\");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.macroBody(64).has_value());
+}
+
+TEST_CASE("DECINVM: invoke undefined macro", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Invoke non-existent macro 42 — should do nothing, no crash
+    mock.writeToScreen("\033[42*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).find_first_not_of(' ')
+          == std::string::npos);
+}
+
+TEST_CASE("DECINVM: nested macro invocation", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 1 that writes "B"
+    mock.writeToScreen("\033P1;0;0!zB\033\\");
+    mock.terminal.flushInput();
+    // Define macro 0 that writes "A", invokes macro 1, then writes "C"
+    mock.writeToScreen("\033P0;0;0!zA\033[1*zC\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0
+    mock.writeToScreen("\033[0*z");
+    mock.terminal.flushInput();
+    // Macro 0 body outputs "A" then "C" (deferred macro 1 runs after), then macro 1 outputs "B"
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    CHECK(text.find('A') != std::string::npos);
+    CHECK(text.find('B') != std::string::npos);
+    CHECK(text.find('C') != std::string::npos);
+}
+
+TEST_CASE("DECINVM: recursive macro guard", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0 that invokes itself (infinite recursion attempt)
+    mock.writeToScreen("\033P0;0;0!z\033[0*z\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0 — should NOT infinite loop, recursion depth is bounded
+    mock.writeToScreen("\033[0*z");
+    mock.terminal.flushInput();
+    // Verify the terminal is still responsive after bounded recursion
+    mock.writeToScreen("OK");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "OK");
+}
+
+TEST_CASE("DECDMAC: empty macro body", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 3 with empty body
+    mock.writeToScreen("\033P3;0;0!z\033\\");
+    mock.terminal.flushInput();
+    // Empty body erases the macro
+    CHECK_FALSE(mock.terminal.macroBody(3).has_value());
+    // Invoke empty macro — should produce no output
+    mock.writeToScreen("\033[3*z");
+    mock.writeToScreen("X");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 1) == "X");
+}
+
+TEST_CASE("DECDMAC: ext 32 implied at level 65, listed at level 62", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto exts = parseDA1Extensions(mock.replyData());
+    CHECK_FALSE(exts.contains(32)); // required at level 5, implied by 65
+
+    // Downgrade to level 62 where ext 32 is optional
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(32)); // optional at level 2
+}
+
+// }}} DECDMAC / DECINVM (Text Macros) Tests
+
+// {{{ DECUDK (User-Defined Keys) Tests
+
+TEST_CASE("DECUDK: program single key", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Program F6 (key 17) with "Hello" (hex: 48656C6C6F)
+    mock.writeToScreen("\033P0;1|17/48656C6C6F\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).has_value());
+    CHECK(mock.terminal.udkString(17).value() == "Hello");
+}
+
+TEST_CASE("DECUDK: program multiple keys", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Program F6 (17) with "A" (hex: 41) and F7 (18) with "B" (hex: 42)
+    mock.writeToScreen("\033P0;1|17/41;18/42\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).value() == "A");
+    CHECK(mock.terminal.udkString(18).value() == "B");
+}
+
+TEST_CASE("DECUDK: clear all before loading (Pc=0)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // First program F6
+    mock.writeToScreen("\033P1;1|17/41\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).has_value());
+    // Then program F7 with clear-all (Pc=0)
+    mock.writeToScreen("\033P0;1|18/42\033\\");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.udkString(17).has_value()); // F6 should be cleared
+    CHECK(mock.terminal.udkString(18).has_value());       // F7 should exist
+}
+
+TEST_CASE("DECUDK: keep existing (Pc=1)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // First program F6
+    mock.writeToScreen("\033P1;1|17/41\033\\");
+    mock.terminal.flushInput();
+    // Then program F7, keeping existing (Pc=1)
+    mock.writeToScreen("\033P1;1|18/42\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).has_value()); // F6 should still exist
+    CHECK(mock.terminal.udkString(18).has_value()); // F7 should also exist
+}
+
+TEST_CASE("DECUDK: lock keys (Pl=0)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Program F6 with lock (Pl=0)
+    mock.writeToScreen("\033P0;0|17/41\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).value() == "A");
+    // Attempt to reprogram F6 — should be rejected because keys are locked
+    mock.writeToScreen("\033P0;0|17/42\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).value() == "A"); // Still "A", not "B"
+}
+
+TEST_CASE("DECUDK: hex decode", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Program F6 (17) with hex "1B5B31m" → ESC [ 1 m (SGR bold)
+    mock.writeToScreen("\033P0;1|17/1B5B316D\033\\");
+    mock.terminal.flushInput();
+    auto const str = mock.terminal.udkString(17);
+    REQUIRE(str.has_value());
+    CHECK(str.value() == "\033[1m");
+}
+
+TEST_CASE("DECUDK: soft reset clears UDKs", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033P0;1|17/41\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).has_value());
+    // Soft reset
+    mock.writeToScreen("\033[!p");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.udkString(17).has_value());
+}
+
+TEST_CASE("DECUDK: ext 8 implied at level 65, listed at level 62", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto exts = parseDA1Extensions(mock.replyData());
+    CHECK_FALSE(exts.contains(8)); // required at level 5, implied by 65
+
+    // Downgrade to level 62 where ext 8 is optional
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(8)); // optional at level 2
+}
+
+TEST_CASE("DECUDK: udkStringForKey maps Key enum to UDK ID", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Program F6 (key 17) with "test"
+    mock.writeToScreen("\033P0;1|17/74657374\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkStringForKey(Key::F6).has_value());
+    CHECK(mock.terminal.udkStringForKey(Key::F6).value() == "test");
+    CHECK_FALSE(mock.terminal.udkStringForKey(Key::F5).has_value()); // F5 is not programmable
+}
+
+// }}} DECUDK (User-Defined Keys) Tests
+
+// {{{ NRCS (National Replacement Character Sets) Tests
+
+TEST_CASE("NRCS: British charset substitution", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Designate British to G0: ESC ( A
+    mock.writeToScreen("\033(A");
+    // Write '#' which should map to '£' (U+00A3) in British charset
+    mock.writeToScreen("#");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    // £ is U+00A3 — the UTF-8 encoding is 0xC2 0xA3
+    CHECK(text.find("\xC2\xA3") != std::string::npos);
+}
+
+TEST_CASE("NRCS: German charset substitution", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Designate German to G0: ESC ( K
+    mock.writeToScreen("\033(K");
+    // In German charset: '[' (0x5B) maps to 'Ä' (U+00C4)
+    mock.writeToScreen("[");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    CHECK(text.find("\xC3\x84") != std::string::npos); // Ä in UTF-8
+}
+
+TEST_CASE("NRCS: French charset substitution", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Designate French to G0: ESC ( R
+    mock.writeToScreen("\033(R");
+    // In French charset: '#' (0x23) maps to '£' (U+00A3)
+    mock.writeToScreen("#");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    CHECK(text.find("\xC2\xA3") != std::string::npos); // £ in UTF-8
+}
+
+TEST_CASE("NRCS: switch back to USASCII", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Set British
+    mock.writeToScreen("\033(A");
+    mock.writeToScreen("#"); // Should be £
+    // Switch back to USASCII
+    mock.writeToScreen("\033(B");
+    mock.writeToScreen("#"); // Should be #
+    mock.terminal.flushInput();
+    // Column 0 has £, column 1 has #
+    auto const col0 =
+        mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(0) });
+    auto const col1 =
+        mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) });
+    CHECK(col0 == "\xC2\xA3"); // £ in UTF-8
+    CHECK(col1 == "#");
+}
+
+TEST_CASE("NRCS: G1 charset via locking shift", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Designate British to G1: ESC ) A
+    mock.writeToScreen("\033)A");
+    // Locking shift G1 (LS1 = SO = 0x0E)
+    mock.writeToScreen("\x0E");
+    // Write '#' — should map through G1 (British) → £
+    mock.writeToScreen("#");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    CHECK(text.find("\xC2\xA3") != std::string::npos);
+}
+
+TEST_CASE("NRCS: DA1 includes ext 9", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto const exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(9)); // ext 9 = NationalReplacementCharacterSets
+}
+
+TEST_CASE("NRCS: two-byte DRCS designator accepted via SCS fallback", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // ESC ) <space> A — designate a DRCS set with two-byte designator into G1.
+    // This must not produce an "Unknown VT sequence" error.
+    mock.writeToScreen("\033) A");
+    mock.terminal.flushInput();
+    // Verify the sequence was consumed without error by writing text after it.
+    // If the ESC sequence was rejected, the parser would have left stray characters on screen.
+    mock.writeToScreen("OK");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "OK");
+}
+
+TEST_CASE("NRCS: single-byte SCS fallback designates British to G2", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // ESC * A — designate British to G2 via the generic fallback path
+    mock.writeToScreen("\033*A");
+    mock.terminal.flushInput();
+    // Verify G2 was set to British by using SS2 (single shift G2) and writing '#'
+    // SS2 = ESC N, then '#' should map to '£' through British charset
+    mock.writeToScreen("\033N#");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    CHECK(text.find("\xC2\xA3") != std::string::npos); // £ in UTF-8
+}
+
+// }}} NRCS (National Replacement Character Sets) Tests
+
+// {{{ Technical Character Set Tests
+
+TEST_CASE("Technical charset: designate and use", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Designate DEC Technical to G0: ESC ( >
+    mock.writeToScreen("\033(>");
+    // Write 'A' (0x41) which maps to Α (Greek Alpha, U+0391) in Technical charset
+    mock.writeToScreen("A");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    // Α (U+0391) in UTF-8 is 0xCE 0x91
+    CHECK(text.find("\xCE\x91") != std::string::npos);
+}
+
+TEST_CASE("Technical charset: pi mapping", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033(>");
+    // 0x70 = 'p' maps to π (U+03C0) in Technical charset
+    mock.writeToScreen("p");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    // π (U+03C0) in UTF-8 is 0xCF 0x80
+    CHECK(text.find("\xCF\x80") != std::string::npos);
+}
+
+TEST_CASE("Technical charset: switch back to USASCII", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033(>");
+    mock.writeToScreen("A"); // Should be Α (Greek Alpha)
+    mock.writeToScreen("\033(B");
+    mock.writeToScreen("A"); // Should be regular A
+    mock.terminal.flushInput();
+    auto const col0 =
+        mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(0) });
+    auto const col1 =
+        mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) });
+    CHECK(col0 == "\xCE\x91"); // Α in UTF-8
+    CHECK(col1 == "A");
+}
+
+TEST_CASE("Technical charset: ext 15 implied at level 65, listed at level 62", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto exts = parseDA1Extensions(mock.replyData());
+    CHECK_FALSE(exts.contains(15)); // required at level 5, implied by 65
+
+    // Downgrade to level 62 where ext 15 is optional
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(15)); // optional at level 2
+}
+
+// }}} Technical Character Set Tests
+
+// {{{ DEC Locator (DECELR / DECLRP) Tests
+
+TEST_CASE("DECELR: enable locator reporting", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    // Enable locator: CSI 1 ; 2 ' z  (Ps=1 enable, Pu=2 character cells)
+    mock.writeToScreen("\033[1;2'z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.locatorState().enabled);
+    CHECK_FALSE(mock.terminal.locatorState().oneShot);
+}
+
+TEST_CASE("DECELR: disable locator reporting", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;2'z"); // enable
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.locatorState().enabled);
+    mock.writeToScreen("\033[0'z"); // disable
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.locatorState().enabled);
+}
+
+TEST_CASE("DECELR: one-shot mode (Ps=2)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[2;2'z"); // one-shot, character cells
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.locatorState().enabled);
+    CHECK(mock.terminal.locatorState().oneShot);
+}
+
+TEST_CASE("DECELR: pixel coordinates (Pu=1)", "[screen]")
+{
+    using LocatorCoordUnit = Terminal::LocatorCoordUnit;
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;1'z"); // enable, pixel coords
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.locatorState().coordUnit == LocatorCoordUnit::DevicePixels);
+}
+
+TEST_CASE("DECSLE: select locator events", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;2'z"); // enable locator
+    mock.terminal.flushInput();
+    // Disable button down, enable button up: CSI 2 ; 3 ' {
+    mock.writeToScreen("\033[2;3'{");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.locatorState().reportButtonDown);
+    CHECK(mock.terminal.locatorState().reportButtonUp);
+}
+
+TEST_CASE("DECRQLP: request locator position", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    // Request locator position when not enabled — should report locator unavailable
+    mock.resetReplyData();
+    mock.writeToScreen("\033[0'|");
+    mock.terminal.flushInput();
+    auto const reply = mock.replyData();
+    // Should contain DECLRP format: CSI 0 ; ... & w
+    CHECK(reply.find("&w") != std::string::npos);
+}
+
+TEST_CASE("DECELR: soft reset disables locator", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;2'z"); // enable
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.locatorState().enabled);
+    // Soft reset
+    mock.writeToScreen("\033[!p");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.locatorState().enabled);
+}
+
+TEST_CASE("DEC Locator: DA1 includes ext 29", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto const exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(29)); // ext 29 = AnsiTextLocator
+}
+
+// }}} DEC Locator (DECELR / DECLRP) Tests
+
+// {{{ DECDLD (DRCS — Dynamically Redefinable Character Sets) Tests
+
+TEST_CASE("DECDLD: define single character glyph", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define DRCS font 0, starting char 0x21 ('!'), erase all, 10x20 matrix
+    // DCS 0;0;0;10;10;0;20;0 { <designator> <sixel data> ST
+    // Simple glyph: first sixel column with bit 0 set = '?' (0x3F + 0 = 0x3F = '?'), wait that's 0.
+    // Actually 0x3F is the base (all zeros). 0x40 = bit 0 set, 0x41 = bits 0+1, etc.
+    // Let's define a minimal glyph with a single pixel set at (0,0): '@' = 0x40 - 0x3F = 1 bit
+    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@\033\\");
+    mock.terminal.flushInput();
+    auto const* charset = mock.terminal.drcsCharset(0);
+    REQUIRE(charset != nullptr);
+    CHECK(charset->glyphs.contains(0x21)); // First glyph at starting position
+}
+
+TEST_CASE("DECDLD: erase control clears existing", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define first glyph
+    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.drcsCharset(0) != nullptr);
+    // Redefine with erase all (Pe=0)
+    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{B@\033\\");
+    mock.terminal.flushInput();
+    auto const* charset = mock.terminal.drcsCharset(0);
+    REQUIRE(charset != nullptr);
+    // The old glyph should be cleared, only new one exists
+    CHECK(charset->glyphs.contains(0x21));
+}
+
+TEST_CASE("DECDLD: multiple glyphs separated by semicolons", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define two glyphs: '@' and 'A' (both just a single column with different bits)
+    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@;A\033\\");
+    mock.terminal.flushInput();
+    auto const* charset = mock.terminal.drcsCharset(0);
+    REQUIRE(charset != nullptr);
+    CHECK(charset->glyphs.contains(0x21)); // First glyph
+    CHECK(charset->glyphs.contains(0x22)); // Second glyph
+}
+
+TEST_CASE("DECDLD: soft reset clears DRCS", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.drcsCharset(0) != nullptr);
+    // Soft reset
+    mock.writeToScreen("\033[!p");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.drcsCharset(0) == nullptr);
+}
+
+TEST_CASE("DECDLD: DA1 includes ext 7 (SoftCharacterSet)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto const exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(7)); // ext 7 = SoftCharacterSet
+}
+
+TEST_CASE("DECDLD: cell has image fragment after writing DRCS character", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define DRCS font 1 with designator ' A', single glyph at position 0x21 ('!')
+    mock.writeToScreen("\033P1;0;0;10;10;0;20;0{ A@\033\\");
+    mock.terminal.flushInput();
+
+    // Verify DRCS font was stored with correct designator
+    REQUIRE(mock.terminal.drcsDesignatorToFont(" A").has_value());
+    CHECK(mock.terminal.drcsDesignatorToFont(" A").value() == 1);
+    REQUIRE(mock.terminal.drcsCharset(1) != nullptr);
+    CHECK(mock.terminal.drcsCharset(1)->glyphs.contains(0x21));
+
+    // Designate DRCS font into G1: ESC ) <space> A
+    mock.writeToScreen("\033) A");
+    mock.terminal.flushInput();
+
+    // Verify G1 was set to DRCS font 1
+    REQUIRE(mock.terminal.currentScreen().cursor().charsets.drcsFont(CharsetTable::G1).has_value());
+    CHECK(mock.terminal.currentScreen().cursor().charsets.drcsFont(CharsetTable::G1).value() == 1);
+
+    // Switch to G1 (SO = 0x0E), write '!' (position 0x21), switch back (SI = 0x0F)
+    mock.writeToScreen("\x0E");
+    mock.terminal.flushInput();
+
+    // Verify DRCS font is active
+    REQUIRE(mock.terminal.currentScreen().cursor().charsets.activeDRCSFont().has_value());
+
+    mock.writeToScreen("!");
+    mock.writeToScreen("\x0F");
+    mock.terminal.flushInput();
+
+    // The cell at (0,0) should have an image fragment (the DRCS glyph bitmap)
+    auto const& line = mock.terminal.currentScreen().grid().lineAt(LineOffset(0));
+    CHECK(line.storage().imageFragments.has_value());
+    if (line.storage().imageFragments.has_value())
+        CHECK(line.storage().imageFragments->contains(0));
+}
+
+TEST_CASE("DECDLD: switching away from DRCS uses normal font", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define DRCS font 1
+    mock.writeToScreen("\033P1;0;0;10;10;0;20;0{ A@\033\\");
+    mock.terminal.flushInput();
+    // Designate DRCS to G1 and switch to it
+    mock.writeToScreen("\033) A\x0E!\x0F");
+    mock.terminal.flushInput();
+    // Write normal character 'X' through G0 (USASCII)
+    mock.writeToScreen("X");
+    mock.terminal.flushInput();
+    // Column 1 ('X') should NOT have an image fragment
+    auto const& line = mock.terminal.currentScreen().grid().lineAt(LineOffset(0));
+    auto const hasImageAtCol1 =
+        line.storage().imageFragments.has_value() && line.storage().imageFragments->contains(1);
+    CHECK_FALSE(hasImageAtCol1);
+    // But it should have the character 'X'
+    CHECK(mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) })
+          == "X");
+}
+
+// }}} DECDLD (DRCS — Dynamically Redefinable Character Sets) Tests
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests

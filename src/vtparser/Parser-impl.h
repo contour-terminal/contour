@@ -250,7 +250,10 @@ constexpr ParserTable ParserTable::get() // {{{
     t.event(State::DCS_Param, Action::Ignore, 0x7F_b);
     t.transition(State::DCS_Param, State::DCS_Ignore, 0x3A_b);
     t.transition(State::DCS_Param, State::DCS_Ignore, Range { .first = 0x3C_b, .last = 0x3F_b });
-    t.transition(State::DCS_Param, State::DCS_Intermediate, Range { .first = 0x20_b, .last = 0x2F_b });
+    t.transition(State::DCS_Param,
+                 State::DCS_Intermediate,
+                 Action::Collect,
+                 Range { .first = 0x20_b, .last = 0x2F_b });
     t.transition(State::DCS_Param, State::DCS_PassThrough, Range { .first = 0x40_b, .last = 0x7E_b });
 
     // OSC_String

@@ -70,9 +70,15 @@ constexpr inline auto DCH = FunctionDocumentation { .mnemonic = "DCH", .comment 
 constexpr inline auto DECCARA = FunctionDocumentation { .mnemonic = "DECCARA", .comment = "Change Attributes in Rectangular Area" };
 constexpr inline auto DECCRA = FunctionDocumentation { .mnemonic = "DECCRA", .comment = "Copy rectangular area" };
 constexpr inline auto DECDC = FunctionDocumentation { .mnemonic = "DECDC", .comment = "Delete column" };
+constexpr inline auto DECDLD = FunctionDocumentation { .mnemonic = "DECDLD", .comment = "Down-Line-Load Character Set (DRCS)" };
+constexpr inline auto DECDMAC = FunctionDocumentation { .mnemonic = "DECDMAC", .comment = "Define Macro" };
+constexpr inline auto DECELR = FunctionDocumentation { .mnemonic = "DECELR", .comment = "Enable Locator Reporting" };
+constexpr inline auto DECRQLP = FunctionDocumentation { .mnemonic = "DECRQLP", .comment = "Request Locator Position" };
+constexpr inline auto DECSLE = FunctionDocumentation { .mnemonic = "DECSLE", .comment = "Select Locator Events" };
 constexpr inline auto DECERA = FunctionDocumentation { .mnemonic = "DECERA", .comment = "Erase rectangular area" };
 constexpr inline auto DECFRA = FunctionDocumentation { .mnemonic = "DECFRA", .comment = "Fill rectangular area" };
 constexpr inline auto DECIC = FunctionDocumentation { .mnemonic = "DECIC", .comment = "Insert column" };
+constexpr inline auto DECINVM = FunctionDocumentation { .mnemonic = "DECINVM", .comment = "Invoke Macro" };
 constexpr inline auto DECPS = FunctionDocumentation { .mnemonic = "DECPS", .comment = "Controls the sound frequency or notes" };
 constexpr inline auto DECRM = FunctionDocumentation { .mnemonic = "DECRM", .comment = "Reset DEC-mode" };
 constexpr inline auto DECRQM = FunctionDocumentation { .mnemonic = "DECRQM", .comment = "Request DEC-mode" };
@@ -94,6 +100,7 @@ constexpr inline auto DECSSCLS = FunctionDocumentation { .mnemonic = "DECSSCLS",
 constexpr inline auto DECSSDT = FunctionDocumentation { .mnemonic = "DECSSDT", .comment = "Select Status Display (Line) Type" };
 constexpr inline auto DECSTBM = FunctionDocumentation { .mnemonic = "DECSTBM", .comment = "Set top/bottom margin" };
 constexpr inline auto DECSTR = FunctionDocumentation { .mnemonic = "DECSTR", .comment = "Soft terminal reset" };
+constexpr inline auto DECUDK = FunctionDocumentation { .mnemonic = "DECUDK", .comment = "User-Defined Keys" };
 constexpr inline auto DECXCPR = FunctionDocumentation { .mnemonic = "DECXCPR", .comment = "Report cursor position" };
 constexpr inline auto DL = FunctionDocumentation { .mnemonic = "DL", .comment = "Delete lines" };
 constexpr inline auto DSR = FunctionDocumentation { .mnemonic = "DSR", .comment = "Device Status Report (DEC)" };
@@ -531,10 +538,42 @@ constexpr inline auto IND     = detail::ESC(std::nullopt, 'D', VTType::VT100, { 
 constexpr inline auto NEL     = detail::ESC(std::nullopt, 'E', VTType::VT100, { .mnemonic = "NEL", .comment = "Next Line"});
 constexpr inline auto RI      = detail::ESC(std::nullopt, 'M', VTType::VT100, { .mnemonic = "RI", .comment = "Reverse Index"});
 constexpr inline auto RIS     = detail::ESC(std::nullopt, 'c', VTType::VT100, { .mnemonic = "RIS", .comment = "Reset to Initial State (Hard Reset)"});
-constexpr inline auto SCS_G0_SPECIAL = detail::ESC('(', '0', VTType::VT100, { .mnemonic = "SCS_G0_SPECIAL", .comment = "Set G0 to DEC Special Character and Line Drawing Set" });// NOLINT
-constexpr inline auto SCS_G0_USASCII = detail::ESC('(', 'B', VTType::VT100, { .mnemonic = "SCS_G0_USASCII", .comment = "Set G0 to USASCII" });// NOLINT
-constexpr inline auto SCS_G1_SPECIAL = detail::ESC(')', '0', VTType::VT100, { .mnemonic = "SCS_G1_SPECIAL", .comment = "Set G1 to DEC Special Character and Line Drawing Set" });// NOLINT
-constexpr inline auto SCS_G1_USASCII = detail::ESC(')', 'B', VTType::VT100, { .mnemonic = "SCS_G1_USASCII", .comment = "Set G1 to USASCII"});//NOLINT
+// SCS (Select Character Set) — G0 designations (ESC ( Dscs)
+constexpr inline auto SCS_G0_SPECIAL       = detail::ESC('(', '0', VTType::VT100, { .mnemonic = "SCS_G0_SPECIAL", .comment = "Set G0 to DEC Special" }); // NOLINT
+constexpr inline auto SCS_G0_BRITISH       = detail::ESC('(', 'A', VTType::VT100, { .mnemonic = "SCS_G0_BRITISH", .comment = "Set G0 to British" }); // NOLINT
+constexpr inline auto SCS_G0_USASCII       = detail::ESC('(', 'B', VTType::VT100, { .mnemonic = "SCS_G0_USASCII", .comment = "Set G0 to USASCII" }); // NOLINT
+constexpr inline auto SCS_G0_FINNISH       = detail::ESC('(', 'C', VTType::VT220, { .mnemonic = "SCS_G0_FINNISH", .comment = "Set G0 to Finnish" }); // NOLINT
+constexpr inline auto SCS_G0_DUTCH         = detail::ESC('(', '4', VTType::VT220, { .mnemonic = "SCS_G0_DUTCH", .comment = "Set G0 to Dutch" }); // NOLINT
+constexpr inline auto SCS_G0_NORWEGIAN     = detail::ESC('(', 'E', VTType::VT220, { .mnemonic = "SCS_G0_NORWEGIAN", .comment = "Set G0 to Norwegian/Danish" }); // NOLINT
+constexpr inline auto SCS_G0_FRENCH        = detail::ESC('(', 'R', VTType::VT220, { .mnemonic = "SCS_G0_FRENCH", .comment = "Set G0 to French" }); // NOLINT
+constexpr inline auto SCS_G0_FRENCHCANADIAN = detail::ESC('(', 'Q', VTType::VT220, { .mnemonic = "SCS_G0_FRENCHCANADIAN", .comment = "Set G0 to French Canadian" }); // NOLINT
+constexpr inline auto SCS_G0_GERMAN        = detail::ESC('(', 'K', VTType::VT220, { .mnemonic = "SCS_G0_GERMAN", .comment = "Set G0 to German" }); // NOLINT
+constexpr inline auto SCS_G0_SPANISH       = detail::ESC('(', 'Z', VTType::VT220, { .mnemonic = "SCS_G0_SPANISH", .comment = "Set G0 to Spanish" }); // NOLINT
+constexpr inline auto SCS_G0_SWEDISH       = detail::ESC('(', 'H', VTType::VT220, { .mnemonic = "SCS_G0_SWEDISH", .comment = "Set G0 to Swedish" }); // NOLINT
+constexpr inline auto SCS_G0_SWISS         = detail::ESC('(', '=', VTType::VT220, { .mnemonic = "SCS_G0_SWISS", .comment = "Set G0 to Swiss" }); // NOLINT
+constexpr inline auto SCS_G0_TECHNICAL     = detail::ESC('(', '>', VTType::VT220, { .mnemonic = "SCS_G0_TECHNICAL", .comment = "Set G0 to DEC Technical" }); // NOLINT
+// SCS — G1 designations (ESC ) Dscs)
+constexpr inline auto SCS_G1_SPECIAL       = detail::ESC(')', '0', VTType::VT100, { .mnemonic = "SCS_G1_SPECIAL", .comment = "Set G1 to DEC Special" }); // NOLINT
+constexpr inline auto SCS_G1_BRITISH       = detail::ESC(')', 'A', VTType::VT100, { .mnemonic = "SCS_G1_BRITISH", .comment = "Set G1 to British" }); // NOLINT
+constexpr inline auto SCS_G1_USASCII       = detail::ESC(')', 'B', VTType::VT100, { .mnemonic = "SCS_G1_USASCII", .comment = "Set G1 to USASCII" }); // NOLINT
+constexpr inline auto SCS_G1_FINNISH       = detail::ESC(')', 'C', VTType::VT220, { .mnemonic = "SCS_G1_FINNISH", .comment = "Set G1 to Finnish" }); // NOLINT
+constexpr inline auto SCS_G1_DUTCH         = detail::ESC(')', '4', VTType::VT220, { .mnemonic = "SCS_G1_DUTCH", .comment = "Set G1 to Dutch" }); // NOLINT
+constexpr inline auto SCS_G1_NORWEGIAN     = detail::ESC(')', 'E', VTType::VT220, { .mnemonic = "SCS_G1_NORWEGIAN", .comment = "Set G1 to Norwegian/Danish" }); // NOLINT
+constexpr inline auto SCS_G1_FRENCH        = detail::ESC(')', 'R', VTType::VT220, { .mnemonic = "SCS_G1_FRENCH", .comment = "Set G1 to French" }); // NOLINT
+constexpr inline auto SCS_G1_FRENCHCANADIAN = detail::ESC(')', 'Q', VTType::VT220, { .mnemonic = "SCS_G1_FRENCHCANADIAN", .comment = "Set G1 to French Canadian" }); // NOLINT
+constexpr inline auto SCS_G1_GERMAN        = detail::ESC(')', 'K', VTType::VT220, { .mnemonic = "SCS_G1_GERMAN", .comment = "Set G1 to German" }); // NOLINT
+constexpr inline auto SCS_G1_SPANISH       = detail::ESC(')', 'Z', VTType::VT220, { .mnemonic = "SCS_G1_SPANISH", .comment = "Set G1 to Spanish" }); // NOLINT
+constexpr inline auto SCS_G1_SWEDISH       = detail::ESC(')', 'H', VTType::VT220, { .mnemonic = "SCS_G1_SWEDISH", .comment = "Set G1 to Swedish" }); // NOLINT
+constexpr inline auto SCS_G1_SWISS         = detail::ESC(')', '=', VTType::VT220, { .mnemonic = "SCS_G1_SWISS", .comment = "Set G1 to Swiss" }); // NOLINT
+constexpr inline auto SCS_G1_TECHNICAL     = detail::ESC(')', '>', VTType::VT220, { .mnemonic = "SCS_G1_TECHNICAL", .comment = "Set G1 to DEC Technical" }); // NOLINT
+// SCS — G2 designations (ESC * Dscs)
+constexpr inline auto SCS_G2_SPECIAL       = detail::ESC('*', '0', VTType::VT220, { .mnemonic = "SCS_G2_SPECIAL", .comment = "Set G2 to DEC Special" }); // NOLINT
+constexpr inline auto SCS_G2_USASCII       = detail::ESC('*', 'B', VTType::VT220, { .mnemonic = "SCS_G2_USASCII", .comment = "Set G2 to USASCII" }); // NOLINT
+constexpr inline auto SCS_G2_BRITISH       = detail::ESC('*', 'A', VTType::VT220, { .mnemonic = "SCS_G2_BRITISH", .comment = "Set G2 to British" }); // NOLINT
+// SCS — G3 designations (ESC + Dscs)
+constexpr inline auto SCS_G3_SPECIAL       = detail::ESC('+', '0', VTType::VT220, { .mnemonic = "SCS_G3_SPECIAL", .comment = "Set G3 to DEC Special" }); // NOLINT
+constexpr inline auto SCS_G3_USASCII       = detail::ESC('+', 'B', VTType::VT220, { .mnemonic = "SCS_G3_USASCII", .comment = "Set G3 to USASCII" }); // NOLINT
+constexpr inline auto SCS_G3_BRITISH       = detail::ESC('+', 'A', VTType::VT220, { .mnemonic = "SCS_G3_BRITISH", .comment = "Set G3 to British" }); // NOLINT
 constexpr inline auto SS2     = detail::ESC(std::nullopt, 'N', VTType::VT220, { .mnemonic = "SS2", .comment = "Single Shift Select (G2 Character Set)"});
 constexpr inline auto SS3     = detail::ESC(std::nullopt, 'O', VTType::VT220, { .mnemonic = "SS3", .comment = "Single Shift Select (G3 Character Set)"});
 
@@ -565,9 +604,13 @@ constexpr inline auto DCH         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto DECCARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 'r', VTType::VT420, documentation::DECCARA);
 constexpr inline auto DECCRA      = detail::CSI(std::nullopt, 0, 8, '$', 'v', VTType::VT420, documentation::DECCRA);
 constexpr inline auto DECDC       = detail::CSI(std::nullopt, 0, 1, '\'', '~', VTType::VT420, documentation::DECDC);
+constexpr inline auto DECELR      = detail::CSI(std::nullopt, 0, 2, '\'', 'z', VTType::VT320, documentation::DECELR);
+constexpr inline auto DECSLE      = detail::CSI(std::nullopt, 0, ArgsMax, '\'', '{', VTType::VT320, documentation::DECSLE);
+constexpr inline auto DECRQLP     = detail::CSI(std::nullopt, 0, 1, '\'', '|', VTType::VT320, documentation::DECRQLP);
 constexpr inline auto DECERA      = detail::CSI(std::nullopt, 0, 4, '$', 'z', VTType::VT420, documentation::DECERA);
 constexpr inline auto DECFRA      = detail::CSI(std::nullopt, 0, 5, '$', 'x', VTType::VT420, documentation::DECFRA);
 constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', VTType::VT420, documentation::DECIC);
+constexpr inline auto DECINVM     = detail::CSI(std::nullopt, 0, 1, '*', 'z', VTType::VT420, documentation::DECINVM);
 constexpr inline auto DECPS       = detail::CSI(std::nullopt, 3, 18, ',', '~', VTType::VT520, documentation::DECPS);
 constexpr inline auto DECRARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 't', VTType::VT420, documentation::DECRARA);
 constexpr inline auto DECRQCRA    = detail::CSI(std::nullopt, 2, 6, '$', 'y', VTType::VT420, documentation::DECRQCRA);
@@ -640,7 +683,10 @@ constexpr inline auto PPB             = detail::CSI(std::nullopt, 0, 1, ' ', 'R'
 constexpr inline auto DECRQDE         = detail::CSI(std::nullopt, 0, 0, '"', 'v', VTType::VT420, documentation::DECRQDE);
 
 // DCS functions
+constexpr inline auto DECDLD      = detail::DCS(std::nullopt, 0, 8, std::nullopt, '{', VTType::VT220, documentation::DECDLD);
+constexpr inline auto DECDMAC     = detail::DCS(std::nullopt, 0, 3, '!', 'z', VTType::VT420, documentation::DECDMAC);
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
+constexpr inline auto DECUDK      = detail::DCS(std::nullopt, 0, 2, std::nullopt, '|', VTType::VT220, documentation::DECUDK);
 constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, documentation::DECSIXEL);
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTExtension::Contour, documentation::STP);
 constexpr inline auto XTGETTCAP   = detail::DCS(std::nullopt, 0, 0, '+', 'q', VTExtension::XTerm, documentation::XTGETTCAP);
@@ -719,9 +765,37 @@ constexpr static auto allFunctionsArray() noexcept
         RI,
         RIS,
         SCS_G0_SPECIAL,
+        SCS_G0_BRITISH,
         SCS_G0_USASCII,
+        SCS_G0_FINNISH,
+        SCS_G0_DUTCH,
+        SCS_G0_NORWEGIAN,
+        SCS_G0_FRENCH,
+        SCS_G0_FRENCHCANADIAN,
+        SCS_G0_GERMAN,
+        SCS_G0_SPANISH,
+        SCS_G0_SWEDISH,
+        SCS_G0_SWISS,
+        SCS_G0_TECHNICAL,
         SCS_G1_SPECIAL,
+        SCS_G1_BRITISH,
         SCS_G1_USASCII,
+        SCS_G1_FINNISH,
+        SCS_G1_DUTCH,
+        SCS_G1_NORWEGIAN,
+        SCS_G1_FRENCH,
+        SCS_G1_FRENCHCANADIAN,
+        SCS_G1_GERMAN,
+        SCS_G1_SPANISH,
+        SCS_G1_SWEDISH,
+        SCS_G1_SWISS,
+        SCS_G1_TECHNICAL,
+        SCS_G2_SPECIAL,
+        SCS_G2_USASCII,
+        SCS_G2_BRITISH,
+        SCS_G3_SPECIAL,
+        SCS_G3_USASCII,
+        SCS_G3_BRITISH,
         SS2,
         SS3,
 
@@ -745,7 +819,11 @@ constexpr static auto allFunctionsArray() noexcept
         DECCARA,
         DECCRA,
         DECDC,
+        DECELR,
+        DECSLE,
+        DECRQLP,
         DECERA,
+        DECINVM,
         DECFRA,
         DECIC,
         DECPS,
@@ -822,6 +900,9 @@ constexpr static auto allFunctionsArray() noexcept
         DECRQDE,
 
         // DCS
+        DECDLD,
+        DECDMAC,
+        DECUDK,
         GIP,
         STP,
         DECRQSS,

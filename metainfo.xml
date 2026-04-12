@@ -109,8 +109,18 @@
         <ul>
           <li>Fixes Unicode characters sometimes being wrongly decoded during high-bandwidth output</li>
           <li>Improves PTY throughput performance determinism by rewriting the internal grid cell storage</li>
-          <li>Adds **experimental** Good Image Protocol (GIP) implementation — a DCS-based protocol for displaying raster images with named image pools, LRU eviction, three compositing layers (below/replace/above), configurable resize and alignment policies, Auto/PNG/RGB/RGBA format support with automatic format detection, and DA1 capability advertisement via code 60 (#100)</li>
+          <li>Adds **experimental** Good Image Protocol (GIP) implementation — a DCS-based protocol for displaying raster images with named image pools, LRU eviction, three compositing layers (below/replace/above), configurable resize and alignment policies, Auto/PNG/RGB/RGBA format support with automatic format detection, and DA1 capability advertisement via code 90 (#100)</li>
           <li>Adds contour cat CLI command for displaying images in the terminal via GIP oneshot sequences</li>
+          <li>Closes VT level 5 conformance gap (#100): DA1 now honestly reports all implemented extensions</li>
+          <li>Adds DECSCL (Set Conformance Level, CSI Ps1;Ps2"p) — applications can change the terminal's conformance level at runtime, with C1 transmission mode (7-bit/8-bit) support</li>
+          <li>Adds text macros (DECDMAC/DECINVM) — define macros via DCS and invoke them via CSI, with hex encoding support, delete-all, recursion guard, and deferred execution</li>
+          <li>Adds User-Defined Keys (DECUDK) — reprogram function keys F6-F20 with custom strings via DCS, with clear/keep semantics and lock mechanism</li>
+          <li>Adds DRCS (DECDLD) — dynamically redefinable character sets with sixel-like bitmap glyph definitions (backend storage; frontend rendering is pending)</li>
+          <li>Wires up all NRCS (National Replacement Character Sets) in SCS dispatch: British, Dutch, Finnish, French, FrenchCanadian, German, NorwegianDanish, Spanish, Swedish, Swiss across G0-G3</li>
+          <li>Adds DEC Locator mouse protocol (DECELR/DECLRP/DECSLE/DECRQLP) — the DEC alternative to xterm mouse tracking, with one-shot mode and configurable event filtering</li>
+          <li>Adds DEC Technical Character Set with full 94-position Unicode mapping (Greek letters, math symbols, bracket pieces, arrows)</li>
+          <li>Fixes VT parser: DCS_Param to DCS_Intermediate transition now correctly collects intermediate bytes</li>
+          <li>Removes ScreenBase class — merges into Screen, eliminating unnecessary virtual dispatch</li>
         </ul>
       </description>
     </release>

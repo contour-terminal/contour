@@ -24,6 +24,7 @@
 #include <sys/types.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -330,6 +331,9 @@ bool Terminal::processInputOnce()
         _parsingBuffer = ptyReadResult->buffer;
         _parser.parseFragment(buf);
         _parsingBuffer.reset();
+
+        // Process any macros that were queued by DECINVM during the parse.
+        processPendingMacros();
     }
 
     if (!_modes.enabled(DECMode::BatchedRendering))
@@ -447,7 +451,7 @@ struct ScopedHyperlinkHover
 {
     std::shared_ptr<HyperlinkInfo const> href;
 
-    ScopedHyperlinkHover(Terminal const& terminal, ScreenBase const& /*screen*/):
+    ScopedHyperlinkHover(Terminal const& terminal, Screen const& /*screen*/):
         href { terminal.tryGetHoveringHyperlink() }
     {
         if (href)
@@ -546,7 +550,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                       highlightSearchMatches);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
-    auto const mainScreenBaseLine = baseLine;
+    auto const mainScreenLine = baseLine;
 
     if (_settings.statusDisplayPosition == StatusDisplayPosition::Bottom)
     {
@@ -554,7 +558,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         fillRenderBufferStatusLine(output, includeSelection, baseLine);
     }
 
-    applyHintOverlay(output, mainScreenBaseLine);
+    applyHintOverlay(output, mainScreenLine);
     updateCursorMotionAnimation(output);
     applyScreenTransitionBlending(output);
 }
@@ -841,6 +845,19 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     if (_inputHandler.sendKeyPressEvent(key, modifiers, eventType))
         return Handled { true };
 
+    // Check for User-Defined Keys (DECUDK) — override function keys F6-F20
+    // when no modifiers are pressed and the key is being pressed (not released).
+    if (modifiers.none() && eventType == KeyboardEventType::Press)
+    {
+        if (auto const udkStr = udkStringForKey(key); udkStr.has_value())
+        {
+            _inputGenerator.generateRaw(*udkStr);
+            flushInput();
+            _viewport.scrollToBottom();
+            return Handled { true };
+        }
+    }
+
     bool const success = _inputGenerator.generate(key, modifiers, eventType);
     if (success)
     {
@@ -900,6 +917,22 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     }
 
     verifyState();
+
+    // DEC Locator: intercept mouse press if locator mode is active
+    if (_locatorState.enabled)
+    {
+        auto const btn = [&]() -> int {
+            switch (button)
+            {
+                case MouseButton::Left: return 1;
+                case MouseButton::Middle: return 2;
+                case MouseButton::Right: return 4;
+                default: return 0;
+            }
+        }();
+        if (btn != 0 && handleLocatorMouseEvent(btn, true, _currentMousePosition))
+            return Handled { true };
+    }
 
     auto const eventHandledByApp =
         allowPassMouseEventToApp(modifiers)
@@ -1216,6 +1249,13 @@ Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
                 case Selection::State::Complete: break;
             }
         }
+    }
+
+    // DEC Locator: intercept mouse release if locator mode is active
+    if (_locatorState.enabled)
+    {
+        if (handleLocatorMouseEvent(0, false, _currentMousePosition))
+            return Handled { true };
     }
 
     if (allowPassMouseEventToApp(modifiers)
@@ -2580,6 +2620,10 @@ void Terminal::softReset()
     _currentScreen->cursor().hyperlink = {};
 
     resetColorPalette();
+    clearMacros();
+    clearUDKs();
+    clearDRCS();
+    resetLocator();
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
@@ -2903,7 +2947,364 @@ LineCount Terminal::maxHistoryLineCount() const noexcept
 void Terminal::setTerminalId(VTType id) noexcept
 {
     _terminalId = id;
+    _operatingLevel = id;
     _supportedVTSequences.reset(id);
+}
+
+void Terminal::setOperatingLevel(VTType level) noexcept
+{
+    _operatingLevel = level;
+    _supportedVTSequences.reset(level);
+}
+
+void Terminal::defineMacro(int id, bool deleteAll, std::string body)
+{
+    if (deleteAll)
+        _macros.clear();
+
+    if (id < 0 || id >= MaxMacroCount)
+        return;
+
+    if (body.empty())
+        _macros.erase(id);
+    else
+        _macros[id] = std::move(body);
+}
+
+void Terminal::invokeMacro(int id)
+{
+    auto const it = _macros.find(id);
+    if (it == _macros.end())
+        return;
+
+    if (_macroRecursionDepth >= MaxMacroRecursionDepth)
+        return; // Guard against infinite recursion
+
+    // Queue the macro body for deferred execution.
+    // We cannot call parseFragment() re-entrantly during an active parse,
+    // so we buffer the body and process it after the current sequence completes.
+    _pendingMacroInvocations.push(it->second);
+}
+
+void Terminal::processPendingMacros()
+{
+    while (!_pendingMacroInvocations.empty())
+    {
+        auto body = std::move(_pendingMacroInvocations.front());
+        _pendingMacroInvocations.pop();
+
+        ++_macroRecursionDepth;
+
+        // Write the macro body into the pty buffer so that parseFragment
+        // can reference it through the buffer management system.
+        auto const chunk = _currentPtyBuffer->writeAtEnd(std::string_view { body });
+        _parsingBuffer = _currentPtyBuffer;
+        _parser.parseFragment(chunk);
+        _parsingBuffer.reset();
+
+        --_macroRecursionDepth;
+    }
+}
+
+std::shared_ptr<RasterizedImage> Terminal::createDRCSImage(DRCSGlyph const& glyph, RGBColor foregroundColor)
+{
+    // Convert monochrome bitmap to RGBA
+    auto const pixelCount = static_cast<size_t>(glyph.width * glyph.height);
+    auto rgbaData = Image::Data(pixelCount * 4, 0);
+
+    for (size_t i = 0; i < pixelCount && i < glyph.bitmap.size(); ++i)
+    {
+        if (glyph.bitmap[i])
+        {
+            rgbaData[i * 4 + 0] = foregroundColor.red;
+            rgbaData[i * 4 + 1] = foregroundColor.green;
+            rgbaData[i * 4 + 2] = foregroundColor.blue;
+            rgbaData[i * 4 + 3] = 0xFF;
+        }
+        // else: leave as transparent (0,0,0,0)
+    }
+
+    auto const pixelSize = ImageSize { Width::cast_from(glyph.width), Height::cast_from(glyph.height) };
+    auto const imageRef = _imagePool.create(ImageFormat::RGBA, pixelSize, std::move(rgbaData));
+    auto const cellSpan = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
+
+    return std::make_shared<RasterizedImage>(
+        imageRef, ImageAlignment::TopStart, ImageResize::ResizeToFit, RGBAColor {}, cellSpan, _cellPixelSize);
+}
+
+void Terminal::defineDRCS(int fontNumber,
+                          int startingCharacter,
+                          int eraseControl,
+                          int charMatrixWidth,
+                          int fontWidth,
+                          int /*textOrFullCell*/,
+                          int charMatrixHeight,
+                          int /*charsetSize*/,
+                          std::string_view designator,
+                          std::string_view data)
+{
+    // Erase control: 0 = erase all chars in set, 1 = erase only chars being reloaded, 2 = erase all
+    if (eraseControl == 0 || eraseControl == 2)
+        _drcsCharsets[fontNumber].glyphs.clear();
+
+    // Store designator → font number mapping for SCS lookup
+    if (!designator.empty())
+        _drcsDesignatorMap[std::string(designator)] = fontNumber;
+
+    auto const width = [&]() {
+        if (charMatrixWidth > 0)
+            return charMatrixWidth;
+        if (fontWidth > 0)
+            return fontWidth;
+        return 10;
+    }();
+    auto const height = (charMatrixHeight > 0) ? charMatrixHeight : 20;
+
+    auto charPos = startingCharacter > 0 ? startingCharacter : 0x21; // Default starting at '!'
+
+    // Parse sixel-like glyph data: each glyph separated by ';', rows within a glyph separated by '/'
+    auto glyphStart = size_t { 0 };
+    while (glyphStart <= data.size())
+    {
+        auto const glyphEnd = data.find(';', glyphStart);
+        auto const glyphData = data.substr(
+            glyphStart, glyphEnd == std::string_view::npos ? std::string_view::npos : glyphEnd - glyphStart);
+
+        if (!glyphData.empty())
+        {
+            auto glyph = DRCSGlyph { .width = width, .height = height, .bitmap = {} };
+            glyph.bitmap.resize(static_cast<size_t>(width * height), 0);
+
+            auto row = 0;
+            auto colBase = size_t { 0 };
+            for (auto const ch: glyphData)
+            {
+                if (ch == '/')
+                {
+                    row += 6; // Each sixel row encodes 6 pixel rows
+                    colBase = 0;
+                    continue;
+                }
+                if (ch < 0x3F || ch > 0x7E)
+                    continue;
+
+                auto const sixel = static_cast<uint8_t>(ch - 0x3F);
+                auto const col = static_cast<int>(colBase);
+                for (auto bit = 0; bit < 6 && (row + bit) < height; ++bit)
+                {
+                    if ((sixel >> bit) & 1)
+                    {
+                        auto const idx = static_cast<size_t>((row + bit) * width + col);
+                        if (idx < glyph.bitmap.size())
+                            glyph.bitmap[idx] = 1;
+                    }
+                }
+                ++colBase;
+            }
+
+            _drcsCharsets[fontNumber].glyphs[charPos] = std::move(glyph);
+        }
+
+        ++charPos;
+        if (glyphEnd == std::string_view::npos)
+            break;
+        glyphStart = glyphEnd + 1;
+    }
+}
+
+void Terminal::setLocatorMode(int ps, int pu) noexcept
+{
+    switch (ps)
+    {
+        case 0: // Locator disabled
+            _locatorState.enabled = false;
+            _locatorState.oneShot = false;
+            break;
+        case 1: // Locator enabled — reports on button press/release
+            _locatorState.enabled = true;
+            _locatorState.oneShot = false;
+            break;
+        case 2: // One-shot mode — report once then disable
+            _locatorState.enabled = true;
+            _locatorState.oneShot = true;
+            break;
+        default: break;
+    }
+
+    // Pu: coordinate unit
+    switch (pu)
+    {
+        case 1: _locatorState.coordUnit = LocatorCoordUnit::DevicePixels; break;
+        case 0: [[fallthrough]];
+        case 2: [[fallthrough]];
+        default: _locatorState.coordUnit = LocatorCoordUnit::CharacterCells; break;
+    }
+}
+
+void Terminal::selectLocatorEvents(std::span<int const> params) noexcept
+{
+    for (auto const ps: params)
+    {
+        switch (ps)
+        {
+            case 0: // Disable all button events (but locator stays enabled)
+                _locatorState.reportButtonDown = false;
+                _locatorState.reportButtonUp = false;
+                break;
+            case 1: // Enable button down events
+                _locatorState.reportButtonDown = true;
+                break;
+            case 2: // Disable button down events
+                _locatorState.reportButtonDown = false;
+                break;
+            case 3: // Enable button up events
+                _locatorState.reportButtonUp = true;
+                break;
+            case 4: // Disable button up events
+                _locatorState.reportButtonUp = false;
+                break;
+            default: break;
+        }
+    }
+}
+
+void Terminal::sendLocatorReport(int event, int button, int row, int col)
+{
+    // DECLRP — Locator Report: CSI Pe ; Pb ; Pr ; Pc ; Pp & w
+    // Pp = page number (always 1)
+    reply("\033[{};{};{};{};1&w", event, button, row, col);
+    flushInput();
+}
+
+void Terminal::requestLocatorPosition()
+{
+    if (!_locatorState.enabled)
+    {
+        // If locator is not enabled, report locator unavailable
+        sendLocatorReport(0, 0, 0, 0);
+        return;
+    }
+    // Report last known mouse position (1-based)
+    auto const row = *_currentMousePosition.line + 1;
+    auto const col = *_currentMousePosition.column + 1;
+    sendLocatorReport(1, 0, row, col);
+}
+
+bool Terminal::handleLocatorMouseEvent(int button, bool press, CellLocation pos)
+{
+    if (!_locatorState.enabled)
+        return false;
+
+    if (press && !_locatorState.reportButtonDown)
+        return false;
+    if (!press && !_locatorState.reportButtonUp)
+        return false;
+
+    // Pe: 2 = button down, 3 = button up
+    auto const event = press ? 2 : 3;
+
+    // Pb: button encoding (1=left, 2=middle, 4=right; 0 for up with no button info)
+    auto const pb = press ? button : 0;
+
+    // Row and column are 1-based
+    auto const row = *pos.line + 1;
+    auto const col = *pos.column + 1;
+
+    sendLocatorReport(event, pb, row, col);
+
+    if (_locatorState.oneShot)
+    {
+        _locatorState.enabled = false;
+        _locatorState.oneShot = false;
+    }
+
+    return true;
+}
+
+void Terminal::programUDK(bool clearAll, bool locked, std::string_view data)
+{
+    if (_udkLocked)
+        return;
+
+    if (clearAll)
+        _userDefinedKeys.clear();
+
+    // Parse "Ky1/St1;Ky2/St2;..." pairs
+    // Each pair: decimal key number, '/', hex-encoded string
+    auto pos = size_t { 0 };
+    while (pos < data.size())
+    {
+        // Parse key ID (decimal)
+        auto const slashPos = data.find('/', pos);
+        if (slashPos == std::string_view::npos)
+            break;
+
+        auto keyId = 0;
+        auto const keyStr = data.substr(pos, slashPos - pos);
+        if (auto [ptr, ec] = std::from_chars(keyStr.data(), keyStr.data() + keyStr.size(), keyId);
+            ec != std::errc {})
+            break;
+
+        // Parse hex-encoded string
+        auto const semiPos = data.find(';', slashPos + 1);
+        auto const hexStr =
+            data.substr(slashPos + 1,
+                        semiPos == std::string_view::npos ? std::string_view::npos : semiPos - slashPos - 1);
+
+        // Decode hex pairs to bytes
+        auto decoded = std::string {};
+        decoded.reserve(hexStr.size() / 2);
+        for (size_t i = 0; i + 1 < hexStr.size(); i += 2)
+        {
+            auto const hexToByte = [](char ch) -> uint8_t {
+                if (ch >= '0' && ch <= '9')
+                    return static_cast<uint8_t>(ch - '0');
+                if (ch >= 'A' && ch <= 'F')
+                    return static_cast<uint8_t>(ch - 'A' + 10);
+                if (ch >= 'a' && ch <= 'f')
+                    return static_cast<uint8_t>(ch - 'a' + 10);
+                return 0;
+            };
+            decoded.push_back(static_cast<char>((hexToByte(hexStr[i]) << 4) | hexToByte(hexStr[i + 1])));
+        }
+
+        _userDefinedKeys[keyId] = std::move(decoded);
+
+        if (semiPos == std::string_view::npos)
+            break;
+        pos = semiPos + 1;
+    }
+
+    if (locked)
+        _udkLocked = true;
+}
+
+std::optional<std::string> Terminal::udkStringForKey(Key key) const noexcept
+{
+    // DEC UDK key IDs map to function keys F6-F20.
+    // These IDs match the CSI tilde parameter numbers.
+    static constexpr auto KeyMapping = std::array<std::pair<Key, int>, 15> { {
+        { Key::F6, 17 },
+        { Key::F7, 18 },
+        { Key::F8, 19 },
+        { Key::F9, 20 },
+        { Key::F10, 21 },
+        { Key::F11, 23 },
+        { Key::F12, 24 },
+        { Key::F13, 25 },
+        { Key::F14, 26 },
+        { Key::F15, 28 },
+        { Key::F16, 29 },
+        { Key::F17, 31 },
+        { Key::F18, 32 },
+        { Key::F19, 33 },
+        { Key::F20, 34 },
+    } };
+
+    auto const it = std::ranges::find_if(KeyMapping, [key](auto const& pair) { return pair.first == key; });
+    if (it != KeyMapping.end())
+        return udkString(it->second);
+    return std::nullopt;
 }
 
 void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)

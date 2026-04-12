@@ -446,7 +446,7 @@ struct VTSerializer
         return item.text;
     }
 
-    std::string visit(StatusLineDefinitions::VTType const&) { return std::format("{}", vt.terminalId()); }
+    std::string visit(StatusLineDefinitions::VTType const&) { return std::format("{}", vt.operatingLevel()); }
 
     std::string visit(StatusLineDefinitions::Tabs const& tabs)
     {

@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 
 namespace vtbackend
 {
@@ -23,7 +24,8 @@ enum class CharsetId : std::uint8_t
     Spanish,
     Swedish,
     Swiss,
-    USASCII
+    USASCII,
+    Technical
 };
 
 enum class CharsetTable : std::uint8_t
@@ -56,6 +58,7 @@ constexpr char charsetDesignation(CharsetId id) noexcept
         case CharsetId::Spanish: return 'Z';
         case CharsetId::Swedish: return 'H';
         case CharsetId::Swiss: return '=';
+        case CharsetId::Technical: return '>';
         case CharsetId::USASCII: return 'B';
     }
     return 'B'; // fallback to USASCII
@@ -124,6 +127,28 @@ class CharsetMapping
     {
         _tables[static_cast<std::size_t>(table)] = charsetMap(id);
         _charsetIds[static_cast<std::size_t>(table)] = id;
+        _drcsFontNumber[static_cast<std::size_t>(table)].reset();
+    }
+
+    /// Selects a DRCS font into the given G-set table.
+    void selectDRCS(CharsetTable table, int fontNumber) noexcept
+    {
+        _drcsFontNumber[static_cast<std::size_t>(table)] = fontNumber;
+        // Set the table to USASCII as fallback for unmapped positions
+        _tables[static_cast<std::size_t>(table)] = charsetMap(CharsetId::USASCII);
+        _charsetIds[static_cast<std::size_t>(table)] = CharsetId::USASCII;
+    }
+
+    /// @returns the DRCS font number for the given G-set table, or nullopt if not a DRCS set.
+    [[nodiscard]] std::optional<int> drcsFont(CharsetTable table) const noexcept
+    {
+        return _drcsFontNumber[static_cast<std::size_t>(table)];
+    }
+
+    /// @returns the DRCS font number for the table that will be used for the next graphic character.
+    [[nodiscard]] std::optional<int> activeDRCSFont() const noexcept
+    {
+        return _drcsFontNumber[static_cast<std::size_t>(_tableForNextGraphic)];
     }
 
     /// @returns the G-set table currently mapped to GL (the active locking shift).
@@ -148,6 +173,7 @@ class CharsetMapping
     std::array<CharsetId, 4> _charsetIds = {
         CharsetId::USASCII, CharsetId::USASCII, CharsetId::USASCII, CharsetId::USASCII
     };
+    std::array<std::optional<int>, 4> _drcsFontNumber = {};
 };
 
 } // namespace vtbackend

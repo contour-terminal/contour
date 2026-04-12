@@ -47,9 +47,11 @@
 #include <mutex>
 #include <numbers>
 #include <optional>
+#include <queue>
 #include <span>
 #include <stack>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -57,8 +59,6 @@ namespace vtbackend
 {
 
 class Screen;
-
-class ScreenBase;
 
 /// Result of applying a smooth-scroll pixel delta.
 enum class SmoothScrollResult : uint8_t
@@ -344,6 +344,159 @@ class Terminal
 
     void setTerminalId(VTType id) noexcept;
     VTType terminalId() const noexcept { return _terminalId; }
+
+    /// Sets the current operating conformance level (used by DECSCL).
+    /// Does not change the maximum terminal identity reported by DA1/DA2.
+    void setOperatingLevel(VTType level) noexcept;
+    VTType operatingLevel() const noexcept { return _operatingLevel; }
+
+    void setC1TransmissionMode(ControlTransmissionMode mode) noexcept { _c1TransmissionMode = mode; }
+    ControlTransmissionMode c1TransmissionMode() const noexcept { return _c1TransmissionMode; }
+
+    // {{{ Text Macros (DECDMAC / DECINVM)
+    static constexpr int MaxMacroCount = 64;
+    static constexpr int MaxMacroRecursionDepth = 16;
+
+    /// Defines a macro with the given ID and body.
+    void defineMacro(int id, bool deleteAll, std::string body);
+
+    /// Invokes a previously defined macro by ID (queues for deferred execution).
+    void invokeMacro(int id);
+
+    /// Processes any pending macro invocations queued by invokeMacro().
+    void processPendingMacros();
+
+    /// Clears all defined macros.
+    void clearMacros() noexcept { _macros.clear(); }
+
+    /// Returns the macro body for the given ID, or nullopt if not defined.
+    [[nodiscard]] std::optional<std::string_view> macroBody(int id) const noexcept
+    {
+        if (auto const it = _macros.find(id); it != _macros.end())
+            return it->second;
+        return std::nullopt;
+    }
+    // }}}
+
+    // {{{ User-Defined Keys (DECUDK)
+    /// Programs user-defined keys from DECUDK DCS payload.
+    /// @param clearAll if true, all existing UDKs are cleared before loading.
+    /// @param locked if true, keys cannot be reprogrammed after this call.
+    /// @param data the raw payload of `Ky1/St1;Ky2/St2;...` pairs.
+    void programUDK(bool clearAll, bool locked, std::string_view data);
+
+    /// Returns the programmed string for a UDK key ID, or nullopt if not programmed.
+    [[nodiscard]] std::optional<std::string> udkString(int keyId) const noexcept
+    {
+        if (auto const it = _userDefinedKeys.find(keyId); it != _userDefinedKeys.end())
+            return it->second;
+        return std::nullopt;
+    }
+
+    /// Checks if a UDK is defined for the given function key and returns its string.
+    /// @param key the Key enum value (e.g., Key::F6)
+    /// @return the programmed string or nullopt if no UDK is defined.
+    [[nodiscard]] std::optional<std::string> udkStringForKey(Key key) const noexcept;
+
+    /// Clears all user-defined keys.
+    void clearUDKs() noexcept
+    {
+        _userDefinedKeys.clear();
+        _udkLocked = false;
+    }
+    // }}}
+
+    // {{{ DRCS (DECDLD — Dynamically Redefinable Character Sets)
+    struct DRCSGlyph
+    {
+        int width = 0;               ///< Glyph width in pixels
+        int height = 0;              ///< Glyph height in pixels
+        std::vector<uint8_t> bitmap; ///< Row-major pixel data (1=set, 0=clear)
+    };
+
+    struct DRCSCharset
+    {
+        std::unordered_map<int, DRCSGlyph> glyphs; ///< Position (0x21-0x7E) → glyph data
+    };
+
+    /// Defines DRCS glyphs from DECDLD DCS payload.
+    void defineDRCS(int fontNumber,
+                    int startingCharacter,
+                    int eraseControl,
+                    int charMatrixWidth,
+                    int fontWidth,
+                    int textOrFullCell,
+                    int charMatrixHeight,
+                    int charsetSize,
+                    std::string_view designator,
+                    std::string_view data);
+
+    /// Returns the DRCS charset for the given font number, or nullptr.
+    [[nodiscard]] DRCSCharset const* drcsCharset(int fontNumber) const noexcept
+    {
+        if (auto const it = _drcsCharsets.find(fontNumber); it != _drcsCharsets.end())
+            return &it->second;
+        return nullptr;
+    }
+
+    /// Clears all DRCS charsets and designator mappings.
+    void clearDRCS() noexcept
+    {
+        _drcsCharsets.clear();
+        _drcsDesignatorMap.clear();
+    }
+
+    /// Maps a DRCS designator string (from DECDLD Dscs field) to a font number.
+    [[nodiscard]] std::optional<int> drcsDesignatorToFont(std::string_view designator) const noexcept
+    {
+        auto const key = std::string(designator);
+        if (auto const it = _drcsDesignatorMap.find(key); it != _drcsDesignatorMap.end())
+            return it->second;
+        return std::nullopt;
+    }
+
+    /// Creates an RGBA ImageFragment from a DRCS glyph bitmap using the given foreground color.
+    [[nodiscard]] std::shared_ptr<RasterizedImage> createDRCSImage(DRCSGlyph const& glyph,
+                                                                   RGBColor foregroundColor);
+    // }}}
+
+    // {{{ DEC Locator (DECELR / DECLRP / DECSLE / DECRQLP)
+    enum class LocatorCoordUnit : uint8_t
+    {
+        CharacterCells, ///< Coordinates in character cell units (default)
+        DevicePixels,   ///< Coordinates in device pixel units
+    };
+
+    struct LocatorState
+    {
+        bool enabled = false;
+        bool oneShot = false;
+        LocatorCoordUnit coordUnit = LocatorCoordUnit::CharacterCells;
+        bool reportButtonDown = true;
+        bool reportButtonUp = true;
+    };
+
+    /// Enables or disables DEC Locator reporting.
+    void setLocatorMode(int ps, int pu) noexcept;
+
+    /// Selects which locator events generate reports.
+    void selectLocatorEvents(std::span<int const> params) noexcept;
+
+    /// Sends a DEC Locator report (DECLRP) to the PTY.
+    void sendLocatorReport(int event, int button, int row, int col);
+
+    /// Requests the current locator position.
+    void requestLocatorPosition();
+
+    /// Returns the current locator state.
+    [[nodiscard]] LocatorState const& locatorState() const noexcept { return _locatorState; }
+
+    /// Resets locator state (called by soft reset).
+    void resetLocator() noexcept { _locatorState = {}; }
+
+    /// Called from sendMousePressEvent/sendMouseReleaseEvent when locator mode is active.
+    bool handleLocatorMouseEvent(int button, bool press, CellLocation pos);
+    // }}}
 
     void setMaxImageSize(ImageSize size) noexcept { _effectiveImageCanvasSize = size; }
     ImageSize maxImageSize() const noexcept { return _effectiveImageCanvasSize; }
@@ -657,10 +810,10 @@ class Terminal
         return _semanticBlockTracker;
     }
 
-    [[nodiscard]] ScreenBase& currentScreen() noexcept { return *_currentScreen; }
-    [[nodiscard]] ScreenBase const& currentScreen() const noexcept { return *_currentScreen; }
+    [[nodiscard]] Screen& currentScreen() noexcept { return *_currentScreen; }
+    [[nodiscard]] Screen const& currentScreen() const noexcept { return *_currentScreen; }
 
-    [[nodiscard]] ScreenBase& activeDisplay() noexcept
+    [[nodiscard]] Screen& activeDisplay() noexcept
     {
         switch (_activeStatusDisplay)
         {
@@ -689,7 +842,7 @@ class Terminal
     ScreenType screenType() const noexcept { return _currentScreenType; }
     void setScreen(ScreenType screenType);
 
-    ScreenBase& screenForType(ScreenType type) noexcept
+    Screen& screenForType(ScreenType type) noexcept
     {
         switch (type)
         {
@@ -1423,7 +1576,7 @@ class Terminal
     PageIndex _savedCursorPage { 0 };            ///< Page index saved by DECSC
     Screen _hostWritableStatusLineScreen;
     Screen _indicatorStatusScreen;
-    gsl::not_null<ScreenBase*> _currentScreen;
+    gsl::not_null<Screen*> _currentScreen;
     Viewport _viewport;
     StatusLineDefinition _indicatorStatusLineDefinition;
 
@@ -1471,6 +1624,19 @@ class Terminal
     bool _focused = true;
 
     VTType _terminalId = VTType::VT525;
+    VTType _operatingLevel = VTType::VT525;
+    ControlTransmissionMode _c1TransmissionMode = ControlTransmissionMode::S7C1T;
+
+    std::unordered_map<int, std::string> _macros;
+    std::queue<std::string> _pendingMacroInvocations;
+    int _macroRecursionDepth = 0;
+
+    std::unordered_map<int, std::string> _userDefinedKeys;
+    bool _udkLocked = false;
+
+    LocatorState _locatorState;
+    std::unordered_map<int, DRCSCharset> _drcsCharsets;
+    std::unordered_map<std::string, int> _drcsDesignatorMap; ///< Dscs designator → font number
 
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
