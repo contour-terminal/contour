@@ -200,6 +200,54 @@ TEST_CASE("writeCellToSoA.empty", "[SoAWriter]")
     CHECK(line.clusterSize[0] == 0);
 }
 
+TEST_CASE("writeCellToSoA.trivial.invalidatedAtCol0", "[SoAWriter]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(10));
+    REQUIRE(line.trivial);
+
+    // Write a cell at col 0 with different attrs than the rest of the line.
+    auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(5) };
+    writeCellToSoA(line, 0, U'X', 1, attrs);
+
+    // Col 0 now has Indexed(5), cols 1-9 still have default — trivial must be false.
+    CHECK_FALSE(line.trivial);
+}
+
+// =============================================================================
+// writeTextToSoA / writeAsciiToSoA — trivial flag edge cases
+// =============================================================================
+
+TEST_CASE("writeTextToSoA.ascii.trivial.invalidatedFromCol0Partial", "[SoAWriter]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(20));
+    REQUIRE(line.trivial);
+
+    // Partial write from col 0 with non-default attrs.
+    // Only cols 0-4 are written; cols 5-19 still have default SGR.
+    auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
+    writeTextToSoA(line, 0, "Hello", attrs);
+
+    // Line has mixed SGR — trivial must be false.
+    CHECK_FALSE(line.trivial);
+}
+
+TEST_CASE("writeTextToSoA.ascii.trivial.preservedFullLine", "[SoAWriter]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(5));
+    REQUIRE(line.trivial);
+
+    // Full-line bulk ASCII write with uniform attrs — trivial should remain true.
+    // Uses asciiHint=true to exercise the bulk path (per-cell path can't preserve
+    // trivial because it writes one cell at a time and can't predict future writes).
+    auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
+    writeTextToSoA(line, 0, "Hello", attrs, HyperlinkId {}, /*asciiHint=*/true);
+
+    CHECK(line.trivial);
+}
+
 // =============================================================================
 // fillWideCharContinuation
 // =============================================================================

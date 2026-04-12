@@ -29,6 +29,7 @@ void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const
 
 void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const& fillAttrs)
 {
+    auto const oldSize = line.codepoints.size();
     auto const n = unbox<size_t>(newCols);
 
     line.codepoints.resize(n, char32_t { 0 });
@@ -41,6 +42,10 @@ void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const&
     // Clamp usedColumns to new size
     if (line.usedColumns > newCols)
         line.usedColumns = newCols;
+
+    // When growing, new cells get fillAttrs. If existing cells had different SGR, no longer trivial.
+    if (n > oldSize && line.trivial && oldSize > 0 && fillAttrs != line.sgr[0])
+        line.trivial = false;
 }
 
 void clearRange(LineSoA& line, size_t from, size_t count, GraphicsAttributes const& attrs)
@@ -143,6 +148,9 @@ void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol,
             }
         }
     }
+
+    // Copied SGR data may break uniformity on the destination line.
+    dst.trivial = false;
 }
 
 void moveColumns(LineSoA& line, size_t srcCol, size_t dstCol, size_t count)

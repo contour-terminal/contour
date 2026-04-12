@@ -266,14 +266,21 @@ class BasicCellProxy
     }
 
   private:
-    /// Invalidate the trivial flag if this cell's SGR or hyperlink differs from cell 0.
+    /// Invalidate the trivial flag if this cell's SGR or hyperlink differs from another cell.
+    /// When at col 0, compare against col 1 (an unwritten cell).
+    /// When at col > 0, compare against col 0.
     void invalidateTrivialIfNeeded() noexcept
         requires(!IsConst)
     {
-        if (_line->trivial && _col > 0
-            && (_line->sgr[_col] != _line->sgr[0] || _line->hyperlinks[_col] != _line->hyperlinks[0]))
+        if (_line->trivial)
         {
-            _line->trivial = false;
+            auto const checkCol = (_col > 0) ? size_t(0) : size_t(1);
+            if (checkCol < _line->codepoints.size()
+                && (_line->sgr[_col] != _line->sgr[checkCol]
+                    || _line->hyperlinks[_col] != _line->hyperlinks[checkCol]))
+            {
+                _line->trivial = false;
+            }
         }
     }
 
