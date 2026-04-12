@@ -450,7 +450,7 @@ struct ScopedHyperlinkHover
 {
     std::shared_ptr<HyperlinkInfo const> href;
 
-    ScopedHyperlinkHover(Terminal const& terminal, ScreenBase const& /*screen*/):
+    ScopedHyperlinkHover(Terminal const& terminal, Screen const& /*screen*/):
         href { terminal.tryGetHoveringHyperlink() }
     {
         if (href)
@@ -549,7 +549,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                       highlightSearchMatches);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
-    auto const mainScreenBaseLine = baseLine;
+    auto const mainScreenLine = baseLine;
 
     if (_settings.statusDisplayPosition == StatusDisplayPosition::Bottom)
     {
@@ -557,7 +557,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         fillRenderBufferStatusLine(output, includeSelection, baseLine);
     }
 
-    applyHintOverlay(output, mainScreenBaseLine);
+    applyHintOverlay(output, mainScreenLine);
     updateCursorMotionAnimation(output);
     applyScreenTransitionBlending(output);
 }

@@ -4842,7 +4842,8 @@ std::set<int> parseDA1Extensions(std::string_view reply)
     while (pos < params.size())
     {
         auto const delim = params.find(';', pos);
-        auto const token = params.substr(pos, delim == std::string_view::npos ? std::string_view::npos : delim - pos);
+        auto const token =
+            params.substr(pos, delim == std::string_view::npos ? std::string_view::npos : delim - pos);
         if (!token.empty())
         {
             auto value = 0;
@@ -5079,7 +5080,7 @@ TEST_CASE("DECDMAC: define and invoke simple text macro", "[screen]")
     // Invoke macro 0
     mock.writeToScreen("\033[0*z");
     mock.terminal.flushInput();
-    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 5) == "Hello");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 5) == "Hello");
 }
 
 TEST_CASE("DECDMAC: define macro with VT sequences", "[screen]")
@@ -5091,7 +5092,7 @@ TEST_CASE("DECDMAC: define macro with VT sequences", "[screen]")
     // Invoke macro 1
     mock.writeToScreen("\033[1*z");
     mock.terminal.flushInput();
-    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 4) == "Bold");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 4) == "Bold");
 }
 
 TEST_CASE("DECDMAC: hex-encoded macro (Pen=1)", "[screen]")
@@ -5103,7 +5104,7 @@ TEST_CASE("DECDMAC: hex-encoded macro (Pen=1)", "[screen]")
     // Invoke macro 2
     mock.writeToScreen("\033[2*z");
     mock.terminal.flushInput();
-    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "Hi");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "Hi");
 }
 
 TEST_CASE("DECDMAC: delete all macros (Pdt=1)", "[screen]")
@@ -5131,7 +5132,7 @@ TEST_CASE("DECDMAC: overwrite existing macro", "[screen]")
     // Invoke macro 0
     mock.writeToScreen("\033[0*z");
     mock.terminal.flushInput();
-    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 3) == "New");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 3) == "New");
 }
 
 TEST_CASE("DECDMAC: max 64 macros", "[screen]")
@@ -5155,7 +5156,8 @@ TEST_CASE("DECINVM: invoke undefined macro", "[screen]")
     // Invoke non-existent macro 42 — should do nothing, no crash
     mock.writeToScreen("\033[42*z");
     mock.terminal.flushInput();
-    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).find_first_not_of(' ') == std::string::npos);
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).find_first_not_of(' ')
+          == std::string::npos);
 }
 
 TEST_CASE("DECINVM: nested macro invocation", "[screen]")
@@ -5171,7 +5173,7 @@ TEST_CASE("DECINVM: nested macro invocation", "[screen]")
     mock.writeToScreen("\033[0*z");
     mock.terminal.flushInput();
     // Macro 0 body outputs "A" then "C" (deferred macro 1 runs after), then macro 1 outputs "B"
-    auto const text = mock.terminal.primaryScreen().grid().lineText(LineOffset(0));
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
     CHECK(text.find('A') != std::string::npos);
     CHECK(text.find('B') != std::string::npos);
     CHECK(text.find('C') != std::string::npos);

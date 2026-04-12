@@ -60,8 +60,6 @@ namespace vtbackend
 
 class Screen;
 
-class ScreenBase;
-
 /// Result of applying a smooth-scroll pixel delta.
 enum class SmoothScrollResult : uint8_t
 {
@@ -692,10 +690,10 @@ class Terminal
         return _semanticBlockTracker;
     }
 
-    [[nodiscard]] ScreenBase& currentScreen() noexcept { return *_currentScreen; }
-    [[nodiscard]] ScreenBase const& currentScreen() const noexcept { return *_currentScreen; }
+    [[nodiscard]] Screen& currentScreen() noexcept { return *_currentScreen; }
+    [[nodiscard]] Screen const& currentScreen() const noexcept { return *_currentScreen; }
 
-    [[nodiscard]] ScreenBase& activeDisplay() noexcept
+    [[nodiscard]] Screen& activeDisplay() noexcept
     {
         switch (_activeStatusDisplay)
         {
@@ -724,7 +722,7 @@ class Terminal
     ScreenType screenType() const noexcept { return _currentScreenType; }
     void setScreen(ScreenType screenType);
 
-    ScreenBase& screenForType(ScreenType type) noexcept
+    Screen& screenForType(ScreenType type) noexcept
     {
         switch (type)
         {
@@ -1458,7 +1456,7 @@ class Terminal
     PageIndex _savedCursorPage { 0 };            ///< Page index saved by DECSC
     Screen _hostWritableStatusLineScreen;
     Screen _indicatorStatusScreen;
-    gsl::not_null<ScreenBase*> _currentScreen;
+    gsl::not_null<Screen*> _currentScreen;
     Viewport _viewport;
     StatusLineDefinition _indicatorStatusLineDefinition;
 

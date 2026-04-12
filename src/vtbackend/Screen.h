@@ -5,11 +5,12 @@
 #include <vtbackend/CellUtil.h>
 #include <vtbackend/Charset.h>
 #include <vtbackend/Color.h>
+#include <vtbackend/Cursor.h>
 #include <vtbackend/Grid.h>
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
 #include <vtbackend/MessageParser.h>
-#include <vtbackend/ScreenBase.h>
+#include <vtbackend/Sequence.h>
 #include <vtbackend/VTType.h>
 
 #include <vtparser/ParserExtension.h>
@@ -131,7 +132,7 @@ enum class ApplyResult : uint8_t
  * allowing the object owner to control which part of the screen (or history)
  * to be viewn.
  */
-class Screen final: public ScreenBase, public capabilities::StaticDatabase
+class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 {
   public:
     /// @param terminal            reference to the terminal this display belongs to.
@@ -152,14 +153,19 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     Screen& operator=(Screen const&) = delete;
     Screen(Screen&&) noexcept = delete;
     Screen& operator=(Screen&&) noexcept = delete;
-    ~Screen() override;
+    ~Screen() override; // SequenceHandler is the only virtual base
+
+    [[nodiscard]] Cursor& cursor() noexcept { return _cursor; }
+    [[nodiscard]] Cursor const& cursor() const noexcept { return _cursor; }
+    [[nodiscard]] Cursor const& savedCursorState() const noexcept { return _savedCursor; }
+    void resetSavedCursorState() { _savedCursor = {}; }
 
     using StaticDatabase::numericCapability;
     [[nodiscard]] unsigned numericCapability(capabilities::Code cap) const override;
 
     [[nodiscard]] LineFlags lineFlags(LineOffset line) const noexcept { return _grid.lineAt(line).flags(); }
 
-    // {{{ SequenceHandler overrides
+    // {{{ SequenceHandlers
     void writeText(char32_t codepoint) override;
     void writeText(std::string_view text, size_t cellCount) override;
     void writeTextEnd() override;
@@ -250,17 +256,17 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void backIndex();    // DECBI
     void forwardIndex(); // DECFI
 
-    void moveCursorTo(LineOffset line, ColumnOffset column) override; // CUP
-    void moveCursorBackward(ColumnCount n);                           // CUB
-    void moveCursorDown(LineCount n);                                 // CUD
-    void moveCursorForward(ColumnCount n);                            // CUF
-    void moveCursorToBeginOfLine();                                   // CR
-    void moveCursorToColumn(ColumnOffset n);                          // CHA
-    void moveCursorToLine(LineOffset n);                              // VPA
-    void moveCursorToNextLine(LineCount n);                           // CNL
-    void moveCursorToNextTab();                                       // HT
-    void moveCursorToPrevLine(LineCount n);                           // CPL
-    void moveCursorUp(LineCount n);                                   // CUU
+    void moveCursorTo(LineOffset line, ColumnOffset column); // CUP
+    void moveCursorBackward(ColumnCount n);                  // CUB
+    void moveCursorDown(LineCount n);                        // CUD
+    void moveCursorForward(ColumnCount n);                   // CUF
+    void moveCursorToBeginOfLine();                          // CR
+    void moveCursorToColumn(ColumnOffset n);                 // CHA
+    void moveCursorToLine(LineOffset n);                     // VPA
+    void moveCursorToNextLine(LineCount n);                  // CNL
+    void moveCursorToNextTab();                              // HT
+    void moveCursorToPrevLine(LineCount n);                  // CPL
+    void moveCursorUp(LineCount n);                          // CUU
 
     void cursorBackwardTab(TabStopCount count);        // CBT
     void cursorForwardTab(TabStopCount count);         // CHT
@@ -276,7 +282,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void reportCursorPosition();         // CPR
     void reportExtendedCursorPosition(); // DECXCPR
     void reportCursorInformation();      // DECCIR
-    void reportColorPaletteUpdate() override;
+    void reportColorPaletteUpdate();
     void selectConformanceLevel(VTType level);
     void requestDynamicColor(DynamicColorName name);
     void requestCapability(capabilities::Code code);
@@ -367,7 +373,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     /// Removes a named image from the image pool.
     void releaseImage(std::string const& name);
 
-    void inspect(std::string const& message, std::ostream& os) const override;
+    void inspect(std::string const& message, std::ostream& os) const;
 
     // for DECSC and DECRC
     void requestAnsiMode(unsigned int mode);
@@ -485,7 +491,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     }
 
     // Tests if given coordinate is within the visible screen area.
-    [[nodiscard]] bool contains(CellLocation coord) const noexcept override
+    [[nodiscard]] bool contains(CellLocation coord) const noexcept
     {
         return LineOffset(0) <= coord.line && coord.line < boxed_cast<LineOffset>(pageSize().lines)
                && ColumnOffset(0) <= coord.column
@@ -493,16 +499,16 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     }
 
     [[nodiscard]] std::optional<CellLocation> search(std::u32string_view searchText,
-                                                     CellLocation startPosition) override;
+                                                     CellLocation startPosition);
     [[nodiscard]] std::optional<CellLocation> searchReverse(std::u32string_view searchText,
-                                                            CellLocation startPosition) override;
+                                                            CellLocation startPosition);
 
     [[nodiscard]] CellProxy usePreviousCell() noexcept
     {
         return useCellAt(_lastCursorPosition.line, _lastCursorPosition.column);
     }
 
-    void updateCursorIterator() noexcept override { _currentLine = &_grid.lineAt(_cursor.position.line); }
+    void updateCursorIterator() noexcept { _currentLine = &_grid.lineAt(_cursor.position.line); }
 
     [[nodiscard]] Line& currentLine() noexcept { return *_currentLine; }
 
@@ -555,7 +561,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void scrollRight(ColumnCount n);
     void unscroll(LineCount n);
 
-    void verifyState() const override;
+    void verifyState() const;
 
     [[nodiscard]] Grid const& grid() const noexcept { return _grid; }
     [[nodiscard]] Grid& grid() noexcept { return _grid; }
@@ -566,93 +572,87 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return _grid.isLineWrapped(lineNumber);
     }
 
-    [[nodiscard]] bool isCellEmpty(CellLocation position) const noexcept override
+    [[nodiscard]] bool isCellEmpty(CellLocation position) const noexcept
     {
         return _grid.lineAt(position.line).cellEmptyAt(position.column);
     }
 
-    [[nodiscard]] bool compareCellTextAt(CellLocation position, char32_t codepoint) const noexcept override
+    [[nodiscard]] bool compareCellTextAt(CellLocation position, char32_t codepoint) const noexcept
     {
         auto cell = _grid.at(position.line, position.column);
         return CellUtil::compareText(cell, codepoint);
     }
 
-    [[nodiscard]] std::string cellTextAt(CellLocation position) const noexcept override
+    [[nodiscard]] std::string cellTextAt(CellLocation position) const noexcept
     {
         auto cell = _grid.at(position.line, position.column);
         return cell.toUtf8();
     }
 
-    [[nodiscard]] CellFlags cellFlagsAt(CellLocation position) const noexcept override
+    [[nodiscard]] CellFlags cellFlagsAt(CellLocation position) const noexcept
     {
         auto cell = _grid.at(position.line, position.column);
         return cell.flags();
     }
 
-    [[nodiscard]] Color cellForegroundColorAt(CellLocation position) const noexcept override
+    [[nodiscard]] Color cellForegroundColorAt(CellLocation position) const noexcept
     {
         auto cell = at(position);
         return cell.foregroundColor();
     }
 
-    [[nodiscard]] Color cellBackgroundColorAt(CellLocation position) const noexcept override
+    [[nodiscard]] Color cellBackgroundColorAt(CellLocation position) const noexcept
     {
         auto cell = at(position);
         return cell.backgroundColor();
     }
 
-    [[nodiscard]] LineFlags lineFlagsAt(LineOffset line) const noexcept override
-    {
-        return _grid.lineAt(line).flags();
-    }
+    [[nodiscard]] LineFlags lineFlagsAt(LineOffset line) const noexcept { return _grid.lineAt(line).flags(); }
 
-    void enableLineFlags(LineOffset lineOffset, LineFlags flags, bool enable) noexcept override
+    void enableLineFlags(LineOffset lineOffset, LineFlags flags, bool enable) noexcept
     {
         _grid.lineAt(lineOffset).setFlag(flags, enable);
     }
 
-    [[nodiscard]] bool isLineFlagEnabledAt(LineOffset line, LineFlags flags) const noexcept override
+    [[nodiscard]] bool isLineFlagEnabledAt(LineOffset line, LineFlags flags) const noexcept
     {
         return _grid.lineAt(line).isFlagEnabled(flags);
     }
 
     [[nodiscard]] std::string lineTextAt(LineOffset line,
-                                         bool stripLeadingSpaces,
-                                         bool stripTrailingSpaces) const noexcept override
+                                         bool stripLeadingSpaces = true,
+                                         bool stripTrailingSpaces = true) const noexcept
     {
         return _grid.lineAt(line).toUtf8Trimmed(stripLeadingSpaces, stripTrailingSpaces);
     }
 
-    [[nodiscard]] bool isLineEmpty(LineOffset line) const noexcept override
-    {
-        return _grid.lineAt(line).empty();
-    }
+    [[nodiscard]] bool isLineEmpty(LineOffset line) const noexcept { return _grid.lineAt(line).empty(); }
 
-    [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept override
+    [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept
     {
         return _grid.lineAt(position.line).cellWidthAt(position.column);
     }
 
-    [[nodiscard]] LineCount historyLineCount() const noexcept override { return _grid.historyLineCount(); }
+    [[nodiscard]] LineCount historyLineCount() const noexcept { return _grid.historyLineCount(); }
 
-    [[nodiscard]] HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept override
+    [[nodiscard]] HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept
     {
         auto cell = at(position);
         return cell.hyperlink();
     }
 
-    [[nodiscard]] std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept override;
+    [[nodiscard]] std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept;
 
     void applyAndLog(Function const& function, Sequence const& seq);
     [[nodiscard]] ApplyResult apply(Function const& function, Sequence const& seq);
 
-    void fail(std::string const& message) const override;
+    void fail(std::string const& message) const;
 
     void hardReset();
     void applyPageSizeToMainDisplay(PageSize pageSize);
 
-    void saveCursor() override;
-    void restoreCursor() override;
+    void saveCursor();
+    void restoreCursor();
     void restoreCursor(Cursor const& savedCursor);
 
     void restoreGraphicsRendition();
@@ -720,6 +720,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     gsl::not_null<Settings*> _settings;
     gsl::not_null<Margin*> _margin;
     Grid _grid;
+
+    Cursor _cursor {};
+    Cursor _savedCursor {};
 
     GraphicsAttributes _savedGraphicsRenditions {};
 
