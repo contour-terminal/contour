@@ -546,7 +546,8 @@ void Screen::writeText(string_view text, size_t cellCount)
     auto const isPureAscii =
         std::ranges::all_of(text, [](char ch) { return static_cast<unsigned char>(ch) < 0x80; });
     if (isPureAscii && !_terminal->isModeEnabled(AnsiMode::Insert) && isFullHorizontalMargins()
-        && _cursor.charsets.isSelected(CharsetId::USASCII))
+        && _cursor.charsets.isSelected(CharsetId::USASCII)
+        && !_cursor.charsets.activeDRCSFont().has_value())
     {
         crlfIfWrapPending();
 
@@ -648,6 +649,36 @@ void Screen::writeText(string_view text, size_t cellCount)
         for (auto const rawCp: unicode::convert_to<char32_t>(text))
         {
             crlfIfWrapPending();
+
+            // DRCS check: if the active charset is a DRCS font, render as image
+            if (auto const drcsFont = _cursor.charsets.activeDRCSFont(); drcsFont.has_value())
+            {
+                (void) _cursor.charsets.map(rawCp); // Advance single-shift state
+                if (auto const* charset = _terminal->drcsCharset(*drcsFont); charset != nullptr)
+                {
+                    auto const charPos = static_cast<int>(rawCp);
+                    if (auto const glyphIt = charset->glyphs.find(charPos);
+                        glyphIt != charset->glyphs.end())
+                    {
+                        auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
+                                                             _cursor.graphicsRendition.foregroundColor,
+                                                             ColorTarget::Foreground,
+                                                             ColorMode::Normal);
+                        auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
+                        auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
+                        cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
+                        cell.setImageFragment(
+                            rasterizedImage,
+                            CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+                        _lastCursorPosition = _cursor.position;
+                        prevCodepoint = U' ';
+                        advanceCursorAfterWrite(ColumnCount(1));
+                        _terminal->markCellDirty(_lastCursorPosition);
+                        continue;
+                    }
+                }
+            }
+
             auto const cp = _cursor.charsets.map(rawCp);
 
             if (!prevCodepoint)
@@ -721,6 +752,41 @@ void Screen::writeText(char32_t codepoint)
 void Screen::writeTextInternal(char32_t sourceCodepoint)
 {
     crlfIfWrapPending();
+
+    // Check if the active charset is a DRCS font
+    if (auto const drcsFont = _cursor.charsets.activeDRCSFont(); drcsFont.has_value())
+    {
+        if (auto const* charset = _terminal->drcsCharset(*drcsFont); charset != nullptr)
+        {
+            auto const charPos = static_cast<int>(sourceCodepoint);
+            if (auto const glyphIt = charset->glyphs.find(charPos); glyphIt != charset->glyphs.end())
+            {
+                // Resolve foreground color for the glyph
+                auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
+                                                     _cursor.graphicsRendition.foregroundColor,
+                                                     ColorTarget::Foreground,
+                                                     ColorMode::Normal);
+
+                // Create an RGBA image from the monochrome DRCS glyph
+                auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
+
+                // Write a space as placeholder, attach the DRCS image, then advance cursor.
+                {
+                    auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
+                    cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
+                    cell.setImageFragment(rasterizedImage,
+                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+                    _lastCursorPosition = _cursor.position;
+                    advanceCursorAfterWrite(ColumnCount(1));
+                    _terminal->markCellDirty(_lastCursorPosition);
+                }
+                (void) _cursor.charsets.map(sourceCodepoint); // Advance single-shift state
+                _terminal->resetInstructionCounter();
+                return;
+            }
+        }
+        // Fall through to normal rendering if glyph not found
+    }
 
     char32_t const codepoint = _cursor.charsets.map(sourceCodepoint);
 
@@ -1199,7 +1265,8 @@ void Screen::sendDeviceAttributes()
               DeviceAttributes::HorizontalScrolling |
               DeviceAttributes::NationalReplacementCharacterSets |
               DeviceAttributes::RectangularEditing | DeviceAttributes::SelectiveErase |
-              DeviceAttributes::SixelGraphics | DeviceAttributes::StatusDisplay |
+              DeviceAttributes::SixelGraphics | DeviceAttributes::SoftCharacterSet |
+              DeviceAttributes::StatusDisplay |
               DeviceAttributes::TechnicalCharacters |
               DeviceAttributes::TextMacros |
               DeviceAttributes::UserDefinedKeys |
@@ -2122,6 +2189,79 @@ void Screen::screenAlignmentPattern()
 void Screen::applicationKeypadMode(bool enable)
 {
     _terminal->setApplicationkeypadMode(enable);
+}
+
+bool Screen::tryHandleSCS(Sequence const& seq)
+{
+    auto const& intermediates = seq.intermediateCharacters();
+    if (intermediates.empty())
+        return false;
+
+    // First intermediate selects the G-set: ( = G0, ) = G1, * = G2, + = G3
+    auto const gSet = [&]() -> std::optional<CharsetTable> {
+        switch (intermediates[0])
+        {
+            case '(': return CharsetTable::G0;
+            case ')': return CharsetTable::G1;
+            case '*': return CharsetTable::G2;
+            case '+': return CharsetTable::G3;
+            default: return std::nullopt;
+        }
+    }();
+    if (!gSet)
+        return false;
+
+    // Build the designator string from remaining intermediates + final character.
+    // Single-byte designator: intermediates has 1 char, final is the designator.
+    // Two-byte designator (DRCS): intermediates has 2 chars, second is the intermediate, final is the designator.
+    auto const designator = [&]() -> std::string {
+        auto result = std::string {};
+        for (size_t i = 1; i < intermediates.size(); ++i)
+            result += intermediates[i];
+        result += seq.finalChar();
+        return result;
+    }();
+
+    // Try to map the designator to a standard charset first
+    auto const standardCharset = [&]() -> std::optional<CharsetId> {
+        if (designator.size() == 1)
+        {
+            switch (designator[0])
+            {
+                case '0': return CharsetId::Special;
+                case 'A': return CharsetId::British;
+                case 'B': return CharsetId::USASCII;
+                case 'C': return CharsetId::Finnish;
+                case '4': return CharsetId::Dutch;
+                case 'E': return CharsetId::NorwegianDanish;
+                case 'R': return CharsetId::French;
+                case 'Q': return CharsetId::FrenchCanadian;
+                case 'K': return CharsetId::German;
+                case 'Z': return CharsetId::Spanish;
+                case 'H': return CharsetId::Swedish;
+                case '=': return CharsetId::Swiss;
+                case '>': return CharsetId::Technical;
+                default: break;
+            }
+        }
+        return std::nullopt;
+    }();
+
+    if (standardCharset)
+    {
+        designateCharset(*gSet, *standardCharset);
+        return true;
+    }
+
+    // For DRCS designators: look up the font number from the Terminal's designator map.
+    if (auto const fontNumber = _terminal->drcsDesignatorToFont(designator); fontNumber.has_value())
+    {
+        _cursor.charsets.selectDRCS(*gSet, *fontNumber);
+        return true;
+    }
+
+    // Accept any other unrecognized designator silently (unknown DRCS or future extension).
+    return true;
 }
 
 void Screen::designateCharset(CharsetTable table, CharsetId charset)
@@ -3574,6 +3714,8 @@ void Screen::processSequence(Sequence const& seq)
     _terminal->incrementInstructionCounter();
     if (Function const* funcSpec = seq.functionDefinition(_terminal->activeSequences()); funcSpec != nullptr)
         applyAndLog(*funcSpec, seq);
+    else if (seq.category() == FunctionCategory::ESC && tryHandleSCS(seq))
+        ; // Handled as SCS designation (e.g., DRCS two-byte designators)
     else if (vtParserLog)
         vtParserLog()("Unknown VT sequence: {}", seq);
 }
@@ -4632,6 +4774,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SEMA: processShellIntegration(seq); break;
 
         // hooks
+        case DECDLD: _terminal->hookParser(hookDECDLD(seq)); break;
         case DECDMAC: _terminal->hookParser(hookDECDMAC(seq)); break;
         case DECSIXEL: _terminal->hookParser(hookSixel(seq)); break;
         case STP: _terminal->hookParser(hookSTP(seq)); break;
@@ -4786,6 +4929,42 @@ unique_ptr<ParserExtension> Screen::hookDECRQSS(Sequence const& /*seq*/)
 
         // TODO: handle batching
     });
+}
+
+unique_ptr<ParserExtension> Screen::hookDECDLD(Sequence const& seq)
+{
+    // DECDLD — Down-Line-Load Character Set (DRCS)
+    // DCS Pfn;Pcn;Pe;Pcmw;Pw;Pt;Pcmh;Pcss { Dscs Sxbp1;Sxbp2;...ST
+    auto const fontNumber = seq.param_or(0, 0);
+    auto const startingChar = seq.param_or(1, 0);
+    auto const eraseControl = seq.param_or(2, 0);
+    auto const charMatrixWidth = seq.param_or(3, 0);
+    auto const fontWidth = seq.param_or(4, 0);
+    auto const textOrFullCell = seq.param_or(5, 0);
+    auto const charMatrixHeight = seq.param_or(6, 0);
+    auto const charsetSize = seq.param_or(7, 0);
+
+    return make_unique<SimpleStringCollector>(
+        [this, fontNumber, startingChar, eraseControl, charMatrixWidth, fontWidth, textOrFullCell,
+         charMatrixHeight, charsetSize](string_view data) {
+            // Data starts with Dscs (charset designator), followed by sixel glyph data.
+            // Dscs is either 1 byte (final only) or 2 bytes (intermediate 0x20-0x2F + final).
+            auto designator = string_view {};
+            auto glyphData = data;
+            if (data.size() >= 2 && data[0] >= 0x20 && data[0] <= 0x2F)
+            {
+                // Two-byte designator: intermediate + final
+                designator = data.substr(0, 2);
+                glyphData = data.substr(2);
+            }
+            else if (!data.empty())
+            {
+                designator = data.substr(0, 1);
+                glyphData = data.substr(1);
+            }
+            _terminal->defineDRCS(fontNumber, startingChar, eraseControl, charMatrixWidth, fontWidth,
+                                  textOrFullCell, charMatrixHeight, charsetSize, designator, glyphData);
+        });
 }
 
 unique_ptr<ParserExtension> Screen::hookDECDMAC(Sequence const& seq)

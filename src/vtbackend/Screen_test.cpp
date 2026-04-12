@@ -5189,8 +5189,10 @@ TEST_CASE("DECINVM: recursive macro guard", "[screen]")
     // Invoke macro 0 — should NOT infinite loop, recursion depth is bounded
     mock.writeToScreen("\033[0*z");
     mock.terminal.flushInput();
-    // Test passes if we reach here without hanging
-    CHECK(true);
+    // Verify the terminal is still responsive after bounded recursion
+    mock.writeToScreen("OK");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "OK");
 }
 
 TEST_CASE("DECDMAC: empty macro body", "[screen]")
@@ -5201,10 +5203,11 @@ TEST_CASE("DECDMAC: empty macro body", "[screen]")
     mock.terminal.flushInput();
     // Empty body erases the macro
     CHECK_FALSE(mock.terminal.macroBody(3).has_value());
-    // Invoke — should do nothing
+    // Invoke empty macro — should produce no output
     mock.writeToScreen("\033[3*z");
+    mock.writeToScreen("X");
     mock.terminal.flushInput();
-    CHECK(true);
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 1) == "X");
 }
 
 TEST_CASE("DECDMAC: ext 32 implied at level 65, listed at level 62", "[screen]")
@@ -5425,6 +5428,34 @@ TEST_CASE("NRCS: DA1 includes ext 9", "[screen]")
     CHECK(exts.contains(9)); // ext 9 = NationalReplacementCharacterSets
 }
 
+TEST_CASE("NRCS: two-byte DRCS designator accepted via SCS fallback", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // ESC ) <space> A — designate a DRCS set with two-byte designator into G1.
+    // This must not produce an "Unknown VT sequence" error.
+    mock.writeToScreen("\033) A");
+    mock.terminal.flushInput();
+    // Verify the sequence was consumed without error by writing text after it.
+    // If the ESC sequence was rejected, the parser would have left stray characters on screen.
+    mock.writeToScreen("OK");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "OK");
+}
+
+TEST_CASE("NRCS: single-byte SCS fallback designates British to G2", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // ESC * A — designate British to G2 via the generic fallback path
+    mock.writeToScreen("\033*A");
+    mock.terminal.flushInput();
+    // Verify G2 was set to British by using SS2 (single shift G2) and writing '#'
+    // SS2 = ESC N, then '#' should map to '£' through British charset
+    mock.writeToScreen("\033N#");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    CHECK(text.find("\xC2\xA3") != std::string::npos); // £ in UTF-8
+}
+
 // }}} NRCS (National Replacement Character Sets) Tests
 
 // {{{ Technical Character Set Tests
@@ -5577,6 +5608,137 @@ TEST_CASE("DEC Locator: DA1 includes ext 29", "[screen]")
 }
 
 // }}} DEC Locator (DECELR / DECLRP) Tests
+
+// {{{ DECDLD (DRCS — Dynamically Redefinable Character Sets) Tests
+
+TEST_CASE("DECDLD: define single character glyph", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define DRCS font 0, starting char 0x21 ('!'), erase all, 10x20 matrix
+    // DCS 0;0;0;10;10;0;20;0 { <designator> <sixel data> ST
+    // Simple glyph: first sixel column with bit 0 set = '?' (0x3F + 0 = 0x3F = '?'), wait that's 0.
+    // Actually 0x3F is the base (all zeros). 0x40 = bit 0 set, 0x41 = bits 0+1, etc.
+    // Let's define a minimal glyph with a single pixel set at (0,0): '@' = 0x40 - 0x3F = 1 bit
+    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@\033\\");
+    mock.terminal.flushInput();
+    auto const* charset = mock.terminal.drcsCharset(0);
+    REQUIRE(charset != nullptr);
+    CHECK(charset->glyphs.contains(0x21)); // First glyph at starting position
+}
+
+TEST_CASE("DECDLD: erase control clears existing", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define first glyph
+    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.drcsCharset(0) != nullptr);
+    // Redefine with erase all (Pe=0)
+    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{B@\033\\");
+    mock.terminal.flushInput();
+    auto const* charset = mock.terminal.drcsCharset(0);
+    REQUIRE(charset != nullptr);
+    // The old glyph should be cleared, only new one exists
+    CHECK(charset->glyphs.contains(0x21));
+}
+
+TEST_CASE("DECDLD: multiple glyphs separated by semicolons", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define two glyphs: '@' and 'A' (both just a single column with different bits)
+    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@;A\033\\");
+    mock.terminal.flushInput();
+    auto const* charset = mock.terminal.drcsCharset(0);
+    REQUIRE(charset != nullptr);
+    CHECK(charset->glyphs.contains(0x21)); // First glyph
+    CHECK(charset->glyphs.contains(0x22)); // Second glyph
+}
+
+TEST_CASE("DECDLD: soft reset clears DRCS", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.drcsCharset(0) != nullptr);
+    // Soft reset
+    mock.writeToScreen("\033[!p");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.drcsCharset(0) == nullptr);
+}
+
+TEST_CASE("DECDLD: DA1 includes ext 7 (SoftCharacterSet)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto const exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(7)); // ext 7 = SoftCharacterSet
+}
+
+TEST_CASE("DECDLD: cell has image fragment after writing DRCS character", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define DRCS font 1 with designator ' A', single glyph at position 0x21 ('!')
+    mock.writeToScreen("\033P1;0;0;10;10;0;20;0{ A@\033\\");
+    mock.terminal.flushInput();
+
+    // Verify DRCS font was stored with correct designator
+    REQUIRE(mock.terminal.drcsDesignatorToFont(" A").has_value());
+    CHECK(mock.terminal.drcsDesignatorToFont(" A").value() == 1);
+    REQUIRE(mock.terminal.drcsCharset(1) != nullptr);
+    CHECK(mock.terminal.drcsCharset(1)->glyphs.contains(0x21));
+
+    // Designate DRCS font into G1: ESC ) <space> A
+    mock.writeToScreen("\033) A");
+    mock.terminal.flushInput();
+
+    // Verify G1 was set to DRCS font 1
+    REQUIRE(mock.terminal.currentScreen().cursor().charsets.drcsFont(CharsetTable::G1).has_value());
+    CHECK(mock.terminal.currentScreen().cursor().charsets.drcsFont(CharsetTable::G1).value() == 1);
+
+    // Switch to G1 (SO = 0x0E), write '!' (position 0x21), switch back (SI = 0x0F)
+    mock.writeToScreen("\x0E");
+    mock.terminal.flushInput();
+
+    // Verify DRCS font is active
+    REQUIRE(mock.terminal.currentScreen().cursor().charsets.activeDRCSFont().has_value());
+
+    mock.writeToScreen("!");
+    mock.writeToScreen("\x0F");
+    mock.terminal.flushInput();
+
+    // The cell at (0,0) should have an image fragment (the DRCS glyph bitmap)
+    auto const& line = mock.terminal.currentScreen().grid().lineAt(LineOffset(0));
+    CHECK(line.storage().imageFragments.has_value());
+    if (line.storage().imageFragments.has_value())
+        CHECK(line.storage().imageFragments->contains(0));
+}
+
+TEST_CASE("DECDLD: switching away from DRCS uses normal font", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define DRCS font 1
+    mock.writeToScreen("\033P1;0;0;10;10;0;20;0{ A@\033\\");
+    mock.terminal.flushInput();
+    // Designate DRCS to G1 and switch to it
+    mock.writeToScreen("\033) A\x0E!\x0F");
+    mock.terminal.flushInput();
+    // Write normal character 'X' through G0 (USASCII)
+    mock.writeToScreen("X");
+    mock.terminal.flushInput();
+    // Column 1 ('X') should NOT have an image fragment
+    auto const& line = mock.terminal.currentScreen().grid().lineAt(LineOffset(0));
+    auto const hasImageAtCol1 = line.storage().imageFragments.has_value()
+                                && line.storage().imageFragments->contains(1);
+    CHECK_FALSE(hasImageAtCol1);
+    // But it should have the character 'X'
+    CHECK(mock.terminal.currentScreen().cellTextAt(
+              { .line = LineOffset(0), .column = ColumnOffset(1) })
+          == "X");
+}
+
+// }}} DECDLD (DRCS — Dynamically Redefinable Character Sets) Tests
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests

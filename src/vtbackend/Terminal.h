@@ -406,6 +406,54 @@ class Terminal
     }
     // }}}
 
+    // {{{ DRCS (DECDLD — Dynamically Redefinable Character Sets)
+    struct DRCSGlyph
+    {
+        int width = 0;   ///< Glyph width in pixels
+        int height = 0;  ///< Glyph height in pixels
+        std::vector<uint8_t> bitmap; ///< Row-major pixel data (1=set, 0=clear)
+    };
+
+    struct DRCSCharset
+    {
+        std::unordered_map<int, DRCSGlyph> glyphs; ///< Position (0x21-0x7E) → glyph data
+    };
+
+    /// Defines DRCS glyphs from DECDLD DCS payload.
+    void defineDRCS(int fontNumber, int startingCharacter, int eraseControl,
+                    int charMatrixWidth, int fontWidth, int textOrFullCell,
+                    int charMatrixHeight, int charsetSize,
+                    std::string_view designator, std::string_view data);
+
+    /// Returns the DRCS charset for the given font number, or nullptr.
+    [[nodiscard]] DRCSCharset const* drcsCharset(int fontNumber) const noexcept
+    {
+        if (auto const it = _drcsCharsets.find(fontNumber); it != _drcsCharsets.end())
+            return &it->second;
+        return nullptr;
+    }
+
+    /// Clears all DRCS charsets and designator mappings.
+    void clearDRCS() noexcept
+    {
+        _drcsCharsets.clear();
+        _drcsDesignatorMap.clear();
+    }
+
+    /// Maps a DRCS designator string (from DECDLD Dscs field) to a font number.
+    [[nodiscard]] std::optional<int> drcsDesignatorToFont(std::string_view designator) const noexcept
+    {
+        auto const key = std::string(designator);
+        if (auto const it = _drcsDesignatorMap.find(key); it != _drcsDesignatorMap.end())
+            return it->second;
+        return std::nullopt;
+    }
+
+    /// Creates an RGBA ImageFragment from a DRCS glyph bitmap using the given foreground color.
+    [[nodiscard]] std::shared_ptr<RasterizedImage> createDRCSImage(DRCSGlyph const& glyph,
+                                                                    RGBColor foregroundColor);
+    // }}}
+
     // {{{ DEC Locator (DECELR / DECLRP / DECSLE / DECRQLP)
     enum class LocatorCoordUnit : uint8_t
     {
@@ -1581,6 +1629,8 @@ class Terminal
     bool _udkLocked = false;
 
     LocatorState _locatorState;
+    std::unordered_map<int, DRCSCharset> _drcsCharsets;
+    std::unordered_map<std::string, int> _drcsDesignatorMap; ///< Dscs designator → font number
 
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes

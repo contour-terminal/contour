@@ -70,6 +70,7 @@ constexpr inline auto DCH = FunctionDocumentation { .mnemonic = "DCH", .comment 
 constexpr inline auto DECCARA = FunctionDocumentation { .mnemonic = "DECCARA", .comment = "Change Attributes in Rectangular Area" };
 constexpr inline auto DECCRA = FunctionDocumentation { .mnemonic = "DECCRA", .comment = "Copy rectangular area" };
 constexpr inline auto DECDC = FunctionDocumentation { .mnemonic = "DECDC", .comment = "Delete column" };
+constexpr inline auto DECDLD = FunctionDocumentation { .mnemonic = "DECDLD", .comment = "Down-Line-Load Character Set (DRCS)" };
 constexpr inline auto DECDMAC = FunctionDocumentation { .mnemonic = "DECDMAC", .comment = "Define Macro" };
 constexpr inline auto DECELR = FunctionDocumentation { .mnemonic = "DECELR", .comment = "Enable Locator Reporting" };
 constexpr inline auto DECRQLP = FunctionDocumentation { .mnemonic = "DECRQLP", .comment = "Request Locator Position" };
@@ -682,6 +683,7 @@ constexpr inline auto PPB             = detail::CSI(std::nullopt, 0, 1, ' ', 'R'
 constexpr inline auto DECRQDE         = detail::CSI(std::nullopt, 0, 0, '"', 'v', VTType::VT420, documentation::DECRQDE);
 
 // DCS functions
+constexpr inline auto DECDLD      = detail::DCS(std::nullopt, 0, 8, std::nullopt, '{', VTType::VT220, documentation::DECDLD);
 constexpr inline auto DECDMAC     = detail::DCS(std::nullopt, 0, 3, '!', 'z', VTType::VT420, documentation::DECDMAC);
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
 constexpr inline auto DECUDK      = detail::DCS(std::nullopt, 0, 2, std::nullopt, '|', VTType::VT220, documentation::DECUDK);
@@ -876,6 +878,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECRQDE,
 
         // DCS
+        DECDLD,
         DECDMAC,
         DECUDK,
         GIP,

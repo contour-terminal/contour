@@ -5,6 +5,9 @@ if(LIBTERMINAL_TESTING)
 
         add_executable(detect-dark-light-mode detect-dark-light-mode.cpp)
 
+        add_executable(watch-dec-locator watch-dec-locator.cpp)
+        add_executable(drcs-demo drcs-demo.cpp)
+
         add_executable(multi-page-demo multi-page-demo.cpp)
     endif()
 endif()

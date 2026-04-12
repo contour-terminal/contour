@@ -305,6 +305,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void screenAlignmentPattern();
     void applicationKeypadMode(bool enable);
     void designateCharset(CharsetTable table, CharsetId charset);
+
+    /// Attempts to handle an unmatched ESC sequence as SCS designation.
+    /// Returns true if the sequence was recognized as SCS (including DRCS two-byte designators).
+    [[nodiscard]] bool tryHandleSCS(Sequence const& seq);
     void singleShiftSelect(CharsetTable table);
     void requestPixelSize(RequestPixelSize area);
     void requestCharacterSize(RequestPixelSize area);
@@ -694,6 +698,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDLD(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDMAC(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECUDK(Sequence const& seq);

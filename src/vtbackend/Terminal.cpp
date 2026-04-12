@@ -2622,6 +2622,7 @@ void Terminal::softReset()
     resetColorPalette();
     clearMacros();
     clearUDKs();
+    clearDRCS();
     resetLocator();
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
@@ -3005,6 +3006,112 @@ void Terminal::processPendingMacros()
     }
 }
 
+std::shared_ptr<RasterizedImage> Terminal::createDRCSImage(DRCSGlyph const& glyph,
+                                                           RGBColor foregroundColor)
+{
+    // Convert monochrome bitmap to RGBA
+    auto const pixelCount = static_cast<size_t>(glyph.width * glyph.height);
+    auto rgbaData = Image::Data(pixelCount * 4, 0);
+
+    for (size_t i = 0; i < pixelCount && i < glyph.bitmap.size(); ++i)
+    {
+        if (glyph.bitmap[i])
+        {
+            rgbaData[i * 4 + 0] = foregroundColor.red;
+            rgbaData[i * 4 + 1] = foregroundColor.green;
+            rgbaData[i * 4 + 2] = foregroundColor.blue;
+            rgbaData[i * 4 + 3] = 0xFF;
+        }
+        // else: leave as transparent (0,0,0,0)
+    }
+
+    auto const pixelSize =
+        ImageSize { Width::cast_from(glyph.width), Height::cast_from(glyph.height) };
+    auto const imageRef = _imagePool.create(ImageFormat::RGBA, pixelSize, std::move(rgbaData));
+    auto const cellSpan = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
+
+    return std::make_shared<RasterizedImage>(imageRef,
+                                             ImageAlignment::TopStart,
+                                             ImageResize::ResizeToFit,
+                                             RGBAColor {},
+                                             cellSpan,
+                                             _cellPixelSize);
+}
+
+void Terminal::defineDRCS(int fontNumber, int startingCharacter, int eraseControl,
+                          int charMatrixWidth, int fontWidth, int /*textOrFullCell*/,
+                          int charMatrixHeight, int /*charsetSize*/,
+                          std::string_view designator, std::string_view data)
+{
+    // Erase control: 0 = erase all chars in set, 1 = erase only chars being reloaded, 2 = erase all
+    if (eraseControl == 0 || eraseControl == 2)
+        _drcsCharsets[fontNumber].glyphs.clear();
+
+    // Store designator → font number mapping for SCS lookup
+    if (!designator.empty())
+        _drcsDesignatorMap[std::string(designator)] = fontNumber;
+
+    auto const width = [&]() {
+        if (charMatrixWidth > 0)
+            return charMatrixWidth;
+        if (fontWidth > 0)
+            return fontWidth;
+        return 10;
+    }();
+    auto const height = (charMatrixHeight > 0) ? charMatrixHeight : 20;
+
+    auto charPos = startingCharacter > 0 ? startingCharacter : 0x21; // Default starting at '!'
+
+    // Parse sixel-like glyph data: each glyph separated by ';', rows within a glyph separated by '/'
+    auto glyphStart = size_t { 0 };
+    while (glyphStart <= data.size())
+    {
+        auto const glyphEnd = data.find(';', glyphStart);
+        auto const glyphData = data.substr(
+            glyphStart, glyphEnd == std::string_view::npos ? std::string_view::npos : glyphEnd - glyphStart);
+
+        if (!glyphData.empty())
+        {
+            auto glyph = DRCSGlyph { .width = width, .height = height, .bitmap = {} };
+            glyph.bitmap.resize(static_cast<size_t>(width * height), 0);
+
+            auto row = 0;
+            auto colBase = size_t { 0 };
+            for (auto const ch: glyphData)
+            {
+                if (ch == '/')
+                {
+                    row += 6; // Each sixel row encodes 6 pixel rows
+                    colBase = 0;
+                    continue;
+                }
+                if (ch < 0x3F || ch > 0x7E)
+                    continue;
+
+                auto const sixel = static_cast<uint8_t>(ch - 0x3F);
+                auto const col = static_cast<int>(colBase);
+                for (auto bit = 0; bit < 6 && (row + bit) < height; ++bit)
+                {
+                    if ((sixel >> bit) & 1)
+                    {
+                        auto const idx = static_cast<size_t>((row + bit) * width + col);
+                        if (idx < glyph.bitmap.size())
+                            glyph.bitmap[idx] = 1;
+                    }
+                }
+                ++colBase;
+            }
+
+            _drcsCharsets[fontNumber].glyphs[charPos] = std::move(glyph);
+        }
+
+        ++charPos;
+        if (glyphEnd == std::string_view::npos)
+            break;
+        glyphStart = glyphEnd + 1;
+    }
+}
+
 void Terminal::setLocatorMode(int ps, int pu) noexcept
 {
     switch (ps)
@@ -3077,9 +3184,10 @@ void Terminal::requestLocatorPosition()
         sendLocatorReport(0, 0, 0, 0);
         return;
     }
-    // Report current position (row 1, col 1 as default — we don't track mouse position globally)
-    // In practice this would use the last known mouse position
-    sendLocatorReport(1, 0, 1, 1);
+    // Report last known mouse position (1-based)
+    auto const row = *_currentMousePosition.line + 1;
+    auto const col = *_currentMousePosition.column + 1;
+    sendLocatorReport(1, 0, row, col);
 }
 
 bool Terminal::handleLocatorMouseEvent(int button, bool press, CellLocation pos)
