@@ -47,9 +47,11 @@
 #include <mutex>
 #include <numbers>
 #include <optional>
+#include <queue>
 #include <span>
 #include <stack>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -344,6 +346,39 @@ class Terminal
 
     void setTerminalId(VTType id) noexcept;
     VTType terminalId() const noexcept { return _terminalId; }
+
+    /// Sets the current operating conformance level (used by DECSCL).
+    /// Does not change the maximum terminal identity reported by DA1/DA2.
+    void setOperatingLevel(VTType level) noexcept;
+    VTType operatingLevel() const noexcept { return _operatingLevel; }
+
+    void setC1TransmissionMode(ControlTransmissionMode mode) noexcept { _c1TransmissionMode = mode; }
+    ControlTransmissionMode c1TransmissionMode() const noexcept { return _c1TransmissionMode; }
+
+    // {{{ Text Macros (DECDMAC / DECINVM)
+    static constexpr int MaxMacroCount = 64;
+    static constexpr int MaxMacroRecursionDepth = 16;
+
+    /// Defines a macro with the given ID and body.
+    void defineMacro(int id, bool deleteAll, std::string body);
+
+    /// Invokes a previously defined macro by ID (queues for deferred execution).
+    void invokeMacro(int id);
+
+    /// Processes any pending macro invocations queued by invokeMacro().
+    void processPendingMacros();
+
+    /// Clears all defined macros.
+    void clearMacros() noexcept { _macros.clear(); }
+
+    /// Returns the macro body for the given ID, or nullopt if not defined.
+    [[nodiscard]] std::optional<std::string_view> macroBody(int id) const noexcept
+    {
+        if (auto const it = _macros.find(id); it != _macros.end())
+            return it->second;
+        return std::nullopt;
+    }
+    // }}}
 
     void setMaxImageSize(ImageSize size) noexcept { _effectiveImageCanvasSize = size; }
     ImageSize maxImageSize() const noexcept { return _effectiveImageCanvasSize; }
@@ -1471,6 +1506,12 @@ class Terminal
     bool _focused = true;
 
     VTType _terminalId = VTType::VT525;
+    VTType _operatingLevel = VTType::VT525;
+    ControlTransmissionMode _c1TransmissionMode = ControlTransmissionMode::S7C1T;
+
+    std::unordered_map<int, std::string> _macros;
+    std::queue<std::string> _pendingMacroInvocations;
+    int _macroRecursionDepth = 0;
 
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes

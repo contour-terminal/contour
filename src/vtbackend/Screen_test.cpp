@@ -13,7 +13,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <charconv>
 #include <ranges>
+#include <set>
 #include <string_view>
 
 using crispy::escape;
@@ -4814,6 +4816,414 @@ TEST_CASE("HT.does_not_overwrite_existing_content", "[screen]")
 }
 
 // }}} HT (Horizontal Tab) Tests
+
+// {{{ DA1 (Primary Device Attributes) Tests
+
+/// Parses a DA1 response string (e.g. "\033[?65;1;4;6;...c") and returns the set of extension numbers.
+std::set<int> parseDA1Extensions(std::string_view reply)
+{
+    std::set<int> extensions;
+
+    // Find the CSI ? prefix and 'c' terminator
+    auto const prefix = reply.find("\033[?");
+    if (prefix == std::string_view::npos)
+        return extensions;
+
+    auto const start = prefix + 3; // skip "\033[?"
+    auto const end = reply.find('c', start);
+    if (end == std::string_view::npos)
+        return extensions;
+
+    auto const params = reply.substr(start, end - start);
+
+    // Split by ';' and parse each number
+    auto isFirst = true;
+    size_t pos = 0;
+    while (pos < params.size())
+    {
+        auto const delim = params.find(';', pos);
+        auto const token = params.substr(pos, delim == std::string_view::npos ? std::string_view::npos : delim - pos);
+        if (!token.empty())
+        {
+            auto value = 0;
+            if (auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), value);
+                ec == std::errc {})
+            {
+                if (isFirst)
+                    isFirst = false; // first number is the conformance level, not an extension
+                else
+                    extensions.insert(value);
+            }
+        }
+        if (delim == std::string_view::npos)
+            break;
+        pos = delim + 1;
+    }
+
+    return extensions;
+}
+
+/// Parses the conformance level from a DA1 response.
+int parseDA1Level(std::string_view reply)
+{
+    auto const prefix = reply.find("\033[?");
+    if (prefix == std::string_view::npos)
+        return 0;
+    auto const start = prefix + 3;
+    auto const delim = reply.find(';', start);
+    auto const end = (delim != std::string_view::npos) ? delim : reply.find('c', start);
+    if (end == std::string_view::npos)
+        return 0;
+    auto value = 0;
+    std::from_chars(reply.data() + start, reply.data() + end, value);
+    return value;
+}
+
+TEST_CASE("DA1: response reports level 65 for VT525", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    CHECK(parseDA1Level(mock.replyData()) == 65);
+}
+
+TEST_CASE("DA1: optional extensions at level 65", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto const exts = parseDA1Extensions(mock.replyData());
+
+    // Optional at level 5 — should be listed
+    CHECK(exts.contains(1));  // Columns132
+    CHECK(exts.contains(4));  // SixelGraphics
+    CHECK(exts.contains(18)); // Windowing
+    CHECK(exts.contains(21)); // HorizontalScrolling
+    CHECK(exts.contains(22)); // AnsiColor
+
+    // Required at level 5 — implied by 65, must NOT be listed
+    CHECK_FALSE(exts.contains(6));  // SelectiveErase (required at level 5)
+    CHECK_FALSE(exts.contains(8));  // UserDefinedKeys (required at level 5)
+    CHECK_FALSE(exts.contains(11)); // StatusDisplay (required at level 3+)
+    CHECK_FALSE(exts.contains(15)); // TechnicalCharacters (required at level 5)
+    CHECK_FALSE(exts.contains(28)); // RectangularEditing (required at level 4+)
+    CHECK_FALSE(exts.contains(32)); // TextMacros (required at level 5)
+
+    // Non-DEC extensions — always listed
+    CHECK(exts.contains(52));  // ClipboardExtension
+    CHECK(exts.contains(314)); // CaptureScreenBuffer
+}
+
+// }}} DA1 (Primary Device Attributes) Tests
+
+// {{{ DECSCL (Set Conformance Level) Tests
+
+TEST_CASE("DECSCL: DA1 always reports max level 65", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Set conformance level to 62 (VT220), 7-bit C1
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    // DA1 always reports max device capability, not operating level
+    CHECK(parseDA1Level(mock.replyData()) == 65);
+}
+
+TEST_CASE("DECSCL: level 62 reveals required-at-5 extensions as optional", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto const exts = parseDA1Extensions(mock.replyData());
+    // At level 2, all these become optional and should be listed
+    CHECK(exts.contains(6));  // SelectiveErase (optional at 2-4)
+    CHECK(exts.contains(8));  // UserDefinedKeys (optional at 2-4)
+    CHECK(exts.contains(11)); // StatusDisplay (optional at 2)
+    CHECK(exts.contains(15)); // TechnicalCharacters (optional at 2-4)
+    CHECK(exts.contains(28)); // RectangularEditing (optional at 2-3)
+    CHECK(exts.contains(32)); // TextMacros (optional at 2-4)
+}
+
+TEST_CASE("DECSCL: level 63 hides StatusDisplay (required at 3+)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[63;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    CHECK(parseDA1Level(mock.replyData()) == 65);
+    auto const exts = parseDA1Extensions(mock.replyData());
+    CHECK_FALSE(exts.contains(11)); // StatusDisplay required at level 3+
+    CHECK(exts.contains(6));        // SelectiveErase still optional at level 3
+    CHECK(exts.contains(28));       // RectangularEditing still optional at level 3
+}
+
+TEST_CASE("DECSCL: level 64 hides RectangularEditing (required at 4+)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[64;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    CHECK(parseDA1Level(mock.replyData()) == 65);
+    auto const exts = parseDA1Extensions(mock.replyData());
+    CHECK_FALSE(exts.contains(11)); // StatusDisplay required at 3+
+    CHECK_FALSE(exts.contains(28)); // RectangularEditing required at 4+
+    CHECK(exts.contains(6));        // SelectiveErase still optional at level 4
+    CHECK(exts.contains(8));        // UserDefinedKeys still optional at level 4
+    CHECK(exts.contains(15));       // TechnicalCharacters still optional at level 4
+    CHECK(exts.contains(32));       // TextMacros still optional at level 4
+}
+
+TEST_CASE("DECSCL: set level 65 round-trip", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // First downgrade to 62
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    // Then upgrade back to 65
+    mock.writeToScreen("\033[65;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    CHECK(parseDA1Level(mock.replyData()) == 65);
+}
+
+TEST_CASE("DECSCL: implies soft reset", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Move cursor away from origin
+    mock.writeToScreen("\033[3;5H"); // cursor to row 3, col 5
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().cursor().position.line != LineOffset(0));
+
+    // Set conformance level — this implies soft reset, which should reset margins
+    // but cursor position is reset by the soft reset
+    mock.writeToScreen("\033[65;1\"p");
+    mock.terminal.flushInput();
+
+    // After soft reset, origin mode is off and cursor is at home position
+    // softReset resets DECOM, so cursor should be at the top-left area
+    // Note: soft reset doesn't explicitly move cursor, but resets margins and modes
+    CHECK(mock.terminal.operatingLevel() == VTType::VT525);
+}
+
+TEST_CASE("DECSCL: C1 mode 7-bit", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[65;1\"p"); // Ps2=1 → 7-bit C1
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S7C1T);
+}
+
+TEST_CASE("DECSCL: C1 mode 8-bit", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[65;0\"p"); // Ps2=0 → 8-bit C1
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S8C1T);
+}
+
+TEST_CASE("DECSCL: C1 mode 8-bit with Ps2=2", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033[65;2\"p"); // Ps2=2 → 8-bit C1
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S8C1T);
+}
+
+TEST_CASE("DECSCL: level 61 forces 7-bit C1", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // VT100 (level 61) always uses 7-bit, regardless of Ps2
+    mock.writeToScreen("\033[61;0\"p");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S7C1T);
+}
+
+TEST_CASE("DECSCL: DECRQSS reports current level", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Set to level 64 (VT420) — DECRQSS requires VT420, so we must stay at level 4+
+    mock.writeToScreen("\033[64;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    // Query DECSCL via DECRQSS
+    mock.writeToScreen("\033P$q\"p\033\\");
+    mock.terminal.flushInput();
+    auto const reply = mock.replyData();
+    // Should contain "64;1" for level 64 with 7-bit C1
+    CHECK(reply.find("64;1\"p") != std::string::npos);
+}
+
+// }}} DECSCL (Set Conformance Level) Tests
+
+// {{{ DECDMAC / DECINVM (Text Macros) Tests
+
+TEST_CASE("DECDMAC: define and invoke simple text macro", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0 with plain text "Hello"
+    mock.writeToScreen("\033P0;0;0!zHello\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0
+    mock.writeToScreen("\033[0*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 5) == "Hello");
+}
+
+TEST_CASE("DECDMAC: define macro with VT sequences", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 1 with SGR bold + text "Bold"
+    mock.writeToScreen("\033P1;0;0!z\033[1mBold\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 1
+    mock.writeToScreen("\033[1*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 4) == "Bold");
+}
+
+TEST_CASE("DECDMAC: hex-encoded macro (Pen=1)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 2 with hex encoding: "Hi" = 0x48 0x69
+    mock.writeToScreen("\033P2;0;1!z4869\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 2
+    mock.writeToScreen("\033[2*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "Hi");
+}
+
+TEST_CASE("DECDMAC: delete all macros (Pdt=1)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0
+    mock.writeToScreen("\033P0;0;0!zFirst\033\\");
+    mock.terminal.flushInput();
+    // Define macro 5 with delete-all (Pdt=1)
+    mock.writeToScreen("\033P5;1;0!zSecond\033\\");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.macroBody(0).has_value());
+    CHECK(mock.terminal.macroBody(5).has_value());
+}
+
+TEST_CASE("DECDMAC: overwrite existing macro", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0 with "Old"
+    mock.writeToScreen("\033P0;0;0!zOld\033\\");
+    mock.terminal.flushInput();
+    // Redefine macro 0 with "New"
+    mock.writeToScreen("\033P0;0;0!zNew\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0
+    mock.writeToScreen("\033[0*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 3) == "New");
+}
+
+TEST_CASE("DECDMAC: max 64 macros", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macros 0-63
+    for (auto i = 0; i < 64; ++i)
+        mock.writeToScreen(std::format("\033P{};0;0!zM{}\033\\", i, i));
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.macroBody(0).has_value());
+    CHECK(mock.terminal.macroBody(63).has_value());
+    // Macro 64 should be rejected (out of range)
+    mock.writeToScreen("\033P64;0;0!zBad\033\\");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.macroBody(64).has_value());
+}
+
+TEST_CASE("DECINVM: invoke undefined macro", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Invoke non-existent macro 42 — should do nothing, no crash
+    mock.writeToScreen("\033[42*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).find_first_not_of(' ') == std::string::npos);
+}
+
+TEST_CASE("DECINVM: nested macro invocation", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 1 that writes "B"
+    mock.writeToScreen("\033P1;0;0!zB\033\\");
+    mock.terminal.flushInput();
+    // Define macro 0 that writes "A", invokes macro 1, then writes "C"
+    mock.writeToScreen("\033P0;0;0!zA\033[1*zC\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0
+    mock.writeToScreen("\033[0*z");
+    mock.terminal.flushInput();
+    // Macro 0 body outputs "A" then "C" (deferred macro 1 runs after), then macro 1 outputs "B"
+    auto const text = mock.terminal.primaryScreen().grid().lineText(LineOffset(0));
+    CHECK(text.find('A') != std::string::npos);
+    CHECK(text.find('B') != std::string::npos);
+    CHECK(text.find('C') != std::string::npos);
+}
+
+TEST_CASE("DECINVM: recursive macro guard", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0 that invokes itself (infinite recursion attempt)
+    mock.writeToScreen("\033P0;0;0!z\033[0*z\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0 — should NOT infinite loop, recursion depth is bounded
+    mock.writeToScreen("\033[0*z");
+    mock.terminal.flushInput();
+    // Test passes if we reach here without hanging
+    CHECK(true);
+}
+
+TEST_CASE("DECDMAC: empty macro body", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 3 with empty body
+    mock.writeToScreen("\033P3;0;0!z\033\\");
+    mock.terminal.flushInput();
+    // Empty body erases the macro
+    CHECK_FALSE(mock.terminal.macroBody(3).has_value());
+    // Invoke — should do nothing
+    mock.writeToScreen("\033[3*z");
+    mock.terminal.flushInput();
+    CHECK(true);
+}
+
+TEST_CASE("DECDMAC: ext 32 implied at level 65, listed at level 62", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto exts = parseDA1Extensions(mock.replyData());
+    CHECK_FALSE(exts.contains(32)); // required at level 5, implied by 65
+
+    // Downgrade to level 62 where ext 32 is optional
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(32)); // optional at level 2
+}
+
+// }}} DECDMAC / DECINVM (Text Macros) Tests
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests

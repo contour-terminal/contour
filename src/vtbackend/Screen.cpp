@@ -1169,7 +1169,7 @@ void Screen::reportCursorInformation()
 
 void Screen::selectConformanceLevel(VTType level)
 {
-    _terminal->setTerminalId(level);
+    _terminal->setOperatingLevel(level);
 }
 
 void Screen::sendDeviceAttributes()
@@ -1194,16 +1194,23 @@ void Screen::sendDeviceAttributes()
     }();
 
     auto da = DeviceAttributes::AnsiColor |
-              // DeviceAttributes::AnsiTextLocator |
+              // TODO: DeviceAttributes::AnsiTextLocator |
               DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132 |
+              DeviceAttributes::HorizontalScrolling |
               // TODO: DeviceAttributes::NationalReplacementCharacterSets |
-              DeviceAttributes::RectangularEditing |
-              // TODO: DeviceAttributes::SelectiveErase |
-              DeviceAttributes::SixelGraphics |
+              DeviceAttributes::RectangularEditing | DeviceAttributes::SelectiveErase |
+              DeviceAttributes::SixelGraphics | DeviceAttributes::StatusDisplay |
               // TODO: DeviceAttributes::TechnicalCharacters |
-              DeviceAttributes::UserDefinedKeys | DeviceAttributes::ClipboardExtension;
+              DeviceAttributes::TextMacros |
+              // TODO: DeviceAttributes::UserDefinedKeys |
+              DeviceAttributes::Windowing | DeviceAttributes::ClipboardExtension;
     if (_terminal->settings().goodImageProtocol)
         da = da | DeviceAttributes::GoodImageProtocol;
+
+    // Filter out extensions that are required at the current operating level.
+    // Required extensions are implied by the conformance level and should not be listed.
+    da = filterRequiredExtensions(da, _terminal->operatingLevel());
+
     auto const attrs = to_params(da);
 
     reply("\033[?{};{}c", id, attrs);
@@ -2339,7 +2346,7 @@ void Screen::requestStatusString(RequestStatusString value)
         {
             case RequestStatusString::DECSCL: {
                 auto level = 61;
-                switch (_terminal->terminalId())
+                switch (_terminal->operatingLevel())
                 {
                     case VTType::VT525:
                     case VTType::VT520:
@@ -2353,8 +2360,7 @@ void Screen::requestStatusString(RequestStatusString value)
                     case VTType::VT100: level = 61; break;
                 }
 
-                auto const c1TransmittionMode = ControlTransmissionMode::S7C1T;
-                auto const c1t = c1TransmittionMode == ControlTransmissionMode::S7C1T ? 1 : 0;
+                auto const c1t = _terminal->c1TransmissionMode() == ControlTransmissionMode::S7C1T ? 1 : 0;
 
                 return std::format("{};{}\"p", level, c1t);
             }
@@ -4200,6 +4206,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         break;
         case DECDC: deleteColumns(seq.param_or(0, ColumnCount(1))); break;
         case DECIC: insertColumns(seq.param_or(0, ColumnCount(1))); break;
+        case DECINVM: _terminal->invokeMacro(seq.param_or(0, 0)); break;
         case DECSACE:
             // Ps=0 or 1 → stream mode, Ps=2 → rectangle mode
             _rectangularAttributeMode = (seq.param_or(0, 1) == 2);
@@ -4288,6 +4295,39 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         }
         case DECRQPSR: return impl::DECRQPSR(seq, *this);
+        case DECSCL: {
+            // DECSCL — Set Conformance Level
+            // CSI Ps1 ; Ps2 " p
+            auto const level = seq.param_or(0, 65);
+            auto const c1Mode = seq.param_or(1, 0);
+            auto const vtType = [&]() -> std::optional<VTType> {
+                switch (level)
+                {
+                    case 61: return VTType::VT100;
+                    case 62: return VTType::VT220;
+                    case 63: return VTType::VT320;
+                    case 64: return VTType::VT420;
+                    case 65: return VTType::VT525;
+                    default: return std::nullopt;
+                }
+            }();
+            if (!vtType)
+                return ApplyResult::Invalid;
+
+            selectConformanceLevel(*vtType);
+
+            // DECSCL implies a soft reset (per DEC spec)
+            _terminal->softReset();
+
+            // Set C1 transmission mode: Ps2=1 → 7-bit, Ps2=0 or 2 → 8-bit
+            // (For level 61/VT100, C1 mode is always 7-bit)
+            if (level == 61 || c1Mode == 1)
+                _terminal->setC1TransmissionMode(ControlTransmissionMode::S7C1T);
+            else
+                _terminal->setC1TransmissionMode(ControlTransmissionMode::S8C1T);
+
+            return ApplyResult::Ok;
+        }
         case DECSCUSR: return impl::DECSCUSR(seq, *_terminal);
         case DECSCPP:
             if (auto const columnCount = seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
@@ -4332,7 +4372,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             break;
         case DECSTR:
             // For VTType VT100 and VT52 ignore this sequence
-            if (_terminal->terminalId() == VTType::VT100)
+            if (_terminal->operatingLevel() == VTType::VT100)
                 return ApplyResult::Invalid;
             _terminal->softReset();
             break;
@@ -4552,6 +4592,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SEMA: processShellIntegration(seq); break;
 
         // hooks
+        case DECDMAC: _terminal->hookParser(hookDECDMAC(seq)); break;
         case DECSIXEL: _terminal->hookParser(hookSixel(seq)); break;
         case STP: _terminal->hookParser(hookSTP(seq)); break;
         case DECRQSS: _terminal->hookParser(hookDECRQSS(seq)); break;
@@ -4703,6 +4744,45 @@ unique_ptr<ParserExtension> Screen::hookDECRQSS(Sequence const& /*seq*/)
             requestStatusString(s.value());
 
         // TODO: handle batching
+    });
+}
+
+unique_ptr<ParserExtension> Screen::hookDECDMAC(Sequence const& seq)
+{
+    // DECDMAC — Define Macro
+    // DCS Pid ; Pdt ; Pen ! z D...D ST
+    auto const macroId = seq.param_or(0, 0);
+    auto const deleteAll = seq.param_or(1, 0) == 1;
+    auto const hexEncoded = seq.param_or(2, 0) == 1;
+
+    return make_unique<SimpleStringCollector>([this, macroId, deleteAll, hexEncoded](string_view data) {
+        auto body = std::string {};
+        if (hexEncoded)
+        {
+            // Decode hex-encoded data: pairs of hex digits → bytes
+            body.reserve(data.size() / 2);
+            for (size_t i = 0; i + 1 < data.size(); i += 2)
+            {
+                auto const hi = data[i];
+                auto const lo = data[i + 1];
+                auto const hexToByte = [](char ch) -> uint8_t {
+                    if (ch >= '0' && ch <= '9')
+                        return static_cast<uint8_t>(ch - '0');
+                    if (ch >= 'A' && ch <= 'F')
+                        return static_cast<uint8_t>(ch - 'A' + 10);
+                    if (ch >= 'a' && ch <= 'f')
+                        return static_cast<uint8_t>(ch - 'a' + 10);
+                    return 0;
+                };
+                body.push_back(static_cast<char>((hexToByte(hi) << 4) | hexToByte(lo)));
+            }
+        }
+        else
+        {
+            body = std::string(data);
+        }
+
+        _terminal->defineMacro(macroId, deleteAll, std::move(body));
     });
 }
 

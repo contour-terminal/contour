@@ -70,9 +70,11 @@ constexpr inline auto DCH = FunctionDocumentation { .mnemonic = "DCH", .comment 
 constexpr inline auto DECCARA = FunctionDocumentation { .mnemonic = "DECCARA", .comment = "Change Attributes in Rectangular Area" };
 constexpr inline auto DECCRA = FunctionDocumentation { .mnemonic = "DECCRA", .comment = "Copy rectangular area" };
 constexpr inline auto DECDC = FunctionDocumentation { .mnemonic = "DECDC", .comment = "Delete column" };
+constexpr inline auto DECDMAC = FunctionDocumentation { .mnemonic = "DECDMAC", .comment = "Define Macro" };
 constexpr inline auto DECERA = FunctionDocumentation { .mnemonic = "DECERA", .comment = "Erase rectangular area" };
 constexpr inline auto DECFRA = FunctionDocumentation { .mnemonic = "DECFRA", .comment = "Fill rectangular area" };
 constexpr inline auto DECIC = FunctionDocumentation { .mnemonic = "DECIC", .comment = "Insert column" };
+constexpr inline auto DECINVM = FunctionDocumentation { .mnemonic = "DECINVM", .comment = "Invoke Macro" };
 constexpr inline auto DECPS = FunctionDocumentation { .mnemonic = "DECPS", .comment = "Controls the sound frequency or notes" };
 constexpr inline auto DECRM = FunctionDocumentation { .mnemonic = "DECRM", .comment = "Reset DEC-mode" };
 constexpr inline auto DECRQM = FunctionDocumentation { .mnemonic = "DECRQM", .comment = "Request DEC-mode" };
@@ -568,6 +570,7 @@ constexpr inline auto DECDC       = detail::CSI(std::nullopt, 0, 1, '\'', '~', V
 constexpr inline auto DECERA      = detail::CSI(std::nullopt, 0, 4, '$', 'z', VTType::VT420, documentation::DECERA);
 constexpr inline auto DECFRA      = detail::CSI(std::nullopt, 0, 5, '$', 'x', VTType::VT420, documentation::DECFRA);
 constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', VTType::VT420, documentation::DECIC);
+constexpr inline auto DECINVM     = detail::CSI(std::nullopt, 0, 1, '*', 'z', VTType::VT420, documentation::DECINVM);
 constexpr inline auto DECPS       = detail::CSI(std::nullopt, 3, 18, ',', '~', VTType::VT520, documentation::DECPS);
 constexpr inline auto DECRARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 't', VTType::VT420, documentation::DECRARA);
 constexpr inline auto DECRQCRA    = detail::CSI(std::nullopt, 2, 6, '$', 'y', VTType::VT420, documentation::DECRQCRA);
@@ -640,6 +643,7 @@ constexpr inline auto PPB             = detail::CSI(std::nullopt, 0, 1, ' ', 'R'
 constexpr inline auto DECRQDE         = detail::CSI(std::nullopt, 0, 0, '"', 'v', VTType::VT420, documentation::DECRQDE);
 
 // DCS functions
+constexpr inline auto DECDMAC     = detail::DCS(std::nullopt, 0, 3, '!', 'z', VTType::VT420, documentation::DECDMAC);
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
 constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, documentation::DECSIXEL);
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTExtension::Contour, documentation::STP);
@@ -746,6 +750,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECCRA,
         DECDC,
         DECERA,
+        DECINVM,
         DECFRA,
         DECIC,
         DECPS,
@@ -822,6 +827,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECRQDE,
 
         // DCS
+        DECDMAC,
         GIP,
         STP,
         DECRQSS,

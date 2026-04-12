@@ -330,6 +330,9 @@ bool Terminal::processInputOnce()
         _parsingBuffer = ptyReadResult->buffer;
         _parser.parseFragment(buf);
         _parsingBuffer.reset();
+
+        // Process any macros that were queued by DECINVM during the parse.
+        processPendingMacros();
     }
 
     if (!_modes.enabled(DECMode::BatchedRendering))
@@ -2580,6 +2583,7 @@ void Terminal::softReset()
     _currentScreen->cursor().hyperlink = {};
 
     resetColorPalette();
+    clearMacros();
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
@@ -2903,7 +2907,63 @@ LineCount Terminal::maxHistoryLineCount() const noexcept
 void Terminal::setTerminalId(VTType id) noexcept
 {
     _terminalId = id;
+    _operatingLevel = id;
     _supportedVTSequences.reset(id);
+}
+
+void Terminal::setOperatingLevel(VTType level) noexcept
+{
+    _operatingLevel = level;
+    _supportedVTSequences.reset(level);
+}
+
+void Terminal::defineMacro(int id, bool deleteAll, std::string body)
+{
+    if (deleteAll)
+        _macros.clear();
+
+    if (id < 0 || id >= MaxMacroCount)
+        return;
+
+    if (body.empty())
+        _macros.erase(id);
+    else
+        _macros[id] = std::move(body);
+}
+
+void Terminal::invokeMacro(int id)
+{
+    auto const it = _macros.find(id);
+    if (it == _macros.end())
+        return;
+
+    if (_macroRecursionDepth >= MaxMacroRecursionDepth)
+        return; // Guard against infinite recursion
+
+    // Queue the macro body for deferred execution.
+    // We cannot call parseFragment() re-entrantly during an active parse,
+    // so we buffer the body and process it after the current sequence completes.
+    _pendingMacroInvocations.push(it->second);
+}
+
+void Terminal::processPendingMacros()
+{
+    while (!_pendingMacroInvocations.empty())
+    {
+        auto body = std::move(_pendingMacroInvocations.front());
+        _pendingMacroInvocations.pop();
+
+        ++_macroRecursionDepth;
+
+        // Write the macro body into the pty buffer so that parseFragment
+        // can reference it through the buffer management system.
+        auto const chunk = _currentPtyBuffer->writeAtEnd(std::string_view { body });
+        _parsingBuffer = _currentPtyBuffer;
+        _parser.parseFragment(chunk);
+        _parsingBuffer.reset();
+
+        --_macroRecursionDepth;
+    }
 }
 
 void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)

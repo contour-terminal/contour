@@ -43,7 +43,7 @@ enum class VTExtension : uint8_t
  *
  * Used in response to SendDeviceAttributes.
  */
-enum class DeviceAttributes : uint16_t
+enum class DeviceAttributes : uint32_t
 {
     Columns132 = (1 << 0),
     Printer = (1 << 1),
@@ -59,6 +59,10 @@ enum class DeviceAttributes : uint16_t
     CaptureScreenBuffer = (1 << 11),
     ClipboardExtension = (1 << 12),
     GoodImageProtocol = (1 << 13),
+    StatusDisplay = (1 << 14),
+    HorizontalScrolling = (1 << 15),
+    TextMacros = (1 << 16),
+    SoftCharacterSet = (1 << 17),
 };
 
 constexpr DeviceAttributes operator|(DeviceAttributes a, DeviceAttributes b)
@@ -70,6 +74,30 @@ constexpr bool operator&(DeviceAttributes a, DeviceAttributes b)
 {
     return (static_cast<unsigned>(a) & static_cast<unsigned>(b)) != 0;
 }
+
+/// Returns the architectural conformance level (1-5) for a given VTType.
+constexpr int conformanceLevelOf(VTType vt) noexcept
+{
+    switch (vt)
+    {
+        case VTType::VT100: return 1;
+        case VTType::VT220:
+        case VTType::VT240: return 2;
+        case VTType::VT320:
+        case VTType::VT330:
+        case VTType::VT340: return 3;
+        case VTType::VT420: return 4;
+        case VTType::VT510:
+        case VTType::VT520:
+        case VTType::VT525: return 5;
+    }
+    return 1;
+}
+
+/// Filters out DA1 extensions that are required at the given operating level.
+/// Required extensions are implied by the conformance level and should not be listed.
+/// Based on the DEC VSRM registered extensions table.
+DeviceAttributes filterRequiredExtensions(DeviceAttributes attrs, VTType operatingLevel) noexcept;
 
 //! Generates human readable string of comma seperated list of attribute names.
 std::string to_string(DeviceAttributes v);

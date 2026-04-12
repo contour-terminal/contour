@@ -214,8 +214,8 @@ TEST_CASE("GoodImageProtocol.DA1.IncludesGIPCode", "[GIP]")
     mock.writeToScreen("\033[c");
     mock.terminal.flushInput();
 
-    // Response should contain ;60 (the GIP DA1 code)
-    CHECK(mock.replyData().find(";60") != std::string::npos);
+    // Response should contain ;90 (the GIP DA1 code)
+    CHECK(mock.replyData().find(";90") != std::string::npos);
 }
 
 // ==================== Screen Layer Tests ====================
