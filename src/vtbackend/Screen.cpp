@@ -546,8 +546,7 @@ void Screen::writeText(string_view text, size_t cellCount)
     auto const isPureAscii =
         std::ranges::all_of(text, [](char ch) { return static_cast<unsigned char>(ch) < 0x80; });
     if (isPureAscii && !_terminal->isModeEnabled(AnsiMode::Insert) && isFullHorizontalMargins()
-        && _cursor.charsets.isSelected(CharsetId::USASCII)
-        && !_cursor.charsets.activeDRCSFont().has_value())
+        && _cursor.charsets.isSelected(CharsetId::USASCII) && !_cursor.charsets.activeDRCSFont().has_value())
     {
         crlfIfWrapPending();
 
@@ -657,13 +656,12 @@ void Screen::writeText(string_view text, size_t cellCount)
                 if (auto const* charset = _terminal->drcsCharset(*drcsFont); charset != nullptr)
                 {
                     auto const charPos = static_cast<int>(rawCp);
-                    if (auto const glyphIt = charset->glyphs.find(charPos);
-                        glyphIt != charset->glyphs.end())
+                    if (auto const glyphIt = charset->glyphs.find(charPos); glyphIt != charset->glyphs.end())
                     {
                         auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
-                                                             _cursor.graphicsRendition.foregroundColor,
-                                                             ColorTarget::Foreground,
-                                                             ColorMode::Normal);
+                                                              _cursor.graphicsRendition.foregroundColor,
+                                                              ColorTarget::Foreground,
+                                                              ColorMode::Normal);
                         auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
                         auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
                         cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
@@ -763,9 +761,9 @@ void Screen::writeTextInternal(char32_t sourceCodepoint)
             {
                 // Resolve foreground color for the glyph
                 auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
-                                                     _cursor.graphicsRendition.foregroundColor,
-                                                     ColorTarget::Foreground,
-                                                     ColorMode::Normal);
+                                                      _cursor.graphicsRendition.foregroundColor,
+                                                      ColorTarget::Foreground,
+                                                      ColorMode::Normal);
 
                 // Create an RGBA image from the monochrome DRCS glyph
                 auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
@@ -1259,18 +1257,14 @@ void Screen::sendDeviceAttributes()
         return "1"; // Should never be reached.
     }();
 
-    auto da = DeviceAttributes::AnsiColor |
-              DeviceAttributes::AnsiTextLocator |
-              DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132 |
-              DeviceAttributes::HorizontalScrolling |
-              DeviceAttributes::NationalReplacementCharacterSets |
-              DeviceAttributes::RectangularEditing | DeviceAttributes::SelectiveErase |
-              DeviceAttributes::SixelGraphics | DeviceAttributes::SoftCharacterSet |
-              DeviceAttributes::StatusDisplay |
-              DeviceAttributes::TechnicalCharacters |
-              DeviceAttributes::TextMacros |
-              DeviceAttributes::UserDefinedKeys |
-              DeviceAttributes::Windowing | DeviceAttributes::ClipboardExtension;
+    auto da = DeviceAttributes::AnsiColor | DeviceAttributes::AnsiTextLocator
+              | DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132
+              | DeviceAttributes::HorizontalScrolling | DeviceAttributes::NationalReplacementCharacterSets
+              | DeviceAttributes::RectangularEditing | DeviceAttributes::SelectiveErase
+              | DeviceAttributes::SixelGraphics | DeviceAttributes::SoftCharacterSet
+              | DeviceAttributes::StatusDisplay | DeviceAttributes::TechnicalCharacters
+              | DeviceAttributes::TextMacros | DeviceAttributes::UserDefinedKeys | DeviceAttributes::Windowing
+              | DeviceAttributes::ClipboardExtension;
     if (_terminal->settings().goodImageProtocol)
         da = da | DeviceAttributes::GoodImageProtocol;
 
@@ -2213,7 +2207,8 @@ bool Screen::tryHandleSCS(Sequence const& seq)
 
     // Build the designator string from remaining intermediates + final character.
     // Single-byte designator: intermediates has 1 char, final is the designator.
-    // Two-byte designator (DRCS): intermediates has 2 chars, second is the intermediate, final is the designator.
+    // Two-byte designator (DRCS): intermediates has 2 chars, second is the intermediate, final is the
+    // designator.
     auto const designator = [&]() -> std::string {
         auto result = std::string {};
         for (size_t i = 1; i < intermediates.size(); ++i)
@@ -4944,27 +4939,41 @@ unique_ptr<ParserExtension> Screen::hookDECDLD(Sequence const& seq)
     auto const charMatrixHeight = seq.param_or(6, 0);
     auto const charsetSize = seq.param_or(7, 0);
 
-    return make_unique<SimpleStringCollector>(
-        [this, fontNumber, startingChar, eraseControl, charMatrixWidth, fontWidth, textOrFullCell,
-         charMatrixHeight, charsetSize](string_view data) {
-            // Data starts with Dscs (charset designator), followed by sixel glyph data.
-            // Dscs is either 1 byte (final only) or 2 bytes (intermediate 0x20-0x2F + final).
-            auto designator = string_view {};
-            auto glyphData = data;
-            if (data.size() >= 2 && data[0] >= 0x20 && data[0] <= 0x2F)
-            {
-                // Two-byte designator: intermediate + final
-                designator = data.substr(0, 2);
-                glyphData = data.substr(2);
-            }
-            else if (!data.empty())
-            {
-                designator = data.substr(0, 1);
-                glyphData = data.substr(1);
-            }
-            _terminal->defineDRCS(fontNumber, startingChar, eraseControl, charMatrixWidth, fontWidth,
-                                  textOrFullCell, charMatrixHeight, charsetSize, designator, glyphData);
-        });
+    return make_unique<SimpleStringCollector>([this,
+                                               fontNumber,
+                                               startingChar,
+                                               eraseControl,
+                                               charMatrixWidth,
+                                               fontWidth,
+                                               textOrFullCell,
+                                               charMatrixHeight,
+                                               charsetSize](string_view data) {
+        // Data starts with Dscs (charset designator), followed by sixel glyph data.
+        // Dscs is either 1 byte (final only) or 2 bytes (intermediate 0x20-0x2F + final).
+        auto designator = string_view {};
+        auto glyphData = data;
+        if (data.size() >= 2 && data[0] >= 0x20 && data[0] <= 0x2F)
+        {
+            // Two-byte designator: intermediate + final
+            designator = data.substr(0, 2);
+            glyphData = data.substr(2);
+        }
+        else if (!data.empty())
+        {
+            designator = data.substr(0, 1);
+            glyphData = data.substr(1);
+        }
+        _terminal->defineDRCS(fontNumber,
+                              startingChar,
+                              eraseControl,
+                              charMatrixWidth,
+                              fontWidth,
+                              textOrFullCell,
+                              charMatrixHeight,
+                              charsetSize,
+                              designator,
+                              glyphData);
+    });
 }
 
 unique_ptr<ParserExtension> Screen::hookDECDMAC(Sequence const& seq)
@@ -5013,9 +5022,8 @@ unique_ptr<ParserExtension> Screen::hookDECUDK(Sequence const& seq)
     auto const clearAll = seq.param_or(0, 0) == 0;
     auto const locked = seq.param_or(1, 0) == 0;
 
-    return make_unique<SimpleStringCollector>([this, clearAll, locked](string_view data) {
-        _terminal->programUDK(clearAll, locked, data);
-    });
+    return make_unique<SimpleStringCollector>(
+        [this, clearAll, locked](string_view data) { _terminal->programUDK(clearAll, locked, data); });
 }
 
 optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocation startPosition)

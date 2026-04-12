@@ -409,8 +409,8 @@ class Terminal
     // {{{ DRCS (DECDLD — Dynamically Redefinable Character Sets)
     struct DRCSGlyph
     {
-        int width = 0;   ///< Glyph width in pixels
-        int height = 0;  ///< Glyph height in pixels
+        int width = 0;               ///< Glyph width in pixels
+        int height = 0;              ///< Glyph height in pixels
         std::vector<uint8_t> bitmap; ///< Row-major pixel data (1=set, 0=clear)
     };
 
@@ -420,10 +420,16 @@ class Terminal
     };
 
     /// Defines DRCS glyphs from DECDLD DCS payload.
-    void defineDRCS(int fontNumber, int startingCharacter, int eraseControl,
-                    int charMatrixWidth, int fontWidth, int textOrFullCell,
-                    int charMatrixHeight, int charsetSize,
-                    std::string_view designator, std::string_view data);
+    void defineDRCS(int fontNumber,
+                    int startingCharacter,
+                    int eraseControl,
+                    int charMatrixWidth,
+                    int fontWidth,
+                    int textOrFullCell,
+                    int charMatrixHeight,
+                    int charsetSize,
+                    std::string_view designator,
+                    std::string_view data);
 
     /// Returns the DRCS charset for the given font number, or nullptr.
     [[nodiscard]] DRCSCharset const* drcsCharset(int fontNumber) const noexcept
@@ -451,7 +457,7 @@ class Terminal
 
     /// Creates an RGBA ImageFragment from a DRCS glyph bitmap using the given foreground color.
     [[nodiscard]] std::shared_ptr<RasterizedImage> createDRCSImage(DRCSGlyph const& glyph,
-                                                                    RGBColor foregroundColor);
+                                                                   RGBColor foregroundColor);
     // }}}
 
     // {{{ DEC Locator (DECELR / DECLRP / DECSLE / DECRQLP)

@@ -52,7 +52,7 @@ DeviceAttributes filterRequiredExtensions(DeviceAttributes attrs, VTType operati
     // DEC VSRM table: each entry maps an extension to the conformance level
     // at which it becomes REQUIRED (and thus should not be listed in DA1).
     // Extensions not in this table are always optional when supported.
-    static constexpr auto requiredAtLevel = std::array {
+    static constexpr auto RequiredAtLevel = std::array {
         pair { DeviceAttributes::StatusDisplay, 3 },       // optional at level 2 only
         pair { DeviceAttributes::RectangularEditing, 4 },  // optional at levels 2-3
         pair { DeviceAttributes::SelectiveErase, 5 },      // optional at levels 2-4
@@ -63,7 +63,7 @@ DeviceAttributes filterRequiredExtensions(DeviceAttributes attrs, VTType operati
 
     auto const level = conformanceLevelOf(operatingLevel);
     auto result = static_cast<uint32_t>(attrs);
-    for (auto const& [attr, reqLevel]: requiredAtLevel)
+    for (auto const& [attr, reqLevel]: RequiredAtLevel)
         if (level >= reqLevel)
             result &= ~static_cast<uint32_t>(attr);
     return static_cast<DeviceAttributes>(result);

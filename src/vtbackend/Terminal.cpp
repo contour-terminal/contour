@@ -3006,8 +3006,7 @@ void Terminal::processPendingMacros()
     }
 }
 
-std::shared_ptr<RasterizedImage> Terminal::createDRCSImage(DRCSGlyph const& glyph,
-                                                           RGBColor foregroundColor)
+std::shared_ptr<RasterizedImage> Terminal::createDRCSImage(DRCSGlyph const& glyph, RGBColor foregroundColor)
 {
     // Convert monochrome bitmap to RGBA
     auto const pixelCount = static_cast<size_t>(glyph.width * glyph.height);
@@ -3025,23 +3024,24 @@ std::shared_ptr<RasterizedImage> Terminal::createDRCSImage(DRCSGlyph const& glyp
         // else: leave as transparent (0,0,0,0)
     }
 
-    auto const pixelSize =
-        ImageSize { Width::cast_from(glyph.width), Height::cast_from(glyph.height) };
+    auto const pixelSize = ImageSize { Width::cast_from(glyph.width), Height::cast_from(glyph.height) };
     auto const imageRef = _imagePool.create(ImageFormat::RGBA, pixelSize, std::move(rgbaData));
     auto const cellSpan = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
 
-    return std::make_shared<RasterizedImage>(imageRef,
-                                             ImageAlignment::TopStart,
-                                             ImageResize::ResizeToFit,
-                                             RGBAColor {},
-                                             cellSpan,
-                                             _cellPixelSize);
+    return std::make_shared<RasterizedImage>(
+        imageRef, ImageAlignment::TopStart, ImageResize::ResizeToFit, RGBAColor {}, cellSpan, _cellPixelSize);
 }
 
-void Terminal::defineDRCS(int fontNumber, int startingCharacter, int eraseControl,
-                          int charMatrixWidth, int fontWidth, int /*textOrFullCell*/,
-                          int charMatrixHeight, int /*charsetSize*/,
-                          std::string_view designator, std::string_view data)
+void Terminal::defineDRCS(int fontNumber,
+                          int startingCharacter,
+                          int eraseControl,
+                          int charMatrixWidth,
+                          int fontWidth,
+                          int /*textOrFullCell*/,
+                          int charMatrixHeight,
+                          int /*charsetSize*/,
+                          std::string_view designator,
+                          std::string_view data)
 {
     // Erase control: 0 = erase all chars in set, 1 = erase only chars being reloaded, 2 = erase all
     if (eraseControl == 0 || eraseControl == 2)
@@ -3248,7 +3248,8 @@ void Terminal::programUDK(bool clearAll, bool locked, std::string_view data)
         // Parse hex-encoded string
         auto const semiPos = data.find(';', slashPos + 1);
         auto const hexStr =
-            data.substr(slashPos + 1, semiPos == std::string_view::npos ? std::string_view::npos : semiPos - slashPos - 1);
+            data.substr(slashPos + 1,
+                        semiPos == std::string_view::npos ? std::string_view::npos : semiPos - slashPos - 1);
 
         // Decode hex pairs to bytes
         auto decoded = std::string {};
@@ -3283,9 +3284,21 @@ std::optional<std::string> Terminal::udkStringForKey(Key key) const noexcept
     // DEC UDK key IDs map to function keys F6-F20.
     // These IDs match the CSI tilde parameter numbers.
     static constexpr auto KeyMapping = std::array<std::pair<Key, int>, 15> { {
-        { Key::F6, 17 },  { Key::F7, 18 },  { Key::F8, 19 },  { Key::F9, 20 },  { Key::F10, 21 },
-        { Key::F11, 23 }, { Key::F12, 24 }, { Key::F13, 25 }, { Key::F14, 26 }, { Key::F15, 28 },
-        { Key::F16, 29 }, { Key::F17, 31 }, { Key::F18, 32 }, { Key::F19, 33 }, { Key::F20, 34 },
+        { Key::F6, 17 },
+        { Key::F7, 18 },
+        { Key::F8, 19 },
+        { Key::F9, 20 },
+        { Key::F10, 21 },
+        { Key::F11, 23 },
+        { Key::F12, 24 },
+        { Key::F13, 25 },
+        { Key::F14, 26 },
+        { Key::F15, 28 },
+        { Key::F16, 29 },
+        { Key::F17, 31 },
+        { Key::F18, 32 },
+        { Key::F19, 33 },
+        { Key::F20, 34 },
     } };
 
     auto const it = std::ranges::find_if(KeyMapping, [key](auto const& pair) { return pair.first == key; });

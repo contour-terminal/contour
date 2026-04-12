@@ -5264,7 +5264,7 @@ TEST_CASE("DECUDK: clear all before loading (Pc=0)", "[screen]")
     mock.writeToScreen("\033P0;1|18/42\033\\");
     mock.terminal.flushInput();
     CHECK_FALSE(mock.terminal.udkString(17).has_value()); // F6 should be cleared
-    CHECK(mock.terminal.udkString(18).has_value());        // F7 should exist
+    CHECK(mock.terminal.udkString(18).has_value());       // F7 should exist
 }
 
 TEST_CASE("DECUDK: keep existing (Pc=1)", "[screen]")
@@ -5398,8 +5398,10 @@ TEST_CASE("NRCS: switch back to USASCII", "[screen]")
     mock.writeToScreen("#"); // Should be #
     mock.terminal.flushInput();
     // Column 0 has £, column 1 has #
-    auto const col0 = mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(0) });
-    auto const col1 = mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) });
+    auto const col0 =
+        mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(0) });
+    auto const col1 =
+        mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) });
     CHECK(col0 == "\xC2\xA3"); // £ in UTF-8
     CHECK(col1 == "#");
 }
@@ -5493,8 +5495,10 @@ TEST_CASE("Technical charset: switch back to USASCII", "[screen]")
     mock.writeToScreen("\033(B");
     mock.writeToScreen("A"); // Should be regular A
     mock.terminal.flushInput();
-    auto const col0 = mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(0) });
-    auto const col1 = mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) });
+    auto const col0 =
+        mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(0) });
+    auto const col1 =
+        mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) });
     CHECK(col0 == "\xCE\x91"); // Α in UTF-8
     CHECK(col1 == "A");
 }
@@ -5729,12 +5733,11 @@ TEST_CASE("DECDLD: switching away from DRCS uses normal font", "[screen]")
     mock.terminal.flushInput();
     // Column 1 ('X') should NOT have an image fragment
     auto const& line = mock.terminal.currentScreen().grid().lineAt(LineOffset(0));
-    auto const hasImageAtCol1 = line.storage().imageFragments.has_value()
-                                && line.storage().imageFragments->contains(1);
+    auto const hasImageAtCol1 =
+        line.storage().imageFragments.has_value() && line.storage().imageFragments->contains(1);
     CHECK_FALSE(hasImageAtCol1);
     // But it should have the character 'X'
-    CHECK(mock.terminal.currentScreen().cellTextAt(
-              { .line = LineOffset(0), .column = ColumnOffset(1) })
+    CHECK(mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) })
           == "X");
 }
 

@@ -159,9 +159,9 @@ int main()
     //   Pcss=0  (94-character set)
     //   Dscs = designator character (space + 'A' for a user-defined 94-set)
     auto decdld = std::string("\033P1;0;0;10;10;0;20;0{ A");
-    decdld += smiley;  // Position 0x21 ('!')
+    decdld += smiley; // Position 0x21 ('!')
     decdld += ';';
-    decdld += heart;   // Position 0x22 ('"')
+    decdld += heart; // Position 0x22 ('"')
     decdld += ';';
     decdld += diamond; // Position 0x23 ('#')
     decdld += "\033\\";
@@ -181,13 +181,13 @@ int main()
 
     // Locking shift to G1 (SO = 0x0E) to activate the DRCS charset
     writeToTTY("  DRCS characters:      ");
-    writeToTTY("\x0E");       // SO — switch to G1
-    writeToTTY("!");          // Smiley (position 0x21)
+    writeToTTY("\x0E"); // SO — switch to G1
+    writeToTTY("!");    // Smiley (position 0x21)
     writeToTTY(" ");
-    writeToTTY("\"");         // Heart (position 0x22)
+    writeToTTY("\""); // Heart (position 0x22)
     writeToTTY(" ");
-    writeToTTY("#");          // Diamond (position 0x23)
-    writeToTTY("\x0F");       // SI — switch back to G0
+    writeToTTY("#");    // Diamond (position 0x23)
+    writeToTTY("\x0F"); // SI — switch back to G0
 
     writeToTTY("\n\n");
     writeToTTY("  (If your terminal supports DRCS rendering,\n");
