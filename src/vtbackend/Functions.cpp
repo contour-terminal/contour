@@ -40,8 +40,6 @@ Function const* select(FunctionSelector const& selector,
         auto const i = (a + b) / 2;
         auto const& fui = availableDefinitions[i];
         auto const rel = compare(selector, fui);
-        // std::cout << std::format(" - a:{:>2} b:{:>2} i:{} rel:{} I: {}\n", a, b, i, rel < 0 ? '<' : rel > 0
-        // ? '>' : '=', I);
         if (rel > 0)
             a = i + 1;
         else if (rel < 0)
@@ -51,7 +49,21 @@ Function const* select(FunctionSelector const& selector,
             b = i - 1;
         }
         else
-            return &fui;
+        {
+            // Found a match. Scan left to find the most specific (leftmost) match.
+            // Multiple definitions can match the same selector (e.g. DCS with 0 args
+            // and the same final byte). The leftmost match
+            // in the sorted array has the tightest parameter range.
+            auto result = &fui;
+            for (auto j = i; j > 0; --j)
+            {
+                if (compare(selector, availableDefinitions[j - 1]) == 0)
+                    result = &availableDefinitions[j - 1];
+                else
+                    break;
+            }
+            return result;
+        }
     }
     return nullptr;
 }

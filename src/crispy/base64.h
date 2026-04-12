@@ -107,7 +107,7 @@ constexpr void encode(uint8_t ch, encoder_state& state, sink&& s)
 template <typename sink>
 constexpr void finish(encoder_state& state, sink&& s)
 {
-    finish(detail::IndexMap, state, std::forward<sink>(s));
+    finish(detail::Base64Alphabet, state, std::forward<sink>(s));
 }
 
 template <typename Iterator, typename Alphabet>

@@ -109,6 +109,8 @@
         <ul>
           <li>Fixes Unicode characters sometimes being wrongly decoded during high-bandwidth output</li>
           <li>Improves PTY throughput performance determinism by rewriting the internal grid cell storage</li>
+          <li>Adds **experimental** Good Image Protocol (GIP) implementation — a DCS-based protocol for displaying raster images with named image pools, LRU eviction, three compositing layers (below/replace/above), configurable resize and alignment policies, Auto/PNG/RGB/RGBA format support with automatic format detection, and DA1 capability advertisement via code 60 (#100)</li>
+          <li>Adds contour cat CLI command for displaying images in the terminal via GIP oneshot sequences</li>
         </ul>
       </description>
     </release>

@@ -265,6 +265,7 @@ struct ImagesConfig
     bool sixelScrolling { true };
     vtbackend::ImageSize maxImageSize { vtpty::Width { 0 }, vtpty::Height { 0 } };
     int maxImageColorRegisters { 4096 };
+    bool goodImageProtocol { false };
 };
 
 struct HorizontalMarginTag
@@ -1330,8 +1331,12 @@ struct Writer
 
     [[nodiscard]] std::string format(std::string_view doc, ImagesConfig& v)
     {
-        return format(
-            doc, v.sixelScrolling, v.maxImageColorRegisters, v.maxImageSize.width, v.maxImageSize.height);
+        return format(doc,
+                      v.sixelScrolling,
+                      v.maxImageColorRegisters,
+                      v.maxImageSize.width,
+                      v.maxImageSize.height,
+                      v.goodImageProtocol);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, WindowMargins& v)

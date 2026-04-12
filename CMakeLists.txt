@@ -101,8 +101,6 @@ option(CONTOUR_WITH_UTEMPTER "Build with utempter support [default: ON]" ON)
 option(CONTOUR_USE_CPM "Use CPM to fetch dependencies [default: ON]" ON)
 option(CONTOUR_BUILD_STATIC "Link to static libraries [default: OFF]" OFF)
 option(CONTOUR_BUILD_NATIVE "Build for native architecture [default: OFF]" OFF)
-
-
 if(CONTOUR_BUILD_STATIC)
     set(BUILD_SHARED_LIBS OFF)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)

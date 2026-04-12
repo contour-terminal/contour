@@ -81,6 +81,21 @@ TEST_CASE("Functions.VTLevelConstrain", "[Functions]")
     CHECK(*f == DECSLRM);
 }
 
+TEST_CASE("Functions.DCS_GIP", "[Functions]")
+{
+    // GIP is DCS with intermediate='!' and final='g' (0 args).
+    // This tests the binary search leftward-scan fix for ambiguous DCS selectors.
+    SupportedSequences const availableSequences;
+    auto const* f = vtbackend::select({ .category = FunctionCategory::DCS,
+                                        .leader = 0,
+                                        .argc = 0,
+                                        .intermediate = '!',
+                                        .finalSymbol = 'g' },
+                                      availableSequences.activeSequences());
+    REQUIRE(f);
+    CHECK(*f == GIP);
+}
+
 TEST_CASE("Functions.EnableAndDisable", "[Functions]")
 {
     SupportedSequences availableSequences;

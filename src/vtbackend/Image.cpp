@@ -150,6 +150,10 @@ namespace
         int paramHeight;
         int imageWidth;
         int imageHeight;
+        int subOffsetX;
+        int subOffsetY;
+        int subWidth;
+        int subHeight;
         std::vector<uint8_t> const& imageData;
         uint32_t defaultColor;
     };
@@ -175,13 +179,16 @@ namespace
                 if (simd::all_of(xInBounds))
                 {
                     // Fully in bounds
-                    auto const sourceXVec = simd::static_simd_cast<int>(
-                        (simd::static_simd_cast<float>(globalXVec) - static_cast<float>(context.xOffset))
-                        * static_cast<float>(context.imageWidth) / static_cast<float>(context.paramWidth));
+                    auto const sourceXVec =
+                        context.subOffsetX
+                        + simd::static_simd_cast<int>(
+                            (simd::static_simd_cast<float>(globalXVec) - static_cast<float>(context.xOffset))
+                            * static_cast<float>(context.subWidth) / static_cast<float>(context.paramWidth));
 
-                    auto const sourceY = static_cast<int>((globalY - context.yOffset)
-                                                          * static_cast<double>(context.imageHeight)
-                                                          / static_cast<double>(context.paramHeight));
+                    auto const sourceY = context.subOffsetY
+                                         + static_cast<int>((globalY - context.yOffset)
+                                                            * static_cast<double>(context.subHeight)
+                                                            / static_cast<double>(context.paramHeight));
 
                     for (int i = 0; i < SimdWidth; ++i)
                     {
@@ -213,12 +220,16 @@ namespace
                         if (xInBounds[i])
                         {
                             auto const globalX = context.cellX + x + i;
-                            auto const sourceX = static_cast<int>((globalX - context.xOffset)
-                                                                  * static_cast<double>(context.imageWidth)
-                                                                  / static_cast<double>(context.paramWidth));
-                            auto const sourceY = static_cast<int>((globalY - context.yOffset)
-                                                                  * static_cast<double>(context.imageHeight)
-                                                                  / static_cast<double>(context.paramHeight));
+                            auto const sourceX =
+                                context.subOffsetX
+                                + static_cast<int>((globalX - context.xOffset)
+                                                   * static_cast<double>(context.subWidth)
+                                                   / static_cast<double>(context.paramWidth));
+                            auto const sourceY =
+                                context.subOffsetY
+                                + static_cast<int>((globalY - context.yOffset)
+                                                   * static_cast<double>(context.subHeight)
+                                                   / static_cast<double>(context.paramHeight));
                             auto const sourceIndex =
                                 (static_cast<size_t>(sourceY) * static_cast<size_t>(context.imageWidth)
                                  + static_cast<size_t>(sourceX))
@@ -256,9 +267,17 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
         .height = Height::cast_from(unbox<int>(_cellSpan.lines) * unbox<int>(cellSize.height)),
     };
 
+    // Use sub-region dimensions if specified, otherwise use full image.
+    auto const subWidth =
+        _imageSubSize.width.value > 0 ? unbox<int>(_imageSubSize.width) : unbox<int>(_image->width());
+    auto const subHeight =
+        _imageSubSize.height.value > 0 ? unbox<int>(_imageSubSize.height) : unbox<int>(_image->height());
+    auto const subOffsetX = static_cast<int>(_imageOffset.x.value);
+    auto const subOffsetY = static_cast<int>(_imageOffset.y.value);
     auto const imageWidth = unbox<int>(_image->width());
     auto const imageHeight = unbox<int>(_image->height());
-    auto const targetSize = computeTargetSize(_resizePolicy, _image->size(), gridSize);
+    auto const effectiveImageSize = ImageSize { Width(subWidth), Height(subHeight) };
+    auto const targetSize = computeTargetSize(_resizePolicy, effectiveImageSize, gridSize);
     auto const paramWidth = unbox<int>(targetSize.width);
     auto const paramHeight = unbox<int>(targetSize.height);
     auto const [xOffset, yOffset] = computeTargetTopLeftOffset(_alignmentPolicy, targetSize, gridSize);
@@ -281,6 +300,10 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
         .paramHeight = paramHeight,
         .imageWidth = imageWidth,
         .imageHeight = imageHeight,
+        .subOffsetX = subOffsetX,
+        .subOffsetY = subOffsetY,
+        .subWidth = subWidth,
+        .subHeight = subHeight,
         .imageData = _image->data(),
         .defaultColor = _defaultColor.value,
     };
@@ -303,10 +326,12 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
             auto const globalX = cellX + x;
             if (globalX >= xOffset && globalX < xOffset + paramWidth && yInBounds)
             {
-                auto const sourceX = static_cast<int>((globalX - xOffset) * static_cast<double>(imageWidth)
-                                                      / static_cast<double>(paramWidth));
-                auto const sourceY = static_cast<int>((globalY - yOffset) * static_cast<double>(imageHeight)
-                                                      / static_cast<double>(paramHeight));
+                auto const sourceX = subOffsetX
+                                     + static_cast<int>((globalX - xOffset) * static_cast<double>(subWidth)
+                                                        / static_cast<double>(paramWidth));
+                auto const sourceY = subOffsetY
+                                     + static_cast<int>((globalY - yOffset) * static_cast<double>(subHeight)
+                                                        / static_cast<double>(paramHeight));
                 auto const sourceIndex = (static_cast<size_t>(sourceY) * static_cast<size_t>(imageWidth)
                                           + static_cast<size_t>(sourceX))
                                          * 4;
@@ -337,15 +362,16 @@ shared_ptr<RasterizedImage> rasterize(shared_ptr<Image const> image,
                                       ImageResize resizePolicy,
                                       RGBAColor defaultColor,
                                       GridSize cellSpan,
-                                      ImageSize cellSize)
+                                      ImageSize cellSize,
+                                      ImageLayer layer)
 {
     return make_shared<RasterizedImage>(
-        std::move(image), alignmentPolicy, resizePolicy, defaultColor, cellSpan, cellSize);
+        std::move(image), alignmentPolicy, resizePolicy, defaultColor, cellSpan, cellSize, layer);
 }
 
-void ImagePool::link(string const& name, shared_ptr<Image const> imageRef)
+void ImagePool::link(string name, shared_ptr<Image const> imageRef)
 {
-    _imageNameToImageCache.emplace(name, std::move(imageRef));
+    _imageNameToImageCache.emplace(std::move(name), std::move(imageRef));
 }
 
 shared_ptr<Image const> ImagePool::findImageByName(string const& name) const noexcept

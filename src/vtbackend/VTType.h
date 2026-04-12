@@ -58,6 +58,7 @@ enum class DeviceAttributes : uint16_t
     Windowing = (1 << 10),
     CaptureScreenBuffer = (1 << 11),
     ClipboardExtension = (1 << 12),
+    GoodImageProtocol = (1 << 13),
 };
 
 constexpr DeviceAttributes operator|(DeviceAttributes a, DeviceAttributes b)

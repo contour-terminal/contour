@@ -54,6 +54,8 @@ namespace
             std::fill_n(line.hyperlinks.data() + startCol, count, hyperlink);
         }
 
+        clearReplacedImageFragments(line.imageFragments, static_cast<uint16_t>(startCol), count);
+
         // Trivial flag: all cells got the same SGR. Check once against cell 0.
         if (line.trivial && startCol > 0 && (attrs != line.sgr[0] || hyperlink != line.hyperlinks[0]))
         {

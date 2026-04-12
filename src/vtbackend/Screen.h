@@ -8,6 +8,7 @@
 #include <vtbackend/Grid.h>
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
+#include <vtbackend/MessageParser.h>
 #include <vtbackend/ScreenBase.h>
 #include <vtbackend/VTType.h>
 
@@ -312,6 +313,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     std::shared_ptr<Image const> uploadImage(ImageFormat format, ImageSize imageSize, Image::Data&& pixmap);
 
+    /// Uploads an image to the named image pool, decoding PNG to RGBA if needed.
+    void uploadImage(std::string name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap);
+
     /**
      * Renders an image onto the screen.
      *
@@ -332,7 +336,36 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
                      ImageSize imageSize,
                      ImageAlignment alignmentPolicy,
                      ImageResize resizePolicy,
-                     bool autoScroll);
+                     bool autoScroll,
+                     bool updateCursor = true,
+                     ImageLayer layer = ImageLayer::Replace);
+
+    /// Renders a previously uploaded named image onto the grid at the current cursor position.
+    void renderImageByName(std::string const& name,
+                           GridSize gridSize,
+                           PixelCoordinate imageOffset,
+                           ImageSize imageSize,
+                           ImageAlignment alignmentPolicy,
+                           ImageResize resizePolicy,
+                           bool autoScroll,
+                           bool requestStatus,
+                           bool updateCursor = false,
+                           ImageLayer layer = ImageLayer::Replace);
+
+    /// Renders an image from raw pixel data (upload + render in one step).
+    /// @return true on success, false if decoding failed.
+    [[nodiscard]] bool renderImage(ImageFormat format,
+                                   ImageSize imageSize,
+                                   Image::Data&& pixmap,
+                                   GridSize gridSize,
+                                   ImageAlignment alignmentPolicy,
+                                   ImageResize resizePolicy,
+                                   bool autoScroll,
+                                   bool updateCursor = false,
+                                   ImageLayer layer = ImageLayer::Replace);
+
+    /// Removes a named image from the image pool.
+    void releaseImage(std::string const& name);
 
     void inspect(std::string const& message, std::ostream& os) const override;
 
@@ -663,6 +696,16 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
+
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageProtocol(Sequence const& seq);
+    void handleGipUpload(Message message);
+    void handleGipRender(Message const& message);
+    void handleGipRelease(Message const& message);
+    void handleGipOneshot(Message message);
+    void handleGipQuery();
+    void replyGipStatus(int statusCode);
+
+    [[nodiscard]] std::optional<Image::Data> decodePng(std::span<uint8_t const> data, ImageSize& size) const;
 
     void processShellIntegration(Sequence const& seq);
     void handleSemanticBlockQuery(Sequence const& seq);

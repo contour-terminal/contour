@@ -84,6 +84,7 @@ class MockTerm: public Terminal::NullEvents
         settings.pageSize = pageSize;
         settings.maxHistoryLineCount = maxHistoryLineCount;
         settings.ptyReadBufferSize = ptyReadBufferSize;
+        settings.goodImageProtocol = true;
         return settings;
     }
 

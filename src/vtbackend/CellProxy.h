@@ -196,6 +196,8 @@ class BasicCellProxy
             _line->widths[_col] = static_cast<uint8_t>(std::max(1u, unicode::width(ch)));
         else
             _line->widths[_col] = 1;
+
+        clearReplacedImageFragment(_line->imageFragments, static_cast<uint16_t>(_col));
     }
 
     void setWidth(uint8_t w) noexcept

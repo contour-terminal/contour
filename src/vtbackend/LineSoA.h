@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <ranges>
 
 namespace vtbackend
 {
@@ -96,6 +97,34 @@ struct LineSoA
     /// when the line is being rewritten with the same default attributes.
     GraphicsAttributes fillAttrs {};
 };
+
+// ---------------------------------------------------------------------------
+// Image fragment helpers
+// ---------------------------------------------------------------------------
+
+/// Removes a Replace-layer image fragment at the given column.
+/// Below and Above layer images coexist with text; only Replace layer images are destroyed.
+inline void clearReplacedImageFragment(std::optional<LineSoA::ImageFragmentMap>& fragments, uint16_t col)
+{
+    if (!fragments)
+        return;
+    if (auto const it = fragments->find(col); it != fragments->end())
+    {
+        if (!shouldPreserveImageOnTextWrite(it->second))
+            fragments->erase(it);
+    }
+}
+
+/// Range overload: clears Replace-layer image fragments across [startCol, startCol+count).
+inline void clearReplacedImageFragments(std::optional<LineSoA::ImageFragmentMap>& fragments,
+                                        uint16_t startCol,
+                                        size_t count)
+{
+    if (!fragments)
+        return;
+    for (auto const col: std::views::iota(startCol, static_cast<uint16_t>(startCol + count)))
+        clearReplacedImageFragment(fragments, col);
+}
 
 // ---------------------------------------------------------------------------
 // LineSoA helper functions
