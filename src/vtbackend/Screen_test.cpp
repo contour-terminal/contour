@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Charset.h>
+#include <vtbackend/InputGenerator.h>
 #include <vtbackend/MockTerm.h>
 #include <vtbackend/Screen.h>
 #include <vtbackend/Viewport.h>
@@ -5226,6 +5227,123 @@ TEST_CASE("DECDMAC: ext 32 implied at level 65, listed at level 62", "[screen]")
 }
 
 // }}} DECDMAC / DECINVM (Text Macros) Tests
+
+// {{{ DECUDK (User-Defined Keys) Tests
+
+TEST_CASE("DECUDK: program single key", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Program F6 (key 17) with "Hello" (hex: 48656C6C6F)
+    mock.writeToScreen("\033P0;1|17/48656C6C6F\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).has_value());
+    CHECK(mock.terminal.udkString(17).value() == "Hello");
+}
+
+TEST_CASE("DECUDK: program multiple keys", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Program F6 (17) with "A" (hex: 41) and F7 (18) with "B" (hex: 42)
+    mock.writeToScreen("\033P0;1|17/41;18/42\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).value() == "A");
+    CHECK(mock.terminal.udkString(18).value() == "B");
+}
+
+TEST_CASE("DECUDK: clear all before loading (Pc=0)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // First program F6
+    mock.writeToScreen("\033P1;1|17/41\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).has_value());
+    // Then program F7 with clear-all (Pc=0)
+    mock.writeToScreen("\033P0;1|18/42\033\\");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.udkString(17).has_value()); // F6 should be cleared
+    CHECK(mock.terminal.udkString(18).has_value());        // F7 should exist
+}
+
+TEST_CASE("DECUDK: keep existing (Pc=1)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // First program F6
+    mock.writeToScreen("\033P1;1|17/41\033\\");
+    mock.terminal.flushInput();
+    // Then program F7, keeping existing (Pc=1)
+    mock.writeToScreen("\033P1;1|18/42\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).has_value()); // F6 should still exist
+    CHECK(mock.terminal.udkString(18).has_value()); // F7 should also exist
+}
+
+TEST_CASE("DECUDK: lock keys (Pl=0)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Program F6 with lock (Pl=0)
+    mock.writeToScreen("\033P0;0|17/41\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).value() == "A");
+    // Attempt to reprogram F6 — should be rejected because keys are locked
+    mock.writeToScreen("\033P0;0|17/42\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).value() == "A"); // Still "A", not "B"
+}
+
+TEST_CASE("DECUDK: hex decode", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Program F6 (17) with hex "1B5B31m" → ESC [ 1 m (SGR bold)
+    mock.writeToScreen("\033P0;1|17/1B5B316D\033\\");
+    mock.terminal.flushInput();
+    auto const str = mock.terminal.udkString(17);
+    REQUIRE(str.has_value());
+    CHECK(str.value() == "\033[1m");
+}
+
+TEST_CASE("DECUDK: soft reset clears UDKs", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033P0;1|17/41\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkString(17).has_value());
+    // Soft reset
+    mock.writeToScreen("\033[!p");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.udkString(17).has_value());
+}
+
+TEST_CASE("DECUDK: ext 8 implied at level 65, listed at level 62", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto exts = parseDA1Extensions(mock.replyData());
+    CHECK_FALSE(exts.contains(8)); // required at level 5, implied by 65
+
+    // Downgrade to level 62 where ext 8 is optional
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(8)); // optional at level 2
+}
+
+TEST_CASE("DECUDK: udkStringForKey maps Key enum to UDK ID", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Program F6 (key 17) with "test"
+    mock.writeToScreen("\033P0;1|17/74657374\033\\");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.udkStringForKey(Key::F6).has_value());
+    CHECK(mock.terminal.udkStringForKey(Key::F6).value() == "test");
+    CHECK_FALSE(mock.terminal.udkStringForKey(Key::F5).has_value()); // F5 is not programmable
+}
+
+// }}} DECUDK (User-Defined Keys) Tests
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests

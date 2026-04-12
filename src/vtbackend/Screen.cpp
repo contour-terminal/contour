@@ -1202,7 +1202,7 @@ void Screen::sendDeviceAttributes()
               DeviceAttributes::SixelGraphics | DeviceAttributes::StatusDisplay |
               // TODO: DeviceAttributes::TechnicalCharacters |
               DeviceAttributes::TextMacros |
-              // TODO: DeviceAttributes::UserDefinedKeys |
+              DeviceAttributes::UserDefinedKeys |
               DeviceAttributes::Windowing | DeviceAttributes::ClipboardExtension;
     if (_terminal->settings().goodImageProtocol)
         da = da | DeviceAttributes::GoodImageProtocol;
@@ -4596,6 +4596,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECSIXEL: _terminal->hookParser(hookSixel(seq)); break;
         case STP: _terminal->hookParser(hookSTP(seq)); break;
         case DECRQSS: _terminal->hookParser(hookDECRQSS(seq)); break;
+        case DECUDK: _terminal->hookParser(hookDECUDK(seq)); break;
         case XTGETTCAP: _terminal->hookParser(hookXTGETTCAP(seq)); break;
         case GIP: _terminal->hookParser(hookGoodImageProtocol(seq)); break;
 
@@ -4783,6 +4784,18 @@ unique_ptr<ParserExtension> Screen::hookDECDMAC(Sequence const& seq)
         }
 
         _terminal->defineMacro(macroId, deleteAll, std::move(body));
+    });
+}
+
+unique_ptr<ParserExtension> Screen::hookDECUDK(Sequence const& seq)
+{
+    // DECUDK — User-Defined Keys
+    // DCS Pc ; Pl | Ky1/St1 ; Ky2/St2 ; ... ST
+    auto const clearAll = seq.param_or(0, 0) == 0;
+    auto const locked = seq.param_or(1, 0) == 0;
+
+    return make_unique<SimpleStringCollector>([this, clearAll, locked](string_view data) {
+        _terminal->programUDK(clearAll, locked, data);
     });
 }
 

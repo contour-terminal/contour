@@ -696,6 +696,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDMAC(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECUDK(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
 
     [[nodiscard]] std::unique_ptr<ParserExtension> hookGoodImageProtocol(Sequence const& seq);

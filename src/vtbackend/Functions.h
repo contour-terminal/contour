@@ -96,6 +96,7 @@ constexpr inline auto DECSSCLS = FunctionDocumentation { .mnemonic = "DECSSCLS",
 constexpr inline auto DECSSDT = FunctionDocumentation { .mnemonic = "DECSSDT", .comment = "Select Status Display (Line) Type" };
 constexpr inline auto DECSTBM = FunctionDocumentation { .mnemonic = "DECSTBM", .comment = "Set top/bottom margin" };
 constexpr inline auto DECSTR = FunctionDocumentation { .mnemonic = "DECSTR", .comment = "Soft terminal reset" };
+constexpr inline auto DECUDK = FunctionDocumentation { .mnemonic = "DECUDK", .comment = "User-Defined Keys" };
 constexpr inline auto DECXCPR = FunctionDocumentation { .mnemonic = "DECXCPR", .comment = "Report cursor position" };
 constexpr inline auto DL = FunctionDocumentation { .mnemonic = "DL", .comment = "Delete lines" };
 constexpr inline auto DSR = FunctionDocumentation { .mnemonic = "DSR", .comment = "Device Status Report (DEC)" };
@@ -645,6 +646,7 @@ constexpr inline auto DECRQDE         = detail::CSI(std::nullopt, 0, 0, '"', 'v'
 // DCS functions
 constexpr inline auto DECDMAC     = detail::DCS(std::nullopt, 0, 3, '!', 'z', VTType::VT420, documentation::DECDMAC);
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
+constexpr inline auto DECUDK      = detail::DCS(std::nullopt, 0, 2, std::nullopt, '|', VTType::VT220, documentation::DECUDK);
 constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, documentation::DECSIXEL);
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTExtension::Contour, documentation::STP);
 constexpr inline auto XTGETTCAP   = detail::DCS(std::nullopt, 0, 0, '+', 'q', VTExtension::XTerm, documentation::XTGETTCAP);
@@ -828,6 +830,7 @@ constexpr static auto allFunctionsArray() noexcept
 
         // DCS
         DECDMAC,
+        DECUDK,
         GIP,
         STP,
         DECRQSS,

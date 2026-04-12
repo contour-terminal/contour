@@ -24,6 +24,7 @@
 #include <sys/types.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -843,6 +844,19 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
 
     if (_inputHandler.sendKeyPressEvent(key, modifiers, eventType))
         return Handled { true };
+
+    // Check for User-Defined Keys (DECUDK) — override function keys F6-F20
+    // when no modifiers are pressed and the key is being pressed (not released).
+    if (modifiers.none() && eventType == KeyboardEventType::Press)
+    {
+        if (auto const udkStr = udkStringForKey(key); udkStr.has_value())
+        {
+            _inputGenerator.generateRaw(*udkStr);
+            flushInput();
+            _viewport.scrollToBottom();
+            return Handled { true };
+        }
+    }
 
     bool const success = _inputGenerator.generate(key, modifiers, eventType);
     if (success)
@@ -2584,6 +2598,7 @@ void Terminal::softReset()
 
     resetColorPalette();
     clearMacros();
+    clearUDKs();
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
@@ -2964,6 +2979,79 @@ void Terminal::processPendingMacros()
 
         --_macroRecursionDepth;
     }
+}
+
+void Terminal::programUDK(bool clearAll, bool locked, std::string_view data)
+{
+    if (_udkLocked)
+        return;
+
+    if (clearAll)
+        _userDefinedKeys.clear();
+
+    // Parse "Ky1/St1;Ky2/St2;..." pairs
+    // Each pair: decimal key number, '/', hex-encoded string
+    auto pos = size_t { 0 };
+    while (pos < data.size())
+    {
+        // Parse key ID (decimal)
+        auto const slashPos = data.find('/', pos);
+        if (slashPos == std::string_view::npos)
+            break;
+
+        auto keyId = 0;
+        auto const keyStr = data.substr(pos, slashPos - pos);
+        if (auto [ptr, ec] = std::from_chars(keyStr.data(), keyStr.data() + keyStr.size(), keyId);
+            ec != std::errc {})
+            break;
+
+        // Parse hex-encoded string
+        auto const semiPos = data.find(';', slashPos + 1);
+        auto const hexStr =
+            data.substr(slashPos + 1, semiPos == std::string_view::npos ? std::string_view::npos : semiPos - slashPos - 1);
+
+        // Decode hex pairs to bytes
+        auto decoded = std::string {};
+        decoded.reserve(hexStr.size() / 2);
+        for (size_t i = 0; i + 1 < hexStr.size(); i += 2)
+        {
+            auto const hexToByte = [](char ch) -> uint8_t {
+                if (ch >= '0' && ch <= '9')
+                    return static_cast<uint8_t>(ch - '0');
+                if (ch >= 'A' && ch <= 'F')
+                    return static_cast<uint8_t>(ch - 'A' + 10);
+                if (ch >= 'a' && ch <= 'f')
+                    return static_cast<uint8_t>(ch - 'a' + 10);
+                return 0;
+            };
+            decoded.push_back(static_cast<char>((hexToByte(hexStr[i]) << 4) | hexToByte(hexStr[i + 1])));
+        }
+
+        _userDefinedKeys[keyId] = std::move(decoded);
+
+        if (semiPos == std::string_view::npos)
+            break;
+        pos = semiPos + 1;
+    }
+
+    if (locked)
+        _udkLocked = true;
+}
+
+std::optional<std::string> Terminal::udkStringForKey(Key key) const noexcept
+{
+    // DEC UDK key IDs map to function keys F6-F20.
+    // These IDs match the CSI tilde parameter numbers.
+    static constexpr auto KeyMapping = std::array<std::pair<Key, int>, 15> { {
+        { Key::F6, 17 },  { Key::F7, 18 },  { Key::F8, 19 },  { Key::F9, 20 },  { Key::F10, 21 },
+        { Key::F11, 23 }, { Key::F12, 24 }, { Key::F13, 25 }, { Key::F14, 26 }, { Key::F15, 28 },
+        { Key::F16, 29 }, { Key::F17, 31 }, { Key::F18, 32 }, { Key::F19, 33 }, { Key::F20, 34 },
+    } };
+
+    auto const it = std::ranges::find_if(KeyMapping, [key](auto const& pair) { return pair.first == key; });
+    if (it != KeyMapping.end())
+        return udkString(it->second);
+    return std::nullopt;
 }
 
 void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)

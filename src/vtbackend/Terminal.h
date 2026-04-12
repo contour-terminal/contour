@@ -378,6 +378,34 @@ class Terminal
     }
     // }}}
 
+    // {{{ User-Defined Keys (DECUDK)
+    /// Programs user-defined keys from DECUDK DCS payload.
+    /// @param clearAll if true, all existing UDKs are cleared before loading.
+    /// @param locked if true, keys cannot be reprogrammed after this call.
+    /// @param data the raw payload of `Ky1/St1;Ky2/St2;...` pairs.
+    void programUDK(bool clearAll, bool locked, std::string_view data);
+
+    /// Returns the programmed string for a UDK key ID, or nullopt if not programmed.
+    [[nodiscard]] std::optional<std::string> udkString(int keyId) const noexcept
+    {
+        if (auto const it = _userDefinedKeys.find(keyId); it != _userDefinedKeys.end())
+            return it->second;
+        return std::nullopt;
+    }
+
+    /// Checks if a UDK is defined for the given function key and returns its string.
+    /// @param key the Key enum value (e.g., Key::F6)
+    /// @return the programmed string or nullopt if no UDK is defined.
+    [[nodiscard]] std::optional<std::string> udkStringForKey(Key key) const noexcept;
+
+    /// Clears all user-defined keys.
+    void clearUDKs() noexcept
+    {
+        _userDefinedKeys.clear();
+        _udkLocked = false;
+    }
+    // }}}
+
     void setMaxImageSize(ImageSize size) noexcept { _effectiveImageCanvasSize = size; }
     ImageSize maxImageSize() const noexcept { return _effectiveImageCanvasSize; }
 
@@ -1510,6 +1538,9 @@ class Terminal
     std::unordered_map<int, std::string> _macros;
     std::queue<std::string> _pendingMacroInvocations;
     int _macroRecursionDepth = 0;
+
+    std::unordered_map<int, std::string> _userDefinedKeys;
+    bool _udkLocked = false;
 
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
