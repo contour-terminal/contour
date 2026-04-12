@@ -66,11 +66,17 @@ inline void writeCellToSoA(LineSoA& line,
 
     clearReplacedImageFragment(line.imageFragments, static_cast<uint16_t>(col));
 
-    // Invalidate trivial flag if this cell's SGR or hyperlink differs from the first cell's.
-    if (line.trivial && col > 0
-        && (line.sgr[col] != line.sgr[0] || line.hyperlinks[col] != line.hyperlinks[0]))
+    // Invalidate trivial flag if this cell's SGR or hyperlink differs from another cell's.
+    // When writing at col 0, compare against col 1 (an unwritten cell).
+    // When writing at col > 0, compare against col 0.
+    if (line.trivial)
     {
-        line.trivial = false;
+        auto const checkCol = (col > 0) ? size_t(0) : size_t(1);
+        if (checkCol < line.codepoints.size()
+            && (line.sgr[col] != line.sgr[checkCol] || line.hyperlinks[col] != line.hyperlinks[checkCol]))
+        {
+            line.trivial = false;
+        }
     }
 }
 

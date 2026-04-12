@@ -129,6 +129,46 @@ TEST_CASE("LineSoA.copyColumns", "[LineSoA]")
     CHECK(dst.codepoints[0] == 0);
 }
 
+TEST_CASE("LineSoA.copyColumns.trivialInvalidated", "[LineSoA]")
+{
+    // Source line with non-uniform SGR
+    LineSoA src;
+    initializeLineSoA(src, ColumnCount(10));
+    src.codepoints[0] = U'A';
+    src.clusterSize[0] = 1;
+    src.sgr[0].foregroundColor = Color::Indexed(1);
+
+    // Destination line starts trivial
+    LineSoA dst;
+    initializeLineSoA(dst, ColumnCount(10));
+    REQUIRE(dst.trivial);
+
+    copyColumns(src, 0, dst, 0, 1);
+
+    // After copying non-uniform data, trivial must be false
+    CHECK_FALSE(dst.trivial);
+}
+
+TEST_CASE("LineSoA.copyColumns.trivialInvalidated.partialCopy", "[LineSoA]")
+{
+    // Simulates horizontal-margin scroll: copy columns 2-7 from source into destination
+    auto const srcAttrs = GraphicsAttributes { .foregroundColor = Color::Indexed(5) };
+    LineSoA src;
+    initializeLineSoA(src, ColumnCount(10), srcAttrs);
+    src.codepoints[2] = U'X';
+    src.clusterSize[2] = 1;
+
+    LineSoA dst;
+    initializeLineSoA(dst, ColumnCount(10));
+    REQUIRE(dst.trivial);
+
+    // Partial copy: columns 2-7 from source into destination at same position
+    copyColumns(src, 2, dst, 2, 6);
+
+    // Destination now has mixed SGR (cols 0-1 default, cols 2-7 indexed(5)), trivial must be false
+    CHECK_FALSE(dst.trivial);
+}
+
 TEST_CASE("LineSoA.resizeLineSoA.grow", "[LineSoA]")
 {
     LineSoA line;
@@ -141,6 +181,32 @@ TEST_CASE("LineSoA.resizeLineSoA.grow", "[LineSoA]")
     CHECK(line.codepoints.size() == 10);
     CHECK(line.codepoints[2] == U'X'); // preserved
     CHECK(line.codepoints[7] == 0);    // new columns are empty
+}
+
+TEST_CASE("LineSoA.resizeLineSoA.grow.trivialInvalidatedOnMismatch", "[LineSoA]")
+{
+    auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(5), attrs);
+    REQUIRE(line.trivial);
+
+    // Growing with default fillAttrs ({}) differs from the existing sgr[0].
+    resizeLineSoA(line, ColumnCount(10));
+
+    CHECK_FALSE(line.trivial);
+}
+
+TEST_CASE("LineSoA.resizeLineSoA.grow.trivialPreservedOnMatch", "[LineSoA]")
+{
+    auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(5), attrs);
+    REQUIRE(line.trivial);
+
+    // Growing with same fillAttrs keeps trivial.
+    resizeLineSoA(line, ColumnCount(10), attrs);
+
+    CHECK(line.trivial);
 }
 
 TEST_CASE("LineSoA.resizeLineSoA.shrink", "[LineSoA]")
@@ -396,6 +462,19 @@ TEST_CASE("CellProxy.beginsWith", "[CellProxy]")
 // =============================================================================
 // CellProxy trivial flag invalidation tests
 // =============================================================================
+
+TEST_CASE("CellProxy.trivialInvalidation.atCol0", "[CellProxy]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(10));
+    CellProxy(line, 0).write(GraphicsAttributes {}, U'A', 1);
+    CellProxy(line, 1).write(GraphicsAttributes {}, U'B', 1);
+    REQUIRE(line.trivial); // uniform SGR — still trivial
+
+    // Changing SGR at col 0 must invalidate trivial (col 1 still has default attrs)
+    CellProxy(line, 0).setForegroundColor(Color::Indexed(IndexedColor::Red));
+    CHECK_FALSE(line.trivial);
+}
 
 TEST_CASE("CellProxy.trivialInvalidation.setForegroundColor", "[CellProxy]")
 {
