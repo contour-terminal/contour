@@ -107,6 +107,7 @@
     <release version="0.7.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Adds Win32 Input Mode (DEC private mode 9001) for native ConPTY keyboard input encoding, fixing keyboard input for applications that request this mode on Windows</li>
           <li>Fixes Unicode characters sometimes being wrongly decoded during high-bandwidth output</li>
           <li>Improves PTY throughput performance determinism by rewriting the internal grid cell storage</li>
           <li>Adds **experimental** Good Image Protocol (GIP) implementation — a DCS-based protocol for displaying raster images with named image pools, LRU eviction, three compositing layers (below/replace/above), configurable resize and alignment policies, Auto/PNG/RGB/RGBA format support with automatic format detection, and DA1 capability advertisement via code 90 (#100)</li>

@@ -625,11 +625,296 @@ bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
 }
 // }}}
 
+// {{{ Win32 Input Mode (DEC private mode 9001)
+
+// clang-format off
+
+/// Maps Windows Virtual Key codes used in Win32 Input Mode.
+namespace VK
+{
+    constexpr uint32_t Back      = 0x08;
+    constexpr uint32_t Tab       = 0x09;
+    constexpr uint32_t Return    = 0x0D;
+    constexpr uint32_t Pause     = 0x13;
+    constexpr uint32_t Capital   = 0x14;
+    constexpr uint32_t Escape    = 0x1B;
+    constexpr uint32_t Prior     = 0x21;
+    constexpr uint32_t Next      = 0x22;
+    constexpr uint32_t End       = 0x23;
+    constexpr uint32_t Home      = 0x24;
+    constexpr uint32_t Left      = 0x25;
+    constexpr uint32_t Up        = 0x26;
+    constexpr uint32_t Right     = 0x27;
+    constexpr uint32_t Down      = 0x28;
+    constexpr uint32_t Snapshot  = 0x2C;
+    constexpr uint32_t Insert    = 0x2D;
+    constexpr uint32_t Delete    = 0x2E;
+    constexpr uint32_t LWin      = 0x5B;
+    constexpr uint32_t RWin      = 0x5C;
+    constexpr uint32_t Apps      = 0x5D;
+    constexpr uint32_t Numpad0   = 0x60;
+    constexpr uint32_t Numpad1   = 0x61;
+    constexpr uint32_t Numpad2   = 0x62;
+    constexpr uint32_t Numpad3   = 0x63;
+    constexpr uint32_t Numpad4   = 0x64;
+    constexpr uint32_t Numpad5   = 0x65;
+    constexpr uint32_t Numpad6   = 0x66;
+    constexpr uint32_t Numpad7   = 0x67;
+    constexpr uint32_t Numpad8   = 0x68;
+    constexpr uint32_t Numpad9   = 0x69;
+    constexpr uint32_t Multiply  = 0x6A;
+    constexpr uint32_t Add       = 0x6B;
+    constexpr uint32_t Subtract  = 0x6D;
+    constexpr uint32_t Decimal   = 0x6E;
+    constexpr uint32_t Divide    = 0x6F;
+    constexpr uint32_t F1        = 0x70;
+    constexpr uint32_t F2        = 0x71;
+    constexpr uint32_t F3        = 0x72;
+    constexpr uint32_t F4        = 0x73;
+    constexpr uint32_t F5        = 0x74;
+    constexpr uint32_t F6        = 0x75;
+    constexpr uint32_t F7        = 0x76;
+    constexpr uint32_t F8        = 0x77;
+    constexpr uint32_t F9        = 0x78;
+    constexpr uint32_t F10       = 0x79;
+    constexpr uint32_t F11       = 0x7A;
+    constexpr uint32_t F12       = 0x7B;
+    constexpr uint32_t F13       = 0x7C;
+    constexpr uint32_t F14       = 0x7D;
+    constexpr uint32_t F15       = 0x7E;
+    constexpr uint32_t F16       = 0x7F;
+    constexpr uint32_t F17       = 0x80;
+    constexpr uint32_t F18       = 0x81;
+    constexpr uint32_t F19       = 0x82;
+    constexpr uint32_t F20       = 0x83;
+    constexpr uint32_t F21       = 0x84;
+    constexpr uint32_t F22       = 0x85;
+    constexpr uint32_t F23       = 0x86;
+    constexpr uint32_t F24       = 0x87;
+    constexpr uint32_t NumLock   = 0x90;
+    constexpr uint32_t Scroll    = 0x91;
+    constexpr uint32_t Shift     = 0x10; // VK_SHIFT (generic)
+    constexpr uint32_t Control   = 0x11; // VK_CONTROL (generic)
+    constexpr uint32_t Menu      = 0x12; // VK_MENU / Alt (generic)
+    constexpr uint32_t RMenu     = 0xA5;
+    constexpr uint32_t MediaNextTrack     = 0xB0;
+    constexpr uint32_t MediaPrevTrack     = 0xB1;
+    constexpr uint32_t MediaStop          = 0xB2;
+    constexpr uint32_t MediaPlayPause     = 0xB3;
+    constexpr uint32_t VolumeMute         = 0xAD;
+    constexpr uint32_t VolumeDown         = 0xAE;
+    constexpr uint32_t VolumeUp           = 0xAF;
+} // namespace VK
+
+// clang-format on
+
+/// Returns true if the given Key represents an enhanced key in Windows terminology.
+/// Enhanced keys have E0 scan code prefixes on a standard 101/102-key keyboard layout.
+/// This sets the ENHANCED_KEY (0x0100) flag in dwControlKeyState.
+constexpr bool isEnhancedKey(Key key) noexcept
+{
+    // clang-format off
+    switch (key)
+    {
+        // Dedicated navigation cluster (not numpad equivalents)
+        case Key::UpArrow:
+        case Key::DownArrow:
+        case Key::LeftArrow:
+        case Key::RightArrow:
+        case Key::Home:
+        case Key::End:
+        case Key::Insert:
+        case Key::Delete:
+        case Key::PageUp:
+        case Key::PageDown:
+        // Numpad keys with E0 scan codes
+        case Key::Numpad_Enter:
+        case Key::Numpad_Divide:
+        // Right-side modifiers (E0 prefix distinguishes from left-side)
+        case Key::RightControl:
+        case Key::RightAlt:
+        // Other enhanced keys
+        case Key::PrintScreen:
+            return true;
+        default:
+            return false;
+    }
+    // clang-format on
+}
+
+constexpr uint32_t InputGenerator::keyToVirtualKeyCode(Key key)
+{
+    // clang-format off
+    switch (key)
+    {
+        case Key::F1:  return VK::F1;
+        case Key::F2:  return VK::F2;
+        case Key::F3:  return VK::F3;
+        case Key::F4:  return VK::F4;
+        case Key::F5:  return VK::F5;
+        case Key::F6:  return VK::F6;
+        case Key::F7:  return VK::F7;
+        case Key::F8:  return VK::F8;
+        case Key::F9:  return VK::F9;
+        case Key::F10: return VK::F10;
+        case Key::F11: return VK::F11;
+        case Key::F12: return VK::F12;
+        case Key::F13: return VK::F13;
+        case Key::F14: return VK::F14;
+        case Key::F15: return VK::F15;
+        case Key::F16: return VK::F16;
+        case Key::F17: return VK::F17;
+        case Key::F18: return VK::F18;
+        case Key::F19: return VK::F19;
+        case Key::F20: return VK::F20;
+        case Key::F21: return VK::F21;
+        case Key::F22: return VK::F22;
+        case Key::F23: return VK::F23;
+        case Key::F24: return VK::F24;
+        case Key::F25: return VK::F24; // No VK for F25+, map to F24
+        case Key::F26: return VK::F24;
+        case Key::F27: return VK::F24;
+        case Key::F28: return VK::F24;
+        case Key::F29: return VK::F24;
+        case Key::F30: return VK::F24;
+        case Key::F31: return VK::F24;
+        case Key::F32: return VK::F24;
+        case Key::F33: return VK::F24;
+        case Key::F34: return VK::F24;
+        case Key::F35: return VK::F24;
+
+        case Key::Escape:    return VK::Escape;
+        case Key::Enter:     return VK::Return;
+        case Key::Tab:       return VK::Tab;
+        case Key::Backspace: return VK::Back;
+
+        case Key::DownArrow:  return VK::Down;
+        case Key::LeftArrow:  return VK::Left;
+        case Key::RightArrow: return VK::Right;
+        case Key::UpArrow:    return VK::Up;
+
+        case Key::Insert:   return VK::Insert;
+        case Key::Delete:   return VK::Delete;
+        case Key::Home:     return VK::Home;
+        case Key::End:      return VK::End;
+        case Key::PageUp:   return VK::Prior;
+        case Key::PageDown: return VK::Next;
+
+        case Key::MediaPlay:            return VK::MediaPlayPause;
+        case Key::MediaStop:            return VK::MediaStop;
+        case Key::MediaPrevious:        return VK::MediaPrevTrack;
+        case Key::MediaNext:            return VK::MediaNextTrack;
+        case Key::MediaPause:           return VK::MediaPlayPause;
+        case Key::MediaTogglePlayPause: return VK::MediaPlayPause;
+
+        case Key::VolumeUp:   return VK::VolumeUp;
+        case Key::VolumeDown: return VK::VolumeDown;
+        case Key::VolumeMute: return VK::VolumeMute;
+
+        case Key::LeftShift:    return VK::Shift;   // Generic VK_SHIFT, matching Windows KEY_EVENT_RECORD
+        case Key::RightShift:   return VK::Shift;   // Qt cannot distinguish left/right
+        case Key::LeftControl:  return VK::Control;  // Generic VK_CONTROL
+        case Key::RightControl: return VK::Control;  // Qt cannot distinguish left/right
+        case Key::LeftAlt:      return VK::Menu;     // Generic VK_MENU
+        case Key::RightAlt:     return VK::Menu;     // Qt cannot distinguish left/right
+        case Key::LeftSuper:    return VK::LWin;
+        case Key::RightSuper:   return VK::RWin;
+        case Key::LeftHyper:    return VK::LWin;
+        case Key::RightHyper:   return VK::RWin;
+        case Key::LeftMeta:     return VK::LWin;
+        case Key::RightMeta:    return VK::RWin;
+        case Key::IsoLevel3Shift: return VK::RMenu;
+        case Key::IsoLevel5Shift: return VK::RMenu;
+
+        case Key::CapsLock:    return VK::Capital;
+        case Key::ScrollLock:  return VK::Scroll;
+        case Key::NumLock:     return VK::NumLock;
+        case Key::PrintScreen: return VK::Snapshot;
+        case Key::Pause:       return VK::Pause;
+        case Key::Menu:        return VK::Apps;
+
+        case Key::Numpad_Divide:   return VK::Divide;
+        case Key::Numpad_Multiply: return VK::Multiply;
+        case Key::Numpad_Subtract: return VK::Subtract;
+        case Key::Numpad_Add:      return VK::Add;
+        case Key::Numpad_Decimal:  return VK::Decimal;
+        case Key::Numpad_Enter:    return VK::Return;
+        case Key::Numpad_Equal:    return VK::Return; // No VK_NUMPAD_EQUAL, use Return
+        case Key::Numpad_0: return VK::Numpad0;
+        case Key::Numpad_1: return VK::Numpad1;
+        case Key::Numpad_2: return VK::Numpad2;
+        case Key::Numpad_3: return VK::Numpad3;
+        case Key::Numpad_4: return VK::Numpad4;
+        case Key::Numpad_5: return VK::Numpad5;
+        case Key::Numpad_6: return VK::Numpad6;
+        case Key::Numpad_7: return VK::Numpad7;
+        case Key::Numpad_8: return VK::Numpad8;
+        case Key::Numpad_9: return VK::Numpad9;
+    }
+    // clang-format on
+    return 0;
+}
+
+constexpr Win32ControlKeyState InputGenerator::buildWin32ControlKeyState(Modifiers modifiers)
+{
+    auto state = Win32ControlKeyState {};
+    if (modifiers.test(Modifier::Shift))
+        state.enable(Win32ControlKeyFlag::ShiftPressed);
+    if (modifiers.test(Modifier::Alt))
+        state.enable(Win32ControlKeyFlag::LeftAltPressed);
+    if (modifiers.test(Modifier::Control))
+        state.enable(Win32ControlKeyFlag::LeftCtrlPressed);
+    if (modifiers.test(Modifier::CapsLock))
+        state.enable(Win32ControlKeyFlag::CapsLockOn);
+    if (modifiers.test(Modifier::NumLock))
+        state.enable(Win32ControlKeyFlag::NumLockOn);
+    return state;
+}
+
+bool InputGenerator::generateWin32KeyInput(uint32_t virtualKeyCode,
+                                           char32_t unicodeChar,
+                                           Modifiers modifiers,
+                                           KeyboardEventType eventType,
+                                           Win32ControlKeyState extraControlKeyState)
+{
+    // Format: CSI Vk ; Sc ; Uc ; Kd ; Cs ; Rc _
+    auto const kd = (eventType == KeyboardEventType::Release) ? 0u : 1u;
+    auto const cs = buildWin32ControlKeyState(modifiers).with(extraControlKeyState);
+
+    // Apply Ctrl mapping to the unicode character, matching Windows KEY_EVENT_RECORD behavior.
+    // When Ctrl is held, Windows reports the control character (e.g., Ctrl+R → 0x12),
+    // not the raw letter. Without this, ConPTY/PSReadLine may not recognize Ctrl+key combos.
+    auto uc = static_cast<uint32_t>(unicodeChar);
+    if (modifiers.test(Modifier::Control))
+    {
+        if (auto const mapped = ctrlMappedKey(unicodeChar); mapped.has_value())
+            uc = static_cast<uint32_t>(static_cast<unsigned char>(*mapped));
+    }
+
+    append(std::format("\033[{};{};{};{};{};{}_",
+                       virtualKeyCode,
+                       0u, // scan code (not available from Qt)
+                       uc,
+                       kd,
+                       cs.value(),
+                       1u)); // repeat count
+    inputLog()("Sending Win32 input: VK={:#x} UC={:#x} KD={} CS={:#x} {}.",
+               virtualKeyCode,
+               uc,
+               kd,
+               cs.value(),
+               eventType);
+    return true;
+}
+
+// }}}
+
 void InputGenerator::reset()
 {
     _keyboardInputGenerator.reset();
     _bracketedPaste = false;
     _generateFocusEvents = false;
+    _win32InputMode = false;
     _mouseProtocol = std::nullopt;
     _mouseTransport = MouseTransport::Default;
     _mouseWheelMode = MouseWheelMode::Default;
@@ -669,6 +954,12 @@ bool InputGenerator::generate(char32_t characterEvent,
                               Modifiers modifiers,
                               KeyboardEventType eventType)
 {
+    // Win32 Input Mode supersedes all other keyboard protocols when active.
+    // It is the native ConPTY input format and carries richer key information
+    // (VK codes, scan codes) than CSI u in the Windows environment.
+    if (_win32InputMode)
+        return generateWin32KeyInput(physicalKey, characterEvent, modifiers, eventType);
+
     // modifyOtherKeys mode 2: emit CSI 27 ; modifier ; codepoint ~ for modified keys.
     // This takes precedence over the CSI u keyboard protocol but only when no CSI u flags are active.
     if (_modifyOtherKeys == 2 && !_keyboardInputGenerator.flags().any()
@@ -699,8 +990,37 @@ bool InputGenerator::generate(char32_t characterEvent,
     return success;
 }
 
+/// Strips the modifier corresponding to a modifier-only key from the modifier set.
+/// On key release, Windows KEY_EVENT_RECORDs reflect the post-release state
+/// (e.g., releasing Alt clears LEFT_ALT_PRESSED from dwControlKeyState).
+/// Qt may still report the pre-release modifier, so we strip it explicitly.
+constexpr Modifiers stripSelfModifier(Key key, Modifiers modifiers) noexcept
+{
+    // clang-format off
+    switch (key)
+    {
+        case Key::LeftShift:    case Key::RightShift:   return modifiers.without(Modifier::Shift);
+        case Key::LeftControl:  case Key::RightControl: return modifiers.without(Modifier::Control);
+        case Key::LeftAlt:      case Key::RightAlt:     return modifiers.without(Modifier::Alt);
+        case Key::LeftSuper:    case Key::RightSuper:
+        case Key::LeftMeta:     case Key::RightMeta:    return modifiers.without(Modifier::Super);
+        default:                                        return modifiers;
+    }
+    // clang-format on
+}
+
 bool InputGenerator::generate(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
+    if (_win32InputMode)
+    {
+        auto effectiveModifiers = modifiers;
+        if (eventType == KeyboardEventType::Release)
+            effectiveModifiers = stripSelfModifier(key, effectiveModifiers);
+        auto const extra = isEnhancedKey(key) ? Win32ControlKeyState { Win32ControlKeyFlag::EnhancedKey }
+                                              : Win32ControlKeyState {};
+        return generateWin32KeyInput(keyToVirtualKeyCode(key), 0, effectiveModifiers, eventType, extra);
+    }
+
     bool const success = _keyboardInputGenerator.generateKey(key, modifiers, eventType);
 
     if (success)

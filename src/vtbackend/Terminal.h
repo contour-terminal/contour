@@ -152,10 +152,10 @@ class Modes
     }
 
   private:
-    std::bitset<32> _ansi;                            // AnsiMode
-    std::bitset<8452 + 1> _dec;                       // DECMode
-    std::bitset<8452 + 1> _decFrozen;                 // DECMode
-    std::map<DECMode, std::vector<bool>> _savedModes; // saved DEC modes
+    std::bitset<32> _ansi;                                              // AnsiMode
+    std::bitset<static_cast<size_t>(DECMode::DECModeCount)> _dec;       // DECMode
+    std::bitset<static_cast<size_t>(DECMode::DECModeCount)> _decFrozen; // DECMode
+    std::map<DECMode, std::vector<bool>> _savedModes;                   // saved DEC modes
 };
 // }}}
 

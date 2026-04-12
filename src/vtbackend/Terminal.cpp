@@ -2550,6 +2550,7 @@ void Terminal::setMode(DECMode mode, bool enable)
         case DECMode::ApplicationKeypad: setApplicationkeypadMode(enable); break;
         case DECMode::AutoRepeat: break;
         case DECMode::BackarrowKey: _inputGenerator.setBackarrowKeyMode(enable); break;
+        case DECMode::Win32InputMode: _inputGenerator.setWin32InputMode(enable); break;
         case DECMode::SemanticBlockProtocol:
             _semanticBlockTracker.setEnabled(enable);
             if (enable)
@@ -3740,6 +3741,8 @@ std::string to_string(DECMode mode)
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
+        case DECMode::Win32InputMode: return "Win32InputMode";
+        case DECMode::DECModeCount: break;
     }
     return std::format("({})", static_cast<unsigned>(mode));
 }

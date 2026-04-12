@@ -9,6 +9,7 @@ BBBBB
 BCDE
 BLval
 BRval
+capslock
 CCCCC
 CDEFGH
 COLSx
@@ -62,6 +63,7 @@ WXYZ
 bpp
 circleval
 crtdbg
+csiu
 ctrled
 dcx
 decdld
@@ -76,6 +78,8 @@ entrantly
 gitbranch
 gitgraph
 isakbm
+LMENU
+LWin
 nabcd
 ndrwxr
 nfile
@@ -84,6 +88,8 @@ pseudoconsole
 qmljsdebugger
 rbong
 redefinable
+RWin
+SCROLLLOCK
 soa
 udk
 unscroll

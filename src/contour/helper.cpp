@@ -56,7 +56,9 @@ using vtbackend::Width;
 namespace contour
 {
 
-vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers, quint32 nativeModifiers)
+vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
+                                   quint32 nativeModifiers,
+                                   [[maybe_unused]] bool stripAltGr)
 {
     using vtbackend::Modifier;
     using vtbackend::Modifiers;
@@ -74,10 +76,15 @@ vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers, quint32 na
         modifiers |= Modifier::Super;
 
 #if defined(_WIN32)
-    // Windows: Handle AltGr (Ctrl+Alt combination)
-    auto constexpr AltGrEquivalent = Modifiers { Modifier::Alt, Modifier::Control };
-    if (modifiers.contains(AltGrEquivalent))
-        modifiers = modifiers.without(AltGrEquivalent);
+    // Windows: Handle AltGr (Ctrl+Alt combination).
+    // In Win32 Input Mode, we keep the raw modifier state so ConPTY receives
+    // the correct dwControlKeyState flags.
+    if (stripAltGr)
+    {
+        auto constexpr AltGrEquivalent = Modifiers { Modifier::Alt, Modifier::Control };
+        if (modifiers.contains(AltGrEquivalent))
+            modifiers = modifiers.without(AltGrEquivalent);
+    }
 
     // Windows: Query lock states directly via Win32 API
     // GetKeyState returns toggle state in low-order bit (0x0001)
@@ -350,6 +357,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         pair { Qt::Key_VolumeDown, Key::VolumeDown },
         pair { Qt::Key_VolumeMute, Key::VolumeMute },
 
+        pair { Qt::Key_Shift, Key::LeftShift },     // NB: Qt cannot distinguish between left and right
         pair { Qt::Key_Control, Key::LeftControl }, // NB: Qt cannot distinguish between left and right
         pair { Qt::Key_Alt, Key::LeftAlt },         // NB: Qt cannot distinguish between left and right
         pair { Qt::Key_Meta, Key::LeftMeta },       // NB: Qt cannot distinguish between left and right
@@ -441,7 +449,9 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         // clang-format on
     }; // }}}
 
-    auto const modifiers = makeModifiers(event->modifiers(), event->nativeModifiers());
+    auto const isWin32Mode = session.terminal().isModeEnabled(vtbackend::DECMode::Win32InputMode);
+    auto const modifiers =
+        makeModifiers(event->modifiers(), event->nativeModifiers(), /*stripAltGr=*/!isWin32Mode);
     auto const key = event->key();
 
     if (event->modifiers().testFlag(Qt::KeypadModifier))
