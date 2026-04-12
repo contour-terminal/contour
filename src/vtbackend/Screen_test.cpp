@@ -5345,5 +5345,87 @@ TEST_CASE("DECUDK: udkStringForKey maps Key enum to UDK ID", "[screen]")
 
 // }}} DECUDK (User-Defined Keys) Tests
 
+// {{{ NRCS (National Replacement Character Sets) Tests
+
+TEST_CASE("NRCS: British charset substitution", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Designate British to G0: ESC ( A
+    mock.writeToScreen("\033(A");
+    // Write '#' which should map to '£' (U+00A3) in British charset
+    mock.writeToScreen("#");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    // £ is U+00A3 — the UTF-8 encoding is 0xC2 0xA3
+    CHECK(text.find("\xC2\xA3") != std::string::npos);
+}
+
+TEST_CASE("NRCS: German charset substitution", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Designate German to G0: ESC ( K
+    mock.writeToScreen("\033(K");
+    // In German charset: '[' (0x5B) maps to 'Ä' (U+00C4)
+    mock.writeToScreen("[");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    CHECK(text.find("\xC3\x84") != std::string::npos); // Ä in UTF-8
+}
+
+TEST_CASE("NRCS: French charset substitution", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Designate French to G0: ESC ( R
+    mock.writeToScreen("\033(R");
+    // In French charset: '#' (0x23) maps to '£' (U+00A3)
+    mock.writeToScreen("#");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    CHECK(text.find("\xC2\xA3") != std::string::npos); // £ in UTF-8
+}
+
+TEST_CASE("NRCS: switch back to USASCII", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Set British
+    mock.writeToScreen("\033(A");
+    mock.writeToScreen("#"); // Should be £
+    // Switch back to USASCII
+    mock.writeToScreen("\033(B");
+    mock.writeToScreen("#"); // Should be #
+    mock.terminal.flushInput();
+    // Column 0 has £, column 1 has #
+    auto const col0 = mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(0) });
+    auto const col1 = mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) });
+    CHECK(col0 == "\xC2\xA3"); // £ in UTF-8
+    CHECK(col1 == "#");
+}
+
+TEST_CASE("NRCS: G1 charset via locking shift", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Designate British to G1: ESC ) A
+    mock.writeToScreen("\033)A");
+    // Locking shift G1 (LS1 = SO = 0x0E)
+    mock.writeToScreen("\x0E");
+    // Write '#' — should map through G1 (British) → £
+    mock.writeToScreen("#");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    CHECK(text.find("\xC2\xA3") != std::string::npos);
+}
+
+TEST_CASE("NRCS: DA1 includes ext 9", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto const exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(9)); // ext 9 = NationalReplacementCharacterSets
+}
+
+// }}} NRCS (National Replacement Character Sets) Tests
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests

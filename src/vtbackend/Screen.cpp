@@ -1197,7 +1197,7 @@ void Screen::sendDeviceAttributes()
               // TODO: DeviceAttributes::AnsiTextLocator |
               DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132 |
               DeviceAttributes::HorizontalScrolling |
-              // TODO: DeviceAttributes::NationalReplacementCharacterSets |
+              DeviceAttributes::NationalReplacementCharacterSets |
               DeviceAttributes::RectangularEditing | DeviceAttributes::SelectiveErase |
               DeviceAttributes::SixelGraphics | DeviceAttributes::StatusDisplay |
               // TODO: DeviceAttributes::TechnicalCharacters |
@@ -4008,10 +4008,39 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case CR: moveCursorToBeginOfLine(); break;
 
         // ESC
+        // SCS — G0
         case SCS_G0_SPECIAL: designateCharset(CharsetTable::G0, CharsetId::Special); break;
+        case SCS_G0_BRITISH: designateCharset(CharsetTable::G0, CharsetId::British); break;
         case SCS_G0_USASCII: designateCharset(CharsetTable::G0, CharsetId::USASCII); break;
+        case SCS_G0_FINNISH: designateCharset(CharsetTable::G0, CharsetId::Finnish); break;
+        case SCS_G0_DUTCH: designateCharset(CharsetTable::G0, CharsetId::Dutch); break;
+        case SCS_G0_NORWEGIAN: designateCharset(CharsetTable::G0, CharsetId::NorwegianDanish); break;
+        case SCS_G0_FRENCH: designateCharset(CharsetTable::G0, CharsetId::French); break;
+        case SCS_G0_FRENCHCANADIAN: designateCharset(CharsetTable::G0, CharsetId::FrenchCanadian); break;
+        case SCS_G0_GERMAN: designateCharset(CharsetTable::G0, CharsetId::German); break;
+        case SCS_G0_SPANISH: designateCharset(CharsetTable::G0, CharsetId::Spanish); break;
+        case SCS_G0_SWEDISH: designateCharset(CharsetTable::G0, CharsetId::Swedish); break;
+        case SCS_G0_SWISS: designateCharset(CharsetTable::G0, CharsetId::Swiss); break;
+        // SCS — G1
         case SCS_G1_SPECIAL: designateCharset(CharsetTable::G1, CharsetId::Special); break;
+        case SCS_G1_BRITISH: designateCharset(CharsetTable::G1, CharsetId::British); break;
         case SCS_G1_USASCII: designateCharset(CharsetTable::G1, CharsetId::USASCII); break;
+        case SCS_G1_FINNISH: designateCharset(CharsetTable::G1, CharsetId::Finnish); break;
+        case SCS_G1_DUTCH: designateCharset(CharsetTable::G1, CharsetId::Dutch); break;
+        case SCS_G1_NORWEGIAN: designateCharset(CharsetTable::G1, CharsetId::NorwegianDanish); break;
+        case SCS_G1_FRENCH: designateCharset(CharsetTable::G1, CharsetId::French); break;
+        case SCS_G1_FRENCHCANADIAN: designateCharset(CharsetTable::G1, CharsetId::FrenchCanadian); break;
+        case SCS_G1_GERMAN: designateCharset(CharsetTable::G1, CharsetId::German); break;
+        case SCS_G1_SPANISH: designateCharset(CharsetTable::G1, CharsetId::Spanish); break;
+        case SCS_G1_SWEDISH: designateCharset(CharsetTable::G1, CharsetId::Swedish); break;
+        case SCS_G1_SWISS: designateCharset(CharsetTable::G1, CharsetId::Swiss); break;
+        // SCS — G2/G3
+        case SCS_G2_SPECIAL: designateCharset(CharsetTable::G2, CharsetId::Special); break;
+        case SCS_G2_USASCII: designateCharset(CharsetTable::G2, CharsetId::USASCII); break;
+        case SCS_G2_BRITISH: designateCharset(CharsetTable::G2, CharsetId::British); break;
+        case SCS_G3_SPECIAL: designateCharset(CharsetTable::G3, CharsetId::Special); break;
+        case SCS_G3_USASCII: designateCharset(CharsetTable::G3, CharsetId::USASCII); break;
+        case SCS_G3_BRITISH: designateCharset(CharsetTable::G3, CharsetId::British); break;
         case DECALN: screenAlignmentPattern(); break;
         case DECBI: backIndex(); break;
         case DECDHL_Top:
