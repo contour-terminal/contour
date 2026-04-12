@@ -547,6 +547,7 @@ constexpr inline auto SCS_G0_GERMAN        = detail::ESC('(', 'K', VTType::VT220
 constexpr inline auto SCS_G0_SPANISH       = detail::ESC('(', 'Z', VTType::VT220, { .mnemonic = "SCS_G0_SPANISH", .comment = "Set G0 to Spanish" }); // NOLINT
 constexpr inline auto SCS_G0_SWEDISH       = detail::ESC('(', 'H', VTType::VT220, { .mnemonic = "SCS_G0_SWEDISH", .comment = "Set G0 to Swedish" }); // NOLINT
 constexpr inline auto SCS_G0_SWISS         = detail::ESC('(', '=', VTType::VT220, { .mnemonic = "SCS_G0_SWISS", .comment = "Set G0 to Swiss" }); // NOLINT
+constexpr inline auto SCS_G0_TECHNICAL     = detail::ESC('(', '>', VTType::VT220, { .mnemonic = "SCS_G0_TECHNICAL", .comment = "Set G0 to DEC Technical" }); // NOLINT
 // SCS — G1 designations (ESC ) Dscs)
 constexpr inline auto SCS_G1_SPECIAL       = detail::ESC(')', '0', VTType::VT100, { .mnemonic = "SCS_G1_SPECIAL", .comment = "Set G1 to DEC Special" }); // NOLINT
 constexpr inline auto SCS_G1_BRITISH       = detail::ESC(')', 'A', VTType::VT100, { .mnemonic = "SCS_G1_BRITISH", .comment = "Set G1 to British" }); // NOLINT
@@ -560,6 +561,7 @@ constexpr inline auto SCS_G1_GERMAN        = detail::ESC(')', 'K', VTType::VT220
 constexpr inline auto SCS_G1_SPANISH       = detail::ESC(')', 'Z', VTType::VT220, { .mnemonic = "SCS_G1_SPANISH", .comment = "Set G1 to Spanish" }); // NOLINT
 constexpr inline auto SCS_G1_SWEDISH       = detail::ESC(')', 'H', VTType::VT220, { .mnemonic = "SCS_G1_SWEDISH", .comment = "Set G1 to Swedish" }); // NOLINT
 constexpr inline auto SCS_G1_SWISS         = detail::ESC(')', '=', VTType::VT220, { .mnemonic = "SCS_G1_SWISS", .comment = "Set G1 to Swiss" }); // NOLINT
+constexpr inline auto SCS_G1_TECHNICAL     = detail::ESC(')', '>', VTType::VT220, { .mnemonic = "SCS_G1_TECHNICAL", .comment = "Set G1 to DEC Technical" }); // NOLINT
 // SCS — G2 designations (ESC * Dscs)
 constexpr inline auto SCS_G2_SPECIAL       = detail::ESC('*', '0', VTType::VT220, { .mnemonic = "SCS_G2_SPECIAL", .comment = "Set G2 to DEC Special" }); // NOLINT
 constexpr inline auto SCS_G2_USASCII       = detail::ESC('*', 'B', VTType::VT220, { .mnemonic = "SCS_G2_USASCII", .comment = "Set G2 to USASCII" }); // NOLINT
@@ -757,9 +759,11 @@ constexpr static auto allFunctionsArray() noexcept
         SCS_G0_SPECIAL, SCS_G0_BRITISH, SCS_G0_USASCII, SCS_G0_FINNISH,
         SCS_G0_DUTCH, SCS_G0_NORWEGIAN, SCS_G0_FRENCH, SCS_G0_FRENCHCANADIAN,
         SCS_G0_GERMAN, SCS_G0_SPANISH, SCS_G0_SWEDISH, SCS_G0_SWISS,
+        SCS_G0_TECHNICAL,
         SCS_G1_SPECIAL, SCS_G1_BRITISH, SCS_G1_USASCII, SCS_G1_FINNISH,
         SCS_G1_DUTCH, SCS_G1_NORWEGIAN, SCS_G1_FRENCH, SCS_G1_FRENCHCANADIAN,
         SCS_G1_GERMAN, SCS_G1_SPANISH, SCS_G1_SWEDISH, SCS_G1_SWISS,
+        SCS_G1_TECHNICAL,
         SCS_G2_SPECIAL, SCS_G2_USASCII, SCS_G2_BRITISH,
         SCS_G3_SPECIAL, SCS_G3_USASCII, SCS_G3_BRITISH,
         SS2,

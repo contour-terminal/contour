@@ -1200,7 +1200,7 @@ void Screen::sendDeviceAttributes()
               DeviceAttributes::NationalReplacementCharacterSets |
               DeviceAttributes::RectangularEditing | DeviceAttributes::SelectiveErase |
               DeviceAttributes::SixelGraphics | DeviceAttributes::StatusDisplay |
-              // TODO: DeviceAttributes::TechnicalCharacters |
+              DeviceAttributes::TechnicalCharacters |
               DeviceAttributes::TextMacros |
               DeviceAttributes::UserDefinedKeys |
               DeviceAttributes::Windowing | DeviceAttributes::ClipboardExtension;
@@ -4021,6 +4021,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SCS_G0_SPANISH: designateCharset(CharsetTable::G0, CharsetId::Spanish); break;
         case SCS_G0_SWEDISH: designateCharset(CharsetTable::G0, CharsetId::Swedish); break;
         case SCS_G0_SWISS: designateCharset(CharsetTable::G0, CharsetId::Swiss); break;
+        case SCS_G0_TECHNICAL: designateCharset(CharsetTable::G0, CharsetId::Technical); break;
         // SCS — G1
         case SCS_G1_SPECIAL: designateCharset(CharsetTable::G1, CharsetId::Special); break;
         case SCS_G1_BRITISH: designateCharset(CharsetTable::G1, CharsetId::British); break;
@@ -4034,6 +4035,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SCS_G1_SPANISH: designateCharset(CharsetTable::G1, CharsetId::Spanish); break;
         case SCS_G1_SWEDISH: designateCharset(CharsetTable::G1, CharsetId::Swedish); break;
         case SCS_G1_SWISS: designateCharset(CharsetTable::G1, CharsetId::Swiss); break;
+        case SCS_G1_TECHNICAL: designateCharset(CharsetTable::G1, CharsetId::Technical); break;
         // SCS — G2/G3
         case SCS_G2_SPECIAL: designateCharset(CharsetTable::G2, CharsetId::Special); break;
         case SCS_G2_USASCII: designateCharset(CharsetTable::G2, CharsetId::USASCII); break;

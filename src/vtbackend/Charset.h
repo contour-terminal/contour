@@ -23,7 +23,8 @@ enum class CharsetId : std::uint8_t
     Spanish,
     Swedish,
     Swiss,
-    USASCII
+    USASCII,
+    Technical
 };
 
 enum class CharsetTable : std::uint8_t
@@ -56,6 +57,7 @@ constexpr char charsetDesignation(CharsetId id) noexcept
         case CharsetId::Spanish: return 'Z';
         case CharsetId::Swedish: return 'H';
         case CharsetId::Swiss: return '=';
+        case CharsetId::Technical: return '>';
         case CharsetId::USASCII: return 'B';
     }
     return 'B'; // fallback to USASCII

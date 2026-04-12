@@ -5427,5 +5427,67 @@ TEST_CASE("NRCS: DA1 includes ext 9", "[screen]")
 
 // }}} NRCS (National Replacement Character Sets) Tests
 
+// {{{ Technical Character Set Tests
+
+TEST_CASE("Technical charset: designate and use", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Designate DEC Technical to G0: ESC ( >
+    mock.writeToScreen("\033(>");
+    // Write 'A' (0x41) which maps to Α (Greek Alpha, U+0391) in Technical charset
+    mock.writeToScreen("A");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    // Α (U+0391) in UTF-8 is 0xCE 0x91
+    CHECK(text.find("\xCE\x91") != std::string::npos);
+}
+
+TEST_CASE("Technical charset: pi mapping", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033(>");
+    // 0x70 = 'p' maps to π (U+03C0) in Technical charset
+    mock.writeToScreen("p");
+    mock.terminal.flushInput();
+    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
+    // π (U+03C0) in UTF-8 is 0xCF 0x80
+    CHECK(text.find("\xCF\x80") != std::string::npos);
+}
+
+TEST_CASE("Technical charset: switch back to USASCII", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.writeToScreen("\033(>");
+    mock.writeToScreen("A"); // Should be Α (Greek Alpha)
+    mock.writeToScreen("\033(B");
+    mock.writeToScreen("A"); // Should be regular A
+    mock.terminal.flushInput();
+    auto const col0 = mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(0) });
+    auto const col1 = mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) });
+    CHECK(col0 == "\xCE\x91"); // Α in UTF-8
+    CHECK(col1 == "A");
+}
+
+TEST_CASE("Technical charset: ext 15 implied at level 65, listed at level 62", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto exts = parseDA1Extensions(mock.replyData());
+    CHECK_FALSE(exts.contains(15)); // required at level 5, implied by 65
+
+    // Downgrade to level 62 where ext 15 is optional
+    mock.writeToScreen("\033[62;1\"p");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(15)); // optional at level 2
+}
+
+// }}} Technical Character Set Tests
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests
