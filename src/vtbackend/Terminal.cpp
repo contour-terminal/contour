@@ -918,6 +918,22 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
 
     verifyState();
 
+    // DEC Locator: intercept mouse press if locator mode is active
+    if (_locatorState.enabled)
+    {
+        auto const btn = [&]() -> int {
+            switch (button)
+            {
+                case MouseButton::Left: return 1;
+                case MouseButton::Middle: return 2;
+                case MouseButton::Right: return 4;
+                default: return 0;
+            }
+        }();
+        if (btn != 0 && handleLocatorMouseEvent(btn, true, _currentMousePosition))
+            return Handled { true };
+    }
+
     auto const eventHandledByApp =
         allowPassMouseEventToApp(modifiers)
         && _inputGenerator.generateMousePress(
@@ -1233,6 +1249,13 @@ Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
                 case Selection::State::Complete: break;
             }
         }
+    }
+
+    // DEC Locator: intercept mouse release if locator mode is active
+    if (_locatorState.enabled)
+    {
+        if (handleLocatorMouseEvent(0, false, _currentMousePosition))
+            return Handled { true };
     }
 
     if (allowPassMouseEventToApp(modifiers)
@@ -2599,6 +2622,7 @@ void Terminal::softReset()
     resetColorPalette();
     clearMacros();
     clearUDKs();
+    resetLocator();
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
@@ -2979,6 +3003,114 @@ void Terminal::processPendingMacros()
 
         --_macroRecursionDepth;
     }
+}
+
+void Terminal::setLocatorMode(int ps, int pu) noexcept
+{
+    switch (ps)
+    {
+        case 0: // Locator disabled
+            _locatorState.enabled = false;
+            _locatorState.oneShot = false;
+            break;
+        case 1: // Locator enabled — reports on button press/release
+            _locatorState.enabled = true;
+            _locatorState.oneShot = false;
+            break;
+        case 2: // One-shot mode — report once then disable
+            _locatorState.enabled = true;
+            _locatorState.oneShot = true;
+            break;
+        default: break;
+    }
+
+    // Pu: coordinate unit
+    switch (pu)
+    {
+        case 1: _locatorState.coordUnit = LocatorCoordUnit::DevicePixels; break;
+        case 0: [[fallthrough]];
+        case 2: [[fallthrough]];
+        default: _locatorState.coordUnit = LocatorCoordUnit::CharacterCells; break;
+    }
+}
+
+void Terminal::selectLocatorEvents(std::span<int const> params) noexcept
+{
+    for (auto const ps: params)
+    {
+        switch (ps)
+        {
+            case 0: // Disable all button events (but locator stays enabled)
+                _locatorState.reportButtonDown = false;
+                _locatorState.reportButtonUp = false;
+                break;
+            case 1: // Enable button down events
+                _locatorState.reportButtonDown = true;
+                break;
+            case 2: // Disable button down events
+                _locatorState.reportButtonDown = false;
+                break;
+            case 3: // Enable button up events
+                _locatorState.reportButtonUp = true;
+                break;
+            case 4: // Disable button up events
+                _locatorState.reportButtonUp = false;
+                break;
+            default: break;
+        }
+    }
+}
+
+void Terminal::sendLocatorReport(int event, int button, int row, int col)
+{
+    // DECLRP — Locator Report: CSI Pe ; Pb ; Pr ; Pc ; Pp & w
+    // Pp = page number (always 1)
+    reply("\033[{};{};{};{};1&w", event, button, row, col);
+    flushInput();
+}
+
+void Terminal::requestLocatorPosition()
+{
+    if (!_locatorState.enabled)
+    {
+        // If locator is not enabled, report locator unavailable
+        sendLocatorReport(0, 0, 0, 0);
+        return;
+    }
+    // Report current position (row 1, col 1 as default — we don't track mouse position globally)
+    // In practice this would use the last known mouse position
+    sendLocatorReport(1, 0, 1, 1);
+}
+
+bool Terminal::handleLocatorMouseEvent(int button, bool press, CellLocation pos)
+{
+    if (!_locatorState.enabled)
+        return false;
+
+    if (press && !_locatorState.reportButtonDown)
+        return false;
+    if (!press && !_locatorState.reportButtonUp)
+        return false;
+
+    // Pe: 2 = button down, 3 = button up
+    auto const event = press ? 2 : 3;
+
+    // Pb: button encoding (1=left, 2=middle, 4=right; 0 for up with no button info)
+    auto const pb = press ? button : 0;
+
+    // Row and column are 1-based
+    auto const row = *pos.line + 1;
+    auto const col = *pos.column + 1;
+
+    sendLocatorReport(event, pb, row, col);
+
+    if (_locatorState.oneShot)
+    {
+        _locatorState.enabled = false;
+        _locatorState.oneShot = false;
+    }
+
+    return true;
 }
 
 void Terminal::programUDK(bool clearAll, bool locked, std::string_view data)

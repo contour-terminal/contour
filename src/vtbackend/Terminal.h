@@ -406,6 +406,44 @@ class Terminal
     }
     // }}}
 
+    // {{{ DEC Locator (DECELR / DECLRP / DECSLE / DECRQLP)
+    enum class LocatorCoordUnit : uint8_t
+    {
+        CharacterCells, ///< Coordinates in character cell units (default)
+        DevicePixels,   ///< Coordinates in device pixel units
+    };
+
+    struct LocatorState
+    {
+        bool enabled = false;
+        bool oneShot = false;
+        LocatorCoordUnit coordUnit = LocatorCoordUnit::CharacterCells;
+        bool reportButtonDown = true;
+        bool reportButtonUp = true;
+    };
+
+    /// Enables or disables DEC Locator reporting.
+    void setLocatorMode(int ps, int pu) noexcept;
+
+    /// Selects which locator events generate reports.
+    void selectLocatorEvents(std::span<int const> params) noexcept;
+
+    /// Sends a DEC Locator report (DECLRP) to the PTY.
+    void sendLocatorReport(int event, int button, int row, int col);
+
+    /// Requests the current locator position.
+    void requestLocatorPosition();
+
+    /// Returns the current locator state.
+    [[nodiscard]] LocatorState const& locatorState() const noexcept { return _locatorState; }
+
+    /// Resets locator state (called by soft reset).
+    void resetLocator() noexcept { _locatorState = {}; }
+
+    /// Called from sendMousePressEvent/sendMouseReleaseEvent when locator mode is active.
+    bool handleLocatorMouseEvent(int button, bool press, CellLocation pos);
+    // }}}
+
     void setMaxImageSize(ImageSize size) noexcept { _effectiveImageCanvasSize = size; }
     ImageSize maxImageSize() const noexcept { return _effectiveImageCanvasSize; }
 
@@ -1541,6 +1579,8 @@ class Terminal
 
     std::unordered_map<int, std::string> _userDefinedKeys;
     bool _udkLocked = false;
+
+    LocatorState _locatorState;
 
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes

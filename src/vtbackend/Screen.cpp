@@ -1194,7 +1194,7 @@ void Screen::sendDeviceAttributes()
     }();
 
     auto da = DeviceAttributes::AnsiColor |
-              // TODO: DeviceAttributes::AnsiTextLocator |
+              DeviceAttributes::AnsiTextLocator |
               DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132 |
               DeviceAttributes::HorizontalScrolling |
               DeviceAttributes::NationalReplacementCharacterSets |
@@ -4236,6 +4236,15 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         break;
         case DECDC: deleteColumns(seq.param_or(0, ColumnCount(1))); break;
+        case DECELR: _terminal->setLocatorMode(seq.param_or(0, 0), seq.param_or(1, 0)); break;
+        case DECSLE: {
+            auto params = std::vector<int> {};
+            for (size_t i = 0; i < seq.parameterCount(); ++i)
+                params.push_back(seq.param_or(i, 0));
+            _terminal->selectLocatorEvents(params);
+            break;
+        }
+        case DECRQLP: _terminal->requestLocatorPosition(); break;
         case DECIC: insertColumns(seq.param_or(0, ColumnCount(1))); break;
         case DECINVM: _terminal->invokeMacro(seq.param_or(0, 0)); break;
         case DECSACE:

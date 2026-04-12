@@ -5489,5 +5489,94 @@ TEST_CASE("Technical charset: ext 15 implied at level 65, listed at level 62", "
 
 // }}} Technical Character Set Tests
 
+// {{{ DEC Locator (DECELR / DECLRP) Tests
+
+TEST_CASE("DECELR: enable locator reporting", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    // Enable locator: CSI 1 ; 2 ' z  (Ps=1 enable, Pu=2 character cells)
+    mock.writeToScreen("\033[1;2'z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.locatorState().enabled);
+    CHECK_FALSE(mock.terminal.locatorState().oneShot);
+}
+
+TEST_CASE("DECELR: disable locator reporting", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;2'z"); // enable
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.locatorState().enabled);
+    mock.writeToScreen("\033[0'z"); // disable
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.locatorState().enabled);
+}
+
+TEST_CASE("DECELR: one-shot mode (Ps=2)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[2;2'z"); // one-shot, character cells
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.locatorState().enabled);
+    CHECK(mock.terminal.locatorState().oneShot);
+}
+
+TEST_CASE("DECELR: pixel coordinates (Pu=1)", "[screen]")
+{
+    using LocatorCoordUnit = Terminal::LocatorCoordUnit;
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;1'z"); // enable, pixel coords
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.locatorState().coordUnit == LocatorCoordUnit::DevicePixels);
+}
+
+TEST_CASE("DECSLE: select locator events", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;2'z"); // enable locator
+    mock.terminal.flushInput();
+    // Disable button down, enable button up: CSI 2 ; 3 ' {
+    mock.writeToScreen("\033[2;3'{");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.locatorState().reportButtonDown);
+    CHECK(mock.terminal.locatorState().reportButtonUp);
+}
+
+TEST_CASE("DECRQLP: request locator position", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    // Request locator position when not enabled — should report locator unavailable
+    mock.resetReplyData();
+    mock.writeToScreen("\033[0'|");
+    mock.terminal.flushInput();
+    auto const reply = mock.replyData();
+    // Should contain DECLRP format: CSI 0 ; ... & w
+    CHECK(reply.find("&w") != std::string::npos);
+}
+
+TEST_CASE("DECELR: soft reset disables locator", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;2'z"); // enable
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.locatorState().enabled);
+    // Soft reset
+    mock.writeToScreen("\033[!p");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.locatorState().enabled);
+}
+
+TEST_CASE("DEC Locator: DA1 includes ext 29", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.resetReplyData();
+    mock.writeToScreen("\033[c");
+    mock.terminal.flushInput();
+    auto const exts = parseDA1Extensions(mock.replyData());
+    CHECK(exts.contains(29)); // ext 29 = AnsiTextLocator
+}
+
+// }}} DEC Locator (DECELR / DECLRP) Tests
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests

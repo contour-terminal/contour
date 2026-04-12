@@ -71,6 +71,9 @@ constexpr inline auto DECCARA = FunctionDocumentation { .mnemonic = "DECCARA", .
 constexpr inline auto DECCRA = FunctionDocumentation { .mnemonic = "DECCRA", .comment = "Copy rectangular area" };
 constexpr inline auto DECDC = FunctionDocumentation { .mnemonic = "DECDC", .comment = "Delete column" };
 constexpr inline auto DECDMAC = FunctionDocumentation { .mnemonic = "DECDMAC", .comment = "Define Macro" };
+constexpr inline auto DECELR = FunctionDocumentation { .mnemonic = "DECELR", .comment = "Enable Locator Reporting" };
+constexpr inline auto DECRQLP = FunctionDocumentation { .mnemonic = "DECRQLP", .comment = "Request Locator Position" };
+constexpr inline auto DECSLE = FunctionDocumentation { .mnemonic = "DECSLE", .comment = "Select Locator Events" };
 constexpr inline auto DECERA = FunctionDocumentation { .mnemonic = "DECERA", .comment = "Erase rectangular area" };
 constexpr inline auto DECFRA = FunctionDocumentation { .mnemonic = "DECFRA", .comment = "Fill rectangular area" };
 constexpr inline auto DECIC = FunctionDocumentation { .mnemonic = "DECIC", .comment = "Insert column" };
@@ -600,6 +603,9 @@ constexpr inline auto DCH         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto DECCARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 'r', VTType::VT420, documentation::DECCARA);
 constexpr inline auto DECCRA      = detail::CSI(std::nullopt, 0, 8, '$', 'v', VTType::VT420, documentation::DECCRA);
 constexpr inline auto DECDC       = detail::CSI(std::nullopt, 0, 1, '\'', '~', VTType::VT420, documentation::DECDC);
+constexpr inline auto DECELR      = detail::CSI(std::nullopt, 0, 2, '\'', 'z', VTType::VT320, documentation::DECELR);
+constexpr inline auto DECSLE      = detail::CSI(std::nullopt, 0, ArgsMax, '\'', '{', VTType::VT320, documentation::DECSLE);
+constexpr inline auto DECRQLP     = detail::CSI(std::nullopt, 0, 1, '\'', '|', VTType::VT320, documentation::DECRQLP);
 constexpr inline auto DECERA      = detail::CSI(std::nullopt, 0, 4, '$', 'z', VTType::VT420, documentation::DECERA);
 constexpr inline auto DECFRA      = detail::CSI(std::nullopt, 0, 5, '$', 'x', VTType::VT420, documentation::DECFRA);
 constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', VTType::VT420, documentation::DECIC);
@@ -789,6 +795,9 @@ constexpr static auto allFunctionsArray() noexcept
         DECCARA,
         DECCRA,
         DECDC,
+        DECELR,
+        DECSLE,
+        DECRQLP,
         DECERA,
         DECINVM,
         DECFRA,
