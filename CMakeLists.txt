@@ -152,6 +152,10 @@ if(CONTOUR_USE_CPM)
 endif()
 
 
+if(CONTOUR_FRONTEND_GUI)
+    include(FindQt)
+endif()
+
 include(ContourThirdParties)
 add_subdirectory(src)
 add_subdirectory(examples)
