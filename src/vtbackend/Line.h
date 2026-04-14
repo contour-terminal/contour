@@ -230,7 +230,7 @@ class Line
         auto const cols = unbox<size_t>(_columns);
         auto const used = trimBlankRight(_storage, cols);
 
-        auto const textAttrs = (used > 0) ? _storage.sgr[0] : GraphicsAttributes {};
+        auto const textAttrs = (cols > 0) ? _storage.sgr[0] : GraphicsAttributes {};
 
         // Direct copy from SoA codepoints — no UTF-8 encoding needed.
         textOut.resize(used);
@@ -241,7 +241,7 @@ class Line
             .displayWidth = _columns,
             .textAttributes = textAttrs,
             .fillAttributes = textAttrs,
-            .hyperlink = (used > 0) ? _storage.hyperlinks[0] : HyperlinkId {},
+            .hyperlink = (cols > 0) ? _storage.hyperlinks[0] : HyperlinkId {},
             .usedColumns = ColumnCount::cast_from(used),
         };
         // text field left empty — caller passes textOut to the renderer directly

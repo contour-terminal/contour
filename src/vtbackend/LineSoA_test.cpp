@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/CellProxy.h>
+#include <vtbackend/Line.h>
 #include <vtbackend/LineSoA.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -567,6 +568,67 @@ TEST_CASE("LineFlags.formatter.composite", "[LineFlags]")
     auto const flags = LineFlags({ LineFlag::Wrapped, LineFlag::OutputStart });
     auto const result = std::format("{}", flags);
     CHECK(result == "Wrapped,OutputStart");
+}
+
+// ---------------------------------------------------------------------------
+// trivialBuffer() regression test: fill attributes must survive empty lines
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Line.trivialBuffer.emptyLinePreservesFillAttributes", "[Line]")
+{
+    // Regression test: when a trivial line is reset/cleared with non-default
+    // SGR attributes but has no text content (all codepoints zero),
+    // trivialBuffer() must still return those SGR attributes as fill attributes.
+    // Previously it returned default GraphicsAttributes{} when used==0.
+
+    auto const navyBg =
+        GraphicsAttributes { .foregroundColor = Color::Indexed(7), .backgroundColor = Color::Indexed(4) };
+
+    auto constexpr Cols = ColumnCount(80);
+    auto line = Line(Cols, LineFlag::None, navyBg);
+
+    // Verify the line is trivial and has no text content.
+    REQUIRE(line.isTrivialBuffer());
+
+    std::u32string textOut;
+    auto const tb = line.trivialBuffer(textOut);
+
+    // The line has zero used columns (no codepoints set).
+    CHECK(tb.usedColumns == ColumnCount(0));
+    CHECK(textOut.empty());
+
+    // Critical: fill attributes must match the SGR the line was initialized with,
+    // NOT default GraphicsAttributes{}.
+    CHECK(tb.fillAttributes.backgroundColor == Color::Indexed(4));
+    CHECK(tb.fillAttributes.foregroundColor == Color::Indexed(7));
+    CHECK(tb.textAttributes.backgroundColor == Color::Indexed(4));
+    CHECK(tb.textAttributes.foregroundColor == Color::Indexed(7));
+}
+
+TEST_CASE("Line.trivialBuffer.resetPreservesFillAttributes", "[Line]")
+{
+    // Verify that resetting a line with specific SGR and then calling
+    // trivialBuffer() returns those attributes even when codepoints are all zero.
+
+    auto constexpr Cols = ColumnCount(40);
+    auto line = Line(Cols, LineFlag::None, GraphicsAttributes {});
+
+    // Write some content first.
+    line.storage().codepoints[0] = U'X';
+    line.storage().clusterSize[0] = 1;
+
+    // Now reset the line with a themed background (simulating EL CSI K at col 0).
+    auto const themedAttrs = GraphicsAttributes { .backgroundColor = Color::Indexed(4) };
+    line.reset(LineFlag::None, themedAttrs);
+
+    REQUIRE(line.isTrivialBuffer());
+
+    std::u32string textOut;
+    auto const tb = line.trivialBuffer(textOut);
+
+    CHECK(tb.usedColumns == ColumnCount(0));
+    CHECK(tb.fillAttributes.backgroundColor == Color::Indexed(4));
+    CHECK(tb.textAttributes.backgroundColor == Color::Indexed(4));
 }
 
 // LineView tests removed — Line is now backed by LineSoA directly (tested via Line_test.cpp)
