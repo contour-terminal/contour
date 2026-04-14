@@ -220,6 +220,24 @@ constexpr bool isModifierKey(Key key) noexcept
     // clang-format on
 }
 
+/// Win32 dwControlKeyState bitmask flags from KEY_EVENT_RECORD.
+/// These map 1:1 to the Windows API constants.
+enum class Win32ControlKeyFlag : uint16_t
+{
+    RightAltPressed = 0x0001,  // RIGHT_ALT_PRESSED
+    LeftAltPressed = 0x0002,   // LEFT_ALT_PRESSED
+    RightCtrlPressed = 0x0004, // RIGHT_CTRL_PRESSED
+    LeftCtrlPressed = 0x0008,  // LEFT_CTRL_PRESSED
+    ShiftPressed = 0x0010,     // SHIFT_PRESSED
+    NumLockOn = 0x0020,        // NUMLOCK_ON
+    ScrollLockOn = 0x0040,     // SCROLLLOCK_ON
+    CapsLockOn = 0x0080,       // CAPSLOCK_ON
+    EnhancedKey = 0x0100,      // ENHANCED_KEY
+};
+
+/// Type-safe bitset for Win32 control key state flags.
+using Win32ControlKeyState = crispy::flags<Win32ControlKeyFlag>;
+
 std::string to_string(Key key);
 
 enum class KeyMode : uint8_t
@@ -488,6 +506,14 @@ class InputGenerator
     void setPassiveMouseTracking(bool v) noexcept { _passiveMouseTracking = v; }
     [[nodiscard]] bool passiveMouseTracking() const noexcept { return _passiveMouseTracking; }
 
+    /// Enables or disables Win32 Input Mode (DEC private mode 9001).
+    ///
+    /// When enabled, key events are encoded in the Win32 KEY_EVENT_RECORD format
+    /// (CSI Vk;Sc;Uc;Kd;Cs;Rc _) instead of CSI u or legacy VT sequences.
+    /// This is the native input protocol for Windows ConPTY.
+    void setWin32InputMode(bool enable) noexcept { _win32InputMode = enable; }
+    [[nodiscard]] bool win32InputMode() const noexcept { return _win32InputMode; }
+
     /// Sets the modifyOtherKeys mode (0 = disabled, 1 = mode 1, 2 = mode 2).
     void setModifyOtherKeys(int mode) noexcept { _modifyOtherKeys = mode; }
 
@@ -589,6 +615,14 @@ class InputGenerator
 
     bool mouseTransportURXVT(MouseEventType type, uint8_t button, uint8_t modifier, CellLocation pos);
 
+    bool generateWin32KeyInput(uint32_t virtualKeyCode,
+                               char32_t unicodeChar,
+                               Modifiers modifiers,
+                               KeyboardEventType eventType,
+                               Win32ControlKeyState extraControlKeyState = {});
+    static constexpr Win32ControlKeyState buildWin32ControlKeyState(Modifiers modifiers);
+    static constexpr uint32_t keyToVirtualKeyCode(Key key);
+
     inline bool append(std::string_view sequence);
     inline bool append(char asciiChar);
     inline bool append(uint8_t byte);
@@ -598,6 +632,7 @@ class InputGenerator
     //
     bool _bracketedPaste = false;
     bool _generateFocusEvents = false;
+    bool _win32InputMode = false;
     std::optional<MouseProtocol> _mouseProtocol = std::nullopt;
     bool _passiveMouseTracking = false;
     MouseTransport _mouseTransport = MouseTransport::Default;

@@ -627,7 +627,7 @@ enum class AnsiMode : uint8_t
     AutomaticNewLine = 20, // LNM
 };
 
-enum class DECMode : std::uint16_t
+enum class DECMode : std::uint8_t
 {
     UseApplicationCursorKeys = 0,
     DesignateCharsetUSASCII = 1,
@@ -716,60 +716,85 @@ enum class DECMode : std::uint16_t
     UsePrivateColorRegisters = 26, // ?1070
 
     // {{{ Mouse related flags
-    /// extend mouse protocl encoding
-    MouseExtended = 1005,
+    /// Extend mouse protocol encoding (DEC mode 1005).
+    MouseExtended = 31,
 
-    /// Uses a (SGR-style?) different encoding.
-    MouseSGR = 1006,
+    /// Uses a (SGR-style?) different encoding (DEC mode 1006).
+    MouseSGR = 32,
 
-    // URXVT invented extend mouse protocol
-    MouseURXVT = 1015,
+    /// URXVT invented extend mouse protocol (DEC mode 1015).
+    MouseURXVT = 33,
 
-    // SGR-Pixels, like SGR but with pixels instead of line/column positions.
-    MouseSGRPixels = 1016,
+    /// SGR-Pixels, like SGR but with pixels instead of line/column positions (DEC mode 1016).
+    MouseSGRPixels = 34,
 
-    /// Toggles scrolling in alternate screen buffer, encodes CUP/CUD instead of mouse wheel events.
-    MouseAlternateScroll = 1007,
+    /// Toggles scrolling in alternate screen buffer, encodes CUP/CUD instead of mouse wheel events
+    /// (DEC mode 1007).
+    MouseAlternateScroll = 35,
     // }}}
     // {{{ Extensions
-    // This merely resembles the "Synchronized Output" feature from iTerm2, except that it is using
-    // a different VT sequence to be enabled. Instead of a DCS,
-    // this feature is using CSI ? 2026 h (DECSM and DECRM).
-    BatchedRendering = 2026,
+    /// Synchronized Output (DEC mode 2026).
+    ///
+    /// This merely resembles the "Synchronized Output" feature from iTerm2, except that it is using
+    /// a different VT sequence to be enabled. Instead of a DCS,
+    /// this feature is using CSI ? 2026 h (DECSM and DECRM).
+    BatchedRendering = 36,
 
-    // See https://github.com/contour-terminal/terminal-unicode-core
-    Unicode = 2027,
+    /// See https://github.com/contour-terminal/terminal-unicode-core (DEC mode 2027).
+    Unicode = 37,
 
-    // If this mode is unset, text reflow is blocked on on this line and any lines below.
-    // If this mode is set, the current line and any line below is allowed to reflow.
-    // Default: Enabled (if supported by terminal).
-    TextReflow = 2028,
+    /// Text reflow control (DEC mode 2028).
+    ///
+    /// If this mode is unset, text reflow is blocked on this line and any lines below.
+    /// If this mode is set, the current line and any line below is allowed to reflow.
+    /// Default: Enabled (if supported by terminal).
+    TextReflow = 38,
 
-    // Tell the terminal emulator that the application is only passively tracking on mouse events.
-    // This for example might be used by the terminal emulator to still allow mouse selection.
-    MousePassiveTracking = 2029,
+    /// Passive mouse tracking (DEC mode 2029).
+    ///
+    /// Tell the terminal emulator that the application is only passively tracking on mouse events.
+    /// This for example might be used by the terminal emulator to still allow mouse selection.
+    MousePassiveTracking = 39,
 
-    // If enabled, UI text selection will be reported to the application for the regions
-    // intersecting with the main page area.
-    ReportGridCellSelection = 2030,
+    /// Grid cell selection reporting (DEC mode 2030).
+    ///
+    /// If enabled, UI text selection will be reported to the application for the regions
+    /// intersecting with the main page area.
+    ReportGridCellSelection = 40,
 
-    // If enabled, the terminal will report color palette changes to the application,
-    // if modified by the user or operating system (e.g. dark/light mode adaption).
-    ReportColorPaletteUpdated = 2031,
+    /// Color palette update reporting (DEC mode 2031).
+    ///
+    /// If enabled, the terminal will report color palette changes to the application,
+    /// if modified by the user or operating system (e.g. dark/light mode adaption).
+    ReportColorPaletteUpdated = 41,
 
     /// DEC Private Mode 2034 — Semantic Block Reader Protocol.
     ///
     /// When enabled, the terminal tracks semantic zones from OSC 133 shell integration
     /// and the query sequence CSI > Ps ; Pn b becomes available for retrieving structured
     /// JSON blocks of semantic command data.
-    SemanticBlockProtocol = 2034,
+    SemanticBlockProtocol = 42,
 
-    // If enabled (default, as per spec), then the cursor is left next to the graphic,
-    // that is, the text cursor is placed at the position of the sixel cursor.
-    // If disabled otherwise, the cursor is placed below the image, as if CR LF was sent,
-    // which is how xterm behaves by default (sadly).
-    SixelCursorNextToGraphic = 8452,
+    /// Sixel cursor positioning (DEC mode 8452).
+    ///
+    /// If enabled (default, as per spec), then the cursor is left next to the graphic,
+    /// that is, the text cursor is placed at the position of the sixel cursor.
+    /// If disabled otherwise, the cursor is placed below the image, as if CR LF was sent,
+    /// which is how xterm behaves by default (sadly).
+    SixelCursorNextToGraphic = 43,
+
+    /// Win32 Input Mode (DEC private mode 9001).
+    ///
+    /// When enabled, key events are sent in the Win32 KEY_EVENT_RECORD format:
+    /// CSI Vk ; Sc ; Uc ; Kd ; Cs ; Rc _
+    /// This is the native input protocol for Windows ConPTY. When both Win32 Input Mode
+    /// and CSI u (Kitty keyboard protocol) are active, Win32 Input Mode takes precedence
+    /// as the more powerful and versatile protocol for the ConPTY environment.
+    Win32InputMode = 44,
     // }}}
+
+    /// Sentinel value for sizing the mode bitset. Must remain the last entry.
+    DECModeCount = 45
 };
 
 /// OSC color-setting related commands that can be grouped into one
@@ -882,6 +907,8 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::Unicode: return 2027;
         case DECMode::TextReflow: return 2028;
         case DECMode::SixelCursorNextToGraphic: return 8452;
+        case DECMode::Win32InputMode: return 9001;
+        case DECMode::DECModeCount: break;
     }
     return static_cast<unsigned>(m);
 }
@@ -940,6 +967,7 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         case 2031: return DECMode::ReportColorPaletteUpdated;
         case 2034: return DECMode::SemanticBlockProtocol;
         case 8452: return DECMode::SixelCursorNextToGraphic;
+        case 9001: return DECMode::Win32InputMode;
         default: return std::nullopt;
     }
 }

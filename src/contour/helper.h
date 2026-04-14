@@ -121,8 +121,13 @@ constexpr inline char32_t makeChar(Qt::Key key, Qt::KeyboardModifiers mods)
 /// Extracts CapsLock and NumLock states from platform-specific native modifiers.
 /// @param qtModifiers Standard Qt keyboard modifiers
 /// @param nativeModifiers Platform-specific value from QKeyEvent::nativeModifiers()
+/// @param stripAltGr When true (default), removes the Ctrl+Alt combination on Windows
+///                   that represents AltGr. Set to false for Win32 Input Mode which
+///                   needs the raw modifier state.
 /// @return Combined modifiers including lock key states
-vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers, quint32 nativeModifiers = 0);
+vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
+                                   quint32 nativeModifiers = 0,
+                                   bool stripAltGr = true);
 
 constexpr inline vtbackend::MouseButton makeMouseButton(Qt::MouseButton button)
 {
