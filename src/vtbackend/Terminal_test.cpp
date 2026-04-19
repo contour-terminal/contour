@@ -166,6 +166,118 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
     }
 }
 
+TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
+{
+    // Set up a terminal with history capacity to allow scrollback.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(6) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+
+    // Fill terminal and generate scrollback history.
+    mc.writeToScreen("line1\r\n"
+                     "line2\r\n"
+                     "line3\r\n"
+                     "line4\r\n"
+                     "line5\r\n"
+                     "line6\r\n");
+
+    auto const anyModifiers = vtbackend::Modifiers { vtbackend::Modifier::None };
+
+    SECTION("keypress honors autoScrollOnUpdate=false")
+    {
+        terminal.settings().autoScrollOnUpdate = false;
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+        auto const offsetBefore = terminal.viewport().scrollOffset();
+
+        terminal.sendKeyEvent(vtbackend::Key::Enter,
+                              anyModifiers,
+                              vtbackend::KeyboardEventType::Press,
+                              std::chrono::steady_clock::now());
+
+        CHECK(terminal.viewport().scrolled());
+        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+    }
+
+    SECTION("keypress honors autoScrollOnUpdate=true (default)")
+    {
+        REQUIRE(terminal.settings().autoScrollOnUpdate);
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+
+        terminal.sendKeyEvent(vtbackend::Key::Enter,
+                              anyModifiers,
+                              vtbackend::KeyboardEventType::Press,
+                              std::chrono::steady_clock::now());
+
+        CHECK(!terminal.viewport().scrolled());
+    }
+
+    SECTION("char input honors autoScrollOnUpdate=false")
+    {
+        terminal.settings().autoScrollOnUpdate = false;
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+        auto const offsetBefore = terminal.viewport().scrollOffset();
+
+        terminal.sendCharEvent(
+            U'a', 0, anyModifiers, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
+
+        CHECK(terminal.viewport().scrolled());
+        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+    }
+
+    SECTION("char input honors autoScrollOnUpdate=true")
+    {
+        REQUIRE(terminal.settings().autoScrollOnUpdate);
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+
+        terminal.sendCharEvent(
+            U'a', 0, anyModifiers, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
+
+        CHECK(!terminal.viewport().scrolled());
+    }
+
+    SECTION("scrollbackBufferCleared (CSI 3 J) honors autoScrollOnUpdate=false")
+    {
+        terminal.settings().autoScrollOnUpdate = false;
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+        auto const offsetBefore = terminal.viewport().scrollOffset();
+
+        mc.writeToScreen("\x1b[3J");
+
+        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+    }
+
+    // Note: we exercise `bufferChanged` directly rather than feeding DECSET 1049,
+    // because the full alt-screen entry sequence also clears the screen which in
+    // turn triggers `onBufferScrolled`, clamping the viewport to the (empty) alt
+    // screen history independently of our flag.
+    SECTION("bufferChanged honors autoScrollOnUpdate=false")
+    {
+        terminal.settings().autoScrollOnUpdate = false;
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+        auto const offsetBefore = terminal.viewport().scrollOffset();
+
+        terminal.bufferChanged(vtbackend::ScreenType::Primary);
+
+        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+    }
+
+    SECTION("bufferChanged honors autoScrollOnUpdate=true")
+    {
+        REQUIRE(terminal.settings().autoScrollOnUpdate);
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+
+        terminal.bufferChanged(vtbackend::ScreenType::Primary);
+
+        CHECK(!terminal.viewport().scrolled());
+    }
+}
+
 TEST_CASE("Terminal.DECCARA", "[terminal]")
 {
     auto mock = MockTerm { ColumnCount(5), LineCount(5) };

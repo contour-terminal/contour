@@ -80,6 +80,12 @@ struct Settings
     /// Enables momentum (inertia) scrolling for touchpad gestures.
     bool momentumScrolling = true;
 
+    /// When true, PTY/app-caused updates (key input forwarded to the PTY, buffer
+    /// switches, scrollback clears, etc.) force the viewport to snap to the
+    /// bottom. When false, the viewport stays wherever the user parked it.
+    /// User-initiated transitions (e.g. leaving Vi mode) are not affected.
+    bool autoScrollOnUpdate = true;
+
     // Size in bytes per PTY Buffer Object.
     //
     // Defaults to 1 MB, that's roughly 10k lines when column count is 100.

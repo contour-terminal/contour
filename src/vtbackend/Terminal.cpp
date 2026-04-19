@@ -823,6 +823,18 @@ void Terminal::updateIndicatorStatusLine()
     }
 }
 
+void Terminal::autoScrollToBottomIfEnabled()
+{
+    if (_settings.autoScrollOnUpdate)
+        _viewport.scrollToBottom();
+}
+
+void Terminal::forceAutoScrollToBottomIfEnabled()
+{
+    if (_settings.autoScrollOnUpdate)
+        _viewport.forceScrollToBottom();
+}
+
 Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
 {
     _cursorBlinkState = 1;
@@ -853,7 +865,7 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
         {
             _inputGenerator.generateRaw(*udkStr);
             flushInput();
-            _viewport.scrollToBottom();
+            autoScrollToBottomIfEnabled();
             return Handled { true };
         }
     }
@@ -863,7 +875,7 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     {
         flushInput();
         if (!isModifierKey(key))
-            _viewport.scrollToBottom();
+            autoScrollToBottomIfEnabled();
     }
     return Handled { success };
 }
@@ -898,7 +910,7 @@ Handled Terminal::sendCharEvent(
     if (success)
     {
         flushInput();
-        _viewport.scrollToBottom();
+        autoScrollToBottomIfEnabled();
     }
     return Handled { success };
 }
@@ -1920,14 +1932,14 @@ void Terminal::bell()
 void Terminal::bufferChanged(ScreenType type)
 {
     clearSelection();
-    _viewport.forceScrollToBottom();
+    forceAutoScrollToBottomIfEnabled();
     _eventListener.bufferChanged(type);
 }
 
 void Terminal::scrollbackBufferCleared()
 {
     clearSelection();
-    _viewport.scrollToBottom();
+    autoScrollToBottomIfEnabled();
     breakLoopAndRefreshRenderBuffer();
 }
 
