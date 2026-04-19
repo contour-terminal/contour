@@ -29,6 +29,7 @@ namespace
                            GraphicsAttributes const& attrs,
                            HyperlinkId hyperlink) noexcept
     {
+        assert(!line.codepoints.empty());
         auto const maxCols = line.codepoints.size();
         if (startCol >= maxCols)
             return 0;
@@ -79,6 +80,7 @@ namespace
                               GraphicsAttributes const& attrs,
                               HyperlinkId hyperlink) noexcept
     {
+        assert(!line.codepoints.empty());
         auto const maxCols = line.codepoints.size();
         auto col = startCol;
 

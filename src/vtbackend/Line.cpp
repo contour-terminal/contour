@@ -12,6 +12,14 @@ LineSoA Line::reflow(ColumnCount newColumnCount)
 {
     using crispy::comparison;
 
+    // Blank lines have no content to reflow — just adopt the new logical width.
+    // No allocation, no overflow generated.
+    if (isBlank())
+    {
+        _columns = newColumnCount;
+        return {};
+    }
+
     switch (crispy::strongCompare(newColumnCount, size()))
     {
         case comparison::Equal: break;
@@ -61,8 +69,11 @@ LineSoA Line::reflow(ColumnCount newColumnCount)
 
 std::string Line::toUtf8() const
 {
-    std::string str;
     auto const cols = unbox<size_t>(_columns);
+    if (isBlank())
+        return std::string(cols, ' ');
+
+    std::string str;
     int skipCount = 0;
     for (size_t i = 0; i < cols; ++i)
     {

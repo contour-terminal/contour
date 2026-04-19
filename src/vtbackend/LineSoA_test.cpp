@@ -613,9 +613,9 @@ TEST_CASE("Line.trivialBuffer.resetPreservesFillAttributes", "[Line]")
     auto constexpr Cols = ColumnCount(40);
     auto line = Line(Cols, LineFlag::None, GraphicsAttributes {});
 
-    // Write some content first.
-    line.storage().codepoints[0] = U'X';
-    line.storage().clusterSize[0] = 1;
+    // Write some content first (materialize the lazy-blank line first).
+    line.materializedStorage().codepoints[0] = U'X';
+    line.materializedStorage().clusterSize[0] = 1;
 
     // Now reset the line with a themed background (simulating EL CSI K at col 0).
     auto const themedAttrs = GraphicsAttributes { .backgroundColor = Color::Indexed(4) };

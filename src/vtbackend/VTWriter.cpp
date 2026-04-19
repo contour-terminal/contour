@@ -189,6 +189,21 @@ void VTWriter::setBackgroundColor(Color color)
 void VTWriter::write(Line const& line)
 {
     auto const cols = unbox<size_t>(line.size());
+
+    // Blank lines have no cells to inspect — emit `cols` spaces using the line's
+    // cached fill attributes as the SGR pen, then reset. Batch into one writer call
+    // so SGR state is flushed once instead of per-column.
+    if (line.isBlank())
+    {
+        auto const& attrs = line.storage().fillAttrs;
+        sgrAdd(GraphicsRendition::Normal);
+        setForegroundColor(attrs.foregroundColor);
+        setBackgroundColor(attrs.backgroundColor);
+        write(std::string(cols, ' '));
+        sgrAdd(GraphicsRendition::Reset);
+        return;
+    }
+
     for (size_t i = 0; i < cols; ++i)
     {
         auto const cell = ConstCellProxy(line.storage(), i);

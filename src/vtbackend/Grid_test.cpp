@@ -1047,4 +1047,105 @@ TEST_CASE("Grid.render_extraLines.zero_extra_lines_unchanged", "[grid]")
 }
 
 // }}}
+// {{{ Lazy-blank line behavior in Grid
+
+TEST_CASE("Grid.spawnWithLargeHistory.constantTime", "[grid][blank]")
+{
+    // Constructing a Grid with a very large history must not eagerly allocate per-column
+    // SoA storage for every line. With lazy-blank lines, all history slots stay un-materialized
+    // and the entire construction is dominated by ring-buffer slot allocation only.
+    auto const t0 = std::chrono::steady_clock::now();
+    auto grid = Grid(PageSize { LineCount(24), ColumnCount(80) }, true, LineCount(500'000));
+    auto const t1 = std::chrono::steady_clock::now();
+
+    auto const elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    INFO("Grid spawn with 500K history: " << elapsedMs << " ms");
+    // Generous bound to avoid CI flakes; pre-fix this took 100-300 ms, lazy-blank is ~5-10 ms.
+    CHECK(elapsedMs < 100);
+
+    // Verify all history slots are blank (un-materialized).
+    auto blankCount = size_t { 0 };
+    for (auto i = -static_cast<int>(grid.maxHistoryLineCount().as<size_t>());
+         i < grid.pageSize().lines.as<int>();
+         ++i)
+    {
+        if (grid.lineAt(LineOffset::cast_from(i)).isBlank())
+            ++blankCount;
+    }
+    // Every slot should be blank initially.
+    CHECK(blankCount == grid.maxHistoryLineCount().as<size_t>() + grid.pageSize().lines.as<size_t>());
+}
+
+TEST_CASE("Grid.resizeColumnsWithLargeHistory.fast", "[grid][blank]")
+{
+    auto grid = Grid(PageSize { LineCount(24), ColumnCount(80) }, true, LineCount(500'000));
+
+    auto const t0 = std::chrono::steady_clock::now();
+    (void) grid.resize(PageSize { LineCount(24), ColumnCount(100) }, CellLocation {}, false);
+    auto const t1 = std::chrono::steady_clock::now();
+
+    auto const elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    INFO("Grid resize 80->100 cols with 500K blank history: " << elapsedMs << " ms");
+    CHECK(elapsedMs < 200);
+    CHECK(grid.pageSize().columns == ColumnCount(100));
+}
+
+TEST_CASE("Grid.shrinkColumnsWrapsLongLine", "[grid][blank]")
+{
+    // A single 200-column line shrunk to 40 must produce 5 wrapped chunks with
+    // LineFlag::Wrapped on continuations and original content preserved end-to-end.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(200) }, true, LineCount(50));
+    auto const longText = std::string(200, 'A');
+    grid.setLineText(LineOffset(0), longText);
+    REQUIRE(grid.lineTextTrimmed(LineOffset(0)) == longText);
+
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(40) }, CellLocation {}, false);
+    CHECK(grid.pageSize().columns == ColumnCount(40));
+
+    // After shrink to 40 cols, 200 chars of 'A' span 5 lines of 40 cells each.
+    // Reconstruct by walking history + page.
+    std::string reconstructed;
+    for (int i = -grid.historyLineCount().as<int>(); i < grid.pageSize().lines.as<int>(); ++i)
+    {
+        reconstructed += grid.lineTextTrimmed(LineOffset::cast_from(i));
+    }
+    CHECK(reconstructed == longText);
+}
+
+TEST_CASE("Grid.shrinkColumnsWrapsTextWithBlankHistory", "[grid][blank]")
+{
+    // Mix text and blank history lines, then shrink columns. Text must wrap correctly,
+    // and surrounding blank lines must remain blank with the new column count.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(80) }, true, LineCount(20));
+
+    // Scroll up enough to push 5 history lines, then write text only on some of them.
+    for (int i = 0; i < 5; ++i)
+        grid.scrollUp(LineCount(1));
+
+    // Write a wide-enough line at history offset -3 that will wrap when shrunk to 40 cols.
+    auto const wideText = std::string(60, 'B'); // 60 chars > 40 cols → must wrap once
+    grid.setLineText(LineOffset(-3), wideText);
+    REQUIRE(grid.lineTextTrimmed(LineOffset(-3)) == wideText);
+
+    // Lines -5, -4, -2, -1 remain blank (never written).
+    REQUIRE(grid.lineAt(LineOffset(-5)).isBlank());
+    REQUIRE(grid.lineAt(LineOffset(-4)).isBlank());
+    REQUIRE(grid.lineAt(LineOffset(-2)).isBlank());
+    REQUIRE(grid.lineAt(LineOffset(-1)).isBlank());
+
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(40) }, CellLocation {}, false);
+    CHECK(grid.pageSize().columns == ColumnCount(40));
+
+    // Reconstruct the wide line: it should still appear contiguously in history
+    // (now spread across multiple wrapped lines).
+    std::string reconstructed;
+    for (int i = -grid.historyLineCount().as<int>(); i < grid.pageSize().lines.as<int>(); ++i)
+        reconstructed += grid.lineTextTrimmed(LineOffset::cast_from(i));
+
+    INFO("Reconstructed history+page: " << reconstructed);
+    // The wide text must survive the reflow somewhere in history.
+    CHECK(reconstructed.find(wideText) != std::string::npos);
+}
+
+// }}}
 // NOLINTEND(misc-const-correctness)

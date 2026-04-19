@@ -21,7 +21,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <vector>
 
 namespace vtbackend
 {
@@ -63,20 +62,26 @@ class Line
     /// Buffer type for reflow overflow columns.
     using InflatedBuffer = LineSoA;
 
-    Line() { initializeLineSoA(_storage, ColumnCount(0)); }
+    Line() { initializeBlankLineSoA(_storage); }
 
+    /// Constructs a blank (un-materialized) line of @p cols width with @p attrs as fill attributes.
+    /// O(1): no per-column allocation. The line materializes lazily on first write.
     Line(ColumnCount cols, LineFlags flags = {}, GraphicsAttributes attrs = {}):
         _columns { cols }, _flags { flags }
     {
-        initializeLineSoA(_storage, cols, attrs);
+        initializeBlankLineSoA(_storage, attrs);
     }
 
     /// Construct from TrivialLineBuffer (backward compat -- converts to SoA internally).
     Line(LineFlags flags, TrivialLineBuffer const& buffer): _columns { buffer.displayWidth }, _flags { flags }
     {
-        initializeLineSoA(_storage, buffer.displayWidth, buffer.fillAttributes);
-        if (!buffer.text.empty())
+        if (buffer.text.empty())
         {
+            initializeBlankLineSoA(_storage, buffer.fillAttributes);
+        }
+        else
+        {
+            initializeLineSoA(_storage, buffer.displayWidth, buffer.fillAttributes);
             writeTextToSoA(_storage, 0, buffer.text.view(), buffer.textAttributes, buffer.hyperlink);
         }
     }
@@ -92,18 +97,24 @@ class Line
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) noexcept = default;
 
+    /// Reset the line to the blank state with the given fill attributes.
+    /// O(1): clears the SoA arrays without re-allocating per-column storage.
+    /// Skips the six vector swaps when the line is already blank with matching fillAttrs.
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
     {
         _flags = flags;
-        resetLine(_storage, _columns, attributes);
+        if (isBlankWithFillAttrs(attributes))
+            return;
+        initializeBlankLineSoA(_storage, attributes);
     }
 
     void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
     {
         _flags = flags;
         _columns = count;
-        resizeLineSoA(_storage, count);
-        resetLine(_storage, count, attributes);
+        if (isBlankWithFillAttrs(attributes))
+            return;
+        initializeBlankLineSoA(_storage, attributes);
     }
 
     /// Fill all cells with the given codepoint and attributes.
@@ -115,10 +126,11 @@ class Line
         _flags = flags;
         if (codepoint == 0)
         {
-            resetLine(_storage, _columns, attributes);
+            initializeBlankLineSoA(_storage, attributes);
         }
         else
         {
+            materialize();
             for (size_t i = 0; i < unbox<size_t>(_columns); ++i)
                 writeCellToSoA(_storage, i, codepoint, width, attributes);
         }
@@ -128,6 +140,7 @@ class Line
     void fill(ColumnOffset start, GraphicsAttributes const& sgr, std::string_view ascii)
     {
         assert(unbox<size_t>(start) + ascii.size() <= unbox<size_t>(_columns));
+        materialize();
         auto constexpr AsciiWidth = 1;
         auto col = unbox<size_t>(start);
         for (char const ch: ascii)
@@ -138,9 +151,27 @@ class Line
             clearRange(_storage, col, remaining, GraphicsAttributes {});
     }
 
+    /// Tests if the line is in the blank (un-materialized) state.
+    /// Blank lines have all SoA arrays empty but a non-zero logical column count.
+    [[nodiscard]] bool isBlank() const noexcept
+    {
+        return isBlankLineSoA(_storage) && unbox<size_t>(_columns) > 0;
+    }
+
+    /// Tests if the line is blank AND its cached fill attributes match @p attrs.
+    /// This is the invariant used to short-circuit partial-line clear and copy operations:
+    /// a blank line with matching fillAttrs is already in the target state, so mutating
+    /// would only trigger materialization without any observable effect.
+    [[nodiscard]] bool isBlankWithFillAttrs(GraphicsAttributes const& attrs) const noexcept
+    {
+        return isBlank() && _storage.fillAttrs == attrs;
+    }
+
     /// Tests if all cells are empty.
     [[nodiscard]] bool empty() const noexcept
     {
+        if (isBlank())
+            return true;
         return trimBlankRight(_storage, unbox<size_t>(_columns)) == 0;
     }
 
@@ -148,14 +179,37 @@ class Line
 
     void resize(ColumnCount count)
     {
+        if (isBlank())
+        {
+            _columns = count;
+            return;
+        }
         _columns = count;
         resizeLineSoA(_storage, count);
+    }
+
+    /// Materialize the SoA arrays in-place if the line is blank.
+    /// After materialize() returns, all six SoA arrays are sized to @c _columns and
+    /// initialized to default values + the cached @c fillAttrs.
+    void materialize() noexcept
+    {
+        if (isBlank())
+            initializeLineSoA(_storage, _columns, _storage.fillAttrs);
+    }
+
+    /// Force materialization and return a mutable reference to the underlying SoA storage.
+    /// Use this in place of @c storage() at every call site that writes through SoA arrays.
+    [[nodiscard]] LineSoA& materializedStorage() noexcept
+    {
+        materialize();
+        return _storage;
     }
 
     [[nodiscard]] CellProxy useCellAt(ColumnOffset column) noexcept
     {
         Require(ColumnOffset(0) <= column);
         Require(column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
+        materialize();
         return CellProxy(_storage, unbox<size_t>(column));
     }
 
@@ -163,12 +217,16 @@ class Line
     {
         Require(ColumnOffset(0) <= column);
         Require(column < ColumnOffset::cast_from(size()));
+        if (isBlank())
+            return true;
         auto const col = unbox<size_t>(column);
         return _storage.codepoints[col] == 0 || _storage.codepoints[col] == 0x20;
     }
 
     [[nodiscard]] uint8_t cellWidthAt(ColumnOffset column) const noexcept
     {
+        if (isBlank())
+            return 1;
         return _storage.widths[unbox<size_t>(column)];
     }
 
@@ -219,14 +277,27 @@ class Line
     [[nodiscard]] std::string toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const;
 
     /// Check if all cells share the same graphics attributes (uniform SGR).
-    /// O(1) — reads a cached flag maintained by writeCellToSoA/resetLine.
-    [[nodiscard]] bool isTrivialBuffer() const noexcept { return _storage.trivial; }
+    /// O(1) — reads a cached flag maintained by writeCellToSoA/resetLine. Blank lines
+    /// are trivial by definition (uniformly filled with @c fillAttrs).
+    [[nodiscard]] bool isTrivialBuffer() const noexcept { return isBlank() || _storage.trivial; }
 
     /// Build a TrivialLineBuffer for the render fast path.
     /// Only valid when isTrivialBuffer() returns true.
     /// @param textOut receives the codepoints directly from SoA (no UTF-8 encoding).
     [[nodiscard]] TrivialLineBuffer trivialBuffer(std::u32string& textOut) const
     {
+        if (isBlank())
+        {
+            textOut.clear();
+            return TrivialLineBuffer {
+                .displayWidth = _columns,
+                .textAttributes = _storage.fillAttrs,
+                .fillAttributes = _storage.fillAttrs,
+                .hyperlink = HyperlinkId {},
+                .usedColumns = ColumnCount(0),
+            };
+        }
+
         auto const cols = unbox<size_t>(_columns);
         auto const used = trimBlankRight(_storage, cols);
 
@@ -262,6 +333,10 @@ class Line
         auto const baseColumn = unbox<size_t>(startColumn);
         if (text.size() > cols - baseColumn)
             return false;
+
+        // A blank line has no codepoints to match against; only an empty needle matches.
+        if (isBlank())
+            return text.empty();
 
         size_t i = 0;
         while (i < text.size())

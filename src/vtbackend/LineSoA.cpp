@@ -27,8 +27,33 @@ void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const
     line.fillAttrs = fillAttrs;
 }
 
+void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) noexcept
+{
+    // Swap with empty vectors to release capacity — clear() alone retains allocated memory
+    // and would defeat the lazy-blank memory savings after a line cycles through
+    // materialize → reset. For long sessions with ED/clear-screen ops, this keeps the
+    // resident set proportional to currently-used lines rather than high-water mark.
+    AlignedVector<char32_t> {}.swap(line.codepoints);
+    AlignedVector<uint8_t> {}.swap(line.widths);
+    AlignedVector<GraphicsAttributes> {}.swap(line.sgr);
+    AlignedVector<HyperlinkId> {}.swap(line.hyperlinks);
+    AlignedVector<uint8_t> {}.swap(line.clusterSize);
+    AlignedVector<uint16_t> {}.swap(line.clusterPoolIndex);
+
+    std::vector<char32_t> {}.swap(line.clusterPool);
+    line.imageFragments.reset();
+    line.lineFlags = {};
+    line.usedColumns = {};
+    line.trivial = true;
+    line.fillAttrs = fillAttrs;
+}
+
 void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const& fillAttrs)
 {
+    // NOTE: resizeLineSoA does not preserve line.fillAttrs — callers operating on lazy-blank
+    // Line objects must short-circuit via Line::resize() (which keeps blank lines blank) or
+    // explicitly materialize first. Direct callers (e.g. reflow scratch buffers) start from
+    // 0-column LineSoA where this is unambiguous.
     auto const oldSize = line.codepoints.size();
     auto const n = unbox<size_t>(newCols);
 
@@ -50,6 +75,7 @@ void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const&
 
 void clearRange(LineSoA& line, size_t from, size_t count, GraphicsAttributes const& attrs)
 {
+    assert(!line.codepoints.empty() || count == 0);
     assert(from + count <= line.codepoints.size());
 
     std::fill_n(line.codepoints.data() + from, count, char32_t { 0 });
@@ -80,6 +106,11 @@ void resetLine(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAt
 {
     auto const n = unbox<size_t>(cols);
 
+    // Callers using the lazy-blank model should call initializeBlankLineSoA instead;
+    // resetLine still works via clearRange's empty-count fast path when the line is
+    // blank and cols == 0.
+    assert(!line.codepoints.empty() || n == 0);
+
     // When the line was used in a "clean" manner (uniform SGR, same fill attrs,
     // no hyperlinks), the widths/sgr/hyperlinks/clusterPoolIndex arrays already
     // contain correct default values. Only codepoints and clusterSize need clearing
@@ -106,6 +137,16 @@ void resetLine(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAt
 
 void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol, size_t count)
 {
+    // Blank source: copying from an un-materialized line is semantically equivalent to
+    // clearing the destination range with the source's fillAttrs. This lets callers
+    // pass a blank line as the source without per-call-site guards.
+    if (src.codepoints.empty())
+    {
+        if (count > 0)
+            clearRange(dst, dstCol, count, src.fillAttrs);
+        return;
+    }
+    assert(!dst.codepoints.empty() || count == 0);
     assert(srcCol + count <= src.codepoints.size());
     assert(dstCol + count <= dst.codepoints.size());
 
@@ -155,6 +196,7 @@ void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol,
 
 void moveColumns(LineSoA& line, size_t srcCol, size_t dstCol, size_t count)
 {
+    assert(!line.codepoints.empty() || count == 0);
     assert(srcCol + count <= line.codepoints.size());
     assert(dstCol + count <= line.codepoints.size());
 
@@ -177,6 +219,9 @@ void moveColumns(LineSoA& line, size_t srcCol, size_t dstCol, size_t count)
 
 size_t trimBlankRight(LineSoA const& line, size_t cols)
 {
+    // Blank lines have no codepoints to scan; the line is uniformly empty by definition.
+    if (line.codepoints.empty())
+        return 0;
     auto end = cols;
     while (end > 0 && line.codepoints[end - 1] == 0)
         --end;
@@ -185,6 +230,7 @@ size_t trimBlankRight(LineSoA const& line, size_t cols)
 
 int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint)
 {
+    assert(!line.codepoints.empty());
     auto const currentSize = line.clusterSize[col];
     if (currentSize >= MaxGraphemeClusterSize)
         return 0;
@@ -205,6 +251,7 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint)
 
 void clearClusterExtras(LineSoA& line, size_t col)
 {
+    assert(!line.codepoints.empty());
     // Mark the cell as having no extras.
     // The old pool entries become garbage — they'll be cleaned on line reset (lazy compaction).
     if (line.clusterSize[col] > 1)

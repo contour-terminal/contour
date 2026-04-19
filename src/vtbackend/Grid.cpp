@@ -104,7 +104,11 @@ void Grid::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
     verifyState();
     rezeroBuffers();
     _historyLimit = maxHistoryLineCount;
-    _lines.resize(unbox<size_t>(_pageSize.lines + this->maxHistoryLineCount()));
+    // Use the prototype overload so newly grown ring slots are blank Lines with the
+    // correct logical column count (not default-constructed cols=0 lines that would
+    // violate the "size() >= pageSize.columns" invariant elsewhere).
+    _lines.resize(unbox<size_t>(_pageSize.lines + this->maxHistoryLineCount()),
+                  Line(_pageSize.columns, defaultLineFlags(), GraphicsAttributes {}));
     _linesUsed = min(_linesUsed, _pageSize.lines + this->maxHistoryLineCount());
     verifyState();
 }
@@ -370,15 +374,26 @@ LineCount Grid::scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Marg
             auto& targetLine = lineAt(targetLineOffset);
             auto const& sourceLine = lineAt(sourceLineOffset);
             auto const fromCol = unbox<size_t>(margin.horizontal.from);
-            copyColumns(sourceLine.storage(), fromCol, targetLine.storage(), fromCol, columnsToMove);
+            // copyColumns handles a blank source by clearing the destination range.
+            // The destination needs to be materialized for the write.
+            if (sourceLine.isBlank() && targetLine.isBlank())
+                continue; // both blank: copy is a no-op
+            copyColumns(
+                sourceLine.storage(), fromCol, targetLine.materializedStorage(), fromCol, columnsToMove);
         }
 
         for (LineOffset line = margin.vertical.to - *n2 + 1; line <= margin.vertical.to; ++line)
         {
             auto& targetLine = lineAt(line);
             auto const fromCol = unbox<size_t>(margin.horizontal.from);
-            clearRange(
-                targetLine.storage(), fromCol, unbox<size_t>(margin.horizontal.length()), defaultAttributes);
+            // Clearing a blank line with non-default attrs would change semantics; only skip
+            // when the target is already blank with matching fillAttrs.
+            if (targetLine.isBlankWithFillAttrs(defaultAttributes))
+                continue;
+            clearRange(targetLine.materializedStorage(),
+                       fromCol,
+                       unbox<size_t>(margin.horizontal.length()),
+                       defaultAttributes);
         }
     }
     verifyState();
@@ -428,9 +443,11 @@ void Grid::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttributes,
                 auto const& srcLine = lineAt(line - *n);
                 auto& dstLine = lineAt(line);
                 auto const fromCol = unbox<size_t>(margin.horizontal.from);
+                if (srcLine.isBlank() && dstLine.isBlank())
+                    continue;
                 copyColumns(srcLine.storage(),
                             fromCol,
-                            dstLine.storage(),
+                            dstLine.materializedStorage(),
                             fromCol,
                             unbox<size_t>(margin.horizontal.length()));
             }
@@ -439,7 +456,9 @@ void Grid::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttributes,
             {
                 auto& targetLine = lineAt(line);
                 auto const fromCol = unbox<size_t>(margin.horizontal.from);
-                clearRange(targetLine.storage(),
+                if (targetLine.isBlankWithFillAttrs(defaultAttributes))
+                    continue;
+                clearRange(targetLine.materializedStorage(),
                            fromCol,
                            unbox<size_t>(margin.horizontal.length()),
                            defaultAttributes);
@@ -475,12 +494,15 @@ void Grid::scrollLeft(GraphicsAttributes defaultAttributes, Margin margin) noexc
     for (LineOffset lineNo = margin.vertical.from; lineNo <= margin.vertical.to; ++lineNo)
     {
         auto& line = lineAt(lineNo);
-        auto& storage = line.storage();
         auto const from = unbox<size_t>(margin.horizontal.from);
         auto const to = unbox<size_t>(margin.horizontal.to) + 1;
         auto const count = to - from;
         if (count > 1)
         {
+            // Blank line with matching fillAttrs is invariant under this rotation.
+            if (line.isBlankWithFillAttrs(defaultAttributes))
+                continue;
+            auto& storage = line.materializedStorage();
             moveColumns(storage, from + 1, from, count - 1);
             clearRange(storage, from + count - 1, 1, defaultAttributes);
         }

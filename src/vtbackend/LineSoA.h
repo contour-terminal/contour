@@ -27,8 +27,11 @@ inline constexpr uint8_t MaxGraphemeClusterSize = 7;
 
 /// Structure-of-Arrays storage for one terminal line.
 ///
-/// Each array has exactly `columns` elements. All arrays are always eagerly populated
-/// (no lazy inflation). This enables uniform access patterns and SIMD-friendly bulk operations.
+/// Each array has exactly `columns` elements OR is empty (blank state).
+/// In the blank state, all six AlignedVectors have size 0 — the line is logically
+/// `cols` wide and uniformly filled with @c fillAttrs. Reads are short-circuited by
+/// the owning @c Line; writes call @c materialize() first to inflate the arrays
+/// via @c initializeLineSoA. Blank lines are O(1) to construct and reset.
 ///
 /// Arrays are grouped into tiers by access frequency:
 /// - Tier 1 (Hot): codepoints, widths — touched on every character write
@@ -135,6 +138,20 @@ inline void clearReplacedImageFragments(std::optional<LineSoA::ImageFragmentMap>
 /// @param cols      Number of columns.
 /// @param fillAttrs Default graphics attributes for empty cells.
 void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAttrs = {});
+
+/// Initialize a line in the blank state: all arrays empty, but @c fillAttrs and @c trivial set.
+/// O(1) — no per-column allocation. The owning @c Line tracks the logical column count
+/// separately. Reads short-circuit; writes must call @c materialize() first.
+/// @param line      The LineSoA to put into the blank state.
+/// @param fillAttrs Default graphics attributes that empty cells appear to have.
+void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs = {}) noexcept;
+
+/// Test whether a LineSoA is in the blank (un-materialized) state.
+/// @return true iff @c codepoints is empty (all six arrays are empty by invariant).
+[[nodiscard]] inline bool isBlankLineSoA(LineSoA const& line) noexcept
+{
+    return line.codepoints.empty();
+}
 
 /// Resize all arrays to a new column count, preserving existing data.
 /// New columns (if growing) are initialized with @p fillAttrs.
