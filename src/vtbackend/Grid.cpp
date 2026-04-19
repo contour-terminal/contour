@@ -375,9 +375,13 @@ LineCount Grid::scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Marg
             auto const& sourceLine = lineAt(sourceLineOffset);
             auto const fromCol = unbox<size_t>(margin.horizontal.from);
             // copyColumns handles a blank source by clearing the destination range.
-            // The destination needs to be materialized for the write.
-            if (sourceLine.isBlank() && targetLine.isBlank())
-                continue; // both blank: copy is a no-op
+            // The destination needs to be materialized for the write — but only when the
+            // copy would actually change the destination. Two blank lines with the same
+            // fillAttrs collapse to a no-op; differing fillAttrs require materialization
+            // so the source's attrs propagate into the target's [fromCol, fromCol+count).
+            if (sourceLine.isBlank() && targetLine.isBlank()
+                && sourceLine.storage().fillAttrs == targetLine.storage().fillAttrs)
+                continue;
             copyColumns(
                 sourceLine.storage(), fromCol, targetLine.materializedStorage(), fromCol, columnsToMove);
         }
@@ -443,7 +447,10 @@ void Grid::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttributes,
                 auto const& srcLine = lineAt(line - *n);
                 auto& dstLine = lineAt(line);
                 auto const fromCol = unbox<size_t>(margin.horizontal.from);
-                if (srcLine.isBlank() && dstLine.isBlank())
+                // Only skip when both lines are blank AND share fillAttrs; differing
+                // attrs must propagate into the copied range (requires materialization).
+                if (srcLine.isBlank() && dstLine.isBlank()
+                    && srcLine.storage().fillAttrs == dstLine.storage().fillAttrs)
                     continue;
                 copyColumns(srcLine.storage(),
                             fromCol,

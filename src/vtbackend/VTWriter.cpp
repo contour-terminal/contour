@@ -192,11 +192,15 @@ void VTWriter::write(Line const& line)
 
     // Blank lines have no cells to inspect — emit `cols` spaces using the line's
     // cached fill attributes as the SGR pen, then reset. Batch into one writer call
-    // so SGR state is flushed once instead of per-column.
+    // so SGR state is flushed once instead of per-column. Mirror the per-cell path's
+    // Bold/Normal handling so the blank-line fast path does not silently drop weight.
     if (line.isBlank())
     {
         auto const& attrs = line.storage().fillAttrs;
-        sgrAdd(GraphicsRendition::Normal);
+        if (attrs.flags & CellFlag::Bold)
+            sgrAdd(GraphicsRendition::Bold);
+        else
+            sgrAdd(GraphicsRendition::Normal);
         setForegroundColor(attrs.foregroundColor);
         setBackgroundColor(attrs.backgroundColor);
         write(std::string(cols, ' '));
