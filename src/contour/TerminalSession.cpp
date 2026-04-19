@@ -136,6 +136,7 @@ namespace
         settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
         settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
         settings.maxHistoryLineCount = profile.history.value().maxHistoryLineCount;
+        settings.autoScrollOnUpdate = profile.history.value().autoScrollOnUpdate;
         settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset.value();
         settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
         settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
@@ -1978,6 +1979,7 @@ void TerminalSession::configureTerminal()
     configureCursor(_profile.modeInsert.value().cursor);
     updateColorPreference(_app.colorPreference());
     _terminal.setMaxHistoryLineCount(_profile.history.value().maxHistoryLineCount);
+    _terminal.settings().autoScrollOnUpdate = _profile.history.value().autoScrollOnUpdate;
     _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
     _terminal.inputHandler().setSearchModeSwitch(_profile.searchModeSwitch.value());

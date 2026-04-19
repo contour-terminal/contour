@@ -1380,6 +1380,17 @@ class Terminal
     void requestTabName();
 
   private:
+    /// Scroll the viewport to the bottom if `settings().autoScrollOnUpdate` is enabled.
+    /// Intended for PTY/app-caused code paths only (e.g. key/char forwarding,
+    /// scrollback clears). User-initiated transitions should call
+    /// `_viewport.forceScrollToBottom()` directly.
+    void autoScrollToBottomIfEnabled();
+
+    /// Like `autoScrollToBottomIfEnabled()` but bypasses the `scrollingDisabled()`
+    /// check (used e.g. on alt-screen switch, where scrolling is "disabled" on the
+    /// target buffer but pixel/offset state still needs to be reset).
+    void forceAutoScrollToBottomIfEnabled();
+
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
