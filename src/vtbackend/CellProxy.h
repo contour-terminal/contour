@@ -40,7 +40,13 @@ class BasicCellProxy
 
     using LineType = std::conditional_t<IsConst, LineSoA const, LineSoA>;
 
-    BasicCellProxy(LineType& line, size_t col) noexcept: _line(&line), _col(col) {}
+    BasicCellProxy(LineType& line, size_t col) noexcept: _line(&line), _col(col)
+    {
+        // CellProxy must never be constructed on a blank (un-materialized) line:
+        // every accessor below dereferences the SoA arrays. Callers must materialize
+        // first (mutable proxy) or guard with isBlank() (const proxy).
+        assert(!line.codepoints.empty());
+    }
 
     /// Implicit conversion from mutable proxy to const proxy.
     operator BasicCellProxy<true>() const noexcept

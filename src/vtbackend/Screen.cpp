@@ -554,7 +554,7 @@ void Screen::writeText(string_view text, size_t cellCount)
             static_cast<size_t>(pageSize().columns.value - _cursor.position.column.value);
 
         auto& line = currentLine();
-        auto& soa = line.storage();
+        auto& soa = line.materializedStorage();
         auto const startCol = static_cast<size_t>(_cursor.position.column.value);
 
         // If the cursor is at a wide-char continuation cell, erase the left half
@@ -626,7 +626,8 @@ void Screen::writeText(string_view text, size_t cellCount)
         {
             auto const& prevLine = grid().lineAt(_lastCursorPosition.line);
             auto const prevCol = unbox<size_t>(_lastCursorPosition.column);
-            if (prevCol < unbox<size_t>(prevLine.size()))
+            // Blank lines have no preceding codepoints to seed grapheme state with.
+            if (prevCol < unbox<size_t>(prevLine.size()) && !prevLine.isBlank())
             {
                 auto const& prevStorage = prevLine.storage();
                 auto const prevProxy = ConstCellProxy(prevStorage, prevCol);
@@ -800,7 +801,7 @@ void Screen::writeTextInternal(char32_t sourceCodepoint)
     {
         auto const& prevLine = grid().lineAt(_lastCursorPosition.line);
         auto const prevCol = unbox<size_t>(_lastCursorPosition.column);
-        if (prevCol < unbox<size_t>(prevLine.size()))
+        if (prevCol < unbox<size_t>(prevLine.size()) && !prevLine.isBlank())
         {
             auto const& prevStorage = prevLine.storage();
             auto const prevProxy = ConstCellProxy(prevStorage, prevCol);
@@ -1476,7 +1477,13 @@ void Screen::clearToEndOfLine()
         return;
     }
 
-    auto& storage = currentLine().storage();
+    auto& current = currentLine();
+    // Skip the partial clear if the line is already blank with matching fill attrs:
+    // every cell already appears to have the cursor's SGR, so the clear is a no-op
+    // and materialization would only allocate without changing state.
+    if (current.isBlankWithFillAttrs(_cursor.graphicsRendition))
+        return;
+    auto& storage = current.materializedStorage();
     auto const from = unbox<size_t>(_cursor.position.column);
     auto const count = unbox<size_t>(pageSize().columns) - from;
     clearRange(storage, from, count, _cursor.graphicsRendition);
@@ -1491,7 +1498,10 @@ void Screen::clearToEndOfLine()
 
 void Screen::clearToBeginOfLine()
 {
-    auto& storage = _grid.lineAt(_cursor.position.line).storage();
+    auto& currentLineRef = _grid.lineAt(_cursor.position.line);
+    if (currentLineRef.isBlankWithFillAttrs(_cursor.graphicsRendition))
+        return;
+    auto& storage = currentLineRef.materializedStorage();
     auto const count = unbox<size_t>(_cursor.position.column) + 1;
     clearRange(storage, 0, count, _cursor.graphicsRendition);
 
@@ -1541,7 +1551,11 @@ void Screen::insertChars(LineOffset lineOffset, ColumnCount columnsToInsert)
         std::min(*columnsToInsert, *margin().horizontal.to - *logicalCursorPosition().column + 1);
 
     auto& line = _grid.lineAt(lineOffset);
-    auto& storage = line.storage();
+    // Insert into a blank line with matching fill attrs is a no-op: shifting "all default cells"
+    // by N still leaves all default cells, and the cleared range was already default.
+    if (line.isBlankWithFillAttrs(_cursor.graphicsRendition))
+        return;
+    auto& storage = line.materializedStorage();
     auto const cursorCol = static_cast<size_t>(*realCursorPosition().column);
     auto const marginEnd = static_cast<size_t>(*margin().horizontal.to + 1);
     auto const moveCount = marginEnd - cursorCol - static_cast<size_t>(sanitizedN);
@@ -1579,7 +1593,9 @@ void Screen::scrollLeft(ColumnCount n)
     for (auto lineNo = margin().vertical.from; lineNo <= margin().vertical.to; ++lineNo)
     {
         auto& line = _grid.lineAt(lineNo);
-        auto& storage = line.storage();
+        if (line.isBlankWithFillAttrs(_cursor.graphicsRendition))
+            continue;
+        auto& storage = line.materializedStorage();
         auto const leftMargin = static_cast<size_t>(*margin().horizontal.from);
         auto const rightMargin = static_cast<size_t>(*margin().horizontal.to);
         auto const width = rightMargin - leftMargin + 1;
@@ -1600,7 +1616,9 @@ void Screen::scrollRight(ColumnCount n)
     for (auto lineNo = margin().vertical.from; lineNo <= margin().vertical.to; ++lineNo)
     {
         auto& line = _grid.lineAt(lineNo);
-        auto& storage = line.storage();
+        if (line.isBlankWithFillAttrs(_cursor.graphicsRendition))
+            continue;
+        auto& storage = line.materializedStorage();
         auto const leftMargin = static_cast<size_t>(*margin().horizontal.from);
         auto const rightMargin = static_cast<size_t>(*margin().horizontal.to);
         auto const width = rightMargin - leftMargin + 1;

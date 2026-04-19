@@ -768,8 +768,11 @@ template <typename RendererT>
     {
         Line const& line = _lines[i];
 
-        // Fast path: uniform-attribute line — render as a single batch.
-        if (line.isTrivialBuffer() && highlightSearchMatches == HighlightSearchMatches::No)
+        // Fast path: uniform-attribute line — render as a single batch. Blank lines have no
+        // codepoints, so no search pattern can match them; always use the trivial path for
+        // blanks to avoid constructing ConstCellProxy on un-materialized SoA arrays.
+        if (line.isBlank()
+            || (line.isTrivialBuffer() && highlightSearchMatches == HighlightSearchMatches::No))
         {
             std::u32string trivialText;
             auto const tb = line.trivialBuffer(trivialText);

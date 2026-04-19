@@ -960,12 +960,18 @@ TEST_CASE("Grid resize with wrap and spaces", "[grid]")
 namespace
 {
 
-/// Minimal mock renderer that tracks which lines were rendered.
+/// Minimal mock renderer that tracks which lines were rendered and via which path.
 struct MockGridRenderer
 {
     std::vector<LineOffset> renderedLines;
+    size_t trivialCount = 0;
+    size_t perCellCount = 0;
 
-    void startLine(LineOffset y, [[maybe_unused]] LineFlags flags) { renderedLines.push_back(y); }
+    void startLine(LineOffset y, [[maybe_unused]] LineFlags flags)
+    {
+        renderedLines.push_back(y);
+        ++perCellCount;
+    }
 
     void renderCell([[maybe_unused]] ConstCellProxy cell,
                     [[maybe_unused]] LineOffset line,
@@ -981,6 +987,7 @@ struct MockGridRenderer
                            [[maybe_unused]] std::u32string_view textOverride = {})
     {
         renderedLines.push_back(y);
+        ++trivialCount;
     }
 
     void finish() {}
@@ -1044,6 +1051,193 @@ TEST_CASE("Grid.render_extraLines.zero_extra_lines_unchanged", "[grid]")
     CHECK(renderer.renderedLines.size() == 2);
     CHECK(renderer.renderedLines[0] == LineOffset(0));
     CHECK(renderer.renderedLines[1] == LineOffset(1));
+}
+
+// }}}
+// {{{ Lazy-blank line behavior in Grid
+
+TEST_CASE("Grid.spawnWithLargeHistory.leavesHistoryUnmaterialized", "[grid][blank]")
+{
+    // Constructing a Grid with a very large history must not eagerly allocate per-column
+    // SoA storage for every line. Assert the deterministic invariant — every slot stays
+    // blank (un-materialized) — rather than wall-clock timing, which is CI-flaky.
+    auto grid = Grid(PageSize { LineCount(24), ColumnCount(80) }, true, LineCount(500'000));
+
+    auto blankCount = size_t { 0 };
+    for (auto i = -static_cast<int>(grid.maxHistoryLineCount().as<size_t>());
+         i < grid.pageSize().lines.as<int>();
+         ++i)
+    {
+        if (grid.lineAt(LineOffset::cast_from(i)).isBlank())
+            ++blankCount;
+    }
+    // Every slot should be blank initially.
+    CHECK(blankCount == grid.maxHistoryLineCount().as<size_t>() + grid.pageSize().lines.as<size_t>());
+}
+
+TEST_CASE("Grid.resizeColumnsWithLargeHistory.keepsBlank", "[grid][blank]")
+{
+    // After a column resize, a previously-all-blank history must still be all-blank
+    // (lazy path must not materialize any line during the resize).
+    auto grid = Grid(PageSize { LineCount(24), ColumnCount(80) }, true, LineCount(500'000));
+
+    (void) grid.resize(PageSize { LineCount(24), ColumnCount(100) }, CellLocation {}, false);
+    CHECK(grid.pageSize().columns == ColumnCount(100));
+
+    auto blankCount = size_t { 0 };
+    for (auto i = -static_cast<int>(grid.maxHistoryLineCount().as<size_t>());
+         i < grid.pageSize().lines.as<int>();
+         ++i)
+    {
+        if (grid.lineAt(LineOffset::cast_from(i)).isBlank())
+            ++blankCount;
+    }
+    CHECK(blankCount == grid.maxHistoryLineCount().as<size_t>() + grid.pageSize().lines.as<size_t>());
+}
+
+TEST_CASE("Grid.shrinkColumnsWrapsLongLine", "[grid][blank]")
+{
+    // A single 200-column line shrunk to 40 must produce 5 wrapped chunks with
+    // LineFlag::Wrapped on continuations and original content preserved end-to-end.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(200) }, true, LineCount(50));
+    auto const longText = std::string(200, 'A');
+    grid.setLineText(LineOffset(0), longText);
+    REQUIRE(grid.lineTextTrimmed(LineOffset(0)) == longText);
+
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(40) }, CellLocation {}, false);
+    CHECK(grid.pageSize().columns == ColumnCount(40));
+
+    // After shrink to 40 cols, 200 chars of 'A' span 5 lines of 40 cells each.
+    // Reconstruct by walking history + page.
+    std::string reconstructed;
+    for (int i = -grid.historyLineCount().as<int>(); i < grid.pageSize().lines.as<int>(); ++i)
+    {
+        reconstructed += grid.lineTextTrimmed(LineOffset::cast_from(i));
+    }
+    CHECK(reconstructed == longText);
+}
+
+TEST_CASE("Grid.shrinkColumnsWrapsTextWithBlankHistory", "[grid][blank]")
+{
+    // Mix text and blank history lines, then shrink columns. Text must wrap correctly,
+    // and surrounding blank lines must remain blank with the new column count.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(80) }, true, LineCount(20));
+
+    // Scroll up enough to push 5 history lines, then write text only on some of them.
+    for (int i = 0; i < 5; ++i)
+        grid.scrollUp(LineCount(1));
+
+    // Write a wide-enough line at history offset -3 that will wrap when shrunk to 40 cols.
+    auto const wideText = std::string(60, 'B'); // 60 chars > 40 cols → must wrap once
+    grid.setLineText(LineOffset(-3), wideText);
+    REQUIRE(grid.lineTextTrimmed(LineOffset(-3)) == wideText);
+
+    // Lines -5, -4, -2, -1 remain blank (never written).
+    REQUIRE(grid.lineAt(LineOffset(-5)).isBlank());
+    REQUIRE(grid.lineAt(LineOffset(-4)).isBlank());
+    REQUIRE(grid.lineAt(LineOffset(-2)).isBlank());
+    REQUIRE(grid.lineAt(LineOffset(-1)).isBlank());
+
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(40) }, CellLocation {}, false);
+    CHECK(grid.pageSize().columns == ColumnCount(40));
+
+    // Reconstruct the wide line: it should still appear contiguously in history
+    // (now spread across multiple wrapped lines).
+    std::string reconstructed;
+    for (int i = -grid.historyLineCount().as<int>(); i < grid.pageSize().lines.as<int>(); ++i)
+        reconstructed += grid.lineTextTrimmed(LineOffset::cast_from(i));
+
+    INFO("Reconstructed history+page: " << reconstructed);
+    // The wide text must survive the reflow somewhere in history.
+    CHECK(reconstructed.find(wideText) != std::string::npos);
+}
+
+TEST_CASE("Grid.render.blankLineWithSearchHighlight.usesTrivialPath", "[grid][blank]")
+{
+    // Regression: blank (un-materialized) lines must be rendered via the trivial path
+    // even when HighlightSearchMatches::Yes is set. The per-cell branch would otherwise
+    // construct ConstCellProxy on an empty SoA and hit the assert in debug (UB in release).
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, true, LineCount(5));
+
+    auto renderer = MockGridRenderer {};
+    (void) grid.render(renderer, ScrollOffset(0), HighlightSearchMatches::Yes, LineCount(0));
+
+    CHECK(renderer.renderedLines.size() == 3);
+    CHECK(renderer.trivialCount == 3);
+    CHECK(renderer.perCellCount == 0);
+}
+
+TEST_CASE("Grid.scrollUp.partialHorizontal.blankLinesDifferingFillAttrsMaterialize", "[grid][blank]")
+{
+    // When two blank lines have differing fillAttrs, a partial-horizontal scrollUp must
+    // still propagate the source's attrs into the destination's copied range (i.e. the
+    // destination must be materialized). The old skip-on-both-blank would drop this.
+    auto grid = Grid(PageSize { LineCount(4), ColumnCount(10) }, true, LineCount(0));
+
+    // Seed two rows with different fill attrs, each still blank (no writes).
+    auto redBg = GraphicsAttributes {};
+    redBg.backgroundColor = RGBColor { 255, 0, 0 };
+    auto blueBg = GraphicsAttributes {};
+    blueBg.backgroundColor = RGBColor { 0, 0, 255 };
+
+    grid.lineAt(LineOffset(1)).reset(LineFlags {}, redBg);
+    grid.lineAt(LineOffset(2)).reset(LineFlags {}, blueBg);
+    REQUIRE(grid.lineAt(LineOffset(1)).isBlankWithFillAttrs(redBg));
+    REQUIRE(grid.lineAt(LineOffset(2)).isBlankWithFillAttrs(blueBg));
+
+    // Partial-horizontal scrollUp: vertical margin [1..2], horizontal [2..7].
+    // Row 2 (blueBg) is source, row 1 (redBg) is target. Differing attrs force materialization.
+    auto const margin =
+        Margin { .vertical = Margin::Vertical { .from = LineOffset(1), .to = LineOffset(2) },
+                 .horizontal = Margin::Horizontal { .from = ColumnOffset(2), .to = ColumnOffset(7) } };
+    grid.scrollUp(LineCount(1), GraphicsAttributes {}, margin);
+
+    // Target row 1 must no longer be blank — the copied range carries the source's blueBg.
+    CHECK_FALSE(grid.lineAt(LineOffset(1)).isBlank());
+}
+
+TEST_CASE("Grid.scrollDown.partialHorizontal.blankLinesDifferingFillAttrsMaterialize", "[grid][blank]")
+{
+    // Symmetric to scrollUp: partial-horizontal scrollDown between two blank lines with
+    // differing fillAttrs must materialize the destination rather than skipping.
+    auto grid = Grid(PageSize { LineCount(4), ColumnCount(10) }, true, LineCount(0));
+
+    auto redBg = GraphicsAttributes {};
+    redBg.backgroundColor = RGBColor { 255, 0, 0 };
+    auto blueBg = GraphicsAttributes {};
+    blueBg.backgroundColor = RGBColor { 0, 0, 255 };
+
+    grid.lineAt(LineOffset(1)).reset(LineFlags {}, redBg);
+    grid.lineAt(LineOffset(2)).reset(LineFlags {}, blueBg);
+    REQUIRE(grid.lineAt(LineOffset(1)).isBlankWithFillAttrs(redBg));
+    REQUIRE(grid.lineAt(LineOffset(2)).isBlankWithFillAttrs(blueBg));
+
+    auto const margin =
+        Margin { .vertical = Margin::Vertical { .from = LineOffset(1), .to = LineOffset(2) },
+                 .horizontal = Margin::Horizontal { .from = ColumnOffset(2), .to = ColumnOffset(7) } };
+    grid.scrollDown(LineCount(1), GraphicsAttributes {}, margin);
+
+    // Row 2 is target (row 1 is source under scrollDown); it must materialize.
+    CHECK_FALSE(grid.lineAt(LineOffset(2)).isBlank());
+}
+
+TEST_CASE("Grid.scrollUp.partialHorizontal.blankLinesMatchingFillAttrsStayBlank", "[grid][blank]")
+{
+    // The skip optimization must still apply when both lines share fillAttrs: the copy
+    // would be a no-op, so both lines remain un-materialized (memory stays cheap).
+    auto grid = Grid(PageSize { LineCount(4), ColumnCount(10) }, true, LineCount(0));
+
+    auto attrs = GraphicsAttributes {};
+    attrs.backgroundColor = RGBColor { 128, 128, 128 };
+    grid.lineAt(LineOffset(1)).reset(LineFlags {}, attrs);
+    grid.lineAt(LineOffset(2)).reset(LineFlags {}, attrs);
+
+    auto const margin =
+        Margin { .vertical = Margin::Vertical { .from = LineOffset(1), .to = LineOffset(2) },
+                 .horizontal = Margin::Horizontal { .from = ColumnOffset(2), .to = ColumnOffset(7) } };
+    grid.scrollUp(LineCount(1), GraphicsAttributes {}, margin);
+
+    CHECK(grid.lineAt(LineOffset(1)).isBlank());
 }
 
 // }}}

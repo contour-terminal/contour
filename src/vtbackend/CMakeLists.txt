@@ -151,6 +151,7 @@ if(LIBTERMINAL_TESTING)
         SoAClusterWriter_test.cpp
         SixelParser_test.cpp
         ViCommands_test.cpp
+        VTWriter_test.cpp
     )
     target_link_libraries(vtbackend_test Catch2::Catch2 vtbackend)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)

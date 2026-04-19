@@ -160,6 +160,14 @@ class ring: public basic_ring<T, Container<T, Allocator>> // NOLINT(readability-
         this->rezero();
         this->_storage.resize(newSize);
     }
+
+    /// Resize, copy-constructing newly added elements from @p proto instead of default-constructing.
+    /// Mirrors @c std::vector::resize(n, value).
+    void resize(size_t newSize, T const& proto)
+    {
+        this->rezero();
+        this->_storage.resize(newSize, proto);
+    }
     void clear()
     {
         this->_storage.clear();
