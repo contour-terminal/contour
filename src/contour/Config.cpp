@@ -2027,13 +2027,13 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
         auto actionOpt = actions::fromString(actionName);
         if (!actionOpt)
         {
-            logger()("Unknown action '{}'.", actionNode["action"].as<std::string>());
+            logger()("Unknown action '{}'.", actionName);
             return std::nullopt;
         }
         auto action = actionOpt.value();
         if (holds_alternative<actions::ChangeProfile>(action))
         {
-            if (auto name = node["name"]; name.IsScalar())
+            if (auto name = node["name"]; name && name.IsScalar())
             {
                 return actions::ChangeProfile { actionNode.as<std::string>() };
             }
@@ -2043,7 +2043,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::MoveTabTo>(action))
         {
-            if (auto position = node["position"]; position.IsScalar())
+            if (auto position = node["position"]; position && position.IsScalar())
                 return actions::MoveTabTo { position.as<int>() };
             else
                 return std::nullopt;
@@ -2051,7 +2051,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::SwitchToTab>(action))
         {
-            if (auto position = node["position"]; position.IsScalar())
+            if (auto position = node["position"]; position && position.IsScalar())
             {
                 return actions::SwitchToTab { position.as<int>() };
             }
@@ -2071,7 +2071,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::ReloadConfig>(action))
         {
-            if (auto profileName = node["profile"]; profileName.IsScalar())
+            if (auto profileName = node["profile"]; profileName && profileName.IsScalar())
             {
                 return actions::ReloadConfig { profileName.as<std::string>() };
             }
@@ -2081,7 +2081,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::SendChars>(action))
         {
-            if (auto chars = node["chars"]; chars.IsScalar())
+            if (auto chars = node["chars"]; chars && chars.IsScalar())
             {
                 return actions::SendChars { crispy::unescape(chars.as<std::string>()) };
             }
@@ -2133,7 +2133,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::WriteScreen>(action))
         {
-            if (auto chars = node["chars"]; chars.IsScalar())
+            if (auto chars = node["chars"]; chars && chars.IsScalar())
             {
                 return actions::WriteScreen { chars.as<std::string>() };
             }
@@ -2143,7 +2143,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::CreateSelection>(action))
         {
-            if (auto delimiters = node["delimiters"]; delimiters.IsScalar())
+            if (auto delimiters = node["delimiters"]; delimiters && delimiters.IsScalar())
             {
                 return actions::CreateSelection { delimiters.as<std::string>() };
             }

@@ -122,6 +122,7 @@
           <li>Adds DEC Technical Character Set with full 94-position Unicode mapping (Greek letters, math symbols, bracket pieces, arrows)</li>
           <li>Fixes VT parser: DCS_Param to DCS_Intermediate transition now correctly collects intermediate bytes</li>
           <li>Removes ScreenBase class — merges into Screen, eliminating unnecessary virtual dispatch</li>
+          <li>Fixes loading of optional fields in the config file (#1940)</li>
         </ul>
       </description>
     </release>
