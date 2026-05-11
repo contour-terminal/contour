@@ -345,6 +345,29 @@ LineCount Grid::scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Marg
 
         auto const marginHeight = LineCount(margin.vertical.length());
         auto const n2 = std::min(n, marginHeight);
+        if (*n2 == 0)
+            return LineCount(0);
+
+        if (*margin.vertical.from == 0)
+        {
+            auto const historyLinesAdded = scrollUp(n2, defaultAttributes);
+            auto const firstProtectedLine = margin.vertical.to + 1;
+            auto const pageBottomLine = boxed_cast<LineOffset>(_pageSize.lines) - LineOffset(1);
+
+            for (auto targetLine = pageBottomLine; targetLine >= firstProtectedLine; --targetLine)
+            {
+                auto const sourceLine = targetLine - *n2;
+                lineAt(targetLine) = std::move(lineAt(sourceLine));
+            }
+
+            for (auto lineNumber = margin.vertical.to - *n2 + 1; lineNumber <= margin.vertical.to;
+                 ++lineNumber)
+                lineAt(lineNumber).reset(defaultLineFlags(), defaultAttributes, _pageSize.columns);
+
+            verifyState();
+            return historyLinesAdded;
+        }
+
         if (*n2 && n2 < marginHeight)
         {
             for (auto topLineOffset = *margin.vertical.from; topLineOffset <= *margin.vertical.to - *n2;
