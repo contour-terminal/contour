@@ -30,6 +30,7 @@
 #include <filesystem>
 #include <format>
 #include <ranges>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -54,6 +55,32 @@ namespace vtbackend
 
 namespace // {{{ helpers
 {
+    std::optional<std::string> resolveExistingLocalPath(std::string const& cwd,
+                                                        std::string const& home,
+                                                        std::string const& match)
+    {
+        auto candidate = std::filesystem::path {};
+        if (match.starts_with("/"))
+            candidate = match;
+        else if (match.starts_with("~/"))
+        {
+            if (home.empty())
+                return std::nullopt;
+            candidate = std::filesystem::path(home) / match.substr(2);
+        }
+        else
+        {
+            if (cwd.empty())
+                return std::nullopt;
+            candidate = std::filesystem::path(cwd) / match;
+        }
+
+        auto ec = std::error_code {};
+        if (!std::filesystem::exists(candidate, ec))
+            return std::nullopt;
+        return candidate.lexically_normal().string();
+    }
+
     constexpr size_t MaxColorPaletteSaveStackSize = 10;
 
     void trimSpaceRight(string& value)
@@ -1991,6 +2018,47 @@ void Terminal::copyToClipboard(string_view data)
 void Terminal::openDocument(string_view data)
 {
     _eventListener.openDocument(data);
+}
+
+std::optional<std::string> Terminal::localPathAtMousePosition() const
+{
+    auto const mousePosition = currentMouseGridPosition();
+    if (!mousePosition)
+        return std::nullopt;
+
+    auto const lineText = currentScreen().lineTextAt(mousePosition->line, false, false);
+    auto const mouseColumn = static_cast<size_t>(*mousePosition->column);
+    auto const cwd = extractPathFromFileUrl(currentWorkingDirectory());
+    auto const* const homeEnv = std::getenv("HOME");
+    auto const home = std::string(homeEnv ? homeEnv : "");
+
+    static auto const LocalPathRegex = [] {
+        return std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
+                          std::regex_constants::ECMAScript | std::regex_constants::optimize);
+    }();
+
+    auto matchIter = std::sregex_iterator(lineText.begin(), lineText.end(), LocalPathRegex);
+    auto const matchEnd = std::sregex_iterator();
+    for (; matchIter != matchEnd; ++matchIter)
+    {
+        auto const& match = *matchIter;
+        if (match.empty())
+            continue;
+
+        auto const startColumn =
+            utf8ByteOffsetToCodepointIndex(lineText, static_cast<size_t>(match.position()));
+        auto const endColumn =
+            utf8ByteOffsetToCodepointIndex(lineText, static_cast<size_t>(match.position() + match.length()))
+            - 1;
+            
+        if (mouseColumn < startColumn || mouseColumn > endColumn)
+            continue;
+
+        if (auto path = resolveExistingLocalPath(cwd, home, match.str()))
+            return path;
+    }
+
+    return std::nullopt;
 }
 
 // {{{ Hint mode
