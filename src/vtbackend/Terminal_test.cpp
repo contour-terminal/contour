@@ -8,23 +8,29 @@
 
 #include <crispy/App.h>
 #include <crispy/times.h>
+#include <crispy/utils.h>
 
 #include <libunicode/convert.h>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <string>
 #include <vector>
 
 using namespace std;
 using namespace std::chrono_literals;
 using vtbackend::CellFlag;
+using vtbackend::CellLocation;
 using vtbackend::ColumnCount;
 using vtbackend::ColumnOffset;
 using vtbackend::LineCount;
 using vtbackend::LineOffset;
 using vtbackend::MockTerm;
+using vtbackend::Modifier;
 using vtbackend::PageSize;
 using vtbackend::SmoothScrollResult;
 
@@ -163,6 +169,73 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
 
             CHECK(terminal.viewport().scrolled());
         }
+    }
+}
+
+TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
+{
+    namespace fs = std::filesystem;
+
+    auto const tmpRoot =
+        fs::temp_directory_path()
+        / std::format("contour-local-path-{}", std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::create_directories(tmpRoot / "nested");
+    {
+        auto file = std::ofstream(tmpRoot / "nested" / "file.txt");
+        file << "test";
+    }
+
+    auto const cleanup = crispy::finally { [&]() { fs::remove_all(tmpRoot); } };
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+    auto constexpr UiHandledHint = false;
+
+    SECTION("relative path")
+    {
+        auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
+        auto& terminal = mc.terminal;
+        terminal.setCurrentWorkingDirectory("file://" + tmpRoot.string());
+        mc.writeToScreen("open nested/file.txt now");
+
+        terminal.sendMouseMoveEvent(Modifier::None,
+                                    CellLocation { .line = LineOffset(0), .column = ColumnOffset(10) },
+                                    PixelCoordinate,
+                                    UiHandledHint);
+
+        auto const path = terminal.localPathAtMousePosition();
+        REQUIRE(path.has_value());
+        CHECK(*path == (tmpRoot / "nested" / "file.txt").string());
+    }
+
+    SECTION("absolute path")
+    {
+        auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(240) } };
+        auto& terminal = mc.terminal;
+        auto const absolutePath = (tmpRoot / "nested" / "file.txt").string();
+        mc.writeToScreen("open " + absolutePath);
+
+        terminal.sendMouseMoveEvent(Modifier::None,
+                                    CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) },
+                                    PixelCoordinate,
+                                    UiHandledHint);
+
+        auto const path = terminal.localPathAtMousePosition();
+        REQUIRE(path.has_value());
+        CHECK(*path == absolutePath);
+    }
+
+    SECTION("missing path")
+    {
+        auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
+        auto& terminal = mc.terminal;
+        terminal.setCurrentWorkingDirectory("file://" + tmpRoot.string());
+        mc.writeToScreen("open nested/missing.txt now");
+
+        terminal.sendMouseMoveEvent(Modifier::None,
+                                    CellLocation { .line = LineOffset(0), .column = ColumnOffset(10) },
+                                    PixelCoordinate,
+                                    UiHandledHint);
+
+        CHECK_FALSE(terminal.localPathAtMousePosition().has_value());
     }
 }
 
