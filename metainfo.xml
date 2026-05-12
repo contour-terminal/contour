@@ -125,6 +125,7 @@
           <li>Fixes loading of optional fields in the config file (#1940)</li>
           <li>Fixes std::simd feature test for GCC 16 compiler</li>
           <li>Fixes sixel crash in sixel parser caused by aspect ratio miscalculation (#1945)</li>
+          <li>Fixes numeric capability reporting by XTGETTCAP (#XXX)</li>
         </ul>
       </description>
     </release>

@@ -3598,13 +3598,58 @@ TEST_CASE("OSC.4")
 TEST_CASE("XTGETTCAP")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto const queryStr = std::format("\033P+q{:02X}{:02X}{:02X}\033\\", 'R', 'G', 'B');
-    mock.writeToScreen(queryStr);
-    INFO(std::format("Reply data: {}", mock.terminal.peekInput()));
-    // "\033P1+r8/8/8\033\\"
-    // TODO: CHECK(...)
-}
 
+    // Decodes the hex-encoded value from a valid XTGETTCAP response
+    // "\033P1+r<hex-name>[=<hex-value>]\033\\"
+    auto const extractValue = [](std::string_view reply) -> std::optional<std::string> {
+        auto const eq = reply.find('=');
+        if (eq == std::string_view::npos)
+            return std::nullopt;
+        auto const st = reply.find("\033\\", eq);
+        if (st == std::string_view::npos)
+            return std::nullopt;
+        return crispy::fromHexString(reply.substr(eq + 1, st - eq - 1));
+    };
+
+    auto const queryValue = [&](std::string_view name) -> std::optional<std::string> {
+        mock.resetReplyData();
+        mock.writeToScreen(std::format("\033P+q{}\033\\", crispy::toHexString(name)));
+        auto const reply = std::string(mock.terminal.peekInput());
+        INFO(std::format("Reply: {}", crispy::escape(reply)));
+        if (!reply.starts_with("\033P1+r"))
+            return std::nullopt;
+        return extractValue(reply);
+    };
+
+    SECTION("string: RGB")
+    {
+        auto const value = queryValue("RGB");
+        REQUIRE(value.has_value());
+        CHECK(*value == "8/8/8");
+    }
+
+    SECTION("numeric: colors")
+    {
+        auto const value = queryValue("colors");
+        REQUIRE(value.has_value());
+        CHECK(*value == "256");
+    }
+
+    SECTION("boolean: am")
+    {
+        auto const value = queryValue("am");
+        // Boolean capabilities respond with just the name, no =value.
+        CHECK(!value.has_value());
+    }
+
+    SECTION("nonexistent")
+    {
+        mock.resetReplyData();
+        mock.writeToScreen(std::format("\033P+q{:02X}{:02X}\033\\", 'x', 'x'));
+        // Note how 'xx' is not in the return reply, meaning "not found"
+        CHECK(std::string(mock.terminal.peekInput()) == "\033P0+r\033\\");
+    }
+}
 TEST_CASE("setMaxHistoryLineCount", "[screen]")
 {
     // from zero to something

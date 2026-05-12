@@ -2617,12 +2617,7 @@ void Screen::requestCapability(std::string_view name)
     if (booleanCapability(name))
         reply("\033P1+r{}\033\\", toHexString(name));
     else if (auto const value = numericCapability(name); value != Database::Npos)
-    {
-        auto hexValue = std::format("{:X}", value);
-        if (hexValue.size() % 2)
-            hexValue.insert(hexValue.begin(), '0');
-        reply("\033P1+r{}={}\033\\", toHexString(name), hexValue);
-    }
+        reply("\033P1+r{}={}\033\\", toHexString(name), asHex(std::to_string(value)));
     else if (auto const value = stringCapability(name); !value.empty())
         reply("\033P1+r{}={}\033\\", toHexString(name), asHex(value));
     else
@@ -2634,12 +2629,7 @@ void Screen::requestCapability(capabilities::Code code)
     if (booleanCapability(code))
         reply("\033P1+r{}\033\\", code.hex());
     else if (auto const value = numericCapability(code); value >= 0)
-    {
-        auto hexValue = std::format("{:X}", value);
-        if (hexValue.size() % 2)
-            hexValue.insert(hexValue.begin(), '0');
-        reply("\033P1+r{}={}\033\\", code.hex(), hexValue);
-    }
+        reply("\033P1+r{}={}\033\\", code.hex(), asHex(std::to_string(value)));
     else if (auto const value = stringCapability(code); !value.empty())
         reply("\033P1+r{}={}\033\\", code.hex(), asHex(value));
     else
