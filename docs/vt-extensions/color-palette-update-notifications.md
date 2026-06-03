@@ -25,10 +25,10 @@ color preference (dark mode or light mode) by the operating system.
 
 The terminal will reply back in either of the two ways:
 
-VT sequence       | description
-------------------|---------------------------------
-`CSI ? 997 ; 1 n` | DSR reply to indicate dark mode
-`CSI ? 997 ; 2 n` | DSR reply to indicate light mode
+| VT sequence       | description                      |
+| ----------------- | -------------------------------- |
+| `CSI ? 997 ; 1 n` | DSR reply to indicate dark mode  |
+| `CSI ? 997 ; 2 n` | DSR reply to indicate light mode |
 
 ## Request unsolicited DSR on color palette updates
 
@@ -53,21 +53,21 @@ in order to see how to implement this in your own application.
 
 ## Adoption State
 
-| Support  | Terminal/Toolkit/App | Notes                                                                                               |
-|----------|----------------------|-----------------------------------------------------------------------------------------------------|
-| ✅       | Contour              | since `0.4.0`                                                                                       |
-| ✅       | Ghostty              | since `1.0.0`                                                                                       |
-| ✅       | Kitty                | since [`0.38.1`](https://sw.kovidgoyal.net/kitty/changelog/#detailed-list-of-changes)               |
-| ✅       | Neovim               | since [`d460928`](https://github.com/neovim/neovim/commit/d460928263d0ff53283f301dfcb85f5b6e17d2ac) |
-| ✅       | tmux                 | see tracker: [tmux#4269](https://github.com/tmux/tmux/issues/4269)                                  |
-| not yet  | LazyGit              | see tracker: [lazygit#4366](https://github.com/jesseduffield/lazygit/issues/4366)                   |
-| ✅       | Helix                | since [`23a647a`](https://github.com/helix-editor/helix/commit/23a647aee81a69f356b018bdaa49b634b9499cec)|
-| not yet  | WezTerm              | see tracker: [wezterm#6454](https://github.com/wez/wezterm/issues/6454)                             |
-| not yet  | Zellij               | see tracker: [zellij#3831](https://github.com/zellij-org/zellij/issues/3831)                        |
-| ✅       | VTE                  | since [`0.82.0`](https://gitlab.gnome.org/GNOME/vte/-/commits/0.82.0?ref_type=tags)                 |
-| not yet  | Vim                  | see tracker: [vim#17251](https://github.com/vim/vim/issues/17251)                                   |
-| not yet  | Nushell              | see tracker: [nushell#15227](https://github.com/nushell/nushell/issues/15227)                       |
+| Support | Terminal/Toolkit/App | Notes                                                                                                    |
+| ------- | -------------------- | -------------------------------------------------------------------------------------------------------- |
+| ✅      | Contour              | since `0.4.0`                                                                                            |
+| ✅      | Ghostty              | since `1.0.0`                                                                                            |
+| ✅      | Kitty                | since [`0.38.1`](https://sw.kovidgoyal.net/kitty/changelog/#detailed-list-of-changes)                    |
+| ✅      | Neovim               | since [`d460928`](https://github.com/neovim/neovim/commit/d460928263d0ff53283f301dfcb85f5b6e17d2ac)      |
+| ✅      | tmux                 | see tracker: [tmux#4269](https://github.com/tmux/tmux/issues/4269)                                       |
+| not yet | LazyGit              | see tracker: [lazygit#4366](https://github.com/jesseduffield/lazygit/issues/4366)                        |
+| ✅      | Helix                | since [`23a647a`](https://github.com/helix-editor/helix/commit/23a647aee81a69f356b018bdaa49b634b9499cec) |
+| not yet | WezTerm              | see tracker: [wezterm#6454](https://github.com/wez/wezterm/issues/6454)                                  |
+| ✅      | Zellij               | since: [`v0.44.2`](https://github.com/zellij-org/zellij/pull/5111)                                       |
+| ✅      | VTE                  | since [`0.82.0`](https://gitlab.gnome.org/GNOME/vte/-/commits/0.82.0?ref_type=tags)                      |
+| not yet | Vim                  | see tracker: [vim#17251](https://github.com/vim/vim/issues/17251)                                        |
+| not yet | Nushell              | see tracker: [nushell#15227](https://github.com/nushell/nushell/issues/15227)                            |
 
 ## Tools
 
-* [rod](https://github.com/leiserfg/rod): Terminal Dark/Light Mode Detection Tool
+- [rod](https://github.com/leiserfg/rod): Terminal Dark/Light Mode Detection Tool

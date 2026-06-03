@@ -24,8 +24,17 @@ ApplicationWindow
     // title: "%1 - Contour".arg(vtui.session.title)
     title: vtui.title
 
-    width: vtui.implicitWidth
-    height: vtui.implicitHeight
+    // Initialise the window size from the terminal's implicit (configured)
+    // size once on creation. Do not use a binding (`width: vtui.implicitWidth`)
+    // because that would re-evaluate every time implicitWidth changes — e.g.
+    // when updateImplicitSize() runs after a screen/DPR change — and snap the
+    // window back to the implicit size, overriding any WM-assigned geometry.
+    // Tiling WMs that resize the window to a tile, and users who resize
+    // manually, expect the window to keep its assigned size.
+    Component.onCompleted: {
+        width = vtui.implicitWidth
+        height = vtui.implicitHeight
+    }
 
     Terminal {
         id: vtui
