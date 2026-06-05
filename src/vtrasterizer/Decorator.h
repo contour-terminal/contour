@@ -34,7 +34,7 @@ enum class Decorator : uint8_t
     /// TODO: That should span the box around the whole (potentially wide) character
     Framed,
     /// Puts a circle-shape around into the cell (and ideally around the glyph)
-    /// TODO: How'd that look like with double-width characters?
+    /// TODO: How would that look like with double-width characters?
     Encircle,
 };
 
