@@ -39,6 +39,8 @@ definitionally
 flamegraphs
 gha
 ilammy
+initialise
+initialising
 lazygit
 leiserfg
 libcairo
@@ -46,6 +48,7 @@ libglib
 libzstd
 lowerCamelCase
 macOS
+memcpy'd
 midanimation
 nosemi
 notif
