@@ -70,6 +70,13 @@ if(${PEDANTIC_COMPILER})
             # TODO: Should be addressed.
             try_add_compile_options(-Wno-error=missing-declarations)
             try_add_compile_options(-Wno-missing-declarations)
+
+            if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
+                # Recent GCC (>=16) emits false-positive -Wnull-dereference warnings
+                # from inside libstdc++/Catch2 headers (e.g. basic_string::size,
+                # _Hashtable::size). Keep the warning, but don't fail the build on it.
+                try_add_compile_options(-Wno-error=null-dereference)
+            endif()
         endif()
     else()
         message(STATUS "Enabling pedantic compiler options: unsupported platform")
