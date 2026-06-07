@@ -1087,6 +1087,9 @@ class Terminal
         return {};
     }
 
+    /// Returns the local filesystem path under the mouse cursor, if any.
+    [[nodiscard]] std::optional<std::string> localPathAtMousePosition() const;
+
     [[nodiscard]] ExecutionMode executionMode() const noexcept { return _executionMode; }
     void setExecutionMode(ExecutionMode mode);
 

@@ -6,6 +6,7 @@
 #include <functional>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace vtbackend
@@ -140,5 +141,13 @@ class HintModeHandler
 /// Extracts a local filesystem path from a file:// URL (as set by OSC 7).
 /// Returns the URL unchanged if it does not start with "file://".
 [[nodiscard]] auto extractPathFromFileUrl(std::string const& url) -> std::string;
+
+/// Converts a UTF-8 byte offset within @p text to the corresponding codepoint index.
+///
+/// In the UTF-8 strings produced by Line::toUtf8(), each grid cell emits exactly one
+/// codepoint (wide-character continuation cells emit a space). Therefore the codepoint
+/// index equals the column index for these strings.
+[[nodiscard]] auto utf8ByteOffsetToCodepointIndex(std::string_view text, size_t byteOffset) noexcept
+    -> size_t;
 
 } // namespace vtbackend
