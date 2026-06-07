@@ -2628,7 +2628,7 @@ void Screen::requestCapability(capabilities::Code code)
 {
     if (booleanCapability(code))
         reply("\033P1+r{}\033\\", code.hex());
-    else if (auto const value = numericCapability(code); value >= 0)
+    else if (auto const value = numericCapability(code); value != Database::Npos)
         reply("\033P1+r{}={}\033\\", code.hex(), asHex(std::to_string(value)));
     else if (auto const value = stringCapability(code); !value.empty())
         reply("\033P1+r{}={}\033\\", code.hex(), asHex(value));
