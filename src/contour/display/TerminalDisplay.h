@@ -265,6 +265,12 @@ class TerminalDisplay: public QQuickItem
     std::chrono::steady_clock::time_point _initialResizeDeadline {};
     double _lastVirtualWidth {};
     double _lastVirtualHeight {};
+    // Implicit (configured) size snapshot taken in createRenderer(). The stale-
+    // geometry correction in sizeChanged() only applies when the implicit size has
+    // since changed (i.e. a DPR correction actually happened) — otherwise the saved
+    // _lastVirtual* size is legitimate (e.g. a tiling WM's tile) and must be kept.
+    double _initialImplicitWidth {};
+    double _initialImplicitHeight {};
     text::DPI _lastFontDPI;
 #if !defined(__APPLE__) && !defined(_WIN32)
     mutable std::optional<double> _lastReportedContentScale;

@@ -402,8 +402,17 @@ void TerminalDisplay::sizeChanged()
     // size (the window dimensions before DPR correction in createRenderer). This is more
     // specific than checking against implicitSize, which would also falsely trigger on
     // intentional WM-driven resizes (e.g. tiling WM assigning the window a tile size).
-    if (steady_clock::now() < _initialResizeDeadline && std::abs(width() - _lastVirtualWidth) <= 0.5
-        && std::abs(height() - _lastVirtualHeight) <= 0.5)
+    //
+    // Crucially, only treat the saved size as "stale" if the implicit size has
+    // actually changed since createRenderer() — i.e. a DPR correction really
+    // happened. Without that check, a tiling WM that maps the window directly at
+    // its tile size (so width() == _lastVirtual* with no DPR correction) is
+    // wrongly "corrected" down to the implicit 80x25, leaving a tiny near-square
+    // window until a manual resize.
+    auto const implicitSizeChanged = std::abs(implicitWidth() - _initialImplicitWidth) > 0.5
+                                     || std::abs(implicitHeight() - _initialImplicitHeight) > 0.5;
+    if (steady_clock::now() < _initialResizeDeadline && implicitSizeChanged
+        && std::abs(width() - _lastVirtualWidth) <= 0.5 && std::abs(height() - _lastVirtualHeight) <= 0.5)
     {
         displayLog()("Correcting initial window size from {}x{} (stale) to {}x{} (implicit)",
                      width(),
@@ -705,6 +714,26 @@ void TerminalDisplay::onBeforeSynchronize()
     _renderTarget->setModelMatrix(createModelMatrix());
     _renderTarget->setTranslation(float(x() * dpr), float(y() * dpr), float(z() * dpr));
     _renderTarget->setViewSize(viewSize);
+
+    // Reconcile the terminal grid (page size) with the actual surface.
+    //
+    // This runs on the render thread and sets the render viewport from the live
+    // window()->size(). The grid (page size) is computed separately by the GUI-
+    // thread sizeChanged()/applyResize(). At initial map under a tiling WM the
+    // final surface size can arrive here after sizeChanged() last ran, leaving the
+    // grid at a stale, larger page size than the viewport — so the bottom rows
+    // render off-screen until a manual resize nudges sizeChanged() again.
+    //
+    // Detect that divergence and post a sizeChanged() to the GUI thread (where the
+    // resize must happen). applyResize() no-ops when the page size already matches,
+    // and the per-frame cost when in sync is a single page-size comparison.
+    auto const expectedPageSize = pageSizeForPixels(
+        viewSize, _renderer->gridMetrics().cellSize, applyContentScale(profile().margins.value(), dpr));
+    if (expectedPageSize != _session->terminal().totalPageSize())
+        post([this]() {
+            if (_session && _renderTarget && window())
+                sizeChanged();
+        });
 }
 
 void TerminalDisplay::createRenderer()
@@ -720,6 +749,13 @@ void TerminalDisplay::createRenderer()
     // tile size) as reversions.
     _lastVirtualWidth = width();
     _lastVirtualHeight = height();
+
+    // Snapshot the implicit size before applyFontDPI() may recompute it. The
+    // stale-geometry correction in sizeChanged() compares against this to tell a
+    // real DPR-correction reversion (implicit size changed) from a legitimate
+    // WM-assigned size that simply hasn't changed (implicit size unchanged).
+    _initialImplicitWidth = implicitWidth();
+    _initialImplicitHeight = implicitHeight();
 
     // Catch DPR corrections that occurred between setSession() and first render
     // (e.g., Qt correcting from integer-ceiling DPR=2 to actual fractional DPR=1.5
