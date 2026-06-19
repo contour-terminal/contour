@@ -2287,4 +2287,65 @@ TEST_CASE("Terminal.KittyKeyRelease.RepeatStillWorks", "[terminal]")
     CHECK(e(mc.replyData()) == e("\033[1;1:2A"s));
 }
 
+// {{{ Regression tests for top-anchored partial scroll regions (PR #1946)
+TEST_CASE("Terminal.TopAnchoredRegion.PartialScrollKeepsViewportFixed", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(8) }, LineCount(20) };
+    auto& terminal = mc.terminal;
+
+    // Generate scrollback so the viewport can be scrolled up.
+    mc.writeToScreen("h1\r\nh2\r\nh3\r\nh4\r\nh5\r\nh6\r\nh7\r\nh8\r\n");
+    terminal.viewport().scrollUp(LineCount(3));
+    REQUIRE(terminal.viewport().scrolled());
+    auto const scrollOffsetBefore = terminal.viewport().scrollOffset();
+
+    // Top-anchored partial region (rows 1..3), cursor at the region bottom.
+    mc.writeToScreen("\033[1;3r");
+    mc.writeToScreen("\033[3;1H");
+
+    // CSI S (SU) scrolls the region up; the viewport the user scrolled to must
+    // not jump as a side effect.
+    mc.writeToScreen("\033[S");
+
+    CHECK(terminal.viewport().scrollOffset() == scrollOffsetBefore);
+}
+
+TEST_CASE("Terminal.TopAnchoredRegion.PartialScrollDoesNotMoveNormalModeCursor", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(8) }, LineCount(20) };
+    auto& terminal = mc.terminal;
+
+    mc.writeToScreen("r1\r\nr2\r\nr3\r\nr4\r\nr5\r\nr6");
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    auto const cursorLineBefore = terminal.normalModeCursorPosition().line;
+
+    // Top-anchored partial region (rows 1..3), cursor at region bottom, then IND.
+    mc.writeToScreen("\033[1;3r");
+    mc.writeToScreen("\033[3;1H");
+    mc.writeToScreen("\033D");
+
+    CHECK(terminal.normalModeCursorPosition().line == cursorLineBefore);
+}
+
+TEST_CASE("Terminal.TopAnchoredRegion.ScrollCountMatchesScrolledLines", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, LineCount(2) };
+    auto& terminal = mc.terminal;
+
+    // Fill history to capacity (2 lines) so further scrolls have no headroom.
+    mc.writeToScreen("a\r\nb\r\nc\r\nd\r\ne\r\nf\r\n");
+    terminal.viewport().scrollUp(LineCount(1));
+    REQUIRE(terminal.viewport().scrolled());
+    auto const scrollOffsetBefore = terminal.viewport().scrollOffset();
+
+    // Top-anchored partial region, cursor at region bottom, scroll it.
+    mc.writeToScreen("\033[1;2r");
+    mc.writeToScreen("\033[2;1H");
+    mc.writeToScreen("\033D");
+
+    // The viewport must not drift by the history/scroll-count mismatch.
+    CHECK(terminal.viewport().scrollOffset() == scrollOffsetBefore);
+}
+// }}}
+
 // NOLINTEND(misc-const-correctness)
