@@ -1034,8 +1034,17 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
 {
     auto const scrollCount = _grid.scrollUp(n, sgr, margin);
     updateCursorIterator();
-    // TODO only call onBufferScrolled if full page margin
-    _terminal->onBufferScrolled(scrollCount);
+
+    // Only notify the viewport/Vi-cursor/selection of a scrollback scroll when the
+    // scroll covered the whole page. A scroll confined to a sub-page margin region
+    // (e.g. a top-anchored partial DECSTBM region) may still feed lines into
+    // scrollback, but the live area below the region did not move, so shifting the
+    // viewport, the Normal-mode cursor, or the active selection would be wrong.
+    auto const isFullPageMargin =
+        margin.horizontal.from.value == 0 && margin.horizontal.to.value + 1 == pageSize().columns.value
+        && margin.vertical.from.value == 0 && margin.vertical.to.value + 1 == pageSize().lines.value;
+    if (isFullPageMargin)
+        _terminal->onBufferScrolled(scrollCount);
 }
 
 void Screen::scrollDown(LineCount n, Margin margin)
