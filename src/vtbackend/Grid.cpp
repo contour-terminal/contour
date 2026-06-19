@@ -360,9 +360,11 @@ LineCount Grid::scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Marg
                 lineAt(targetLine) = std::move(lineAt(sourceLine));
             }
 
-            for (auto lineNumber = margin.vertical.to - *n2 + 1; lineNumber <= margin.vertical.to;
-                 ++lineNumber)
-                lineAt(lineNumber).reset(defaultLineFlags(), defaultAttributes, _pageSize.columns);
+            // Blank the new region rows at the region bottom.
+            for (auto const lineNumber:
+                 std::views::iota(*margin.vertical.to - *n2 + 1, *margin.vertical.to + 1))
+                lineAt(LineOffset(lineNumber))
+                    .reset(defaultLineFlags(), defaultAttributes, _pageSize.columns);
 
             verifyState();
             return historyLinesAdded;
