@@ -58,7 +58,13 @@ namespace vtpty
 
 namespace
 {
-    UnixPty::PtyHandles createUnixPty(PageSize const& windowSize, optional<ImageSize> pixels)
+    struct PtyHandles
+    {
+        PtyMasterHandle master;
+        PtySlaveHandle slave;
+    };
+
+    PtyHandles createUnixPty(PageSize const& windowSize, optional<ImageSize> pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
         assert(std::cmp_less_equal(unbox(windowSize.lines), numeric_limits<unsigned short>::max()));
