@@ -60,19 +60,19 @@ namespace // {{{ helpers
                                                         std::string const& match)
     {
         auto candidate = std::filesystem::path {};
-        if (match.starts_with("/"))
-            candidate = match;
-        else if (match.starts_with("~/"))
+        if (match.starts_with("~/"))
         {
             if (home.empty())
                 return std::nullopt;
             candidate = std::filesystem::path(home) / match.substr(2);
         }
+        else if (auto const matchPath = std::filesystem::path(match); matchPath.is_absolute())
+            candidate = matchPath;
         else
         {
             if (cwd.empty())
                 return std::nullopt;
-            candidate = std::filesystem::path(cwd) / match;
+            candidate = std::filesystem::path(cwd) / matchPath;
         }
 
         auto ec = std::error_code {};
@@ -2032,12 +2032,17 @@ std::optional<std::string> Terminal::localPathAtMousePosition() const
     auto const* const homeEnv = std::getenv("HOME");
     auto const home = std::string(homeEnv ? homeEnv : "");
 
-    static auto const LocalPathRegex = [] {
-        return std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
-                          std::regex_constants::ECMAScript | std::regex_constants::optimize);
+    static auto const localPathRegex = [] {
+        // Matches, in order: drive-letter absolute paths (C:/foo, C:\foo) for Windows,
+        // ~/ home-relative paths, / absolute paths, ./ and ../ relative paths, paths
+        // containing a separator, and bare filenames. Both '/' and '\\' separators are
+        // accepted so native Windows paths are detected as well as POSIX ones.
+        return std::regex(
+            R"((?:[A-Za-z]:[\\/][\w.\\/-]+|~?[\\/][\w.\\/-]+|\.{1,2}[\\/][\w.\\/-]+|[\w.][\w.-]*[\\/][\w.\\/-]+|[\w.][\w.-]+))",
+            std::regex_constants::ECMAScript | std::regex_constants::optimize);
     }();
 
-    auto matchIter = std::sregex_iterator(lineText.begin(), lineText.end(), LocalPathRegex);
+    auto matchIter = std::sregex_iterator(lineText.begin(), lineText.end(), localPathRegex);
     auto const matchEnd = std::sregex_iterator();
     for (; matchIter != matchEnd; ++matchIter)
     {
@@ -2050,7 +2055,7 @@ std::optional<std::string> Terminal::localPathAtMousePosition() const
         auto const endColumn =
             utf8ByteOffsetToCodepointIndex(lineText, static_cast<size_t>(match.position() + match.length()))
             - 1;
-            
+
         if (mouseColumn < startColumn || mouseColumn > endColumn)
             continue;
 

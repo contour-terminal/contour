@@ -630,7 +630,7 @@ void TerminalSession::openDocument(std::string_view fileOrUrl)
     sessionLog()("openDocument: {}\n", fileOrUrl);
     auto const text = QString::fromUtf8(fileOrUrl.data(), static_cast<int>(fileOrUrl.size()));
     auto url = QUrl(text);
-    
+
     if (url.scheme().isEmpty())
     {
         auto const fileInfo = QFileInfo(text);

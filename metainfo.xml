@@ -128,6 +128,7 @@
           <li>Fixes numeric capability reporting by XTGETTCAP</li>
           <li>Fixes window snapping back to the configured terminal_size after a screen/DPR change on tiling Wayland compositors (#1941), by initialising the window size from the terminal's implicit size only once on creation instead of using a permanent QML binding</li>
           <li>Fixes scrollback preservation for top anchored full width scroll regions</li>
+          <li>Adds Ctrl-click support for opening detected local filesystem paths under the mouse cursor (#1947)</li>
         </ul>
       </description>
     </release>

@@ -189,11 +189,17 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
     auto constexpr UiHandledHint = false;
 
+    // Use forward-slash (generic) path forms throughout: that is how OSC-7 delivers the
+    // working directory URL and how the path-detection regex expects paths to look, on every
+    // platform (including Windows, where native paths use backslashes the regex would reject).
+    auto const tmpRootUrl = "file://" + tmpRoot.generic_string();
+    auto const expectedFile = (tmpRoot / "nested" / "file.txt").lexically_normal().string();
+
     SECTION("relative path")
     {
         auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
         auto& terminal = mc.terminal;
-        terminal.setCurrentWorkingDirectory("file://" + tmpRoot.string());
+        terminal.setCurrentWorkingDirectory(tmpRootUrl);
         mc.writeToScreen("open nested/file.txt now");
 
         terminal.sendMouseMoveEvent(Modifier::None,
@@ -203,14 +209,14 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
 
         auto const path = terminal.localPathAtMousePosition();
         REQUIRE(path.has_value());
-        CHECK(*path == (tmpRoot / "nested" / "file.txt").string());
+        CHECK(*path == expectedFile);
     }
 
     SECTION("absolute path")
     {
         auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(240) } };
         auto& terminal = mc.terminal;
-        auto const absolutePath = (tmpRoot / "nested" / "file.txt").string();
+        auto const absolutePath = (tmpRoot / "nested" / "file.txt").generic_string();
         mc.writeToScreen("open " + absolutePath);
 
         terminal.sendMouseMoveEvent(Modifier::None,
@@ -220,14 +226,14 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
 
         auto const path = terminal.localPathAtMousePosition();
         REQUIRE(path.has_value());
-        CHECK(*path == absolutePath);
+        CHECK(*path == expectedFile);
     }
 
     SECTION("missing path")
     {
         auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
         auto& terminal = mc.terminal;
-        terminal.setCurrentWorkingDirectory("file://" + tmpRoot.string());
+        terminal.setCurrentWorkingDirectory(tmpRootUrl);
         mc.writeToScreen("open nested/missing.txt now");
 
         terminal.sendMouseMoveEvent(Modifier::None,
