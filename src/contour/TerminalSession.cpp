@@ -24,6 +24,7 @@
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QGuiApplication>
@@ -627,7 +628,18 @@ void TerminalSession::copyToClipboard(std::string_view data)
 void TerminalSession::openDocument(std::string_view fileOrUrl)
 {
     sessionLog()("openDocument: {}\n", fileOrUrl);
-    QDesktopServices::openUrl(QUrl(QString::fromStdString(std::string(fileOrUrl))));
+    auto const text = QString::fromUtf8(fileOrUrl.data(), static_cast<int>(fileOrUrl.size()));
+    auto url = QUrl(text);
+
+    if (url.scheme().isEmpty())
+    {
+        auto const fileInfo = QFileInfo(text);
+        if (fileInfo.exists())
+            url = QUrl::fromLocalFile(fileInfo.absoluteFilePath());
+    }
+
+    if (!QDesktopServices::openUrl(url))
+        errorLog()("Could not open document \"{}\".", fileOrUrl);
 }
 
 void TerminalSession::inspect()
@@ -1156,7 +1168,8 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     {
         // Change cursor shape only when changing grid cell.
         _currentMousePosition = pos;
-        if (terminal().isMouseHoveringHyperlink())
+        if (terminal().isMouseHoveringHyperlink()
+            || (modifiers.contains(vtbackend::Modifier::Control) && terminal().localPathAtMousePosition()))
             _display->setMouseCursorShape(MouseCursorShape::PointingHand);
         else
             setDefaultCursor();
@@ -1352,6 +1365,11 @@ bool TerminalSession::operator()(actions::FollowHyperlink)
     if (auto const hyperlink = terminal().tryGetHoveringHyperlink())
     {
         followHyperlink(*hyperlink);
+        return true;
+    }
+    if (auto const path = terminal().localPathAtMousePosition())
+    {
+        openDocument(*path);
         return true;
     }
     return false;

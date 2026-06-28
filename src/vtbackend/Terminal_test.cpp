@@ -8,23 +8,29 @@
 
 #include <crispy/App.h>
 #include <crispy/times.h>
+#include <crispy/utils.h>
 
 #include <libunicode/convert.h>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <string>
 #include <vector>
 
 using namespace std;
 using namespace std::chrono_literals;
 using vtbackend::CellFlag;
+using vtbackend::CellLocation;
 using vtbackend::ColumnCount;
 using vtbackend::ColumnOffset;
 using vtbackend::LineCount;
 using vtbackend::LineOffset;
 using vtbackend::MockTerm;
+using vtbackend::Modifier;
 using vtbackend::PageSize;
 using vtbackend::SmoothScrollResult;
 
@@ -163,6 +169,79 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
 
             CHECK(terminal.viewport().scrolled());
         }
+    }
+}
+
+TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
+{
+    namespace fs = std::filesystem;
+
+    auto const tmpRoot =
+        fs::temp_directory_path()
+        / std::format("contour-local-path-{}", std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::create_directories(tmpRoot / "nested");
+    {
+        auto file = std::ofstream(tmpRoot / "nested" / "file.txt");
+        file << "test";
+    }
+
+    auto const cleanup = crispy::finally { [&]() { fs::remove_all(tmpRoot); } };
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+    auto constexpr UiHandledHint = false;
+
+    // Use forward-slash (generic) path forms throughout: that is how OSC-7 delivers the
+    // working directory URL and how the path-detection regex expects paths to look, on every
+    // platform (including Windows, where native paths use backslashes the regex would reject).
+    auto const tmpRootUrl = "file://" + tmpRoot.generic_string();
+    auto const expectedFile = (tmpRoot / "nested" / "file.txt").lexically_normal().string();
+
+    SECTION("relative path")
+    {
+        auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
+        auto& terminal = mc.terminal;
+        terminal.setCurrentWorkingDirectory(tmpRootUrl);
+        mc.writeToScreen("open nested/file.txt now");
+
+        terminal.sendMouseMoveEvent(Modifier::None,
+                                    CellLocation { .line = LineOffset(0), .column = ColumnOffset(10) },
+                                    PixelCoordinate,
+                                    UiHandledHint);
+
+        auto const path = terminal.localPathAtMousePosition();
+        REQUIRE(path.has_value());
+        CHECK(*path == expectedFile);
+    }
+
+    SECTION("absolute path")
+    {
+        auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(240) } };
+        auto& terminal = mc.terminal;
+        auto const absolutePath = (tmpRoot / "nested" / "file.txt").generic_string();
+        mc.writeToScreen("open " + absolutePath);
+
+        terminal.sendMouseMoveEvent(Modifier::None,
+                                    CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) },
+                                    PixelCoordinate,
+                                    UiHandledHint);
+
+        auto const path = terminal.localPathAtMousePosition();
+        REQUIRE(path.has_value());
+        CHECK(*path == expectedFile);
+    }
+
+    SECTION("missing path")
+    {
+        auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
+        auto& terminal = mc.terminal;
+        terminal.setCurrentWorkingDirectory(tmpRootUrl);
+        mc.writeToScreen("open nested/missing.txt now");
+
+        terminal.sendMouseMoveEvent(Modifier::None,
+                                    CellLocation { .line = LineOffset(0), .column = ColumnOffset(10) },
+                                    PixelCoordinate,
+                                    UiHandledHint);
+
+        CHECK_FALSE(terminal.localPathAtMousePosition().has_value());
     }
 }
 
