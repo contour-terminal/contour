@@ -2,6 +2,7 @@
 #include <vtbackend/HintModeHandler.h>
 
 #include <algorithm>
+#include <cctype>
 #include <ranges>
 
 using namespace std;
@@ -266,13 +267,27 @@ auto extractPathFromFileUrl(std::string const& url) -> std::string
     if (!url.starts_with(Prefix))
         return url;
     auto remainder = url.substr(Prefix.size());
-    // file:///path → /path  ;  file://host/path → /path
+
+    // A Windows drive-letter authority (e.g. file://C:/path) is not a real host: keep it.
+    auto const isDriveLetterPath = [](std::string_view path) {
+        return path.size() >= 2 && (std::isalpha(static_cast<unsigned char>(path[0])) != 0) && path[1] == ':';
+    };
+
+    // file:///path → /path  ;  file://host/path → /path  ;  file://C:/path → C:/path
     if (!remainder.empty() && remainder[0] != '/')
     {
+        if (isDriveLetterPath(remainder))
+            return std::string(remainder);
         if (auto const pos = remainder.find('/'); pos != std::string::npos)
             return std::string(remainder.substr(pos));
         return {};
     }
+
+    // file:///C:/path → C:/path : strip the leading slash before a Windows drive letter so the
+    // resulting string is a valid native absolute path rather than a rooted POSIX-looking one.
+    if (remainder.size() >= 3 && remainder[0] == '/' && isDriveLetterPath(remainder.substr(1)))
+        return std::string(remainder.substr(1));
+
     return std::string(remainder);
 }
 

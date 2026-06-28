@@ -2036,9 +2036,11 @@ std::optional<std::string> Terminal::localPathAtMousePosition() const
         // Matches, in order: drive-letter absolute paths (C:/foo, C:\foo) for Windows,
         // ~/ home-relative paths, / absolute paths, ./ and ../ relative paths, paths
         // containing a separator, and bare filenames. Both '/' and '\\' separators are
-        // accepted so native Windows paths are detected as well as POSIX ones.
+        // accepted so native Windows paths are detected as well as POSIX ones. A literal '~'
+        // is allowed inside path components so Windows 8.3 short names (e.g. RUNNER~1) and
+        // tilde-suffixed backup files (e.g. file~) are matched in full rather than truncated.
         return std::regex(
-            R"((?:[A-Za-z]:[\\/][\w.\\/-]+|~?[\\/][\w.\\/-]+|\.{1,2}[\\/][\w.\\/-]+|[\w.][\w.-]*[\\/][\w.\\/-]+|[\w.][\w.-]+))",
+            R"((?:[A-Za-z]:[\\/][\w.~\\/-]+|~?[\\/][\w.~\\/-]+|\.{1,2}[\\/][\w.~\\/-]+|[\w.][\w.~-]*[\\/][\w.~\\/-]+|[\w.][\w.~-]+))",
             std::regex_constants::ECMAScript | std::regex_constants::optimize);
     }();
 
