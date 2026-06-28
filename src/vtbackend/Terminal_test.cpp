@@ -229,6 +229,35 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
         CHECK(*path == expectedFile);
     }
 
+    SECTION("absolute path with tilde in a component")
+    {
+        // Windows resolves long user names to 8.3 short names containing a '~'
+        // (e.g. C:\Users\RUNNER~1\...). The detection regex must keep such a component
+        // intact instead of truncating the match at the tilde. A directory literally
+        // named "short~1" reproduces the same shape on every platform.
+        auto const shortDir = tmpRoot / "short~1";
+        fs::create_directories(shortDir);
+        {
+            auto file = std::ofstream(shortDir / "file.txt");
+            file << "test";
+        }
+        auto const tildePath = (shortDir / "file.txt").generic_string();
+        auto const expectedTildeFile = (shortDir / "file.txt").lexically_normal().string();
+
+        auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(240) } };
+        auto& terminal = mc.terminal;
+        mc.writeToScreen("open " + tildePath);
+
+        terminal.sendMouseMoveEvent(Modifier::None,
+                                    CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) },
+                                    PixelCoordinate,
+                                    UiHandledHint);
+
+        auto const path = terminal.localPathAtMousePosition();
+        REQUIRE(path.has_value());
+        CHECK(*path == expectedTildeFile);
+    }
+
     SECTION("missing path")
     {
         auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };

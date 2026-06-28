@@ -556,6 +556,16 @@ TEST_CASE("extractPathFromFileUrl.FileUrlWithHost", "[hintmode]")
     CHECK(extractPathFromFileUrl("file://hostname") == "");
 }
 
+TEST_CASE("extractPathFromFileUrl.WindowsDriveLetter", "[hintmode]")
+{
+    // A Windows drive-letter authority must not be mistaken for a host and stripped.
+    CHECK(extractPathFromFileUrl("file://C:/Users/user/file.txt") == "C:/Users/user/file.txt");
+    // The standards-conformant form has an empty authority and a leading slash before the drive.
+    CHECK(extractPathFromFileUrl("file:///C:/Users/user/file.txt") == "C:/Users/user/file.txt");
+    // Lower-case drive letters are equally valid.
+    CHECK(extractPathFromFileUrl("file://d:/temp/x") == "d:/temp/x");
+}
+
 TEST_CASE("HintModeHandler.CwdRelativeFilesystemValidation", "[hintmode]")
 {
     namespace fs = std::filesystem;
