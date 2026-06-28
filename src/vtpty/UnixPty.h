@@ -42,12 +42,6 @@ class UnixPty final: public Pty
     };
 
   public:
-    struct PtyHandles
-    {
-        PtyMasterHandle master;
-        PtySlaveHandle slave;
-    };
-
     UnixPty(PageSize pageSize, std::optional<ImageSize> pixels);
     ~UnixPty() override;
 
