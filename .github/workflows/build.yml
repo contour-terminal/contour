@@ -420,7 +420,18 @@ jobs:
           ./scripts/ci-set-vars.sh
           # Please read the following link on how to use MacOS code signing on Github CI:
           # https://docs.github.com/en/actions/deployment/deploying-xcode-applications/installing-an-apple-certificate-on-macos-runners-for-xcode-development
-          echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
+          #
+          # The signing certificate is only imported into the keychain on master and
+          # release branches (see the "Install the Apple certificate" step below). On
+          # ordinary feature-branch PRs the certificate is unavailable, so attempting to
+          # sign with the Developer ID would fail packaging with
+          # "The specified item could not be found in the keychain.". In that case we fall
+          # back to ad-hoc signing ("-"), which lets cpack produce an unsigned package.
+          if [ "$GITHUB_REF" = "refs/heads/master" ] || [ "$GITHUB_HEAD_REF" = "release" ]; then
+            echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
+          else
+            echo "CODE_SIGN_CERTIFICATE_ID=-" >> "$GITHUB_OUTPUT"
+          fi
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: Install the Apple certificate and provisioning profile
