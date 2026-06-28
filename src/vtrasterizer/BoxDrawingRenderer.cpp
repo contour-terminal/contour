@@ -1517,12 +1517,12 @@ namespace detail
 
             static bool isBraille(char32_t codepoint)
             {
-                return style != Style::Font and codepoint >= 0x2800 and codepoint <= 0x28FF;
+                return CurrentStyle != Style::Font and codepoint >= 0x2800 and codepoint <= 0x28FF;
             }
 
             using Style = BoxDrawingRenderer::BrailleStyle;
-            inline static Style style = Style::Circle;
-            static void setStyle(Style newStyle) { style = newStyle; }
+            inline static Style CurrentStyle = Style::Circle;
+            static void setStyle(Style newStyle) { CurrentStyle = newStyle; }
 
             static auto build(char32_t codepoint,
                               ImageSize size,
@@ -1530,16 +1530,17 @@ namespace detail
                               [[maybe_unused]] size_t ss)
             {
                 uint8_t const value = codepoint - 0x2800;
-                switch (style)
+                switch (CurrentStyle)
                 {
                     using enum Style;
                     case Solid: return buildSolid(value, size);
                     case Circle: [[fallthrough]];
-                    case CircleEmpty: return buildCircle(value, size, th, ss, style == CircleEmpty);
+                    case CircleEmpty: return buildCircle(value, size, th, ss, CurrentStyle == CircleEmpty);
                     case Square: [[fallthrough]];
-                    case SquareEmpty: return buildSquare(value, size, th, 1, style == SquareEmpty);
+                    case SquareEmpty: return buildSquare(value, size, th, 1, CurrentStyle == SquareEmpty);
                     case AASquare: [[fallthrough]];
-                    case AASquareEmpty: return buildSquare(value, size, th, ss, style == AASquareEmpty);
+                    case AASquareEmpty:
+                        return buildSquare(value, size, th, ss, CurrentStyle == AASquareEmpty);
                     case Font: (void) SoftRequire(false); return atlas::Buffer(*size.width * *size.height);
                 }
                 (void) SoftRequire(false);
@@ -1745,7 +1746,7 @@ void BoxDrawingRenderer::setGitDrawingsStyle(BoxDrawingRenderer::GitDrawingsStyl
     using GitBranchStyle = BoxDrawingRenderer::GitDrawingsStyle::BranchStyle;
     using MergeCommitStyle = BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
 
-    if (arcStyle == ArcStyle::Elliptic && newStyle.branchStyle != GitBranchStyle::Thin)
+    if (DefaultArcStyle == ArcStyle::Elliptic && newStyle.branchStyle != GitBranchStyle::Thin)
     {
         // log warning ??
         newStyle.arcStyle = ArcStyle::Round;
@@ -1768,7 +1769,7 @@ void BoxDrawingRenderer::setGitDrawingsStyle(BoxDrawingRenderer::GitDrawingsStyl
             default: assert(false); return detail::Line::Light;
         }
     }();
-    gitArcStyle = newStyle.arcStyle;
+    DefaultGitArcStyle = newStyle.arcStyle;
     detail::branchDrawingDefinitions = detail::getBranchBoxes(mcLine, branchLine);
 }
 void BoxDrawingRenderer::setBrailleStyle(BoxDrawingRenderer::BrailleStyle newStyle)
@@ -2902,7 +2903,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
     auto box = detail::getBoxDrawing(codepoint);
     if (not box)
         return std::nullopt;
-    auto lArcStyle = detail::isGitBranchDrawing(codepoint) ? gitArcStyle : arcStyle;
+    auto lArcStyle = detail::isGitBranchDrawing(codepoint) ? DefaultGitArcStyle : DefaultArcStyle;
     auto image = buildBox(*box, size, lineThickness, supersampling, lArcStyle == ArcStyle::Elliptic);
     boxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
     return image;

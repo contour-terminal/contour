@@ -1096,9 +1096,9 @@ struct Writer
 
     struct Offset
     {
-        static inline int levels = 0;
-        Offset() { levels++; }
-        ~Offset() { --levels; }
+        static inline int Levels = 0;
+        Offset() { Levels++; }
+        ~Offset() { --Levels; }
     };
 
     template <typename F>
@@ -1503,14 +1503,14 @@ struct YAMLConfigWriter: Writer
     template <typename... T>
     std::string process(std::string_view doc, T... val)
     {
-        return format(addOffset(replaceCommentPlaceholder(std::string { doc }), Offset::levels * OneOffset),
+        return format(addOffset(replaceCommentPlaceholder(std::string { doc }), Offset::Levels * OneOffset),
                       val...);
     }
 
     template <typename... T>
     std::string process(std::string_view doc, [[maybe_unused]] std::string_view name, T... val)
     {
-        return format(addOffset(replaceCommentPlaceholder(std::string { doc }), Offset::levels * OneOffset),
+        return format(addOffset(replaceCommentPlaceholder(std::string { doc }), Offset::Levels * OneOffset),
                       val...);
     }
 

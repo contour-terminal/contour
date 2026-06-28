@@ -75,7 +75,7 @@ class BoxDrawingRenderer: public Renderable
 
     static void setBrailleStyle(BrailleStyle newStyle);
     static void setGitDrawingsStyle(GitDrawingsStyle newStyle);
-    static void setArcStyle(ArcStyle newStyle) { arcStyle = newStyle; }
+    static void setArcStyle(ArcStyle newStyle) { DefaultArcStyle = newStyle; }
 
   private:
     AtlasTileAttributes const* getOrCreateCachedTileAttributes(char32_t codepoint,
@@ -97,9 +97,9 @@ class BoxDrawingRenderer: public Renderable
                                                              ImageSize size,
                                                              int lineThickness);
 
-    static inline ArcStyle arcStyle = ArcStyle::Round;
-    static inline ArcStyle gitArcStyle = ArcStyle::Round;
-    static inline BrailleStyle brailleStyle = BrailleStyle::Font;
+    static inline ArcStyle DefaultArcStyle = ArcStyle::Round;
+    static inline ArcStyle DefaultGitArcStyle = ArcStyle::Round;
+    static inline BrailleStyle DefaultBrailleStyle = BrailleStyle::Font;
 };
 
 } // namespace vtrasterizer

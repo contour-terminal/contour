@@ -16,7 +16,7 @@ namespace vtbackend
 class Viewport
 {
   public:
-    static auto inline const viewportLog = logstore::category("vt.viewport", "Logs viewport details.");
+    static auto inline const ViewportLog = logstore::category("vt.viewport", "Logs viewport details.");
 
     using ModifyEvent = std::function<void()>;
 
