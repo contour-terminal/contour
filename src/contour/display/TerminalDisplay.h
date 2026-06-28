@@ -239,10 +239,7 @@ class TerminalDisplay: public QQuickItem
     void statsSummary();
     void doResize(crispy::size size);
 
-    [[nodiscard]] vtrasterizer::GridMetrics const& gridMetrics() const noexcept
-    {
-        return _renderer->gridMetrics();
-    }
+    [[nodiscard]] vtrasterizer::GridMetrics gridMetrics() const noexcept { return _renderer->gridMetrics(); }
 
     /// Flags the screen as dirty.
     ///

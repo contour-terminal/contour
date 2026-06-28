@@ -590,25 +590,14 @@ void TerminalDisplay::applyFontDPI()
 
     auto fd = _renderer->fontDescriptions();
     fd.dpi = newFontDPI;
+    // The font change is only *staged* here; recomputing geometry now would read the *stale* cell size.
+    // Drive a frame instead — consumeFontReconfigApplied() (see paint()) re-derives against the new size.
     _renderer->setFonts(std::move(fd));
-
-    // Recompute implicit/minimum size when font DPI changes (e.g., DPR correction
-    // from 2.0 → 1.5 on KDE/Wayland with fractional scaling). The implicit size
-    // does not require a render target, so this must happen before the guard below.
-    if (window())
-    {
-        updateImplicitSize();
-        updateSizeConstraints();
-    }
 
     if (!_renderTarget)
         return;
 
-    auto const newPixelSize =
-        vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) } * contentScale();
-
-    // Apply resize on same window metrics propagates proper recalculations and repaint.
-    applyResize(newPixelSize, *_session, *_renderer);
+    scheduleRedraw();
 }
 
 void TerminalDisplay::logDisplayInfo()
@@ -763,6 +752,10 @@ void TerminalDisplay::createRenderer()
     // render target, ensuring correct cell metrics from the start.
     applyFontDPI();
 
+    // applyFontDPI() only *stages* the font reload; the render thread is not running yet and there is no
+    // frame to apply it, so materialize it now to read the correct cell size for the texture atlas tile.
+    _renderer->applyStagedReconfigDuringSetup();
+
     auto const textureTileSize = gridMetrics().cellSize;
     auto const viewportMargin = vtrasterizer::PageMargin {}; // TODO margin
     auto const precalculatedViewSize = [this]() -> ImageSize {
@@ -904,6 +897,19 @@ void TerminalDisplay::paint()
 
         terminal().tick(steady_clock::now());
         _renderer->render(terminal(), _renderingPressure);
+
+        // The lazily-applied font/DPI change made the cell size current only now; re-derive page size,
+        // implicit size (a DPI change alters it) and constraints against it (the triggering resize didn't).
+        if (_renderer->consumeFontReconfigApplied())
+            post([this]() {
+                if (!_session || !_renderer)
+                    return;
+                resizeTerminalToDisplaySize();
+                if (window())
+                    updateImplicitSize();
+                updateSizeConstraints();
+            });
+
         if (_doDumpState)
         {
             doDumpStateInternal();
@@ -1086,7 +1092,7 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
     switch (query)
     {
         case Qt::ImCursorRectangle: {
-            auto const& gridMetrics = _renderer->gridMetrics();
+            auto const gridMetrics = _renderer->gridMetrics();
             auto theContentsRect = QRect(); // TODO: contentsRect();
             auto result = QRect();
             auto const dpr = contentScale();
@@ -1226,7 +1232,7 @@ void TerminalDisplay::updateImplicitSize()
     auto const totalPageSize = _session->terminal().totalPageSize();
     auto const dpr = contentScale();
 
-    auto const actualGridCellSize = _renderer->cellSize();
+    auto const actualGridCellSize = _renderer->gridMetrics().cellSize;
     auto const scaledMargins = applyContentScale(_session->profile().margins.value(), dpr);
 
     // Compute the required size in actual pixels using exact integer arithmetic,
@@ -1257,7 +1263,7 @@ void TerminalDisplay::updateSizeConstraints()
     assert(_session);
 
     auto const dpr = contentScale();
-    auto const actualCellSize = _renderer->cellSize();
+    auto const actualCellSize = _renderer->gridMetrics().cellSize;
     auto const margins = _session->profile().margins.value();
 
     // Minimum size (existing logic, unchanged)
@@ -1529,9 +1535,11 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
 
     if (applyFontDescription(fontDPI(), *_renderer, std::move(fontDescriptions)))
     {
-        // resize widget (same pixels, but adjusted terminal rows/columns and margin)
-        applyResize(pixelSize(), *_session, *_renderer);
-        updateSizeConstraints(); // cell size changed
+        // The font change is only *staged* (see applyFontDescription); it is applied on the render
+        // thread during the next frame, after which consumeFontReconfigApplied() (see paint()) resizes
+        // the widget against the new cell size. Doing it here would use the *stale* cell size, so just
+        // request a frame to drive the apply (also covers the occluded/minimized case).
+        scheduleRedraw();
         // logDisplayInfo();
     }
 }
@@ -1545,8 +1553,11 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
     if (!_renderer->setFontSize(newFontSize))
         return false;
 
-    resizeTerminalToDisplaySize();
-    updateSizeConstraints();
+    // The font change is only *staged*; it is applied on the render thread during the next frame, after
+    // which consumeFontReconfigApplied() (see paint()) re-derives the page size against the new cell
+    // size. Recomputing here would use the *stale* cell size, so just request a frame to drive the
+    // apply (this also covers the occluded/minimized case, where no frame would otherwise paint).
+    scheduleRedraw();
     // logDisplayInfo();
     return true;
 }
@@ -1556,9 +1567,12 @@ bool TerminalDisplay::setPageSize(PageSize newPageSize)
     if (newPageSize == terminal().pageSize())
         return false;
 
+    // Derive the view size from the *requested* page size (not the configured profile size), reading the
+    // cell size once to avoid two locked GridMetrics copies and a possible torn read between them.
+    auto const cellSize = gridMetrics().cellSize;
     auto const viewSize = ImageSize {
-        Width(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.value().columns)),
-        Height(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.value().columns))
+        Width(*cellSize.width * unbox<unsigned>(newPageSize.columns)),
+        Height(*cellSize.height * unbox<unsigned>(newPageSize.lines))
     };
     _renderer->setPageSize(newPageSize);
     auto const l = scoped_lock { terminal() };

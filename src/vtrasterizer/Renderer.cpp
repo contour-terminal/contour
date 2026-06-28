@@ -136,6 +136,7 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     }() },
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
     _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
+    _publishedMetrics { _gridMetrics },
     //.
     _backgroundRenderer { _gridMetrics, colorPalette.defaultBackground },
     _imageRenderer { _gridMetrics, cellSize() },
@@ -241,6 +242,18 @@ void Renderer::clearCache()
 
 void Renderer::setFonts(FontDescriptions fontDescriptions)
 {
+    // The text shaper is not thread-safe and is used by the render thread during every frame, so we
+    // only *stage* the requested font descriptions here (on the UI thread). The shaper reconfiguration,
+    // font loading and grid-metrics/atlas rebuild happen on the render thread in applyPendingReconfig().
+    auto const l = std::scoped_lock { _reconfigMutex };
+    auto& pending = ensurePendingLocked();
+    pending.fontDescriptions = std::move(fontDescriptions);
+    // A full font-descriptions change supersedes any pending size-only change.
+    pending.fontSize.reset();
+}
+
+void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
+{
     if (fontDescriptions == _fontDescriptions)
         return;
 
@@ -284,9 +297,17 @@ bool Renderer::setFontSize(text::font_size fontSize)
     if (fontSize.pt > 200.)
         return false;
 
-    _fontDescriptions.size = fontSize;
-    _fonts = loadFontKeys(_fontDescriptions, *_textShaper);
-    updateFontMetrics();
+    // The text shaper is not thread-safe and is used by the render thread during every frame.
+    // We therefore only *stage* the requested size here (on the UI thread); the actual font loading
+    // and grid-metrics recomputation happen on the render thread in applyPendingReconfig().
+    auto const l = std::scoped_lock { _reconfigMutex };
+    auto& pending = ensurePendingLocked();
+    if (pending.fontDescriptions)
+        // A full font-descriptions change is already staged; fold the new size into it so the most
+        // recent size wins rather than being dropped when the descriptions are applied.
+        pending.fontDescriptions->size = fontSize;
+    else
+        pending.fontSize = fontSize;
 
     return true;
 }
@@ -304,6 +325,75 @@ void Renderer::updateFontMetrics()
     _imageRenderer.setCellSize(cellSize());
 
     clearCache();
+}
+
+void Renderer::applyPendingReconfig()
+{
+    // Runs on the render thread, at the start of renderImpl(), before any renderable reads
+    // _gridMetrics or the texture atlas. This is the *only* place those are mutated after
+    // construction, so the data race between UI-thread reconfiguration and rendering is avoided.
+
+    // Fast path: avoid acquiring the mutex on every frame when nothing is staged. The atomic is set
+    // under _reconfigMutex by the UI-thread writers, so a false reading here means no writer has
+    // committed a request yet — and the next frame will pick it up.
+    if (!_reconfigPending.load(std::memory_order_relaxed))
+        return;
+
+    auto const l = std::scoped_lock { _reconfigMutex };
+
+    if (!_pendingReconfig)
+        return;
+
+    auto const pending = std::move(*_pendingReconfig);
+    _pendingReconfig.reset();
+    _reconfigPending.store(false, std::memory_order_relaxed);
+
+    // Apply a pending geometry change (page size, margin, render-surface pixel size).
+    if (pending.geometry)
+    {
+        auto const& geometry = *pending.geometry;
+        if (_renderTarget)
+        {
+            if (geometry.pixelSize)
+                _renderTarget->setRenderSize(*geometry.pixelSize);
+            _renderTarget->setMargin(geometry.pageMargin);
+        }
+        _gridMetrics.pageSize = geometry.pageSize;
+        _gridMetrics.pageMargin = geometry.pageMargin;
+    }
+
+    // Apply a pending font change (full descriptions or size-only): reconfigure the shaper, load the
+    // fonts and rebuild grid metrics + atlas here, on the render thread, so the non-thread-safe text
+    // shaper is never touched concurrently with rendering.
+    if (pending.fontDescriptions || pending.fontSize)
+    {
+        // applyFontDescriptions()/updateFontMetrics() recompute the per-cell metrics from the font and
+        // reset the page geometry, so preserve the current page size/margin across the rebuild.
+        auto const pageSize = _gridMetrics.pageSize;
+        auto const pageMargin = _gridMetrics.pageMargin;
+
+        if (pending.fontDescriptions)
+        {
+            applyFontDescriptions(*pending.fontDescriptions);
+        }
+        else // pending.fontSize
+        {
+            _fontDescriptions.size = *pending.fontSize;
+            _fonts = loadFontKeys(_fontDescriptions, *_textShaper);
+            updateFontMetrics();
+        }
+
+        _gridMetrics.pageSize = pageSize;
+        _gridMetrics.pageMargin = pageMargin;
+
+        // Signal the display to recompute the page size against the new cell size (see
+        // consumeFontReconfigApplied()): the font change altered the cell metrics, so the grid
+        // dimensions derived on the UI thread before this apply may now be stale.
+        _fontReconfigApplied.store(true, std::memory_order_release);
+    }
+
+    // Publish the freshly applied metrics so UI-thread readers (gridMetrics()) observe them.
+    _publishedMetrics = _gridMetrics;
 }
 
 void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
@@ -324,8 +414,12 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 
 void Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 {
+    // Apply any geometry/font reconfiguration requested by the UI thread before rendering.
+    // This is the only point at which _gridMetrics and the texture atlas are mutated after
+    // construction, keeping all such mutation on the render thread (see applyPendingReconfig()).
+    applyPendingReconfig();
+
     auto const statusLineHeight = terminal.statusLineHeight();
-    _gridMetrics.pageSize = terminal.pageSize() + statusLineHeight;
 
     executeImageDiscards();
 

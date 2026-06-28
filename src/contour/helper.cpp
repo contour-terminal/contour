@@ -770,8 +770,11 @@ bool applyFontDescription(text::DPI dpi,
     if (renderer.fontDescriptions() == fontDescriptions)
         return false;
 
+    // setFonts() only *stages* the change; the shaper reconfiguration, font loading and
+    // grid-metrics/atlas rebuild happen on the render thread in applyPendingReconfig(). Do NOT call
+    // updateFontMetrics() here: it mutates _gridMetrics, rebuilds the texture atlas and touches the
+    // non-thread-safe text shaper, which would race the render thread mid-frame (issue #1922).
     renderer.setFonts(sanitizeFontDescription(std::move(fontDescriptions), dpi));
-    renderer.updateFontMetrics();
 
     return true;
 }
@@ -784,21 +787,20 @@ void applyResize(vtbackend::ImageSize newPixelSize,
         return;
 
     auto const oldPageSize = session.terminal().totalPageSize();
+    // gridMetrics() copies a struct under a mutex, so read it once and reuse the cell size below.
+    vtbackend::ImageSize const cellSize = renderer.gridMetrics().cellSize;
     auto const newPageSize = pageSizeForPixels(
         newPixelSize,
-        renderer.gridMetrics().cellSize,
+        cellSize,
         applyContentScale(session.profile().margins.value(), session.display()->contentScale()));
     vtbackend::Terminal& terminal = session.terminal();
-    vtbackend::ImageSize const cellSize = renderer.gridMetrics().cellSize;
 
-    if (renderer.hasRenderTarget())
-        renderer.renderTarget().setRenderSize(newPixelSize);
-    renderer.setPageSize(newPageSize);
-    renderer.setMargin(computeMargin(
-        renderer.gridMetrics().cellSize,
+    auto const newMargin = computeMargin(
+        cellSize,
         newPageSize,
         newPixelSize,
-        applyContentScale(session.profile().margins.value(), session.display()->contentScale())));
+        applyContentScale(session.profile().margins.value(), session.display()->contentScale()));
+    renderer.applyResize(newPixelSize, newPageSize, newMargin);
 
     if (oldPageSize.lines != newPageSize.lines)
         emit session.lineCountChanged(newPageSize.lines.as<int>());

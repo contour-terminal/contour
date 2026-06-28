@@ -19,8 +19,11 @@
 
 #include <gsl/pointers>
 
+#include <atomic>
 #include <format>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -45,6 +48,8 @@ struct RenderCursor
 class Renderer
 {
   public:
+    friend class RendererTest; //!< Grants unit tests access to the deferred-reconfiguration internals.
+
     /** Constructs a Renderer instances.
      *
      * @p fonts              Reference to the set of loaded fonts to be used for rendering text.
@@ -62,6 +67,11 @@ class Renderer
              Decorator hyperlinkNormal,
              Decorator hyperlinkHover);
 
+    /// Returns the live cell size from the grid metrics.
+    ///
+    /// @warning Reads the live _gridMetrics without synchronization; intended for render-thread /
+    ///          construction-time use only. UI-thread callers must use gridMetrics().cellSize, which
+    ///          returns the published (mutex-guarded) copy.
     [[nodiscard]] ImageSize cellSize() const noexcept { return _gridMetrics.cellSize; }
 
     /// Initializes the render and all render subsystems with the given RenderTarget
@@ -76,20 +86,68 @@ class Renderer
     [[nodiscard]] FontDescriptions const& fontDescriptions() const noexcept { return _fontDescriptions; }
     void setFonts(FontDescriptions fontDescriptions);
 
-    [[nodiscard]] GridMetrics const& gridMetrics() const noexcept { return _gridMetrics; }
+    /// Returns the most recently *published* grid metrics.
+    ///
+    /// Geometry writers (setPageSize/applyResize) publish synchronously; font writers (setFonts/
+    /// setFontSize) only stage, so the new cell size appears only after a frame (or setup-time apply).
+    ///
+    /// @note Thread-safe with respect to concurrent reconfiguration requests.
+    [[nodiscard]] GridMetrics gridMetrics() const noexcept
+    {
+        auto const l = std::scoped_lock { _reconfigMutex };
+        return _publishedMetrics;
+    }
+
+    /// Atomically reads and clears the "a font reconfiguration was applied" flag.
+    ///
+    /// A font change (setFontSize/setFonts) is applied lazily on the render thread, so the new cell
+    /// size only becomes available after a frame. The display polls this after rendering and, when it
+    /// returns true, re-derives the terminal page size against the now-current cell size — otherwise a
+    /// font/DPI change would size the grid using the previous cell size for a frame.
+    ///
+    /// @return true if a font reconfiguration has been applied since the last call.
+    [[nodiscard]] bool consumeFontReconfigApplied() noexcept
+    {
+        return _fontReconfigApplied.exchange(false, std::memory_order_acq_rel);
+    }
 
     void setHyperlinkDecoration(Decorator normal, Decorator hover)
     {
         _decorationRenderer.setHyperlinkDecoration(normal, hover);
     }
 
-    void setPageSize(vtbackend::PageSize screenSize) noexcept { _gridMetrics.pageSize = screenSize; }
-
-    void setMargin(PageMargin margin) noexcept
+    /// Requests a new page size (in columns/lines).
+    ///
+    /// The change is published immediately (visible via gridMetrics()) and the actual
+    /// grid-metrics mutation is applied on the render thread at the start of the next frame.
+    ///
+    /// @param screenSize  the new page size.
+    void setPageSize(vtbackend::PageSize screenSize) noexcept
     {
-        if (_renderTarget)
-            _renderTarget->setMargin(margin);
-        _gridMetrics.pageMargin = margin;
+        auto const l = std::scoped_lock { _reconfigMutex };
+        _publishedMetrics.pageSize = screenSize;
+        stagePendingGeometryLocked();
+    }
+
+    /// Requests a combined render-surface resize: pixel size, page size and margin.
+    ///
+    /// Consolidates the three geometry writers so the render target and grid metrics are
+    /// updated atomically (on the render thread) rather than in three separately-observable steps.
+    ///
+    /// @param newPixelSize  new render surface size in pixels.
+    /// @param newPageSize   new page size in columns/lines.
+    /// @param newMargin     new page margin in pixels.
+    void applyResize(vtbackend::ImageSize newPixelSize,
+                     vtbackend::PageSize newPageSize,
+                     PageMargin newMargin) noexcept
+    {
+        auto const l = std::scoped_lock { _reconfigMutex };
+        _publishedMetrics.pageSize = newPageSize;
+        _publishedMetrics.pageMargin = newMargin;
+        auto& pending = ensurePendingLocked();
+        pending.geometry = PendingReconfig::Geometry { .pixelSize = newPixelSize,
+                                                       .pageSize = newPageSize,
+                                                       .pageMargin = newMargin };
     }
 
     /**
@@ -104,6 +162,14 @@ class Renderer
      *                       is known already to be updated right after again.
      */
     void render(vtbackend::Terminal& terminal, bool pressureHint);
+
+    /// Synchronously applies any staged font/geometry reconfiguration.
+    ///
+    /// For display setup, before any frame, when a caller must read the resulting cell metrics
+    /// immediately (e.g. to size the texture atlas tile) rather than wait for the render thread.
+    ///
+    /// @warning Only safe to call while no render thread is concurrently rendering (i.e. during setup).
+    void applyStagedReconfigDuringSetup() { applyPendingReconfig(); }
 
     void discardImage(vtbackend::Image const& image);
 
@@ -180,7 +246,91 @@ class Renderer
     std::unique_ptr<text::shaper> _textShaper;
     FontKeys _fonts;
 
+    /// The live grid metrics, mutated *only* on the render thread (at the start of renderImpl()).
+    ///
+    /// All sub-renderers hold a const reference to this object and read it throughout a frame,
+    /// hence it must never be written while a frame is in flight. UI-thread writers therefore do
+    /// not touch it directly; they stage a request (see _pendingReconfig) that the render thread
+    /// applies between frames.
     GridMetrics _gridMetrics;
+
+    /// A staged, not-yet-applied reconfiguration request produced by UI-thread writers.
+    ///
+    /// Carries the *inputs* of a pending change. The render thread consumes it at the top of
+    /// renderImpl() to rebuild grid metrics / the texture atlas on the render thread, eliminating
+    /// the data race between UI-thread geometry/font changes and the render thread.
+    struct PendingReconfig
+    {
+        /// Pending geometry change: new page size, margin and (optionally) render-surface pixel size.
+        struct Geometry
+        {
+            std::optional<vtbackend::ImageSize> pixelSize; //!< New render surface size, if it changed.
+            vtbackend::PageSize pageSize;                  //!< New page size in columns/lines.
+            PageMargin pageMargin;                         //!< New page margin in pixels.
+        };
+
+        /// Pending font change. Either a size-only change (fontSize) or a full font-descriptions
+        /// change (fontDescriptions, which supersedes a size-only change). Only the *inputs* are
+        /// staged; the heavyweight work (font loading, metric computation via the non-thread-safe
+        /// text shaper, atlas rebuild) is performed on the render thread during applyPendingReconfig().
+        std::optional<text::font_size> fontSize;          //!< Set when only the font size changed.
+        std::optional<FontDescriptions> fontDescriptions; //!< Set when the full font config changed.
+        std::optional<Geometry> geometry;                 //!< Set when a geometry change is pending.
+    };
+
+    /// Protects _pendingReconfig and _publishedMetrics, and serializes the render-thread apply.
+    mutable std::mutex _reconfigMutex;
+
+    /// The most recently *requested* grid metrics, observable synchronously via gridMetrics().
+    ///
+    /// Kept in sync by UI-thread writers so callers needing the new cell size immediately are not
+    /// blocked on the deferred render-thread apply. Guarded by _reconfigMutex.
+    GridMetrics _publishedMetrics;
+
+    /// The staged reconfiguration awaiting application by the render thread. Guarded by _reconfigMutex.
+    std::optional<PendingReconfig> _pendingReconfig;
+
+    /// Mirrors `_pendingReconfig.has_value()` for a lock-free fast path: applyPendingReconfig() runs on
+    /// every frame and consults this first, only acquiring _reconfigMutex when something is actually
+    /// staged. Written under _reconfigMutex; read relaxed on the render thread.
+    std::atomic<bool> _reconfigPending { false };
+
+    /// Set by applyPendingReconfig() (render thread) when a font change was applied; consumed by the
+    /// display (consumeFontReconfigApplied()) to trigger a page-size recompute against the new cell
+    /// size. Atomic because it is written on the render thread and read on the display thread.
+    std::atomic<bool> _fontReconfigApplied { false };
+
+    /// Ensures a PendingReconfig exists and returns it. Caller must hold _reconfigMutex.
+    PendingReconfig& ensurePendingLocked()
+    {
+        if (!_pendingReconfig)
+            _pendingReconfig.emplace();
+        _reconfigPending.store(true, std::memory_order_relaxed);
+        return *_pendingReconfig;
+    }
+
+    /// Stages a geometry-only pending request derived from the current _publishedMetrics.
+    ///
+    /// A render-surface pixel size already staged by a prior applyResize() is preserved; a page-size-
+    /// or margin-only change leaves the pixel size untouched (std::nullopt → render size unchanged).
+    /// Caller must hold _reconfigMutex.
+    void stagePendingGeometryLocked()
+    {
+        auto& pending = ensurePendingLocked();
+        auto const pixelSize = pending.geometry ? pending.geometry->pixelSize : std::nullopt;
+        pending.geometry = PendingReconfig::Geometry { .pixelSize = pixelSize,
+                                                       .pageSize = _publishedMetrics.pageSize,
+                                                       .pageMargin = _publishedMetrics.pageMargin };
+    }
+
+    /// Applies any staged reconfiguration. Called on the render thread at the start of renderImpl().
+    void applyPendingReconfig();
+
+    /// Applies a full font-descriptions change (shaper reconfiguration, font loading, grid-metrics
+    /// rebuild, atlas reconfiguration). Runs on the render thread from applyPendingReconfig().
+    ///
+    /// @param fontDescriptions  the new font descriptions to apply.
+    void applyFontDescriptions(FontDescriptions fontDescriptions);
 
     std::mutex _imageDiscardLock;                       //!< Lock guard for accessing _discardImageQueue.
     std::vector<vtbackend::ImageId> _discardImageQueue; //!< List of images to be discarded.

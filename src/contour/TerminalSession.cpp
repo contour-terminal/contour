@@ -332,7 +332,8 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 void TerminalSession::scheduleRedraw()
 {
     _terminal.markScreenDirty();
-    _manager->update();
+    // Don't refresh GUI tab info here: reached from the parser thread while _stateMutex is held (ESU path),
+    // so _manager->update() would re-lock that non-recursive mutex. It only changes on GUI-thread events.
     if (_display)
         _display->scheduleRedraw();
 }
