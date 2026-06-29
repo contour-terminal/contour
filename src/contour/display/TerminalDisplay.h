@@ -132,6 +132,15 @@ class TerminalDisplay: public QQuickItem
     void setFonts(vtrasterizer::FontDescriptions fontDescriptions);
     bool setFontSize(text::font_size newFontSize);
     bool setPageSize(vtbackend::PageSize newPageSize);
+
+    /// Pushes @p totalPageSize into the renderer's published/live grid metrics.
+    ///
+    /// For callers that resize the terminal directly (bypassing setPageSize()/applyResize()), so the
+    /// renderer's page size stays consistent with the terminal's. Does not resize the terminal itself.
+    ///
+    /// @param totalPageSize  the terminal's total page size (including the status line) to publish.
+    void syncRendererPageSize(vtbackend::PageSize totalPageSize);
+
     void setMouseCursorShape(MouseCursorShape newCursorShape);
     void setWindowFullScreen();
     void setWindowMaximized();

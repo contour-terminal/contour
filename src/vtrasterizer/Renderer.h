@@ -98,6 +98,17 @@ class Renderer
         return _publishedMetrics;
     }
 
+    /// Returns the most recently *published* cell size, lock-free.
+    ///
+    /// Equivalent to gridMetrics().cellSize but without taking _reconfigMutex or copying the whole
+    /// GridMetrics struct — for the many UI-thread hot paths (per-frame sync, scroll, IME, size
+    /// recompute) that need only the cell size. Reading it also cannot tear against a concurrent
+    /// render-thread font apply, unlike two separate gridMetrics().cellSize reads.
+    [[nodiscard]] ImageSize publishedCellSize() const noexcept
+    {
+        return _publishedCellSize.load(std::memory_order_acquire);
+    }
+
     /// Atomically reads and clears the "a font reconfiguration was applied" flag.
     ///
     /// A font change (setFontSize/setFonts) is applied lazily on the render thread, so the new cell
@@ -286,6 +297,12 @@ class Renderer
     /// Kept in sync by UI-thread writers so callers needing the new cell size immediately are not
     /// blocked on the deferred render-thread apply. Guarded by _reconfigMutex.
     GridMetrics _publishedMetrics;
+
+    /// Lock-free mirror of _publishedMetrics.cellSize for publishedCellSize(). Written wherever the
+    /// published cell size changes (construction and the render-thread font apply); read without the
+    /// mutex by UI-thread hot paths. The cell size only changes via font/DPI reconfiguration, never via
+    /// geometry writers, so this stays consistent with _publishedMetrics.cellSize.
+    std::atomic<ImageSize> _publishedCellSize;
 
     /// The staged reconfiguration awaiting application by the render thread. Guarded by _reconfigMutex.
     std::optional<PendingReconfig> _pendingReconfig;

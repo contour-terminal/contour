@@ -83,6 +83,23 @@ class RendererTest
     {
         renderer._gridMetrics = metrics;
         renderer._publishedMetrics = metrics;
+        renderer._publishedCellSize.store(metrics.cellSize, std::memory_order_release);
+    }
+
+    /// Returns the staged pending font descriptions, if a full font-descriptions change is staged.
+    [[nodiscard]] static std::optional<FontDescriptions> pendingFontDescriptions(Renderer const& renderer)
+    {
+        if (!renderer._pendingReconfig)
+            return std::nullopt;
+        return renderer._pendingReconfig->fontDescriptions;
+    }
+
+    /// Returns the staged pending font size, if a size-only change is staged.
+    [[nodiscard]] static std::optional<text::font_size> pendingFontSize(Renderer const& renderer)
+    {
+        if (!renderer._pendingReconfig)
+            return std::nullopt;
+        return renderer._pendingReconfig->fontSize;
     }
 };
 } // namespace vtrasterizer

@@ -137,6 +137,7 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
     _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
     _publishedMetrics { _gridMetrics },
+    _publishedCellSize { _gridMetrics.cellSize },
     //.
     _backgroundRenderer { _gridMetrics, colorPalette.defaultBackground },
     _imageRenderer { _gridMetrics, cellSize() },

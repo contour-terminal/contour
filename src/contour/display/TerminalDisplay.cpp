@@ -717,7 +717,7 @@ void TerminalDisplay::onBeforeSynchronize()
     // resize must happen). applyResize() no-ops when the page size already matches,
     // and the per-frame cost when in sync is a single page-size comparison.
     auto const expectedPageSize = pageSizeForPixels(
-        viewSize, _renderer->gridMetrics().cellSize, applyContentScale(profile().margins.value(), dpr));
+        viewSize, _renderer->publishedCellSize(), applyContentScale(profile().margins.value(), dpr));
     if (expectedPageSize != _session->terminal().totalPageSize())
         post([this]() {
             if (_session && _renderTarget && window())
@@ -1074,16 +1074,19 @@ void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
 
 QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
 {
+    // Read the published cell size once (lock-free), then reuse it: avoids three locked GridMetrics
+    // copies per query (this fires on every keystroke with an IME active) and prevents a torn read where
+    // the width and height could come from different published values across a concurrent font apply.
+    auto const cellSize = _renderer->publishedCellSize();
+
     auto const getCursorPosition = [&]() -> QPoint {
         QPoint cursorPos = QPoint();
         if (terminal().isCursorInViewport())
         {
             auto const dpr = contentScale();
             auto const gridCursorPos = terminal().currentScreen().cursor().position;
-            cursorPos.setX(int(unbox<double>(gridCursorPos.column)
-                               * unbox<double>(_renderer->gridMetrics().cellSize.width)));
-            cursorPos.setY(int(unbox<double>(gridCursorPos.line)
-                               * unbox<double>(_renderer->gridMetrics().cellSize.height)));
+            cursorPos.setX(int(unbox<double>(gridCursorPos.column) * unbox<double>(cellSize.width)));
+            cursorPos.setY(int(unbox<double>(gridCursorPos.line) * unbox<double>(cellSize.height)));
             cursorPos /= dpr;
         }
         return cursorPos;
@@ -1092,16 +1095,15 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
     switch (query)
     {
         case Qt::ImCursorRectangle: {
-            auto const gridMetrics = _renderer->gridMetrics();
             auto theContentsRect = QRect(); // TODO: contentsRect();
             auto result = QRect();
             auto const dpr = contentScale();
             auto const cursorPos = getCursorPosition();
             result.setLeft(theContentsRect.left() + cursorPos.x());
             result.setTop(theContentsRect.top() + cursorPos.y());
-            result.setWidth(int(unbox<double>(gridMetrics.cellSize.width)
-                                / dpr)); // TODO: respect double-width characters
-            result.setHeight(int(unbox<double>(gridMetrics.cellSize.height) / dpr));
+            result.setWidth(
+                int(unbox<double>(cellSize.width) / dpr)); // TODO: respect double-width characters
+            result.setHeight(int(unbox<double>(cellSize.height) / dpr));
             return result;
             break;
         }
@@ -1232,7 +1234,7 @@ void TerminalDisplay::updateImplicitSize()
     auto const totalPageSize = _session->terminal().totalPageSize();
     auto const dpr = contentScale();
 
-    auto const actualGridCellSize = _renderer->gridMetrics().cellSize;
+    auto const actualGridCellSize = _renderer->publishedCellSize();
     auto const scaledMargins = applyContentScale(_session->profile().margins.value(), dpr);
 
     // Compute the required size in actual pixels using exact integer arithmetic,
@@ -1263,7 +1265,7 @@ void TerminalDisplay::updateSizeConstraints()
     assert(_session);
 
     auto const dpr = contentScale();
-    auto const actualCellSize = _renderer->gridMetrics().cellSize;
+    auto const actualCellSize = _renderer->publishedCellSize();
     auto const margins = _session->profile().margins.value();
 
     // Minimum size (existing logic, unchanged)
@@ -1326,12 +1328,14 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
     auto const scaledWindowMarginsPixels =
         vtbackend::ImageSize { Width::cast_from(unbox(scaledWindowMargins.horizontal) * 2),
                                Height::cast_from(unbox(scaledWindowMargins.vertical) * 2) };
-    return gridMetrics().cellSize * _session->terminal().totalPageSize() + scaledWindowMarginsPixels;
+    return _renderer->publishedCellSize() * _session->terminal().totalPageSize() + scaledWindowMarginsPixels;
 }
 
 vtbackend::ImageSize TerminalDisplay::cellSize() const
 {
-    return gridMetrics().cellSize;
+    // Lock-free published cell-size read; avoids taking the renderer's reconfig mutex and copying the
+    // whole GridMetrics struct just to extract the cell size on these hot UI paths.
+    return _renderer->publishedCellSize();
 }
 // }}}
 
@@ -1511,7 +1515,7 @@ void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend:
     // direction. This avoids cumulative rounding errors from the previous approach
     // of computing an unscaled cell size separately (which involved two std::ceil
     // operations that could inflate the pixel count).
-    auto const cellSize = gridMetrics().cellSize;
+    auto const cellSize = _renderer->publishedCellSize();
     auto const scaledMargins = applyContentScale(_session->profile().margins.value(), contentScale());
     auto const targetScaledSize = vtbackend::ImageSize {
         cellSize.width * boxed_cast<vtbackend::Width>(requestedPageSize.columns)
@@ -1568,16 +1572,22 @@ bool TerminalDisplay::setPageSize(PageSize newPageSize)
         return false;
 
     // Derive the view size from the *requested* page size (not the configured profile size), reading the
-    // cell size once to avoid two locked GridMetrics copies and a possible torn read between them.
-    auto const cellSize = gridMetrics().cellSize;
-    auto const viewSize = ImageSize {
-        Width(*cellSize.width * unbox<unsigned>(newPageSize.columns)),
-        Height(*cellSize.height * unbox<unsigned>(newPageSize.lines))
-    };
+    // published cell size once (lock-free) to avoid two locked GridMetrics copies and a torn read.
+    auto const cellSize = _renderer->publishedCellSize();
+    auto const viewSize = ImageSize { Width(*cellSize.width * unbox<unsigned>(newPageSize.columns)),
+                                      Height(*cellSize.height * unbox<unsigned>(newPageSize.lines)) };
     _renderer->setPageSize(newPageSize);
     auto const l = scoped_lock { terminal() };
     terminal().resizeScreen(newPageSize, viewSize);
     return true;
+}
+
+void TerminalDisplay::syncRendererPageSize(PageSize totalPageSize)
+{
+    Require(_renderer != nullptr);
+    // setPageSize() publishes the page size immediately and stages the (idempotent) grid-metrics update
+    // for the next frame; it does not resize the terminal, which the caller already did directly.
+    _renderer->setPageSize(totalPageSize);
 }
 
 void TerminalDisplay::setMouseCursorShape(MouseCursorShape newCursorShape)

@@ -787,8 +787,8 @@ void applyResize(vtbackend::ImageSize newPixelSize,
         return;
 
     auto const oldPageSize = session.terminal().totalPageSize();
-    // gridMetrics() copies a struct under a mutex, so read it once and reuse the cell size below.
-    vtbackend::ImageSize const cellSize = renderer.gridMetrics().cellSize;
+    // Read the published cell size once (lock-free), reused for both the page size and margin below.
+    vtbackend::ImageSize const cellSize = renderer.publishedCellSize();
     auto const newPageSize = pageSizeForPixels(
         newPixelSize,
         cellSize,
