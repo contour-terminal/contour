@@ -515,6 +515,20 @@ void Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 
     auto const statusLineHeight = terminal.statusLineHeight();
 
+    // Reconcile the page size with the terminal's *total* page size. Most page-size changes flow
+    // through setPageSize()/applyResize() (which publish synchronously), but the terminal can also
+    // change its total page size on its own thread without those — notably toggling the indicator
+    // status line on/off (setStatusDisplay() -> resizeScreen()), which adds/removes a line. Detect that
+    // divergence here, on the render thread, and update + publish so gridMetrics().pageSize stays
+    // consistent with the terminal. Guarded by an equality check so the common (unchanged) case adds no
+    // per-frame mutex traffic.
+    if (auto const totalPageSize = terminal.totalPageSize(); _gridMetrics.pageSize != totalPageSize)
+    {
+        _gridMetrics.pageSize = totalPageSize;
+        auto const l = std::scoped_lock { _reconfigMutex };
+        _publishedMetrics.pageSize = totalPageSize;
+    }
+
     executeImageDiscards();
 
 #if !defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE) // {{{
