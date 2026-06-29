@@ -138,13 +138,15 @@ class TerminalDisplay: public QQuickItem
 
     bool setPageSize(vtbackend::PageSize newPageSize);
 
-    /// Pushes @p totalPageSize into the renderer's published/live grid metrics.
+    /// Pushes the full geometry (page size, render-surface pixel size and margin) into the renderer.
     ///
     /// For callers that resize the terminal directly (bypassing setPageSize()/applyResize()), so the
-    /// renderer's page size stays consistent with the terminal's. Does not resize the terminal itself.
+    /// renderer's grid metrics — including the margin — stay consistent with the terminal's. Does not
+    /// resize the terminal itself.
     ///
     /// @param totalPageSize  the terminal's total page size (including the status line) to publish.
-    void syncRendererPageSize(vtbackend::PageSize totalPageSize);
+    /// @param pixelSize      the render-surface size in pixels to publish.
+    void syncRendererGeometry(vtbackend::PageSize totalPageSize, vtbackend::ImageSize pixelSize);
 
     void setMouseCursorShape(MouseCursorShape newCursorShape);
     void setWindowFullScreen();

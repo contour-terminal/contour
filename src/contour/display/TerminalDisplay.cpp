@@ -1675,12 +1675,19 @@ bool TerminalDisplay::setPageSize(PageSize newPageSize)
     return true;
 }
 
-void TerminalDisplay::syncRendererPageSize(PageSize totalPageSize)
+void TerminalDisplay::syncRendererGeometry(PageSize totalPageSize, vtbackend::ImageSize pixelSize)
 {
     Require(_renderer != nullptr);
-    // setPageSize() publishes the page size immediately and stages the (idempotent) grid-metrics update
-    // for the next frame; it does not resize the terminal, which the caller already did directly.
-    _renderer->setPageSize(totalPageSize);
+    // The caller resized the terminal directly (bypassing the renderer's geometry staging). Push the
+    // *full* geometry — page size, render-surface pixel size and margin — into the renderer, not just the
+    // page size: a page-size-only sync would leave the previous session's margin in the live grid metrics
+    // until some later resize nudged it, so a session-switch could render with the wrong margins (bottom
+    // rows mis-clipped) on a display whose first post-switch frame is delayed. The margin is derived from
+    // the renderer's published cell size and the profile margins, exactly as helper::applyResize() does.
+    auto const cellSize = _renderer->publishedCellSize();
+    auto const margin = computeMargin(
+        cellSize, totalPageSize, pixelSize, applyContentScale(profile().margins.value(), contentScale()));
+    _renderer->applyResize(pixelSize, totalPageSize, margin);
 }
 
 void TerminalDisplay::setMouseCursorShape(MouseCursorShape newCursorShape)
