@@ -802,6 +802,19 @@ void TerminalDisplay::createRenderer()
     // frame to apply it, so materialize it now to read the correct cell size for the texture atlas tile.
     _renderer->applyStagedReconfigDuringSetup();
 
+    // applyFontDPI()'s no-render-target branch already computed updateImplicitSize() — but against the
+    // still-stale (pre-correction) cell size, because the staged DPI was only materialized just above. On
+    // a fractional-scaling display where Qt corrected the DPR between setSession() and here, that implicit
+    // size is wrong, and applyResize() below derives the initial geometry from it, opening the window at
+    // the wrong pixel size / column count for a frame. Recompute it now that the corrected cell size is
+    // live. _initialImplicitWidth/Height (snapshotted above) intentionally keep the pre-correction values
+    // for sizeChanged()'s reversion detection, so they are left untouched.
+    if (window())
+    {
+        updateImplicitSize();
+        updateSizeConstraints();
+    }
+
     // Clear the "font reconfig applied" signal raised by the setup-time apply above. The geometry is
     // sized correctly below (applyResize() + the implicit-size/constraints setup), so we must not let
     // the first painted frame's consumeFontReconfigApplied() post a redundant resize/recompute, which
