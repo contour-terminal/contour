@@ -1386,10 +1386,21 @@ class Terminal
     void setStatusLineDefinition(StatusLineDefinition&& definition);
     void resetStatusLineDefinition();
 
-    TabsInfo guiTabsInfoForStatusLine() const noexcept { return _guiTabInfoForStatusLine; }
+    TabsInfo guiTabsInfoForStatusLine() const
+    {
+        // The render thread reads this from fillRenderBufferStatusLine() (already under _stateMutex), and
+        // the GUI thread writes it from setGuiTabInfoForStatusLine(). Serialize the two on a dedicated,
+        // lightweight mutex rather than _stateMutex: the GUI-thread writer would otherwise block on the
+        // heavily-contended _stateMutex for the full duration the parser thread holds it during a burst of
+        // output, stalling input/redraw. _guiTabInfoMutex is only ever held for this small copy, so the
+        // read taking both locks introduces no contention and no lock-order inversion (the writer never
+        // takes _stateMutex).
+        auto const l = std::lock_guard { _guiTabInfoMutex };
+        return _guiTabInfoForStatusLine;
+    }
     void setGuiTabInfoForStatusLine(TabsInfo&& info)
     {
-        auto const l = std::lock_guard { _stateMutex };
+        auto const l = std::lock_guard { _guiTabInfoMutex };
         _guiTabInfoForStatusLine = std::move(info);
     }
 
@@ -1610,6 +1621,10 @@ class Terminal
 
     // {{{ tabs info
     TabsInfo _guiTabInfoForStatusLine;
+    /// Guards _guiTabInfoForStatusLine. Dedicated (not _stateMutex) so the GUI-thread writer
+    /// (setGuiTabInfoForStatusLine) does not block on the heavily-contended _stateMutex held by the parser
+    /// thread during output bursts. Held only for the small copy in the accessor/mutator.
+    std::mutex mutable _guiTabInfoMutex;
     // }}}
 
     // {{{ selection states
