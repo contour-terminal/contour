@@ -219,8 +219,12 @@ class TerminalDisplay: public QQuickItem
 
         // auto const availablePixels = gridMetrics().cellSize * _session->terminal().pageSize();
         auto const availablePixels = pixelSize();
+        // Use the lock-free publishedCellSize() for the divisor — the same accessor pixelSize() uses for
+        // the dividend — so both reads resolve from one source (and one atomic load that cannot tear
+        // against a concurrent render-thread font apply), rather than mixing it with the mutex-guarded
+        // gridMetrics().cellSize.
         return pageSizeForPixels(availablePixels,
-                                 _renderer->gridMetrics().cellSize,
+                                 _renderer->publishedCellSize(),
                                  applyContentScale(_session->profile().margins.value(), contentScale()));
     }
 
