@@ -219,13 +219,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
-    std::optional<std::string> name() const noexcept
+    std::optional<std::string> name() const
     {
-        if (terminal().tabName())
-            return terminal().tabName();
-        if (terminal().getTabsNamingMode() == vtbackend::TabsNamingMode::Title)
-            return terminal().windowTitle();
-        return std::nullopt;
+        // Resolve under the terminal's _stateMutex: this runs on the GUI thread (via
+        // TerminalSessionManager::updateStatusLine(), reached from a posted refreshGuiTabInfoForStatusLine
+        // or on tab activation) while the parser thread writes the title strings under that mutex.
+        // Reading them across separate unlocked accessor calls would race the writer.
+        return terminal().resolvedTabName();
     }
 
     /// Starts the VT background thread.
@@ -280,6 +280,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void requestWindowResize(vtbackend::LineCount, vtbackend::ColumnCount) override;
     void requestWindowResize(vtbackend::Width, vtbackend::Height) override;
     void setWindowTitle(std::string_view title) override;
+    void setTabName(std::string_view name) override;
     void setTerminalProfile(std::string const& configProfileName) override;
     void discardImage(vtbackend::Image const&) override;
     void inputModeChanged(vtbackend::ViMode mode) override;
@@ -453,6 +454,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool resetConfig();
     void followHyperlink(vtbackend::HyperlinkInfo const& hyperlink);
     void setFontSize(text::font_size size);
+
+    /// Posts a refresh of the indicator status-line tab info (tab names) to the GUI thread.
+    ///
+    /// Called when the window title or tab name changes at runtime. Must not refresh inline: these
+    /// notifications arrive on the parser thread while the terminal state mutex is held, and the
+    /// refresh re-enters that non-recursive mutex (see scheduleRedraw()), so it is deferred to the GUI
+    /// thread via the display's event loop.
+    void refreshGuiTabInfoForStatusLine();
+
     void setDefaultCursor();
     void configureTerminal();
     void configureCursor(config::CursorConfig const& cursorConfig);

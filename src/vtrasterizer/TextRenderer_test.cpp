@@ -1,4 +1,5 @@
 #include <vtbackend/Color.h>
+#include <vtbackend/ColorPalette.h>
 
 #include <vtrasterizer/FontDescriptions.h>
 #include <vtrasterizer/GridMetrics.h>
@@ -16,10 +17,13 @@
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <ranges>
 #include <string_view>
+#include <thread>
 
 static std::filesystem::path testFontPath;
 
@@ -48,6 +52,54 @@ class TextRendererTest
         unicode::PresentationStyle presentation)
     {
         return renderer.createRasterizedGlyph(tileLocation, glyphKey, presentation);
+    }
+};
+
+/// Test accessor granting unit tests access to Renderer's deferred-reconfiguration internals.
+class RendererTest
+{
+  public:
+    /// Triggers the render-thread reconfiguration step that renderImpl() would normally run.
+    static void applyPendingReconfig(Renderer& renderer) { renderer.applyPendingReconfig(); }
+
+    /// Returns the *live* grid metrics (mutated only on the render thread).
+    [[nodiscard]] static GridMetrics const& liveGridMetrics(Renderer const& renderer)
+    {
+        return renderer._gridMetrics;
+    }
+
+    /// Returns whether a reconfiguration request is currently staged but not yet applied.
+    [[nodiscard]] static bool hasPendingReconfig(Renderer const& renderer)
+    {
+        return renderer._pendingReconfig.has_value();
+    }
+
+    /// Seeds self-consistent grid metrics into the live and published metrics.
+    ///
+    /// The minimal BDF test font yields zero line metrics from the shaper, which a real TextureAtlas
+    /// (and the cursor/decoration direct mappings) reject. Tests that need a render target / atlas use
+    /// this to provide usable metrics without depending on font metrics.
+    static void seedMetrics(Renderer& renderer, GridMetrics metrics)
+    {
+        renderer._gridMetrics = metrics;
+        renderer._publishedMetrics = metrics;
+        renderer._publishedCellSize.store(metrics.cellSize, std::memory_order_release);
+    }
+
+    /// Returns the staged pending font descriptions, if a full font-descriptions change is staged.
+    [[nodiscard]] static std::optional<FontDescriptions> pendingFontDescriptions(Renderer const& renderer)
+    {
+        if (!renderer._pendingReconfig)
+            return std::nullopt;
+        return renderer._pendingReconfig->fontDescriptions;
+    }
+
+    /// Returns the staged pending font size, if a size-only change is staged.
+    [[nodiscard]] static std::optional<text::font_size> pendingFontSize(Renderer const& renderer)
+    {
+        if (!renderer._pendingReconfig)
+            return std::nullopt;
+        return renderer._pendingReconfig->fontSize;
     }
 };
 } // namespace vtrasterizer
@@ -681,6 +733,534 @@ TEST_CASE("Renderer.findLinePartitionPoint", "[renderer]")
         // Boundary at line 4: lines 0,1,2,3 are below, lines 4,5 are at or above.
         CHECK(Renderer::findLinePartitionPoint(lines, LineCount(4)) == 4);
     }
+}
+
+namespace
+{
+
+/// Bundles a fully-constructed headless Renderer (mock font locator, mock render target) so the
+/// deferred-reconfiguration code paths can be exercised without a GPU/Qt context.
+struct ReconfigFixture
+{
+    FontDescriptions fontDescriptions = [] {
+        auto fd = FontDescriptions {};
+        fd.dpi = DPI { 96, 96 };
+        fd.size = text::font_size { 9.0 }; // Matches the BDF test font's SIZE 9 96 96.
+        fd.textShapingEngine = TextShapingEngine::OpenShaper;
+        fd.fontLocator = FontLocatorEngine::Mock;
+        fd.regular = text::font_description::parse("regular");
+        fd.bold = text::font_description::parse("regular");
+        fd.italic = text::font_description::parse("regular");
+        fd.boldItalic = text::font_description::parse("regular");
+        fd.emoji = text::font_description::parse("regular");
+        return fd;
+    }();
+
+    // The minimal BDF test font produces zero line metrics from the shaper, which a real TextureAtlas
+    // (and direct-mapped cursor/decoration tiles) reject. Tests seed self-consistent metrics via
+    // RendererTest::seedMetrics() instead. Mirrors the known-good metrics used by the TextRenderer test.
+    static GridMetrics seededMetrics()
+    {
+        return GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                             .cellSize = vtbackend::ImageSize { Width(10), Height(20) },
+                             .baseline = 15,
+                             .underline = { .position = 17, .thickness = 1 } };
+    }
+
+    vtbackend::ColorPalette colorPalette {};
+    MockRenderTarget renderTarget {};
+    Renderer renderer;
+
+    ReconfigFixture():
+        renderer(vtbackend::PageSize { LineCount(24), ColumnCount(80) },
+                 fontDescriptions,
+                 colorPalette,
+                 crispy::strong_hashtable_size { 1024 },
+                 crispy::lru_capacity { 4096 },
+                 /* atlasDirectMapping */ false,
+                 Decorator::Underline,
+                 Decorator::Underline)
+    {
+        RendererTest::seedMetrics(renderer, seededMetrics());
+    }
+
+    /// Wires the mock render target (and texture atlas) into the renderer.
+    ///
+    /// Done lazily so geometry/state-machine tests that don't need a render target avoid the atlas
+    /// setup entirely.
+    void attachRenderTarget()
+    {
+        renderer.setRenderTarget(renderTarget);
+        // setRenderTarget() does not stage a reconfiguration; the seeded metrics remain in effect.
+    }
+};
+
+/// Registers the BDF mock font used by the reconfiguration tests with the global mock locator.
+void configureMockFont()
+{
+    auto registry = std::vector<text::font_description_and_source> {
+        { .description = text::font_description::parse("regular"),
+          .source = text::font_path { .value = std::filesystem::absolute(testFontPath).string() } }
+    };
+    text::mock_font_locator::configure(std::move(registry));
+}
+
+} // namespace
+
+TEST_CASE("Renderer.reconfig.geometry_published_synchronously", "[renderer]")
+{
+    // A geometry change (page size / margin / pixel size) does not need the text shaper, so the
+    // requested metrics are published synchronously and observable via gridMetrics() immediately —
+    // before any render-thread apply. This preserves the contract that applyResize()/resizeScreen()
+    // see the new geometry right away.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto const oldCellSize = renderer.gridMetrics().cellSize;
+    auto const newPageSize = PageSize { LineCount(30), ColumnCount(100) };
+    auto const newMargin = vtrasterizer::PageMargin { .left = 7, .top = 11, .bottom = 13 };
+    auto const newPixelSize = vtbackend::ImageSize { Width(1280), Height(720) };
+
+    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+
+    // Published (UI-visible) metrics reflect the request synchronously...
+    CHECK(renderer.gridMetrics().pageSize == newPageSize);
+    CHECK(renderer.gridMetrics().pageMargin.left == newMargin.left);
+    CHECK(renderer.gridMetrics().pageMargin.top == newMargin.top);
+    // ...but the cell size is unchanged by a pure geometry resize.
+    CHECK(renderer.gridMetrics().cellSize == oldCellSize);
+
+    // The request is staged for the render thread until applied.
+    CHECK(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+}
+
+TEST_CASE("Renderer.reconfig.geometry_not_applied_to_live_until_render", "[renderer]")
+{
+    // The live grid metrics (read by the renderables) are only mutated when the render thread applies
+    // the staged reconfiguration — not when the UI thread requests it.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto const newPageSize = PageSize { LineCount(30), ColumnCount(100) };
+    auto const newMargin = vtrasterizer::PageMargin { .left = 7, .top = 11, .bottom = 13 };
+    auto const newPixelSize = vtbackend::ImageSize { Width(1280), Height(720) };
+
+    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+
+    // Before apply: the *live* metrics still hold the original page size, even though the published
+    // (UI-visible) metrics already reflect the request.
+    CHECK(vtrasterizer::RendererTest::liveGridMetrics(renderer).pageSize != newPageSize);
+    CHECK(renderer.gridMetrics().pageSize == newPageSize);
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // After apply: live metrics updated, nothing left pending.
+    CHECK(vtrasterizer::RendererTest::liveGridMetrics(renderer).pageSize == newPageSize);
+    CHECK(vtrasterizer::RendererTest::liveGridMetrics(renderer).pageMargin.left == newMargin.left);
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+}
+
+TEST_CASE("Renderer.reconfig.geometry_resizes_render_target_on_apply", "[renderer]")
+{
+    // With a render target attached, applying a geometry reconfiguration must resize the render
+    // target — and only on the render thread (during applyPendingReconfig), not when requested.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    auto& renderer = fixture.renderer;
+
+    auto const newPageSize = PageSize { LineCount(30), ColumnCount(100) };
+    auto const newMargin = vtrasterizer::PageMargin { .left = 7, .top = 11, .bottom = 13 };
+    auto const newPixelSize = vtbackend::ImageSize { Width(1280), Height(720) };
+
+    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    CHECK(fixture.renderTarget.renderSize() != newPixelSize); // not yet applied
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    CHECK(fixture.renderTarget.renderSize() == newPixelSize); // applied on the render thread
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+}
+
+TEST_CASE("Renderer.reconfig.font_size_change_is_deferred", "[renderer]")
+{
+    // A font-size change needs the (non-thread-safe) text shaper, so it is fully deferred: it only
+    // stages a request and touches neither the live nor the published metrics until the render thread
+    // applies it. This guarantees the shaper is never touched concurrently with rendering.
+    //
+    // NOTE: the minimal BDF test font is a fixed-size bitmap (SIZE 9), so the staged size must be 9pt
+    // (any other size fails to load). This asserts the deferral/state machine, not cell-size magnitude
+    // (which a real scalable font would change).
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto const publishedBefore = renderer.gridMetrics();
+    auto const liveBefore = vtrasterizer::RendererTest::liveGridMetrics(renderer);
+
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+
+    // Deferred: nothing observable changed yet, but a reconfiguration is staged.
+    CHECK(renderer.gridMetrics().cellSize == publishedBefore.cellSize);
+    CHECK(vtrasterizer::RendererTest::liveGridMetrics(renderer).cellSize == liveBefore.cellSize);
+    CHECK(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // After apply: the request is consumed; the font descriptions now carry the requested size.
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+}
+
+TEST_CASE("Renderer.reconfig.font_apply_signals_display_to_resize", "[renderer]")
+{
+    // Because a font change is applied a frame late, the display must recompute the page size against
+    // the new cell size afterwards. applyPendingReconfig() sets a one-shot flag the display consumes.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    // No font change yet → nothing to signal.
+    CHECK_FALSE(renderer.consumeFontReconfigApplied());
+
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    // Staging alone does not raise the flag; only the render-thread apply does.
+    CHECK_FALSE(renderer.consumeFontReconfigApplied());
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // The flag is now set, and consuming it clears it (one-shot).
+    CHECK(renderer.consumeFontReconfigApplied());
+    CHECK_FALSE(renderer.consumeFontReconfigApplied());
+}
+
+TEST_CASE("Renderer.reconfig.geometry_only_does_not_signal_font_resize", "[renderer]")
+{
+    // A geometry-only reconfiguration changes no cell size, so it must NOT raise the font-applied
+    // signal (which would cause a redundant page-size recompute on the display).
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    renderer.applyResize(vtbackend::ImageSize { Width(1280), Height(720) },
+                         PageSize { LineCount(30), ColumnCount(100) },
+                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 });
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    CHECK_FALSE(renderer.consumeFontReconfigApplied());
+}
+
+TEST_CASE("Renderer.reconfig.noop_font_apply_does_not_signal_font_resize", "[renderer]")
+{
+    // A font apply that does not actually change the cell size (e.g. re-applying identical font
+    // descriptions, or a config reload that re-stages the same fonts) must NOT raise the font-applied
+    // signal — otherwise the display performs a redundant terminal-locked page-size recompute for a
+    // cell size that did not change. This is the symmetric counterpart to
+    // geometry_only_does_not_signal_font_resize.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    // First apply establishes a stable cell size from the mock font.
+    renderer.setFonts(fixture.fontDescriptions);
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    (void) renderer.consumeFontReconfigApplied(); // drain whatever the first apply signalled
+
+    // Re-stage the identical descriptions: applyFontDescriptions() early-returns, the cell size is
+    // unchanged, so no font reconfig must be signalled.
+    renderer.setFonts(fixture.fontDescriptions);
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    CHECK_FALSE(renderer.consumeFontReconfigApplied());
+}
+
+TEST_CASE("Renderer.reconfig.published_font_descriptions_track_applied_state", "[renderer]")
+{
+    // fontDescriptions() returns a mutex-guarded snapshot published by the render thread, never the live
+    // (render-thread-owned) field. A staged change must therefore become visible via fontDescriptions()
+    // only after the render-thread apply, not when it is staged.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto changed = fixture.fontDescriptions;
+    changed.maxFallbackCount += 1;
+
+    renderer.setFonts(changed);
+    // Still the original until the render thread applies.
+    CHECK(renderer.fontDescriptions().maxFallbackCount == fixture.fontDescriptions.maxFallbackCount);
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // Published snapshot now reflects the applied descriptions.
+    CHECK(renderer.fontDescriptions().maxFallbackCount == changed.maxFallbackCount);
+}
+
+TEST_CASE("Renderer.reconfig.set_fonts_is_deferred", "[renderer]")
+{
+    // A full font-descriptions change (setFonts) is deferred to the render thread just like a size
+    // change, because it reconfigures the non-thread-safe text shaper and rebuilds the atlas.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    // Request a changed descriptions (keep size 9 so the BDF still loads; tweak the fallback limit).
+    auto changed = fixture.fontDescriptions;
+    changed.maxFallbackCount += 1;
+
+    renderer.setFonts(changed);
+
+    // Deferred: a reconfiguration is staged, but the live font descriptions are unchanged.
+    CHECK(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    CHECK(renderer.fontDescriptions().maxFallbackCount == fixture.fontDescriptions.maxFallbackCount);
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // After the render-thread apply: the change took effect and nothing is left pending.
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    CHECK(renderer.fontDescriptions().maxFallbackCount == changed.maxFallbackCount);
+}
+
+TEST_CASE("Renderer.reconfig.set_font_size_folds_into_pending_set_fonts", "[renderer]")
+{
+    // If a full font-descriptions change is already staged and a font-size change arrives before the
+    // render thread applies, the new size must fold into the staged descriptions (most recent wins)
+    // rather than being dropped.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto changed = fixture.fontDescriptions;
+    changed.maxFallbackCount += 1;
+    changed.size = text::font_size { 9.0 };
+
+    renderer.setFonts(changed);
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 })); // same valid BDF size, folds into pending
+
+    // Both the descriptions change and the (folded) size apply together in one pass.
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    CHECK(renderer.fontDescriptions().maxFallbackCount == changed.maxFallbackCount);
+    CHECK(renderer.fontDescriptions().size.pt == Catch::Approx(9.0));
+}
+
+TEST_CASE("Renderer.reconfig.geometry_preserved_across_font_change", "[renderer]")
+{
+    // When a geometry change and a font change are both staged before a single apply, the page size
+    // and margin set by the geometry request must survive the font-driven grid-metrics rebuild
+    // (loadGridMetrics() otherwise resets page geometry).
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto const newPageSize = PageSize { LineCount(40), ColumnCount(120) };
+    auto const newMargin = vtrasterizer::PageMargin { .left = 5, .top = 9, .bottom = 3 };
+    auto const newPixelSize = vtbackend::ImageSize { Width(1600), Height(900) };
+
+    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 })); // BDF test font's only available size.
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    auto const& live = vtrasterizer::RendererTest::liveGridMetrics(renderer);
+    CHECK(live.pageSize == newPageSize);
+    CHECK(live.pageMargin.left == newMargin.left);
+    CHECK(live.pageMargin.top == newMargin.top);
+    CHECK(live.pageMargin.bottom == newMargin.bottom);
+}
+
+TEST_CASE("Renderer.reconfig.requests_coalesce_until_applied", "[renderer]")
+{
+    // Rapidly issuing many reconfiguration requests (the user-reported crash repro: aggressively
+    // resizing the window) must coalesce into a single pending request that, once applied, leaves no
+    // residual pending work and reflects the *last* requested geometry.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    // Oscillate the geometry many times before the render thread gets a chance to apply.
+    for (auto const lines: { 20, 45, 12, 60, 33 })
+    {
+        auto const pageSize = PageSize { LineCount(lines), ColumnCount(lines * 2) };
+        renderer.setPageSize(pageSize);
+        CHECK(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    }
+
+    auto const finalPageSize = PageSize { LineCount(50), ColumnCount(140) };
+    auto const finalMargin = vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 };
+    renderer.applyResize(vtbackend::ImageSize { Width(1920), Height(1080) }, finalPageSize, finalMargin);
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // One apply drains everything; the last requested geometry wins.
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    CHECK(vtrasterizer::RendererTest::liveGridMetrics(renderer).pageSize == finalPageSize);
+    CHECK(vtrasterizer::RendererTest::liveGridMetrics(renderer).pageMargin.left == finalMargin.left);
+
+    // A subsequent apply with nothing staged is a no-op (idempotent).
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    CHECK(vtrasterizer::RendererTest::liveGridMetrics(renderer).pageSize == finalPageSize);
+}
+
+TEST_CASE("Renderer.reconfig.concurrent_requests_and_apply", "[renderer]")
+{
+    // Reproduces the actual threading model: a "render thread" repeatedly applies staged
+    // reconfigurations (as renderImpl() does) while a "UI thread" concurrently requests geometry and
+    // font-size changes (as wheelEvent()/resize handlers do). Run under ThreadSanitizer this asserts
+    // that _reconfigMutex fully covers the shared state — no data race on _gridMetrics/_publishedMetrics
+    // /_pendingReconfig. Without a sanitizer it still exercises the lock for crashes/UB and converges.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    constexpr int Iterations = 2000;
+    std::atomic<bool> applierStop { false };
+
+    // Render-thread role: drain pending reconfigurations as fast as possible.
+    std::thread applier([&] {
+        while (!applierStop.load(std::memory_order_relaxed))
+            vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+        // Final drain so the last staged request is guaranteed applied.
+        vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    });
+
+    // UI-thread role: issue interleaved geometry and font requests.
+    for (auto const i: std::views::iota(0, Iterations))
+    {
+        auto const lines = 10 + (i % 50);
+        renderer.applyResize(vtbackend::ImageSize { Width(640 + i % 100), Height(480 + i % 100) },
+                             PageSize { LineCount(lines), ColumnCount(lines * 2) },
+                             vtrasterizer::PageMargin { .left = i % 5, .top = i % 7, .bottom = i % 3 });
+        if (i % 3 == 0)
+            renderer.setPageSize(PageSize { LineCount(lines), ColumnCount(lines * 2) });
+        if (i % 11 == 0)
+            (void) renderer.setFontSize(text::font_size { 9.0 }); // BDF font's only valid size.
+        if (i % 17 == 0)
+        {
+            // Exercise the full font-descriptions reconfiguration path concurrently as well.
+            auto fonts = fixture.fontDescriptions;
+            fonts.maxFallbackCount = 1 + (i % 4);
+            renderer.setFonts(fonts);
+        }
+        // Reading the published metrics and consuming the font-applied signal from the UI thread
+        // (as the display does after each frame) must also be race-free.
+        (void) renderer.gridMetrics();
+        (void) renderer.consumeFontReconfigApplied();
+    }
+
+    applierStop.store(true, std::memory_order_relaxed);
+    applier.join();
+
+    // Drain anything still staged and assert a consistent final state.
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    CHECK(vtrasterizer::RendererTest::liveGridMetrics(renderer).cellSize == renderer.gridMetrics().cellSize);
+}
+
+TEST_CASE("Renderer.reconfig.set_font_dpi_does_not_clobber_staged_fonts", "[renderer]")
+{
+    // A DPI-only change (setFontDPI) must merge into an already-staged full font-descriptions change
+    // rather than rebuilding the request from the live descriptions — otherwise a concurrent font
+    // change (e.g. a config reload that staged a new family/fallback) would be silently dropped.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    // Stage a full font-descriptions change first (simulating a config reload).
+    auto changed = fixture.fontDescriptions;
+    changed.maxFallbackCount += 7; // A distinguishing, non-DPI field.
+    renderer.setFonts(changed);
+
+    // Now a DPI change arrives in the same inter-frame gap.
+    auto const newDpi = DPI { 144, 144 };
+    renderer.setFontDPI(newDpi);
+
+    // The staged descriptions must retain the new family/fallback AND pick up the new DPI.
+    auto const staged = vtrasterizer::RendererTest::pendingFontDescriptions(renderer);
+    REQUIRE(staged.has_value());
+    CHECK(staged->maxFallbackCount == changed.maxFallbackCount); // not clobbered
+    CHECK(staged->dpi == newDpi);                                // DPI applied
+}
+
+TEST_CASE("Renderer.reconfig.set_font_dpi_folds_staged_size", "[renderer]")
+{
+    // If only a size-only change is staged when a DPI change arrives, promoting it to a full
+    // descriptions change must fold the staged size in (applyPendingReconfig applies descriptions XOR
+    // size), not drop it.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 })); // BDF font's only valid size.
+    REQUIRE(vtrasterizer::RendererTest::pendingFontSize(renderer).has_value());
+
+    renderer.setFontDPI(DPI { 144, 144 });
+
+    // The size-only staging is now folded into the descriptions and cleared.
+    auto const staged = vtrasterizer::RendererTest::pendingFontDescriptions(renderer);
+    REQUIRE(staged.has_value());
+    CHECK(staged->size.pt == Catch::Approx(9.0));
+    CHECK_FALSE(vtrasterizer::RendererTest::pendingFontSize(renderer).has_value());
+}
+
+TEST_CASE("Renderer.reconfig.set_font_dpi_noop_when_unchanged", "[renderer]")
+{
+    // Setting the same DPI that is already live stages nothing (avoids spurious reconfigurations).
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    renderer.setFontDPI(renderer.fontDescriptions().dpi);
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+}
+
+TEST_CASE("Renderer.reconfig.published_cell_size_tracks_grid_metrics", "[renderer]")
+{
+    // publishedCellSize() is the lock-free mirror of gridMetrics().cellSize; the two must agree after
+    // construction, after a seed, and after a render-thread apply.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    CHECK(renderer.publishedCellSize() == renderer.gridMetrics().cellSize);
+
+    // A geometry-only change does not alter the cell size; the mirror stays consistent.
+    renderer.applyResize(vtbackend::ImageSize { Width(800), Height(600) },
+                         PageSize { LineCount(25), ColumnCount(80) },
+                         vtrasterizer::PageMargin { .left = 0, .top = 0, .bottom = 0 });
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    CHECK(renderer.publishedCellSize() == renderer.gridMetrics().cellSize);
+
+    // After a font apply, the mirror still equals the published cell size.
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    CHECK(renderer.publishedCellSize() == renderer.gridMetrics().cellSize);
+}
+
+TEST_CASE("Renderer.reconfig.page_geometry_preserved_across_dpi_change", "[renderer]")
+{
+    // Regression test for decoupling the font rebuild from page geometry: updateFontMetrics() now
+    // updates only the font-derived fields in place, so a font/DPI change must not reset the page
+    // size/margin previously established by a geometry request.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto const newPageSize = PageSize { LineCount(33), ColumnCount(111) };
+    auto const newMargin = vtrasterizer::PageMargin { .left = 4, .top = 8, .bottom = 6 };
+    renderer.applyResize(vtbackend::ImageSize { Width(1111), Height(666) }, newPageSize, newMargin);
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // Re-stage the same (valid) font size, which exercises updateFontMetrics() in place.
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    auto const& live = vtrasterizer::RendererTest::liveGridMetrics(renderer);
+    CHECK(live.pageSize == newPageSize);
+    CHECK(live.pageMargin.left == newMargin.left);
+    CHECK(live.pageMargin.top == newMargin.top);
+    CHECK(live.pageMargin.bottom == newMargin.bottom);
 }
 
 int main(int argc, char* argv[])

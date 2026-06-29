@@ -210,6 +210,13 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
             auto const _ = std::scoped_lock { displayState.currentSession->terminal() };
             displayState.currentSession->terminal().resizeScreen(totalPageSize, pixels);
         }
+
+        // These resizeScreen() calls go straight to the terminal, bypassing the renderer's geometry
+        // staging, so the renderer's published/live grid metrics would stay stale (diagnostics and any
+        // gridMetrics() reader would see the wrong size/margin). Push the full geometry (page size, pixel
+        // size and margin) into the renderer so its grid metrics stay consistent with the terminal — a
+        // page-size-only sync would leave the previous session's margin live until a later resize.
+        _activeDisplay->syncRendererGeometry(totalPageSize, pixels);
     }
 
     return session;

@@ -1149,6 +1149,16 @@ class Terminal
     void setTabName(std::string_view title);
     [[nodiscard]] std::string const& windowTitle() const noexcept;
     [[nodiscard]] std::optional<std::string> tabName() const noexcept;
+
+    /// Resolves the indicator status-line tab label for this terminal under a single _stateMutex hold.
+    ///
+    /// Returns the explicit tab name if one is set, otherwise the window title when TabsNamingMode::Title
+    /// is active, otherwise nullopt. Unlike calling tabName()/getTabsNamingMode()/windowTitle()
+    /// separately, this reads _tabName/_windowTitle while holding _stateMutex — they are written on the
+    /// parser thread under that same mutex (setTabName()/setWindowTitle()), and this is invoked from the
+    /// GUI thread (TerminalSessionManager::updateStatusLine()), so an unlocked read would be a data race
+    /// on the underlying std::string (torn read / use-after-free on reallocation).
+    [[nodiscard]] std::optional<std::string> resolvedTabName() const;
     [[nodiscard]] bool focused() const noexcept { return _focused; }
     [[nodiscard]] Search& search() noexcept { return _search; }
     [[nodiscard]] Search const& search() const noexcept { return _search; }
@@ -1376,8 +1386,23 @@ class Terminal
     void setStatusLineDefinition(StatusLineDefinition&& definition);
     void resetStatusLineDefinition();
 
-    TabsInfo guiTabsInfoForStatusLine() const noexcept { return _guiTabInfoForStatusLine; }
-    void setGuiTabInfoForStatusLine(TabsInfo&& info) { _guiTabInfoForStatusLine = std::move(info); }
+    TabsInfo guiTabsInfoForStatusLine() const
+    {
+        // The render thread reads this from fillRenderBufferStatusLine() (already under _stateMutex), and
+        // the GUI thread writes it from setGuiTabInfoForStatusLine(). Serialize the two on a dedicated,
+        // lightweight mutex rather than _stateMutex: the GUI-thread writer would otherwise block on the
+        // heavily-contended _stateMutex for the full duration the parser thread holds it during a burst of
+        // output, stalling input/redraw. _guiTabInfoMutex is only ever held for this small copy, so the
+        // read taking both locks introduces no contention and no lock-order inversion (the writer never
+        // takes _stateMutex).
+        auto const l = std::lock_guard { _guiTabInfoMutex };
+        return _guiTabInfoForStatusLine;
+    }
+    void setGuiTabInfoForStatusLine(TabsInfo&& info)
+    {
+        auto const l = std::lock_guard { _guiTabInfoMutex };
+        _guiTabInfoForStatusLine = std::move(info);
+    }
 
     TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
     void requestTabName();
@@ -1596,6 +1621,10 @@ class Terminal
 
     // {{{ tabs info
     TabsInfo _guiTabInfoForStatusLine;
+    /// Guards _guiTabInfoForStatusLine. Dedicated (not _stateMutex) so the GUI-thread writer
+    /// (setGuiTabInfoForStatusLine) does not block on the heavily-contended _stateMutex held by the parser
+    /// thread during output bursts. Held only for the small copy in the accessor/mutator.
+    std::mutex mutable _guiTabInfoMutex;
     // }}}
 
     // {{{ selection states

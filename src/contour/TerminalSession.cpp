@@ -21,6 +21,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
 #include <QtCore/QMimeData>
+#include <QtCore/QPointer>
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
@@ -326,13 +327,20 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
             _display->closeDisplay();
     }
 
+    // A window-title / tab-name change that arrived while no display was attached was dropped by
+    // refreshGuiTabInfoForStatusLine() (it only posts when _display is set). Now that a display is
+    // attached, refresh the indicator status-line tab label so it reflects the current name rather than
+    // a stale one.
+    refreshGuiTabInfoForStatusLine();
+
     scheduleRedraw();
 }
 
 void TerminalSession::scheduleRedraw()
 {
     _terminal.markScreenDirty();
-    _manager->update();
+    // Don't refresh GUI tab info here: reached from the parser thread while _stateMutex is held (ESU path),
+    // so _manager->update() would re-lock that non-recursive mutex. It only changes on GUI-thread events.
     if (_display)
         _display->scheduleRedraw();
 }
@@ -993,9 +1001,40 @@ QString TerminalSession::title() const
 #endif
 }
 
+void TerminalSession::refreshGuiTabInfoForStatusLine()
+{
+    // setWindowTitle()/setTabName() are invoked on the parser thread while _stateMutex is held (ESU
+    // path), so we must not call _manager->update() directly: it rebuilds the tab info from every
+    // session and would re-lock that non-recursive mutex (the deadlock scheduleRedraw() was changed to
+    // avoid). Post the refresh to the GUI thread instead, where it runs free of the parser-thread lock.
+    //
+    // The lambda is keyed to the display QObject, so Qt only cancels it if the *display* dies — not if
+    // this *session* is destroyed first (e.g. closing a tab while its shell still emits an OSC title
+    // change). Capture a QPointer to the session (auto-nulls on destruction) and bail out if the session
+    // is gone, avoiding a use-after-free on _manager.
+    if (_display)
+        _display->post([self = QPointer<TerminalSession> { this }]() {
+            if (self)
+                self->_manager->update();
+        });
+}
+
 void TerminalSession::setWindowTitle(string_view title)
 {
     emit titleChanged(QString::fromUtf8(title.data(), static_cast<int>(title.size())));
+
+    // In TabsNamingMode::Title the indicator status-line tab name derives from the window title, so a
+    // runtime title change must refresh the status-line tab info (no longer done by scheduleRedraw()).
+    refreshGuiTabInfoForStatusLine();
+}
+
+void TerminalSession::setTabName(string_view name)
+{
+    // A tab-name change (via the tab-naming escape sequence) feeds the indicator status-line tab label;
+    // refresh it on the GUI thread since scheduleRedraw() no longer does (see
+    // refreshGuiTabInfoForStatusLine).
+    (void) name;
+    refreshGuiTabInfoForStatusLine();
 }
 
 void TerminalSession::setTerminalProfile(string const& configProfileName)
@@ -2086,6 +2125,13 @@ uint8_t TerminalSession::matchModeFlags() const
 
 void TerminalSession::setFontSize(text::font_size size)
 {
+    // _display->setFontSize() returns false if it could not even stage the change, or if it staged the
+    // change but applied it synchronously (the not-renderable path) and that apply failed and was
+    // swallowed (font-load/atlas error, previous font kept). In either case the rendered font did not
+    // become @p size, so the profile must not record it — otherwise it diverges from the rendered font
+    // and a later increase/decrease step chains from the wrong base. When the apply is deferred to the
+    // next painted frame (the common, renderable path), staging success is reported and the requested
+    // size is the intent to persist.
     if (!_display->setFontSize(size))
         return;
 

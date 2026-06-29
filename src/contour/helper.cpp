@@ -710,33 +710,37 @@ void spawnNewTerminal(string const& programPath,
 
 vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer)
 {
+    // fontDescriptions() returns a mutex-guarded snapshot by value; take it once so all the reads below
+    // observe a single consistent set of descriptions (and so the by-reference helpers below do not bind
+    // to a temporary).
+    auto const fonts = renderer.fontDescriptions();
     auto const fontByStyle = [&](text::font_weight weight,
                                  text::font_slant slant) -> text::font_description const& {
         auto const bold = weight != text::font_weight::normal;
         auto const italic = slant != text::font_slant::normal;
         if (bold && italic)
-            return renderer.fontDescriptions().boldItalic;
+            return fonts.boldItalic;
         else if (bold)
-            return renderer.fontDescriptions().bold;
+            return fonts.bold;
         else if (italic)
-            return renderer.fontDescriptions().italic;
+            return fonts.italic;
         else
-            return renderer.fontDescriptions().regular;
+            return fonts.regular;
     };
     auto const nameOfStyledFont = [&](text::font_weight weight, text::font_slant slant) -> string {
-        auto const& regularFont = renderer.fontDescriptions().regular;
+        auto const& regularFont = fonts.regular;
         auto const& styledFont = fontByStyle(weight, slant);
         if (styledFont.familyName == regularFont.familyName)
             return "auto";
         else
             return styledFont.toPattern();
     };
-    return { .size = renderer.fontDescriptions().size.pt,
-             .regular = renderer.fontDescriptions().regular.familyName,
+    return { .size = fonts.size.pt,
+             .regular = fonts.regular.familyName,
              .bold = nameOfStyledFont(text::font_weight::bold, text::font_slant::normal),
              .italic = nameOfStyledFont(text::font_weight::normal, text::font_slant::italic),
              .boldItalic = nameOfStyledFont(text::font_weight::bold, text::font_slant::italic),
-             .emoji = renderer.fontDescriptions().emoji.toPattern() };
+             .emoji = fonts.emoji.toPattern() };
 }
 
 vtrasterizer::PageMargin computeMargin(ImageSize cellSize,
@@ -770,8 +774,11 @@ bool applyFontDescription(text::DPI dpi,
     if (renderer.fontDescriptions() == fontDescriptions)
         return false;
 
+    // setFonts() only *stages* the change; the shaper reconfiguration, font loading and
+    // grid-metrics/atlas rebuild happen on the render thread in applyPendingReconfig(). Do NOT call
+    // updateFontMetrics() here: it mutates _gridMetrics, rebuilds the texture atlas and touches the
+    // non-thread-safe text shaper, which would race the render thread mid-frame (issue #1922).
     renderer.setFonts(sanitizeFontDescription(std::move(fontDescriptions), dpi));
-    renderer.updateFontMetrics();
 
     return true;
 }
@@ -784,21 +791,20 @@ void applyResize(vtbackend::ImageSize newPixelSize,
         return;
 
     auto const oldPageSize = session.terminal().totalPageSize();
+    // Read the published cell size once (lock-free), reused for both the page size and margin below.
+    vtbackend::ImageSize const cellSize = renderer.publishedCellSize();
     auto const newPageSize = pageSizeForPixels(
         newPixelSize,
-        renderer.gridMetrics().cellSize,
+        cellSize,
         applyContentScale(session.profile().margins.value(), session.display()->contentScale()));
     vtbackend::Terminal& terminal = session.terminal();
-    vtbackend::ImageSize const cellSize = renderer.gridMetrics().cellSize;
 
-    if (renderer.hasRenderTarget())
-        renderer.renderTarget().setRenderSize(newPixelSize);
-    renderer.setPageSize(newPageSize);
-    renderer.setMargin(computeMargin(
-        renderer.gridMetrics().cellSize,
+    auto const newMargin = computeMargin(
+        cellSize,
         newPageSize,
         newPixelSize,
-        applyContentScale(session.profile().margins.value(), session.display()->contentScale())));
+        applyContentScale(session.profile().margins.value(), session.display()->contentScale()));
+    renderer.applyResize(newPixelSize, newPageSize, newMargin);
 
     if (oldPageSize.lines != newPageSize.lines)
         emit session.lineCountChanged(newPageSize.lines.as<int>());

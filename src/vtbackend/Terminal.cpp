@@ -2415,12 +2415,30 @@ void Terminal::setTabName(string_view title)
 
 void Terminal::requestTabName()
 {
-    inputHandler().setTabName([&](std::string name) { _tabName = std::move(name); });
+    // Route the interactively-entered name through setTabName() rather than assigning _tabName
+    // directly, so the event listener is notified (setTabName -> TerminalSession::setTabName ->
+    // refreshGuiTabInfoForStatusLine). Otherwise the indicator status-line tab label would keep showing
+    // the old name until some unrelated event happened to refresh it.
+    inputHandler().setTabName([this](std::string name) { setTabName(name); });
 }
 
 std::optional<std::string> Terminal::tabName() const noexcept
 {
     return _tabName;
+}
+
+std::optional<std::string> Terminal::resolvedTabName() const
+{
+    // Single lock hold for the whole resolution: _tabName/_windowTitle are written on the parser thread
+    // under _stateMutex (setTabName()/setWindowTitle()), and this runs on the GUI thread, so reading them
+    // unlocked (or across three separate locked accessor calls) would race the writer. getTabsNamingMode()
+    // reads _settings, which is not mutated by the parser thread, so it needs no extra protection.
+    auto const l = std::lock_guard { _stateMutex };
+    if (_tabName)
+        return _tabName;
+    if (_settings.tabNamingMode == TabsNamingMode::Title)
+        return _windowTitle;
+    return std::nullopt;
 }
 
 void Terminal::saveWindowTitle()

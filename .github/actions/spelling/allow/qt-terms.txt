@@ -33,6 +33,7 @@ QObject
 QOffscreen
 QOpen
 QPoint
+QPointer
 QProcess
 QQml
 QQuick

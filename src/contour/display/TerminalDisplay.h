@@ -131,7 +131,23 @@ class TerminalDisplay: public QQuickItem
     void resizeWindow(vtbackend::Width, vtbackend::Height);
     void setFonts(vtrasterizer::FontDescriptions fontDescriptions);
     bool setFontSize(text::font_size newFontSize);
+
+    /// The font size the renderer has actually loaded (its published font descriptions), which may differ
+    /// from a just-requested size while a staged change is pending or after a swallowed font-load failure.
+    [[nodiscard]] text::font_size fontSize() const { return _renderer->fontDescriptions().size; }
+
     bool setPageSize(vtbackend::PageSize newPageSize);
+
+    /// Pushes the full geometry (page size, render-surface pixel size and margin) into the renderer.
+    ///
+    /// For callers that resize the terminal directly (bypassing setPageSize()/applyResize()), so the
+    /// renderer's grid metrics — including the margin — stay consistent with the terminal's. Does not
+    /// resize the terminal itself.
+    ///
+    /// @param totalPageSize  the terminal's total page size (including the status line) to publish.
+    /// @param pixelSize      the render-surface size in pixels to publish.
+    void syncRendererGeometry(vtbackend::PageSize totalPageSize, vtbackend::ImageSize pixelSize);
+
     void setMouseCursorShape(MouseCursorShape newCursorShape);
     void setWindowFullScreen();
     void setWindowMaximized();
@@ -210,8 +226,12 @@ class TerminalDisplay: public QQuickItem
 
         // auto const availablePixels = gridMetrics().cellSize * _session->terminal().pageSize();
         auto const availablePixels = pixelSize();
+        // Use the lock-free publishedCellSize() for the divisor — the same accessor pixelSize() uses for
+        // the dividend — so both reads resolve from one source (and one atomic load that cannot tear
+        // against a concurrent render-thread font apply), rather than mixing it with the mutex-guarded
+        // gridMetrics().cellSize.
         return pageSizeForPixels(availablePixels,
-                                 _renderer->gridMetrics().cellSize,
+                                 _renderer->publishedCellSize(),
                                  applyContentScale(_session->profile().margins.value(), contentScale()));
     }
 
@@ -226,6 +246,12 @@ class TerminalDisplay: public QQuickItem
     void watchKdeDpiSetting();
     [[nodiscard]] float uptime() const noexcept;
 
+    /// Applies a staged font/DPI reconfiguration synchronously on the GUI thread and re-derives geometry
+    /// (page size, implicit size, constraints, and the resizeScreen()/SIGWINCH to the child) against the
+    /// resulting cell size. This is the single policy for all discrete font reconfigurations (size,
+    /// family, DPI); see the definition for why these are applied inline rather than deferred to a frame.
+    void applyStagedFontReconfigNow();
+
     /// Updates all window size constraints: minimum size, base size, and size increment.
     /// Configures the window manager to constrain user resizes to exact cell boundaries.
     void updateSizeConstraints();
@@ -239,10 +265,7 @@ class TerminalDisplay: public QQuickItem
     void statsSummary();
     void doResize(crispy::size size);
 
-    [[nodiscard]] vtrasterizer::GridMetrics const& gridMetrics() const noexcept
-    {
-        return _renderer->gridMetrics();
-    }
+    [[nodiscard]] vtrasterizer::GridMetrics gridMetrics() const noexcept { return _renderer->gridMetrics(); }
 
     /// Flags the screen as dirty.
     ///
