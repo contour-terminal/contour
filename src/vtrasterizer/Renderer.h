@@ -86,6 +86,17 @@ class Renderer
     [[nodiscard]] FontDescriptions const& fontDescriptions() const noexcept { return _fontDescriptions; }
     void setFonts(FontDescriptions fontDescriptions);
 
+    /// Stages a DPI-only font change without clobbering an already-staged font-descriptions change.
+    ///
+    /// Unlike reading fontDescriptions() and re-staging the whole thing via setFonts(), this updates
+    /// only the .dpi field of the *effective* descriptions — the ones already staged in a pending
+    /// reconfig if present, otherwise the live ones. A concurrent font-family change staged just before
+    /// (e.g. by a config reload) therefore keeps its family and merely picks up the new DPI, instead of
+    /// being silently overwritten with the live descriptions + new DPI.
+    ///
+    /// @param dpi  the new device pixels-per-inch to apply to the font configuration.
+    void setFontDPI(DPI dpi);
+
     /// Returns the most recently *published* grid metrics.
     ///
     /// Geometry writers (setPageSize/applyResize) publish synchronously; font writers (setFonts/

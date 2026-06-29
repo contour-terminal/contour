@@ -253,6 +253,36 @@ void Renderer::setFonts(FontDescriptions fontDescriptions)
     pending.fontSize.reset();
 }
 
+void Renderer::setFontDPI(DPI dpi)
+{
+    auto const l = std::scoped_lock { _reconfigMutex };
+
+    // Determine the *effective* descriptions WITHOUT creating a pending reconfig yet: an already-staged
+    // font-descriptions change (so a concurrent font-family change isn't clobbered), otherwise the live
+    // descriptions. Bail out before staging anything if the DPI is unchanged, so an unchanged-DPI call
+    // does not spuriously stage an (empty) reconfiguration.
+    auto const& effective = (_pendingReconfig && _pendingReconfig->fontDescriptions)
+                                ? *_pendingReconfig->fontDescriptions
+                                : _fontDescriptions;
+    if (effective.dpi == dpi)
+        return;
+
+    auto descriptions = effective;
+    descriptions.dpi = dpi;
+
+    auto& pending = ensurePendingLocked();
+
+    // Promoting a size-only change to a full descriptions change would otherwise drop the staged size
+    // (applyPendingReconfig() applies fontDescriptions XOR fontSize), so fold it in before clearing it.
+    if (pending.fontSize)
+    {
+        descriptions.size = *pending.fontSize;
+        pending.fontSize.reset();
+    }
+
+    pending.fontDescriptions = std::move(descriptions);
+}
+
 void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
 {
     if (fontDescriptions == _fontDescriptions)

@@ -1112,6 +1112,111 @@ TEST_CASE("Renderer.reconfig.concurrent_requests_and_apply", "[renderer]")
     CHECK(vtrasterizer::RendererTest::liveGridMetrics(renderer).cellSize == renderer.gridMetrics().cellSize);
 }
 
+TEST_CASE("Renderer.reconfig.set_font_dpi_does_not_clobber_staged_fonts", "[renderer]")
+{
+    // A DPI-only change (setFontDPI) must merge into an already-staged full font-descriptions change
+    // rather than rebuilding the request from the live descriptions — otherwise a concurrent font
+    // change (e.g. a config reload that staged a new family/fallback) would be silently dropped.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    // Stage a full font-descriptions change first (simulating a config reload).
+    auto changed = fixture.fontDescriptions;
+    changed.maxFallbackCount += 7; // A distinguishing, non-DPI field.
+    renderer.setFonts(changed);
+
+    // Now a DPI change arrives in the same inter-frame gap.
+    auto const newDpi = DPI { 144, 144 };
+    renderer.setFontDPI(newDpi);
+
+    // The staged descriptions must retain the new family/fallback AND pick up the new DPI.
+    auto const staged = vtrasterizer::RendererTest::pendingFontDescriptions(renderer);
+    REQUIRE(staged.has_value());
+    CHECK(staged->maxFallbackCount == changed.maxFallbackCount); // not clobbered
+    CHECK(staged->dpi == newDpi);                                // DPI applied
+}
+
+TEST_CASE("Renderer.reconfig.set_font_dpi_folds_staged_size", "[renderer]")
+{
+    // If only a size-only change is staged when a DPI change arrives, promoting it to a full
+    // descriptions change must fold the staged size in (applyPendingReconfig applies descriptions XOR
+    // size), not drop it.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 })); // BDF font's only valid size.
+    REQUIRE(vtrasterizer::RendererTest::pendingFontSize(renderer).has_value());
+
+    renderer.setFontDPI(DPI { 144, 144 });
+
+    // The size-only staging is now folded into the descriptions and cleared.
+    auto const staged = vtrasterizer::RendererTest::pendingFontDescriptions(renderer);
+    REQUIRE(staged.has_value());
+    CHECK(staged->size.pt == Catch::Approx(9.0));
+    CHECK_FALSE(vtrasterizer::RendererTest::pendingFontSize(renderer).has_value());
+}
+
+TEST_CASE("Renderer.reconfig.set_font_dpi_noop_when_unchanged", "[renderer]")
+{
+    // Setting the same DPI that is already live stages nothing (avoids spurious reconfigurations).
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    renderer.setFontDPI(renderer.fontDescriptions().dpi);
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+}
+
+TEST_CASE("Renderer.reconfig.published_cell_size_tracks_grid_metrics", "[renderer]")
+{
+    // publishedCellSize() is the lock-free mirror of gridMetrics().cellSize; the two must agree after
+    // construction, after a seed, and after a render-thread apply.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    CHECK(renderer.publishedCellSize() == renderer.gridMetrics().cellSize);
+
+    // A geometry-only change does not alter the cell size; the mirror stays consistent.
+    renderer.applyResize(vtbackend::ImageSize { Width(800), Height(600) },
+                         PageSize { LineCount(25), ColumnCount(80) },
+                         vtrasterizer::PageMargin { .left = 0, .top = 0, .bottom = 0 });
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    CHECK(renderer.publishedCellSize() == renderer.gridMetrics().cellSize);
+
+    // After a font apply, the mirror still equals the published cell size.
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    CHECK(renderer.publishedCellSize() == renderer.gridMetrics().cellSize);
+}
+
+TEST_CASE("Renderer.reconfig.page_geometry_preserved_across_dpi_change", "[renderer]")
+{
+    // Regression test for decoupling the font rebuild from page geometry: updateFontMetrics() now
+    // updates only the font-derived fields in place, so a font/DPI change must not reset the page
+    // size/margin previously established by a geometry request.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto const newPageSize = PageSize { LineCount(33), ColumnCount(111) };
+    auto const newMargin = vtrasterizer::PageMargin { .left = 4, .top = 8, .bottom = 6 };
+    renderer.applyResize(vtbackend::ImageSize { Width(1111), Height(666) }, newPageSize, newMargin);
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // Re-stage the same (valid) font size, which exercises updateFontMetrics() in place.
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    auto const& live = vtrasterizer::RendererTest::liveGridMetrics(renderer);
+    CHECK(live.pageSize == newPageSize);
+    CHECK(live.pageMargin.left == newMargin.left);
+    CHECK(live.pageMargin.top == newMargin.top);
+    CHECK(live.pageMargin.bottom == newMargin.bottom);
+}
+
 int main(int argc, char* argv[])
 {
     crispy::testing::suppressWindowsDialogs();
