@@ -28,7 +28,7 @@ namespace
     }
 } // namespace
 
-ColorPalette::Palette const ColorPalette::defaultColorPalette = []() constexpr {
+ColorPalette::Palette const ColorPalette::DefaultColorPalette = []() constexpr {
     ColorPalette::Palette colors;
 
     // normal colors

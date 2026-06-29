@@ -2645,13 +2645,13 @@ std::string createKeyMapping(Config const& c)
     {
         const auto _ = typename Writer::Offset {};
         for (auto&& entry: c.inputMappings.value().keyMappings)
-            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::levels * Writer::OneOffset));
+            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::Levels * Writer::OneOffset));
 
         for (auto&& entry: c.inputMappings.value().charMappings)
-            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::levels * Writer::OneOffset));
+            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::Levels * Writer::OneOffset));
 
         for (auto&& entry: c.inputMappings.value().mouseMappings)
-            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::levels * Writer::OneOffset));
+            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::Levels * Writer::OneOffset));
     }
 
     return doc;
