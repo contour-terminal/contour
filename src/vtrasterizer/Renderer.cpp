@@ -367,12 +367,15 @@ void Renderer::updateFontMetrics()
 
 void Renderer::applyPendingReconfig()
 {
-    // Runs on the render thread, at the start of renderImpl(), before any renderable reads
-    // _gridMetrics or the texture atlas. This is the *only* place those are mutated after
-    // construction, so the data race between UI-thread reconfiguration and rendering is avoided.
+    // Mutates _gridMetrics / the texture atlas / the non-thread-safe shaper. The caller must hold
+    // _applyMutex for the duration that those are also *read* — on the render thread that is the whole
+    // renderImpl() (it renders from _gridMetrics after this returns); on the GUI thread's not-renderable
+    // path applyStagedReconfigDuringSetup() holds it across this call. That serialization is what keeps
+    // a GUI-thread apply from overlapping an in-flight render-thread frame (a window losing exposure
+    // does not synchronously stop one).
 
-    // Fast path: avoid acquiring the mutex on every frame when nothing is staged. The atomic is set
-    // under _reconfigMutex by the UI-thread writers, so a false reading here means no writer has
+    // Fast path: avoid touching _pendingReconfig on every frame when nothing is staged. The atomic is
+    // set under _reconfigMutex by the UI-thread writers, so a false reading here means no writer has
     // committed a request yet — and the next frame will pick it up.
     if (!_reconfigPending.load(std::memory_order_relaxed))
         return;
@@ -508,6 +511,14 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 
 void Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 {
+    // Hold _applyMutex across the whole frame: this both applies any staged reconfiguration and then
+    // renders from _gridMetrics / the texture atlas. Holding it for the full duration makes a GUI-thread
+    // applyStagedReconfigDuringSetup() (the minimized/occluded path) wait for an in-flight frame to
+    // finish reading those, rather than mutating them mid-render. Uncontended in the steady state (the
+    // GUI thread only contends it on the rare not-renderable reconfig), so it adds no per-frame cost
+    // beyond one uncontended lock.
+    auto const applyGuard = std::scoped_lock { _applyMutex };
+
     // Apply any geometry/font reconfiguration requested by the UI thread before rendering.
     // This is the only point at which _gridMetrics and the texture atlas are mutated after
     // construction, keeping all such mutation on the render thread (see applyPendingReconfig()).

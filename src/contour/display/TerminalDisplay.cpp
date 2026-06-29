@@ -1590,9 +1590,15 @@ void TerminalDisplay::applyStagedFontReconfigIfNotRenderable()
     _renderer->applyStagedReconfigDuringSetup();
     if (_renderer->consumeFontReconfigApplied() && _session && window())
     {
+        // resizeTerminalToDisplaySize() only *stages* the new geometry (page size, margin, render
+        // surface) into the renderer's pending reconfig; it is normally drained by the next painted
+        // frame. Since this branch runs precisely because no frame will paint, drain it synchronously
+        // too — otherwise the geometry would stay unapplied to the live grid metrics / render surface
+        // for the whole minimized interval, contradicting this function's purpose.
         resizeTerminalToDisplaySize();
         updateImplicitSize();
         updateSizeConstraints();
+        _renderer->applyStagedReconfigDuringSetup();
     }
 }
 

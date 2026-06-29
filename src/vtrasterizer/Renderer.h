@@ -210,11 +210,17 @@ class Renderer
 
     /// Synchronously applies any staged font/geometry reconfiguration.
     ///
-    /// For display setup, before any frame, when a caller must read the resulting cell metrics
-    /// immediately (e.g. to size the texture atlas tile) rather than wait for the render thread.
+    /// Used during display setup (before any frame, when a caller must read the resulting cell metrics
+    /// immediately, e.g. to size the texture atlas tile) and on the not-renderable (minimized/occluded)
+    /// path, where no frame will paint to apply the staged change.
     ///
-    /// @warning Only safe to call while no render thread is concurrently rendering (i.e. during setup).
-    void applyStagedReconfigDuringSetup() { applyPendingReconfig(); }
+    /// Takes _applyMutex so it is mutually exclusive with the render thread's per-frame apply+render —
+    /// safe even if an already in-flight frame has not yet observed the window losing exposure.
+    void applyStagedReconfigDuringSetup()
+    {
+        auto const applyGuard = std::scoped_lock { _applyMutex };
+        applyPendingReconfig();
+    }
 
     void discardImage(vtbackend::Image const& image);
 
@@ -325,6 +331,19 @@ class Renderer
 
     /// Protects _pendingReconfig and _publishedMetrics, and serializes the render-thread apply.
     mutable std::mutex _reconfigMutex;
+
+    /// Serializes the heavyweight apply (font load, atlas rebuild, _gridMetrics mutation) in
+    /// applyPendingReconfig() against itself across threads.
+    ///
+    /// applyPendingReconfig() normally runs only on the render thread (at the top of renderImpl()), but
+    /// applyStagedReconfigDuringSetup() also invokes it from the GUI thread for the non-renderable
+    /// (minimized/occluded) case. A window losing exposure does not synchronously stop an already
+    /// in-flight frame, so the GUI-thread apply could otherwise overlap the render-thread apply and race
+    /// on _gridMetrics / the texture atlas / the non-thread-safe shaper. Holding this mutex across the
+    /// whole apply body makes the two mutually exclusive. It is distinct from _reconfigMutex (which only
+    /// guards the short staged-request/published-metrics critical sections) so a UI-thread gridMetrics()
+    /// reader is not blocked for the multi-millisecond font load.
+    std::mutex _applyMutex;
 
     /// The most recently *requested* grid metrics, observable synchronously via gridMetrics().
     ///
