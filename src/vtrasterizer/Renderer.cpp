@@ -15,8 +15,10 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <memory>
 #include <span>
+#include <stdexcept>
 
 using std::array;
 using std::initializer_list;
@@ -64,12 +66,20 @@ namespace
         return gm;
     }
 
+    /// Loads the font keys (regular/bold/italic/...) for the given descriptions.
+    ///
+    /// @throws std::runtime_error if the @e regular font fails to load. The regular key is the
+    ///         anchor every other style falls back to, and a default-constructed (invalid) font_key
+    ///         would later abort inside text::shaper::metrics() (Require on the key mapping). Throwing
+    ///         instead lets applyPendingReconfig()'s try/catch keep the previously loaded font, honoring
+    ///         the "keep previous font on failure" guarantee, and surfaces a startup font-load failure
+    ///         as a clear error rather than a deep abort.
     FontKeys loadFontKeys(FontDescriptions const& fd, text::shaper& shaper)
     {
         FontKeys output {};
         auto const regularOpt = shaper.load_font(fd.regular, fd.size);
-        if (!SoftRequire(regularOpt.has_value()))
-            return output; // Return default-constructed FontKeys if regular font fails to load.
+        if (!regularOpt.has_value())
+            throw std::runtime_error(std::format("Failed to load regular font: {}", fd.regular));
         output.regular = regularOpt.value();
         output.bold = shaper.load_font(fd.bold, fd.size).value_or(output.regular);
         output.italic = shaper.load_font(fd.italic, fd.size).value_or(output.regular);

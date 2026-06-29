@@ -101,6 +101,12 @@ class RendererTest
             return std::nullopt;
         return renderer._pendingReconfig->fontSize;
     }
+
+    /// Returns the *live* font descriptions (mutated only on the render thread).
+    [[nodiscard]] static FontDescriptions const& liveFontDescriptions(Renderer const& renderer)
+    {
+        return renderer._fontDescriptions;
+    }
 };
 } // namespace vtrasterizer
 
@@ -1019,6 +1025,39 @@ TEST_CASE("Renderer.reconfig.set_fonts_is_deferred", "[renderer]")
     // After the render-thread apply: the change took effect and nothing is left pending.
     CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
     CHECK(renderer.fontDescriptions().maxFallbackCount == changed.maxFallbackCount);
+}
+
+TEST_CASE("Renderer.reconfig.font_load_failure_keeps_previous_font", "[renderer]")
+{
+    // A font-descriptions change whose regular font cannot be loaded (e.g. the family was uninstalled or
+    // a locator failure) must NOT abort the process: applyPendingReconfig() catches the failure and keeps
+    // the previously loaded font. Regression test for the crash where loadFontKeys() returned an invalid
+    // FontKeys without throwing, so the catch never fired and metrics(invalid_key) aborted.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto const descriptionsBefore = vtrasterizer::RendererTest::liveFontDescriptions(renderer);
+
+    // Make every subsequent font load fail: with an empty registry the mock locator returns no source,
+    // so load_font() yields nullopt and loadFontKeys() throws (the regular font is unloadable).
+    text::mock_font_locator::configure({});
+
+    auto unloadable = fixture.fontDescriptions;
+    unloadable.regular = text::font_description::parse("this-font-does-not-exist");
+    unloadable.maxFallbackCount += 1; // ensure the descriptions differ so the change is not a no-op
+    renderer.setFonts(unloadable);
+
+    // Must not abort. The apply swallows the load failure and keeps the previous font.
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // The request is consumed (no infinite retry loop), but the live descriptions still hold the
+    // previously loaded font — the failed change was not committed.
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    CHECK(vtrasterizer::RendererTest::liveFontDescriptions(renderer).regular == descriptionsBefore.regular);
+
+    // A failed apply must not signal the display to resize against half-applied metrics.
+    CHECK_FALSE(renderer.consumeFontReconfigApplied());
 }
 
 TEST_CASE("Renderer.reconfig.set_font_size_folds_into_pending_set_fonts", "[renderer]")
