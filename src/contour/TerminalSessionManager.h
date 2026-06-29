@@ -111,20 +111,28 @@ class TerminalSessionManager: public QAbstractListModel
 
     void updateStatusLine()
     {
-        if (auto* displayState = _displayStates[_activeDisplay].currentSession; displayState)
-            displayState->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
-                .tabs =
-                    [&]() {
-                        std::vector<vtbackend::TabsInfo::Tab> tabs;
-                        tabs.reserve(_sessions.size());
-                        for (auto* session: _sessions)
-                            tabs.push_back(
-                                { .name = session->name(), .color = vtbackend::RGBColor { 0, 0, 0 } });
-                        return tabs;
-                    }(),
-                .activeTabPosition =
-                    1 + getSessionIndexOf(_displayStates[_activeDisplay].currentSession).value_or(0),
-            });
+        // Build the tab list (all session names) once: it is identical for every display.
+        auto tabs = [&]() {
+            std::vector<vtbackend::TabsInfo::Tab> result;
+            result.reserve(_sessions.size());
+            for (auto* session: _sessions)
+                result.push_back({ .name = session->name(), .color = vtbackend::RGBColor { 0, 0, 0 } });
+            return result;
+        }();
+
+        // Publish the tab info to EVERY display's current session, not just the active display's. A
+        // title/tab-name change in a non-focused window's foreground session refreshes through here too
+        // (refreshGuiTabInfoForStatusLine -> _manager->update()); updating only the active display would
+        // leave that window's indicator status line showing the stale label until it regained focus. Each
+        // display gets its own activeTabPosition (the index of *its* current session).
+        for (auto& [display, state]: _displayStates)
+        {
+            if (auto* session = state.currentSession; session)
+                session->terminal().setGuiTabInfoForStatusLine(vtbackend::TabsInfo {
+                    .tabs = tabs,
+                    .activeTabPosition = 1 + getSessionIndexOf(session).value_or(0),
+                });
+        }
     }
 
     ContourGuiApp& _app;
