@@ -950,6 +950,52 @@ TEST_CASE("Renderer.reconfig.geometry_only_does_not_signal_font_resize", "[rende
     CHECK_FALSE(renderer.consumeFontReconfigApplied());
 }
 
+TEST_CASE("Renderer.reconfig.noop_font_apply_does_not_signal_font_resize", "[renderer]")
+{
+    // A font apply that does not actually change the cell size (e.g. re-applying identical font
+    // descriptions, or a config reload that re-stages the same fonts) must NOT raise the font-applied
+    // signal — otherwise the display performs a redundant terminal-locked page-size recompute for a
+    // cell size that did not change. This is the symmetric counterpart to
+    // geometry_only_does_not_signal_font_resize.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    // First apply establishes a stable cell size from the mock font.
+    renderer.setFonts(fixture.fontDescriptions);
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+    (void) renderer.consumeFontReconfigApplied(); // drain whatever the first apply signalled
+
+    // Re-stage the identical descriptions: applyFontDescriptions() early-returns, the cell size is
+    // unchanged, so no font reconfig must be signalled.
+    renderer.setFonts(fixture.fontDescriptions);
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    CHECK_FALSE(renderer.consumeFontReconfigApplied());
+}
+
+TEST_CASE("Renderer.reconfig.published_font_descriptions_track_applied_state", "[renderer]")
+{
+    // fontDescriptions() returns a mutex-guarded snapshot published by the render thread, never the live
+    // (render-thread-owned) field. A staged change must therefore become visible via fontDescriptions()
+    // only after the render-thread apply, not when it is staged.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto changed = fixture.fontDescriptions;
+    changed.maxFallbackCount += 1;
+
+    renderer.setFonts(changed);
+    // Still the original until the render thread applies.
+    CHECK(renderer.fontDescriptions().maxFallbackCount == fixture.fontDescriptions.maxFallbackCount);
+
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // Published snapshot now reflects the applied descriptions.
+    CHECK(renderer.fontDescriptions().maxFallbackCount == changed.maxFallbackCount);
+}
+
 TEST_CASE("Renderer.reconfig.set_fonts_is_deferred", "[renderer]")
 {
     // A full font-descriptions change (setFonts) is deferred to the render thread just like a size

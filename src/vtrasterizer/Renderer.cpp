@@ -137,6 +137,7 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
     _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
     _publishedMetrics { _gridMetrics },
+    _publishedFontDescriptions { _fontDescriptions },
     _publishedCellSize { _gridMetrics.cellSize },
     //.
     _backgroundRenderer { _gridMetrics, colorPalette.defaultBackground },
@@ -258,12 +259,15 @@ void Renderer::setFontDPI(DPI dpi)
     auto const l = std::scoped_lock { _reconfigMutex };
 
     // Determine the *effective* descriptions WITHOUT creating a pending reconfig yet: an already-staged
-    // font-descriptions change (so a concurrent font-family change isn't clobbered), otherwise the live
-    // descriptions. Bail out before staging anything if the DPI is unchanged, so an unchanged-DPI call
-    // does not spuriously stage an (empty) reconfiguration.
+    // font-descriptions change (so a concurrent font-family change isn't clobbered), otherwise the
+    // published snapshot. We must NOT read the live _fontDescriptions here: it is mutated on the render
+    // thread (applyPendingReconfig) without _reconfigMutex, so reading it would be a data race. The
+    // published snapshot is render-thread-published under this same mutex. Bail out before staging
+    // anything if the DPI is unchanged, so an unchanged-DPI call does not spuriously stage an (empty)
+    // reconfiguration.
     auto const& effective = (_pendingReconfig && _pendingReconfig->fontDescriptions)
                                 ? *_pendingReconfig->fontDescriptions
-                                : _fontDescriptions;
+                                : _publishedFontDescriptions;
     if (effective.dpi == dpi)
         return;
 
@@ -408,14 +412,24 @@ void Renderer::applyPendingReconfig()
     // shaper is never touched concurrently with rendering.
     if (pending.fontDescriptions || pending.fontSize)
     {
+        // Remember the cell size before the apply so we can tell whether the font change actually
+        // altered the cell metrics. A no-op font apply (e.g. setFontSize() with the current size, or a
+        // config reload re-applying identical fonts) must NOT signal a font reconfig: doing so triggers
+        // a redundant, terminal-locked resize round-trip on the UI thread for a cell size that did not
+        // change (the symmetric counterpart to the geometry-only case guarded above).
+        auto const cellSizeBefore = _gridMetrics.cellSize;
+
         // updateFontMetrics() now updates only the font-derived fields in place and leaves page geometry
         // (pageSize/pageMargin/cellMargin) untouched, so no manual save/restore around the rebuild is
         // needed — the font rebuild and page geometry are decoupled.
         //
         // Font loading (FreeType face creation, file I/O) and atlas (re)allocation can throw. The
         // request has already been consumed, so a throw here would otherwise be swallowed by render()'s
-        // catch-all and silently lost. Catch it locally, log with context, and skip signalling a font
-        // reconfig so the display does not resize against half-applied metrics.
+        // catch-all and silently lost. The underlying loadFontKeys()/configureTextureAtlas() report
+        // failure by throwing rather than via std::expected, so we catch locally, log with context, and
+        // fall through to re-publish the (unchanged) metrics without signalling a font reconfig — the
+        // display must not resize against half-applied metrics.
+        auto applied = false;
         try
         {
             if (pending.fontDescriptions)
@@ -424,39 +438,44 @@ void Renderer::applyPendingReconfig()
             }
             else // pending.fontSize
             {
-                _fontDescriptions.size = *pending.fontSize;
-                _fonts = loadFontKeys(_fontDescriptions, *_textShaper);
+                // Stage the size into a copy first; only commit it to _fontDescriptions once the font
+                // actually loaded, so a load failure does not leave _fontDescriptions.size at a value
+                // whose glyphs were never loaded (which would corrupt later change-detection and the
+                // size reported to the UI).
+                auto descriptions = _fontDescriptions;
+                descriptions.size = *pending.fontSize;
+                _fonts = loadFontKeys(descriptions, *_textShaper);
+                _fontDescriptions = std::move(descriptions);
                 updateFontMetrics();
             }
+            applied = true;
         }
         catch (std::exception const& e)
         {
             errorLog()("Failed to apply staged font reconfiguration: {}. Keeping previous font.", e.what());
-            // Publish whatever metrics we have so readers stay consistent, but do not raise the font
-            // reconfig signal: the cell size did not change in a usable way.
-            {
-                auto const l = std::scoped_lock { _reconfigMutex };
-                _publishedMetrics.cellSize = _gridMetrics.cellSize;
-                _publishedMetrics.baseline = _gridMetrics.baseline;
-                _publishedMetrics.underline = _gridMetrics.underline;
-                _publishedMetrics.cellMargin = _gridMetrics.cellMargin;
-            }
-            _publishedCellSize.store(_gridMetrics.cellSize, std::memory_order_release);
-            return;
+            // Fall through to the publish below with applied == false: readers stay consistent with the
+            // (unchanged) live metrics, and no font reconfig is signalled.
         }
 
         // Signal the display to recompute the page size against the new cell size (see
-        // consumeFontReconfigApplied()): the font change altered the cell metrics, so the grid
-        // dimensions derived on the UI thread before this apply may now be stale.
-        _fontReconfigApplied.store(true, std::memory_order_release);
-    }
+        // consumeFontReconfigApplied()) only if the apply succeeded AND the cell size actually changed:
+        // the grid dimensions derived on the UI thread before this apply are stale only then.
+        if (applied && _gridMetrics.cellSize != cellSizeBefore)
+            _fontReconfigApplied.store(true, std::memory_order_release);
 
-    // Publish the freshly applied metrics so UI-thread readers (gridMetrics()) observe them. Re-acquire
-    // the lock only for this short copy, not across the font load/atlas rebuild above.
+        publishFontMetricsAndDescriptions();
+    }
+}
+
+void Renderer::publishFontMetricsAndDescriptions()
+{
+    // Publish the render-thread-owned (font-derived) metrics and the font descriptions so UI-thread
+    // readers (gridMetrics(), publishedCellSize(), fontDescriptions()) observe them. Re-acquire the lock
+    // only for this short copy, not across the font load/atlas rebuild that precedes the call.
     //
     // Publish only the render-thread-owned (font-derived) fields. pageSize/pageMargin are owned by the
     // UI-thread geometry writers (setPageSize/applyResize), which publish them synchronously when they
-    // stage; a writer may have done so while the lock was released above, so overwriting them here with
+    // stage; a writer may have done so while the lock was released earlier, so overwriting them here with
     // this apply's (possibly older) _gridMetrics values would lose that newer published geometry.
     {
         auto const l = std::scoped_lock { _reconfigMutex };
@@ -464,9 +483,11 @@ void Renderer::applyPendingReconfig()
         _publishedMetrics.baseline = _gridMetrics.baseline;
         _publishedMetrics.underline = _gridMetrics.underline;
         _publishedMetrics.cellMargin = _gridMetrics.cellMargin;
+        _publishedFontDescriptions = _fontDescriptions;
+        // Keep the lock-free cell-size mirror in lockstep with _publishedMetrics.cellSize so the two
+        // never diverge — both are written here, under the lock, from the same source value.
+        _publishedCellSize.store(_gridMetrics.cellSize, std::memory_order_release);
     }
-    // Publish the lock-free cell-size mirror (release-ordered) for publishedCellSize() readers.
-    _publishedCellSize.store(_gridMetrics.cellSize, std::memory_order_release);
 }
 
 void Renderer::render(vtbackend::Terminal& terminal, bool pressure)

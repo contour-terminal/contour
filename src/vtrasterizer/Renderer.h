@@ -83,7 +83,30 @@ class Renderer
     bool setFontSize(text::font_size fontSize);
     void updateFontMetrics();
 
-    [[nodiscard]] FontDescriptions const& fontDescriptions() const noexcept { return _fontDescriptions; }
+    /// Returns the most recently *published* font descriptions.
+    ///
+    /// Returns a snapshot by value (not a reference into the live state): the live _fontDescriptions is
+    /// mutated on the render thread during applyPendingReconfig(), so a UI-thread reader must observe a
+    /// mutex-guarded copy rather than reading the live field lock-free (which would be a data race).
+    /// A font change (setFonts/setFontSize) becomes visible here only after the render thread applies it.
+    ///
+    /// @note Thread-safe with respect to concurrent reconfiguration requests.
+    [[nodiscard]] FontDescriptions fontDescriptions() const noexcept
+    {
+        auto const l = std::scoped_lock { _reconfigMutex };
+        return _publishedFontDescriptions;
+    }
+
+    /// Stages a full font-descriptions change to be applied on the render thread.
+    ///
+    /// The text shaper is not thread-safe and is read by the render thread every frame, so this only
+    /// *stages* the descriptions (on the UI thread); the shaper reconfiguration, font loading and
+    /// grid-metrics/atlas rebuild happen on the render thread in applyPendingReconfig(). The new cell
+    /// size therefore appears via gridMetrics()/fontDescriptions() only after a frame (or a setup-time
+    /// applyStagedReconfigDuringSetup()), not synchronously on return. A staged size-only change is
+    /// superseded by the full descriptions staged here.
+    ///
+    /// @param fontDescriptions  the new font configuration to stage.
     void setFonts(FontDescriptions fontDescriptions);
 
     /// Stages a DPI-only font change without clobbering an already-staged font-descriptions change.
@@ -309,6 +332,13 @@ class Renderer
     /// blocked on the deferred render-thread apply. Guarded by _reconfigMutex.
     GridMetrics _publishedMetrics;
 
+    /// Mutex-guarded snapshot of _fontDescriptions for UI-thread readers (fontDescriptions(),
+    /// setFontDPI()). The live _fontDescriptions is render-thread-owned and mutated without the mutex
+    /// during applyPendingReconfig(); a UI-thread reader must therefore observe this guarded copy
+    /// instead of racing that write. Published by the render thread (under _reconfigMutex) whenever it
+    /// applies a font change, and seeded at construction. Guarded by _reconfigMutex.
+    FontDescriptions _publishedFontDescriptions;
+
     /// Lock-free mirror of _publishedMetrics.cellSize for publishedCellSize(). Written wherever the
     /// published cell size changes (construction and the render-thread font apply); read without the
     /// mutex by UI-thread hot paths. The cell size only changes via font/DPI reconfiguration, never via
@@ -353,6 +383,14 @@ class Renderer
 
     /// Applies any staged reconfiguration. Called on the render thread at the start of renderImpl().
     void applyPendingReconfig();
+
+    /// Publishes the render-thread-owned font-derived metrics and font descriptions for UI-thread
+    /// readers (gridMetrics()/publishedCellSize()/fontDescriptions()).
+    ///
+    /// Acquires _reconfigMutex for the short copy. Called from applyPendingReconfig() after a font
+    /// apply (whether it succeeded or threw), so readers always observe metrics consistent with the
+    /// live grid metrics. Does not touch page geometry, which the UI-thread geometry writers own.
+    void publishFontMetricsAndDescriptions();
 
     /// Applies a full font-descriptions change (shaper reconfiguration, font loading, grid-metrics
     /// rebuild, atlas reconfiguration). Runs on the render thread from applyPendingReconfig().
