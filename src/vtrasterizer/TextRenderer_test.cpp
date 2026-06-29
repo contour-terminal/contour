@@ -1040,13 +1040,13 @@ TEST_CASE("Renderer.reconfig.font_load_failure_keeps_previous_font", "[renderer]
     auto const descriptionsBefore = vtrasterizer::RendererTest::liveFontDescriptions(renderer);
 
     // Make every subsequent font load fail: with an empty registry the mock locator returns no source,
-    // so load_font() yields nullopt and loadFontKeys() throws (the regular font is unloadable).
+    // so load_font() yields nullopt and loadFontKeys() throws (the regular font cannot be loaded).
     text::mock_font_locator::configure({});
 
-    auto unloadable = fixture.fontDescriptions;
-    unloadable.regular = text::font_description::parse("this-font-does-not-exist");
-    unloadable.maxFallbackCount += 1; // ensure the descriptions differ so the change is not a no-op
-    renderer.setFonts(unloadable);
+    auto failing = fixture.fontDescriptions;
+    failing.regular = text::font_description::parse("this-font-does-not-exist");
+    failing.maxFallbackCount += 1; // ensure the descriptions differ so the change is not a no-op
+    renderer.setFonts(failing);
 
     // Must not abort. The apply swallows the load failure and keeps the previous font.
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
