@@ -244,18 +244,11 @@ class TerminalDisplay: public QQuickItem
     void watchKdeDpiSetting();
     [[nodiscard]] float uptime() const noexcept;
 
-    /// Returns whether the display will paint frames (window present, render target created and the
-    /// window exposed). A staged font reconfiguration is applied by the render thread only on a painted
-    /// frame, so this gates whether such a change can be driven by a redraw or must be applied directly.
-    [[nodiscard]] bool willRenderFrames() const noexcept;
-
-    /// Drives a pending font reconfiguration: schedules a redraw when frames will paint, otherwise
-    /// applies the staged reconfiguration synchronously and re-derives geometry. The synchronous path
-    /// covers the minimized/occluded case, where no frame would paint and the change would be lost.
-    ///
-    /// @returns true if the staged reconfiguration was applied synchronously (so the renderer's published
-    ///          metrics already reflect it), false if it was left for the next painted frame.
-    bool applyStagedFontReconfigIfNotRenderable();
+    /// Applies a staged font/DPI reconfiguration synchronously on the GUI thread and re-derives geometry
+    /// (page size, implicit size, constraints, and the resizeScreen()/SIGWINCH to the child) against the
+    /// resulting cell size. This is the single policy for all discrete font reconfigurations (size,
+    /// family, DPI); see the definition for why these are applied inline rather than deferred to a frame.
+    void applyStagedFontReconfigNow();
 
     /// Updates all window size constraints: minimum size, base size, and size increment.
     /// Configures the window manager to constrain user resizes to exact cell boundaries.

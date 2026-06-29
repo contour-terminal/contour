@@ -616,26 +616,9 @@ void TerminalDisplay::applyFontDPI()
         return;
     }
 
-    // Apply the staged DPI change synchronously and re-derive geometry against the new cell size in this
-    // same call, rather than deferring to a later frame's consumeFontReconfigApplied().
-    //
-    // A DPI change (monitor move, fractional-scaling correction) is rare, and deferring it makes the
-    // intervening frame(s) render the new cell size against the previous page size — a visible
-    // wrong-column-count / mis-clipped frame. applyStagedReconfigDuringSetup() takes the renderer's
-    // _applyMutex, so it is safe even if a frame is in flight: it waits for that frame to finish reading
-    // the grid metrics/atlas before mutating them, then the recompute below derives the page size from
-    // the now-current cell size — eliminating the single-frame divergence the deferred path had.
-    _renderer->applyStagedReconfigDuringSetup();
-    (void) _renderer->consumeFontReconfigApplied(); // we re-derive geometry inline below, so consume it
-    if (window())
-    {
-        resizeTerminalToDisplaySize();
-        updateImplicitSize();
-        updateSizeConstraints();
-        // Drain the geometry that resizeTerminalToDisplaySize() just staged so it lands now too, even if
-        // no frame will paint (minimized/occluded) — same rationale as applyStagedReconfigIfNotRenderable.
-        _renderer->applyStagedReconfigDuringSetup();
-    }
+    // Apply the staged DPI change synchronously and re-derive geometry against the new cell size now,
+    // via the shared policy used for every discrete font reconfiguration (see applyStagedFontReconfigNow).
+    applyStagedFontReconfigNow();
     scheduleRedraw();
 
     // Commit the dedup guard only now that applyStagedReconfigDuringSetup() has run synchronously and the
@@ -1607,45 +1590,36 @@ void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend:
     window()->resize(QSize(unscaledViewSize.width.as<int>(), unscaledViewSize.height.as<int>()));
 }
 
-bool TerminalDisplay::willRenderFrames() const noexcept
+void TerminalDisplay::applyStagedFontReconfigNow()
 {
-    // A staged font reconfiguration is normally applied by the render thread on the next painted frame.
-    // The scene graph only paints while the window is exposed, so a minimized/occluded (or window-less)
-    // display will never paint and would leave the change unapplied. isExposed() is the canonical Qt
-    // signal for "the window is showing and will render".
-    return window() != nullptr && _renderTarget != nullptr && window()->isExposed();
-}
-
-bool TerminalDisplay::applyStagedFontReconfigIfNotRenderable()
-{
-    // When the window will paint, leave the staged reconfig for the render thread (paint() consumes it
-    // and re-derives geometry). When it will NOT paint, the render thread is provably idle (the scene
-    // graph does not render an unexposed window), so it is safe to apply the staged reconfig synchronously
-    // here on the GUI thread and re-derive geometry now — otherwise the change would silently never apply.
+    // Apply a staged font/DPI reconfiguration synchronously, on the GUI thread, and re-derive geometry
+    // against the resulting cell size in this same call — rather than deferring to a later painted frame's
+    // consumeFontReconfigApplied().
     //
-    // Returns true if the staged reconfig was applied synchronously here, false if it was left for the
-    // next painted frame. The caller uses this to decide whether the renderer's published metrics already
-    // reflect the change (synchronous) or not yet (deferred).
-    if (willRenderFrames())
-    {
-        scheduleRedraw();
-        return false;
-    }
-
+    // This is the single policy for ALL discrete font reconfigurations (size, family, DPI). Deferring to a
+    // frame had three problems the synchronous path avoids: (1) the child process learned its new row/col
+    // count one to two frames late (a TUI read of the terminal size right after the change saw stale
+    // dimensions); (2) the intervening frame(s) rendered the new cell size against the previous page size,
+    // a visible wrong-column-count flash; (3) it relied on a frame actually painting, so an exposed-but-
+    // not-painting window (occluded, compositor withholding frames) could leave the change unapplied
+    // indefinitely. Font reconfigurations are discrete user/config events, not the continuous
+    // resize stream the render-thread deferral exists to protect, so applying them inline is appropriate.
+    //
+    // Safety: applyStagedReconfigDuringSetup() takes the renderer's _applyMutex, which renderImpl() also
+    // holds across a whole frame, so this is mutually exclusive with an in-flight render-thread frame even
+    // if the window has not yet observed losing exposure — it waits for that frame to finish reading the
+    // grid metrics / atlas before mutating them. This is the same mechanism applyFontDPI() relied on.
     _renderer->applyStagedReconfigDuringSetup();
     if (_renderer->consumeFontReconfigApplied() && _session && window())
     {
         // resizeTerminalToDisplaySize() only *stages* the new geometry (page size, margin, render
-        // surface) into the renderer's pending reconfig; it is normally drained by the next painted
-        // frame. Since this branch runs precisely because no frame will paint, drain it synchronously
-        // too — otherwise the geometry would stay unapplied to the live grid metrics / render surface
-        // for the whole minimized interval, contradicting this function's purpose.
+        // surface) into the renderer's pending reconfig. Drain it synchronously too so it lands now —
+        // including the resizeScreen()/SIGWINCH to the child — rather than waiting for a frame.
         resizeTerminalToDisplaySize();
         updateImplicitSize();
         updateSizeConstraints();
         _renderer->applyStagedReconfigDuringSetup();
     }
-    return true;
 }
 
 void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
@@ -1655,11 +1629,10 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
 
     if (applyFontDescription(fontDPI(), *_renderer, std::move(fontDescriptions)))
     {
-        // The font change is only *staged* (see applyFontDescription). It is applied on the render
-        // thread during the next frame, after which consumeFontReconfigApplied() (see paint()) resizes
-        // the widget against the new cell size. Doing it here would use the *stale* cell size — so drive
-        // a frame, or apply synchronously when no frame will paint (minimized/occluded).
-        applyStagedFontReconfigIfNotRenderable();
+        // The font change is only *staged* (see applyFontDescription). Apply it synchronously and
+        // re-derive geometry against the new cell size now; doing the recompute without the apply would
+        // use the *stale* cell size.
+        applyStagedFontReconfigNow();
         // logDisplayInfo();
     }
 }
@@ -1673,23 +1646,17 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
     if (!_renderer->setFontSize(newFontSize))
         return false;
 
-    // The font change is only *staged*; it is applied on the render thread during the next frame, after
-    // which consumeFontReconfigApplied() (see paint()) re-derives the page size against the new cell
-    // size. Recomputing here would use the *stale* cell size — so drive a frame, or apply synchronously
-    // when no frame will paint (minimized/occluded), where window()->update() alone would never apply it.
-    auto const appliedSynchronously = applyStagedFontReconfigIfNotRenderable();
+    // The font change is only *staged*; apply it synchronously and re-derive the page size against the
+    // new cell size now (recomputing without the apply would use the *stale* cell size).
+    applyStagedFontReconfigNow();
     // logDisplayInfo();
 
-    // When the change applied synchronously (not-renderable path), report whether it actually took: the
-    // render-thread apply catches and swallows font-load failures (keeping the previous font), so the
-    // caller must not record a size the renderer never loaded. When the apply is deferred to the next
-    // frame (renderable path), staging succeeded and is reported as success.
-    if (appliedSynchronously)
-        // font_size has no operator==; compare the point size the apply published against the request.
-        // The request is the exact value just staged (no arithmetic in between), so an exact compare is
-        // correct: equal means the synchronous apply loaded it, unequal means it was swallowed.
-        return _renderer->fontDescriptions().size.pt == newFontSize.pt;
-    return true;
+    // Report whether the change actually took: the render-thread apply catches and swallows font-load
+    // failures (keeping the previous font), so the caller must not record a size the renderer never
+    // loaded. font_size has no operator==; compare the point size the apply published against the request.
+    // The request is the exact value just staged (no arithmetic in between), so an exact compare is
+    // correct: equal means the apply loaded it, unequal means it was swallowed.
+    return _renderer->fontDescriptions().size.pt == newFontSize.pt;
 }
 
 bool TerminalDisplay::setPageSize(PageSize newPageSize)
