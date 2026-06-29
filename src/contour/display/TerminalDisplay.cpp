@@ -900,13 +900,23 @@ void TerminalDisplay::paint()
 
         // The lazily-applied font/DPI change made the cell size current only now; re-derive page size,
         // implicit size (a DPI change alters it) and constraints against it (the triggering resize didn't).
+        //
+        // The recompute must run on the GUI thread (it mutates Qt window state and resizes the terminal),
+        // so it is post()ed and applied on frame N+1: for this one frame the new cell size is rendered
+        // against the previous page size/margins. That single-frame divergence is an accepted trade-off
+        // of keeping all grid-metrics mutation on the render thread (the deferral that fixed the
+        // resize-time crashes); applying it inline here would touch Qt/terminal state off the GUI thread.
         if (_renderer->consumeFontReconfigApplied())
             post([this]() {
-                if (!_session || !_renderer)
+                // The display may be torn down between this post() (render thread) and its execution
+                // (GUI thread): the session/renderer can be cleared and, crucially, the window may be
+                // gone. resizeTerminalToDisplaySize()/updateImplicitSize()/updateSizeConstraints() all
+                // require a live window (the latter two Require(window()) and would std::abort()), so
+                // bail out entirely unless the display is still fully alive.
+                if (!_session || !_renderer || !window())
                     return;
                 resizeTerminalToDisplaySize();
-                if (window())
-                    updateImplicitSize();
+                updateImplicitSize();
                 updateSizeConstraints();
             });
 
