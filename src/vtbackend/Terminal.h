@@ -582,7 +582,14 @@ class Terminal
 
     [[nodiscard]] PageSize pageSize() const noexcept { return _pty->pageSize(); }
 
-    [[nodiscard]] PageSize totalPageSize() const noexcept { return _settings.pageSize; }
+    /// Returns the total page size (main page + status line), read lock-free from the atomic mirror so the
+    /// render thread observes a consistent (non-torn) value even while resizeScreen() updates it. Callers
+    /// already holding _stateMutex observe the same value (it is written in lockstep with
+    /// _settings.pageSize).
+    [[nodiscard]] PageSize totalPageSize() const noexcept
+    {
+        return _atomicTotalPageSize.load(std::memory_order_acquire);
+    }
 
     [[nodiscard]] ImageSize pixelSize() const noexcept { return cellPixelSize() * totalPageSize(); }
 
@@ -1392,9 +1399,16 @@ class Terminal
         // the GUI thread writes it from setGuiTabInfoForStatusLine(). Serialize the two on a dedicated,
         // lightweight mutex rather than _stateMutex: the GUI-thread writer would otherwise block on the
         // heavily-contended _stateMutex for the full duration the parser thread holds it during a burst of
-        // output, stalling input/redraw. _guiTabInfoMutex is only ever held for this small copy, so the
-        // read taking both locks introduces no contention and no lock-order inversion (the writer never
-        // takes _stateMutex).
+        // output, stalling input/redraw. _guiTabInfoMutex is only ever held for this small copy.
+        //
+        // Lock ordering: the reader nests _guiTabInfoMutex INSIDE _stateMutex (it is already held here).
+        // The writer (TerminalSessionManager::updateStatusLine) DOES take _stateMutex — it resolves each
+        // session name via resolvedTabName() — but it takes and RELEASES _stateMutex there, then acquires
+        // _guiTabInfoMutex separately in setGuiTabInfoForStatusLine(); it never holds _stateMutex while
+        // acquiring _guiTabInfoMutex. Because the writer never nests the two the other way round, there is
+        // no AB-BA inversion. Do NOT move the name resolution inside setGuiTabInfoForStatusLine() (i.e.
+        // under _guiTabInfoMutex): that WOULD nest _stateMutex inside _guiTabInfoMutex and deadlock against
+        // this reader.
         auto const l = std::lock_guard { _guiTabInfoMutex };
         return _guiTabInfoForStatusLine;
     }
@@ -1479,6 +1493,14 @@ class Terminal
     // configuration state
     Settings _factorySettings;
     Settings _settings;
+
+    /// Lock-free mirror of _settings.pageSize for the render thread.
+    ///
+    /// _settings.pageSize is written under _stateMutex by resizeScreen() (GUI thread) but read every frame
+    /// by the render thread (renderImpl() -> totalPageSize()) without that lock. PageSize is two ints, so a
+    /// plain read concurrent with the write can tear (columns from one value, lines from another). This
+    /// atomic, written in lockstep with _settings.pageSize, gives the render thread a consistent snapshot.
+    std::atomic<PageSize> _atomicTotalPageSize { _settings.pageSize };
 
     // synchronization
     std::mutex mutable _stateMutex;
