@@ -579,7 +579,12 @@ void TerminalDisplay::applyFontDPI()
                  newFontDPI,
                  contentScale(),
                  window() ? "Window present" : "No window");
-    _lastFontDPI = newFontDPI;
+
+    // NB: _lastFontDPI is the dedup guard above; it is committed only once the renderer confirms it
+    // actually applied the new DPI (see end of this function). Committing it here — before the staged
+    // reload, which applyPendingReconfig() can fail and swallow (atlas reallocation, FreeType
+    // instantiation) — would record success that never happened, and the guard above would then
+    // permanently skip the retry when the same DPI is reported again, stranding the wrong DPI.
 
     // logDisplayInfo();
 
@@ -604,6 +609,10 @@ void TerminalDisplay::applyFontDPI()
             updateImplicitSize();
             updateSizeConstraints();
         }
+        // The materialization in createRenderer() will confirm the apply; mirror its published DPI so a
+        // later spurious same-DPI signal is correctly deduped only if it really landed.
+        if (_renderer->fontDescriptions().dpi == newFontDPI)
+            _lastFontDPI = newFontDPI;
         return;
     }
 
@@ -628,6 +637,13 @@ void TerminalDisplay::applyFontDPI()
         _renderer->applyStagedReconfigDuringSetup();
     }
     scheduleRedraw();
+
+    // Commit the dedup guard only now that applyStagedReconfigDuringSetup() has run synchronously and the
+    // renderer published the new DPI. If the staged reload threw (applyPendingReconfig() catches and keeps
+    // the previous font), the published DPI stays old, _lastFontDPI is left unchanged, and the next
+    // identical DPI signal correctly retries instead of being skipped forever.
+    if (_renderer->fontDescriptions().dpi == newFontDPI)
+        _lastFontDPI = newFontDPI;
 }
 
 void TerminalDisplay::logDisplayInfo()
