@@ -590,32 +590,44 @@ void TerminalDisplay::applyFontDPI()
 
     // Stage a DPI-only change. setFontDPI() merges the new DPI into whatever font descriptions are
     // already staged (so a concurrent font-family change from a config reload is not clobbered), rather
-    // than rebuilding the request from the live descriptions. The change is only *staged* here;
-    // recomputing geometry now would read the *stale* cell size — drive a frame instead, after which
-    // consumeFontReconfigApplied() (see paint()) re-derives against the new size.
+    // than rebuilding the request from the live descriptions.
     _renderer->setFontDPI(newFontDPI);
 
-    // The implicit size and size constraints depend on the DPR directly (not only on the cell size),
-    // so recompute them now — this does NOT require a render target. Without this, a DPI change that
-    // arrives while the render target is released (e.g. window hidden after releaseResources()) would
-    // leave the window with a stale implicit size and min/size constraints until a frame eventually
-    // paints. The post-apply consumeFontReconfigApplied() path recomputes again against the new cell
-    // size once the staged font change lands.
-    if (window())
-    {
-        updateImplicitSize();
-        updateSizeConstraints();
-    }
-
     if (!_renderTarget)
+    {
         // During createRenderer() the render target does not exist yet; the staged change is
         // materialized explicitly there via applyStagedReconfigDuringSetup(). With no render target
-        // there is also no frame to drive — the recompute above already handled the DPR-dependent part.
+        // there is also no frame to drive. The implicit size / constraints still depend on the DPR
+        // directly, so recompute those (they do not need the render target) and return.
+        if (window())
+        {
+            updateImplicitSize();
+            updateSizeConstraints();
+        }
         return;
+    }
 
-    // Drive a frame to apply the staged DPI change, or apply it synchronously when no frame will paint
-    // (minimized/occluded), where window()->update() alone would never apply it.
-    applyStagedFontReconfigIfNotRenderable();
+    // Apply the staged DPI change synchronously and re-derive geometry against the new cell size in this
+    // same call, rather than deferring to a later frame's consumeFontReconfigApplied().
+    //
+    // A DPI change (monitor move, fractional-scaling correction) is rare, and deferring it makes the
+    // intervening frame(s) render the new cell size against the previous page size — a visible
+    // wrong-column-count / mis-clipped frame. applyStagedReconfigDuringSetup() takes the renderer's
+    // _applyMutex, so it is safe even if a frame is in flight: it waits for that frame to finish reading
+    // the grid metrics/atlas before mutating them, then the recompute below derives the page size from
+    // the now-current cell size — eliminating the single-frame divergence the deferred path had.
+    _renderer->applyStagedReconfigDuringSetup();
+    (void) _renderer->consumeFontReconfigApplied(); // we re-derive geometry inline below, so consume it
+    if (window())
+    {
+        resizeTerminalToDisplaySize();
+        updateImplicitSize();
+        updateSizeConstraints();
+        // Drain the geometry that resizeTerminalToDisplaySize() just staged so it lands now too, even if
+        // no frame will paint (minimized/occluded) — same rationale as applyStagedReconfigIfNotRenderable.
+        _renderer->applyStagedReconfigDuringSetup();
+    }
+    scheduleRedraw();
 }
 
 void TerminalDisplay::logDisplayInfo()
