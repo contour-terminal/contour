@@ -377,6 +377,14 @@ class Renderer
     /// size. Atomic because it is written on the render thread and read on the display thread.
     std::atomic<bool> _fontReconfigApplied { false };
 
+    /// The terminal total page size observed by the per-frame reconcile in renderImpl() on the previous
+    /// frame. Render-thread-only. Used to distinguish a terminal-driven page-size change (status-line
+    /// toggle: an edge — the value changed since last frame) from a UI-driven resize still in flight (the
+    /// terminal total has not changed yet, only the renderer's already-correct grid metrics differ). Only
+    /// a terminal-driven edge triggers the reconcile, so the reconcile never reverts a just-published
+    /// UI resize. nullopt until the first frame seeds it.
+    std::optional<vtbackend::PageSize> _lastObservedTotalPageSize;
+
     /// Ensures a PendingReconfig exists and returns it. Caller must hold _reconfigMutex.
     PendingReconfig& ensurePendingLocked()
     {
