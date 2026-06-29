@@ -20,6 +20,7 @@
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
+#include <QtCore/QPointer>
 #include <QtCore/QMimeData>
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
@@ -325,6 +326,12 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
         if (_onClosedHandled)
             _display->closeDisplay();
     }
+
+    // A window-title / tab-name change that arrived while no display was attached was dropped by
+    // refreshGuiTabInfoForStatusLine() (it only posts when _display is set). Now that a display is
+    // attached, refresh the indicator status-line tab label so it reflects the current name rather than
+    // a stale one.
+    refreshGuiTabInfoForStatusLine();
 
     scheduleRedraw();
 }
@@ -1000,8 +1007,16 @@ void TerminalSession::refreshGuiTabInfoForStatusLine()
     // path), so we must not call _manager->update() directly: it rebuilds the tab info from every
     // session and would re-lock that non-recursive mutex (the deadlock scheduleRedraw() was changed to
     // avoid). Post the refresh to the GUI thread instead, where it runs free of the parser-thread lock.
+    //
+    // The lambda is keyed to the display QObject, so Qt only cancels it if the *display* dies — not if
+    // this *session* is destroyed first (e.g. closing a tab while its shell still emits an OSC title
+    // change). Capture a QPointer to the session (auto-nulls on destruction) and bail out if the session
+    // is gone, avoiding a use-after-free on _manager.
     if (_display)
-        _display->post([this]() { _manager->update(); });
+        _display->post([self = QPointer<TerminalSession> { this }]() {
+            if (self)
+                self->_manager->update();
+        });
 }
 
 void TerminalSession::setWindowTitle(string_view title)

@@ -2415,7 +2415,11 @@ void Terminal::setTabName(string_view title)
 
 void Terminal::requestTabName()
 {
-    inputHandler().setTabName([&](std::string name) { _tabName = std::move(name); });
+    // Route the interactively-entered name through setTabName() rather than assigning _tabName
+    // directly, so the event listener is notified (setTabName -> TerminalSession::setTabName ->
+    // refreshGuiTabInfoForStatusLine). Otherwise the indicator status-line tab label would keep showing
+    // the old name until some unrelated event happened to refresh it.
+    inputHandler().setTabName([this](std::string name) { setTabName(name); });
 }
 
 std::optional<std::string> Terminal::tabName() const noexcept
