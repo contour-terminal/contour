@@ -131,6 +131,11 @@ class TerminalDisplay: public QQuickItem
     void resizeWindow(vtbackend::Width, vtbackend::Height);
     void setFonts(vtrasterizer::FontDescriptions fontDescriptions);
     bool setFontSize(text::font_size newFontSize);
+
+    /// The font size the renderer has actually loaded (its published font descriptions), which may differ
+    /// from a just-requested size while a staged change is pending or after a swallowed font-load failure.
+    [[nodiscard]] text::font_size fontSize() const { return _renderer->fontDescriptions().size; }
+
     bool setPageSize(vtbackend::PageSize newPageSize);
 
     /// Pushes @p totalPageSize into the renderer's published/live grid metrics.
@@ -247,7 +252,10 @@ class TerminalDisplay: public QQuickItem
     /// Drives a pending font reconfiguration: schedules a redraw when frames will paint, otherwise
     /// applies the staged reconfiguration synchronously and re-derives geometry. The synchronous path
     /// covers the minimized/occluded case, where no frame would paint and the change would be lost.
-    void applyStagedFontReconfigIfNotRenderable();
+    ///
+    /// @returns true if the staged reconfiguration was applied synchronously (so the renderer's published
+    ///          metrics already reflect it), false if it was left for the next painted frame.
+    bool applyStagedFontReconfigIfNotRenderable();
 
     /// Updates all window size constraints: minimum size, base size, and size increment.
     /// Configures the window manager to constrain user resizes to exact cell boundaries.

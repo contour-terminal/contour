@@ -1603,16 +1603,20 @@ bool TerminalDisplay::willRenderFrames() const noexcept
     return window() != nullptr && _renderTarget != nullptr && window()->isExposed();
 }
 
-void TerminalDisplay::applyStagedFontReconfigIfNotRenderable()
+bool TerminalDisplay::applyStagedFontReconfigIfNotRenderable()
 {
     // When the window will paint, leave the staged reconfig for the render thread (paint() consumes it
     // and re-derives geometry). When it will NOT paint, the render thread is provably idle (the scene
     // graph does not render an unexposed window), so it is safe to apply the staged reconfig synchronously
     // here on the GUI thread and re-derive geometry now — otherwise the change would silently never apply.
+    //
+    // Returns true if the staged reconfig was applied synchronously here, false if it was left for the
+    // next painted frame. The caller uses this to decide whether the renderer's published metrics already
+    // reflect the change (synchronous) or not yet (deferred).
     if (willRenderFrames())
     {
         scheduleRedraw();
-        return;
+        return false;
     }
 
     _renderer->applyStagedReconfigDuringSetup();
@@ -1628,6 +1632,7 @@ void TerminalDisplay::applyStagedFontReconfigIfNotRenderable()
         updateSizeConstraints();
         _renderer->applyStagedReconfigDuringSetup();
     }
+    return true;
 }
 
 void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
@@ -1659,8 +1664,18 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
     // which consumeFontReconfigApplied() (see paint()) re-derives the page size against the new cell
     // size. Recomputing here would use the *stale* cell size — so drive a frame, or apply synchronously
     // when no frame will paint (minimized/occluded), where window()->update() alone would never apply it.
-    applyStagedFontReconfigIfNotRenderable();
+    auto const appliedSynchronously = applyStagedFontReconfigIfNotRenderable();
     // logDisplayInfo();
+
+    // When the change applied synchronously (not-renderable path), report whether it actually took: the
+    // render-thread apply catches and swallows font-load failures (keeping the previous font), so the
+    // caller must not record a size the renderer never loaded. When the apply is deferred to the next
+    // frame (renderable path), staging succeeded and is reported as success.
+    if (appliedSynchronously)
+        // font_size has no operator==; compare the point size the apply published against the request.
+        // The request is the exact value just staged (no arithmetic in between), so an exact compare is
+        // correct: equal means the synchronous apply loaded it, unequal means it was swallowed.
+        return _renderer->fontDescriptions().size.pt == newFontSize.pt;
     return true;
 }
 
