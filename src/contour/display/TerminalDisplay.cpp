@@ -588,16 +588,34 @@ void TerminalDisplay::applyFontDPI()
 
     Require(_renderer);
 
-    auto fd = _renderer->fontDescriptions();
-    fd.dpi = newFontDPI;
-    // The font change is only *staged* here; recomputing geometry now would read the *stale* cell size.
-    // Drive a frame instead — consumeFontReconfigApplied() (see paint()) re-derives against the new size.
-    _renderer->setFonts(std::move(fd));
+    // Stage a DPI-only change. setFontDPI() merges the new DPI into whatever font descriptions are
+    // already staged (so a concurrent font-family change from a config reload is not clobbered), rather
+    // than rebuilding the request from the live descriptions. The change is only *staged* here;
+    // recomputing geometry now would read the *stale* cell size — drive a frame instead, after which
+    // consumeFontReconfigApplied() (see paint()) re-derives against the new size.
+    _renderer->setFontDPI(newFontDPI);
+
+    // The implicit size and size constraints depend on the DPR directly (not only on the cell size),
+    // so recompute them now — this does NOT require a render target. Without this, a DPI change that
+    // arrives while the render target is released (e.g. window hidden after releaseResources()) would
+    // leave the window with a stale implicit size and min/size constraints until a frame eventually
+    // paints. The post-apply consumeFontReconfigApplied() path recomputes again against the new cell
+    // size once the staged font change lands.
+    if (window())
+    {
+        updateImplicitSize();
+        updateSizeConstraints();
+    }
 
     if (!_renderTarget)
+        // During createRenderer() the render target does not exist yet; the staged change is
+        // materialized explicitly there via applyStagedReconfigDuringSetup(). With no render target
+        // there is also no frame to drive — the recompute above already handled the DPR-dependent part.
         return;
 
-    scheduleRedraw();
+    // Drive a frame to apply the staged DPI change, or apply it synchronously when no frame will paint
+    // (minimized/occluded), where window()->update() alone would never apply it.
+    applyStagedFontReconfigIfNotRenderable();
 }
 
 void TerminalDisplay::logDisplayInfo()
@@ -755,6 +773,12 @@ void TerminalDisplay::createRenderer()
     // applyFontDPI() only *stages* the font reload; the render thread is not running yet and there is no
     // frame to apply it, so materialize it now to read the correct cell size for the texture atlas tile.
     _renderer->applyStagedReconfigDuringSetup();
+
+    // Clear the "font reconfig applied" signal raised by the setup-time apply above. The geometry is
+    // sized correctly below (applyResize() + the implicit-size/constraints setup), so we must not let
+    // the first painted frame's consumeFontReconfigApplied() post a redundant resize/recompute, which
+    // would re-derive the page size on frame 1 and cause a brief geometry recompute/flicker at open.
+    (void) _renderer->consumeFontReconfigApplied();
 
     auto const textureTileSize = gridMetrics().cellSize;
     auto const viewportMargin = vtrasterizer::PageMargin {}; // TODO margin
@@ -1542,6 +1566,36 @@ void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend:
     window()->resize(QSize(unscaledViewSize.width.as<int>(), unscaledViewSize.height.as<int>()));
 }
 
+bool TerminalDisplay::willRenderFrames() const noexcept
+{
+    // A staged font reconfiguration is normally applied by the render thread on the next painted frame.
+    // The scene graph only paints while the window is exposed, so a minimized/occluded (or window-less)
+    // display will never paint and would leave the change unapplied. isExposed() is the canonical Qt
+    // signal for "the window is showing and will render".
+    return window() != nullptr && _renderTarget != nullptr && window()->isExposed();
+}
+
+void TerminalDisplay::applyStagedFontReconfigIfNotRenderable()
+{
+    // When the window will paint, leave the staged reconfig for the render thread (paint() consumes it
+    // and re-derives geometry). When it will NOT paint, the render thread is provably idle (the scene
+    // graph does not render an unexposed window), so it is safe to apply the staged reconfig synchronously
+    // here on the GUI thread and re-derive geometry now — otherwise the change would silently never apply.
+    if (willRenderFrames())
+    {
+        scheduleRedraw();
+        return;
+    }
+
+    _renderer->applyStagedReconfigDuringSetup();
+    if (_renderer->consumeFontReconfigApplied() && _session && window())
+    {
+        resizeTerminalToDisplaySize();
+        updateImplicitSize();
+        updateSizeConstraints();
+    }
+}
+
 void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
 {
     Require(_session != nullptr);
@@ -1549,11 +1603,11 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
 
     if (applyFontDescription(fontDPI(), *_renderer, std::move(fontDescriptions)))
     {
-        // The font change is only *staged* (see applyFontDescription); it is applied on the render
+        // The font change is only *staged* (see applyFontDescription). It is applied on the render
         // thread during the next frame, after which consumeFontReconfigApplied() (see paint()) resizes
-        // the widget against the new cell size. Doing it here would use the *stale* cell size, so just
-        // request a frame to drive the apply (also covers the occluded/minimized case).
-        scheduleRedraw();
+        // the widget against the new cell size. Doing it here would use the *stale* cell size — so drive
+        // a frame, or apply synchronously when no frame will paint (minimized/occluded).
+        applyStagedFontReconfigIfNotRenderable();
         // logDisplayInfo();
     }
 }
@@ -1569,9 +1623,9 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
 
     // The font change is only *staged*; it is applied on the render thread during the next frame, after
     // which consumeFontReconfigApplied() (see paint()) re-derives the page size against the new cell
-    // size. Recomputing here would use the *stale* cell size, so just request a frame to drive the
-    // apply (this also covers the occluded/minimized case, where no frame would otherwise paint).
-    scheduleRedraw();
+    // size. Recomputing here would use the *stale* cell size — so drive a frame, or apply synchronously
+    // when no frame will paint (minimized/occluded), where window()->update() alone would never apply it.
+    applyStagedFontReconfigIfNotRenderable();
     // logDisplayInfo();
     return true;
 }
