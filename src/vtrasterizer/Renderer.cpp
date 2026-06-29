@@ -511,11 +511,11 @@ void Renderer::publishFontMetricsAndDescriptions()
     }
 }
 
-void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
+bool Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 {
     try
     {
-        renderImpl(terminal, pressure);
+        return renderImpl(terminal, pressure);
     }
     catch (std::exception const& e)
     {
@@ -525,9 +525,10 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     {
         errorLog()("Renderer::render: caught unknown exception.");
     }
+    return false;
 }
 
-void Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
+bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 {
     // Hold _applyMutex across the whole frame: this both applies any staged reconfiguration and then
     // renders from _gridMetrics / the texture atlas. Holding it for the full duration makes a GUI-thread
@@ -717,6 +718,13 @@ void Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
     }
 
     _renderTarget->execute(now);
+
+    // Consume the "font reconfig applied" signal here, still under _applyMutex (held for the whole frame).
+    // applyPendingReconfig() above sets it on the render thread; consuming it under the same lock that the
+    // GUI thread's applyStagedReconfigDuringSetup() uses means the one-shot signal is never double-consumed
+    // or lost in a race between the two threads. The caller (paint()) drives the GUI-side geometry recompute
+    // when this is true.
+    return consumeFontReconfigApplied();
 }
 
 void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells, int yPixelOffset)

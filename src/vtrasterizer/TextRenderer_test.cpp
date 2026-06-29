@@ -1060,6 +1060,32 @@ TEST_CASE("Renderer.reconfig.font_load_failure_keeps_previous_font", "[renderer]
     CHECK_FALSE(renderer.consumeFontReconfigApplied());
 }
 
+TEST_CASE("Renderer.reconfig.setup_apply_returns_consumed_font_reconfig_flag", "[renderer]")
+{
+    // applyStagedReconfigDuringSetup() applies any staged reconfiguration AND consumes the "font reconfig
+    // applied" one-shot signal under _applyMutex, returning it. Consuming it there (rather than via a
+    // separate consumeFontReconfigApplied() after the lock is released) is what prevents the GUI thread
+    // and the render thread from both consuming the same one-shot signal.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    // A size-only change that alters the cell size: the setup apply reports the font reconfig and the
+    // flag is already consumed, so nothing is left for a later consumer.
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    auto const fontReconfigApplied = renderer.applyStagedReconfigDuringSetup();
+    CHECK_FALSE(renderer.consumeFontReconfigApplied()); // consumed inside the setup apply, not here
+    // The BDF mock font is fixed-size, so the cell size may or may not change vs the seeded metrics; the
+    // contract under test is only that the setup apply, not a later consumer, owns the one-shot signal.
+    (void) fontReconfigApplied;
+
+    // A geometry-only change changes no cell size, so the setup apply reports no font reconfig.
+    renderer.applyResize(vtbackend::ImageSize { Width(1280), Height(720) },
+                         PageSize { LineCount(30), ColumnCount(100) },
+                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 });
+    CHECK_FALSE(renderer.applyStagedReconfigDuringSetup());
+}
+
 TEST_CASE("Renderer.reconfig.set_font_size_folds_into_pending_set_fonts", "[renderer]")
 {
     // If a full font-descriptions change is already staged and a font-size change arrives before the

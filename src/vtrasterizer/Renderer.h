@@ -97,6 +97,17 @@ class Renderer
         return _publishedFontDescriptions;
     }
 
+    /// Returns just the published font DPI, without deep-copying the whole FontDescriptions.
+    ///
+    /// fontDescriptions() copies five text::font_description objects (each with std::strings and feature
+    /// vectors) under the lock. Callers that only need the DPI — e.g. the dedup guard in
+    /// TerminalDisplay::applyFontDPI() — use this to avoid that heap-allocating copy.
+    [[nodiscard]] DPI publishedFontDPI() const noexcept
+    {
+        auto const l = std::scoped_lock { _reconfigMutex };
+        return _publishedFontDescriptions.dpi;
+    }
+
     /// Stages a full font-descriptions change to be applied on the render thread.
     ///
     /// The text shaper is not thread-safe and is read by the render thread every frame, so this only
@@ -205,8 +216,13 @@ class Renderer
      *                       CPU intensive but allow to render fast.
      *                       The user shall not notice that, because this frame
      *                       is known already to be updated right after again.
+     *
+     * @return true if a font reconfiguration was applied during this frame and the display must
+     *         re-derive its geometry against the new cell size (see applyPendingReconfig()). The flag is
+     *         consumed here, under _applyMutex, so it cannot also be consumed concurrently by a GUI-thread
+     *         applyStagedReconfigDuringSetup().
      */
-    void render(vtbackend::Terminal& terminal, bool pressureHint);
+    [[nodiscard]] bool render(vtbackend::Terminal& terminal, bool pressureHint);
 
     /// Synchronously applies any staged font/geometry reconfiguration.
     ///
@@ -216,10 +232,16 @@ class Renderer
     ///
     /// Takes _applyMutex so it is mutually exclusive with the render thread's per-frame apply+render —
     /// safe even if an already in-flight frame has not yet observed the window losing exposure.
-    void applyStagedReconfigDuringSetup()
+    ///
+    /// @return true if a font reconfiguration was applied (and thus the "font reconfig applied" signal was
+    ///         consumed). Consuming under _applyMutex here — rather than via a separate
+    ///         consumeFontReconfigApplied() after the lock is released — is what prevents the render
+    ///         thread's render() from racing the GUI thread for the same one-shot signal.
+    [[nodiscard]] bool applyStagedReconfigDuringSetup()
     {
         auto const applyGuard = std::scoped_lock { _applyMutex };
         applyPendingReconfig();
+        return consumeFontReconfigApplied();
     }
 
     void discardImage(vtbackend::Image const& image);
@@ -262,7 +284,7 @@ class Renderer
 
   private:
     /// Internal implementation of render(), wrapped in a try/catch for graceful degradation.
-    void renderImpl(vtbackend::Terminal& terminal, bool pressure);
+    [[nodiscard]] bool renderImpl(vtbackend::Terminal& terminal, bool pressure);
 
     void configureTextureAtlas();
 
