@@ -994,9 +994,32 @@ QString TerminalSession::title() const
 #endif
 }
 
+void TerminalSession::refreshGuiTabInfoForStatusLine()
+{
+    // setWindowTitle()/setTabName() are invoked on the parser thread while _stateMutex is held (ESU
+    // path), so we must not call _manager->update() directly: it rebuilds the tab info from every
+    // session and would re-lock that non-recursive mutex (the deadlock scheduleRedraw() was changed to
+    // avoid). Post the refresh to the GUI thread instead, where it runs free of the parser-thread lock.
+    if (_display)
+        _display->post([this]() { _manager->update(); });
+}
+
 void TerminalSession::setWindowTitle(string_view title)
 {
     emit titleChanged(QString::fromUtf8(title.data(), static_cast<int>(title.size())));
+
+    // In TabsNamingMode::Title the indicator status-line tab name derives from the window title, so a
+    // runtime title change must refresh the status-line tab info (no longer done by scheduleRedraw()).
+    refreshGuiTabInfoForStatusLine();
+}
+
+void TerminalSession::setTabName(string_view name)
+{
+    // A tab-name change (via the tab-naming escape sequence) feeds the indicator status-line tab label;
+    // refresh it on the GUI thread since scheduleRedraw() no longer does (see
+    // refreshGuiTabInfoForStatusLine).
+    (void) name;
+    refreshGuiTabInfoForStatusLine();
 }
 
 void TerminalSession::setTerminalProfile(string const& configProfileName)
