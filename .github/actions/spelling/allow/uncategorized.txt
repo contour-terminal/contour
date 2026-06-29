@@ -196,6 +196,7 @@ XVec
 Ype
 ZAxis
 acion
+acq
 acrylicblur
 adb
 aee
@@ -328,6 +329,8 @@ debversion
 deccra
 decoratioins
 decrpm
+dedup
+deduped
 dejavu
 delimieters
 demibold
@@ -819,6 +822,7 @@ rdynamic
 reaaally
 readfd
 recognises
+reconfig
 relase
 remaints
 renderables
