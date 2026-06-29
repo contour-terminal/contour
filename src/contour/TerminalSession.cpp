@@ -20,8 +20,8 @@
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
-#include <QtCore/QPointer>
 #include <QtCore/QMimeData>
+#include <QtCore/QPointer>
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
