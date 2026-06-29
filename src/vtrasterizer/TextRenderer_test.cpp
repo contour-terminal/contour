@@ -101,6 +101,12 @@ class RendererTest
             return std::nullopt;
         return renderer._pendingReconfig->fontSize;
     }
+
+    /// Returns the *live* font descriptions (mutated only on the render thread).
+    [[nodiscard]] static FontDescriptions const& liveFontDescriptions(Renderer const& renderer)
+    {
+        return renderer._fontDescriptions;
+    }
 };
 } // namespace vtrasterizer
 
@@ -1019,6 +1025,65 @@ TEST_CASE("Renderer.reconfig.set_fonts_is_deferred", "[renderer]")
     // After the render-thread apply: the change took effect and nothing is left pending.
     CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
     CHECK(renderer.fontDescriptions().maxFallbackCount == changed.maxFallbackCount);
+}
+
+TEST_CASE("Renderer.reconfig.font_load_failure_keeps_previous_font", "[renderer]")
+{
+    // A font-descriptions change whose regular font cannot be loaded (e.g. the family was uninstalled or
+    // a locator failure) must NOT abort the process: applyPendingReconfig() catches the failure and keeps
+    // the previously loaded font. Regression test for the crash where loadFontKeys() returned an invalid
+    // FontKeys without throwing, so the catch never fired and metrics(invalid_key) aborted.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto const descriptionsBefore = vtrasterizer::RendererTest::liveFontDescriptions(renderer);
+
+    // Make every subsequent font load fail: with an empty registry the mock locator returns no source,
+    // so load_font() yields nullopt and loadFontKeys() throws (the regular font cannot be loaded).
+    text::mock_font_locator::configure({});
+
+    auto failing = fixture.fontDescriptions;
+    failing.regular = text::font_description::parse("this-font-does-not-exist");
+    failing.maxFallbackCount += 1; // ensure the descriptions differ so the change is not a no-op
+    renderer.setFonts(failing);
+
+    // Must not abort. The apply swallows the load failure and keeps the previous font.
+    vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+    // The request is consumed (no infinite retry loop), but the live descriptions still hold the
+    // previously loaded font — the failed change was not committed.
+    CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    CHECK(vtrasterizer::RendererTest::liveFontDescriptions(renderer).regular == descriptionsBefore.regular);
+
+    // A failed apply must not signal the display to resize against half-applied metrics.
+    CHECK_FALSE(renderer.consumeFontReconfigApplied());
+}
+
+TEST_CASE("Renderer.reconfig.setup_apply_returns_consumed_font_reconfig_flag", "[renderer]")
+{
+    // applyStagedReconfigDuringSetup() applies any staged reconfiguration AND consumes the "font reconfig
+    // applied" one-shot signal under _applyMutex, returning it. Consuming it there (rather than via a
+    // separate consumeFontReconfigApplied() after the lock is released) is what prevents the GUI thread
+    // and the render thread from both consuming the same one-shot signal.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    // A size-only change that alters the cell size: the setup apply reports the font reconfig and the
+    // flag is already consumed, so nothing is left for a later consumer.
+    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    auto const fontReconfigApplied = renderer.applyStagedReconfigDuringSetup();
+    CHECK_FALSE(renderer.consumeFontReconfigApplied()); // consumed inside the setup apply, not here
+    // The BDF mock font is fixed-size, so the cell size may or may not change vs the seeded metrics; the
+    // contract under test is only that the setup apply, not a later consumer, owns the one-shot signal.
+    (void) fontReconfigApplied;
+
+    // A geometry-only change changes no cell size, so the setup apply reports no font reconfig.
+    renderer.applyResize(vtbackend::ImageSize { Width(1280), Height(720) },
+                         PageSize { LineCount(30), ColumnCount(100) },
+                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 });
+    CHECK_FALSE(renderer.applyStagedReconfigDuringSetup());
 }
 
 TEST_CASE("Renderer.reconfig.set_font_size_folds_into_pending_set_fonts", "[renderer]")

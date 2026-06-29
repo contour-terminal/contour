@@ -604,28 +604,43 @@ void TerminalDisplay::applyFontDPI()
         // materialized explicitly there via applyStagedReconfigDuringSetup(). With no render target
         // there is also no frame to drive. The implicit size / constraints still depend on the DPR
         // directly, so recompute those (they do not need the render target) and return.
+        //
+        // _lastFontDPI is deliberately NOT committed here: the staged DPI is not materialized yet (the
+        // renderer still publishes the old DPI), so there is nothing to confirm. createRenderer() commits
+        // it right after it materializes the staged reconfig — committing it speculatively here would
+        // record a success that has not happened.
         if (window())
         {
             updateImplicitSize();
             updateSizeConstraints();
         }
-        // The materialization in createRenderer() will confirm the apply; mirror its published DPI so a
-        // later spurious same-DPI signal is correctly deduped only if it really landed.
-        if (_renderer->fontDescriptions().dpi == newFontDPI)
-            _lastFontDPI = newFontDPI;
         return;
     }
 
     // Apply the staged DPI change synchronously and re-derive geometry against the new cell size now,
     // via the shared policy used for every discrete font reconfiguration (see applyStagedFontReconfigNow).
-    applyStagedFontReconfigNow();
+    auto const cellSizeChanged = applyStagedFontReconfigNow();
+
+    // The implicit (virtual) size and the WM size-increment hint derive from the DPR/contentScale, not
+    // only from the cell pixel size, so a DPI change must recompute them even when the new cell metrics
+    // round to the SAME pixel size (cellSizeChanged == false, so applyStagedFontReconfigNow() did not run
+    // the geometry recompute). Skipping this on a fractional-scaling display left the window's virtual
+    // size and resize increments computed at the old DPR. When the cell size did change,
+    // applyStagedFontReconfigNow() already ran these, so only do it for the unchanged-cell-size case.
+    if (!cellSizeChanged && window())
+    {
+        updateImplicitSize();
+        updateSizeConstraints();
+    }
+
     scheduleRedraw();
 
     // Commit the dedup guard only now that applyStagedReconfigDuringSetup() has run synchronously and the
     // renderer published the new DPI. If the staged reload threw (applyPendingReconfig() catches and keeps
     // the previous font), the published DPI stays old, _lastFontDPI is left unchanged, and the next
-    // identical DPI signal correctly retries instead of being skipped forever.
-    if (_renderer->fontDescriptions().dpi == newFontDPI)
+    // identical DPI signal correctly retries instead of being skipped forever. publishedFontDPI() reads
+    // just the DPI under the lock (no full FontDescriptions copy).
+    if (_renderer->publishedFontDPI() == newFontDPI)
         _lastFontDPI = newFontDPI;
 }
 
@@ -645,6 +660,11 @@ void TerminalDisplay::logDisplayInfo()
         Height::cast_from(window()->screen()->size().height())
     };
     auto const actualScreenSize = normalScreenSize * window()->effectiveDevicePixelRatio();
+    // Snapshot the mutex-guarded grid metrics and font descriptions once each, then read fields off the
+    // locals: gridMetrics()/fontDescriptions() each take _reconfigMutex and deep-copy a full struct, so
+    // reading them per line (5 + 2 times) would do 7 locked deep copies for one diagnostic dump.
+    auto const gm = gridMetrics();
+    auto const fd = _renderer->fontDescriptions();
 #if defined(CONTOUR_BUILD_TYPE)
     displayLog()("[FYI] Build type          : {}", CONTOUR_BUILD_TYPE);
 #endif
@@ -655,13 +675,13 @@ void TerminalDisplay::logDisplayInfo()
     displayLog()("[FYI] Device pixel ratio  : {}", window()->devicePixelRatio());
     displayLog()("[FYI] Effective DPR       : {}", window()->effectiveDevicePixelRatio());
     displayLog()("[FYI] Content scale       : {}", contentScale());
-    displayLog()("[FYI] Font DPI            : {} ({})", fontDPI(), _renderer->fontDescriptions().dpi);
-    displayLog()("[FYI] Font size           : {} ({} px)", _renderer->fontDescriptions().size, fontSizeInPx);
-    displayLog()("[FYI] Cell size           : {} px", gridMetrics().cellSize);
-    displayLog()("[FYI] Page size           : {}", gridMetrics().pageSize);
-    displayLog()("[FYI] Font baseline       : {} px", gridMetrics().baseline);
-    displayLog()("[FYI] Underline position  : {} px", gridMetrics().underline.position);
-    displayLog()("[FYI] Underline thickness : {} px", gridMetrics().underline.thickness);
+    displayLog()("[FYI] Font DPI            : {} ({})", fontDPI(), fd.dpi);
+    displayLog()("[FYI] Font size           : {} ({} px)", fd.size, fontSizeInPx);
+    displayLog()("[FYI] Cell size           : {} px", gm.cellSize);
+    displayLog()("[FYI] Page size           : {}", gm.pageSize);
+    displayLog()("[FYI] Font baseline       : {} px", gm.baseline);
+    displayLog()("[FYI] Underline position  : {} px", gm.underline.position);
+    displayLog()("[FYI] Underline thickness : {} px", gm.underline.thickness);
     // clang-format on
 }
 
@@ -781,9 +801,20 @@ void TerminalDisplay::createRenderer()
     // render target, ensuring correct cell metrics from the start.
     applyFontDPI();
 
-    // applyFontDPI() only *stages* the font reload; the render thread is not running yet and there is no
-    // frame to apply it, so materialize it now to read the correct cell size for the texture atlas tile.
-    _renderer->applyStagedReconfigDuringSetup();
+    // applyFontDPI() only *stages* the font reload (its no-render-target branch ran above): the render
+    // thread is not running yet and there is no frame to apply it, so materialize it now to read the
+    // correct cell size for the texture atlas tile. applyStagedReconfigDuringSetup() also consumes the
+    // "font reconfig applied" one-shot signal raised by this setup-time apply and returns it — we
+    // intentionally discard it: the geometry is sized correctly below (applyResize() + the implicit-size /
+    // constraints setup), so the first painted frame must NOT also post a redundant resize/recompute that
+    // would re-derive the page size on frame 1 and cause a brief geometry recompute/flicker at open.
+    (void) _renderer->applyStagedReconfigDuringSetup();
+
+    // The staged DPI is now materialized, but applyFontDPI()'s no-render-target branch could not commit its
+    // _lastFontDPI dedup guard (the renderer had not yet published the new DPI when it ran). Commit it now,
+    // so a later screen/DPI signal reporting this same (already-applied) DPI is correctly deduped instead
+    // of triggering a full redundant font reload + geometry recompute + spurious resizeScreen()/SIGWINCH.
+    _lastFontDPI = fontDPI();
 
     // applyFontDPI()'s no-render-target branch already computed updateImplicitSize() — but against the
     // still-stale (pre-correction) cell size, because the staged DPI was only materialized just above. On
@@ -797,12 +828,6 @@ void TerminalDisplay::createRenderer()
         updateImplicitSize();
         updateSizeConstraints();
     }
-
-    // Clear the "font reconfig applied" signal raised by the setup-time apply above. The geometry is
-    // sized correctly below (applyResize() + the implicit-size/constraints setup), so we must not let
-    // the first painted frame's consumeFontReconfigApplied() post a redundant resize/recompute, which
-    // would re-derive the page size on frame 1 and cause a brief geometry recompute/flicker at open.
-    (void) _renderer->consumeFontReconfigApplied();
 
     auto const textureTileSize = gridMetrics().cellSize;
     auto const viewportMargin = vtrasterizer::PageMargin {}; // TODO margin
@@ -944,28 +969,27 @@ void TerminalDisplay::paint()
 #endif
 
         terminal().tick(steady_clock::now());
-        _renderer->render(terminal(), _renderingPressure);
+        auto const fontReconfigApplied = _renderer->render(terminal(), _renderingPressure);
 
         // The lazily-applied font/DPI change made the cell size current only now; re-derive page size,
         // implicit size (a DPI change alters it) and constraints against it (the triggering resize didn't).
+        // render() consumes the "font reconfig applied" signal under _applyMutex and returns it, so this
+        // render-thread path and the GUI-thread applyStagedReconfigNow() can never both consume it.
         //
         // The recompute must run on the GUI thread (it mutates Qt window state and resizes the terminal),
         // so it is post()ed and applied on frame N+1: for this one frame the new cell size is rendered
         // against the previous page size/margins. That single-frame divergence is an accepted trade-off
         // of keeping all grid-metrics mutation on the render thread (the deferral that fixed the
         // resize-time crashes); applying it inline here would touch Qt/terminal state off the GUI thread.
-        if (_renderer->consumeFontReconfigApplied())
+        if (fontReconfigApplied)
             post([this]() {
                 // The display may be torn down between this post() (render thread) and its execution
                 // (GUI thread): the session/renderer can be cleared and, crucially, the window may be
-                // gone. resizeTerminalToDisplaySize()/updateImplicitSize()/updateSizeConstraints() all
-                // require a live window (the latter two Require(window()) and would std::abort()), so
-                // bail out entirely unless the display is still fully alive.
+                // gone. recomputeGeometryAfterFontReconfig() requires a live window (Require(window())
+                // inside it would std::abort()), so bail out unless the display is still fully alive.
                 if (!_session || !_renderer || !window())
                     return;
-                resizeTerminalToDisplaySize();
-                updateImplicitSize();
-                updateSizeConstraints();
+                recomputeGeometryAfterFontReconfig();
             });
 
         if (_doDumpState)
@@ -1428,7 +1452,9 @@ void TerminalDisplay::doDumpState()
 
 QImage TerminalDisplay::screenshot()
 {
-    _renderer->render(terminal(), _renderingPressure);
+    // A one-off render for the screenshot; any font-reconfig recompute it signals is handled by the
+    // regular paint() path, so the return value is intentionally ignored here.
+    (void) _renderer->render(terminal(), _renderingPressure);
     auto [size, image] = _renderTarget->takeScreenshot();
 
     return QImage(image.data(),
@@ -1590,11 +1616,23 @@ void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend:
     window()->resize(QSize(unscaledViewSize.width.as<int>(), unscaledViewSize.height.as<int>()));
 }
 
-void TerminalDisplay::applyStagedFontReconfigNow()
+void TerminalDisplay::recomputeGeometryAfterFontReconfig()
+{
+    // Re-derive the geometry that depends on the (now current) cell size after a font/DPI reconfiguration:
+    // the terminal page size + render-surface margin (resizeTerminalToDisplaySize, which also drives the
+    // resizeScreen()/SIGWINCH to the child) and the Qt window's implicit size + size constraints. Callers
+    // must ensure the display is fully alive (live _session, _renderer and window()) — updateImplicitSize()
+    // and updateSizeConstraints() Require(window()) and would abort otherwise.
+    Require(_session && _renderer && window());
+    resizeTerminalToDisplaySize();
+    updateImplicitSize();
+    updateSizeConstraints();
+}
+
+bool TerminalDisplay::applyStagedFontReconfigNow()
 {
     // Apply a staged font/DPI reconfiguration synchronously, on the GUI thread, and re-derive geometry
-    // against the resulting cell size in this same call — rather than deferring to a later painted frame's
-    // consumeFontReconfigApplied().
+    // against the resulting cell size in this same call — rather than deferring to a later painted frame.
     //
     // This is the single policy for ALL discrete font reconfigurations (size, family, DPI). Deferring to a
     // frame had three problems the synchronous path avoids: (1) the child process learned its new row/col
@@ -1609,17 +1647,26 @@ void TerminalDisplay::applyStagedFontReconfigNow()
     // holds across a whole frame, so this is mutually exclusive with an in-flight render-thread frame even
     // if the window has not yet observed losing exposure — it waits for that frame to finish reading the
     // grid metrics / atlas before mutating them. This is the same mechanism applyFontDPI() relied on.
-    _renderer->applyStagedReconfigDuringSetup();
-    if (_renderer->consumeFontReconfigApplied() && _session && window())
+    //
+    // applyStagedReconfigDuringSetup() both applies the staged change and consumes the "font reconfig
+    // applied" one-shot signal under _applyMutex, returning it. Consuming it there (not via a separate
+    // consumeFontReconfigApplied() after the lock is released) is what prevents this GUI-thread path from
+    // racing a render-thread frame for the signal.
+    //
+    // @return true if the cell size actually changed (a geometry recompute against it was performed). DPI
+    //         changes that round to the same cell pixel size return false but still alter DPR-derived
+    //         window geometry; applyFontDPI() recomputes the implicit size / size constraints itself for
+    //         that case.
+    auto const fontReconfigApplied = _renderer->applyStagedReconfigDuringSetup();
+    if (fontReconfigApplied && _session && window())
     {
-        // resizeTerminalToDisplaySize() only *stages* the new geometry (page size, margin, render
+        // recomputeGeometryAfterFontReconfig() only *stages* the new geometry (page size, margin, render
         // surface) into the renderer's pending reconfig. Drain it synchronously too so it lands now —
         // including the resizeScreen()/SIGWINCH to the child — rather than waiting for a frame.
-        resizeTerminalToDisplaySize();
-        updateImplicitSize();
-        updateSizeConstraints();
-        _renderer->applyStagedReconfigDuringSetup();
+        recomputeGeometryAfterFontReconfig();
+        (void) _renderer->applyStagedReconfigDuringSetup();
     }
+    return fontReconfigApplied;
 }
 
 void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)

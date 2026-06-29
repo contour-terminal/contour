@@ -250,7 +250,17 @@ class TerminalDisplay: public QQuickItem
     /// (page size, implicit size, constraints, and the resizeScreen()/SIGWINCH to the child) against the
     /// resulting cell size. This is the single policy for all discrete font reconfigurations (size,
     /// family, DPI); see the definition for why these are applied inline rather than deferred to a frame.
-    void applyStagedFontReconfigNow();
+    ///
+    /// @return true if the cell size changed (and the geometry recompute against it ran). A DPI change
+    ///         that rounds to the same cell pixel size returns false but still needs the DPR-derived
+    ///         implicit size / size constraints recomputed — applyFontDPI() does that unconditionally.
+    bool applyStagedFontReconfigNow();
+
+    /// Re-derives the geometry that depends on the cell size after a font/DPI reconfiguration: the
+    /// terminal page size + margin (and the resizeScreen()/SIGWINCH to the child) and the Qt window's
+    /// implicit size + size constraints. Shared by the synchronous (applyStagedFontReconfigNow) and the
+    /// deferred frame (paint()) reconfig paths so the two cannot diverge. Requires a live display.
+    void recomputeGeometryAfterFontReconfig();
 
     /// Updates all window size constraints: minimum size, base size, and size increment.
     /// Configures the window manager to constrain user resizes to exact cell boundaries.

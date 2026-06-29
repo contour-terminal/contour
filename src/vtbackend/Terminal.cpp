@@ -1782,6 +1782,9 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 
     _factorySettings.pageSize = totalPageSize;
     _settings.pageSize = totalPageSize;
+    // Keep the lock-free mirror in lockstep with _settings.pageSize so the render thread's totalPageSize()
+    // never observes a torn value (see _atomicTotalPageSize).
+    _atomicTotalPageSize.store(totalPageSize, std::memory_order_release);
     _currentMousePosition = clampToScreen(_currentMousePosition);
     if (pixels)
         setCellPixelSize(pixels.value() / mainDisplayPageSize);
@@ -2409,17 +2412,34 @@ std::string const& Terminal::windowTitle() const noexcept
 
 void Terminal::setTabName(string_view title)
 {
+    // Parser-thread path (SETTABNAME escape sequence): writeToScreen() already holds _stateMutex across
+    // the whole parse, so _tabName is written under the lock here. The GUI interactive-prompt path goes
+    // through requestTabName(), which takes _stateMutex itself before mutating _tabName — it must NOT call
+    // this method (that would write _tabName lock-free, racing the parser thread and resolvedTabName()).
     _tabName = title;
     _eventListener.setTabName(title);
 }
 
 void Terminal::requestTabName()
 {
-    // Route the interactively-entered name through setTabName() rather than assigning _tabName
-    // directly, so the event listener is notified (setTabName -> TerminalSession::setTabName ->
-    // refreshGuiTabInfoForStatusLine). Otherwise the indicator status-line tab label would keep showing
-    // the old name until some unrelated event happened to refresh it.
-    inputHandler().setTabName([this](std::string name) { setTabName(name); });
+    // The interactively-entered name arrives on the GUI thread, where _stateMutex is NOT held (unlike the
+    // parser-thread SETTABNAME path). _tabName is read on the GUI thread by resolvedTabName() and written
+    // on the parser thread by setTabName(), both under _stateMutex, so this writer must take the lock too;
+    // assigning _tabName lock-free would be a data race (torn read / use-after-free on string reallocation).
+    //
+    // The event-listener notification (-> TerminalSession::setTabName -> refreshGuiTabInfoForStatusLine,
+    // which only post()s to the GUI loop) is done OUTSIDE the lock to keep the _stateMutex hold minimal and
+    // avoid taking GUI-side locks under it. We do not route through setTabName() because that writes
+    // _tabName without the lock.
+    inputHandler().setTabName([this](std::string const& name) {
+        {
+            auto const l = std::lock_guard { _stateMutex };
+            _tabName = name;
+        }
+        // Notify with the local argument, not _tabName: reading the member after releasing the lock would
+        // again race the parser thread.
+        _eventListener.setTabName(name);
+    });
 }
 
 std::optional<std::string> Terminal::tabName() const noexcept

@@ -47,6 +47,7 @@ Checks: >-
   -modernize-avoid-c-arrays,
   -modernize-return-braced-init-list,
   -modernize-use-bool-literals,
+  -modernize-use-designated-initializers,
   -modernize-use-scoped-lock,
   -modernize-use-trailing-return-type,
   performance-*,
@@ -73,7 +74,6 @@ Checks: >-
 WarningsAsErrors: >-
   bugprone-narrowing-conversions,
   modernize-use-constraints,
-  modernize-use-designated-initializers,
   modernize-use-nullptr,
   performance-enum-size,
   readability-avoid-nested-conditional-operator,

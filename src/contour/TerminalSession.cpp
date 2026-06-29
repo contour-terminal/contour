@@ -2125,13 +2125,12 @@ uint8_t TerminalSession::matchModeFlags() const
 
 void TerminalSession::setFontSize(text::font_size size)
 {
-    // _display->setFontSize() returns false if it could not even stage the change, or if it staged the
-    // change but applied it synchronously (the not-renderable path) and that apply failed and was
-    // swallowed (font-load/atlas error, previous font kept). In either case the rendered font did not
-    // become @p size, so the profile must not record it — otherwise it diverges from the rendered font
-    // and a later increase/decrease step chains from the wrong base. When the apply is deferred to the
-    // next painted frame (the common, renderable path), staging success is reported and the requested
-    // size is the intent to persist.
+    // _display->setFontSize() stages the change and applies it synchronously (applyStagedFontReconfigNow),
+    // then returns whether the rendered font actually became @p size: false if the size was out of range
+    // (not even staged) or if the render-thread apply failed and was swallowed (font-load/atlas error,
+    // previous font kept). Only persist the size to the profile when it returns true — recording a size
+    // the renderer never loaded would diverge the profile from the rendered font and make a later
+    // increase/decrease step chain from the wrong base.
     if (!_display->setFontSize(size))
         return;
 

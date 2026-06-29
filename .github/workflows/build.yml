@@ -31,6 +31,9 @@ concurrency:
 
 env:
   CTEST_OUTPUT_ON_FAILURE: 1
+  # Single source of truth for the LLVM/Clang toolchain version used across this workflow
+  # (clang-format, clang-tidy and the Clang build matrix). Bump this one value to upgrade.
+  LLVM_VERSION: "22"
   # Sccache GitHub Actions cache backend - currently disabled due to service reliability
   # See https://github.com/mozilla/sccache/blob/main/docs/GHA.md for documentation
   SCCACHE_GHA_ENABLED: "false"
@@ -125,10 +128,10 @@ jobs:
       run: |
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 21
-        sudo apt-get install clang-format-21
+        sudo ./llvm.sh "$LLVM_VERSION"
+        sudo apt-get install "clang-format-$LLVM_VERSION"
     - name: "Clang-format"
-      run: find ./src/ -name "*.cpp" -o -name "*.h" | xargs clang-format-21 --Werror --dry-run
+      run: find ./src/ -name "*.cpp" -o -name "*.h" | xargs "clang-format-$LLVM_VERSION" --Werror --dry-run
     - name: "Check includes"
       run: ./scripts/check-includes.sh
 
@@ -137,7 +140,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: github.ref != 'refs/heads/master'
     env:
-      CLANG_VERSION: 20
+      CLANG_VERSION: ${{ env.LLVM_VERSION }}
     steps:
     - uses: actions/checkout@v4
     - name: ccache
@@ -673,7 +676,7 @@ jobs:
         compiler:
           [
             "GCC 14",
-            "Clang 20",
+            "Clang 22",
           ]
         qt_version: [6]
         runner:
@@ -723,12 +726,14 @@ jobs:
         run: sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: Install Clang
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
+        env:
+          CC_VERSION: ${{ steps.extract_matrix.outputs.CC_VERSION }}
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          sudo apt install -y clang-20
-          sudo apt install -y clang-tidy-20
+          sudo ./llvm.sh "$CC_VERSION"
+          sudo apt install -y "clang-$CC_VERSION"
+          sudo apt install -y "clang-tidy-$CC_VERSION"
       - name: "create build directory"
         run: mkdir build
       - name: CMake version

@@ -15,8 +15,10 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <memory>
 #include <span>
+#include <stdexcept>
 
 using std::array;
 using std::initializer_list;
@@ -64,12 +66,20 @@ namespace
         return gm;
     }
 
+    /// Loads the font keys (regular/bold/italic/...) for the given descriptions.
+    ///
+    /// @throws std::runtime_error if the @e regular font fails to load. The regular key is the
+    ///         anchor every other style falls back to, and a default-constructed (invalid) font_key
+    ///         would later abort inside text::shaper::metrics() (Require on the key mapping). Throwing
+    ///         instead lets applyPendingReconfig()'s try/catch keep the previously loaded font, honoring
+    ///         the "keep previous font on failure" guarantee, and surfaces a startup font-load failure
+    ///         as a clear error rather than a deep abort.
     FontKeys loadFontKeys(FontDescriptions const& fd, text::shaper& shaper)
     {
         FontKeys output {};
         auto const regularOpt = shaper.load_font(fd.regular, fd.size);
-        if (!SoftRequire(regularOpt.has_value()))
-            return output; // Return default-constructed FontKeys if regular font fails to load.
+        if (!regularOpt.has_value())
+            throw std::runtime_error(std::format("Failed to load regular font: {}", fd.regular));
         output.regular = regularOpt.value();
         output.bold = shaper.load_font(fd.bold, fd.size).value_or(output.regular);
         output.italic = shaper.load_font(fd.italic, fd.size).value_or(output.regular);
@@ -501,11 +511,11 @@ void Renderer::publishFontMetricsAndDescriptions()
     }
 }
 
-void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
+bool Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 {
     try
     {
-        renderImpl(terminal, pressure);
+        return renderImpl(terminal, pressure);
     }
     catch (std::exception const& e)
     {
@@ -515,9 +525,10 @@ void Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     {
         errorLog()("Renderer::render: caught unknown exception.");
     }
+    return false;
 }
 
-void Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
+bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 {
     // Hold _applyMutex across the whole frame: this both applies any staged reconfiguration and then
     // renders from _gridMetrics / the texture atlas. Holding it for the full duration makes a GUI-thread
@@ -707,6 +718,13 @@ void Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
     }
 
     _renderTarget->execute(now);
+
+    // Consume the "font reconfig applied" signal here, still under _applyMutex (held for the whole frame).
+    // applyPendingReconfig() above sets it on the render thread; consuming it under the same lock that the
+    // GUI thread's applyStagedReconfigDuringSetup() uses means the one-shot signal is never double-consumed
+    // or lost in a race between the two threads. The caller (paint()) drives the GUI-side geometry recompute
+    // when this is true.
+    return consumeFontReconfigApplied();
 }
 
 void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells, int yPixelOffset)
