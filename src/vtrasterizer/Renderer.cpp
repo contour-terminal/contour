@@ -315,8 +315,16 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
         _textShaper->set_font_fallback_limit(fontDescriptions.maxFallbackCount);
     }
 
+    // Load the fonts against the NEW descriptions but only commit them to _fontDescriptions once the
+    // load succeeds. loadFontKeys()/updateFontMetrics() (atlas reconfiguration) can throw, and this is
+    // called from applyPendingReconfig()'s try/catch which keeps the previous font on failure. Committing
+    // _fontDescriptions first (as before) would leave it at a never-loaded value: the change-detection
+    // guard at the top of this function and helper.cpp::applyFontDescription would then both early-return
+    // on retry, permanently stranding the wrong font. This mirrors the size-only branch in
+    // applyPendingReconfig(). The shaper reconfiguration above is render-thread-owned and idempotent on
+    // retry, so it is fine to have run already.
+    _fonts = loadFontKeys(fontDescriptions, *_textShaper);
     _fontDescriptions = std::move(fontDescriptions);
-    _fonts = loadFontKeys(_fontDescriptions, *_textShaper);
     updateFontMetrics();
 
     if (_renderTarget)
