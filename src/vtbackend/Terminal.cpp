@@ -2427,6 +2427,20 @@ std::optional<std::string> Terminal::tabName() const noexcept
     return _tabName;
 }
 
+std::optional<std::string> Terminal::resolvedTabName() const
+{
+    // Single lock hold for the whole resolution: _tabName/_windowTitle are written on the parser thread
+    // under _stateMutex (setTabName()/setWindowTitle()), and this runs on the GUI thread, so reading them
+    // unlocked (or across three separate locked accessor calls) would race the writer. getTabsNamingMode()
+    // reads _settings, which is not mutated by the parser thread, so it needs no extra protection.
+    auto const l = std::lock_guard { _stateMutex };
+    if (_tabName)
+        return _tabName;
+    if (_settings.tabNamingMode == TabsNamingMode::Title)
+        return _windowTitle;
+    return std::nullopt;
+}
+
 void Terminal::saveWindowTitle()
 {
     _savedWindowTitles.push(_windowTitle);

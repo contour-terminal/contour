@@ -219,13 +219,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
-    std::optional<std::string> name() const noexcept
+    std::optional<std::string> name() const
     {
-        if (terminal().tabName())
-            return terminal().tabName();
-        if (terminal().getTabsNamingMode() == vtbackend::TabsNamingMode::Title)
-            return terminal().windowTitle();
-        return std::nullopt;
+        // Resolve under the terminal's _stateMutex: this runs on the GUI thread (via
+        // TerminalSessionManager::updateStatusLine(), reached from a posted refreshGuiTabInfoForStatusLine
+        // or on tab activation) while the parser thread writes the title strings under that mutex.
+        // Reading them across separate unlocked accessor calls would race the writer.
+        return terminal().resolvedTabName();
     }
 
     /// Starts the VT background thread.

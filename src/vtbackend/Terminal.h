@@ -1149,6 +1149,16 @@ class Terminal
     void setTabName(std::string_view title);
     [[nodiscard]] std::string const& windowTitle() const noexcept;
     [[nodiscard]] std::optional<std::string> tabName() const noexcept;
+
+    /// Resolves the indicator status-line tab label for this terminal under a single _stateMutex hold.
+    ///
+    /// Returns the explicit tab name if one is set, otherwise the window title when TabsNamingMode::Title
+    /// is active, otherwise nullopt. Unlike calling tabName()/getTabsNamingMode()/windowTitle()
+    /// separately, this reads _tabName/_windowTitle while holding _stateMutex — they are written on the
+    /// parser thread under that same mutex (setTabName()/setWindowTitle()), and this is invoked from the
+    /// GUI thread (TerminalSessionManager::updateStatusLine()), so an unlocked read would be a data race
+    /// on the underlying std::string (torn read / use-after-free on reallocation).
+    [[nodiscard]] std::optional<std::string> resolvedTabName() const;
     [[nodiscard]] bool focused() const noexcept { return _focused; }
     [[nodiscard]] Search& search() noexcept { return _search; }
     [[nodiscard]] Search const& search() const noexcept { return _search; }
