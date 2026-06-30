@@ -333,7 +333,11 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
         _session->start();
     }
 
-    window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar.value());
+    // NB: The window frame is owned by QML now. main.qml makes the window frameless on the platforms
+    // that use the custom client-side TitleBar (the tab strip + window controls). The profile's
+    // show_title_bar setting controls the *custom* bar's visibility (not the native frame, which
+    // would otherwise double-decorate); main.qml binds the TitleBar's visibility to titleBarVisible.
+    setTitleBarVisible(profile().showTitleBar.value());
 
     if (!_renderer)
     {
@@ -390,6 +394,17 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     emit sessionChanged(newSession);
 }
 
+void TerminalDisplay::releaseSession()
+{
+    if (!_session)
+        return;
+    displayLog()("TerminalDisplay::releaseSession: dropping session {} (taken over by another display)",
+                 (void*) _session);
+    QObject::disconnect(_session, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
+    _session = nullptr;
+    emit sessionChanged(nullptr);
+}
+
 vtbackend::PageSize TerminalDisplay::windowSize() const noexcept
 {
     if (!_session)
@@ -432,8 +447,16 @@ void TerminalDisplay::sizeChanged()
                      implicitHeight());
         post([this]() {
             if (auto* currentWindow = window(); currentWindow)
-                currentWindow->resize(static_cast<int>(std::ceil(implicitWidth())),
-                                      static_cast<int>(std::ceil(implicitHeight())));
+            {
+                // Add the chrome offset (window minus this item) so the correction targets the
+                // window size, not just the terminal's — otherwise it drops the title-bar height.
+                // Ceil the (possibly fractional) implicit terminal size, then add the whole-pixel
+                // chrome offset from the shared helper so this path rounds chrome the same way the
+                // snap and size-constraint paths do.
+                auto const chrome = chromeSize();
+                currentWindow->resize(static_cast<int>(std::ceil(implicitWidth())) + chrome.width(),
+                                      static_cast<int>(std::ceil(implicitHeight())) + chrome.height());
+            }
         });
         return;
     }
@@ -471,18 +494,32 @@ void TerminalDisplay::sizeChanged()
             auto const snappedVirtualHeight =
                 static_cast<int>(std::ceil(static_cast<double>(unbox(snappedActualSize.height)) / dpr));
 
+            // The display item may not fill the whole window: a custom title bar (and any other
+            // chrome) sits outside it. Snapping resizes the *window*, so add back the chrome offset
+            // (window size minus this item's size) — otherwise each snap drops the chrome height and
+            // the window shrinks on every frame until the terminal collapses.
+            auto const chrome = chromeSize();
+            auto const chromeWidth = chrome.width();
+            auto const chromeHeight = chrome.height();
+
+            auto const targetWidth = snappedVirtualWidth + chromeWidth;
+            auto const targetHeight = snappedVirtualHeight + chromeHeight;
+
             auto const currentWidth = window()->width();
             auto const currentHeight = window()->height();
 
-            if (snappedVirtualWidth != currentWidth || snappedVirtualHeight != currentHeight)
+            if (targetWidth != currentWidth || targetHeight != currentHeight)
             {
-                displayLog()("Snapping window from {}x{} to {}x{} virtual (grid-aligned, actual {})",
+                displayLog()("Snapping window from {}x{} to {}x{} virtual (grid-aligned, actual {}, "
+                             "chrome {}x{})",
                              currentWidth,
                              currentHeight,
-                             snappedVirtualWidth,
-                             snappedVirtualHeight,
-                             snappedActualSize);
-                window()->resize(snappedVirtualWidth, snappedVirtualHeight);
+                             targetWidth,
+                             targetHeight,
+                             snappedActualSize,
+                             chromeWidth,
+                             chromeHeight);
+                window()->resize(targetWidth, targetHeight);
             }
             _snapPending = false;
         });
@@ -514,6 +551,10 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
 
         connect(this, &QQuickItem::widthChanged, this, &TerminalDisplay::sizeChanged, Qt::DirectConnection);
         connect(this, &QQuickItem::heightChanged, this, &TerminalDisplay::sizeChanged, Qt::DirectConnection);
+
+        // setSession() may have run before a window existed (window() was null), so the macOS native
+        // frame for show_title_bar could not be applied then. Re-assert it now that we have a window.
+        applyNativeTitleBar(_titleBarVisible);
     }
     else
         displayLog()("Detaching widget {} from window.", (void*) this);
@@ -752,16 +793,23 @@ void TerminalDisplay::onBeforeSynchronize()
             _session->onClosed();
     }
 
-    auto const dpr = contentScale();
+    auto const geometry = itemDevicePixelGeometry();
+    auto const dpr = geometry.dpr;
     auto const windowSize = window()->size() * dpr;
 
+    // The render *target* (GL framebuffer / scissor reference) spans the whole window, but the
+    // terminal grid must occupy only this item's rectangle — which, with a custom title bar above
+    // it, is smaller than and offset within the window. Use the item's own size for the view (the
+    // grid extent) and the item's *scene* position (in device pixels, from the shared helper) for the
+    // translation. x()/y() are local to the parent item, so they would apply no offset; the helper's
+    // mapToScene-based position is the position within the window the render target needs.
     auto const viewSize =
-        ImageSize { Width::cast_from(windowSize.width()), Height::cast_from(windowSize.height()) };
+        ImageSize { Width::cast_from(geometry.width), Height::cast_from(geometry.height) };
 
     _renderTarget->setRenderSize(
         ImageSize { Width::cast_from(windowSize.width()), Height::cast_from(windowSize.height()) });
     _renderTarget->setModelMatrix(createModelMatrix());
-    _renderTarget->setTranslation(float(x() * dpr), float(y() * dpr), float(z() * dpr));
+    _renderTarget->setTranslation(float(geometry.x), float(geometry.y), float(z() * dpr));
     _renderTarget->setViewSize(viewSize);
 
     // Reconcile the terminal grid (page size) with the actual surface.
@@ -980,6 +1028,23 @@ void TerminalDisplay::paint()
 #endif
 
         terminal().tick(steady_clock::now());
+
+        // The terminal paints over the QML scene graph (afterRendering) into a framebuffer that
+        // spans the whole window. With a custom title bar above it, the display item occupies only a
+        // sub-rectangle of the window, so clip rendering to that rectangle — otherwise the terminal
+        // (its background and first rows) paints over the title bar. Take the item's device-pixel
+        // scene rectangle from the same helper onBeforeSynchronize uses, so the clip and the render
+        // translation can never disagree. GL scissor uses a bottom-left origin, so the item's top
+        // becomes (windowHeight - (sceneY + height())).
+        auto const geometry = itemDevicePixelGeometry();
+        auto const winHeightPx = static_cast<int>(std::lround(window()->height() * geometry.dpr));
+        auto const itemX = static_cast<int>(std::lround(geometry.x));
+        auto const itemW = static_cast<int>(std::lround(geometry.width));
+        auto const itemH = static_cast<int>(std::lround(geometry.height));
+        auto const itemTopPx = static_cast<int>(std::lround(geometry.y));
+        _renderTarget->setOuterScissorRect(itemX, winHeightPx - (itemTopPx + itemH), itemW, itemH);
+        auto const scissorGuard = gsl::finally([this]() { _renderTarget->clearOuterScissorRect(); });
+
         auto const fontReconfigApplied = _renderer->render(terminal(), _renderingPressure);
 
         // The lazily-applied font/DPI change made the cell size current only now; re-derive page size,
@@ -1355,6 +1420,37 @@ void TerminalDisplay::updateImplicitSize()
     setImplicitHeight(virtualHeight);
 }
 
+TerminalDisplay::DevicePixelGeometry TerminalDisplay::itemDevicePixelGeometry() const
+{
+    // x()/y() are local to the parent item (e.g. 0 inside the content area below the title bar), so
+    // mapToScene() is used to get this item's position within the window. Both render-thread callers
+    // (the render translation and the GL scissor clip) need the same device-pixel rectangle, so the
+    // mapToScene + dpr scaling lives here once.
+    auto const dpr = contentScale();
+    auto const scenePos = mapToScene(QPointF(0.0, 0.0));
+    return DevicePixelGeometry {
+        .dpr = dpr,
+        .x = scenePos.x() * dpr,
+        .y = scenePos.y() * dpr,
+        .width = width() * dpr,
+        .height = height() * dpr,
+    };
+}
+
+QSize TerminalDisplay::chromeSize() const noexcept
+{
+    auto const* currentWindow = window();
+    if (currentWindow == nullptr)
+        return QSize(0, 0);
+
+    // Whole-pixel, >= 0 chrome offset. Using a single helper keeps every caller's rounding identical
+    // (lround), so the snap, the min/base-size constraint and the initial size correction can never
+    // disagree by a pixel and slowly shrink the window in only one of those paths.
+    auto const chromeWidth = std::max(0, static_cast<int>(std::lround(currentWindow->width() - width())));
+    auto const chromeHeight = std::max(0, static_cast<int>(std::lround(currentWindow->height() - height())));
+    return QSize(chromeWidth, chromeHeight);
+}
+
 void TerminalDisplay::updateSizeConstraints()
 {
     Require(window());
@@ -1365,15 +1461,24 @@ void TerminalDisplay::updateSizeConstraints()
     auto const actualCellSize = _renderer->publishedCellSize();
     auto const margins = _session->profile().margins.value();
 
-    // Minimum size (existing logic, unchanged)
+    // The display item may not fill the whole window (a custom title bar / chrome sits outside it).
+    // All window-level constraints below describe the *window*, so add the chrome offset (window
+    // size minus this item's size) to the terminal-derived minimum and base sizes — otherwise the
+    // WM could shrink the window until the terminal area has zero rows.
+    auto const chrome = chromeSize();
+    auto const chromeWidth = chrome.width();
+    auto const chromeHeight = chrome.height();
+
+    // Minimum size (existing logic, plus chrome offset)
     auto constexpr MinimumTotalPageSize = PageSize { LineCount(5), ColumnCount(10) };
     auto const minimumSize = computeRequiredSize(margins, actualCellSize * (1.0 / dpr), MinimumTotalPageSize);
-    window()->setMinimumSize(QSize(unbox<int>(minimumSize.width), unbox<int>(minimumSize.height)));
+    window()->setMinimumSize(
+        QSize(unbox<int>(minimumSize.width) + chromeWidth, unbox<int>(minimumSize.height) + chromeHeight));
 
-    // Base size: the margin area not participating in the increment grid.
+    // Base size: the margin area not participating in the increment grid, plus the chrome.
     // Margins from config are in virtual pixels, applied on both sides.
-    auto const baseWidth = static_cast<int>(2 * unbox(margins.horizontal));
-    auto const baseHeight = static_cast<int>(2 * unbox(margins.vertical));
+    auto const baseWidth = static_cast<int>(2 * unbox(margins.horizontal)) + chromeWidth;
+    auto const baseHeight = static_cast<int>(2 * unbox(margins.vertical)) + chromeHeight;
     window()->setBaseSize(QSize(baseWidth, baseHeight));
 
     // Size increment: virtual cell size.
@@ -1803,12 +1908,39 @@ void TerminalDisplay::toggleFullScreen()
     }
 }
 
+void TerminalDisplay::setTitleBarVisible(bool visible)
+{
+    if (_titleBarVisible != visible)
+    {
+        _titleBarVisible = visible;
+        emit titleBarVisibleChanged();
+    }
+    // macOS keeps the native frame (see header / main.qml), so show_title_bar must drive that frame
+    // there. Apply unconditionally (not only on change) so a setSession() re-init re-asserts the frame
+    // even when _titleBarVisible already matched.
+    applyNativeTitleBar(visible);
+}
+
+void TerminalDisplay::applyNativeTitleBar(bool visible)
+{
+    // show_title_bar selects the window decoration on every OS: when on, keep the native frame; when
+    // off, make the window frameless so our client-side TitleBar is the only decoration. This is the
+    // C++ counterpart of main.qml's `flags` binding (both keyed on the same titleBarVisible value) and
+    // is what carries the runtime ToggleTitleBar action and the initial profile value through to the
+    // native frame. main.qml drops our custom min/max/close controls whenever the native frame shows,
+    // so the two decorations never stack.
+    if (auto* w = window(); w != nullptr)
+        w->setFlag(Qt::FramelessWindowHint, !visible);
+}
+
 void TerminalDisplay::toggleTitleBar()
 {
-    auto const currentlyFrameless = (window()->flags() & Qt::FramelessWindowHint) != 0;
-    _maximizedState = window()->visibility() == QQuickWindow::Visibility::Maximized;
-
-    window()->setFlag(Qt::FramelessWindowHint, !currentlyFrameless);
+    // Under client-side decoration the title bar is our custom QML TitleBar, not the OS frame. The
+    // old implementation cleared Qt::FramelessWindowHint to bring the native frame back, but the
+    // custom bar stayed visible (its QML flags binding never re-asserts framelessness), stacking two
+    // title bars. Toggle the custom bar's visibility instead; the window stays frameless. On macOS
+    // setTitleBarVisible() additionally toggles the native frame (there is no custom bar there).
+    setTitleBarVisible(!titleBarVisible());
 }
 
 void TerminalDisplay::toggleInputMethodEditorHandling()

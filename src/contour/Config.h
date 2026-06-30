@@ -181,9 +181,11 @@ struct MouseConfig
 
 struct IndicatorConfig
 {
+    // Tabs are now shown as first-class GUI tabs in the window title bar, so the default indicator
+    // status line no longer renders the {Tabs} segment. The {Tabs} directive itself remains
+    // supported, so existing user configs that reference it keep working.
     std::string left { " {InputMode:Bold,Color=#FFFF00}"
                        "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
-                       "{Tabs:ActiveColor=#FFFF00,Left= │ }"
                        "{ProtectedMode:Bold,Left= │ }"
                        "{SearchPrompt:Left= │ }" };
     std::string middle { "« {Title} »" };
@@ -408,7 +410,11 @@ struct TerminalProfile
     ConfigEntry<vtpty::SshHostConfig, documentation::SshHostConfig> ssh {};
     ConfigEntry<bool, documentation::EscapeSandbox> escapeSandbox { true };
     ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
-    ConfigEntry<bool, documentation::ShowTitleBar> showTitleBar { true };
+    // show_title_bar now selects the WINDOW DECORATION: true = native server-side frame (+ the OS's
+    // own min/max/close controls; our tab strip then omits its custom ones), false = frameless with
+    // full client-side decoration (our tab strip draws the controls). Defaults to false so the
+    // out-of-box look is the custom CSD tab strip, matching the prior Linux/Windows appearance.
+    ConfigEntry<bool, documentation::ShowTitleBar> showTitleBar { false };
     ConfigEntry<bool, documentation::ShowIndicatorOnResize> sizeIndicatorOnResize { true };
     ConfigEntry<bool, documentation::Fullscreen> fullscreen { false };
     ConfigEntry<bool, documentation::Maximized> maximized { false };

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/display/Blur.h>
+#include <contour/display/ScissorRect.h>
 #include <contour/display/ShaderConfig.h>
 
 #include <vtbackend/Image.h>
@@ -79,6 +80,13 @@ class OpenGLRenderer final:
     void renderRectangle(int x, int y, Width, Height, RGBAColor color) override;
     void setScissorRect(int x, int y, int width, int height) override;
     void clearScissorRect() override;
+
+    /// Installs an outer clip rectangle (in bottom-left-origin device pixels) that bounds ALL
+    /// rendering for the frame — used to clip the terminal to its QML item rectangle (below the
+    /// title bar). Unlike setScissorRect(), this persists across nested set/clearScissorRect() pairs
+    /// (clearScissorRect restores it), so a transient inner scissor cannot un-clip the frame.
+    void setOuterScissorRect(int x, int y, int width, int height);
+    void clearOuterScissorRect();
     void execute(std::chrono::steady_clock::time_point now) override;
 
     std::pair<vtbackend::ImageSize, std::vector<uint8_t>> takeScreenshot();
@@ -168,6 +176,9 @@ class OpenGLRenderer final:
     QMatrix4x4 _projectionMatrix;
     QMatrix4x4 _viewMatrix;
     QMatrix4x4 _modelMatrix;
+
+    // Outer clip rectangle (bottom-left-origin device pixels) restored by clearScissorRect().
+    std::optional<ScissorRect> _outerScissor;
     QOpenGLPixelTransferOptions _transferOptions;
 
     vtrasterizer::PageMargin _margin {};

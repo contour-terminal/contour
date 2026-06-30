@@ -219,7 +219,7 @@ ContourTerminal
     }
 
     function onCreateNewTab() {
-        terminalSessions.addSession();
+        terminalSessions.createNewTab();
     }
 
     function delay(duration) { // In milliseconds

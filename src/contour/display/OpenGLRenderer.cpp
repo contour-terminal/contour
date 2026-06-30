@@ -759,12 +759,44 @@ void OpenGLRenderer::renderRectangle(int ix, int iy, Width width, Height height,
 
 void OpenGLRenderer::setScissorRect(int x, int y, int width, int height)
 {
+    auto rect = ScissorRect { .x = x, .y = y, .width = width, .height = height };
+
+    // A transient inner scissor (e.g. smooth scroll) must stay within any installed outer scissor
+    // (which clips the terminal below the title bar); otherwise it would un-clip the frame and let
+    // the terminal paint over the title bar. Intersect so nesting can only shrink the clip region.
+    if (_outerScissor.has_value())
+        rect = rect.intersect(*_outerScissor);
+
     glEnable(GL_SCISSOR_TEST);
-    glScissor(x, y, width, height);
+    glScissor(rect.x, rect.y, rect.width, rect.height);
 }
 
 void OpenGLRenderer::clearScissorRect()
 {
+    // If an outer scissor was installed (e.g. the display clips the terminal to its item rectangle,
+    // below the title bar), restore it rather than fully disabling the test — otherwise a nested,
+    // transient scissor (smooth scroll) would un-clip the rest of the frame and let the terminal
+    // paint over the title bar.
+    if (_outerScissor.has_value())
+    {
+        auto const& s = *_outerScissor;
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(s.x, s.y, s.width, s.height);
+    }
+    else
+        glDisable(GL_SCISSOR_TEST);
+}
+
+void OpenGLRenderer::setOuterScissorRect(int x, int y, int width, int height)
+{
+    _outerScissor = ScissorRect { .x = x, .y = y, .width = width, .height = height };
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(x, y, width, height);
+}
+
+void OpenGLRenderer::clearOuterScissorRect()
+{
+    _outerScissor.reset();
     glDisable(GL_SCISSOR_TEST);
 }
 

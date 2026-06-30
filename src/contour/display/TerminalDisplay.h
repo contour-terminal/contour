@@ -16,6 +16,7 @@
 
 #include <QtCore/QFileSystemWatcher>
 #include <QtCore/QPoint>
+#include <QtCore/QSize>
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QVector4D>
@@ -48,6 +49,11 @@ class TerminalDisplay: public QQuickItem
     Q_PROPERTY(TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
     Q_PROPERTY(QString profile READ profileName WRITE setProfileName NOTIFY profileNameChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
+    /// Whether the custom (client-side) title bar is shown. Initialized from the profile's
+    /// show_title_bar setting on session attach and flipped by the ToggleTitleBar action; main.qml
+    /// binds the custom TitleBar's visibility to it (the window stays frameless either way).
+    Q_PROPERTY(
+        bool titleBarVisible READ titleBarVisible WRITE setTitleBarVisible NOTIFY titleBarVisibleChanged)
     QML_ELEMENT
 
     TerminalSession* getSessionHelper() { return _session; }
@@ -64,6 +70,27 @@ class TerminalDisplay: public QQuickItem
         else
             return "No session";
     }
+
+    /// @return Whether the custom title bar is currently shown.
+    [[nodiscard]] bool titleBarVisible() const noexcept { return _titleBarVisible; }
+
+    /// Sets the custom title bar's visibility and emits titleBarVisibleChanged() on a change.
+    ///
+    /// On macOS the window keeps its NATIVE frame (main.qml uses Qt.Window there, not frameless,
+    /// because client-side decoration is not the platform convention), so there is no custom bar to
+    /// hide — this also toggles the native frame's Qt::FramelessWindowHint so show_title_bar:false
+    /// actually removes the title bar on macOS. On the other platforms the window is QML-frameless and
+    /// the custom TitleBar is what this controls; the native frame is left to main.qml's flags binding.
+    /// @param visible The new visibility.
+    void setTitleBarVisible(bool visible);
+
+    /// Applies the native window-frame decoration for @p visible by toggling Qt::FramelessWindowHint
+    /// on the attached window: shown => keep the native frame, hidden => frameless so the custom
+    /// client-side TitleBar is the only decoration. This is the C++ counterpart of main.qml's `flags`
+    /// binding and applies on EVERY platform (not macOS-only). No-op when no window is attached yet
+    /// (the frame is re-applied from setSession() once a window exists).
+    /// @param visible Whether the title bar (native frame) should be shown.
+    void applyNativeTitleBar(bool visible);
     // }}}
 
     [[nodiscard]] config::TerminalProfile const& profile() const noexcept
@@ -88,6 +115,13 @@ class TerminalDisplay: public QQuickItem
 
     // NB: Use TerminalSession.attachDisplay, that one is calling this here. TODO(PR) ?
     void setSession(TerminalSession* newSession);
+
+    /// Clears this display's session pointer without notifying the session. Called by
+    /// TerminalSession::attachDisplay when another display takes over the session, so a stale
+    /// display (e.g. the hidden single-pane view after a split) stops believing it is attached.
+    /// Unlike setSession(nullptr) it does not call back into detachDisplay(), avoiding recursion
+    /// and the detach precondition while the session is already reassigning its display.
+    void releaseSession();
 
     [[nodiscard]] TerminalSession& session() noexcept
     {
@@ -205,6 +239,7 @@ class TerminalDisplay: public QQuickItem
     void profileNameChanged();
     void titleChanged(QString const&);
     void sessionChanged(TerminalSession*);
+    void titleBarVisibleChanged();
     void terminalBufferChanged(vtbackend::ScreenType);
     void terminated();
     void showNotification(QString const& title, QString const& body);
@@ -267,6 +302,35 @@ class TerminalDisplay: public QQuickItem
     /// deferred frame (paint()) reconfig paths so the two cannot diverge. Requires a live display.
     void recomputeGeometryAfterFontReconfig();
 
+    /// This display item's rectangle in DEVICE PIXELS within the window's scene: the scene-space
+    /// origin (mapToScene(0,0)) and the item extent, both multiplied by the device pixel ratio. With a
+    /// custom title bar the item is a sub-rectangle of the window, so both the render translation
+    /// (onBeforeSynchronize) and the GL scissor clip (paint) need exactly this geometry. Extracted so
+    /// those two render-thread paths derive it identically — if the math drifts between them the
+    /// terminal clips and paints against different rectangles and bleeds over/under the title bar.
+    struct DevicePixelGeometry
+    {
+        double dpr = 1.0; //!< The device pixel ratio used for the scaling.
+        double x = 0.0;   //!< Scene-space left edge, in device pixels.
+        double y = 0.0;   //!< Scene-space top edge, in device pixels.
+        double width = 0.0;  //!< Item width, in device pixels.
+        double height = 0.0; //!< Item height, in device pixels.
+    };
+
+    /// @return This item's device-pixel scene geometry (see DevicePixelGeometry).
+    [[nodiscard]] DevicePixelGeometry itemDevicePixelGeometry() const;
+
+    /// The window "chrome" offset: the window size minus this display item's size, i.e. the space
+    /// taken by the custom title bar (and any other decoration) that sits OUTSIDE the terminal item.
+    /// Window-level operations (snap-to-grid, min/base size, the initial size correction) describe the
+    /// WINDOW, so they add this back to terminal-derived sizes; dropping it makes the window lose the
+    /// title-bar height a little more on every frame. Rounded to whole pixels and clamped to >= 0 so
+    /// every caller uses the SAME rounding (previously one path kept a double + ceil while others
+    /// lround'd, which could disagree by a pixel at fractional DPI). Returns a zero offset when no
+    /// window is attached.
+    /// @return The (width, height) chrome offset in virtual pixels.
+    [[nodiscard]] QSize chromeSize() const noexcept;
+
     /// Updates all window size constraints: minimum size, base size, and size increment.
     /// Configures the window manager to constrain user resizes to exact cell boundaries.
     void updateSizeConstraints();
@@ -322,7 +386,9 @@ class TerminalDisplay: public QQuickItem
     bool _renderingPressure = false;
     display::OpenGLRenderer* _renderTarget = nullptr;
     bool _maximizedState = false;
-    bool _snapPending = false; ///< Guards against redundant snap-to-grid post() calls.
+    bool _titleBarVisible = true; ///< Whether the native window frame is shown (show_title_bar);
+                                  ///< (re)initialized from the profile. false => frameless + custom CSD.
+    bool _snapPending = false;    ///< Guards against redundant snap-to-grid post() calls.
     bool _sessionChanged = false;
     // update() timer used to animate the blinking cursor.
     QTimer _updateTimer;

@@ -793,10 +793,17 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     auto const oldPageSize = session.terminal().totalPageSize();
     // Read the published cell size once (lock-free), reused for both the page size and margin below.
     vtbackend::ImageSize const cellSize = renderer.publishedCellSize();
-    auto const newPageSize = pageSizeForPixels(
+    auto newPageSize = pageSizeForPixels(
         newPixelSize,
         cellSize,
         applyContentScale(session.profile().margins.value(), session.display()->contentScale()));
+
+    // A render surface smaller than a single cell (e.g. transiently while a layout settles, or a
+    // pane shrunk to nothing) yields a zero-sized page. resizeScreen()/clampToScreen() require at
+    // least 1x1, so clamp here rather than letting an invalid page size reach the backend.
+    newPageSize.lines = std::max(newPageSize.lines, vtbackend::LineCount(1));
+    newPageSize.columns = std::max(newPageSize.columns, vtbackend::ColumnCount(1));
+
     vtbackend::Terminal& terminal = session.terminal();
 
     auto const newMargin = computeMargin(

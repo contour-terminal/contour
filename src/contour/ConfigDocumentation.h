@@ -109,10 +109,14 @@ constexpr StringLiteral FullscreenConfig {
     "\n"
 };
 
-constexpr StringLiteral ShowTitleBarConfig { "{comment} When this profile is *activated*, this flag decides\n"
-                                             "{comment} whether or not the title bar will be shown\n"
-                                             "show_title_bar: {}\n"
-                                             "\n" };
+constexpr StringLiteral ShowTitleBarConfig {
+    "{comment} When this profile is *activated*, this flag selects the window decoration:\n"
+    "{comment}   true  = the native (server-side) title bar and its window controls;\n"
+    "{comment}   false = a frameless window with Contour's own client-side tab strip and controls.\n"
+    "{comment} The tab strip is shown either way; only the min/max/close controls move to the OS frame.\n"
+    "show_title_bar: {}\n"
+    "\n"
+};
 
 constexpr StringLiteral ShowIndicatorOnResizeConfig {
     "{comment} When this profile is *activated*, this flag decides\n"
