@@ -441,6 +441,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "insert_after_yank", where.insertAfterYank);
         loadFromEntry(child, "bell", where.bell);
         loadFromEntry(child, "wm_class", where.wmClass);
+        loadFromEntry(child, "tab_label", where.tabLabel);
         loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
         loadFromEntry(child, "margins", where.margins);
         loadFromEntry(child, "terminal_id", where.terminalId);

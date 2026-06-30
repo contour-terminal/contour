@@ -469,6 +469,7 @@ struct TerminalProfile
     ConfigEntry<std::vector<HintPatternConfig>, documentation::HintPatterns> hintPatterns {};
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
+    ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{WindowTitle}" };
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 

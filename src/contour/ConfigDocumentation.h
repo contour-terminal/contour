@@ -153,6 +153,15 @@ constexpr StringLiteral WMClassConfig {
     "{comment} Defines the class part of the WM_CLASS property of the window.\n"
 };
 
+constexpr StringLiteral TabLabelConfig {
+    "{comment} Default template for the text shown on each GUI tab.\n"
+    "{comment} Supported placeholders:\n"
+    "{comment}   {{WindowTitle}}  the active pane's window/tab title\n"
+    "{comment}   {{TabPosition}}  the tab's 1-based position\n"
+    "{comment} Renaming a tab overrides this default; the rename may itself use the same placeholders.\n"
+    "{comment} Split tabs show \"Multiple panes\" instead.\n"
+};
+
 constexpr StringLiteral MarginsConfig {
     "{comment} Window margins\n"
     "{comment}\n"
@@ -489,6 +498,10 @@ constexpr StringLiteral StatusLineConfig {
     "    {comment} Synchronize the window title with the Host Writable status_line if\n"
     "    {comment} and only if the host writable status line was denied to be shown.\n"
     "    sync_to_window_title: {}\n"
+    "    {comment} Each segment is a template of literal text and {{Placeholder}} markers (e.g.\n"
+    "    {comment} {{Clock}}, {{VTType}}). A literal brace is written by DOUBLING it: \"{{{{\" yields a\n"
+    "    {comment} single \"{{\" and \"}}}}\" yields a single \"}}\". COMPATIBILITY: earlier versions\n"
+    "    {comment} emitted an undoubled \"}}}}\" verbatim; if a template relied on that, double the braces.\n"
     "    indicator:\n"
     "        left: \"{}\"\n"
     "        middle: \"{}\"\n"
@@ -1384,6 +1397,21 @@ constexpr StringLiteral WMClassWeb {
     "\n"
 };
 
+constexpr StringLiteral TabLabelWeb {
+    "\n"
+    "Default template for the text shown on each GUI tab. The value is a string with optional `{Name}` "
+    "placeholders that are substituted per tab:\n"
+    "\n"
+    "- `{WindowTitle}` — the active pane's window/tab title.\n"
+    "- `{TabPosition}` — the tab's 1-based position in the window.\n"
+    "\n"
+    "Literal text outside placeholders is kept verbatim, and an unknown placeholder expands to an empty "
+    "string. Renaming a tab overrides this default for that tab; the rename text may itself contain the "
+    "same placeholders (so renaming a tab to `{WindowTitle}` tracks its title). A tab holding a split is "
+    "shown as `Multiple panes`.\n"
+    "\n"
+};
+
 constexpr StringLiteral TerminalIdWeb {
     "\n"
     "configuration option allows you to specify the terminal type that will be advertised by the terminal "
@@ -1899,6 +1927,7 @@ using SeachModeSwitch = DocumentationEntry<SeachModeSwitchConfig, SeachModeSwitc
 using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYankWeb>;
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
+using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
 using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;
 using TerminalSize = DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>;
 using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;
