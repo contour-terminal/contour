@@ -4,11 +4,16 @@
 #include <crispy/assert.h>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <deque>
 #include <initializer_list>
+#include <memory>
 #include <optional>
+#include <ranges>
 #include <vector>
 
 #if !defined(_WIN32)

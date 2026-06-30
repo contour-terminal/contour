@@ -308,16 +308,45 @@ std::optional<Pty::ReadResult> UnixPty::read(crispy::buffer_object<char>& storag
                                              std::optional<std::chrono::milliseconds> timeout,
                                              size_t size)
 {
-    assert(_readSelector.size() > 0);
+    // This runs on the session's read thread while close() may run concurrently on the GUI thread
+    // (e.g. when a GUI tab is closed). close() mutates _readSelector (cancel_read) under _mutex, so
+    // every _readSelector inspection/mutation here must be serialized under the same _mutex -- except
+    // the blocking wait_one(), which must stay unlocked or close() would block on _mutex and never
+    // reach wakeupReader(), deadlocking the teardown. The wakeup writes a separate, always-registered
+    // eventfd/break-pipe, so a blocked wait_one() is woken regardless of the selector's fd contents.
 
-    if (auto const fd = _readSelector.wait_one(timeout); fd.has_value())
+    // Phase 1: locked pre-check. The selector can be emptied by a concurrent close() (master) plus a
+    // prior stdout-fastpipe EOF; reading from an empty selector is a no-op, not an error.
     {
-        auto const l = scoped_lock { storage };
-        if (auto x = readSome(*fd, storage.hotEnd(), std::min(size, storage.bytesAvailable())))
-            return ReadResult { .data = x.value(), .fromStdoutFastPipe = *fd == _stdoutFastPipe.reader() };
+        auto const _ = std::scoped_lock { _mutex };
+        if (_readSelector.size() == 0)
+        {
+            errno = EAGAIN;
+            return std::nullopt;
+        }
     }
-    else
+
+    // Phase 2: blocking wait WITHOUT _mutex, so a concurrent close() can acquire _mutex and wake us.
+    auto const fd = _readSelector.wait_one(timeout);
+    if (!fd.has_value())
+    {
         errno = EAGAIN;
+        return std::nullopt;
+    }
+
+    // Phase 3: locked read and bookkeeping. readSome() may cancel_read the stdout-fastpipe on EOF, so
+    // it must mutate _readSelector under _mutex too. Re-validate first: if close() ran between phase 2
+    // and here, the master fd is gone -- do not ::read() a closed fd. A fastpipe fd remains drainable.
+    auto const _ = std::scoped_lock { _mutex };
+    if (_readSelector.size() == 0 || (*fd == _masterFd.get() && _masterFd.is_closed()))
+    {
+        errno = EAGAIN;
+        return std::nullopt;
+    }
+
+    auto const l = scoped_lock { storage };
+    if (auto x = readSome(*fd, storage.hotEnd(), std::min(size, storage.bytesAvailable())))
+        return ReadResult { .data = x.value(), .fromStdoutFastPipe = *fd == _stdoutFastPipe.reader() };
     return std::nullopt;
 }
 
