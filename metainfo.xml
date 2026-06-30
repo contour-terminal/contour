@@ -92,17 +92,16 @@
   <releases>
 
     <!-- unreleased: TODO: Don't forget to add date attribute to it. -->
-    <!--
-
     <release version="x.y.z" urgency="medium" type="development">
       <description>
         <ul>
-          <li> ... </li>
+          <li>Adds first-class GUI tabs presented in a custom window title bar, replacing the status-line tab list (the {Tabs} status-line directive remains supported for existing configs)</li>
+          <li>Adds split panes (split views) — split the active pane vertically (Ctrl+Shift+E) or horizontally (Ctrl+Shift+O), close a pane (Ctrl+Shift+X), and move pane focus with Alt+Shift+Arrow</li>
+          <li>Adds double-click-to-rename and a Windows-Terminal-style color-swatch picker for tabs via the tab context menu</li>
+          <li>Changes the window to use a custom client-side-decorated title bar (tab strip plus window controls) by default on all platforms; set show_title_bar: true to use the native server-side window decoration instead, in which case the tab strip is kept but its window controls defer to the OS frame</li>
         </ul>
       </description>
     </release>
-
-    -->
 
     <release version="0.7.0" urgency="medium" type="development">
       <description>
