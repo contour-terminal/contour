@@ -1155,6 +1155,19 @@ class Terminal
     void setWindowTitle(std::string_view title);
     void setTabName(std::string_view title);
     [[nodiscard]] std::string const& windowTitle() const noexcept;
+
+    /// Returns a copy of the raw OS-window title (OSC 0/2), read under _stateMutex.
+    ///
+    /// Unlike windowTitle() — which returns a reference with no lock — this is safe to call from the
+    /// GUI thread: _windowTitle is written on the parser thread under _stateMutex (writeToScreen()
+    /// holds the lock across the whole parse, within which setWindowTitle()/restoreWindowTitle() run).
+    /// A by-value copy is required; a reference handed back after the lock releases would race the
+    /// writer (torn read / use-after-free on string reallocation). Unlike resolvedTabName(), this
+    /// ignores TabsNamingMode and always yields the raw title — for the GUI tab-label {WindowTitle}
+    /// placeholder, which must not depend on the status-line-derived naming mode.
+    /// @return The raw window title.
+    [[nodiscard]] std::string resolvedWindowTitle() const;
+
     [[nodiscard]] std::optional<std::string> tabName() const noexcept;
 
     /// Resolves the indicator status-line tab label for this terminal under a single _stateMutex hold.

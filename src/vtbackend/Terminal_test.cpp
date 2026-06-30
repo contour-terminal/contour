@@ -1252,6 +1252,51 @@ TEST_CASE("Terminal.momentumScroll.cancelled_by_begin", "[terminal]")
     CHECK_FALSE(terminal.isMomentumScrollActive());
 }
 
+TEST_CASE("Terminal.resizeScreen.minimal_one_by_one", "[terminal]")
+{
+    // Regression: when the render surface collapses below one cell (e.g. a pane shrunk to nothing,
+    // or a transient layout state) the frontend clamps the page size to a minimum of 1x1 before
+    // calling resizeScreen(). The backend must accept a 1x1 page without tripping the
+    // clampToScreen() bounds assert (which fires when a page dimension reaches zero).
+    auto mc = MockTerm { PageSize { LineCount { 10 }, ColumnCount { 20 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    terminal.tick(chrono::steady_clock::time_point());
+
+    REQUIRE_NOTHROW(terminal.resizeScreen(PageSize { LineCount { 1 }, ColumnCount { 1 } }));
+    CHECK(terminal.pageSize().lines == LineCount { 1 });
+    CHECK(terminal.pageSize().columns == ColumnCount { 1 });
+
+    // And it can grow back from the degenerate size.
+    REQUIRE_NOTHROW(terminal.resizeScreen(PageSize { LineCount { 10 }, ColumnCount { 20 } }));
+    CHECK(terminal.pageSize().lines == LineCount { 10 });
+}
+
+TEST_CASE("Terminal.resizeScreen.minimal_one_by_one.with_status_line", "[terminal]")
+{
+    // Regression: the same degenerate 1x1 resize, but with the indicator status line VISIBLE — the
+    // contour GUI default. resizeScreen derives the main page as `totalPageSize - statusLineHeight()`,
+    // so a 1x1 total here would leave a ZERO-line main page (1 - 1) and trip
+    // applyPageSizeToCurrentBuffer()/verifyState(). The plain test above misses this because MockTerm
+    // defaults statusDisplayType to None (statusLineHeight() == 0). resizeScreen must clamp the total
+    // up so at least one main-display line survives on top of the status line.
+    auto mc = MockTerm { PageSize { LineCount { 10 }, ColumnCount { 20 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.tick(chrono::steady_clock::time_point());
+    REQUIRE(terminal.statusLineHeight() == LineCount { 1 });
+
+    REQUIRE_NOTHROW(terminal.resizeScreen(PageSize { LineCount { 1 }, ColumnCount { 1 } }));
+    // The total was clamped up to leave one main line above the one status line; the main page
+    // (what the PTY/shell sees) never collapses to zero.
+    CHECK(terminal.pageSize().lines >= LineCount { 1 });
+    CHECK(terminal.pageSize().columns == ColumnCount { 1 });
+    CHECK(terminal.totalPageSize().lines >= LineCount { 2 });
+
+    // And it can grow back from the degenerate size.
+    REQUIRE_NOTHROW(terminal.resizeScreen(PageSize { LineCount { 10 }, ColumnCount { 20 } }));
+    CHECK(terminal.pageSize().lines == LineCount { 9 }); // 10 total - 1 status line
+}
+
 TEST_CASE("Terminal.momentumScroll.cancelled_by_resize", "[terminal]")
 {
     auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
