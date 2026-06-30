@@ -556,7 +556,9 @@ void OpenGLRenderer::recordRectPass()
         return;
 
     auto const firstVertex = static_cast<quint32>(_frameRectVertices.size() / rhilayout::RectVertexFloats);
-    crispy::copy(_rectBuffer, back_inserter(_frameRectVertices));
+    // Bulk append (single memcpy) rather than element-wise back_inserter — this runs on the per-frame path.
+    _frameRectVertices.reserve(_frameRectVertices.size() + _rectBuffer.size());
+    _frameRectVertices.insert(_frameRectVertices.end(), _rectBuffer.begin(), _rectBuffer.end());
     _frameDrawItems.push_back(FrameDrawItem {
         .pass = FramePass::Rect,
         .firstVertex = firstVertex,
@@ -572,7 +574,9 @@ void OpenGLRenderer::recordTextPass()
         return;
 
     auto const firstVertex = static_cast<quint32>(_frameTextVertices.size() / rhilayout::TextVertexFloats);
-    crispy::copy(batch.buffer, back_inserter(_frameTextVertices));
+    // Bulk append (single memcpy) rather than element-wise back_inserter — this runs on the per-frame path.
+    _frameTextVertices.reserve(_frameTextVertices.size() + batch.buffer.size());
+    _frameTextVertices.insert(_frameTextVertices.end(), batch.buffer.begin(), batch.buffer.end());
     _frameDrawItems.push_back(FrameDrawItem {
         .pass = FramePass::Text,
         .firstVertex = firstVertex,
