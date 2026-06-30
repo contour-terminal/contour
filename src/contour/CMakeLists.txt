@@ -43,12 +43,25 @@ set(_header_files
     CaptureScreen.h
     Config.h
     ContourApp.h
+    TabLabel.h
 )
-set(_source_files
+# Sources are split into a reusable object library (contour_core) and the thin executable entry
+# point (main.cpp). The object library carries every translation unit of the frontend so that both
+# the `contour` executable AND the `contour_gui_test` target can link the exact same objects — this
+# is what lets the GUI tests construct real TerminalSession/ContourGuiApp objects instead of only
+# Qt-free surrogates. An OBJECT library (not STATIC) is used deliberately: it shares the compiled
+# objects without a static archive's symbol-stripping, which would otherwise drop AUTOMOC/AUTORCC
+# registration objects whose symbols are only referenced reflectively at runtime.
+set(_core_source_files
     Actions.cpp
     CaptureScreen.cpp
     Config.cpp
     ContourApp.cpp
+    TabLabel.cpp
+)
+# The executable entry point lives outside the object library so the test can supply its own main
+# (Catch2's) without a duplicate-symbol clash.
+set(_main_source_files
     main.cpp
 )
 
@@ -58,15 +71,19 @@ if(CONTOUR_FRONTEND_GUI)
         BlurBehind.h
         ContourGuiApp.h
         FreeDesktopNotifier.h
+        PaneProxy.h
+        SessionFactory.h
         TerminalSession.h
         TerminalSessionManager.h
         helper.h
     )
-    list(APPEND _source_files
+    list(APPEND _core_source_files
         Audio.cpp
         BlurBehind.cpp
         ContourGuiApp.cpp
         FreeDesktopNotifier.cpp
+        PaneProxy.cpp
+        SessionFactory.cpp
         TerminalSession.cpp
         TerminalSessionManager.cpp
         helper.cpp
@@ -74,7 +91,7 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 
 if(WIN32)
-    list(APPEND _source_files contour.rc)
+    list(APPEND _main_source_files contour.rc)
 endif()
 
 set(_qt_resources resources.qrc)
@@ -87,13 +104,26 @@ set(_qml_files
     ui/main.qml
 )
 
-source_group(Sources FILES ${_source_files})
+source_group(Sources FILES ${_core_source_files} ${_main_source_files})
 source_group(Headers FILES ${_header_files})
 source_group(Resources FILES ${_qt_resources})
 source_group(QML FILES ${_qml_files})
 
+# {{{ contour_core: the reusable object library (everything but main.cpp)
+add_library(contour_core OBJECT)
+target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources} ${_qml_files})
+
+set_target_properties(contour_core PROPERTIES AUTOMOC ON)
+set_target_properties(contour_core PROPERTIES AUTORCC ON)
+
+# Both the binary dir (for generated headers) and the parent src dir (so "#include <contour/...>"
+# resolves) must be PUBLIC so consumers of the object library inherit them.
+target_include_directories(contour_core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# }}}
+
 add_executable(contour)
-target_sources(contour PRIVATE ${_source_files} ${_header_files} ${_qt_resources} ${_qml_files})
+target_sources(contour PRIVATE ${_main_source_files})
+target_link_libraries(contour PRIVATE contour_core)
 
 set_target_properties(contour PROPERTIES AUTOMOC ON)
 set_target_properties(contour PROPERTIES AUTORCC ON)
@@ -104,7 +134,9 @@ target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 # QML debugging can be enabled at runtime via -qmljsdebugger=... or QT_QML_DEBUG env var.
 # Avoid compile-time defines that force the "QML debugging is enabled" message on every
 # invocation, including headless CLI commands like `contour cat`.
-target_compile_definitions(contour PRIVATE
+# These are attached to contour_core (which compiles the sources) as PUBLIC so the executable and
+# the test target both inherit them when they consume the object library.
+target_compile_definitions(contour_core PUBLIC
     CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
@@ -114,21 +146,21 @@ target_compile_definitions(contour PRIVATE
 )
 
 # Disable all deprecated Qt functions prior to Qt 6.0
-target_compile_definitions(contour PRIVATE QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
+target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
 
 # Create custom target to execute contour
 add_custom_target(run COMMAND contour)
 
 if(CONTOUR_PERF_STATS)
-    target_compile_definitions(contour PRIVATE CONTOUR_PERF_STATS)
+    target_compile_definitions(contour_core PUBLIC CONTOUR_PERF_STATS)
 endif()
 
 if(CONTOUR_FRONTEND_GUI)
-    target_compile_definitions(contour PRIVATE CONTOUR_FRONTEND_GUI)
+    target_compile_definitions(contour_core PUBLIC CONTOUR_FRONTEND_GUI)
 endif()
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    target_compile_definitions(contour PRIVATE CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_definitions(contour_core PUBLIC CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 # }}}
 
@@ -164,7 +196,7 @@ endif()
 
 if(FREEBSD)
     # FreeBSD does not find yaml-cpp in /usr/local but weirdly everything else.
-    target_link_directories(contour PUBLIC "/usr/local/lib")
+    target_link_directories(contour_core PUBLIC "/usr/local/lib")
 endif()
 
 if (TARGET yaml-cpp::yaml-cpp)
@@ -173,10 +205,13 @@ else()
     set(YAML_CPP_LIBRARIES yaml-cpp)
 endif()
 
-target_link_libraries(contour
-    PRIVATE
+# Link dependencies go on contour_core as PUBLIC so they propagate to the `contour` executable and
+# the `contour_gui_test` target through the object library's usage requirements.
+target_link_libraries(contour_core
+    PUBLIC
     crispy::core
     vtbackend
+    vtmux
     Qt6::Core
     ${YAML_CPP_LIBRARIES}
 )
@@ -186,8 +221,8 @@ if(CONTOUR_FRONTEND_GUI)
     if(OPENBSD)
         find_package(X11 REQUIRED)
     endif()
-    target_link_libraries(contour
-        PRIVATE
+    target_link_libraries(contour_core
+        PUBLIC
         vtrasterizer
         ContourTerminalDisplay
         Qt6::DBus
@@ -200,9 +235,9 @@ if(CONTOUR_FRONTEND_GUI)
     )
 
     if(OPENBSD)
-        target_link_libraries(contour PRIVATE X11::xcb X11::xcb_cursor)
+        target_link_libraries(contour_core PUBLIC X11::xcb X11::xcb_cursor)
     elseif(NOT(WIN32) AND NOT(APPLE))
-        target_link_libraries(contour PRIVATE xcb)
+        target_link_libraries(contour_core PUBLIC xcb)
     endif()
     if(CONTOUR_BUILD_STATIC)
         qt_import_qml_plugins(contour)
@@ -210,13 +245,51 @@ if(CONTOUR_FRONTEND_GUI)
 
     if(LINUX AND CONTOUR_WAYLAND)
         find_package(Qt6 COMPONENTS WaylandClient WaylandClientPrivate)
-        target_compile_definitions(contour PRIVATE CONTOUR_WAYLAND)
-        target_link_libraries(contour PRIVATE Qt6::WaylandClient Qt6::WaylandClientPrivate)
-        qt6_generate_wayland_protocol_client_sources(contour FILES "${CMAKE_CURRENT_SOURCE_DIR}/protocols/blur.xml")
+        target_compile_definitions(contour_core PUBLIC CONTOUR_WAYLAND)
+        target_link_libraries(contour_core PUBLIC Qt6::WaylandClient Qt6::WaylandClientPrivate)
+        # The Wayland protocol client sources are generated against contour_core (which owns the
+        # frontend translation units that reference them).
+        qt6_generate_wayland_protocol_client_sources(contour_core FILES "${CMAKE_CURRENT_SOURCE_DIR}/protocols/blur.xml")
         # Explicitly add the generated protocol source code to the target, as the macro sometimes fails to do so.
-        target_sources(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/wayland-blur-protocol.c")
-        target_sources(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/qwayland-blur.cpp")
+        target_sources(contour_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/wayland-blur-protocol.c")
+        target_sources(contour_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/qwayland-blur.cpp")
     endif()
+
+    # {{{ GUI frontend E2E tests (run under the Qt offscreen platform; no display server needed)
+    option(CONTOUR_GUI_TESTING "Enables building of GUI frontend unittests [default: ON]" ${CONTOUR_TESTING})
+    if(CONTOUR_GUI_TESTING)
+        enable_testing()
+        # Qt Test provides QAbstractItemModelTester, used to machine-verify the tab list-model's
+        # QAbstractListModel contract (begin/end insert/remove/move pairing) in TabListModel_test.
+        find_package(Qt6 COMPONENTS Test REQUIRED)
+        # The test links contour_core (the frontend object library) so it can construct real
+        # TerminalSession / ContourGuiApp objects (TerminalSession_test) in addition to the Qt-free
+        # surrogates. contour_core already compiles the QML resources, so the test must NOT compile
+        # resources.qrc again — doing so would duplicate the resource registration symbols.
+        add_executable(contour_gui_test
+            test/test_main.cpp
+            test/Actions_test.cpp
+            test/ScissorRect_test.cpp
+            test/TerminalSessionManager_test.cpp
+            test/TerminalSession_test.cpp
+            test/QmlComponents_test.cpp
+            test/TabListModel_test.cpp
+            test/TabLabel_test.cpp
+        )
+        set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
+        target_link_libraries(contour_gui_test
+            PRIVATE
+            contour_core
+            Qt6::Test
+            Catch2::Catch2
+        )
+        target_include_directories(contour_gui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+        if(NOT WIN32)
+            target_compile_options(contour_gui_test PRIVATE -Wno-c2y-extensions)
+        endif()
+        add_test(NAME contour_gui_test COMMAND $<TARGET_FILE:contour_gui_test>)
+    endif()
+    # }}}
 endif()
 # }}}
 

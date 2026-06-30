@@ -30,6 +30,11 @@
     #include <atomic>
 #endif
 
+namespace contour
+{
+class TerminalSessionManager;
+}
+
 namespace contour::display
 {
 
@@ -294,6 +299,11 @@ class TerminalDisplay: public QQuickItem
     std::string _profileName;
     std::string _programPath;
     TerminalSession* _session = nullptr;
+    /// The session manager this display is registered with, cached the first time the display learns
+    /// of one (focus-in / setSession). Used by ~TerminalDisplay to evict this display from the
+    /// manager's per-display bookkeeping even when the session has already been detached (a closed
+    /// split pane is destroyed session-less), which a _session-routed call could not reach.
+    TerminalSessionManager* _manager = nullptr;
     std::chrono::steady_clock::time_point _startTime;
     std::chrono::steady_clock::time_point _initialResizeDeadline {};
     double _lastVirtualWidth {};

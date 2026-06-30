@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Config.h>
 #include <contour/ContourGuiApp.h>
+#include <contour/PaneProxy.h>
 #include <contour/display/TerminalDisplay.h>
 
 #include <vtpty/Process.h>
@@ -466,7 +467,9 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterType<display::TerminalDisplay>("Contour.Terminal", 1, 0, "ContourTerminal");
     qmlRegisterUncreatableType<TerminalSession>("Contour.Terminal", 1, 0, "TerminalSession", "Use factory.");
     qmlRegisterUncreatableType<TerminalSessionManager>("Contour.Terminal", 1, 0, "TerminalSessionManager", "Do not use me directly.");
+    qmlRegisterUncreatableType<PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
     qRegisterMetaType<TerminalSession*>("TerminalSession*");
+    qRegisterMetaType<PaneProxy*>("PaneProxy*");
     // clang-format on
 
     {

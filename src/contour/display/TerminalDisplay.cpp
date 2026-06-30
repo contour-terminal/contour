@@ -278,6 +278,12 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
 TerminalDisplay::~TerminalDisplay()
 {
     displayLog()("Destroying terminal widget.");
+    // Evict this display from the manager's per-display bookkeeping before it is freed, so no
+    // dangling TerminalDisplay* key (or its dangling currentSession) survives in _displayStates. Use
+    // the cached manager rather than _session->getTerminalManager(): a closed split pane is destroyed
+    // after its session was already detached (_session == nullptr), so the session route would miss it.
+    if (_manager != nullptr)
+        _manager->detachDisplay(this);
     if (_session)
         _session->detachDisplay(*this);
 }
@@ -310,6 +316,11 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     }
 
     _session = newSession;
+
+    // Cache the manager so ~TerminalDisplay can self-evict from _displayStates even if this pane is
+    // closed before it ever receives focus (focus-in is the other place the cache is set).
+    if (auto* manager = newSession->getTerminalManager(); manager != nullptr)
+        _manager = manager;
 
     QObject::connect(newSession, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
 
@@ -1126,7 +1137,11 @@ void TerminalDisplay::focusInEvent(QFocusEvent* event)
 
     if (_session)
     {
-        _session->getTerminalManager()->FocusOnDisplay(this);
+        // Cache the manager so ~TerminalDisplay can self-evict from _displayStates even after the
+        // session is gone (see the destructor). This focus-in is also where the display first enters
+        // _displayStates (FocusOnDisplay), so the cache and the registration are set together.
+        _manager = _session->getTerminalManager();
+        _manager->FocusOnDisplay(this);
         _session->sendFocusInEvent(); // TODO: paint with "normal" colors
     }
 }
