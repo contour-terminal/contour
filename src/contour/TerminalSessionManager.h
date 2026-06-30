@@ -11,6 +11,7 @@
 #include <QtQml/QQmlEngine>
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <ranges>
 #include <span>
@@ -81,8 +82,6 @@ class TerminalSessionManager: public QAbstractListModel, public vtmux::ModelEven
     void moveTabTo(int position);
     void moveTabToLeft(TerminalSession* session);
     void moveTabToRight(TerminalSession* session);
-
-    void setSession(size_t index);
 
     void removeSession(TerminalSession&);
     void currentSessionIsTerminated();
@@ -309,6 +308,14 @@ class TerminalSessionManager: public QAbstractListModel, public vtmux::ModelEven
     /// @return The backing sessions, in pane-tree order.
     [[nodiscard]] std::vector<TerminalSession*> sessionsInTab(vtmux::Tab* tab) const;
 
+    /// Gathers the backing sessions of every tab in the window matching @p predicate, in row order.
+    /// Shared by the bulk-close operations (closeOtherTabs / closeTabsToRight), which snapshot the doomed
+    /// sessions before the model mutates. Returns empty when there is no window.
+    /// @param predicate Selects which tabs' sessions to gather.
+    /// @return The matching tabs' backing sessions.
+    [[nodiscard]] std::vector<TerminalSession*> gatherSessionsOfTabsWhere(
+        std::function<bool(vtmux::Tab*)> const& predicate) const;
+
     /// Terminates each of @p sessions, the single whole-tab close primitive shared by all close
     /// paths (CloseTab, the tab ✕ button, "Close Other Tabs", "Close Tabs to the Right").
     /// terminate() drives sessionClosed -> removeSession, which collapses the model to the survivor on
@@ -362,13 +369,6 @@ class TerminalSessionManager: public QAbstractListModel, public vtmux::ModelEven
     /// split tree and subsequent pane operations target it) and activates the display session of its
     /// active leaf. No-op if @p row is out of range.
     void activateModelTabByRow(int row);
-
-    [[nodiscard]] std::optional<std::size_t> getSessionIndexOf(TerminalSession* session) const noexcept
-    {
-        if (auto const i = std::ranges::find(_sessions, session); i != _sessions.end())
-            return static_cast<std::size_t>(std::distance(_sessions.begin(), i));
-        return std::nullopt;
-    }
 
     void updateStatusLine()
     {

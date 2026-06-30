@@ -149,26 +149,12 @@ TerminalSession* TerminalSessionManager::createBackingSession(vtmux::SessionId s
     return session;
 }
 
-void TerminalSessionManager::setSession(size_t index)
-{
-    Require(index <= _sessions.size());
-    managerLog()(std::format("SET SESSION: index: {}, _sessions.size(): {}", index, _sessions.size()));
-
-    if (index < _sessions.size())
-        activateSession(_sessions[index]);
-    else
-        activateSession(createSessionInBackground());
-}
-
 TerminalSession* TerminalSessionManager::activateSession(TerminalSession* session, bool isNewSession)
 {
     if (!session)
         return nullptr;
 
-    managerLog()("Activating session ID {} {} at index {}",
-                 session->id(),
-                 (void*) session,
-                 getSessionIndexOf(session).value_or(-1));
+    managerLog()("Activating session ID {} {}", session->id(), (void*) session);
 
     // iterate over _displayStates to see if this session is already active
     for (auto& [display, state]: _displayStates)
@@ -949,22 +935,31 @@ void TerminalSessionManager::terminateSessions(std::span<TerminalSession* const>
         session->terminate();
 }
 
+std::vector<TerminalSession*> TerminalSessionManager::gatherSessionsOfTabsWhere(
+    std::function<bool(vtmux::Tab*)> const& predicate) const
+{
+    // Collect the backing sessions of every tab matching @p predicate. Used by the bulk-close operations,
+    // which must gather the doomed sessions BEFORE the model mutates (so the tabs still exist), then close
+    // structurally through the unit-tested model method, then terminate the gathered sessions. terminate()
+    // -> removeSession then only cleans up the Qt bookkeeping, so we close in tab-space, not pane-space.
+    std::vector<TerminalSession*> doomed;
+    if (_modelWindow == nullptr)
+        return doomed;
+    for (auto const row: std::views::iota(0, _modelWindow->tabCount()))
+        if (auto* tab = _modelWindow->tabAt(row); tab != nullptr && predicate(tab))
+            for (auto* session: sessionsInTab(tab))
+                doomed.push_back(session);
+    return doomed;
+}
+
 void TerminalSessionManager::closeOtherTabs(int index)
 {
     auto* keep = tabAtRow(index);
     if (keep == nullptr || _modelWindow == nullptr)
         return;
 
-    // Gather the backing sessions of every tab that will be closed BEFORE mutating the model, then
-    // let the authoritative (and unit-tested) SessionModel::closeOtherTabs do the structural close,
-    // and finally terminate the gathered sessions. terminate() -> removeSession then only cleans up
-    // the Qt bookkeeping (the model tab is already gone), so we close in tab-space, not pane-space.
-    std::vector<TerminalSession*> doomed;
-    for (auto const row: std::views::iota(0, _modelWindow->tabCount()))
-        if (auto* tab = _modelWindow->tabAt(row); tab != nullptr && tab->id() != keep->id())
-            for (auto* session: sessionsInTab(tab))
-                doomed.push_back(session);
-
+    auto const doomed =
+        gatherSessionsOfTabsWhere([keep](vtmux::Tab* tab) { return tab->id() != keep->id(); });
     _model->closeOtherTabs(_modelWindow->id(), keep->id());
     terminateSessions(doomed);
 }
@@ -975,14 +970,9 @@ void TerminalSessionManager::closeTabsToRight(int index)
     if (anchor == nullptr || _modelWindow == nullptr)
         return;
 
-    // Same strategy as closeOtherTabs: collect the sessions of the tabs to the right, close them in
-    // tab-space through the unit-tested model method, then terminate the gathered sessions.
-    std::vector<TerminalSession*> doomed;
-    for (auto const row: std::views::iota(index + 1, _modelWindow->tabCount()))
-        if (auto* tab = _modelWindow->tabAt(row); tab != nullptr)
-            for (auto* session: sessionsInTab(tab))
-                doomed.push_back(session);
-
+    // Tabs strictly to the right of @p index. tabAt() is row-ordered, so compare each candidate's row.
+    auto const doomed = gatherSessionsOfTabsWhere(
+        [this, index](vtmux::Tab* tab) { return rowOfTab(tab->id()) > index; });
     _model->closeTabsToRight(_modelWindow->id(), anchor->id());
     terminateSessions(doomed);
 }
