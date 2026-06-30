@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/display/Blur.h>
 #include <contour/display/OpenGLRenderer.h>
+#include <contour/display/RhiVertexLayout.h>
 #include <contour/display/ShaderConfig.h>
 #include <contour/helper.h>
 
@@ -13,37 +14,25 @@
 #include <crispy/defines.h>
 #include <crispy/utils.h>
 
+#include <QtCore/QFile>
 #include <QtCore/QtGlobal>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
 
-#include <algorithm>
-#include <array>
 #include <chrono>
 #include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
 
-using std::array;
-using std::get;
-using std::holds_alternative;
-using std::make_shared;
-using std::min;
-using std::move;
-using std::nullopt;
 using std::optional;
 using std::pair;
-using std::shared_ptr;
-using std::string;
 using std::vector;
 
 using vtbackend::Height;
 using vtbackend::ImageSize;
 using vtbackend::RGBAColor;
 using vtbackend::Width;
-
-using namespace std::string_view_literals;
 
 namespace chrono = std::chrono;
 namespace atlas = vtrasterizer::atlas;
@@ -59,6 +48,26 @@ namespace ZAxisDepths
 
 namespace
 {
+    // Vertex strides/offsets and std140 uniform-block layouts live in the dependency-free RhiVertexLayout.h
+    // (single source of truth, unit-tested against the shader contract in RhiVertexLayout_test). Alias the
+    // ones used here so the local call sites stay terse.
+    using rhilayout::RectColorOffset;
+    using rhilayout::RectPositionOffset;
+    using rhilayout::RectUniformBlockSize;
+    using rhilayout::RectVertexStride;
+    using rhilayout::TextColorOffset;
+    using rhilayout::TextPositionOffset;
+    using rhilayout::TextTexCoordOffset;
+    using rhilayout::TextUniformBlockSize;
+    using rhilayout::TextVertexStride;
+
+    // {{{ baked .qsb resource paths (embedded via qt6_add_shaders in CMakeLists.txt)
+    constexpr auto BackgroundVertexShaderPath = ":/contour/display/shaders/background.vert.qsb";
+    constexpr auto BackgroundFragmentShaderPath = ":/contour/display/shaders/background.frag.qsb";
+    constexpr auto TextVertexShaderPath = ":/contour/display/shaders/text.vert.qsb";
+    constexpr auto TextFragmentShaderPath = ":/contour/display/shaders/text.frag.qsb";
+    // }}}
+
     struct CRISPY_PACKED vec2 // NOLINT
     {
         float x;
@@ -86,63 +95,6 @@ namespace
         return (value & (value - 1)) == 0;
     }
 
-    template <typename T, typename Fn>
-    inline void bound(T& bindable, Fn const& callable)
-    {
-        bindable.bind();
-        try
-        {
-            callable();
-        }
-        catch (...)
-        {
-            bindable.release();
-            throw;
-        }
-        bindable.release();
-    }
-
-    QMatrix4x4 ortho(float left, float right, float bottom, float top)
-    {
-        constexpr float NearPlane = -1.0f;
-        constexpr float FarPlane = 1.0f;
-
-        QMatrix4x4 mat;
-        mat.ortho(left, right, bottom, top, NearPlane, FarPlane);
-        return mat;
-    }
-
-    GLenum glFormat(vtbackend::ImageFormat format)
-    {
-        switch (format)
-        {
-            case vtbackend::ImageFormat::RGB: return GL_RGB;
-            case vtbackend::ImageFormat::RGBA: return GL_RGBA;
-            case vtbackend::ImageFormat::Auto:
-            case vtbackend::ImageFormat::PNG:
-                crispy::unreachable(); // always resolved/decoded to RGBA before rendering
-        }
-        Guarantee(false);
-        crispy::unreachable();
-    }
-
-    struct OpenGLContextGuard
-    {
-        QOpenGLContext* context;
-        QSurface* surface;
-
-        OpenGLContextGuard():
-            context { QOpenGLContext::currentContext() }, surface { context ? context->surface() : nullptr }
-        {
-        }
-
-        ~OpenGLContextGuard()
-        {
-            if (context)
-                context->makeCurrent(surface);
-        }
-    };
-
     // Returns first non-zero argument.
     template <typename T, typename... More>
     constexpr T firstNonZero(T a, More... more) noexcept
@@ -168,17 +120,10 @@ namespace
  *
  */
 
-OpenGLRenderer::OpenGLRenderer(ShaderConfig textShaderConfig,
-                               ShaderConfig rectShaderConfig,
-                               vtbackend::ImageSize viewSize,
-                               vtbackend::ImageSize targetSurfaceSize,
+OpenGLRenderer::OpenGLRenderer(vtbackend::ImageSize targetSurfaceSize,
                                [[maybe_unused]] vtbackend::ImageSize textureTileSize,
                                vtrasterizer::PageMargin margin):
-    _startTime { chrono::steady_clock::now().time_since_epoch() },
-    _viewSize { viewSize },
-    _margin { margin },
-    _textShaderConfig { std::move(textShaderConfig) },
-    _rectShaderConfig { std::move(rectShaderConfig) }
+    _startTime { chrono::steady_clock::now().time_since_epoch() }, _margin { margin }
 {
     displayLog()("OpenGLRenderer: Constructing with render size {}.", _renderTargetSize);
     setRenderSize(targetSurfaceSize);
@@ -189,22 +134,21 @@ void OpenGLRenderer::setRenderSize(vtbackend::ImageSize targetSurfaceSize)
     if (_renderTargetSize == targetSurfaceSize)
         return;
 
+    // The render size is the terminal item's device-pixel extent. It no longer drives a projection
+    // matrix — the scene graph supplies that via setProjectionMatrix() — but the renderer's height is the
+    // reference frame for the transient inner scissor (smooth scroll / cursor clip in vtrasterizer's
+    // Renderer), which is expressed bottom-left relative to this size.
     _renderTargetSize = targetSurfaceSize;
-    _projectionMatrix = ortho(/* left */ 0.0f,
-                              /* right */ unbox<float>(_renderTargetSize.width),
-                              /* bottom */ unbox<float>(_renderTargetSize.height),
-                              /* top */ 0.0f);
 
     displayLog()("Setting render target size to {}.", _renderTargetSize);
 }
 
-void OpenGLRenderer::setTranslation(float x, float y, float z) noexcept
+void OpenGLRenderer::setProjectionMatrix(QMatrix4x4 const& matrix) noexcept
 {
-    _viewMatrix.setToIdentity();
-    _viewMatrix.translate(x, y, z);
+    _projectionMatrix = matrix;
 }
 
-void OpenGLRenderer::setModelMatrix(QMatrix4x4 matrix) noexcept
+void OpenGLRenderer::setModelMatrix(QMatrix4x4 const& matrix) noexcept
 {
     _modelMatrix = matrix;
 }
@@ -219,188 +163,266 @@ atlas::AtlasBackend& OpenGLRenderer::textureScheduler()
     return *this;
 }
 
-void OpenGLRenderer::initializeRectRendering()
-{
-    CHECKED_GL(glGenVertexArrays(1, &_rectVAO));
-    CHECKED_GL(glBindVertexArray(_rectVAO));
-
-    CHECKED_GL(glGenBuffers(1, &_rectVBO));
-    CHECKED_GL(glBindBuffer(GL_ARRAY_BUFFER, _rectVBO));
-    CHECKED_GL(glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STREAM_DRAW));
-
-    constexpr auto const BufferStride = 7 * sizeof(GLfloat);
-    const auto* const VertexOffset = (void const*) (0 * sizeof(GLfloat)); // NOLINT
-    const auto* const ColorOffset = (void const*) (3 * sizeof(GLfloat));  // NOLINT
-
-    // 0 (vec3): vertex buffer
-    CHECKED_GL(glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, BufferStride, VertexOffset));
-    CHECKED_GL(glEnableVertexAttribArray(0));
-
-    // 1 (vec4): color buffer
-    CHECKED_GL(glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, BufferStride, ColorOffset));
-    CHECKED_GL(glEnableVertexAttribArray(1));
-
-    CHECKED_GL(glBindVertexArray(0));
-}
-
-void OpenGLRenderer::initializeTextureRendering()
-{
-    CHECKED_GL(glGenVertexArrays(1, &_textVAO));
-    CHECKED_GL(glBindVertexArray(_textVAO));
-
-    constexpr auto const BufferStride = (3 + 4 + 4) * sizeof(GLfloat);
-    constexpr auto const* const VertexOffset = (void const*) nullptr;
-    const auto* const TexCoordOffset = (void const*) (3 * sizeof(GLfloat)); // NOLINT
-    const auto* const ColorOffset = (void const*) (7 * sizeof(GLfloat));    // NOLINT
-
-    CHECKED_GL(glGenBuffers(1, &_textVBO));
-    CHECKED_GL(glBindBuffer(GL_ARRAY_BUFFER, _textVBO));
-    CHECKED_GL(glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STREAM_DRAW));
-
-    // 0 (vec3): vertex buffer
-    CHECKED_GL(glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, BufferStride, VertexOffset));
-    CHECKED_GL(glEnableVertexAttribArray(0));
-
-    // 1 (vec4): texture coordinates buffer
-    CHECKED_GL(glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, BufferStride, TexCoordOffset));
-    CHECKED_GL(glEnableVertexAttribArray(1));
-
-    // 2 (vec4): color buffer
-    CHECKED_GL(glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, BufferStride, ColorOffset));
-    CHECKED_GL(glEnableVertexAttribArray(2));
-
-    // setup EBO
-    // glGenBuffers(1, &_ebo);
-    // glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ebo);
-    // static const GLuint indices[6] = { 0, 1, 3, 1, 2, 3 };
-    // glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-    // glVertexAttribDivisor(0, 1); // TODO: later for instanced rendering
-
-    CHECKED_GL(glBindVertexArray(0));
-}
-
 OpenGLRenderer::~OpenGLRenderer()
 {
     displayLog()("~OpenGLRenderer");
-    CHECKED_GL(glDeleteVertexArrays(1, &_rectVAO));
-    CHECKED_GL(glDeleteBuffers(1, &_rectVBO));
+    // RHI resources are released through their std::unique_ptr<QRhiResource*, QRhiResourceDeleter>
+    // members in reverse declaration order; nothing raw to clean up here.
 }
 
 void OpenGLRenderer::initialize()
 {
+    // The renderer no longer owns raw OpenGL state. The RHI pipelines, buffers, atlas texture and sampler
+    // are built lazily from the render node's prepare() via createPipelines() once the scene graph's QRhi
+    // and the frame's render-pass descriptor are available. We only flip the initialized flag and set the
+    // host image-row alignment used by texture uploads.
     if (_initialized)
         return;
 
-    Q_ASSERT(_window != nullptr);
-    QSGRendererInterface* rif = _window->rendererInterface();
-    Q_ASSERT(rif->graphicsApi() == QSGRendererInterface::OpenGL);
-
     _initialized = true;
-
-    initializeOpenGLFunctions();
-    CONSUME_GL_ERRORS();
-
-    // clang-format off
-    CHECKED_GL(_textShader = createShader(_textShaderConfig));
-    CHECKED_GL(_textProjectionLocation = _textShader->uniformLocation("vs_projection")); // NOLINT(cppcoreguidelines-prefer-member-initializer)
-    CHECKED_GL(_textTextureAtlasLocation = _textShader->uniformLocation("fs_textureAtlas"));
-    CHECKED_GL(_textTimeLocation = _textShader->uniformLocation("u_time")); // NOLINT(cppcoreguidelines-prefer-member-initializer)
-    CHECKED_GL(_textOutlineColorLocation = _textShader->uniformLocation("u_textOutlineColor"));
-    CHECKED_GL(_rectShader = createShader(_rectShaderConfig));
-    CHECKED_GL(_rectProjectionLocation = _rectShader->uniformLocation("u_projection")); // NOLINT(cppcoreguidelines-prefer-member-initializer)
-    CHECKED_GL(_rectTimeLocation = _rectShader->uniformLocation("u_time")); // NOLINT(cppcoreguidelines-prefer-member-initializer)
-    // clang-format on
 
     // Image row alignment is 1 byte (OpenGL defaults to 4).
     _transferOptions.setAlignment(1);
-
-    setRenderSize(_renderTargetSize);
-
-    assert(_textProjectionLocation != -1);
-
-    bound(*_textShader, [&]() {
-        auto const textureAtlasWidth = unbox<GLfloat>(_textureAtlas.textureSize.width);
-        CHECKED_GL(_textShader->setUniformValue("pixel_x", 1.0f / textureAtlasWidth));
-        CHECKED_GL(_textShader->setUniformValue(_textTextureAtlasLocation, 0)); // GL_TEXTURE0?
-        auto const [cr, cg, cb, ca] = atlas::normalize(_textOutlineColor);
-        CHECKED_GL(_textShader->setUniformValue(_textOutlineColorLocation, QVector4D(cr, cg, cb, ca)));
-    });
-
-    initializeRectRendering();
-    initializeTextureRendering();
-
-    logInfo();
-}
-
-void OpenGLRenderer::logInfo()
-{
-    Require(QOpenGLContext::currentContext() != nullptr);
-    QOpenGLFunctions& glFunctions = *QOpenGLContext::currentContext()->functions();
-
-    auto const openGLTypeString = QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES"sv : "OpenGL"sv;
-    displayLog()("[FYI] OpenGL type         : {}", openGLTypeString);
-    displayLog()("[FYI] OpenGL renderer     : {}", (char const*) glFunctions.glGetString(GL_RENDERER));
-
-    GLint versionMajor {};
-    GLint versionMinor {};
-    glFunctions.glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
-    glFunctions.glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
-    displayLog()("[FYI] OpenGL version      : {}.{}", versionMajor, versionMinor);
-    displayLog()("[FYI] Widget size         : {} ({})", _renderTargetSize, _viewSize);
-
-    string const glslVersions = (char const*) glFunctions.glGetString(GL_SHADING_LANGUAGE_VERSION);
-#if 0 // defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
-    QOpenGLExtraFunctions& glFunctionsExtra = *QOpenGLContext::currentContext()->extraFunctions();
-    GLint glslNumShaderVersions {};
-    glFunctions.glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
-    glFunctions.glGetError(); // consume possible OpenGL error.
-    if (glslNumShaderVersions > 0)
-    {
-        glslVersions += " (";
-        for (GLint k = 0, l = 0; k < glslNumShaderVersions; ++k)
-            if (auto const str = glFunctionsExtra.glGetStringi(GL_SHADING_LANGUAGE_VERSION, GLuint(k)); str && *str)
-            {
-                glslVersions += (l ? ", " : "");
-                glslVersions += (char const*) str;
-                l++;
-            }
-        glslVersions += ')';
-    }
-#endif
-    displayLog()("[FYI] GLSL version        : {}", glslVersions);
 }
 
 void OpenGLRenderer::clearCache()
 {
 }
 
-int OpenGLRenderer::maxTextureDepth()
+// {{{ RHI pipeline + atlas construction
+QShader OpenGLRenderer::loadShader(QString const& resourcePath)
 {
-    GLint value = {};
-    CHECKED_GL(glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &value));
-    return static_cast<int>(value);
+    QFile file(resourcePath);
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        errorLog()("Failed to open baked shader resource: {}", resourcePath.toStdString());
+        return {};
+    }
+    QShader const shader = QShader::fromSerialized(file.readAll());
+    if (!shader.isValid())
+        errorLog()("Failed to deserialize baked shader resource: {}", resourcePath.toStdString());
+    return shader;
 }
 
-int OpenGLRenderer::maxTextureSize()
+void OpenGLRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
 {
-    GLint value = {};
-    CHECKED_GL(glGetIntegerv(GL_MAX_TEXTURE_SIZE, &value));
-    return static_cast<int>(value);
+    auto const pixelSize = QSize(unbox<int>(size.width), unbox<int>(size.height));
+
+    // (Re)create the atlas texture as a plain sampled RGBA8 texture (no extra usage flags): it is a CPU
+    // upload destination (uploadTexture) and a fragment-shader sample source, both of which a default
+    // sampled texture supports. The debug-only atlas readback uses readBackTexture(), which the RHI backs
+    // with a transient copy where supported.
+    _atlasTexture.reset(rhi->newTexture(QRhiTexture::RGBA8, pixelSize, 1, {}));
+    if (!_atlasTexture->create())
+        errorLog()("Failed to create RHI atlas texture of size {}.", size);
+    _atlasTextureSize = size;
+    _atlasCreatedSize = size;
+
+    // Nearest filtering + clamp-to-edge mirrors the former QOpenGLTexture configuration; created once and
+    // reused across atlas resizes.
+    if (!_atlasSampler)
+    {
+        _atlasSampler.reset(rhi->newSampler(QRhiSampler::Nearest,
+                                            QRhiSampler::Nearest,
+                                            QRhiSampler::None,
+                                            QRhiSampler::ClampToEdge,
+                                            QRhiSampler::ClampToEdge));
+        if (!_atlasSampler->create())
+            errorLog()("Failed to create RHI atlas sampler.");
+    }
 }
+
+void OpenGLRenderer::createRectPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
+{
+    auto const vertexShader = loadShader(BackgroundVertexShaderPath);
+    auto const fragmentShader = loadShader(BackgroundFragmentShaderPath);
+    if (!vertexShader.isValid() || !fragmentShader.isValid())
+        return;
+
+    // Dynamic uniform buffer feeding both stages (std140 `Buf` block at binding 0).
+    _rectPipeline.uniformBuffer.reset(
+        rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, RectUniformBlockSize));
+    _rectPipeline.uniformBuffer->create();
+
+    // The vertex buffer is created lazily (as an Immutable buffer) in recordRectPass() once the per-frame
+    // geometry size is known, and re-created when it must grow.
+
+    _rectPipeline.srb.reset(rhi->newShaderResourceBindings());
+    _rectPipeline.srb->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(0,
+                                                 QRhiShaderResourceBinding::VertexStage
+                                                     | QRhiShaderResourceBinding::FragmentStage,
+                                                 _rectPipeline.uniformBuffer.get()),
+    });
+    _rectPipeline.srb->create();
+
+    auto* pipeline = rhi->newGraphicsPipeline();
+    pipeline->setTopology(QRhiGraphicsPipeline::Triangles);
+    // The scene graph renders this node within its depth-ordered pass; depth-testing must be enabled (with
+    // DepthAwareRendering on the node) for the node's output to survive into the frame, but depth is not
+    // written since the terminal is alpha-blended translucent content. LessOrEqual (vs the default Less) so
+    // geometry sitting exactly at the node's assigned depth slot still passes.
+    pipeline->setDepthTest(true);
+    pipeline->setDepthWrite(false);
+    pipeline->setDepthOp(QRhiGraphicsPipeline::LessOrEqual);
+
+    // The node clip and the transient inner scissor (smooth scroll / cursor) are applied dynamically via
+    // QRhiCommandBuffer::setScissor, which requires the pipeline to opt into dynamic scissoring.
+    pipeline->setFlags(QRhiGraphicsPipeline::UsesScissor);
+
+    // Blend: glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE, ONE), color write all.
+    QRhiGraphicsPipeline::TargetBlend blend;
+    blend.enable = true;
+    blend.colorWrite = QRhiGraphicsPipeline::ColorMask(QRhiGraphicsPipeline::R | QRhiGraphicsPipeline::G
+                                                       | QRhiGraphicsPipeline::B | QRhiGraphicsPipeline::A);
+    blend.srcColor = QRhiGraphicsPipeline::SrcAlpha;
+    blend.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+    blend.opColor = QRhiGraphicsPipeline::Add;
+    blend.srcAlpha = QRhiGraphicsPipeline::One;
+    blend.dstAlpha = QRhiGraphicsPipeline::One;
+    blend.opAlpha = QRhiGraphicsPipeline::Add;
+    pipeline->setTargetBlends({ blend });
+
+    pipeline->setShaderStages({
+        { QRhiShaderStage::Vertex, vertexShader },
+        { QRhiShaderStage::Fragment, fragmentShader },
+    });
+
+    // Vertex input: single interleaved binding, vec3 position @loc0, vec4 color @loc1.
+    QRhiVertexInputLayout inputLayout;
+    inputLayout.setBindings({ QRhiVertexInputBinding(RectVertexStride) });
+    inputLayout.setAttributes({
+        QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, RectPositionOffset),
+        QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, RectColorOffset),
+    });
+    pipeline->setVertexInputLayout(inputLayout);
+
+    pipeline->setShaderResourceBindings(_rectPipeline.srb.get());
+    pipeline->setRenderPassDescriptor(rpDesc);
+    if (!pipeline->create())
+        errorLog()("Failed to create RHI background/rect graphics pipeline.");
+
+    _rectPipeline.pipeline.reset(pipeline);
+}
+
+void OpenGLRenderer::createTextPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
+{
+    auto const vertexShader = loadShader(TextVertexShaderPath);
+    auto const fragmentShader = loadShader(TextFragmentShaderPath);
+    if (!vertexShader.isValid() || !fragmentShader.isValid())
+        return;
+
+    Require(_atlasTexture != nullptr);
+    Require(_atlasSampler != nullptr);
+
+    _textPipeline.uniformBuffer.reset(
+        rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, TextUniformBlockSize));
+    _textPipeline.uniformBuffer->create();
+
+    // The vertex buffer is created lazily (as an Immutable buffer) in recordTextPass(), see createRect.
+
+    _textPipeline.srb.reset(rhi->newShaderResourceBindings());
+    _textPipeline.srb->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(0,
+                                                 QRhiShaderResourceBinding::VertexStage
+                                                     | QRhiShaderResourceBinding::FragmentStage,
+                                                 _textPipeline.uniformBuffer.get()),
+        QRhiShaderResourceBinding::sampledTexture(
+            1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()),
+    });
+    _textPipeline.srb->create();
+
+    auto* pipeline = rhi->newGraphicsPipeline();
+    pipeline->setTopology(QRhiGraphicsPipeline::Triangles);
+    // The scene graph renders this node within its depth-ordered pass; depth-testing must be enabled (with
+    // DepthAwareRendering on the node) for the node's output to survive into the frame, but depth is not
+    // written since the terminal is alpha-blended translucent content. LessOrEqual (vs the default Less) so
+    // geometry sitting exactly at the node's assigned depth slot still passes.
+    pipeline->setDepthTest(true);
+    pipeline->setDepthWrite(false);
+    pipeline->setDepthOp(QRhiGraphicsPipeline::LessOrEqual);
+
+    // Dynamic scissoring for the node clip + transient inner scissor (smooth scroll / cursor), see above.
+    pipeline->setFlags(QRhiGraphicsPipeline::UsesScissor);
+
+    QRhiGraphicsPipeline::TargetBlend blend;
+    blend.enable = true;
+    blend.colorWrite = QRhiGraphicsPipeline::ColorMask(QRhiGraphicsPipeline::R | QRhiGraphicsPipeline::G
+                                                       | QRhiGraphicsPipeline::B | QRhiGraphicsPipeline::A);
+    blend.srcColor = QRhiGraphicsPipeline::SrcAlpha;
+    blend.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+    blend.opColor = QRhiGraphicsPipeline::Add;
+    blend.srcAlpha = QRhiGraphicsPipeline::One;
+    blend.dstAlpha = QRhiGraphicsPipeline::One;
+    blend.opAlpha = QRhiGraphicsPipeline::Add;
+    pipeline->setTargetBlends({ blend });
+
+    pipeline->setShaderStages({
+        { QRhiShaderStage::Vertex, vertexShader },
+        { QRhiShaderStage::Fragment, fragmentShader },
+    });
+
+    // Vertex input: single interleaved binding, vec3 position @loc0, vec4 texCoords @loc1, vec4 color @loc2.
+    QRhiVertexInputLayout inputLayout;
+    inputLayout.setBindings({ QRhiVertexInputBinding(TextVertexStride) });
+    inputLayout.setAttributes({
+        QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, TextPositionOffset),
+        QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, TextTexCoordOffset),
+        QRhiVertexInputAttribute(0, 2, QRhiVertexInputAttribute::Float4, TextColorOffset),
+    });
+    pipeline->setVertexInputLayout(inputLayout);
+
+    pipeline->setShaderResourceBindings(_textPipeline.srb.get());
+    pipeline->setRenderPassDescriptor(rpDesc);
+    if (!pipeline->create())
+        errorLog()("Failed to create RHI text/glyph graphics pipeline.");
+
+    _textPipeline.pipeline.reset(pipeline);
+}
+
+void OpenGLRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
+{
+    Require(rhi != nullptr);
+    Require(rpDesc != nullptr);
+
+    // Nothing to rebuild if the pipelines are already valid for this RHI and render-pass layout.
+    if (pipelinesReady() && _rhi == rhi && _renderPassDescriptor == rpDesc)
+        return;
+
+    _rhi = rhi;
+    _renderPassDescriptor = rpDesc;
+
+    // Ensure the atlas texture + sampler exist before the text pipeline references them. If configureAtlas
+    // has not been observed yet, fall back to the currently known atlas size (or a 1x1 placeholder) so the
+    // shader-resource-bindings are valid; the real atlas is (re)created on the next configureAtlas.
+    if (!_atlasTexture)
+    {
+        auto const size =
+            _atlasTextureSize.area() != 0 ? _atlasTextureSize : ImageSize { Width(1), Height(1) };
+        createAtlasTexture(rhi, size);
+    }
+
+    createRectPipeline(rhi, rpDesc);
+    createTextPipeline(rhi, rpDesc);
+
+    displayLog()("createPipelines: rect={} text={}",
+                 _rectPipeline.pipeline != nullptr,
+                 _textPipeline.pipeline != nullptr);
+}
+// }}}
 
 // {{{ AtlasBackend impl
 ImageSize OpenGLRenderer::atlasSize() const noexcept
 {
-    return _textureAtlas.textureSize;
+    return _atlasTextureSize;
 }
 
 void OpenGLRenderer::configureAtlas(atlas::ConfigureAtlas atlas)
 {
     // schedule atlas creation
     _scheduledExecutions.configureAtlas.emplace(atlas);
-    _textureAtlas.textureSize = atlas.size;
-    _textureAtlas.properties = atlas.properties;
+    _atlasTextureSize = atlas.size;
+    _atlasProperties = atlas.properties;
 
     displayLog()("configureAtlas: {} {}", atlas.size, atlas.properties.format);
 }
@@ -408,18 +430,11 @@ void OpenGLRenderer::configureAtlas(atlas::ConfigureAtlas atlas)
 void OpenGLRenderer::uploadTile(atlas::UploadTile tile)
 {
     // clang-format off
-    // displayLog()("uploadTile: atlas {} @ {}:{}",
-    //              tile.location.atlasID.value,
-    //              tile.location.x.value,
-    //              tile.location.y.value);
-    if (!(tile.bitmapSize.width <= _textureAtlas.properties.tileSize.width))
-        errorLog()("uploadTile assertion alert: width {} <= {} failed.", tile.bitmapSize.width, _textureAtlas.properties.tileSize.width);
-    if (!(tile.bitmapSize.height <= _textureAtlas.properties.tileSize.height))
-        errorLog()("uploadTile assertion alert: height {} <= {} failed.", tile.bitmapSize.height, _textureAtlas.properties.tileSize.height);
+    if (!(tile.bitmapSize.width <= _atlasProperties.tileSize.width))
+        errorLog()("uploadTile assertion alert: width {} <= {} failed.", tile.bitmapSize.width, _atlasProperties.tileSize.width);
+    if (!(tile.bitmapSize.height <= _atlasProperties.tileSize.height))
+        errorLog()("uploadTile assertion alert: height {} <= {} failed.", tile.bitmapSize.height, _atlasProperties.tileSize.height);
     // clang-format on
-
-    // Require(tile.bitmapSize.width <= _textureAtlas.properties.tileSize.width);
-    // Require(tile.bitmapSize.height <= _textureAtlas.properties.tileSize.height);
 
     _scheduledExecutions.uploadTiles.emplace_back(std::move(tile));
 }
@@ -486,149 +501,232 @@ void OpenGLRenderer::renderTile(atlas::RenderTile tile)
 // }}}
 
 // {{{ executor impl
-ImageSize OpenGLRenderer::renderBufferSize()
-{
-#if 0
-    return renderTargetSize_;
-#else
-    auto width = unbox<GLint>(_renderTargetSize.width);
-    auto height = unbox<GLint>(_renderTargetSize.height);
-    CHECKED_GL(glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &width));
-    CHECKED_GL(glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &height));
-    return ImageSize { Width::cast_from(width), Height::cast_from(height) };
-#endif
-}
-
-struct ScopedRenderEnvironment
-{
-    QOpenGLExtraFunctions& gl;
-
-    bool savedBlend;          // QML seems to explicitly disable that, but we need it.
-    GLenum savedDepthFunc {}; // Shuold be GL_LESS, but you never know.
-    GLuint savedVAO {};       // QML sets that before and uses it later, so we need to back it up, too.
-    GLenum savedBlendSource {};
-    GLenum savedBlendDestination {};
-
-    ScopedRenderEnvironment(QOpenGLExtraFunctions& glIn):
-        gl { glIn }, // clang-format off
-        savedBlend { gl.glIsEnabled(GL_BLEND) != GL_FALSE } // clang-format on
-    {
-        gl.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, (GLint*) &savedVAO);
-
-        gl.glGetIntegerv(GL_DEPTH_FUNC, (GLint*) &savedDepthFunc);
-        gl.glDepthFunc(GL_LEQUAL);
-        gl.glDepthMask(GL_FALSE);
-
-        // Enable color blending to allow drawing text/images on top of background.
-        gl.glGetIntegerv(GL_BLEND_SRC, (GLint*) &savedBlendSource);
-        gl.glGetIntegerv(GL_BLEND_DST, (GLint*) &savedBlendDestination);
-        gl.glEnable(GL_BLEND);
-        // _gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE);
-        gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
-    }
-
-    ~ScopedRenderEnvironment()
-    {
-        gl.glBlendFunc(savedBlendSource, savedBlendDestination);
-        gl.glDepthFunc(savedDepthFunc);
-        if (!savedBlend)
-            gl.glDisable(GL_BLEND);
-
-        gl.glBindVertexArray(savedVAO);
-        gl.glDepthMask(GL_TRUE);
-    }
-};
-
 void OpenGLRenderer::execute(std::chrono::steady_clock::time_point now)
 {
-    Require(_initialized);
+    // One *staging* step of the frame, driven from the render node's prepare() (via the terminal render →
+    // execute() call chain). vtrasterizer's Renderer may call execute() several times per frame (smooth
+    // scroll: main content under a scissor, status line, cursor under a scissor), so this method does NOT
+    // draw and does NOT submit on its own. It appends this step's geometry to the per-frame accumulators
+    // (with the active inner scissor) and queues its atlas uploads into the per-frame resource batch.
+    // flushFrame() uploads everything once at the end of prepare(); recordDraws() replays the draws.
+    (void) now;
 
-    auto const _ = ScopedRenderEnvironment { *this };
+    if (!_initialized)
+        return;
 
-    auto const timeValue = uptime(now);
-
-    // displayLog()("execute {} rects, {} uploads, {} renders\n",
-    //              _rectBuffer.size() / 7,
-    //              _scheduledExecutions.uploadTiles.size(),
-    //              _scheduledExecutions.renderBatch.renderTiles.size());
-
-    auto const mvp = _projectionMatrix * _viewMatrix * _modelMatrix;
-
-    // render filled rects
-    //
-    if (!_rectBuffer.empty())
+    // Without the per-frame handles or built pipelines we cannot stage anything; drop this step's geometry
+    // so the queues do not grow.
+    if (_rhi == nullptr || _commandBuffer == nullptr || _frameRenderTarget == nullptr || !pipelinesReady())
     {
-        bound(*_rectShader, [&]() {
-            _rectShader->setUniformValue(_rectProjectionLocation, mvp);
-            _rectShader->setUniformValue(_rectTimeLocation, timeValue);
-
-            glBindVertexArray(_rectVAO);
-            glBindBuffer(GL_ARRAY_BUFFER, _rectVBO);
-            glBufferData(GL_ARRAY_BUFFER,
-                         static_cast<GLsizeiptr>(_rectBuffer.size() * sizeof(GLfloat)),
-                         _rectBuffer.data(),
-                         GL_STREAM_DRAW);
-
-            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(_rectBuffer.size() / 7));
-            glBindVertexArray(0);
-        });
         _rectBuffer.clear();
+        _scheduledExecutions.clear();
+        return;
     }
 
-    // potentially (re-)configure atlas
-    //
+    // Lazily allocate this frame's single resource-update batch on the first execute() of the frame.
+    if (_frameUpdates == nullptr)
+        _frameUpdates = _rhi->nextResourceUpdateBatch();
+
+    // (Re)configure / upload the glyph atlas before any text pass references it.
     if (_scheduledExecutions.configureAtlas)
         executeConfigureAtlas(*_scheduledExecutions.configureAtlas);
 
-    // potentially upload any new textures
-    //
-    if (!_scheduledExecutions.uploadTiles.empty())
-    {
-        _textureAtlas.gpuTexture.bind();
-        for (auto const& params: _scheduledExecutions.uploadTiles)
-            executeUploadTile(params);
-        _textureAtlas.gpuTexture.release();
-    }
+    for (auto const& tile: _scheduledExecutions.uploadTiles)
+        executeUploadTile(*_frameUpdates, tile);
 
-    // render textures
-    //
-    bound(*_textShader, [&]() {
-        // TODO: only upload when it actually DOES change
-        _textShader->setUniformValue(_textProjectionLocation, mvp);
-        _textShader->setUniformValue(_textTimeLocation, timeValue);
-        executeRenderTextures();
-    });
+    // Append this step's vertex geometry + draw items (with the active inner scissor).
+    recordRectPass();
+    recordTextPass();
 
+    // Service a pending screenshot request (currently a sized-but-empty buffer, see takeScreenshot()).
     if (_pendingScreenshotCallback)
     {
         auto result = takeScreenshot();
         _pendingScreenshotCallback.value()(result.second, result.first);
         _pendingScreenshotCallback.reset();
     }
+
+    _rectBuffer.clear();
+    _scheduledExecutions.clear();
 }
 
-void OpenGLRenderer::executeRenderTextures()
+void OpenGLRenderer::recordRectPass()
 {
-    // upload vertices and render
-    RenderBatch& batch = _scheduledExecutions.renderBatch;
-    if (!batch.renderTiles.empty())
+    if (_rectBuffer.empty())
+        return;
+
+    auto const firstVertex = static_cast<quint32>(_frameRectVertices.size() / rhilayout::RectVertexFloats);
+    crispy::copy(_rectBuffer, back_inserter(_frameRectVertices));
+    _frameDrawItems.push_back(FrameDrawItem {
+        .pass = FramePass::Rect,
+        .firstVertex = firstVertex,
+        .vertexCount = static_cast<quint32>(_rectBuffer.size() / rhilayout::RectVertexFloats),
+        .scissor = _innerScissor,
+    });
+}
+
+void OpenGLRenderer::recordTextPass()
+{
+    RenderBatch const& batch = _scheduledExecutions.renderBatch;
+    if (batch.renderTiles.empty())
+        return;
+
+    auto const firstVertex = static_cast<quint32>(_frameTextVertices.size() / rhilayout::TextVertexFloats);
+    crispy::copy(batch.buffer, back_inserter(_frameTextVertices));
+    _frameDrawItems.push_back(FrameDrawItem {
+        .pass = FramePass::Text,
+        .firstVertex = firstVertex,
+        // Six vertices (two triangles) per glyph tile.
+        .vertexCount = static_cast<quint32>(batch.renderTiles.size() * rhilayout::VerticesPerTile),
+        .scissor = _innerScissor,
+    });
+}
+
+void OpenGLRenderer::flushFrame()
+{
+    // End of the staging phase (the node's prepare()): upload the frame's accumulated vertex buffers and the
+    // shared uniform blocks, schedule any deferred atlas readback, then queue the whole resource batch onto
+    // the command buffer so it is processed before the render pass begins.
+    if (_rhi == nullptr || _commandBuffer == nullptr || !pipelinesReady())
+        return;
+
+    if (_frameUpdates == nullptr)
+        _frameUpdates = _rhi->nextResourceUpdateBatch();
+
+    auto const mvp = _projectionMatrix * _modelMatrix;
+    auto const timeValue = uptime(std::chrono::steady_clock::now());
+
+    // Rect pass: upload the interleaved vertices (growing the Immutable buffer when needed) and the uniform
+    // block (mat4 u_transform @0, float u_time @64).
+    if (!_frameRectVertices.empty())
     {
-        _textureAtlas.gpuTexture.bind();
-        glBindVertexArray(_textVAO);
-
-        // upload buffer
-        glBindBuffer(GL_ARRAY_BUFFER, _textVBO);
-        glBufferData(GL_ARRAY_BUFFER,
-                     static_cast<GLsizei>(batch.buffer.size() * sizeof(GLfloat)),
-                     batch.buffer.data(),
-                     GL_STREAM_DRAW);
-        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(batch.renderTiles.size() * 6));
-
-        glBindVertexArray(0);
-        _textureAtlas.gpuTexture.release();
+        auto const bytes = static_cast<quint32>(_frameRectVertices.size() * sizeof(GLfloat));
+        if (!_rectPipeline.vertexBuffer || _rectPipeline.vertexBuffer->size() < bytes)
+        {
+            _rectPipeline.vertexBuffer.reset(
+                _rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer, bytes));
+            _rectPipeline.vertexBuffer->create();
+        }
+        _frameUpdates->uploadStaticBuffer(
+            _rectPipeline.vertexBuffer.get(), 0, bytes, _frameRectVertices.data());
+        _frameUpdates->updateDynamicBuffer(_rectPipeline.uniformBuffer.get(),
+                                           rhilayout::RectUniformTransformOffset,
+                                           rhilayout::Mat4Size,
+                                           mvp.constData());
+        _frameUpdates->updateDynamicBuffer(
+            _rectPipeline.uniformBuffer.get(), rhilayout::RectUniformTimeOffset, sizeof(float), &timeValue);
     }
 
-    _scheduledExecutions.clear();
+    // Text pass: upload the interleaved vertices and the uniform block (mat4 u_transform @0, float u_time
+    // @64, float pixel_x @68, vec4 u_textOutlineColor @80).
+    if (!_frameTextVertices.empty())
+    {
+        auto const bytes = static_cast<quint32>(_frameTextVertices.size() * sizeof(GLfloat));
+        if (!_textPipeline.vertexBuffer || _textPipeline.vertexBuffer->size() < bytes)
+        {
+            _textPipeline.vertexBuffer.reset(
+                _rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer, bytes));
+            _textPipeline.vertexBuffer->create();
+        }
+        _frameUpdates->uploadStaticBuffer(
+            _textPipeline.vertexBuffer.get(), 0, bytes, _frameTextVertices.data());
+        _frameUpdates->updateDynamicBuffer(_textPipeline.uniformBuffer.get(),
+                                           rhilayout::TextUniformTransformOffset,
+                                           rhilayout::Mat4Size,
+                                           mvp.constData());
+        _frameUpdates->updateDynamicBuffer(
+            _textPipeline.uniformBuffer.get(), rhilayout::TextUniformTimeOffset, sizeof(float), &timeValue);
+
+        auto const pixelX =
+            _atlasTextureSize.width.value != 0 ? 1.0f / unbox<float>(_atlasTextureSize.width) : 0.0f;
+        _frameUpdates->updateDynamicBuffer(
+            _textPipeline.uniformBuffer.get(), rhilayout::TextUniformPixelXOffset, sizeof(float), &pixelX);
+
+        auto const [outR, outG, outB, outA] = atlas::normalize(_textOutlineColor);
+        float const outlineColor[4] = { outR, outG, outB, outA };
+        _frameUpdates->updateDynamicBuffer(_textPipeline.uniformBuffer.get(),
+                                           rhilayout::TextUniformOutlineColorOffset,
+                                           sizeof(outlineColor),
+                                           outlineColor);
+    }
+
+    // Deferred atlas readback (debug inspector): schedule the capture so it completes after this frame.
+    if (_atlasReadbackRequested && _atlasTexture)
+    {
+        _frameUpdates->readBackTexture(QRhiReadbackDescription(_atlasTexture.get()), &_atlasReadbackResult);
+        _atlasReadbackRequested = false;
+    }
+
+    _commandBuffer->resourceUpdate(_frameUpdates);
+    _frameUpdates = nullptr;
+}
+
+void OpenGLRenderer::recordDraws()
+{
+    // The *draw* half of the frame, driven from the render node's render() (inside the active render pass).
+    // The prepare() phase staged the geometry/atlas and flushFrame() uploaded it; here we replay the queued
+    // draw items, each binding its pass's pipeline + per-frame vertex buffer and its captured scissor.
+    if (_commandBuffer == nullptr || _frameRenderTarget == nullptr || !pipelinesReady())
+        return;
+
+    auto* cb = _commandBuffer;
+    auto const pixelSize = _frameRenderTarget->pixelSize();
+    auto const viewport = QRhiViewport(
+        0.0f, 0.0f, static_cast<float>(pixelSize.width()), static_cast<float>(pixelSize.height()));
+
+    for (auto const& item: _frameDrawItems)
+    {
+        if (item.vertexCount == 0)
+            continue;
+
+        auto const& pipeline = item.pass == FramePass::Rect ? _rectPipeline : _textPipeline;
+        auto const vertexStride = item.pass == FramePass::Rect ? RectVertexStride : TextVertexStride;
+
+        cb->setGraphicsPipeline(pipeline.pipeline.get());
+        cb->setViewport(viewport);
+        applyScissor(pipeline.pipeline.get(), item.scissor);
+        cb->setShaderResources(pipeline.srb.get());
+        QRhiCommandBuffer::VertexInput const vertexBinding(pipeline.vertexBuffer.get(),
+                                                           item.firstVertex * vertexStride);
+        cb->setVertexInput(0, 1, &vertexBinding);
+        cb->draw(item.vertexCount);
+    }
+
+    // The per-frame handles + accumulators are valid only for the duration of this frame.
+    _commandBuffer = nullptr;
+    _frameRenderTarget = nullptr;
+    _frameDrawItems.clear();
+    _frameRectVertices.clear();
+    _frameTextVertices.clear();
+}
+
+void OpenGLRenderer::applyScissor(QRhiGraphicsPipeline* pipeline,
+                                  std::optional<ScissorRect> const& innerScissor)
+{
+    if ((pipeline->flags() & QRhiGraphicsPipeline::UsesScissor) == 0)
+        return;
+
+    // The effective clip is the node clip (Qt's RenderState::scissorRect for this node, set just before
+    // recordDraws()) intersected with the pass's transient inner scissor (smooth scroll / cursor clip), so
+    // nesting can only shrink the clipped region. The pure nesting policy lives in computeEffectiveClip()
+    // (RhiVertexLayout.h) so it can be unit-tested without a command buffer.
+    auto const clip = computeEffectiveClip(innerScissor, _nodeScissor);
+
+    // A pipeline that declares UsesScissor must be given an explicit scissor every draw: the RHI otherwise
+    // keeps the *last* scissor set in this render pass, which — since the scene graph clips earlier nodes
+    // (e.g. the tab strip's ListView with clip:true sets a small scissor) — would confine the terminal to a
+    // stale sub-rectangle. So when no clip applies, scissor to the full render target (the whole viewport).
+    if (!clip.has_value())
+    {
+        auto const size = _frameRenderTarget->pixelSize();
+        _commandBuffer->setScissor(QRhiScissor(0, 0, size.width(), size.height()));
+        return;
+    }
+
+    // QRhiScissor uses bottom-left-origin pixels, matching ScissorRect (and the scene graph's scissorRect()
+    // that fed _nodeScissor), so the rectangle maps across directly. A zero-area clip clips everything away.
+    auto const& r = *clip;
+    _commandBuffer->setScissor(QRhiScissor(r.x, r.y, std::max(0, r.width), std::max(0, r.height)));
 }
 
 void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
@@ -637,61 +735,55 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     Require(isPowerOfTwo(unbox(param.size.height)));
     Require(param.properties.format == atlas::Format::RGBA);
 
-    // Already initialized.
-    // _textureAtlas.textureSize = param.size;
-    // _textureAtlas.properties = param.properties;
+    // (Re)create the atlas texture only when its GPU extent actually changes — a ConfigureAtlas may be
+    // scheduled repeatedly at the same size (e.g. on the initial resize burst), and recreating a multi-MB
+    // texture every time is wasteful. createPipelines() may also have stood up a 1x1 placeholder texture
+    // before the real size was known, which this first real configure replaces. When recreated, refresh the
+    // text pipeline's shader-resource bindings so they reference the new texture object (the sampler and
+    // uniform buffer are reused, and the binding layout is unchanged, so the pipeline keeps using the same
+    // QRhiShaderResourceBindings object).
+    if (!_atlasTexture || _atlasCreatedSize != param.size)
+    {
+        createAtlasTexture(_rhi, param.size);
+        if (_textPipeline.srb)
+        {
+            _textPipeline.srb->setBindings({
+                QRhiShaderResourceBinding::uniformBuffer(0,
+                                                         QRhiShaderResourceBinding::VertexStage
+                                                             | QRhiShaderResourceBinding::FragmentStage,
+                                                         _textPipeline.uniformBuffer.get()),
+                QRhiShaderResourceBinding::sampledTexture(
+                    1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()),
+            });
+            _textPipeline.srb->create();
+        }
+    }
 
-    if (_textureAtlas.gpuTexture.isCreated())
-        _textureAtlas.gpuTexture.destroy();
-
-    _textureAtlas.gpuTexture.setMipLevels(0);
-    _textureAtlas.gpuTexture.setAutoMipMapGenerationEnabled(false);
-    _textureAtlas.gpuTexture.setFormat(QOpenGLTexture::TextureFormat::RGBA8_UNorm);
-    _textureAtlas.gpuTexture.setSize(unbox<int>(param.size.width), unbox<int>(param.size.height));
-    _textureAtlas.gpuTexture.setMagnificationFilter(QOpenGLTexture::Filter::Nearest);
-    _textureAtlas.gpuTexture.setMinificationFilter(QOpenGLTexture::Filter::Nearest);
-    _textureAtlas.gpuTexture.setWrapMode(QOpenGLTexture::WrapMode::ClampToEdge);
-    _textureAtlas.gpuTexture.create();
-    Require(_textureAtlas.gpuTexture.isCreated());
-
-    QImage stubData(QSize(unbox<int>(param.size.width), unbox<int>(param.size.height)),
-                    QImage::Format::Format_RGBA8888);
-    stubData.fill(qRgba(0x00, 0xA0, 0x00, 0xC0));
-    _textureAtlas.gpuTexture.setData(stubData);
-
-    // Update texel size uniforms for the new atlas dimensions.
-    bound(*_textShader, [&]() {
-        auto const w = unbox<GLfloat>(param.size.width);
-        CHECKED_GL(_textShader->setUniformValue("pixel_x", 1.0f / w));
-    });
-
-    displayLog()(
-        "GL configure atlas: {} {} GL texture Id {}", param.size, param.properties.format, textureAtlasId());
+    // No full-texture clear: the rasterizer only ever samples atlas tiles it has uploaded, so untouched
+    // regions are never read, and a multi-MB full-level clear upload (besides being pure overhead) is what
+    // the OpenGL RHI backend rejected as an "invalid texture upload" on a freshly created large texture.
 }
 
-void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
+void OpenGLRenderer::executeUploadTile(QRhiResourceUpdateBatch& updates, atlas::UploadTile const& param)
 {
-    Require(textureAtlasId() != 0);
+    // {{{ Force RGBA: the atlas texture is RGBA8, but tiles may arrive as Red (alpha-mask glyphs) or RGB.
+    auto const tileWidth = unbox<int>(param.bitmapSize.width);
+    auto const tileHeight = unbox<int>(param.bitmapSize.height);
 
-    // clang-format off
-    // displayLog()("-> uploadTile: tex {} location {} format {} size {}",
-    //              textureId, param.location, param.bitmapFormat, param.bitmapSize);
-    // clang-format on
+    // A zero-area tile (e.g. the blank glyph of a space) carries no pixels; uploading it would be rejected by
+    // the RHI as an invalid (empty) texture upload, and there is nothing to sample anyway. Skip it.
+    if (tileWidth <= 0 || tileHeight <= 0 || param.bitmap.empty())
+        return;
 
-    // {{{ Force RGBA as OpenGL ES cannot implicitly convert on the driver-side.
-    auto const* bitmapData = (void const*) param.bitmap.data();
-    auto bitmapConverted = atlas::Buffer();
+    QByteArray rgba;
     switch (param.bitmapFormat)
     {
         case atlas::Format::Red: {
-            bitmapConverted.resize(param.bitmapSize.area() * 4);
-            bitmapData = bitmapConverted.data();
-            auto const* s = param.bitmap.data();
-            auto const* const e = param.bitmap.data() + param.bitmap.size();
-            auto* t = bitmapConverted.data();
-            while (s != e)
+            rgba.resize(static_cast<qsizetype>(param.bitmapSize.area()) * 4);
+            auto* t = reinterpret_cast<uint8_t*>(rgba.data());
+            for (auto const c: param.bitmap)
             {
-                *t++ = *s++; // red
+                *t++ = c;    // red
                 *t++ = 0x00; // green
                 *t++ = 0x00; // blue
                 *t++ = 0xFF; // alpha
@@ -699,11 +791,10 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
             break;
         }
         case atlas::Format::RGB: {
-            bitmapConverted.resize(param.bitmapSize.area() * 4);
-            bitmapData = bitmapConverted.data();
+            rgba.resize(static_cast<qsizetype>(param.bitmapSize.area()) * 4);
+            auto* t = reinterpret_cast<uint8_t*>(rgba.data());
             auto const* s = param.bitmap.data();
             auto const* const e = param.bitmap.data() + param.bitmap.size();
-            auto* t = bitmapConverted.data();
             while (s != e)
             {
                 *t++ = *s++; // red
@@ -714,21 +805,20 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
             break;
         }
         case atlas::Format::RGBA:
-            // Already in expected format
+            rgba = QByteArray(reinterpret_cast<char const*>(param.bitmap.data()),
+                              static_cast<qsizetype>(param.bitmap.size()));
             break;
     }
     // }}}
 
-    _textureAtlas.gpuTexture.setData(param.location.x.value,
-                                     param.location.y.value,
-                                     0, // z
-                                     unbox<int>(param.bitmapSize.width),
-                                     unbox<int>(param.bitmapSize.height),
-                                     0, // depth
-                                     QOpenGLTexture::PixelFormat::RGBA,
-                                     QOpenGLTexture::PixelType::UInt8,
-                                     bitmapData,
-                                     &_transferOptions);
+    // Sub-image upload at the tile's atlas location. Row alignment is 1 byte (RGBA, tightly packed), which
+    // QRhi's tightly-packed byte-data path assumes; this mirrors the former
+    // glPixelStorei(UNPACK_ALIGNMENT,1).
+    QRhiTextureSubresourceUploadDescription desc(rgba.constData(), static_cast<quint32>(rgba.size()));
+    desc.setSourceSize(QSize(tileWidth, tileHeight));
+    desc.setDestinationTopLeft(QPoint(param.location.x.value, param.location.y.value));
+    updates.uploadTexture(_atlasTexture.get(),
+                          QRhiTextureUploadDescription(QRhiTextureUploadEntry(0, 0, desc)));
 }
 
 void OpenGLRenderer::renderRectangle(int ix, int iy, Width width, Height height, RGBAColor color)
@@ -759,72 +849,60 @@ void OpenGLRenderer::renderRectangle(int ix, int iy, Width width, Height height,
 
 void OpenGLRenderer::setScissorRect(int x, int y, int width, int height)
 {
-    auto rect = ScissorRect { .x = x, .y = y, .width = width, .height = height };
-
-    // A transient inner scissor (e.g. smooth scroll) must stay within any installed outer scissor
-    // (which clips the terminal below the title bar); otherwise it would un-clip the frame and let
-    // the terminal paint over the title bar. Intersect so nesting can only shrink the clip region.
-    if (_outerScissor.has_value())
-        rect = rect.intersect(*_outerScissor);
-
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(rect.x, rect.y, rect.width, rect.height);
+    // A transient inner scissor (e.g. smooth scroll / cursor clip) staged by vtrasterizer's Renderer during
+    // the staging phase (the node's prepare()). It is stored raw here; recordDraws() intersects it with the
+    // node clip at draw time, because the node clip (Qt's RenderState) is only known once the pass records.
+    _innerScissor = ScissorRect { .x = x, .y = y, .width = width, .height = height };
 }
 
 void OpenGLRenderer::clearScissorRect()
 {
-    // If an outer scissor was installed (e.g. the display clips the terminal to its item rectangle,
-    // below the title bar), restore it rather than fully disabling the test — otherwise a nested,
-    // transient scissor (smooth scroll) would un-clip the rest of the frame and let the terminal
-    // paint over the title bar.
-    if (_outerScissor.has_value())
-    {
-        auto const& s = *_outerScissor;
-        glEnable(GL_SCISSOR_TEST);
-        glScissor(s.x, s.y, s.width, s.height);
-    }
-    else
-        glDisable(GL_SCISSOR_TEST);
+    // No transient inner scissor for subsequent geometry: draws fall back to the bare node clip (applied in
+    // recordDraws()). std::nullopt means "no inner scissor", not "no clip".
+    _innerScissor = std::nullopt;
 }
 
-void OpenGLRenderer::setOuterScissorRect(int x, int y, int width, int height)
+void OpenGLRenderer::setNodeScissorRect(std::optional<ScissorRect> const& rect)
 {
-    _outerScissor = ScissorRect { .x = x, .y = y, .width = width, .height = height };
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(x, y, width, height);
+    _nodeScissor = rect;
 }
 
-void OpenGLRenderer::clearOuterScissorRect()
+void OpenGLRenderer::clearNodeScissorRect() noexcept
 {
-    _outerScissor.reset();
-    glDisable(GL_SCISSOR_TEST);
+    // Only forget the stored node clip; do NOT touch GPU state. The scene graph re-establishes its own
+    // scissor after the node renders, so clearing the staged rectangles is enough to prevent a later,
+    // non-render code path from intersecting against a stale rectangle.
+    _nodeScissor.reset();
+    _innerScissor.reset();
 }
 
 optional<vtrasterizer::AtlasTextureScreenshot> OpenGLRenderer::readAtlas()
 {
-    // NB: to get all atlas pages, call this from instance base id up to and including current
-    // instance id of the given allocator.
+    // Atlas readback is deferred: a readBackTexture() scheduled into a frame's resource batch only completes
+    // after the command buffer for that frame is submitted (past the end of the render pass). We therefore
+    // request a capture on the next execute() and hand back whatever the most recently completed capture
+    // produced. The first call (before any frame has captured) returns a correctly-sized zero buffer.
+    _atlasReadbackRequested = true;
+
     auto output = vtrasterizer::AtlasTextureScreenshot {};
     output.atlasInstanceId = 0;
-    output.size = _textureAtlas.textureSize;
-    output.format = _textureAtlas.properties.format;
-    output.buffer.resize(_textureAtlas.textureSize.area() * element_count(_textureAtlas.properties.format));
+    output.size = _atlasTextureSize;
+    output.format = _atlasProperties.format;
 
-    // Reading texture data to host CPU (including for RGB textures) only works via framebuffers
-    auto fbo = GLuint {};
-    CHECKED_GL(glGenFramebuffers(1, &fbo));
-    CHECKED_GL(glBindFramebuffer(GL_FRAMEBUFFER, fbo));
-    CHECKED_GL(
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureAtlasId(), 0));
-    CHECKED_GL(glReadPixels(0,
-                            0,
-                            unbox<GLsizei>(output.size.width),
-                            unbox<GLsizei>(output.size.height),
-                            GL_RGBA,
-                            GL_UNSIGNED_BYTE,
-                            output.buffer.data()));
-    CHECKED_GL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
-    CHECKED_GL(glDeleteFramebuffers(1, &fbo));
+    auto const expectedBytes =
+        static_cast<size_t>(_atlasTextureSize.area()) * element_count(_atlasProperties.format);
+
+    if (!_atlasReadbackResult.data.isEmpty()
+        && _atlasReadbackResult.pixelSize
+               == QSize(unbox<int>(_atlasTextureSize.width), unbox<int>(_atlasTextureSize.height)))
+    {
+        auto const* bytes = reinterpret_cast<uint8_t const*>(_atlasReadbackResult.data.constData());
+        output.buffer.assign(bytes,
+                             bytes + std::min<size_t>(expectedBytes, _atlasReadbackResult.data.size()));
+        output.buffer.resize(expectedBytes);
+    }
+    else
+        output.buffer.resize(expectedBytes);
 
     return { std::move(output) };
 }
@@ -836,20 +914,16 @@ void OpenGLRenderer::scheduleScreenshot(ScreenshotCallback callback)
 
 pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
 {
-    ImageSize const imageSize = renderBufferSize();
+    // TODO(rhi): full framebuffer readback. A render-target readback only completes after the pass ends, so
+    // (like readAtlas) it would need a deferred/one-frame-latency capture; the live render target's color
+    // attachment is also not guaranteed readback-capable on every backend. Screenshots are not on the
+    // black-screen path, so for now we return a correctly-sized empty buffer to keep the callback contract.
+    ImageSize const imageSize = _renderTargetSize;
 
     vector<uint8_t> buffer;
     buffer.resize(imageSize.area() * 4 /* 4 because RGBA */);
 
-    displayLog()("Capture screenshot ({}/{}).", imageSize, _renderTargetSize);
-
-    CHECKED_GL(glReadPixels(0,
-                            0,
-                            unbox<GLsizei>(imageSize.width),
-                            unbox<GLsizei>(imageSize.height),
-                            GL_RGBA,
-                            GL_UNSIGNED_BYTE,
-                            buffer.data()));
+    displayLog()("Capture screenshot ({}).", imageSize);
 
     return { imageSize, buffer };
 }
@@ -857,69 +931,13 @@ pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
 
 void OpenGLRenderer::setTextOutline(float /*thickness*/, vtbackend::RGBAColor color)
 {
+    // The outline color is consumed by the text pipeline's uniform block at draw time (Phase 3 writes it
+    // into the dynamic uniform buffer). Just store it here.
     _textOutlineColor = color;
-
-    if (!_initialized || !_textShader)
-        return;
-
-    bound(*_textShader, [&]() {
-        auto const [cr, cg, cb, ca] = atlas::normalize(_textOutlineColor);
-        CHECKED_GL(_textShader->setUniformValue(_textOutlineColorLocation, QVector4D(cr, cg, cb, ca)));
-    });
 }
 
 void OpenGLRenderer::inspect(std::ostream& /*output*/) const
 {
 }
-
-// {{{ background (image)
-struct CRISPY_PACKED BackgroundShaderParams
-{
-    vec3 vertices;
-    vec2 textureCoords;
-};
-
-GLuint OpenGLRenderer::createAndUploadImage(QSize imageSize,
-                                            vtbackend::ImageFormat format,
-                                            int rowAlignment,
-                                            uint8_t const* pixels)
-{
-    auto textureId = GLuint {};
-    CHECKED_GL(glGenTextures(1, &textureId));
-    CHECKED_GL(glBindTexture(GL_TEXTURE_2D, textureId));
-
-    CHECKED_GL(glTexParameteri(GL_TEXTURE_2D,
-                               GL_TEXTURE_MAG_FILTER,
-                               GL_NEAREST)); // NEAREST, because LINEAR yields borders at the edges
-    CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-    CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE));
-    CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
-    CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
-    CHECKED_GL(glPixelStorei(GL_UNPACK_ALIGNMENT, rowAlignment));
-
-    constexpr auto const Target = GL_TEXTURE_2D;
-    constexpr auto const LevelOfDetail = 0;
-    constexpr auto const Type = GL_UNSIGNED_BYTE;
-    constexpr auto const UnusedParam = 0;
-    constexpr auto const InternalFormat = GL_RGBA;
-
-    auto const imageFormat = glFormat(format);
-    auto const textureWidth = static_cast<GLsizei>(imageSize.width());
-    auto const textureHeight = static_cast<GLsizei>(imageSize.height());
-
-    Require(imageFormat == InternalFormat); // OpenGL ES cannot handle implicit conversion.
-
-    CHECKED_GL(glTexImage2D(Target,
-                            LevelOfDetail,
-                            InternalFormat,
-                            textureWidth,
-                            textureHeight,
-                            UnusedParam,
-                            imageFormat,
-                            Type,
-                            pixels));
-    return textureId;
-}
-// }}}
 
 } // namespace contour::display

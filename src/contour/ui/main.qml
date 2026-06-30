@@ -60,8 +60,9 @@ ApplicationWindow
         visible: appWindow.showCustomTitleBar
         height: visible ? implicitHeight : 0
         property real effectiveHeight: visible ? implicitHeight : 0
-        // Keep the bar above the terminal's OpenGL surface, which otherwise paints over siblings
-        // declared before it.
+        // Declared after the content area below, so a positive z keeps the bar above it. The terminal now
+        // renders through a scene-graph node (TerminalRenderNode) and composites in z-order like any item,
+        // so this is ordinary stacking — no longer a workaround for the terminal painting over siblings.
         z: 1
         controller: terminalSessions
         window: appWindow

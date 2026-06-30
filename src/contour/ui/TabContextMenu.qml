@@ -30,11 +30,12 @@ Menu {
         highlightedText: systemPalette.highlightedText
     }
 
-    // Opaque, themed background. The ApplicationWindow is transparent (for terminal see-through) and
-    // no Qt Quick Controls style is configured, so the default Basic Menu would render with an empty
-    // background and the terminal would show straight through the popup. Painting an opaque OS-window
-    // fill here is the fix. NB: do NOT set width/height — the Menu's content drives the size; the
-    // background only contributes color/frame.
+    // Opaque, themed background. The ApplicationWindow is transparent (for terminal see-through) and no
+    // Qt Quick Controls style is configured, so the default Basic Menu would otherwise render with an
+    // empty background and the transparent window would show through the popup. Painting an opaque
+    // OS-window fill here gives the menu a solid, themed surface. (The terminal itself no longer paints
+    // over the popup — it renders through a scene-graph node and composites in z-order.) NB: do NOT set
+    // width/height — the Menu's content drives the size; the background only contributes color/frame.
     background: Rectangle {
         color: systemPalette.window
         border.color: systemPalette.mid

@@ -13,8 +13,13 @@ ContourTerminal
 
     session: terminalSessions.createSession()
 
+    // Background layers sit *behind* the terminal grid. The terminal now renders through a scene-graph
+    // node (TerminalRenderNode) as this item's own content, and a QQuickItem's children paint on top of
+    // its node content by default — so without a negative z these opaque background fills would cover the
+    // grid (a black terminal). z:-1 places them below the node content, matching TerminalPane.qml.
     Rectangle {
         id : backgroundColor
+        z: -1
         anchors.centerIn: parent
         width:  vtWidget.width
         height:  vtWidget.height
@@ -28,6 +33,7 @@ ContourTerminal
 
     Image {
         id: backgroundImage
+        z: -1
         width:  vtWidget.width
         height:  vtWidget.height
         opacity : session.opacityBackground
@@ -38,6 +44,7 @@ ContourTerminal
 
 
     FastBlur {
+        z: -1
         visible: session.isBlurBackground
         anchors.fill: backgroundImage
         source: backgroundImage
@@ -46,6 +53,7 @@ ContourTerminal
 
 
     Rectangle {
+        z: -1
         anchors.centerIn: parent
         width:  vtWidget.width
         height:  vtWidget.height

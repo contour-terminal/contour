@@ -22,6 +22,7 @@
 #include <QtGui/QVector4D>
 #include <QtQml/QtQml>
 #include <QtQuick/QQuickItem>
+#include <QtQuick/QSGRenderNode>
 
 #include <filesystem>
 #include <memory>
@@ -30,6 +31,13 @@
 #if defined(CONTOUR_PERF_STATS)
     #include <atomic>
 #endif
+
+QT_BEGIN_NAMESPACE
+class QRhi;
+class QRhiCommandBuffer;
+class QRhiRenderTarget;
+class QRhiRenderPassDescriptor;
+QT_END_NAMESPACE
 
 namespace contour
 {
@@ -148,6 +156,41 @@ class TerminalDisplay: public QQuickItem
     bool event(QEvent* event) override;
     // }}}
 
+    /// Prepares (stages) one terminal frame for the RHI, called by TerminalRenderNode from
+    /// QSGRenderNode::prepare() — before the scene graph begins the render pass.
+    ///
+    /// Builds the renderer's RHI graphics pipelines for @p rpDesc (cached; rebuilt only on RHI / render-pass
+    /// change), hands the live submission handles (@p rhi, @p cb, @p rt) to the renderer, installs the scene
+    /// graph's transform (@p itemToClip) and clip rectangle (from @p state), then runs the terminal render.
+    /// The renderer uploads its geometry/atlas and records cb->resourceUpdate() here, because Qt's RHI
+    /// render-node contract requires resource uploads to be issued before the render pass (in prepare()),
+    /// leaving only draw commands for render(). The draw commands themselves are issued later by
+    /// recordFrameRhi() once the pass is recording.
+    /// @param rhi        The scene graph's RHI instance.
+    /// @param cb         The command buffer to queue resource updates onto.
+    /// @param rt         The render target the pass renders into.
+    /// @param rpDesc     The render-pass descriptor the pipelines are baked against.
+    /// @param itemToClip The composed projection * node-matrix transform mapping item-local pixels to clip.
+    void prepareFrameRhi(QRhi* rhi,
+                         QRhiCommandBuffer* cb,
+                         QRhiRenderTarget* rt,
+                         QRhiRenderPassDescriptor* rpDesc,
+                         QMatrix4x4 const& itemToClip);
+
+    /// Records the staged frame's draw commands into the command buffer, called by TerminalRenderNode from
+    /// QSGRenderNode::render() — inside the active render pass.
+    ///
+    /// The geometry/atlas were uploaded during prepareFrameRhi() (the node's prepare() phase); this installs
+    /// the node clip (Qt's @p state scissor, only known now the pass records) and issues the
+    /// pipeline/viewport/scissor/draw commands so the terminal composites in z-order under popups.
+    /// @param state The scene-graph render state, for the node clip rectangle applied to the draws.
+    void recordFrameRhi(QSGRenderNode::RenderState const* state);
+
+    /// Releases the OpenGL renderer owned via the scene-graph node. Called by TerminalRenderNode on the
+    /// render thread when the node is destroyed (or the scene graph is invalidated), where GL teardown
+    /// must happen. Safe to call when no renderer exists.
+    void releaseRenderResources();
+
     // {{{ TerminalDisplay API
     void closeDisplay();
     void post(std::function<void()> fn);
@@ -216,18 +259,24 @@ class TerminalDisplay: public QQuickItem
     [[nodiscard]] QString profileName() const { return QString::fromStdString(_profileName); }
     void setProfileName(QString const& name) { _profileName = name.toStdString(); }
 
+  protected:
+    /// Scene-graph extension point: creates/updates the TerminalRenderNode that draws the terminal in
+    /// z-order. On first call it lazily creates the OpenGL renderer (formerly done from the render
+    /// signals) and the node; on subsequent calls it marks the node dirty so Qt re-renders. Runs on the
+    /// render thread with the GUI thread blocked.
+    /// @param oldNode The previously returned node, or nullptr on first call.
+    /// @return The TerminalRenderNode for this item (owned by the scene graph).
+    QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* data) override;
+
   public Q_SLOTS:
     void onAutoScrollTick();
     void onSceneGrapheInitialized();
     void onBeforeSynchronize();
-    void onBeforeRendering();
-    void paint();
 
     void handleWindowChanged(QQuickWindow* newWindow);
     void sizeChanged();
     void cleanup();
 
-    void onAfterRendering();
     void onScrollBarValueChanged(int value);
     void onRefreshRateChanged();
     void applyFontDPI();
@@ -281,6 +330,17 @@ class TerminalDisplay: public QQuickItem
     void doDumpStateInternal();
     QImage screenshot();
     void createRenderer();
+
+    /// Runs the OpenGL terminal render (grid, cursor, decorations) into the scene graph's current target.
+    /// Invoked from renderFrame() after the transform and clip have been installed on the renderer. Also
+    /// drives the per-frame bookkeeping: consuming a lazily applied font/DPI reconfiguration, taking a
+    /// pending screenshot, and scheduling the next frame via update().
+    void paint();
+
+    /// Frees the OpenGL renderer (GL resources). Idempotent and shared by every teardown path (the
+    /// scene-graph node's releaseResources, sceneGraphInvalidated → cleanup). Must run on the render
+    /// thread with the GL context current.
+    void destroyRenderer();
     [[nodiscard]] QMatrix4x4 createModelMatrix() const;
     void configureScreenHooks();
     void watchKdeDpiSetting();
@@ -302,22 +362,17 @@ class TerminalDisplay: public QQuickItem
     /// deferred frame (paint()) reconfig paths so the two cannot diverge. Requires a live display.
     void recomputeGeometryAfterFontReconfig();
 
-    /// This display item's rectangle in DEVICE PIXELS within the window's scene: the scene-space
-    /// origin (mapToScene(0,0)) and the item extent, both multiplied by the device pixel ratio. With a
-    /// custom title bar the item is a sub-rectangle of the window, so both the render translation
-    /// (onBeforeSynchronize) and the GL scissor clip (paint) need exactly this geometry. Extracted so
-    /// those two render-thread paths derive it identically — if the math drifts between them the
-    /// terminal clips and paints against different rectangles and bleeds over/under the title bar.
+    /// This display item's extent in DEVICE PIXELS: the item width/height multiplied by the device pixel
+    /// ratio. The scene graph supplies the item→clip placement transform at render time, so callers need
+    /// only the size and dpr — not the scene position the terminal used to derive its own translation.
     struct DevicePixelGeometry
     {
-        double dpr = 1.0; //!< The device pixel ratio used for the scaling.
-        double x = 0.0;   //!< Scene-space left edge, in device pixels.
-        double y = 0.0;   //!< Scene-space top edge, in device pixels.
+        double dpr = 1.0;    //!< The device pixel ratio used for the scaling.
         double width = 0.0;  //!< Item width, in device pixels.
         double height = 0.0; //!< Item height, in device pixels.
     };
 
-    /// @return This item's device-pixel scene geometry (see DevicePixelGeometry).
+    /// @return This item's device-pixel extent (see DevicePixelGeometry).
     [[nodiscard]] DevicePixelGeometry itemDevicePixelGeometry() const;
 
     /// The window "chrome" offset: the window size minus this display item's size, i.e. the space

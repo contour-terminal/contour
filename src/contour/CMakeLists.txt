@@ -270,6 +270,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/test_main.cpp
             test/Actions_test.cpp
             test/ScissorRect_test.cpp
+            test/RhiVertexLayout_test.cpp
             test/TerminalSessionManager_test.cpp
             test/TerminalSession_test.cpp
             test/QmlComponents_test.cpp

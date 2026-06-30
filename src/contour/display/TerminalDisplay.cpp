@@ -4,6 +4,7 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/display/OpenGLRenderer.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/display/TerminalRenderNode.h>
 #include <contour/helper.h>
 
 #include <vtbackend/Color.h>
@@ -578,15 +579,21 @@ class CleanupJob: public QRunnable
 void TerminalDisplay::releaseResources()
 {
     displayLog()("Releasing resources.");
-    window()->scheduleRenderJob(new CleanupJob(_renderTarget), QQuickWindow::BeforeSynchronizingStage);
-    _renderTarget = nullptr;
+    // QQuickItem::releaseResources() runs on the GUI thread, but GL teardown must happen on the render
+    // thread with the context current — so defer it via a render job. The renderer may already be gone
+    // (the scene-graph node's releaseResources() destroys it on the render thread), in which case there
+    // is nothing to schedule.
+    if (_renderTarget)
+    {
+        window()->scheduleRenderJob(new CleanupJob(_renderTarget), QQuickWindow::BeforeSynchronizingStage);
+        _renderTarget = nullptr;
+    }
 }
 
 void TerminalDisplay::cleanup()
 {
     displayLog()("Cleaning up.");
-    delete _renderTarget;
-    _renderTarget = nullptr;
+    destroyRenderer();
 }
 
 void TerminalDisplay::onAutoScrollTick()
@@ -793,33 +800,28 @@ void TerminalDisplay::onBeforeSynchronize()
             _session->onClosed();
     }
 
+    // The renderer is created lazily in updatePaintNode (also during this sync phase). On the very first
+    // sync it may not exist yet; the initial geometry is established by createRenderer()/applyResize(), so
+    // there is nothing to reconcile here yet.
+    if (!_renderTarget)
+        return;
+
     auto const geometry = itemDevicePixelGeometry();
     auto const dpr = geometry.dpr;
-    auto const windowSize = window()->size() * dpr;
 
-    // The render *target* (GL framebuffer / scissor reference) spans the whole window, but the
-    // terminal grid must occupy only this item's rectangle — which, with a custom title bar above
-    // it, is smaller than and offset within the window. Use the item's own size for the view (the
-    // grid extent) and the item's *scene* position (in device pixels, from the shared helper) for the
-    // translation. x()/y() are local to the parent item, so they would apply no offset; the helper's
-    // mapToScene-based position is the position within the window the render target needs.
-    auto const viewSize =
-        ImageSize { Width::cast_from(geometry.width), Height::cast_from(geometry.height) };
-
-    _renderTarget->setRenderSize(
-        ImageSize { Width::cast_from(windowSize.width()), Height::cast_from(windowSize.height()) });
-    _renderTarget->setModelMatrix(createModelMatrix());
-    _renderTarget->setTranslation(float(geometry.x), float(geometry.y), float(z() * dpr));
-    _renderTarget->setViewSize(viewSize);
+    // The terminal grid occupies this item's rectangle. The scene graph supplies the placement transform
+    // (projection * node matrix) at render time (see renderFrame) and the render size is published from
+    // updatePaintNode, so onBeforeSynchronize no longer sets any render-target geometry — it only
+    // reconciles the grid page size against the actual surface below.
+    auto const viewSize = ImageSize { Width::cast_from(geometry.width), Height::cast_from(geometry.height) };
 
     // Reconcile the terminal grid (page size) with the actual surface.
     //
-    // This runs on the render thread and sets the render viewport from the live
-    // window()->size(). The grid (page size) is computed separately by the GUI-
-    // thread sizeChanged()/applyResize(). At initial map under a tiling WM the
-    // final surface size can arrive here after sizeChanged() last ran, leaving the
-    // grid at a stale, larger page size than the viewport — so the bottom rows
-    // render off-screen until a manual resize nudges sizeChanged() again.
+    // This runs on the render thread against the item's device-pixel view size. The grid (page size) is
+    // computed separately by the GUI-thread sizeChanged()/applyResize(). At initial map under a tiling WM
+    // the final surface size can arrive here after sizeChanged() last ran, leaving the grid at a stale,
+    // larger page size than the viewport — so the bottom rows render off-screen until a manual resize
+    // nudges sizeChanged() again.
     //
     // Detect that divergence and post a sizeChanged() to the GUI thread (where the
     // resize must happen). applyResize() no-ops when the page size already matches,
@@ -890,13 +892,12 @@ void TerminalDisplay::createRenderer()
 
     auto const textureTileSize = gridMetrics().cellSize;
     auto const viewportMargin = vtrasterizer::PageMargin {}; // TODO margin
-    auto const precalculatedViewSize = [this]() -> ImageSize {
-        auto const uiSize = ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
-        return uiSize * contentScale();
-    }();
+    // The render target size is this item's device-pixel extent (the bottom-left-origin reference for the
+    // inner smooth-scroll scissor); it is re-published each frame from updatePaintNode. The placement
+    // within the window comes from the scene graph's transform at render time, not from a window-sized
+    // surface, so only the item size is needed here.
     auto const precalculatedTargetSize = [this]() -> ImageSize {
-        auto const uiSize =
-            ImageSize { Width::cast_from(window()->width()), Height::cast_from(window()->height()) };
+        auto const uiSize = ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
         return uiSize * contentScale();
     }();
 
@@ -916,32 +917,14 @@ void TerminalDisplay::createRenderer()
                      windowSize.height());
     }
 
-    _renderTarget = new OpenGLRenderer(builtinShaderConfig(ShaderClass::Text),
-                                       builtinShaderConfig(ShaderClass::Background),
-                                       precalculatedViewSize,
-                                       precalculatedTargetSize,
-                                       textureTileSize,
-                                       viewportMargin);
-    _renderTarget->setWindow(window());
+    _renderTarget = new OpenGLRenderer(precalculatedTargetSize, textureTileSize, viewportMargin);
     _renderer->setRenderTarget(*_renderTarget);
 
-    connect(window(),
-            &QQuickWindow::beforeRendering,
-            this,
-            &TerminalDisplay::onBeforeRendering,
-            Qt::ConnectionType::DirectConnection);
-
-    // connect(window(),
-    //         &QQuickWindow::beforeRenderPassRecording,
-    //         this,
-    //         &TerminalDisplay::paint,
-    //         Qt::DirectConnection);
-
-    connect(window(),
-            &QQuickWindow::afterRendering,
-            this,
-            &TerminalDisplay::onAfterRendering,
-            Qt::DirectConnection);
+    // The terminal no longer paints from the window's beforeRendering/afterRendering signals (which fired
+    // after the whole QML scene was composited and let the terminal overpaint popups). Rendering is now
+    // driven by the scene graph through TerminalRenderNode (see updatePaintNode/renderFrame), so it
+    // composites in z-order. The renderer's one-time GL initialization happens lazily on the first
+    // renderFrame(), where the scene graph's GL context is current.
 
     configureScreenHooks();
     watchKdeDpiSetting();
@@ -985,13 +968,73 @@ QMatrix4x4 TerminalDisplay::createModelMatrix() const
     return result;
 }
 
-void TerminalDisplay::onBeforeRendering()
+void TerminalDisplay::prepareFrameRhi(QRhi* rhi,
+                                      QRhiCommandBuffer* cb,
+                                      QRhiRenderTarget* rt,
+                                      QRhiRenderPassDescriptor* rpDesc,
+                                      QMatrix4x4 const& itemToClip)
 {
-    if (_renderTarget->initialized())
+    if (!_renderTarget || rhi == nullptr || cb == nullptr || rt == nullptr || rpDesc == nullptr)
         return;
 
-    logDisplayInfo();
-    _renderTarget->initialize();
+    // Lazily flag the renderer as initialized on the first prepare (sets host image-row alignment); the
+    // actual RHI resources are built by createPipelines() below. This formerly lived in the renderFrame
+    // initialize() call when the renderer still owned raw GL state.
+    if (!_renderTarget->initialized())
+    {
+        logDisplayInfo();
+        _renderTarget->initialize();
+    }
+
+    // Build (or reuse cached) graphics pipelines for the current render pass. prepare() runs before the
+    // render pass is recording, which is the only valid point to create RHI graphics pipelines.
+    _renderTarget->createPipelines(rhi, rpDesc);
+    if (!_renderTarget->pipelinesReady())
+        return;
+
+    // Hand the per-frame RHI submission handles to the renderer so the staging done in paint() (terminal
+    // render → execute()) queues its resource uploads onto this command buffer, before the scene graph
+    // begins the render pass. The node clip (Qt's RenderState) is not available in prepare(); it is applied
+    // in recordFrameRhi() at draw time. Any transient inner scissor captured during staging is stored raw
+    // and intersected with the node clip there.
+    _renderTarget->beginFrame(rhi, cb, rt);
+
+    // Install the scene graph's transform: the renderer feeds item-local, top-left-origin pixel vertices
+    // through this combined projection * node-matrix, so the grid lands exactly where this item sits in
+    // the window — no own ortho or translation needed. The render size and model matrix were snapshotted
+    // in updatePaintNode while the GUI thread was blocked.
+    _renderTarget->setProjectionMatrix(itemToClip);
+
+    // Run the terminal render (which calls the renderer's execute() one or more times to accumulate this
+    // frame's geometry), then flush the accumulated vertex/atlas uploads onto the command buffer before the
+    // scene graph begins the render pass.
+    paint();
+    _renderTarget->flushFrame();
+}
+
+void TerminalDisplay::recordFrameRhi(QSGRenderNode::RenderState const* state)
+{
+    if (!_renderTarget)
+        return;
+
+    // Install Qt's node clip for this frame (only available now, from the RenderState). recordDraws()
+    // intersects it with each pass's transient inner scissor (smooth scroll / cursor) captured during
+    // staging. std::nullopt when Qt is not clipping the node.
+    if (state->scissorEnabled())
+    {
+        auto const r = state->scissorRect();
+        _renderTarget->setNodeScissorRect(
+            ScissorRect { .x = r.x(), .y = r.y(), .width = r.width(), .height = r.height() });
+    }
+    else
+        _renderTarget->setNodeScissorRect(std::nullopt);
+
+    // Issue the draw commands staged during prepareFrameRhi(), now that the scene graph's render pass is
+    // recording. No-op if nothing was staged (e.g. pipelines were not ready in prepare()).
+    _renderTarget->recordDraws();
+
+    // Forget the node clip (member only), so a later code path never intersects against a stale rectangle.
+    _renderTarget->clearNodeScissorRect();
 }
 
 void TerminalDisplay::paint()
@@ -1007,9 +1050,6 @@ void TerminalDisplay::paint()
 
     try
     {
-        window()->beginExternalCommands();
-        auto const _ = gsl::finally([this]() { window()->endExternalCommands(); });
-
         [[maybe_unused]] auto const lastState = _state.fetchAndClear();
 
 #if defined(CONTOUR_PERF_STATS)
@@ -1028,22 +1068,6 @@ void TerminalDisplay::paint()
 #endif
 
         terminal().tick(steady_clock::now());
-
-        // The terminal paints over the QML scene graph (afterRendering) into a framebuffer that
-        // spans the whole window. With a custom title bar above it, the display item occupies only a
-        // sub-rectangle of the window, so clip rendering to that rectangle — otherwise the terminal
-        // (its background and first rows) paints over the title bar. Take the item's device-pixel
-        // scene rectangle from the same helper onBeforeSynchronize uses, so the clip and the render
-        // translation can never disagree. GL scissor uses a bottom-left origin, so the item's top
-        // becomes (windowHeight - (sceneY + height())).
-        auto const geometry = itemDevicePixelGeometry();
-        auto const winHeightPx = static_cast<int>(std::lround(window()->height() * geometry.dpr));
-        auto const itemX = static_cast<int>(std::lround(geometry.x));
-        auto const itemW = static_cast<int>(std::lround(geometry.width));
-        auto const itemH = static_cast<int>(std::lround(geometry.height));
-        auto const itemTopPx = static_cast<int>(std::lround(geometry.y));
-        _renderTarget->setOuterScissorRect(itemX, winHeightPx - (itemTopPx + itemH), itemW, itemH);
-        auto const scissorGuard = gsl::finally([this]() { _renderTarget->clearOuterScissorRect(); });
 
         auto const fontReconfigApplied = _renderer->render(terminal(), _renderingPressure);
 
@@ -1073,6 +1097,41 @@ void TerminalDisplay::paint()
             doDumpStateInternal();
             _doDumpState = false;
         }
+
+        if (_saveScreenshot)
+        {
+            std::visit(crispy::overloaded { [&](const std::filesystem::path& path) {
+                                               screenshot().save(QString::fromStdString(path.string()));
+                                           },
+                                            [&](std::monostate) {
+                                                if (QClipboard* clipboard = QGuiApplication::clipboard();
+                                                    clipboard != nullptr)
+                                                    clipboard->setImage(screenshot(), QClipboard::Clipboard);
+                                            } },
+                       _saveScreenshot.value());
+
+            _saveScreenshot = std::nullopt;
+        }
+
+        // Schedule the next frame if needed. update() (re-evaluating the scene-graph node) must run on the
+        // GUI thread, so it is post()ed from this render-thread path — mirroring scheduleRedraw().
+        auto const requestUpdate = [this]() {
+            post([this]() { update(); });
+        };
+
+        if (!_state.finish())
+            requestUpdate();
+
+        // Update the terminal's world clock, so nextRender() knows when to render next (if needed).
+        terminal().tick(steady_clock::now());
+
+        if (auto const timeoutOpt = terminal().nextRender(); timeoutOpt.has_value())
+        {
+            if (*timeoutOpt == chrono::milliseconds::min())
+                requestUpdate();
+            else
+                post([this, timeout = *timeoutOpt]() { _updateTimer.start(timeout); });
+        }
     }
     catch (exception const& e)
     {
@@ -1089,50 +1148,58 @@ float TerminalDisplay::uptime() const noexcept
     return uptimeSecs;
 }
 
-void TerminalDisplay::onAfterRendering()
+QSGNode* TerminalDisplay::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* /*data*/)
 {
-    // This method is called after the QML scene has been rendered.
-    // We use this to schedule the next rendering frame, if needed.
-    // This signal is emitted from the scene graph rendering thread
-    paint();
-    if (_saveScreenshot)
+    // Runs on the render thread with the GUI thread blocked (safe to touch both). Create the OpenGL
+    // renderer on demand (formerly done from the window's render signals) and the scene-graph node that
+    // draws the terminal in z-order.
+    if (width() < 1.0 || height() < 1.0 || !_session)
     {
-        std::visit(crispy::overloaded { [&](const std::filesystem::path& path) {
-                                           screenshot().save(QString::fromStdString(path.string()));
-                                       },
-                                        [&](std::monostate) {
-                                            if (QClipboard* clipboard = QGuiApplication::clipboard();
-                                                clipboard != nullptr)
-                                                clipboard->setImage(screenshot(), QClipboard::Clipboard);
-                                        } },
-                   _saveScreenshot.value());
-
-        _saveScreenshot = std::nullopt;
+        // Nothing to draw yet; drop any existing node so we recreate it once we have a size/session.
+        delete oldNode;
+        return nullptr;
     }
 
-    if (!_state.finish())
-    {
-        if (window())
-            window()->update();
-    }
+    if (!_renderTarget)
+        createRenderer();
 
-    // Update the terminal's world clock, such that nextRender() knows when to render next (if needed).
-    terminal().tick(steady_clock::now());
+    // updatePaintNode runs during the synchronize phase with the GUI thread blocked, so this is the safe
+    // point to read item geometry — the GUI thread cannot mutate it concurrently. Snapshot the item's
+    // device-pixel render size here and push it to the renderer, rather than reading it from the render
+    // thread in renderFrame() (where the GUI thread is unblocked). The render size is the bottom-left-origin
+    // reference frame for the transient inner scissor.
+    auto const geometry = itemDevicePixelGeometry();
+    _renderTarget->setRenderSize(ImageSize { Width::cast_from(std::lround(geometry.width)),
+                                             Height::cast_from(std::lround(geometry.height)) });
 
-    auto timeoutOpt = terminal().nextRender();
-    if (!timeoutOpt.has_value())
-        return;
+    // The model matrix (QML transforms applied to this item) is also read here while the GUI thread is
+    // blocked; the scene-graph node only composes Qt's projection/node matrices on top of it at render.
+    _renderTarget->setModelMatrix(createModelMatrix());
 
-    auto const timeout = *timeoutOpt;
-    if (timeout == chrono::milliseconds::min())
-    {
-        if (window())
-            window()->update();
-    }
-    else
-    {
-        post([this, timeout]() { _updateTimer.start(timeout); });
-    }
+    auto* node = static_cast<TerminalRenderNode*>(oldNode);
+    if (!node)
+        node = new TerminalRenderNode(this);
+
+    // Content changes every frame the terminal is dirty; mark the node so Qt invokes render() again.
+    node->markDirty(QSGNode::DirtyMaterial);
+    return node;
+}
+
+void TerminalDisplay::releaseRenderResources()
+{
+    // Called by TerminalRenderNode on the render thread as the node is torn down, where the scene graph's
+    // GL context is current — the right place to free the renderer's GL resources.
+    destroyRenderer();
+}
+
+void TerminalDisplay::destroyRenderer()
+{
+    // Single, idempotent renderer teardown shared by all entry points (the scene-graph node's
+    // releaseResources, sceneGraphInvalidated → cleanup). delete of nullptr is a no-op, so calling this
+    // more than once across those paths frees the renderer exactly once. Must run on the render thread
+    // with the GL context current.
+    delete _renderTarget;
+    _renderTarget = nullptr;
 }
 // }}}
 
@@ -1422,16 +1489,11 @@ void TerminalDisplay::updateImplicitSize()
 
 TerminalDisplay::DevicePixelGeometry TerminalDisplay::itemDevicePixelGeometry() const
 {
-    // x()/y() are local to the parent item (e.g. 0 inside the content area below the title bar), so
-    // mapToScene() is used to get this item's position within the window. Both render-thread callers
-    // (the render translation and the GL scissor clip) need the same device-pixel rectangle, so the
-    // mapToScene + dpr scaling lives here once.
+    // The item's device-pixel extent. Scene position is no longer needed: the scene graph supplies the
+    // item→clip transform at render time (see renderFrame), so callers want only the dpr and the size.
     auto const dpr = contentScale();
-    auto const scenePos = mapToScene(QPointF(0.0, 0.0));
     return DevicePixelGeometry {
         .dpr = dpr,
-        .x = scenePos.x() * dpr,
-        .y = scenePos.y() * dpr,
         .width = width() * dpr,
         .height = height() * dpr,
     };

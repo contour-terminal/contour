@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <optional>
 
 namespace contour::display
 {
@@ -38,5 +39,28 @@ struct ScissorRect
         };
     }
 };
+
+/// Computes the effective scissor clip for a draw from the transient inner scissor (smooth-scroll / cursor
+/// clip pushed by vtrasterizer's Renderer) and the scene graph's per-node clip (Qt's RenderState scissor).
+///
+/// Pure, GPU-free policy so the clip-nesting decision is unit-testable without a command buffer. Nesting can
+/// only ever shrink the clipped region, so when both are present the result is their intersection; when only
+/// one is present it is used as-is; when neither is present std::nullopt signals "no clip" (the caller
+/// scissors to the full render target — a pipeline that declares UsesScissor must be given an explicit
+/// scissor every draw, else it inherits a previous node's stale scissor).
+/// @param innerScissor The transient inner scissor for this draw, if any (bottom-left-origin device pixels).
+/// @param nodeScissor  The scene graph's clip rectangle for this node, if any (same coordinate space).
+/// @return The effective clip rectangle, or std::nullopt when no clip applies.
+[[nodiscard]] constexpr std::optional<ScissorRect> computeEffectiveClip(
+    std::optional<ScissorRect> const& innerScissor, std::optional<ScissorRect> const& nodeScissor) noexcept
+{
+    if (innerScissor.has_value() && nodeScissor.has_value())
+        return innerScissor->intersect(*nodeScissor);
+    if (innerScissor.has_value())
+        return innerScissor;
+    if (nodeScissor.has_value())
+        return nodeScissor;
+    return std::nullopt;
+}
 
 } // namespace contour::display
