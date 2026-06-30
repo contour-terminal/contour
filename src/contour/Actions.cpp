@@ -91,6 +91,13 @@ optional<Action> fromString(string const& name)
         mapAction<actions::SwitchToTabLeft>("SwitchToTabLeft"),
         mapAction<actions::SwitchToTabRight>("SwitchToTabRight"),
         mapAction<actions::SetTabName>("SetTabName"),
+        mapAction<actions::SplitVertical>("SplitVertical"),
+        mapAction<actions::SplitHorizontal>("SplitHorizontal"),
+        mapAction<actions::ClosePane>("ClosePane"),
+        mapAction<actions::FocusPaneLeft>("FocusPaneLeft"),
+        mapAction<actions::FocusPaneRight>("FocusPaneRight"),
+        mapAction<actions::FocusPaneUp>("FocusPaneUp"),
+        mapAction<actions::FocusPaneDown>("FocusPaneDown"),
     };
 
     auto const lowerCaseName = toLower(name);

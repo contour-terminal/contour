@@ -12,6 +12,7 @@
 #include <string>
 #include <tuple>
 #include <variant>
+#include <vector>
 
 namespace contour::actions
 {
@@ -96,6 +97,13 @@ struct SwitchToPreviousTab{};
 struct SwitchToTabLeft{};
 struct SwitchToTabRight{};
 struct SetTabName{};
+struct SplitVertical{};    // split the active pane left/right
+struct SplitHorizontal{};  // split the active pane top/bottom
+struct ClosePane{};
+struct FocusPaneLeft{};
+struct FocusPaneRight{};
+struct FocusPaneUp{};
+struct FocusPaneDown{};
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -160,10 +168,52 @@ using Action = std::variant<CancelSelection,
                             SwitchToPreviousTab,
                             SwitchToTabLeft,
                             SwitchToTabRight,
-                            SetTabName>;
+                            SetTabName,
+                            SplitVertical,
+                            SplitHorizontal,
+                            ClosePane,
+                            FocusPaneLeft,
+                            FocusPaneRight,
+                            FocusPaneUp,
+                            FocusPaneDown>;
 
+/// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
+///
+/// These are structural/destructive actions where a held key must not be amplified into a burst:
+/// creating or closing a tab, closing a pane, and splitting a pane. Splitting is included because
+/// each fire forks a new shell process and shrinks the layout, so a held split key would spawn a
+/// burst of panes until they collapse — the same amplification the tab/pane actions guard against.
+/// The keyboard dispatch (handleAction) consults this concept to filter such actions out of
+/// KeyboardEventType::Repeat events.
 template <typename T>
-concept NonRepeatableActionConcept = crispy::one_of<T, CreateNewTab, CloseTab>;
+concept NonRepeatableActionConcept =
+    crispy::one_of<T, CreateNewTab, CloseTab, ClosePane, SplitVertical, SplitHorizontal>;
+
+/// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
+/// member), false otherwise.
+[[nodiscard]] inline bool isNonRepeatable(Action const& action) noexcept
+{
+    return std::visit(crispy::overloaded {
+                          [](NonRepeatableActionConcept auto const&) { return true; },
+                          [](auto const&) { return false; },
+                      },
+                      action);
+}
+
+/// Filters @p actions down to those that may fire on a keyboard auto-repeat event, dropping every
+/// NonRepeatableActionConcept member (so a held key cannot be amplified into a burst of, e.g.,
+/// tab/pane closes).
+/// @param actions The actions bound to the key being repeated.
+/// @return A copy containing only the repeatable actions, preserving order.
+[[nodiscard]] inline std::vector<Action> filterRepeatableActions(std::vector<Action> const& actions)
+{
+    std::vector<Action> result;
+    result.reserve(actions.size());
+    for (auto const& action: actions)
+        if (!isNonRepeatable(action))
+            result.push_back(action);
+    return result;
+}
 
 std::optional<Action> fromString(std::string const& name);
 
@@ -300,6 +350,18 @@ namespace documentation
     constexpr inline std::string_view SwitchToTabLeft { "Switch to tab to the left" };
     constexpr inline std::string_view SwitchToTabRight { "Switch to tab to the right" };
     constexpr inline std::string_view SetTabName { "Set the name of the current tab" };
+    constexpr inline std::string_view SplitVertical {
+        "Splits the active pane into two side-by-side panes (a vertical divider)."
+    };
+    constexpr inline std::string_view SplitHorizontal {
+        "Splits the active pane into two stacked panes (a horizontal divider)."
+    };
+    constexpr inline std::string_view ClosePane { "Closes the active pane (or the tab if it is the last "
+                                                  "pane)." };
+    constexpr inline std::string_view FocusPaneLeft { "Moves pane focus to the left." };
+    constexpr inline std::string_view FocusPaneRight { "Moves pane focus to the right." };
+    constexpr inline std::string_view FocusPaneUp { "Moves pane focus up." };
+    constexpr inline std::string_view FocusPaneDown { "Moves pane focus down." };
 } // namespace documentation
 
 constexpr inline auto getDocumentation()
@@ -368,6 +430,13 @@ constexpr inline auto getDocumentation()
         std::tuple { Action { SwitchToTabLeft {} }, documentation::SwitchToTabLeft },
         std::tuple { Action { SwitchToTabRight {} }, documentation::SwitchToTabRight },
         std::tuple { Action { SetTabName {} }, documentation::SetTabName },
+        std::tuple { Action { SplitVertical {} }, documentation::SplitVertical },
+        std::tuple { Action { SplitHorizontal {} }, documentation::SplitHorizontal },
+        std::tuple { Action { ClosePane {} }, documentation::ClosePane },
+        std::tuple { Action { FocusPaneLeft {} }, documentation::FocusPaneLeft },
+        std::tuple { Action { FocusPaneRight {} }, documentation::FocusPaneRight },
+        std::tuple { Action { FocusPaneUp {} }, documentation::FocusPaneUp },
+        std::tuple { Action { FocusPaneDown {} }, documentation::FocusPaneDown },
     };
 }
 
@@ -450,6 +519,13 @@ DECLARE_ACTION_FMT(SwitchToPreviousTab)
 DECLARE_ACTION_FMT(SwitchToTabLeft)
 DECLARE_ACTION_FMT(SwitchToTabRight)
 DECLARE_ACTION_FMT(SetTabName)
+DECLARE_ACTION_FMT(SplitVertical)
+DECLARE_ACTION_FMT(SplitHorizontal)
+DECLARE_ACTION_FMT(ClosePane)
+DECLARE_ACTION_FMT(FocusPaneLeft)
+DECLARE_ACTION_FMT(FocusPaneRight)
+DECLARE_ACTION_FMT(FocusPaneUp)
+DECLARE_ACTION_FMT(FocusPaneDown)
 // }}}
 #undef DECLARE_ACTION_FMT
 
@@ -544,6 +620,13 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(SwitchToTabLeft);
         HANDLE_ACTION(SwitchToTabRight);
         HANDLE_ACTION(SetTabName);
+        HANDLE_ACTION(SplitVertical);
+        HANDLE_ACTION(SplitHorizontal);
+        HANDLE_ACTION(ClosePane);
+        HANDLE_ACTION(FocusPaneLeft);
+        HANDLE_ACTION(FocusPaneRight);
+        HANDLE_ACTION(FocusPaneUp);
+        HANDLE_ACTION(FocusPaneDown);
         if (std::holds_alternative<contour::actions::MoveTabTo>(_action))
         {
             const auto action = std::get<contour::actions::MoveTabTo>(_action);
