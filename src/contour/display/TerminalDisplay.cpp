@@ -1174,7 +1174,7 @@ float TerminalDisplay::uptime() const noexcept
 
 QSGNode* TerminalDisplay::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* /*data*/)
 {
-    // Runs on the render thread with the GUI thread blocked (safe to touch both). Create the OpenGL
+    // Runs on the render thread with the GUI thread blocked (safe to touch both). Create the RHI
     // renderer on demand (formerly done from the window's render signals) and the scene-graph node that
     // draws the terminal in z-order.
     if (width() < 1.0 || height() < 1.0 || !_session)
@@ -1216,8 +1216,8 @@ QSGNode* TerminalDisplay::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*
 
 void TerminalDisplay::releaseRenderResources()
 {
-    // Called by TerminalRenderNode on the render thread as the node is torn down, where the scene graph's
-    // GL context is current — the right place to free the renderer's GL resources.
+    // Called by TerminalRenderNode on the render thread as the node is torn down — the right place to free
+    // the RHI renderer's GPU resources, which must be released on the render thread.
     destroyRenderer();
 }
 
@@ -1226,7 +1226,7 @@ void TerminalDisplay::destroyRenderer()
     // Single, idempotent renderer teardown shared by all entry points (the scene-graph node's
     // releaseResources, sceneGraphInvalidated → cleanup). delete of nullptr is a no-op, so calling this
     // more than once across those paths frees the renderer exactly once. Must run on the render thread
-    // with the GL context current.
+    // (the RHI resources it owns are released there).
     delete _renderTarget;
     _renderTarget = nullptr;
 }
@@ -1691,20 +1691,28 @@ void TerminalDisplay::requestScreenshot(std::function<void(QImage)> onReady)
 
 void TerminalDisplay::doDumpStateInternal()
 {
-
-    auto finally = crispy::finally { [this] {
+    // On the at-exit dump path the session must be terminated once the dump is complete. The screenshot is
+    // now a *deferred* RHI readback (requestScreenshot only schedules the offscreen capture; the PNG lands a
+    // frame or two later), so termination must be chained onto the screenshot's completion — terminating
+    // eagerly here would tear the window down before the readback runs and screenshot.png would never be
+    // written. terminateOnExit() is invoked from every path that does not reach that deferred callback (the
+    // early-outs below and the no-renderer case in requestScreenshot); the callback owns termination on the
+    // normal path.
+    auto const terminateOnExit = [this] {
         if (_session->terminal().device().isClosed() && _session->app().dumpStateAtExit().has_value())
             _session->terminate();
-    } };
+    };
 
     if (!QOpenGLContext::currentContext())
     {
         errorLog()("Cannot dump state: no OpenGL context available");
+        terminateOnExit();
         return;
     }
     if (!QOpenGLContext::currentContext()->makeCurrent(window()))
     {
         errorLog()("Cannot dump state: cannot make current");
+        terminateOnExit();
         return;
     }
 
@@ -1775,9 +1783,19 @@ void TerminalDisplay::doDumpStateInternal()
 
     auto screenshotFilePath = targetDir / "screenshot.png";
     displayLog()("Requesting screenshot for state dump: {}", screenshotFilePath.generic_string());
-    // Deferred capture: the RHI reads the offscreen render back one frame later, so save it when it arrives.
-    requestScreenshot([screenshotFilePath](QImage const& image) {
+
+    // Deferred capture: the RHI reads the offscreen render back a frame or two later, so save it when it
+    // arrives and only *then* terminate on the at-exit path — terminating now would close the window before
+    // the readback completes and the PNG would never be written. If there is no renderer, requestScreenshot
+    // never invokes the callback, so terminate here to avoid leaking the session on that path.
+    if (!_renderTarget)
+    {
+        terminateOnExit();
+        return;
+    }
+    requestScreenshot([screenshotFilePath, terminateOnExit](QImage const& image) {
         image.save(QString::fromStdString(screenshotFilePath.string()));
+        terminateOnExit();
     });
 }
 

@@ -1021,10 +1021,16 @@ std::tuple<LineOffset, ColumnOffset> TerminalSession::consumeScroll() noexcept
 
 QString TerminalSession::title() const
 {
+    // Bound to main.qml's window `title:`, so Qt re-evaluates this on the GUI thread whenever the title
+    // changes — concurrently with the parser thread's OSC 0/2 writer (setWindowTitle assigns _windowTitle
+    // under _stateMutex). Read the locked copy via resolvedWindowTitle() rather than the lock-free
+    // windowTitle() reference, which would tear (or use-after-free on a string reallocation) against that
+    // writer. Native tabs/splits make these GUI-thread title reads far more frequent.
+    auto const windowTitle = resolvedWindowTitle();
 #if !defined(NDEBUG)
-    return QString::fromStdString(terminal().windowTitle() + " - Contour (DEBUG)");
+    return QString::fromStdString(windowTitle + " - Contour (DEBUG)");
 #else
-    return QString::fromStdString(terminal().windowTitle() + " - Contour");
+    return QString::fromStdString(windowTitle + " - Contour");
 #endif
 }
 
