@@ -219,15 +219,35 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     /// @return The deserialized shader; an invalid QShader if the resource could not be read.
     [[nodiscard]] static QShader loadShader(QString const& resourcePath);
 
-    /// Builds the background/rect graphics pipeline (no texture; one uniform block).
-    /// @param rhi    The scene graph's RHI instance.
-    /// @param rpDesc The render-pass descriptor to bake into the pipeline.
-    void createRectPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc);
+    /// Describes the per-pass variation between the RHI graphics pipelines (shaders, uniform-block size,
+    /// vertex stride + attribute layout, whether the pass samples the glyph atlas). Everything not captured
+    /// here (topology, depth/blend/scissor state, the binding-0 uniform buffer) is identical for every pass
+    /// and lives directly in createPipeline(). The concrete pass table + backing attribute arrays live in
+    /// the .cpp; this is the interpreter contract.
+    struct PassDescriptor
+    {
+        QString vertexShaderPath;     ///< qrc path of the baked vertex shader (.qsb).
+        QString fragmentShaderPath;   ///< qrc path of the baked fragment shader (.qsb).
+        quint32 uniformBlockSize = 0; ///< std140 uniform block size in bytes (binding 0).
+        quint32 vertexStride = 0;     ///< Interleaved vertex stride in bytes (single binding 0).
+        std::span<QRhiVertexInputAttribute const> attributes; ///< Vertex-input attributes for this pass.
+        bool hasSampler = false;         ///< Whether the pass samples the glyph atlas at binding 1.
+        char const* debugName = nullptr; ///< Human-readable pass name for diagnostics.
+    };
 
-    /// Builds the text/glyph graphics pipeline (atlas sampler at binding 1; one uniform block).
+    /// Builds one graphics pipeline (+ its SRB and uniform buffer) from a pass descriptor into @p out.
+    ///
+    /// Data-driven replacement for the former per-pass createRectPipeline()/createTextPipeline(): the only
+    /// variation is carried by @p desc. A pass that samples the atlas (desc.hasSampler) requires the atlas
+    /// texture + sampler to already exist (createPipelines() ensures that ordering).
     /// @param rhi    The scene graph's RHI instance.
     /// @param rpDesc The render-pass descriptor to bake into the pipeline.
-    void createTextPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc);
+    /// @param desc   The pass description (shaders, layout, sampler flag).
+    /// @param out    The pipeline slot to populate.
+    void createPipeline(QRhi* rhi,
+                        QRhiRenderPassDescriptor* rpDesc,
+                        PassDescriptor const& desc,
+                        RhiPipeline& out);
 
     /// Creates (or re-creates) the glyph atlas texture and its sampler for the given size.
     /// @param rhi  The scene graph's RHI instance.

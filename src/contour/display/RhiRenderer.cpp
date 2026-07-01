@@ -15,13 +15,16 @@
 #include <crispy/utils.h>
 
 #include <QtCore/QFile>
+#include <QtCore/QVarLengthArray>
 #include <QtCore/QtGlobal>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
 
+#include <array>
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -66,6 +69,37 @@ namespace
     constexpr auto BackgroundFragmentShaderPath = ":/contour/display/shaders/background.frag.qsb";
     constexpr auto TextVertexShaderPath = ":/contour/display/shaders/text.vert.qsb";
     constexpr auto TextFragmentShaderPath = ":/contour/display/shaders/text.frag.qsb";
+    // }}}
+
+    // {{{ Data-driven render-pass table
+    //
+    // The background/rect and text/glyph graphics pipelines are identical except for a handful of axes:
+    // which baked shaders they load, the size of their std140 uniform block, their interleaved vertex
+    // stride + attribute layout, and whether they sample the glyph atlas (binding 1). Everything else
+    // (Triangles topology, depth-test-no-write LessOrEqual, the SrcAlpha/OneMinusSrcAlpha blend, the
+    // UsesScissor flag, the binding-0 uniform buffer) is shared. Describing the variation as data and
+    // interpreting it in a single createPipeline() loop means adding a third pass tomorrow is one more
+    // row here, not another near-duplicate builder function.
+
+    // QRhiVertexInputAttribute is not a literal type, so these attribute tables are file-scope const
+    // (initialized once at load time) rather than constexpr; they back the PassDescriptor::attributes span.
+
+    /// The interleaved vertex-input attributes for the background/rect pass: vec3 position @loc0,
+    /// vec4 color @loc1 (single binding 0).
+    const std::array rectVertexAttributes {
+        QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, RectPositionOffset),
+        QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, RectColorOffset),
+    };
+
+    /// The interleaved vertex-input attributes for the text/glyph pass: vec3 position @loc0,
+    /// vec4 texCoords @loc1, vec4 color @loc2 (single binding 0).
+    const std::array textVertexAttributes {
+        QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, TextPositionOffset),
+        QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, TextTexCoordOffset),
+        QRhiVertexInputAttribute(0, 2, QRhiVertexInputAttribute::Float4, TextColorOffset),
+    };
+    // The PassDescriptor struct itself is declared as a private member of RhiRenderer (RhiRenderer.h); the
+    // concrete pass table is built in createPipelines() below.
     // }}}
 
     struct CRISPY_PACKED vec2 // NOLINT
@@ -232,29 +266,44 @@ void RhiRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
     }
 }
 
-void RhiRenderer::createRectPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
+void RhiRenderer::createPipeline(QRhi* rhi,
+                                 QRhiRenderPassDescriptor* rpDesc,
+                                 PassDescriptor const& desc,
+                                 RhiPipeline& out)
 {
-    auto const vertexShader = loadShader(BackgroundVertexShaderPath);
-    auto const fragmentShader = loadShader(BackgroundFragmentShaderPath);
+    auto const vertexShader = loadShader(desc.vertexShaderPath);
+    auto const fragmentShader = loadShader(desc.fragmentShaderPath);
     if (!vertexShader.isValid() || !fragmentShader.isValid())
         return;
 
-    // Dynamic uniform buffer feeding both stages (std140 `Buf` block at binding 0).
-    _rectPipeline.uniformBuffer.reset(
-        rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, RectUniformBlockSize));
-    _rectPipeline.uniformBuffer->create();
+    // A pass that samples the glyph atlas needs the atlas texture + sampler to already exist (they are
+    // referenced by binding 1); createPipelines() guarantees this ordering before invoking us.
+    if (desc.hasSampler)
+    {
+        Require(_atlasTexture != nullptr);
+        Require(_atlasSampler != nullptr);
+    }
 
-    // The vertex buffer is created lazily (as an Immutable buffer) in recordRectPass() once the per-frame
-    // geometry size is known, and re-created when it must grow.
+    // Dynamic uniform buffer feeding both stages (std140 `Buf` block at binding 0). The vertex buffer is
+    // created lazily (as an Immutable buffer) in the pass's record step once the per-frame geometry size is
+    // known, and re-created when it must grow.
+    out.uniformBuffer.reset(
+        rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, desc.uniformBlockSize));
+    out.uniformBuffer->create();
 
-    _rectPipeline.srb.reset(rhi->newShaderResourceBindings());
-    _rectPipeline.srb->setBindings({
-        QRhiShaderResourceBinding::uniformBuffer(0,
-                                                 QRhiShaderResourceBinding::VertexStage
-                                                     | QRhiShaderResourceBinding::FragmentStage,
-                                                 _rectPipeline.uniformBuffer.get()),
-    });
-    _rectPipeline.srb->create();
+    // Binding 0 (the uniform block) is shared by every pass; binding 1 (the atlas sampler) is added only for
+    // sampling passes.
+    QVarLengthArray<QRhiShaderResourceBinding, 2> bindings;
+    bindings.append(QRhiShaderResourceBinding::uniformBuffer(0,
+                                                             QRhiShaderResourceBinding::VertexStage
+                                                                 | QRhiShaderResourceBinding::FragmentStage,
+                                                             out.uniformBuffer.get()));
+    if (desc.hasSampler)
+        bindings.append(QRhiShaderResourceBinding::sampledTexture(
+            1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()));
+    out.srb.reset(rhi->newShaderResourceBindings());
+    out.srb->setBindings(bindings.cbegin(), bindings.cend());
+    out.srb->create();
 
     auto* pipeline = rhi->newGraphicsPipeline();
     pipeline->setTopology(QRhiGraphicsPipeline::Triangles);
@@ -288,96 +337,18 @@ void RhiRenderer::createRectPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc
         { QRhiShaderStage::Fragment, fragmentShader },
     });
 
-    // Vertex input: single interleaved binding, vec3 position @loc0, vec4 color @loc1.
+    // Vertex input: a single interleaved binding at the pass's stride, with the pass's attribute list.
     QRhiVertexInputLayout inputLayout;
-    inputLayout.setBindings({ QRhiVertexInputBinding(RectVertexStride) });
-    inputLayout.setAttributes({
-        QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, RectPositionOffset),
-        QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, RectColorOffset),
-    });
+    inputLayout.setBindings({ QRhiVertexInputBinding(desc.vertexStride) });
+    inputLayout.setAttributes(desc.attributes.begin(), desc.attributes.end());
     pipeline->setVertexInputLayout(inputLayout);
 
-    pipeline->setShaderResourceBindings(_rectPipeline.srb.get());
+    pipeline->setShaderResourceBindings(out.srb.get());
     pipeline->setRenderPassDescriptor(rpDesc);
     if (!pipeline->create())
-        errorLog()("Failed to create RHI background/rect graphics pipeline.");
+        errorLog()("Failed to create RHI {} graphics pipeline.", desc.debugName);
 
-    _rectPipeline.pipeline.reset(pipeline);
-}
-
-void RhiRenderer::createTextPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
-{
-    auto const vertexShader = loadShader(TextVertexShaderPath);
-    auto const fragmentShader = loadShader(TextFragmentShaderPath);
-    if (!vertexShader.isValid() || !fragmentShader.isValid())
-        return;
-
-    Require(_atlasTexture != nullptr);
-    Require(_atlasSampler != nullptr);
-
-    _textPipeline.uniformBuffer.reset(
-        rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, TextUniformBlockSize));
-    _textPipeline.uniformBuffer->create();
-
-    // The vertex buffer is created lazily (as an Immutable buffer) in recordTextPass(), see createRect.
-
-    _textPipeline.srb.reset(rhi->newShaderResourceBindings());
-    _textPipeline.srb->setBindings({
-        QRhiShaderResourceBinding::uniformBuffer(0,
-                                                 QRhiShaderResourceBinding::VertexStage
-                                                     | QRhiShaderResourceBinding::FragmentStage,
-                                                 _textPipeline.uniformBuffer.get()),
-        QRhiShaderResourceBinding::sampledTexture(
-            1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()),
-    });
-    _textPipeline.srb->create();
-
-    auto* pipeline = rhi->newGraphicsPipeline();
-    pipeline->setTopology(QRhiGraphicsPipeline::Triangles);
-    // The scene graph renders this node within its depth-ordered pass; depth-testing must be enabled (with
-    // DepthAwareRendering on the node) for the node's output to survive into the frame, but depth is not
-    // written since the terminal is alpha-blended translucent content. LessOrEqual (vs the default Less) so
-    // geometry sitting exactly at the node's assigned depth slot still passes.
-    pipeline->setDepthTest(true);
-    pipeline->setDepthWrite(false);
-    pipeline->setDepthOp(QRhiGraphicsPipeline::LessOrEqual);
-
-    // Dynamic scissoring for the node clip + transient inner scissor (smooth scroll / cursor), see above.
-    pipeline->setFlags(QRhiGraphicsPipeline::UsesScissor);
-
-    QRhiGraphicsPipeline::TargetBlend blend;
-    blend.enable = true;
-    blend.colorWrite = QRhiGraphicsPipeline::ColorMask(QRhiGraphicsPipeline::R | QRhiGraphicsPipeline::G
-                                                       | QRhiGraphicsPipeline::B | QRhiGraphicsPipeline::A);
-    blend.srcColor = QRhiGraphicsPipeline::SrcAlpha;
-    blend.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
-    blend.opColor = QRhiGraphicsPipeline::Add;
-    blend.srcAlpha = QRhiGraphicsPipeline::One;
-    blend.dstAlpha = QRhiGraphicsPipeline::One;
-    blend.opAlpha = QRhiGraphicsPipeline::Add;
-    pipeline->setTargetBlends({ blend });
-
-    pipeline->setShaderStages({
-        { QRhiShaderStage::Vertex, vertexShader },
-        { QRhiShaderStage::Fragment, fragmentShader },
-    });
-
-    // Vertex input: single interleaved binding, vec3 position @loc0, vec4 texCoords @loc1, vec4 color @loc2.
-    QRhiVertexInputLayout inputLayout;
-    inputLayout.setBindings({ QRhiVertexInputBinding(TextVertexStride) });
-    inputLayout.setAttributes({
-        QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, TextPositionOffset),
-        QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, TextTexCoordOffset),
-        QRhiVertexInputAttribute(0, 2, QRhiVertexInputAttribute::Float4, TextColorOffset),
-    });
-    pipeline->setVertexInputLayout(inputLayout);
-
-    pipeline->setShaderResourceBindings(_textPipeline.srb.get());
-    pipeline->setRenderPassDescriptor(rpDesc);
-    if (!pipeline->create())
-        errorLog()("Failed to create RHI text/glyph graphics pipeline.");
-
-    _textPipeline.pipeline.reset(pipeline);
+    out.pipeline.reset(pipeline);
 }
 
 void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
@@ -392,9 +363,10 @@ void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
     _rhi = rhi;
     _renderPassDescriptor = rpDesc;
 
-    // Ensure the atlas texture + sampler exist before the text pipeline references them. If configureAtlas
-    // has not been observed yet, fall back to the currently known atlas size (or a 1x1 placeholder) so the
-    // shader-resource-bindings are valid; the real atlas is (re)created on the next configureAtlas.
+    // Ensure the atlas texture + sampler exist before the text pipeline references them (its descriptor sets
+    // hasSampler). If configureAtlas has not been observed yet, fall back to the currently known atlas size
+    // (or a 1x1 placeholder) so the shader-resource-bindings are valid; the real atlas is (re)created on the
+    // next configureAtlas.
     if (!_atlasTexture)
     {
         auto const size =
@@ -402,8 +374,33 @@ void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
         createAtlasTexture(rhi, size);
     }
 
-    createRectPipeline(rhi, rpDesc);
-    createTextPipeline(rhi, rpDesc);
+    // The render passes, described as data, each paired with the pipeline slot it populates. Adding a pass
+    // is one more row here plus its FramePass tag and record step — no new near-duplicate builder function.
+    struct PassEntry
+    {
+        PassDescriptor descriptor;
+        RhiPipeline* slot = nullptr;
+    };
+    std::array const passes {
+        PassEntry { .descriptor = { .vertexShaderPath = BackgroundVertexShaderPath,
+                                    .fragmentShaderPath = BackgroundFragmentShaderPath,
+                                    .uniformBlockSize = RectUniformBlockSize,
+                                    .vertexStride = RectVertexStride,
+                                    .attributes = rectVertexAttributes,
+                                    .hasSampler = false,
+                                    .debugName = "background/rect" },
+                    .slot = &_rectPipeline },
+        PassEntry { .descriptor = { .vertexShaderPath = TextVertexShaderPath,
+                                    .fragmentShaderPath = TextFragmentShaderPath,
+                                    .uniformBlockSize = TextUniformBlockSize,
+                                    .vertexStride = TextVertexStride,
+                                    .attributes = textVertexAttributes,
+                                    .hasSampler = true,
+                                    .debugName = "text/glyph" },
+                    .slot = &_textPipeline },
+    };
+    for (auto const& entry: passes)
+        createPipeline(rhi, rpDesc, entry.descriptor, *entry.slot);
 
     displayLog()("createPipelines: rect={} text={}",
                  _rectPipeline.pipeline != nullptr,
