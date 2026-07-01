@@ -100,7 +100,6 @@ qt_add_resources(_qt_resources ${_qt_resources})
 set(_qml_files
     ui/BellSound.qml
     ui/RequestPermission.qml
-    ui/Terminal.qml
     ui/main.qml
 )
 

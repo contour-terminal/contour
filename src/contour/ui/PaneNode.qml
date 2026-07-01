@@ -19,7 +19,16 @@ Item {
     id: root
 
     // The PaneProxy for this node (leaf or split).
-    required property var node
+    //
+    // NOT `required`: the recursive split children are URL-loaded (Loader { source: "PaneNode.qml" }) and can
+    // only receive their node via the deferred `onLoaded: item.node = Qt.binding(...)` assignment below — which
+    // runs AFTER the object is constructed. A `required property` must be satisfied at construction, so the
+    // URL-Loader path could never satisfy it: Qt emitted "Required property node was not initialized" and left
+    // each child with a null node, so neither inner Loader activated, no TerminalPane was created, and the
+    // split pane rendered as the fully transparent window (the desktop showing through). Defaulting to null
+    // makes the deferred assignment valid and matches the `root.node !== null` guards used throughout. The
+    // top-level instance in main.qml still sets `node:` declaratively at construction.
+    property var node: null
 
     // Smallest first-child share a divider drag may persist; keeps both panes visible/grabbable.
     readonly property real minPaneRatio: 0.05

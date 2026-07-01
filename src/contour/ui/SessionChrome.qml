@@ -128,6 +128,15 @@ Item {
             Window.window.alert(0);
     }
 
+    // Relay an OSC-777 notification to the window's tray/notification logic. Routed through Window.window
+    // (the ApplicationWindow's showNotification) rather than the display item: a ContourTerminal's
+    // showNotification is a C++ signal, so connecting a session's notification to it for a split pane would
+    // dead-end (signal->signal) and never reach the tray. Window-level relay works for every host uniformly.
+    function relayNotification(title, body) {
+        if (Window.window !== null && Window.window.showNotification !== undefined)
+            Window.window.showNotification(title, body);
+    }
+
     // Update the VT's viewport whenever the scrollbar's position changes.
     function onScrollBarPositionChanged() {
         let vt = chrome.session;
@@ -154,10 +163,10 @@ Item {
         if (vt === null)
             return;
 
-        // Bell, window alert, and OSC-777 notifications (relayed through the display item).
+        // Bell, window alert, and OSC-777 notifications (relayed to the window's tray logic).
         vt.onBell.connect(playBell);
         vt.onAlert.connect(doAlert);
-        vt.onShowNotification.connect(chrome.displayItem.showNotification);
+        vt.onShowNotification.connect(relayNotification);
 
         // Bidirectional scrollbar binding (drag -> viewport, scroll -> thumb).
         vbar.onPositionChanged.connect(onScrollBarPositionChanged);

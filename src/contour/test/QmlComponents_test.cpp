@@ -11,6 +11,7 @@
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QObject>
+#include <QtCore/QStringList>
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
 #include <QtQml/QQmlComponent>
@@ -37,9 +38,25 @@ class MockTabController: public QAbstractListModel
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
     // Mirrors TerminalSessionManager::multimediaReady, which SessionChrome.qml's bell Loader gates on.
     Q_PROPERTY(bool multimediaReady READ multimediaReady CONSTANT)
+    // Mirrors TerminalSessionManager::titleBarVisible (re-homed from the removed vtui): the window-decoration
+    // axis main.qml binds its flags / custom controls / resize border to.
+    Q_PROPERTY(
+        bool titleBarVisible READ titleBarVisible WRITE setTitleBarVisible NOTIFY titleBarVisibleChanged)
 
   public:
     [[nodiscard]] bool multimediaReady() const noexcept { return false; }
+
+    [[nodiscard]] bool titleBarVisible() const noexcept { return _titleBarVisible; }
+    void setTitleBarVisible(bool v)
+    {
+        if (_titleBarVisible != v)
+        {
+            _titleBarVisible = v;
+            emit titleBarVisibleChanged();
+        }
+    }
+    /// Mirrors TerminalDisplay::toggleTitleBar(): flips the native-decoration axis.
+    Q_INVOKABLE void toggleTitleBar() { setTitleBarVisible(!_titleBarVisible); }
 
     enum Roles : int
     {
@@ -80,6 +97,19 @@ class MockTabController: public QAbstractListModel
                  { RawTitleRole, "rawTitle" } };
     }
 
+    Q_INVOKABLE [[nodiscard]] QObject* createSession() { return nullptr; }
+    // Models the REAL TerminalSessionManager::canCloseWindow semantics: the window may close only when no
+    // sessions remain (the last pane exited). By the time onTerminated runs, removeSession has already
+    // decremented the session count, so `_openSessions` here reflects the survivors. Call-tracking lets a
+    // test assert onTerminated consulted the gate. Using the true semantics (not a settable bool) is what
+    // reproduces the "closing one pane of a split kills the whole window" bug.
+    Q_INVOKABLE [[nodiscard]] bool canCloseWindow()
+    {
+        ++canCloseWindowCalls;
+        return _openSessions == 0;
+    }
+    void setOpenSessions(int n) noexcept { _openSessions = n; }
+    int canCloseWindowCalls = 0;
     Q_INVOKABLE void createNewTab() {}
     Q_INVOKABLE void activateTab(int) {}
     Q_INVOKABLE void moveTab(int, int) {}
@@ -101,24 +131,102 @@ class MockTabController: public QAbstractListModel
 
   signals:
     void activeTabIndexChanged();
+    void titleBarVisibleChanged();
 
   private:
     int _count = 3;
     int _activeTabIndex = 0;
+    bool _titleBarVisible = true;
+    int _openSessions = 1;
 };
 
-/// A stand-in for one node of the pane tree (PaneProxy), exposing exactly the interface PaneNode.qml
-/// reads, so the recursive split renderer can be instantiated without a real terminal/display.
+/// A dynamic stand-in for a TerminalSession, exposing the full property + signal surface the QML
+/// (TerminalPane
+/// + SessionChrome) actually reads and connects to. Unlike a static stub, its properties are settable and
+/// carry NOTIFY signals, and it declares every signal the QML `.connect()`s or Connections-targets — so a
+/// test can DRIVE the state transitions (resize, opacity change) that real split lifecycle churn produces.
+/// This is what makes the connect-leak / null-deref class of split bug reproducible in a headless test.
+class MockSession: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int pageLineCount READ pageLineCount NOTIFY lineCountChanged)
+    Q_PROPERTY(int pageColumnsCount READ pageColumnsCount NOTIFY columnsCountChanged)
+    Q_PROPERTY(int historyLineCount READ historyLineCount CONSTANT)
+    Q_PROPERTY(bool showResizeIndicator READ showResizeIndicator CONSTANT)
+    Q_PROPERTY(int upTime READ upTime CONSTANT)
+    Q_PROPERTY(float opacity READ opacity NOTIFY opacityChanged)
+    Q_PROPERTY(QColor backgroundColor READ backgroundColor CONSTANT)
+    Q_PROPERTY(QString bellSource READ bellSource CONSTANT)
+    Q_PROPERTY(bool isScrollbarRight READ isScrollbarRight CONSTANT)
+    Q_PROPERTY(bool isScrollbarVisible READ isScrollbarVisible CONSTANT)
+
+  public:
+    [[nodiscard]] int pageLineCount() const { return _lines; }
+    [[nodiscard]] int pageColumnsCount() const { return _columns; }
+    [[nodiscard]] int historyLineCount() const { return 0; }
+    [[nodiscard]] bool showResizeIndicator() const { return true; }
+    [[nodiscard]] int upTime() const { return 5; } // > 1.0 so the resize popup path is exercised
+    [[nodiscard]] float opacity() const { return _opacity; }
+    [[nodiscard]] QColor backgroundColor() const { return QColor(Qt::black); }
+    [[nodiscard]] QString bellSource() const { return QString(); }
+    [[nodiscard]] bool isScrollbarRight() const { return true; }
+    [[nodiscard]] bool isScrollbarVisible() const { return false; }
+
+    // Drivers: mutate state and fire the NOTIFY the QML binds to, reproducing a live resize / opacity change.
+    void setPageSize(int columns, int lines)
+    {
+        _columns = columns;
+        _lines = lines;
+        emit columnsCountChanged();
+        emit lineCountChanged();
+    }
+    void setOpacity(float o)
+    {
+        _opacity = o;
+        emit opacityChanged();
+    }
+
+    // Permission dialog stubs (SessionChrome connects these signals to dialog .open slots).
+    Q_INVOKABLE void applyPendingFontChange(bool, bool) {}
+    Q_INVOKABLE void applyPendingPaste(bool, bool) {}
+    Q_INVOKABLE void executePendingBufferCapture(bool, bool) {}
+    Q_INVOKABLE void executeShowHostWritableStatusLine(bool, bool) {}
+
+  signals:
+    void lineCountChanged();
+    void columnsCountChanged();
+    void opacityChanged();
+    void onBell();
+    void onAlert();
+    void onShowNotification(QString const& title, QString const& body);
+    void onScrollOffsetChanged(int value);
+    void requestPermissionForFontChange();
+    void requestPermissionForBufferCapture();
+    void requestPermissionForShowHostWritableStatusLine();
+    void requestPermissionForPasteLargeFile();
+
+  private:
+    int _columns = 80;
+    int _lines = 25;
+    float _opacity = 1.0F;
+};
+
+/// A DYNAMIC stand-in for a PaneProxy (one node of the split tree). Unlike the old static mock, session /
+/// active / isLeaf / first / second are settable and carry NOTIFY signals, so a test can drive the exact
+/// transitions a real split/collapse produces: a leaf becoming a split node, a session rebinding
+/// null->non-null->null, a pane's active flag flipping. This is what exercises PaneNode's Loader
+/// re-activation and TerminalPane's onSessionChanged/paneActive handlers — where the split bugs actually
+/// live.
 class MockPaneProxy: public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(bool isLeaf READ isLeaf CONSTANT)
-    Q_PROPERTY(int orientation READ orientation CONSTANT)
-    Q_PROPERTY(double ratio READ ratio CONSTANT)
-    Q_PROPERTY(MockPaneProxy* first READ first CONSTANT)
-    Q_PROPERTY(MockPaneProxy* second READ second CONSTANT)
-    Q_PROPERTY(QObject* session READ session CONSTANT)
-    Q_PROPERTY(bool active READ active CONSTANT)
+    Q_PROPERTY(bool isLeaf READ isLeaf NOTIFY changed)
+    Q_PROPERTY(int orientation READ orientation NOTIFY changed)
+    Q_PROPERTY(double ratio READ ratio NOTIFY changed)
+    Q_PROPERTY(MockPaneProxy* first READ first NOTIFY changed)
+    Q_PROPERTY(MockPaneProxy* second READ second NOTIFY changed)
+    Q_PROPERTY(QObject* session READ session NOTIFY changed)
+    Q_PROPERTY(bool active READ active NOTIFY changed)
 
   public:
     explicit MockPaneProxy(bool leaf, MockPaneProxy* a = nullptr, MockPaneProxy* b = nullptr):
@@ -135,16 +243,57 @@ class MockPaneProxy: public QObject
     [[nodiscard]] double ratio() const { return 0.5; }
     [[nodiscard]] MockPaneProxy* first() const { return _first; }
     [[nodiscard]] MockPaneProxy* second() const { return _second; }
-    [[nodiscard]] QObject* session() const { return nullptr; }
-    [[nodiscard]] bool active() const { return false; }
+    [[nodiscard]] QObject* session() const { return _session; }
+    [[nodiscard]] bool active() const { return _active; }
 
     Q_INVOKABLE void setRatio(double) {}
     Q_INVOKABLE void activate() {}
+
+    // Drivers used by the behavioral split tests to reproduce lifecycle transitions.
+    void setSession(QObject* s)
+    {
+        if (_session == s)
+            return;
+        _session = s;
+        emit changed();
+    }
+    void setActive(bool a)
+    {
+        if (_active == a)
+            return;
+        _active = a;
+        emit changed();
+    }
+    /// Turn this leaf into a split node with two leaf children (as vtmux Pane::split does), then notify.
+    void becomeSplit(MockPaneProxy* a, MockPaneProxy* b)
+    {
+        _leaf = false;
+        _first = a;
+        _second = b;
+        a->setParent(this);
+        b->setParent(this);
+        emit changed();
+    }
+    /// Collapse this split node back to a leaf (as Tab::closePane absorbs the sibling), adopting @p
+    /// survivor's session, then notify.
+    void collapseToLeaf(QObject* survivorSession)
+    {
+        _leaf = true;
+        _first = nullptr;
+        _second = nullptr;
+        _session = survivorSession;
+        emit changed();
+    }
+
+  signals:
+    void changed();
 
   private:
     bool _leaf;
     MockPaneProxy* _first;
     MockPaneProxy* _second;
+    QObject* _session = nullptr;
+    bool _active = false;
 };
 
 /// A trivial stub so PaneNode.qml's leaf branch (TerminalPane → ContourTerminal) can instantiate in
@@ -159,6 +308,9 @@ class StubContourTerminal: public QQuickItem
 {
     Q_OBJECT
     Q_PROPERTY(QObject* session READ session WRITE setSession NOTIFY sessionChanged)
+    // Terminal.qml / TerminalPane read `fontSize` and connect a window-level `opacityChanged`; expose both
+    // so the pane instantiates against the stub.
+    Q_PROPERTY(double fontSize READ fontSize CONSTANT)
   public:
     [[nodiscard]] QObject* session() const { return _session; }
     void setSession(QObject* s)
@@ -169,45 +321,67 @@ class StubContourTerminal: public QQuickItem
             emit sessionChanged(s);
         }
     }
+    [[nodiscard]] double fontSize() const { return 12.0; }
   signals:
     void sessionChanged(QObject* session);
     void showNotification(QString const& title, QString const& body);
+    void opacityChanged(); //!< relayed opacity signal (single-pane).
+    void terminated();     //!< TerminalPane's onTerminated handler binds to this.
 
   private:
     QObject* _session = nullptr;
 };
 
-/// A stand-in for the TerminalDisplay (`vtui`) exposing just the titleBarVisible property main.qml
-/// binds the custom title bar's visibility to. Mirrors the real property's read/write/notify so the
-/// binding semantics (initial value from the profile, live toggle) can be exercised offscreen.
-class MockTitleBarDisplay: public QObject
-{
-    Q_OBJECT
-    Q_PROPERTY(
-        bool titleBarVisible READ titleBarVisible WRITE setTitleBarVisible NOTIFY titleBarVisibleChanged)
+// {{{ RAII QML-warning capture (see also the global gate in test_main.cpp)
+class QmlWarningCapture;
 
+// The active guard the message-handler trampoline appends to (a file-scope anonymous-namespace pointer,
+// because qInstallMessageHandler takes a plain function pointer). One guard alive at a time (tests are
+// sequential).
+QmlWarningCapture* activeWarningCapture = nullptr;
+
+/// RAII guard that installs a Qt message handler capturing warning/critical messages for the lifetime of the
+/// scope, then restores the previous handler on destruction. Exception-safe (restores during unwinding on a
+/// Catch2 REQUIRE throw) and de-duplicates the manual install/restore boilerplate.
+class QmlWarningCapture
+{
   public:
-    [[nodiscard]] bool titleBarVisible() const { return _visible; }
-    void setTitleBarVisible(bool v)
+    QmlWarningCapture()
     {
-        if (_visible != v)
-        {
-            _visible = v;
-            emit titleBarVisibleChanged();
-        }
+        activeWarningCapture = this;
+        _previous = qInstallMessageHandler(&QmlWarningCapture::trampoline);
+    }
+    ~QmlWarningCapture()
+    {
+        qInstallMessageHandler(_previous);
+        activeWarningCapture = nullptr;
+    }
+    QmlWarningCapture(QmlWarningCapture const&) = delete;
+    QmlWarningCapture& operator=(QmlWarningCapture const&) = delete;
+    QmlWarningCapture(QmlWarningCapture&&) = delete;
+    QmlWarningCapture& operator=(QmlWarningCapture&&) = delete;
+
+    [[nodiscard]] QStringList const& warnings() const noexcept { return _warnings; }
+
+    template <typename Predicate>
+    [[nodiscard]] long count(Predicate predicate) const
+    {
+        return std::count_if(_warnings.begin(), _warnings.end(), predicate);
     }
 
-    /// Mirrors TerminalDisplay::toggleTitleBar(): flips show_title_bar, i.e. switches between native
-    /// decoration and frameless CSD. main.qml derives both the frame and the custom-controls visibility
-    /// from this single value, so a toggle never produces a native+custom double decoration.
-    Q_INVOKABLE void toggleTitleBar() { setTitleBarVisible(!_visible); }
-
-  signals:
-    void titleBarVisibleChanged();
+    void record(QString const& msg) { _warnings << msg; }
 
   private:
-    bool _visible = true;
+    static void trampoline(QtMsgType type, QMessageLogContext const&, QString const& msg)
+    {
+        if (activeWarningCapture != nullptr && (type == QtWarningMsg || type == QtCriticalMsg))
+            activeWarningCapture->record(msg);
+    }
+
+    QStringList _warnings;
+    QtMessageHandler _previous = nullptr;
 };
+// }}}
 
 /// Loads a QML component from the contour resources and returns its error string list (empty when
 /// the component is valid). The mock controller and a dummy window are exposed as context
@@ -332,13 +506,9 @@ TEST_CASE("PaneNode renders a split tree without recursive-instantiation errors 
 
     // Capture any QML warning (a recursive-instantiation failure surfaces as a warning, not as a
     // component error, so we must watch the message handler).
-    static QStringList capturedWarnings;
-    capturedWarnings.clear();
-    auto handler = [](QtMsgType type, QMessageLogContext const&, QString const& msg) {
-        if (type == QtWarningMsg || type == QtCriticalMsg)
-            capturedWarnings << msg;
-    };
-    auto* previous = qInstallMessageHandler(handler);
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    QmlWarningCapture warnings;
 
     // A split node (vertical) with two leaf children.
     auto* leftLeaf = new MockPaneProxy(/*leaf*/ true);
@@ -360,17 +530,22 @@ TEST_CASE("PaneNode renders a split tree without recursive-instantiation errors 
     // Let the URL-loaded child Loaders instantiate their PaneNodes.
     QCoreApplication::processEvents();
 
-    qInstallMessageHandler(previous);
-
     REQUIRE(paneNode != nullptr);
-    for (auto const& w: capturedWarnings)
+    for (auto const& w: warnings.warnings())
         INFO("QML warning: " << w.toStdString());
     // No "instantiated recursively" / "Type PaneNode unavailable" warnings.
-    auto const recursionWarnings =
-        std::count_if(capturedWarnings.begin(), capturedWarnings.end(), [](QString const& w) {
-            return w.contains("recursively") || w.contains("unavailable");
-        });
+    auto const recursionWarnings = warnings.count(
+        [](QString const& w) { return w.contains("recursively") || w.contains("unavailable"); });
     CHECK(recursionWarnings == 0);
+
+    // The recursive split children are URL-loaded and receive `node` only via the deferred onLoaded
+    // assignment (after construction). If `node` were a `required property`, Qt would emit "Required property
+    // node was not initialized" for every child and leave it null, so the pane never renders (the
+    // transparent-split-pane bug). Assert that class of warning does not appear.
+    auto const uninitializedRequiredWarnings = warnings.count([](QString const& w) {
+        return w.contains("Required property") && w.contains("was not initialized");
+    });
+    CHECK(uninitializedRequiredWarnings == 0);
 }
 
 TEST_CASE("PaneNode survives node becoming null during split teardown (offscreen)",
@@ -383,14 +558,10 @@ TEST_CASE("PaneNode survives node becoming null during split teardown (offscreen
     // against a split node, then drop node to null and pump events, asserting no such TypeError.
     QQmlEngine engine;
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    static QStringList capturedWarnings;
-    capturedWarnings.clear();
-    auto handler = [](QtMsgType type, QMessageLogContext const&, QString const& msg) {
-        if (type == QtWarningMsg || type == QtCriticalMsg)
-            capturedWarnings << msg;
-    };
-    auto* previous = qInstallMessageHandler(handler);
+    QmlWarningCapture warnings;
 
     auto* leftLeaf = new MockPaneProxy(/*leaf*/ true);
     auto* rightLeaf = new MockPaneProxy(/*leaf*/ true);
@@ -409,14 +580,10 @@ TEST_CASE("PaneNode survives node becoming null during split teardown (offscreen
     paneNode->setProperty("node", QVariant::fromValue(static_cast<QObject*>(nullptr)));
     QCoreApplication::processEvents();
 
-    qInstallMessageHandler(previous);
-
-    for (auto const& w: capturedWarnings)
+    for (auto const& w: warnings.warnings())
         INFO("QML warning: " << w.toStdString());
     auto const nullDerefWarnings =
-        std::count_if(capturedWarnings.begin(), capturedWarnings.end(), [](QString const& w) {
-            return w.contains("TypeError") || w.contains("null");
-        });
+        warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("null"); });
     CHECK(nullDerefWarnings == 0);
 }
 
@@ -430,6 +597,11 @@ TEST_CASE("PaneNode.clampRatio bounds a divider drag instead of discarding it (o
     // arithmetic is verified without synthesizing a real splitter drag.
     QQmlEngine engine;
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    // The leaf renders a TerminalPane -> SessionChrome, whose bell Loader binds
+    // `active: terminalSessions.multimediaReady`; without the context property that binding throws a
+    // ReferenceError (now caught by the global QML-message gate in test_main.cpp).
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
     auto leaf = std::make_unique<MockPaneProxy>(/*leaf*/ true);
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
@@ -461,71 +633,31 @@ TEST_CASE("PaneNode.clampRatio bounds a divider drag instead of discarding it (o
     CHECK(clamp(0.42) == Catch::Approx(0.42));
 }
 
-TEST_CASE("TerminalPane grabs keyboard focus when it becomes the active pane (offscreen)",
-          "[contour][gui][qml][split][focus]")
-{
-    // Regression: keyboard pane navigation (FocusPane*) flips the active pane via the model, which
-    // moves the focus border but used to leave Qt keyboard focus on the previously focused pane.
-    // TerminalPane now grabs active focus on paneActive -> true, so typing follows the highlight.
-    QQmlEngine engine;
-    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
-
-    // A live window provides the focus scope that forceActiveFocus() needs under offscreen.
-    QQuickWindow window;
-    window.resize(400, 300);
-    window.show();
-
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TerminalPane.qml")));
-    // TerminalPane now depends on sibling components (RequestPermission, BellSound), so the engine may
-    // compile it asynchronously; pump events until it settles before asserting.
-    while (component.status() == QQmlComponent::Loading)
-        QCoreApplication::processEvents();
-    {
-        INFO("TerminalPane.qml status: " << static_cast<int>(component.status()));
-        INFO("TerminalPane.qml errors: " << component.errorString().toStdString());
-        REQUIRE(component.isReady());
-    }
-
-    // Start inactive, parented into the window's content item.
-    QVariantMap initial;
-    initial.insert("paneActive", false);
-    std::unique_ptr<QObject> obj(component.createWithInitialProperties(initial));
-    REQUIRE(obj != nullptr);
-    auto* pane = qobject_cast<QQuickItem*>(obj.get());
-    REQUIRE(pane != nullptr);
-    pane->setParentItem(window.contentItem());
-    pane->setWidth(400);
-    pane->setHeight(300);
-    QCoreApplication::processEvents();
-
-    REQUIRE_FALSE(pane->hasActiveFocus()); // nothing focused it yet
-
-    // Becoming the active pane (as a FocusPane* action would, via node.active -> paneActive) must
-    // pull keyboard focus to this terminal.
-    pane->setProperty("paneActive", true);
-    QCoreApplication::processEvents();
-
-    CHECK(pane->hasActiveFocus());
-}
+// (No offscreen "grabs keyboard focus" test: hasActiveFocus() does not resolve reliably under the offscreen
+// platform, so such an assertion is a FALSE guard — it passes with OR without the forceActiveFocus() fix.
+// Focus-follows-active is covered deterministically at the vtmux model layer; the "renders active pane
+// without error" GUI case is covered by the split behavioral test. The global QML-message gate in
+// test_main.cpp additionally fails the run on ANY QML error, so a stray ReferenceError cannot pass silently.)
 
 TEST_CASE("Custom window controls show only when the native frame is hidden (offscreen)",
           "[contour][gui][qml][titlebar]")
 {
-    // show_title_bar (vtui.titleBarVisible) now selects the window decoration on every OS:
+    // show_title_bar (terminalSessions.titleBarVisible, re-homed from the removed vtui) now selects the
+    // window decoration on every OS:
     //   true  -> native frame + OS window controls; our custom controls must be HIDDEN (no duplicate);
     //   false -> frameless + our custom controls SHOWN.
-    // main.qml wires `useCustomWindowControls: !vtui.titleBarVisible` while the tab strip itself stays
-    // visible regardless. This exercises that exact binding.
+    // main.qml wires `useCustomWindowControls: !terminalSessions.titleBarVisible` while the tab strip itself
+    // stays visible regardless. This exercises that exact binding.
     QQmlEngine engine;
-    MockTitleBarDisplay display;
-    display.setTitleBarVisible(false); // profile show_title_bar: false -> frameless CSD
-    engine.rootContext()->setContextProperty("vtui", &display);
+    MockTabController controller;
+    controller.setTitleBarVisible(false); // profile show_title_bar: false -> frameless CSD
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
     QQmlComponent component(&engine);
     component.setData(R"(
         import QtQuick
         Item {
-            property bool customControls: !vtui.titleBarVisible
+            property bool customControls: !terminalSessions.titleBarVisible
             property bool tabStripVisible: true
         }
     )",
@@ -545,7 +677,7 @@ TEST_CASE("Custom window controls show only when the native frame is hidden (off
     CHECK(root->property("tabStripVisible").toBool() == true);
 
     // Switching to native decoration hides our custom controls (the OS draws them).
-    display.setTitleBarVisible(true);
+    controller.setTitleBarVisible(true);
     CHECK(root->property("customControls").toBool() == false);
     CHECK(root->property("tabStripVisible").toBool() == true);
 }
@@ -554,11 +686,11 @@ TEST_CASE("ToggleTitleBar flips the native-frame axis without stacking decoratio
           "[contour][gui][qml][titlebar]")
 {
     // ToggleTitleBar switches between native decoration and frameless CSD. main.qml keeps a single
-    // source of truth (vtui.titleBarVisible) that drives BOTH the window frame (flags) and whether our
-    // custom controls render, so the two decorations can never stack into a double frame.
+    // source of truth (terminalSessions.titleBarVisible) that drives BOTH the window frame (flags) and
+    // whether our custom controls render, so the two decorations can never stack into a double frame.
     QQmlEngine engine;
-    MockTitleBarDisplay display; // starts visible (native frame)
-    engine.rootContext()->setContextProperty("vtui", &display);
+    MockTabController controller; // starts visible (native frame)
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
     QQmlComponent component(&engine);
     component.setData(R"(
@@ -566,8 +698,8 @@ TEST_CASE("ToggleTitleBar flips the native-frame axis without stacking decoratio
         import QtQuick.Window
         Item {
             // Mirror main.qml: frameless exactly when the native frame is off; custom controls then on.
-            property bool frameless: !vtui.titleBarVisible
-            property bool customControls: !vtui.titleBarVisible
+            property bool frameless: !terminalSessions.titleBarVisible
+            property bool customControls: !terminalSessions.titleBarVisible
         }
     )",
                       QUrl());
@@ -576,22 +708,345 @@ TEST_CASE("ToggleTitleBar flips the native-frame axis without stacking decoratio
     REQUIRE(root != nullptr);
 
     // Native frame on: not frameless, and no custom controls (single decoration).
-    REQUIRE(display.titleBarVisible() == true);
+    REQUIRE(controller.titleBarVisible() == true);
     CHECK(root->property("frameless").toBool() == false);
     CHECK(root->property("customControls").toBool() == false);
 
     // Toggle to frameless CSD: frameless and custom controls both on — still a single decoration.
-    display.toggleTitleBar();
-    CHECK(display.titleBarVisible() == false);
+    controller.toggleTitleBar();
+    CHECK(controller.titleBarVisible() == false);
     CHECK(root->property("frameless").toBool() == true);
     CHECK(root->property("customControls").toBool() == true);
 
     // Toggle back to native: frameless and custom controls both off. The two are always opposite of
     // each other, so a native frame is never stacked on top of custom controls.
-    display.toggleTitleBar();
-    CHECK(display.titleBarVisible() == true);
+    controller.toggleTitleBar();
+    CHECK(controller.titleBarVisible() == true);
     CHECK(root->property("frameless").toBool() == false);
     CHECK(root->property("customControls").toBool() == false);
+}
+
+TEST_CASE("PaneNode renders a SINGLE leaf as the whole window without TypeErrors (offscreen)",
+          "[contour][gui][qml][split]")
+{
+    // The pane tree is now the SOLE renderer: an unsplit terminal is a single-leaf tree (one TerminalPane).
+    // Instantiate PaneNode against a single leaf and assert its TerminalPane resolves with no
+    // "TypeError: ... of null" — the null-safety the old Terminal.qml test guarded, now on the leaf path.
+    QQmlEngine engine;
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QmlWarningCapture warnings;
+    MockPaneProxy leaf(/*leaf*/ true);
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("node", QVariant::fromValue(static_cast<QObject*>(&leaf)));
+    std::unique_ptr<QObject> paneNode(component.createWithInitialProperties(initial));
+    QCoreApplication::processEvents();
+
+    REQUIRE(paneNode != nullptr);
+    for (auto const& w: warnings.warnings())
+        INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
+          == 0);
+}
+
+TEST_CASE("TerminalPane.onTerminated closes the window only when it is the last session (offscreen)",
+          "[contour][gui][qml][split][close]")
+{
+    // With the pane tree as the sole renderer, TerminalPane.onTerminated is the ONLY window-close path.
+    // Bug "closing one pane of a split killed the whole window": after one pane exits, ONE survivor remains,
+    // so canCloseWindow() (false while any session remains) must NOT close the window. Only the last exit
+    // does.
+    QQmlEngine engine;
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QQuickWindow window;
+    window.resize(400, 300);
+    window.show();
+
+    QmlWarningCapture warnings;
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TerminalPane.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    REQUIRE(component.isReady());
+
+    std::unique_ptr<QObject> obj(component.create());
+    REQUIRE(obj != nullptr);
+    auto* pane = qobject_cast<QQuickItem*>(obj.get());
+    REQUIRE(pane != nullptr);
+    pane->setParentItem(window.contentItem());
+    QCoreApplication::processEvents();
+
+    // One survivor remains after the split collapsed -> must NOT close.
+    controller.setOpenSessions(1);
+    controller.canCloseWindowCalls = 0;
+    QMetaObject::invokeMethod(pane, "terminated");
+    QCoreApplication::processEvents();
+    CHECK(controller.canCloseWindowCalls == 1);
+    CHECK(window.isVisible());
+
+    // Last pane exits: no sessions remain -> canCloseWindow() true -> close.
+    controller.setOpenSessions(0);
+    controller.canCloseWindowCalls = 0;
+    QMetaObject::invokeMethod(pane, "terminated");
+    QCoreApplication::processEvents();
+    CHECK(controller.canCloseWindowCalls == 1);
+
+    for (auto const& w: warnings.warnings())
+        INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
+          == 0);
+}
+
+// ============================================================================================
+// Split-lifecycle behavioral tests: DRIVE the state transitions a real split/collapse produces (against the
+// dynamic MockSession/MockPaneProxy) and assert BEHAVIOR — not just that the QML loads. Each corresponds to a
+// bug that shipped this branch and slipped through the load-only tests.
+// ============================================================================================
+
+namespace
+{
+/// Instantiate PaneNode.qml against a proxy tree, parented into a live offscreen window. Returns the root
+/// QQuickItem (owned by the caller) and pumps the event loop so child Loaders instantiate.
+[[nodiscard]] std::unique_ptr<QObject> instantiatePaneNode(QQmlEngine& engine,
+                                                           QQuickWindow& window,
+                                                           MockPaneProxy& node)
+{
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    if (!component.isReady())
+        return nullptr;
+
+    QVariantMap initial;
+    initial.insert("node", QVariant::fromValue(static_cast<QObject*>(&node)));
+    std::unique_ptr<QObject> root(component.createWithInitialProperties(initial));
+    if (auto* item = qobject_cast<QQuickItem*>(root.get()))
+    {
+        item->setParentItem(window.contentItem());
+        item->setWidth(400);
+        item->setHeight(300);
+    }
+    QCoreApplication::processEvents();
+    return root;
+}
+} // namespace
+
+TEST_CASE("split: rebinding a leaf's session through null does not raise a TypeError (offscreen)",
+          "[contour][gui][qml][split][behavior]")
+{
+    // Regression for the "Cannot read property 'session' of null" burst on split: the size-popup was wired
+    // with session.lineCountChanged.connect(updateSizeWidget) in onSessionChanged, re-connecting (never
+    // disconnecting) on every session rebind, so stale handlers fired on a torn-down pane. Drive that churn
+    // (A -> null -> B, resizing each live session) and assert no TypeError.
+    QQmlEngine engine;
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QQuickWindow window;
+    window.resize(400, 300);
+    window.show();
+
+    MockSession sessionA;
+    MockSession sessionB;
+    MockPaneProxy leaf(/*leaf*/ true);
+    leaf.setSession(&sessionA);
+
+    QmlWarningCapture warnings;
+
+    auto root = instantiatePaneNode(engine, window, leaf);
+    REQUIRE(root != nullptr);
+
+    sessionA.setPageSize(100, 40);
+    QCoreApplication::processEvents();
+    leaf.setSession(nullptr);
+    QCoreApplication::processEvents();
+    leaf.setSession(&sessionB);
+    QCoreApplication::processEvents();
+    sessionB.setPageSize(120, 50); // a stale handler bound to A (or a null pane) would throw here
+    QCoreApplication::processEvents();
+
+    for (auto const& w: warnings.warnings())
+        INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
+          == 0);
+}
+
+TEST_CASE("split: a pane created already-active renders without error (offscreen)",
+          "[contour][gui][qml][split][behavior]")
+{
+    // A split makes the NEW pane active from construction. Assert a from-birth-active leaf instantiates and
+    // renders with no QML error. Whether it holds keyboard focus is NOT asserted (unreliable offscreen);
+    // focus-follows-active is tested at the vtmux model layer.
+    QQmlEngine engine;
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QQuickWindow window;
+    window.resize(400, 300);
+    window.show();
+
+    QmlWarningCapture warnings;
+
+    MockSession session;
+    MockPaneProxy leaf(/*leaf*/ true);
+    leaf.setSession(&session);
+    leaf.setActive(true);
+
+    auto root = instantiatePaneNode(engine, window, leaf);
+    REQUIRE(root != nullptr);
+    QCoreApplication::processEvents();
+
+    auto* rootItem = qobject_cast<QQuickItem*>(root.get());
+    REQUIRE(rootItem != nullptr);
+    auto* pane = rootItem->findChild<StubContourTerminal*>();
+    REQUIRE(pane != nullptr);
+    CHECK(pane->property("paneActive").toBool());
+    for (auto const& w: warnings.warnings())
+        INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
+          == 0);
+}
+
+TEST_CASE("split: a leaf becoming a split node renders two panes without errors (offscreen)",
+          "[contour][gui][qml][split][behavior]")
+{
+    // Drive the split-CREATION transition: a single leaf becomes a split node with two leaf children, which
+    // must flip PaneNode's Loader from the leaf branch to the SplitView branch and instantiate two child
+    // TerminalPanes — with no TypeError / recursive-instantiation / required-property warning.
+    QQmlEngine engine;
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QQuickWindow window;
+    window.resize(400, 300);
+    window.show();
+
+    MockSession original;
+    MockPaneProxy rootNode(/*leaf*/ true);
+    rootNode.setSession(&original);
+
+    QmlWarningCapture warnings;
+
+    auto rootObj = instantiatePaneNode(engine, window, rootNode);
+    REQUIRE(rootObj != nullptr);
+    QCoreApplication::processEvents();
+
+    auto* leftLeaf = new MockPaneProxy(/*leaf*/ true);
+    leftLeaf->setSession(&original);
+    auto* rightLeaf = new MockPaneProxy(/*leaf*/ true);
+    MockSession newSession;
+    rightLeaf->setSession(&newSession);
+    rightLeaf->setActive(true);
+    rootNode.becomeSplit(leftLeaf, rightLeaf);
+    QCoreApplication::processEvents();
+
+    for (auto const& w: warnings.warnings())
+        INFO("QML warning: " << w.toStdString());
+    auto const badWarnings = warnings.count([](QString const& w) {
+        return w.contains("TypeError") || w.contains("of null") || w.contains("recursively")
+               || (w.contains("Required property") && w.contains("not initialized"));
+    });
+    CHECK(badWarnings == 0);
+}
+
+TEST_CASE("split: collapsing a split node back to a leaf keeps the survivor rendering (offscreen)",
+          "[contour][gui][qml][split][behavior]")
+{
+    // Drive the COLLAPSE transition (the black-terminal bug's shape): a split node collapses back to a single
+    // leaf that adopts the surviving session. PaneNode must flip back to the leaf branch and render a
+    // TerminalPane bound to the survivor — no null-deref.
+    QQmlEngine engine;
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QQuickWindow window;
+    window.resize(400, 300);
+    window.show();
+
+    MockSession survivor;
+    MockSession closing;
+    auto* left = new MockPaneProxy(/*leaf*/ true);
+    left->setSession(&survivor);
+    auto* right = new MockPaneProxy(/*leaf*/ true);
+    right->setSession(&closing);
+    MockPaneProxy rootNode(/*leaf*/ false, left, right);
+
+    QmlWarningCapture warnings;
+
+    auto rootObj = instantiatePaneNode(engine, window, rootNode);
+    REQUIRE(rootObj != nullptr);
+    QCoreApplication::processEvents();
+
+    rootNode.collapseToLeaf(&survivor);
+    rootNode.setActive(true);
+    QCoreApplication::processEvents();
+
+    survivor.setPageSize(90, 30);
+    survivor.setOpacity(0.8F);
+    QCoreApplication::processEvents();
+
+    for (auto const& w: warnings.warnings())
+        INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
+          == 0);
+
+    auto* rootItem = qobject_cast<QQuickItem*>(rootObj.get());
+    REQUIRE(rootItem != nullptr);
+    auto* pane = rootItem->findChild<StubContourTerminal*>();
+    REQUIRE(pane != nullptr);
+    CHECK(pane->session() == static_cast<QObject*>(&survivor));
+}
+
+TEST_CASE("split: TerminalPane opacity follows the session opacity (offscreen)",
+          "[contour][gui][qml][split][behavior]")
+{
+    // TerminalPane.opacity binds to session.opacity. Assert the binding is live and null-guarded.
+    QQmlEngine engine;
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QQuickWindow window;
+    window.resize(400, 300);
+    window.show();
+
+    MockSession session;
+    session.setOpacity(0.5F);
+    MockPaneProxy leaf(/*leaf*/ true);
+    leaf.setSession(&session);
+
+    auto root = instantiatePaneNode(engine, window, leaf);
+    REQUIRE(root != nullptr);
+    QCoreApplication::processEvents();
+
+    auto* rootItem = qobject_cast<QQuickItem*>(root.get());
+    REQUIRE(rootItem != nullptr);
+    auto* pane = rootItem->findChild<StubContourTerminal*>();
+    REQUIRE(pane != nullptr);
+    CHECK(pane->opacity() == Catch::Approx(0.5));
+
+    session.setOpacity(0.9F);
+    QCoreApplication::processEvents();
+    CHECK(pane->opacity() == Catch::Approx(0.9));
+
+    leaf.setSession(nullptr);
+    QCoreApplication::processEvents();
+    CHECK(pane->opacity() == Catch::Approx(1.0));
 }
 
 #include "QmlComponents_test.moc"

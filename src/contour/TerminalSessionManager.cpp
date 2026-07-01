@@ -284,7 +284,52 @@ void TerminalSessionManager::detachDisplay(display::TerminalDisplay* display) no
 void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
 {
     managerLog()("Setting active display to {}", (void*) display);
+
+    // Bridge the (window-level) title-bar and implicit-size state of whichever display is active to the
+    // manager's own signals, so the QML window bindings (flags/controls/resize border/initial size) that
+    // are bound to terminalSessions.* re-evaluate when the active display changes or toggles its title bar.
+    // Re-point the connections from the previous active display to the new one.
+    if (_activeDisplay != display)
+    {
+        if (_activeDisplay != nullptr)
+        {
+            QObject::disconnect(_activeDisplay,
+                                &display::TerminalDisplay::titleBarVisibleChanged,
+                                this,
+                                &TerminalSessionManager::titleBarVisibleChanged);
+            QObject::disconnect(_activeDisplay,
+                                &display::TerminalDisplay::implicitWidthChanged,
+                                this,
+                                &TerminalSessionManager::implicitWindowSizeChanged);
+            QObject::disconnect(_activeDisplay,
+                                &display::TerminalDisplay::implicitHeightChanged,
+                                this,
+                                &TerminalSessionManager::implicitWindowSizeChanged);
+        }
+        if (display != nullptr)
+        {
+            QObject::connect(display,
+                             &display::TerminalDisplay::titleBarVisibleChanged,
+                             this,
+                             &TerminalSessionManager::titleBarVisibleChanged);
+            QObject::connect(display,
+                             &display::TerminalDisplay::implicitWidthChanged,
+                             this,
+                             &TerminalSessionManager::implicitWindowSizeChanged);
+            QObject::connect(display,
+                             &display::TerminalDisplay::implicitHeightChanged,
+                             this,
+                             &TerminalSessionManager::implicitWindowSizeChanged);
+        }
+    }
+
     _activeDisplay = display;
+
+    // The new active display may already have a different title-bar / implicit-size state than the previous
+    // one, so re-notify the window bindings now (the per-signal connections above only fire on future
+    // changes, not on this switch).
+    emit titleBarVisibleChanged();
+    emit implicitWindowSizeChanged();
 
     // if we have a session in nullptr display, set it to this one
     if (_displayStates[nullptr].currentSession != nullptr)
@@ -1106,6 +1151,20 @@ TerminalSession* TerminalSessionManager::activeSession() const noexcept
     return it != _displayStates.end() ? it->second.currentSession : nullptr;
 }
 
+int TerminalSessionManager::implicitWindowWidth() const noexcept
+{
+    // The single authority for a display's implicit size is TerminalDisplay::updateImplicitSize (cell size ×
+    // configured terminal size at the current DPR). Re-expose it rather than re-deriving the math here (which
+    // would duplicate that logic). 0 before any display exists — main.qml applies the size via a one-shot on
+    // implicitWindowSizeChanged, which fires once the first pane's display attaches and computes it.
+    return _activeDisplay != nullptr ? static_cast<int>(std::lround(_activeDisplay->implicitWidth())) : 0;
+}
+
+int TerminalSessionManager::implicitWindowHeight() const noexcept
+{
+    return _activeDisplay != nullptr ? static_cast<int>(std::lround(_activeDisplay->implicitHeight())) : 0;
+}
+
 bool TerminalSessionManager::isActivePane(vtmux::PaneId id) const noexcept
 {
     if (auto* tab = activeModelTab())
@@ -1189,14 +1248,20 @@ void TerminalSessionManager::rebuildActiveTabPaneProxies()
 
 bool TerminalSessionManager::canCloseWindow() const noexcept
 {
-    auto const displayCount = std::count_if(
-        _displayStates.begin(), _displayStates.end(), [](auto const& pair) { return pair.first != nullptr; });
-
-    if (_sessions.size() >= static_cast<size_t>(displayCount))
+    // In the pane-tree model each pane is one session; the window must close only when the LAST session has
+    // exited. This runs from TerminalPane.onTerminated, reached AFTER removeSession() (same onClosed() call,
+    // synchronous) has already erased the closing session and collapsed its split via closePane(). So an
+    // empty _sessions means this was the last pane; while any pane remains, the split just collapsed and the
+    // window must stay open.
+    //
+    // The old `_sessions.size() >= displayCount` test was wrong here: when a pane's shell exits, _sessions is
+    // decremented immediately, but the dead pane's TerminalDisplay is not removed from _displayStates until
+    // the QML object is GC'd (a later event-loop turn). So displayCount transiently exceeded _sessions.size()
+    // (e.g. 2 displays vs 1 surviving session), making the test wrongly report the window as closeable and
+    // terminating the whole window when only one pane of a split had exited.
+    if (!_sessions.empty())
     {
-        managerLog()(
-            "Cannot close window: there are {} sessions, and {} displays.", _sessions.size(), displayCount);
-        // If there are more sessions than displays, we cannot close the window.
+        managerLog()("Cannot close window: {} session(s) still open.", _sessions.size());
         return false;
     }
 

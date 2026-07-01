@@ -222,6 +222,12 @@ namespace
 
     QScreen* findScreenWithBiggestWidth(QScreen* startScreen)
     {
+        // A window that is mapped but not yet assigned to a screen returns a null screen(); guard so the
+        // virtualSiblings() walk below does not dereference null. QQuickWindow::setScreen(nullptr) is a safe
+        // no-op, so returning null here is fine for the caller.
+        if (startScreen == nullptr)
+            return nullptr;
+
         auto* screenToUse = startScreen;
         for (auto* screen: startScreen->virtualSiblings())
         {
@@ -594,7 +600,13 @@ void TerminalDisplay::releaseResources()
     // thread with the context current — so defer it via a render job. The renderer may already be gone
     // (the scene-graph node's releaseResources() destroys it on the render thread), in which case there
     // is nothing to schedule.
-    if (_renderTarget)
+    // window() can already be null if the item was unparented from the scene before releaseResources() runs;
+    // scheduling a render job then would dereference null. The CleanupJob takes ownership of _renderTarget
+    // and deletes it on the render thread, so only null the pointer once the job has taken it. Without a
+    // window we must NOT null _renderTarget here — otherwise the deferred destroyRenderer() (via the
+    // scene-graph node's releaseResources()/cleanup(), which runs on the render thread) would see nullptr and
+    // the renderer would leak. Leaving it set lets that path delete it.
+    if (_renderTarget && window())
     {
         window()->scheduleRenderJob(new CleanupJob(_renderTarget), QQuickWindow::BeforeSynchronizingStage);
         _renderTarget = nullptr;
@@ -785,7 +797,14 @@ void TerminalDisplay::onSceneGrapheInitialized()
 
 void TerminalDisplay::onBeforeSynchronize()
 {
-    if (!_session)
+    // Reached on the render thread during the sync phase. Closing a split pane unparents this item from the
+    // scene graph, so window() starts returning null while the TerminalDisplay object is still alive and
+    // still connected to beforeSynchronizing (QQuickItem clears its window before ~QObject runs the
+    // this-context auto-disconnect). _session is nulled independently by releaseSession(), so it is not a
+    // reliable proxy for window() liveness — guard window() too, or line 795's window()->screen() faults on
+    // a null QWindow. Matches the window() guards the sibling render paths already use (see recordFrameRhi,
+    // scheduleRedraw).
+    if (!_session || !window())
         return;
 
     if (width() < 1.0 || height() < 1.0)
@@ -958,7 +977,13 @@ void TerminalDisplay::createRenderer()
     // Calling it synchronously here (render thread, GUI blocked) causes setWindowNormal()
     // → showNormal() to trigger a Wayland configure event that uses the stale pre-DPR-correction
     // window geometry (e.g. 1115x585 at DPR 2.0), reverting the terminal to the wrong size.
-    post([this]() { _session->configureDisplay(); });
+    // Re-check _session inside the lambda: post() runs it later on the GUI event loop, and the display can be
+    // torn down (releaseSession -> _session == null) between this schedule and its dispatch, matching the
+    // inner-guard pattern of the other post() lambdas here (863/1134).
+    post([this]() {
+        if (_session)
+            _session->configureDisplay();
+    });
 
     displayLog()("Implicit size: {}x{}", implicitWidth(), implicitHeight());
 }
@@ -985,7 +1010,11 @@ void TerminalDisplay::prepareFrameRhi(QRhi* rhi,
                                       QRhiRenderPassDescriptor* rpDesc,
                                       QMatrix4x4 const& itemToClip)
 {
-    if (!_renderTarget || rhi == nullptr || cb == nullptr || rt == nullptr || rpDesc == nullptr)
+    // _session is nulled by releaseSession() independently of _renderTarget teardown, so on pane close there
+    // is a window where _renderTarget is still set but _session is already null. paint() (below) dereferences
+    // the session via terminal()/_session->terminal(), which is assert-only (a no-op under NDEBUG) — so guard
+    // _session here to avoid a null deref in release builds.
+    if (!_renderTarget || !_session || rhi == nullptr || cb == nullptr || rt == nullptr || rpDesc == nullptr)
         return;
 
     // Lazily flag the renderer as initialized on the first prepare (sets host image-row alignment); the
@@ -1064,7 +1093,9 @@ void TerminalDisplay::paint()
     if (_startTime == steady_clock::time_point::min())
         _startTime = steady_clock::now();
 
-    if (!_renderTarget)
+    // Everything below dereferences the session via terminal() (assert-only, so a null deref in release);
+    // _session can be null here while _renderTarget still lives during pane-close teardown.
+    if (!_renderTarget || !_session)
         return;
 
     try
@@ -2085,6 +2116,17 @@ void TerminalDisplay::setHyperlinkDecoration(vtrasterizer::Decorator normal, vtr
 // {{{ TerminalDisplay: terminal events
 void TerminalDisplay::scheduleRedraw()
 {
+    // Reached synchronously from the backend/parser thread (TerminalSession::screenUpdated ->
+    // scheduleRedraw) while a VT sequence is processed. During a split, the GUI thread hands this session
+    // from the hidden single-pane display to the new pane display: attachDisplay() calls the old display's
+    // releaseSession(), which nulls its _session before the session's _display is repointed. In that window
+    // the parser thread can land here on a display whose _session is already null. A released display has
+    // nothing to redraw, so bail out. hasSession() reads _session once; the pointed-to session (when
+    // non-null) owns the very thread calling us and is joined in its own destructor, so it cannot be freed
+    // mid-call — the check is sufficient without a lock.
+    if (!hasSession())
+        return;
+
     auto const currentHistoryLineCount = terminal().currentScreen().historyLineCount();
     if (currentHistoryLineCount != _lastHistoryLineCount)
     {
@@ -2093,8 +2135,14 @@ void TerminalDisplay::scheduleRedraw()
     }
 
     // QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
-    if (window())
-        post([this]() { window()->update(); });
+    // post() queues the lambda to run LATER on the GUI event loop, so window() must be re-checked at the
+    // point of USE, not only here at scheduling time: closing a split pane unparents this item (window() ->
+    // null) between the post and its dispatch, and window()->update() on the null window then segfaults
+    // (member call on null QQuickWindow). Guarding only the outer post() is a check-then-use-later race.
+    post([this]() {
+        if (window())
+            window()->update();
+    });
 }
 
 void TerminalDisplay::renderBufferUpdated()
@@ -2110,6 +2158,12 @@ void TerminalDisplay::closeDisplay()
 
 void TerminalDisplay::onSelectionCompleted()
 {
+    // Like scheduleRedraw(), this can be reached from the backend thread during a split-pane session
+    // hand-off, when this display's _session was just nulled by releaseSession(). Extracting the selection
+    // then would dereference the null session via terminal(); a released display owns no selection, so bail.
+    if (!hasSession())
+        return;
+
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = terminal().extractSelectionText();

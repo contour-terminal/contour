@@ -151,6 +151,27 @@ class TerminalSessionManager: public QAbstractListModel, public vtmux::ModelEven
     Q_PROPERTY(contour::TerminalSession* activeSession READ activeSession NOTIFY activeSessionChanged)
     [[nodiscard]] TerminalSession* activeSession() const noexcept;
 
+    /// Whether the custom title bar (and, on every OS, the native window frame) should be shown. This is a
+    /// WINDOW-level property (one frame per window, not per pane): main.qml binds the window flags, the
+    /// custom window controls and the resize border to it. It originates in the active pane's display
+    /// (TerminalDisplay::titleBarVisible, seeded from the profile's show_title_bar and flipped by the
+    /// ToggleTitleBar action); this manager re-exposes it so the window bindings do not depend on a specific
+    /// single-pane display existing. Defaults to true before any display has focused in.
+    Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
+    [[nodiscard]] bool titleBarVisible() const noexcept
+    {
+        return _activeDisplay != nullptr ? _activeDisplay->titleBarVisible() : true;
+    }
+
+    /// The active display's implicit (configured) size in whole logical pixels, for the one-shot initial
+    /// window sizing in main.qml. Falls back to a profile-derived size before a display exists so a window
+    /// mapped before the first pane attaches still gets a sane geometry. NOTIFY fires once the real size
+    /// becomes available (after the first pane's session attaches), so main.qml can apply it via a one-shot.
+    Q_PROPERTY(int implicitWindowWidth READ implicitWindowWidth NOTIFY implicitWindowSizeChanged)
+    Q_PROPERTY(int implicitWindowHeight READ implicitWindowHeight NOTIFY implicitWindowSizeChanged)
+    [[nodiscard]] int implicitWindowWidth() const noexcept;
+    [[nodiscard]] int implicitWindowHeight() const noexcept;
+
     /// The TerminalSession backing @p id, or nullptr. (Public for PaneProxy.)
     [[nodiscard]] TerminalSession* sessionForId(vtmux::SessionId id) const noexcept;
     /// Whether @p id is the active leaf of the active tab.
@@ -240,6 +261,8 @@ class TerminalSessionManager: public QAbstractListModel, public vtmux::ModelEven
     void multimediaReadyChanged();
     void activeTabIndexChanged();
     void activeTabRootPaneChanged();
+    void titleBarVisibleChanged();
+    void implicitWindowSizeChanged();
     /// Emitted when the active tab's active-pane session may have changed (tab switch, tree rebuild, or
     /// a pane-focus change). Drives window-level bindings (e.g. the window title) bound to activeSession.
     void activeSessionChanged();

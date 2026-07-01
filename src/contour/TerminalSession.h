@@ -121,13 +121,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     }
     QString pathToBackground() const
     {
-        if (const auto& p =
-                std::get_if<std::filesystem::path>(&(_terminal.colorPalette().backgroundImage->location)))
-        {
-            return QString("file:") + QString(p->string().c_str());
-        }
-        else
+        // backgroundImage is a shared_ptr that is null whenever no background image is configured (the
+        // common case), so it must be checked before dereferencing ->location — otherwise this is a null
+        // member access (undefined behavior, caught by UBSan) even though it happens not to crash in
+        // practice.
+        auto const& backgroundImage = _terminal.colorPalette().backgroundImage;
+        if (!backgroundImage)
             return QString();
+
+        if (const auto* p = std::get_if<std::filesystem::path>(&backgroundImage->location))
+            return QString("file:") + QString(p->string().c_str());
+
+        return QString();
     }
     QColor getBackgroundColor() const noexcept
     {
