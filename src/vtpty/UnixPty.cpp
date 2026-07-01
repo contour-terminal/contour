@@ -309,24 +309,17 @@ std::optional<Pty::ReadResult> UnixPty::read(crispy::buffer_object<char>& storag
                                              size_t size)
 {
     // This runs on the session's read thread while close() may run concurrently on the GUI thread
-    // (e.g. when a GUI tab is closed). close() mutates _readSelector (cancel_read) under _mutex, so
-    // every _readSelector inspection/mutation here must be serialized under the same _mutex -- except
-    // the blocking wait_one(), which must stay unlocked or close() would block on _mutex and never
-    // reach wakeupReader(), deadlocking the teardown. The wakeup writes a separate, always-registered
-    // eventfd/break-pipe, so a blocked wait_one() is woken regardless of the selector's fd contents.
+    // (e.g. when a GUI tab is closed). _readSelector is internally thread-safe: want_read/cancel_read/
+    // wait_one serialize their own access to the registered-fd set, so the blocking wait_one() is safe
+    // to call unlocked -- and it MUST stay unlocked, or a concurrent close() would block trying to
+    // cancel_read()/wakeup() and the teardown would deadlock. The wakeup writes a separate,
+    // always-registered eventfd/break-pipe, so a blocked wait_one() is woken regardless of the
+    // selector's fd contents.
 
-    // Phase 1: locked pre-check. The selector can be emptied by a concurrent close() (master) plus a
-    // prior stdout-fastpipe EOF; reading from an empty selector is a no-op, not an error.
-    {
-        auto const _ = std::scoped_lock { _mutex };
-        if (_readSelector.size() == 0)
-        {
-            errno = EAGAIN;
-            return std::nullopt;
-        }
-    }
-
-    // Phase 2: blocking wait WITHOUT _mutex, so a concurrent close() can acquire _mutex and wake us.
+    // Blocking wait. On an empty selector (master closed by a concurrent close() plus a prior
+    // stdout-fastpipe EOF) wait_one() blocks on the break-pipe until the timeout or the next wakeup(),
+    // rather than spinning: returning EAGAIN immediately here would make the caller's read loop busy-spin
+    // a CPU core until the session is torn down.
     auto const fd = _readSelector.wait_one(timeout);
     if (!fd.has_value())
     {
@@ -334,11 +327,14 @@ std::optional<Pty::ReadResult> UnixPty::read(crispy::buffer_object<char>& storag
         return std::nullopt;
     }
 
-    // Phase 3: locked read and bookkeeping. readSome() may cancel_read the stdout-fastpipe on EOF, so
-    // it must mutate _readSelector under _mutex too. Re-validate first: if close() ran between phase 2
-    // and here, the master fd is gone -- do not ::read() a closed fd. A fastpipe fd remains drainable.
+    // Locked read and bookkeeping. readSome() may cancel_read the stdout-fastpipe on EOF, so it mutates
+    // shared state under _mutex. Re-validate first: if close() ran between the wait and here it removed
+    // the master fd from the selector, so the returned fd is no longer wanted -- do not ::read() a
+    // just-closed (and possibly already recycled) fd. A fastpipe fd that is still wanted remains
+    // drainable. is_wanted() reflects the current registration on both selector backends, so this
+    // detects the concurrent close() that the stale `_masterFd.is_closed()` check could not.
     auto const _ = std::scoped_lock { _mutex };
-    if (_readSelector.size() == 0 || (*fd == _masterFd.get() && _masterFd.is_closed()))
+    if (!_readSelector.is_wanted(*fd))
     {
         errno = EAGAIN;
         return std::nullopt;
