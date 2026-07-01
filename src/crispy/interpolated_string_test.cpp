@@ -37,71 +37,49 @@ TEST_CASE("interpolated_string.parse_interpolated_string")
     REQUIRE(std::holds_alternative<crispy::string_interpolation>(interpolated[3]));
 }
 
-TEST_CASE("interpolated_string.escaped_braces")
+TEST_CASE("interpolated_string.literal_braces_pass_through")
 {
+    // There is no brace escaping: doubled braces are not collapsed, so a template that contains "{{...}}"
+    // is parsed as a placeholder (matching the pre-escaping behavior we restored for compatibility).
     using crispy::parse_interpolated_string;
 
-    auto const concat = [](crispy::interpolated_string const& parts) {
-        std::string out;
-        for (auto const& p: parts)
-            if (std::holds_alternative<std::string_view>(p))
-                out += std::get<std::string_view>(p);
-        return out;
-    };
+    auto const parsed = parse_interpolated_string("{{VTType}}");
+    // "{{VTType}}" -> first "{...}" run is "{VTType" (a placeholder), then a trailing literal "}".
+    REQUIRE(parsed.size() == 2);
+    REQUIRE(std::holds_alternative<crispy::string_interpolation>(parsed[0]));
+    CHECK(std::get<crispy::string_interpolation>(parsed[0]).name == "{VTType");
+    REQUIRE(std::holds_alternative<std::string_view>(parsed[1]));
+    CHECK(std::get<std::string_view>(parsed[1]) == "}");
+}
 
-    SECTION("'{{' collapses to a literal '{'")
+TEST_CASE("interpolated_string.whole_captures_exact_source_slice")
+{
+    // Each parsed interpolation carries its exact original "{...}" slice (braces included) so consumers can
+    // echo an unrecognized placeholder verbatim. `whole` is NOT normalized: it is the literal source text.
+    using crispy::parse_interpolated_string;
+
+    SECTION("a simple placeholder")
     {
-        auto const parsed = parse_interpolated_string("a{{b");
-        // No interpolation fragment should be produced for an escaped brace.
-        for (auto const& p: parsed)
-            CHECK_FALSE(std::holds_alternative<crispy::string_interpolation>(p));
-        CHECK(concat(parsed) == "a{b");
+        auto const parsed = parse_interpolated_string("{VTType}");
+        REQUIRE(parsed.size() == 1);
+        REQUIRE(std::holds_alternative<crispy::string_interpolation>(parsed[0]));
+        CHECK(std::get<crispy::string_interpolation>(parsed[0]).whole == "{VTType}");
     }
 
-    SECTION("'}}' collapses to a literal '}'")
+    SECTION("flags and attributes are preserved verbatim in whole, in original order")
     {
-        auto const parsed = parse_interpolated_string("a}}b");
-        CHECK(concat(parsed) == "a}b");
+        auto const parsed = parse_interpolated_string("pre {Clock:Bold,Color=#FFFF00} post");
+        REQUIRE(parsed.size() == 3);
+        REQUIRE(std::holds_alternative<crispy::string_interpolation>(parsed[1]));
+        // The parsed flags/attributes are order-normalized (set/map), but whole is the raw slice.
+        CHECK(std::get<crispy::string_interpolation>(parsed[1]).whole == "{Clock:Bold,Color=#FFFF00}");
     }
 
-    SECTION("a doubled-brace wrapped token is literal, not an interpolation")
+    SECTION("an unterminated placeholder captures to the end of input")
     {
-        auto const parsed = parse_interpolated_string("task {{123}}");
-        for (auto const& p: parsed)
-            CHECK_FALSE(std::holds_alternative<crispy::string_interpolation>(p));
-        CHECK(concat(parsed) == "task {123}");
-    }
-
-    SECTION("a real placeholder still parses alongside escaped braces")
-    {
-        auto const parsed = parse_interpolated_string("{{x}} {Clock}");
-        // Exactly one real interpolation: {Clock}.
-        int interpolations = 0;
-        for (auto const& p: parsed)
-            if (std::holds_alternative<crispy::string_interpolation>(p))
-            {
-                ++interpolations;
-                CHECK(std::get<crispy::string_interpolation>(p).name == "Clock");
-            }
-        CHECK(interpolations == 1);
-        CHECK(concat(parsed) == "{x} "); // the literal part, placeholder excluded
-    }
-
-    SECTION("a single unpaired '}' is still emitted verbatim (only DOUBLED braces are escapes)")
-    {
-        // Compatibility boundary: only a *doubled* brace is an escape. A lone '}' must pass through
-        // unchanged exactly as the pre-escaping parser emitted it, so the brace-escaping feature does
-        // not silently alter status-line templates that contain a single literal '}'.
-        auto const parsed = parse_interpolated_string("a } b");
-        for (auto const& p: parsed)
-            CHECK_FALSE(std::holds_alternative<crispy::string_interpolation>(p));
-        CHECK(concat(parsed) == "a } b");
-    }
-
-    SECTION("an odd run of closing braces collapses pairs and keeps the trailing single brace")
-    {
-        // "}}}" -> one escaped "}" (the leading pair) followed by a lone literal "}".
-        auto const parsed = parse_interpolated_string("x}}}y");
-        CHECK(concat(parsed) == "x}}y");
+        auto const parsed = parse_interpolated_string("x {Unclosed");
+        REQUIRE(parsed.size() == 2);
+        REQUIRE(std::holds_alternative<crispy::string_interpolation>(parsed[1]));
+        CHECK(std::get<crispy::string_interpolation>(parsed[1]).whole == "{Unclosed");
     }
 }

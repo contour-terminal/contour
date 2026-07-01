@@ -22,13 +22,16 @@ std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx)
         }
 
         // A `{Name:flags,key=value}` placeholder. Tab labels are plain text, so flags/attributes are
-        // ignored; only the name selects a value. Unknown names contribute nothing (drop silently),
-        // matching StatusLineBuilder's handling of unrecognized tokens.
+        // ignored; only the name selects a value. An unrecognized name is echoed verbatim (its exact
+        // original `{...}` slice), matching parseStatusLineSegment's handling so both surfaces treat an
+        // unknown placeholder the same way — the user sees what they typed rather than it vanishing.
         auto const& interpolation = std::get<crispy::string_interpolation>(fragment);
         if (interpolation.name == "WindowTitle")
             result += ctx.windowTitle;
         else if (interpolation.name == "TabPosition")
             result += std::format("{}", ctx.position);
+        else
+            result += interpolation.whole;
     }
 
     return result;

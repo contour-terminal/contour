@@ -24,11 +24,12 @@ TEST_CASE("expandTabLabel: position and title combine with literal text", "[cont
     CHECK(expandTabLabel("{TabPosition}: {WindowTitle}", ctx) == "2: vim");
 }
 
-TEST_CASE("expandTabLabel: an unknown placeholder expands to empty", "[contour][tablabel]")
+TEST_CASE("expandTabLabel: an unknown placeholder is echoed verbatim", "[contour][tablabel]")
 {
     auto const ctx = TabLabelContext { .position = 3, .windowTitle = "bash" };
-    // "before" and "after" are literal; "{Nope}" is unrecognized and contributes nothing.
-    CHECK(expandTabLabel("before{Nope}after", ctx) == "beforeafter");
+    // "before" and "after" are literal; "{Nope}" is unrecognized and is echoed exactly as typed rather
+    // than dropped, so the user sees what they wrote (matching the status line's handling).
+    CHECK(expandTabLabel("before{Nope}after", ctx) == "before{Nope}after");
 }
 
 TEST_CASE("expandTabLabel: a template with no placeholders is returned verbatim", "[contour][tablabel]")
@@ -56,13 +57,14 @@ TEST_CASE("expandTabLabel: placeholder flags/attributes are accepted but ignored
     CHECK(expandTabLabel("{WindowTitle:Bold,Color=#FF0000}", ctx) == "vim");
 }
 
-TEST_CASE("expandTabLabel: an unterminated brace expands to empty", "[contour][tablabel]")
+TEST_CASE("expandTabLabel: an unterminated brace is echoed verbatim", "[contour][tablabel]")
 {
     // crispy::parse_interpolated_string treats text after an unmatched '{' as one placeholder, but it
     // keeps the leading '{' in the parsed name (unlike a properly closed "{Name}"). So "{WindowTitle"
-    // parses to a placeholder literally named "{WindowTitle", which matches nothing and drops to empty.
+    // parses to a placeholder literally named "{WindowTitle", which matches nothing and is echoed verbatim
+    // (its `whole` slice runs to end-of-input), so the unterminated text survives instead of vanishing.
     auto const ctx = TabLabelContext { .position = 1, .windowTitle = "vim" };
-    CHECK(expandTabLabel("{WindowTitle", ctx).empty());
+    CHECK(expandTabLabel("{WindowTitle", ctx) == "{WindowTitle");
 }
 
 TEST_CASE("expandTabLabel: a zero/negative position is rendered as-is", "[contour][tablabel]")
@@ -72,28 +74,34 @@ TEST_CASE("expandTabLabel: a zero/negative position is rendered as-is", "[contou
     CHECK(expandTabLabel("{TabPosition}", TabLabelContext { .position = 0, .windowTitle = "" }) == "0");
 }
 
-TEST_CASE("expandTabLabel: doubled braces escape to literal braces", "[contour][tablabel]")
+TEST_CASE("expandTabLabel: unknown placeholders echo verbatim", "[contour][tablabel]")
 {
-    // The fix for the "tab rename eats {...}" finding: a user who wants literal braces in a rename
-    // doubles them. "{{" -> "{" and "}}" -> "}", so the braced text survives instead of being parsed
-    // as an (unknown, dropped) placeholder.
+    // There is no brace escaping (dropped for backward compatibility). Instead, an unrecognized placeholder
+    // is echoed verbatim — the user sees exactly what they typed — matching the status line's handling so
+    // both surfaces behave identically. Known placeholders still expand.
     auto const ctx = TabLabelContext { .position = 5, .windowTitle = "vim" };
 
-    SECTION("a fully-escaped token renders literally")
+    SECTION("a doubled-brace token round-trips verbatim (unknown placeholder + trailing brace)")
     {
-        CHECK(expandTabLabel("task {{123}}", ctx) == "task {123}");
-        CHECK(expandTabLabel("build {{beta}}", ctx) == "build {beta}");
+        // "{{123}}" -> placeholder "{{123}" (name "{{123", unknown -> echoed as "{{123}") then literal "}",
+        // so the whole doubled-brace token is reproduced exactly as typed.
+        CHECK(expandTabLabel("task {{123}}", ctx) == "task {{123}}");
+        CHECK(expandTabLabel("build {{beta}}", ctx) == "build {{beta}}");
     }
 
-    SECTION("escaped braces and a live placeholder coexist")
+    SECTION("an unknown placeholder and a live placeholder coexist")
     {
-        // {{x}} is literal, {WindowTitle} still expands.
-        CHECK(expandTabLabel("{{x}}: {WindowTitle}", ctx) == "{x}: vim");
+        // "{{x}}" -> "{{x}" (unknown, echoed) + "}" ; "{WindowTitle}" still expands.
+        CHECK(expandTabLabel("{{x}}: {WindowTitle}", ctx) == "{{x}}: vim");
     }
 
-    SECTION("a single brace pair still expands a known placeholder")
+    SECTION("a plain unknown placeholder is echoed verbatim, flags and all")
     {
-        // Escaping must not break the established template behavior.
+        CHECK(expandTabLabel("{Bogus:Bold,Color=#FFFF00}", ctx) == "{Bogus:Bold,Color=#FFFF00}");
+    }
+
+    SECTION("a single brace pair expands a known placeholder")
+    {
         CHECK(expandTabLabel("{WindowTitle}", ctx) == "vim");
         CHECK(expandTabLabel("[{TabPosition}]", ctx) == "[5]");
     }

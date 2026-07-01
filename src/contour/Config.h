@@ -181,11 +181,12 @@ struct MouseConfig
 
 struct IndicatorConfig
 {
-    // Tabs are now shown as first-class GUI tabs in the window title bar, so the default indicator
-    // status line no longer renders the {Tabs} segment. The {Tabs} directive itself remains
-    // supported, so existing user configs that reference it keep working.
+    // The default indicator status line keeps the {Tabs} segment so the in-terminal tab list is still
+    // shown even when the GUI tab strip is hidden or unavailable. (Tabs are also surfaced as first-class
+    // GUI tabs in the window title bar; the two are complementary.)
     std::string left { " {InputMode:Bold,Color=#FFFF00}"
                        "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
+                       "{Tabs:ActiveColor=#FFFF00,Left= │ }"
                        "{ProtectedMode:Bold,Left= │ }"
                        "{SearchPrompt:Left= │ }" };
     std::string middle { "« {Title} »" };

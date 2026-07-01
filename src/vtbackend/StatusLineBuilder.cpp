@@ -124,6 +124,9 @@ std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
     if (interpolation.name == "InputMode")
         return StatusLineDefinitions::InputMode { styles };
 
+    if (interpolation.name == "TraceMode")
+        return StatusLineDefinitions::TraceMode { styles };
+
     if (interpolation.name == "ProtectedMode")
         return StatusLineDefinitions::ProtectedMode { styles };
 
@@ -178,9 +181,17 @@ StatusLineSegment parseStatusLineSegment(std::string_view text)
             segment.emplace_back(StatusLineDefinitions::Text {
                 StatusLineDefinitions::Styles {}, std::string(std::get<std::string_view>(fragment)) });
         }
-        else if (auto const item = makeStatusLineItem(std::get<crispy::string_interpolation>(fragment)))
+        else
         {
-            segment.emplace_back(*item);
+            auto const& interpolation = std::get<crispy::string_interpolation>(fragment);
+            if (auto const item = makeStatusLineItem(interpolation))
+                segment.emplace_back(*item);
+            else
+                // An unrecognized placeholder is echoed verbatim (its exact original `{...}` slice) rather
+                // than dropped, so the user sees what they typed — matching expandTabLabel's tab-strip
+                // handling so both surfaces treat unknown placeholders identically.
+                segment.emplace_back(StatusLineDefinitions::Text { StatusLineDefinitions::Styles {},
+                                                                   std::string(interpolation.whole) });
         }
     }
 
@@ -386,6 +397,11 @@ struct VTSerializer
 
     std::string visit(StatusLineDefinitions::TraceMode const&)
     {
+        // Trace mode is off in Normal execution; render nothing then (mirrors ProtectedMode's gating), so
+        // the default status line's {TraceMode} segment is empty unless tracing is actually active.
+        if (vt.executionMode() == ExecutionMode::Normal)
+            return {};
+
         std::string result;
 
         result += "TRACING";
