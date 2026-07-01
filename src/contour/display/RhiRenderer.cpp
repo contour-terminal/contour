@@ -2,6 +2,7 @@
 #include <contour/display/Blur.h>
 #include <contour/display/RhiRenderer.h>
 #include <contour/display/RhiVertexLayout.h>
+#include <contour/display/ScreenshotReadback.h>
 #include <contour/display/ShaderConfig.h>
 #include <contour/helper.h>
 
@@ -98,8 +99,9 @@ namespace
         QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, TextTexCoordOffset),
         QRhiVertexInputAttribute(0, 2, QRhiVertexInputAttribute::Float4, TextColorOffset),
     };
-    // The PassDescriptor struct itself is declared as a private member of RhiRenderer (RhiRenderer.h); the
-    // concrete pass table is built in createPipelines() below.
+    // The PassDescriptor struct itself is declared as a private member of RhiRenderer (RhiRenderer.h). The
+    // concrete two-row pass table lives in RhiRenderer::passDescriptor() (defined below), so both
+    // createPipelines() (swapchain) and createScreenshotPipeline() (offscreen) interpret the same data.
     // }}}
 
     struct CRISPY_PACKED vec2 // NOLINT
@@ -266,10 +268,30 @@ void RhiRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
     }
 }
 
+RhiRenderer::PassDescriptor RhiRenderer::passDescriptor(bool isText)
+{
+    if (isText)
+        return PassDescriptor { .vertexShaderPath = TextVertexShaderPath,
+                                .fragmentShaderPath = TextFragmentShaderPath,
+                                .uniformBlockSize = TextUniformBlockSize,
+                                .vertexStride = TextVertexStride,
+                                .attributes = textVertexAttributes,
+                                .hasSampler = true,
+                                .debugName = "text/glyph" };
+    return PassDescriptor { .vertexShaderPath = BackgroundVertexShaderPath,
+                            .fragmentShaderPath = BackgroundFragmentShaderPath,
+                            .uniformBlockSize = RectUniformBlockSize,
+                            .vertexStride = RectVertexStride,
+                            .attributes = rectVertexAttributes,
+                            .hasSampler = false,
+                            .debugName = "background/rect" };
+}
+
 void RhiRenderer::createPipeline(QRhi* rhi,
                                  QRhiRenderPassDescriptor* rpDesc,
                                  PassDescriptor const& desc,
-                                 RhiPipeline& out)
+                                 RhiPipeline& out,
+                                 QRhiBuffer* sharedUniformBuffer)
 {
     auto const vertexShader = loadShader(desc.vertexShaderPath);
     auto const fragmentShader = loadShader(desc.fragmentShaderPath);
@@ -286,18 +308,23 @@ void RhiRenderer::createPipeline(QRhi* rhi,
 
     // Dynamic uniform buffer feeding both stages (std140 `Buf` block at binding 0). The vertex buffer is
     // created lazily (as an Immutable buffer) in the pass's record step once the per-frame geometry size is
-    // known, and re-created when it must grow.
-    out.uniformBuffer.reset(
-        rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, desc.uniformBlockSize));
-    out.uniformBuffer->create();
+    // known, and re-created when it must grow. When a shared uniform buffer is supplied (the screenshot
+    // pipelines), bind it instead of creating one, so the swapchain set's per-frame uniform writes drive
+    // this pipeline too.
+    QRhiBuffer* uniformBuffer = sharedUniformBuffer;
+    if (uniformBuffer == nullptr)
+    {
+        out.uniformBuffer.reset(
+            rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, desc.uniformBlockSize));
+        out.uniformBuffer->create();
+        uniformBuffer = out.uniformBuffer.get();
+    }
 
     // Binding 0 (the uniform block) is shared by every pass; binding 1 (the atlas sampler) is added only for
     // sampling passes.
     QVarLengthArray<QRhiShaderResourceBinding, 2> bindings;
-    bindings.append(QRhiShaderResourceBinding::uniformBuffer(0,
-                                                             QRhiShaderResourceBinding::VertexStage
-                                                                 | QRhiShaderResourceBinding::FragmentStage,
-                                                             out.uniformBuffer.get()));
+    bindings.append(QRhiShaderResourceBinding::uniformBuffer(
+        0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, uniformBuffer));
     if (desc.hasSampler)
         bindings.append(QRhiShaderResourceBinding::sampledTexture(
             1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()));
@@ -374,30 +401,17 @@ void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
         createAtlasTexture(rhi, size);
     }
 
-    // The render passes, described as data, each paired with the pipeline slot it populates. Adding a pass
-    // is one more row here plus its FramePass tag and record step — no new near-duplicate builder function.
+    // The render passes, described as data (passDescriptor()), each paired with the pipeline slot it
+    // populates. Adding a pass is one more row here plus its FramePass tag and record step — no new
+    // near-duplicate builder function.
     struct PassEntry
     {
         PassDescriptor descriptor;
         RhiPipeline* slot = nullptr;
     };
     std::array const passes {
-        PassEntry { .descriptor = { .vertexShaderPath = BackgroundVertexShaderPath,
-                                    .fragmentShaderPath = BackgroundFragmentShaderPath,
-                                    .uniformBlockSize = RectUniformBlockSize,
-                                    .vertexStride = RectVertexStride,
-                                    .attributes = rectVertexAttributes,
-                                    .hasSampler = false,
-                                    .debugName = "background/rect" },
-                    .slot = &_rectPipeline },
-        PassEntry { .descriptor = { .vertexShaderPath = TextVertexShaderPath,
-                                    .fragmentShaderPath = TextFragmentShaderPath,
-                                    .uniformBlockSize = TextUniformBlockSize,
-                                    .vertexStride = TextVertexStride,
-                                    .attributes = textVertexAttributes,
-                                    .hasSampler = true,
-                                    .debugName = "text/glyph" },
-                    .slot = &_textPipeline },
+        PassEntry { .descriptor = passDescriptor(/*isText*/ false), .slot = &_rectPipeline },
+        PassEntry { .descriptor = passDescriptor(/*isText*/ true), .slot = &_textPipeline },
     };
     for (auto const& entry: passes)
         createPipeline(rhi, rpDesc, entry.descriptor, *entry.slot);
@@ -535,13 +549,9 @@ void RhiRenderer::execute(std::chrono::steady_clock::time_point now)
     recordRectPass();
     recordTextPass();
 
-    // Service a pending screenshot request (currently a sized-but-empty buffer, see takeScreenshot()).
-    if (_pendingScreenshotCallback)
-    {
-        auto result = takeScreenshot();
-        _pendingScreenshotCallback.value()(result.second, result.first);
-        _pendingScreenshotCallback.reset();
-    }
+    // A pending screenshot is serviced in the render phase (recordScreenshotPass), where the frame's draw
+    // items are replayed into an owned offscreen texture and read back deferred — not here in the staging
+    // phase, which has no color pixels to capture yet.
 
     _rectBuffer.clear();
     _scheduledExecutions.clear();
@@ -662,6 +672,43 @@ void RhiRenderer::flushFrame()
     _frameUpdates = nullptr;
 }
 
+void RhiRenderer::replayDrawItems(QRhiCommandBuffer* cb, QSize targetPixelSize, bool offscreen)
+{
+    auto const viewport = QRhiViewport(0.0f,
+                                       0.0f,
+                                       static_cast<float>(targetPixelSize.width()),
+                                       static_cast<float>(targetPixelSize.height()));
+
+    // Selects the pipeline to draw with: the offscreen screenshot set (built against the offscreen
+    // render-pass descriptor) or the swapchain set. Both share the swapchain set's vertex/uniform buffers
+    // (geometry is identical), so `geometry` always refers to the swapchain pipeline that owns the buffers.
+    auto const& drawSet = [&](bool isRect) -> RhiPipeline const& {
+        if (offscreen)
+            return isRect ? _screenshotRectPipeline : _screenshotTextPipeline;
+        return isRect ? _rectPipeline : _textPipeline;
+    };
+
+    for (auto const& item: _frameDrawItems)
+    {
+        if (item.vertexCount == 0)
+            continue;
+
+        auto const isRect = item.pass == FramePass::Rect;
+        auto const& drawPipeline = drawSet(isRect);
+        auto const& geometry = isRect ? _rectPipeline : _textPipeline;
+        auto const vertexStride = isRect ? RectVertexStride : TextVertexStride;
+
+        cb->setGraphicsPipeline(drawPipeline.pipeline.get());
+        cb->setViewport(viewport);
+        applyScissor(drawPipeline.pipeline.get(), item.scissor);
+        cb->setShaderResources(drawPipeline.srb.get());
+        QRhiCommandBuffer::VertexInput const vertexBinding(geometry.vertexBuffer.get(),
+                                                           item.firstVertex * vertexStride);
+        cb->setVertexInput(0, 1, &vertexBinding);
+        cb->draw(item.vertexCount);
+    }
+}
+
 void RhiRenderer::recordDraws()
 {
     // The *draw* half of the frame, driven from the render node's render() (inside the active render pass).
@@ -670,28 +717,7 @@ void RhiRenderer::recordDraws()
     if (_commandBuffer == nullptr || _frameRenderTarget == nullptr || !pipelinesReady())
         return;
 
-    auto* cb = _commandBuffer;
-    auto const pixelSize = _frameRenderTarget->pixelSize();
-    auto const viewport = QRhiViewport(
-        0.0f, 0.0f, static_cast<float>(pixelSize.width()), static_cast<float>(pixelSize.height()));
-
-    for (auto const& item: _frameDrawItems)
-    {
-        if (item.vertexCount == 0)
-            continue;
-
-        auto const& pipeline = item.pass == FramePass::Rect ? _rectPipeline : _textPipeline;
-        auto const vertexStride = item.pass == FramePass::Rect ? RectVertexStride : TextVertexStride;
-
-        cb->setGraphicsPipeline(pipeline.pipeline.get());
-        cb->setViewport(viewport);
-        applyScissor(pipeline.pipeline.get(), item.scissor);
-        cb->setShaderResources(pipeline.srb.get());
-        QRhiCommandBuffer::VertexInput const vertexBinding(pipeline.vertexBuffer.get(),
-                                                           item.firstVertex * vertexStride);
-        cb->setVertexInput(0, 1, &vertexBinding);
-        cb->draw(item.vertexCount);
-    }
+    replayDrawItems(_commandBuffer, _frameRenderTarget->pixelSize(), /*offscreen*/ false);
 
     // The per-frame handles + accumulators are valid only for the duration of this frame.
     _commandBuffer = nullptr;
@@ -909,23 +935,140 @@ optional<vtrasterizer::AtlasTextureScreenshot> RhiRenderer::readAtlas()
 
 void RhiRenderer::scheduleScreenshot(ScreenshotCallback callback)
 {
+    // Store the callback; the next frame's prepare() phase (recordScreenshotPass) renders the terminal into
+    // the offscreen texture and schedules a deferred readback, and deliverScreenshot() forwards the captured
+    // pixels here once the readback completes (one frame later).
     _pendingScreenshotCallback = std::move(callback);
 }
 
-pair<ImageSize, vector<uint8_t>> RhiRenderer::takeScreenshot()
+bool RhiRenderer::ensureScreenshotTarget(QRhi* rhi, ImageSize size)
 {
-    // TODO(rhi): full framebuffer readback. A render-target readback only completes after the pass ends, so
-    // (like readAtlas) it would need a deferred/one-frame-latency capture; the live render target's color
-    // attachment is also not guaranteed readback-capable on every backend. Screenshots are not on the
-    // black-screen path, so for now we return a correctly-sized empty buffer to keep the callback contract.
-    ImageSize const imageSize = _renderTargetSize;
+    auto const pixelSize = QSize(unbox<int>(size.width), unbox<int>(size.height));
+    if (pixelSize.isEmpty())
+        return false;
 
-    vector<uint8_t> buffer;
-    buffer.resize(imageSize.area() * 4 /* 4 because RGBA */);
+    // Reuse the existing offscreen resources when the capture size is unchanged and the swapchain pipelines
+    // (whose uniform/vertex buffers + atlas the screenshot pipelines share) are ready.
+    if (_screenshotRenderTarget != nullptr && _screenshotSize == size
+        && _screenshotRectPipeline.pipeline != nullptr && _screenshotTextPipeline.pipeline != nullptr)
+        return true;
 
-    displayLog()("Capture screenshot ({}).", imageSize);
+    if (!pipelinesReady())
+        return false;
 
-    return { imageSize, buffer };
+    // Color target: an RGBA8 texture usable as a render target and as a readback transfer source.
+    _screenshotTexture.reset(rhi->newTexture(
+        QRhiTexture::RGBA8, pixelSize, 1, QRhiTexture::RenderTarget | QRhiTexture::UsedAsTransferSource));
+    if (!_screenshotTexture->create())
+    {
+        errorLog()("Screenshot: failed to create offscreen color texture of size {}.", size);
+        return false;
+    }
+
+    // Depth-stencil buffer: the pipelines depth-test (LessOrEqual), so the offscreen pass needs a matching
+    // depth-stencil attachment for its render-pass descriptor to be compatible with the pipelines.
+    _screenshotDepthStencil.reset(rhi->newRenderBuffer(QRhiRenderBuffer::DepthStencil, pixelSize, 1));
+    if (!_screenshotDepthStencil->create())
+    {
+        errorLog()("Screenshot: failed to create offscreen depth-stencil buffer of size {}.", size);
+        return false;
+    }
+
+    QRhiTextureRenderTargetDescription rtDesc({ QRhiColorAttachment(_screenshotTexture.get()) });
+    rtDesc.setDepthStencilBuffer(_screenshotDepthStencil.get());
+    _screenshotRenderTarget.reset(rhi->newTextureRenderTarget(rtDesc));
+    _screenshotRpDesc.reset(_screenshotRenderTarget->newCompatibleRenderPassDescriptor());
+    _screenshotRenderTarget->setRenderPassDescriptor(_screenshotRpDesc.get());
+    if (!_screenshotRenderTarget->create())
+    {
+        errorLog()("Screenshot: failed to create offscreen render target of size {}.", size);
+        return false;
+    }
+
+    // Build the pass pipelines against the offscreen render-pass descriptor. They reuse the swapchain
+    // pipelines' shared uniform + vertex buffers and atlas texture/sampler (createPipeline references the
+    // renderer's _atlas* + the per-pass RhiPipeline's uniform buffer): here we point the offscreen pipelines'
+    // uniform buffers at the *same* buffers as the swapchain set so flushFrame()'s per-frame uniform writes
+    // serve both, then build the graphics pipeline against the offscreen render pass.
+    createScreenshotPipeline(rhi, /*isText*/ false);
+    createScreenshotPipeline(rhi, /*isText*/ true);
+    if (_screenshotRectPipeline.pipeline == nullptr || _screenshotTextPipeline.pipeline == nullptr)
+    {
+        errorLog()("Screenshot: failed to create offscreen pipelines.");
+        return false;
+    }
+
+    _screenshotSize = size;
+    return true;
+}
+
+void RhiRenderer::createScreenshotPipeline(QRhi* rhi, bool isText)
+{
+    // Reuse the data-driven pipeline builder with the offscreen render-pass descriptor and the *shared*
+    // swapchain uniform buffer for this pass (so flushFrame()'s per-frame uniform writes drive the offscreen
+    // pipeline too). The swapchain pipeline for this pass owns that uniform buffer.
+    auto const desc = passDescriptor(isText);
+    auto& out = isText ? _screenshotTextPipeline : _screenshotRectPipeline;
+    auto* sharedUniforms = (isText ? _textPipeline : _rectPipeline).uniformBuffer.get();
+    createPipeline(rhi, _screenshotRpDesc.get(), desc, out, sharedUniforms);
+}
+
+void RhiRenderer::recordScreenshotPass(QRhi* rhi, QRhiCommandBuffer* cb)
+{
+    if (!_pendingScreenshotCallback || rhi == nullptr || cb == nullptr || !pipelinesReady())
+        return;
+
+    // Capture at the terminal's device-pixel render size (terminal-only pixels — no window chrome).
+    auto const size = _renderTargetSize;
+    if (!ensureScreenshotTarget(rhi, size))
+        return;
+
+    // Replay this frame's staged draw items into the offscreen target. This runs in prepare(), before the
+    // scene graph begins its own render pass, so a fresh beginPass/endPass on the command buffer is legal
+    // (passes must be sequential, not nested). The vertex/uniform uploads queued by flushFrame() precede this
+    // on the command buffer, so the shared buffers are populated by the time these draws execute.
+    QColor const clearColor(0, 0, 0, 0);
+    cb->beginPass(_screenshotRenderTarget.get(), clearColor, { 1.0f, 0 });
+    replayDrawItems(cb, _screenshotRenderTarget->pixelSize(), /*offscreen*/ true);
+    cb->endPass();
+
+    // Schedule the deferred readback of the offscreen texture (completes after this frame is submitted).
+    auto* batch = rhi->nextResourceUpdateBatch();
+    batch->readBackTexture(QRhiReadbackDescription(_screenshotTexture.get()), &_screenshotReadbackResult);
+    cb->resourceUpdate(batch);
+    _screenshotReadbackPending = true;
+    _screenshotSize = size;
+    displayLog()("Screenshot: scheduled offscreen capture ({}).", size);
+}
+
+void RhiRenderer::deliverScreenshot()
+{
+    // Deliver a completed capture to the pending callback. The readback scheduled on the previous frame has
+    // its data available once that frame was submitted; guard on a non-empty result so we never deliver
+    // before the capture completes.
+    if (!_screenshotReadbackPending || !_pendingScreenshotCallback)
+        return;
+    if (_screenshotReadbackResult.data.isEmpty())
+        return;
+
+    auto const width = unbox<int>(_screenshotSize.width);
+    auto const height = unbox<int>(_screenshotSize.height);
+
+    // Offscreen-texture readback is top-left origin on every backend, so no vertical flip is needed. (The
+    // capturedFromTexture=true short-circuit makes the backend framebuffer orientation irrelevant, so we
+    // don't consult _rhi here — keeping deliverScreenshot independent of a live per-frame RHI handle.)
+    auto const flip = screenshotNeedsVerticalFlip(/*capturedFromTexture*/ true, /*framebufferIsYUp*/ false);
+    auto const* bytes = reinterpret_cast<uint8_t const*>(_screenshotReadbackResult.data.constData());
+    auto const source =
+        std::span<uint8_t const>(bytes, static_cast<size_t>(_screenshotReadbackResult.data.size()));
+    auto buffer = normalizeScreenshotBuffer(source, width, height, flip);
+
+    displayLog()("Screenshot: delivering captured frame ({}).", _screenshotSize);
+    _pendingScreenshotCallback.value()(buffer, _screenshotSize);
+
+    _pendingScreenshotCallback.reset();
+    _screenshotReadbackPending = false;
+    _screenshotReadbackResult.data.clear();
 }
 // }}}
 

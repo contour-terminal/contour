@@ -189,7 +189,30 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     void clearNodeScissorRect() noexcept;
     void execute(std::chrono::steady_clock::time_point now) override;
 
-    std::pair<vtbackend::ImageSize, std::vector<uint8_t>> takeScreenshot();
+    /// @return true once a screenshot has been requested (scheduleScreenshot) and is awaiting a captured
+    ///         frame; drives the render node to run the offscreen screenshot pass this frame.
+    [[nodiscard]] bool screenshotRequested() const noexcept { return _pendingScreenshotCallback.has_value(); }
+
+    /// Renders this frame's staged draw items into an owned offscreen RGBA8 texture and schedules a
+    /// deferred readback of it, when a screenshot is pending.
+    ///
+    /// Called from the render node's prepare() phase (after flushFrame() staged the geometry, and before the
+    /// scene graph begins its own render pass — the only point at which no pass is active on the command
+    /// buffer, so a fresh beginPass/endPass into the offscreen target is legal). Replaying the same draw
+    /// items into an owned texture render target captures the terminal-only pixels — no window chrome. The
+    /// offscreen target + a pipeline set built against its own render-pass descriptor are created lazily and
+    /// resized on demand. The readback lands one frame later; deliverScreenshot() forwards it to the pending
+    /// callback. No-op unless a screenshot is pending and the pipelines are ready.
+    /// @param rhi The scene graph's RHI instance.
+    /// @param cb  The live command buffer to record the offscreen pass onto.
+    void recordScreenshotPass(QRhi* rhi, QRhiCommandBuffer* cb);
+
+    /// Delivers a completed offscreen screenshot readback to the pending callback, if any.
+    ///
+    /// Called once per frame (from the render node) so a readback scheduled on the previous frame — whose
+    /// QRhiReadbackResult has since completed — is handed to scheduleScreenshot()'s callback and the
+    /// request cleared. No-op until a capture has completed. Non-blocking by design.
+    void deliverScreenshot();
 
     void clearCache() override;
 
@@ -219,6 +242,8 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     /// @return The deserialized shader; an invalid QShader if the resource could not be read.
     [[nodiscard]] static QShader loadShader(QString const& resourcePath);
 
+    // Forward reference: the pass descriptor accessor is defined out-of-line after the struct.
+
     /// Describes the per-pass variation between the RHI graphics pipelines (shaders, uniform-block size,
     /// vertex stride + attribute layout, whether the pass samples the glyph atlas). Everything not captured
     /// here (topology, depth/blend/scissor state, the binding-0 uniform buffer) is identical for every pass
@@ -235,7 +260,12 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
         char const* debugName = nullptr; ///< Human-readable pass name for diagnostics.
     };
 
-    /// Builds one graphics pipeline (+ its SRB and uniform buffer) from a pass descriptor into @p out.
+    /// @return the pass descriptor for the background/rect pass (isText == false) or the text/glyph pass
+    ///         (isText == true). The two-row pass table; shared by the swapchain and screenshot pipelines.
+    /// @param isText true for the text/glyph pass, false for background/rect.
+    [[nodiscard]] static PassDescriptor passDescriptor(bool isText);
+
+    /// Builds one graphics pipeline (+ its SRB) from a pass descriptor into @p out.
     ///
     /// Data-driven replacement for the former per-pass createRectPipeline()/createTextPipeline(): the only
     /// variation is carried by @p desc. A pass that samples the atlas (desc.hasSampler) requires the atlas
@@ -244,10 +274,15 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     /// @param rpDesc The render-pass descriptor to bake into the pipeline.
     /// @param desc   The pass description (shaders, layout, sampler flag).
     /// @param out    The pipeline slot to populate.
+    /// @param sharedUniformBuffer When non-null, the SRB binds this existing uniform buffer instead of the
+    ///                            method creating a new one in @p out. Used by the screenshot pipelines to
+    ///                            share the swapchain set's per-frame uniforms; pass nullptr for the normal
+    ///                            (owning) case.
     void createPipeline(QRhi* rhi,
                         QRhiRenderPassDescriptor* rpDesc,
                         PassDescriptor const& desc,
-                        RhiPipeline& out);
+                        RhiPipeline& out,
+                        QRhiBuffer* sharedUniformBuffer = nullptr);
 
     /// Creates (or re-creates) the glyph atlas texture and its sampler for the given size.
     /// @param rhi  The scene graph's RHI instance.
@@ -272,6 +307,34 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     /// @param innerScissor The transient inner scissor captured for this draw, intersected with the node
     ///                     clip here; std::nullopt for no inner scissor.
     void applyScissor(QRhiGraphicsPipeline* pipeline, std::optional<ScissorRect> const& innerScissor);
+
+    /// Replays the frame's accumulated draw items onto @p cb for @p targetPixelSize, using either the
+    /// swapchain pipelines (the live pass) or the offscreen screenshot pipelines. Shared by recordDraws()
+    /// (swapchain) and recordScreenshotPass() (offscreen) so the per-item pipeline/vertex/scissor binding
+    /// logic exists once.
+    /// @param cb              The command buffer to record draws onto (a pass must already be active).
+    /// @param targetPixelSize The active render target's pixel size (drives viewport + the full-area clip).
+    /// @param offscreen       true to bind the offscreen screenshot pipeline set, false for the swapchain
+    /// set.
+    void replayDrawItems(QRhiCommandBuffer* cb, QSize targetPixelSize, bool offscreen);
+
+    /// Creates (or resizes) the offscreen screenshot render target — an owned RGBA8 color texture (readback
+    /// source) + a depth-stencil buffer + a texture render target with its own render-pass descriptor — and
+    /// the screenshot pipeline set built against that descriptor. No-op if it already exists at @p size.
+    /// @param rhi  The scene graph's RHI instance.
+    /// @param size The capture size in device pixels (the terminal's render-target size).
+    /// @return true if the offscreen resources are ready to render into.
+    [[nodiscard]] bool ensureScreenshotTarget(QRhi* rhi, ImageSize size);
+
+    /// Builds one screenshot-pass graphics pipeline against the offscreen render-pass descriptor.
+    ///
+    /// Uses the same pass descriptor (shaders, vertex layout, sampler flag) as the swapchain pipeline, but
+    /// wires its shader-resource bindings to the *shared* swapchain uniform buffer (so flushFrame()'s
+    /// per-frame uniform writes drive both) and the shared atlas texture/sampler. Only the graphics-pipeline
+    /// object + SRB differ from the swapchain set; the vertex/uniform buffers are shared.
+    /// @param rhi    The scene graph's RHI instance.
+    /// @param isText true to build the text/glyph pass (adds the atlas sampler), false for background/rect.
+    void createScreenshotPipeline(QRhi* rhi, bool isText);
 
     void executeConfigureAtlas(ConfigureAtlas const& param);
     void executeUploadTile(QRhiResourceUpdateBatch& updates, UploadTile const& param);
@@ -416,7 +479,25 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     // renderRectangle() and uploaded/drawn in execute().
     std::vector<float> _rectBuffer;
 
+    // {{{ Deferred offscreen screenshot capture
+    //
+    // A screenshot renders the terminal's draw items into an owned RGBA8 texture (not the window backbuffer,
+    // which would include the title bar / tab strip / split chrome) and reads it back. Like the atlas
+    // readback, a texture readback scheduled into a frame only completes after that frame is submitted, so
+    // the pixels arrive one frame later and are delivered to the pending callback then. The offscreen target
+    // + its pipeline set are created lazily (first screenshot) and resized when the capture size changes.
     std::optional<ScreenshotCallback> _pendingScreenshotCallback;
+    QRhiReadbackResult _screenshotReadbackResult;
+    ImageSize _screenshotSize {};            ///< Device-pixel size the pending/last capture was taken at.
+    bool _screenshotReadbackPending = false; ///< A readback is scheduled and awaiting completion delivery.
+
+    QRhiResourcePtr<QRhiTexture> _screenshotTexture; ///< Owned RGBA8 color target (readback source).
+    QRhiResourcePtr<QRhiRenderBuffer> _screenshotDepthStencil; ///< Depth-stencil for the offscreen pass.
+    QRhiResourcePtr<QRhiTextureRenderTarget> _screenshotRenderTarget; ///< The offscreen render target.
+    QRhiResourcePtr<QRhiRenderPassDescriptor> _screenshotRpDesc;      ///< Its render-pass descriptor.
+    RhiPipeline _screenshotRectPipeline; ///< Rect pass built against the offscreen render-pass desc.
+    RhiPipeline _screenshotTextPipeline; ///< Text pass built against the offscreen render-pass desc.
+    // }}}
 
     // render state cache
     struct

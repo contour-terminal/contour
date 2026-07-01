@@ -1010,6 +1010,14 @@ void TerminalDisplay::prepareFrameRhi(QRhi* rhi,
     // scene graph begins the render pass.
     paint();
     _renderTarget->flushFrame();
+
+    // Deliver a screenshot captured on the previous frame (its readback has completed by now), then, if a
+    // capture is pending, replay this frame's staged draws into the offscreen screenshot texture and schedule
+    // its readback. Both happen here in prepare(), before the scene graph begins its render pass — the only
+    // point at which a fresh beginPass/endPass into the offscreen target is legal (passes cannot nest).
+    _renderTarget->deliverScreenshot();
+    if (_renderTarget->screenshotRequested())
+        _renderTarget->recordScreenshotPass(rhi, cb);
 }
 
 void TerminalDisplay::recordFrameRhi(QSGRenderNode::RenderState const* state)
@@ -1100,17 +1108,22 @@ void TerminalDisplay::paint()
 
         if (_saveScreenshot)
         {
-            std::visit(crispy::overloaded { [&](const std::filesystem::path& path) {
-                                               screenshot().save(QString::fromStdString(path.string()));
-                                           },
-                                            [&](std::monostate) {
-                                                if (QClipboard* clipboard = QGuiApplication::clipboard();
-                                                    clipboard != nullptr)
-                                                    clipboard->setImage(screenshot(), QClipboard::Clipboard);
-                                            } },
-                       _saveScreenshot.value());
-
+            // Deferred capture (RHI offscreen readback lands one frame later). Bind the destination now and
+            // deliver when the pixels are ready. Clearing _saveScreenshot immediately prevents re-arming the
+            // request every frame while the readback is in flight.
+            auto const destination = _saveScreenshot.value();
             _saveScreenshot = std::nullopt;
+            requestScreenshot([destination](QImage const& image) {
+                std::visit(crispy::overloaded { [&](std::filesystem::path const& path) {
+                                                   image.save(QString::fromStdString(path.string()));
+                                               },
+                                                [&](std::monostate) {
+                                                    if (QClipboard* clipboard = QGuiApplication::clipboard();
+                                                        clipboard != nullptr)
+                                                        clipboard->setImage(image, QClipboard::Clipboard);
+                                                } },
+                           destination);
+            });
         }
 
         // Schedule the next frame if needed. update() (re-evaluating the scene-graph node) must run on the
@@ -1632,18 +1645,32 @@ void TerminalDisplay::doDumpState()
     _doDumpState = true;
 }
 
-QImage TerminalDisplay::screenshot()
+QImage TerminalDisplay::screenshotImageFromBuffer(std::vector<uint8_t> const& rgbaBuffer,
+                                                  vtbackend::ImageSize pixelSize)
 {
-    // A one-off render for the screenshot; any font-reconfig recompute it signals is handled by the
-    // regular paint() path, so the return value is intentionally ignored here.
-    (void) _renderer->render(terminal(), _renderingPressure);
-    auto [size, image] = _renderTarget->takeScreenshot();
-
-    return QImage(image.data(),
-                  size.width.as<int>(),
-                  size.height.as<int>(),
+    // The offscreen-texture readback delivers a top-left-origin RGBA8 buffer, so — unlike the old
+    // glReadPixels backbuffer path — no vertical flip is applied here. copy() detaches from the (transient)
+    // source buffer so the returned image stays valid after it is freed.
+    return QImage(rgbaBuffer.data(),
+                  pixelSize.width.as<int>(),
+                  pixelSize.height.as<int>(),
                   QImage::Format_RGBA8888_Premultiplied)
-        .transformed(QTransform().scale(1, -1));
+        .copy();
+}
+
+void TerminalDisplay::requestScreenshot(std::function<void(QImage)> onReady)
+{
+    if (!_renderTarget)
+        return;
+
+    // Deferred capture: the RHI renders the terminal into an offscreen texture and reads it back one frame
+    // later. Wrap the caller's continuation so it receives a ready-to-use QImage. update() nudges the scene
+    // graph to run a frame so the capture + readback actually happen.
+    _renderTarget->scheduleScreenshot([onReady = std::move(onReady)](std::vector<uint8_t> const& rgbaBuffer,
+                                                                     vtbackend::ImageSize pixelSize) {
+        onReady(screenshotImageFromBuffer(rgbaBuffer, pixelSize));
+    });
+    update();
 }
 
 void TerminalDisplay::doDumpStateInternal()
@@ -1731,8 +1758,11 @@ void TerminalDisplay::doDumpStateInternal()
     } while (0);
 
     auto screenshotFilePath = targetDir / "screenshot.png";
-    displayLog()("Saving screenshot to: {}", screenshotFilePath.generic_string());
-    screenshot().save(QString::fromStdString(screenshotFilePath.string()));
+    displayLog()("Requesting screenshot for state dump: {}", screenshotFilePath.generic_string());
+    // Deferred capture: the RHI reads the offscreen render back one frame later, so save it when it arrives.
+    requestScreenshot([screenshotFilePath](QImage const& image) {
+        image.save(QString::fromStdString(screenshotFilePath.string()));
+    });
 }
 
 void TerminalDisplay::resizeTerminalToDisplaySize()

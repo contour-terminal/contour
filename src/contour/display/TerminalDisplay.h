@@ -328,7 +328,22 @@ class TerminalDisplay: public QQuickItem
     // helper methods
     //
     void doDumpStateInternal();
-    QImage screenshot();
+
+    /// Requests a deferred screenshot of the terminal's rendered output and delivers it as a QImage.
+    ///
+    /// The RHI captures the terminal into an offscreen texture and reads it back one frame later (a texture
+    /// readback only completes after the frame is submitted), so this cannot return synchronously. @p onReady
+    /// is invoked (on the render thread, from the frame that completes the readback) with the captured image.
+    /// @param onReady Receives the captured QImage once the readback completes.
+    void requestScreenshot(std::function<void(QImage)> onReady);
+
+    /// Wraps a raw RGBA8 readback buffer (top-left origin, as the offscreen-texture readback delivers) into a
+    /// QImage that owns a copy of the pixels.
+    /// @param rgbaBuffer Tightly-packed RGBA8 pixels, width*height*4 bytes.
+    /// @param pixelSize  The image size in pixels.
+    /// @return A QImage owning a deep copy of the pixels (safe after @p rgbaBuffer is freed).
+    [[nodiscard]] static QImage screenshotImageFromBuffer(std::vector<uint8_t> const& rgbaBuffer,
+                                                          vtbackend::ImageSize pixelSize);
     void createRenderer();
 
     /// Runs the OpenGL terminal render (grid, cursor, decorations) into the scene graph's current target.

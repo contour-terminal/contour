@@ -271,6 +271,8 @@ if(CONTOUR_FRONTEND_GUI)
             test/Actions_test.cpp
             test/ScissorRect_test.cpp
             test/RhiVertexLayout_test.cpp
+            test/ScreenshotReadback_test.cpp
+            test/ScreenshotRhiReadback_test.cpp
             test/TerminalSessionManager_test.cpp
             test/TerminalSession_test.cpp
             test/QmlComponents_test.cpp
@@ -282,6 +284,7 @@ if(CONTOUR_FRONTEND_GUI)
             PRIVATE
             contour_core
             Qt6::Test
+            Qt6::GuiPrivate # rhi/qrhi.h + qrhigles2_p.h for the end-to-end screenshot readback test
             Catch2::Catch2
         )
         target_include_directories(contour_gui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
