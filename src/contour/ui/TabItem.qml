@@ -142,24 +142,20 @@ Item {
 
     // A single left-tap activates the tab; a double-tap starts an inline rename. A TapHandler fires
     // onTapped for EVERY tap (tapCount is the running consecutive-tap count), so a double-tap fires
-    // first with tapCount===1 then tapCount===2. Activating immediately on the first tap would switch
-    // tabs (and steal terminal focus) before the rename even opens. Instead, defer the single-tap
-    // activation by the double-click interval and cancel it if the second tap arrives.
-    Timer {
-        id: activateTimer
-        interval: Application.styleHints.mouseDoubleClickInterval
-        onTriggered: root.controller.activateTab(root.tabIndex)
-    }
-
+    // first with tapCount===1 (activate) then tapCount===2 (rename).
+    //
+    // Activate on the FIRST tap rather than deferring it by the double-click interval: activating an
+    // already-active tab is a harmless no-op (SessionModel::activateTab early-outs), so the second tap of
+    // a rename gesture re-activates the (already-active) tab and then opens the editor — you always rename
+    // the tab you clicked. Deferring instead cost every single click the full double-click-interval latency
+    // and, on platforms/styles where that interval is reported as 0, fired the deferred activation
+    // synchronously so a genuine double-tap flashed the wrong tab before renaming.
     TapHandler {
         acceptedButtons: Qt.LeftButton
         onTapped: (eventPoint, button) => {
-            if (tapCount === 2) {
-                activateTimer.stop() // the pending single-tap activation was actually a rename gesture
+            root.controller.activateTab(root.tabIndex)
+            if (tapCount === 2)
                 renameLoader.start()
-            } else {
-                activateTimer.restart()
-            }
         }
     }
 
