@@ -174,25 +174,26 @@ StatusLineSegment parseStatusLineSegment(std::string_view text)
 
     auto const interpolations = crispy::parse_interpolated_string(text);
 
+    // An un-styled literal Text item wrapping the given source bytes; used both for the plain-text
+    // fragments and for the verbatim echo of an unrecognized placeholder.
+    auto const literalText = [](std::string_view s) {
+        return StatusLineDefinitions::Text { StatusLineDefinitions::Styles {}, std::string(s) };
+    };
+
     for (auto const& fragment: interpolations)
     {
         if (std::holds_alternative<std::string_view>(fragment))
-        {
-            segment.emplace_back(StatusLineDefinitions::Text {
-                StatusLineDefinitions::Styles {}, std::string(std::get<std::string_view>(fragment)) });
-        }
+            segment.emplace_back(literalText(std::get<std::string_view>(fragment)));
+        // Pass the fragment variant straight through (no copy): makeStatusLineItem takes it by const ref,
+        // so binding the string_interpolation into a temporary variant here would deep-copy its flag set
+        // and attribute map.
+        else if (auto const item = makeStatusLineItem(fragment))
+            segment.emplace_back(*item);
         else
-        {
-            auto const& interpolation = std::get<crispy::string_interpolation>(fragment);
-            if (auto const item = makeStatusLineItem(interpolation))
-                segment.emplace_back(*item);
-            else
-                // An unrecognized placeholder is echoed verbatim (its exact original `{...}` slice) rather
-                // than dropped, so the user sees what they typed — matching expandTabLabel's tab-strip
-                // handling so both surfaces treat unknown placeholders identically.
-                segment.emplace_back(StatusLineDefinitions::Text { StatusLineDefinitions::Styles {},
-                                                                   std::string(interpolation.whole) });
-        }
+            // An unrecognized placeholder is echoed verbatim (its exact original `{...}` slice) rather than
+            // dropped, so the user sees what they typed — matching expandTabLabel's tab-strip handling so
+            // both surfaces treat unknown placeholders identically.
+            segment.emplace_back(literalText(std::get<crispy::string_interpolation>(fragment).whole));
     }
 
     return segment;

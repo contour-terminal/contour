@@ -69,19 +69,16 @@ interpolated_string parse_interpolated_string(std::string_view text)
     // Builds an interpolation for the placeholder spanning [openBrace, closeBrace] (closeBrace == npos for
     // an unterminated trailing placeholder, which extends to the end of the input). Captures the whole
     // source slice — braces included — so unrecognized placeholders can be echoed verbatim downstream.
-    //
-    // For an unterminated placeholder the leading '{' is kept IN the parsed name (so the name is e.g.
-    // "{WindowTitle", which no consumer recognizes): a "{Name" without a closing brace is malformed, so it
-    // stays unrecognized and echoes verbatim rather than silently behaving like a valid "{Name}". A properly
-    // closed placeholder strips both braces before parsing, as usual.
     auto makeInterpolation = [text](size_t openBrace, size_t closeBrace) {
-        auto const inner = closeBrace == std::string_view::npos
-                               ? text.substr(openBrace)
-                               : text.substr(openBrace + 1, closeBrace - openBrace - 1);
-        auto interpolation = parse_interpolation(inner);
-        interpolation.whole = closeBrace == std::string_view::npos
-                                  ? text.substr(openBrace)
-                                  : text.substr(openBrace, closeBrace - openBrace + 1);
+        auto const terminated = closeBrace != std::string_view::npos;
+        // The whole source slice, braces included; extends to end-of-input when unterminated.
+        auto const whole =
+            terminated ? text.substr(openBrace, closeBrace - openBrace + 1) : text.substr(openBrace);
+        // A closed placeholder strips both braces before parsing; an unterminated one keeps the leading
+        // '{' in the name (so "{WindowTitle" stays unrecognized and echoes verbatim, rather than behaving
+        // like a valid "{WindowTitle}").
+        auto interpolation = parse_interpolation(terminated ? whole.substr(1, whole.size() - 2) : whole);
+        interpolation.whole = whole;
         return interpolation;
     };
 

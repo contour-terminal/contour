@@ -13,6 +13,7 @@
 
 #include <crispy/StrongHash.h>
 
+#include <QtCore/QVarLengthArray>
 #include <QtGui/QMatrix4x4>
 #include <QtQuick/QQuickWindow>
 
@@ -283,6 +284,16 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
                         RhiPipeline& out,
                         QRhiBuffer* sharedUniformBuffer = nullptr);
 
+    /// The shader-resource bindings shared by every pass: the uniform block at binding 0 (both stages),
+    /// plus the atlas sampler at binding 1 (fragment stage) for sampling passes. Single source of truth for
+    /// the binding layout, used both when creating a pipeline's SRB and when re-pointing it at a recreated
+    /// atlas texture, so the two never drift.
+    /// @param uniformBuffer The uniform buffer to bind at slot 0.
+    /// @param hasSampler    Whether to add the atlas sampler at slot 1 (true for the text/glyph pass).
+    /// @return The 1- or 2-element binding list.
+    [[nodiscard]] QVarLengthArray<QRhiShaderResourceBinding, 2> atlasSrbBindings(QRhiBuffer* uniformBuffer,
+                                                                                 bool hasSampler) const;
+
     /// Creates (or re-creates) the glyph atlas texture and its sampler for the given size.
     /// @param rhi  The scene graph's RHI instance.
     /// @param size The atlas texture size in pixels (power of two).
@@ -291,8 +302,9 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     /// Re-points a text pipeline's shader-resource bindings (binding 1) at the current _atlasTexture.
     ///
     /// Every SRB that samples the glyph atlas holds a reference to a specific QRhiTexture object; when
-    /// createAtlasTexture() replaces _atlasTexture (destroying the old one), every such SRB must be
-    /// rebound or it samples a freed texture. Call this for all atlas-sampling pipelines after a recreate.
+    /// createAtlasTexture() replaces _atlasTexture (destroying the old one), every such SRB must be rebound
+    /// or it samples a freed texture. executeConfigureAtlas() calls this for each atlas-sampling pipeline
+    /// after a recreate.
     /// @param pipeline      The pipeline whose srb references the atlas (no-op if it has no srb).
     /// @param uniformBuffer The uniform buffer bound at slot 0. The screenshot pipelines share the
     ///                      swapchain pipeline's buffer (their own uniformBuffer field is null), so it is

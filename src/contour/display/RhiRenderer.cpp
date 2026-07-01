@@ -241,21 +241,30 @@ void RhiRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
     }
 }
 
+QVarLengthArray<QRhiShaderResourceBinding, 2> RhiRenderer::atlasSrbBindings(QRhiBuffer* uniformBuffer,
+                                                                            bool hasSampler) const
+{
+    // Binding 0 (the uniform block) is shared by every pass; binding 1 (the atlas sampler) is added only for
+    // sampling passes.
+    QVarLengthArray<QRhiShaderResourceBinding, 2> bindings;
+    bindings.append(QRhiShaderResourceBinding::uniformBuffer(
+        0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, uniformBuffer));
+    if (hasSampler)
+        bindings.append(QRhiShaderResourceBinding::sampledTexture(
+            1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()));
+    return bindings;
+}
+
 void RhiRenderer::rebindAtlasTexture(RhiPipeline& pipeline, QRhiBuffer* uniformBuffer)
 {
     if (!pipeline.srb)
         return;
-    // The binding layout is unchanged (uniform buffer at 0, atlas sampler at 1); only the atlas texture
-    // object differs after a recreate. Rebuild the QRhiShaderResourceBindings in place so the pipeline keeps
-    // using the same srb object while pointing binding 1 at the new _atlasTexture.
-    pipeline.srb->setBindings({
-        QRhiShaderResourceBinding::uniformBuffer(0,
-                                                 QRhiShaderResourceBinding::VertexStage
-                                                     | QRhiShaderResourceBinding::FragmentStage,
-                                                 uniformBuffer),
-        QRhiShaderResourceBinding::sampledTexture(
-            1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()),
-    });
+    // The binding layout is unchanged; only the atlas texture object differs after a recreate. Rebuild the
+    // QRhiShaderResourceBindings in place (same layout as createPipeline via atlasSrbBindings) so the
+    // pipeline keeps its srb object while binding 1 points at the new _atlasTexture. Every atlas rebind is a
+    // sampling pass, so hasSampler is always true here.
+    auto const bindings = atlasSrbBindings(uniformBuffer, /*hasSampler*/ true);
+    pipeline.srb->setBindings(bindings.cbegin(), bindings.cend());
     pipeline.srb->create();
 }
 
@@ -311,14 +320,7 @@ void RhiRenderer::createPipeline(QRhi* rhi,
         uniformBuffer = out.uniformBuffer.get();
     }
 
-    // Binding 0 (the uniform block) is shared by every pass; binding 1 (the atlas sampler) is added only for
-    // sampling passes.
-    QVarLengthArray<QRhiShaderResourceBinding, 2> bindings;
-    bindings.append(QRhiShaderResourceBinding::uniformBuffer(
-        0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, uniformBuffer));
-    if (desc.hasSampler)
-        bindings.append(QRhiShaderResourceBinding::sampledTexture(
-            1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()));
+    auto const bindings = atlasSrbBindings(uniformBuffer, desc.hasSampler);
     out.srb.reset(rhi->newShaderResourceBindings());
     out.srb->setBindings(bindings.cbegin(), bindings.cend());
     out.srb->create();
@@ -767,8 +769,12 @@ void RhiRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     if (!_atlasTexture || _atlasCreatedSize != param.size)
     {
         createAtlasTexture(_rhi, param.size);
-        rebindAtlasTexture(_textPipeline, _textPipeline.uniformBuffer.get());
-        rebindAtlasTexture(_screenshotTextPipeline, _textPipeline.uniformBuffer.get());
+        // Rebind EVERY atlas-sampling pipeline so none is left holding a reference to the freed texture.
+        // Both share the swapchain text pipeline's uniform buffer (the screenshot pipeline was built to
+        // share it), so they rebind against the same buffer. Listed here as the single place that
+        // enumerates the atlas-sampling set — add a future one here and both build and rebind stay correct.
+        for (RhiPipeline* pipeline: { &_textPipeline, &_screenshotTextPipeline })
+            rebindAtlasTexture(*pipeline, _textPipeline.uniformBuffer.get());
     }
 
     // No full-texture clear: the rasterizer only ever samples atlas tiles it has uploaded, so untouched
