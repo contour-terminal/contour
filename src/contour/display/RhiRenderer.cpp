@@ -22,6 +22,7 @@
 #include <QtGui/QImage>
 
 #include <array>
+#include <bit>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -104,33 +105,6 @@ namespace
     // createPipelines() (swapchain) and createScreenshotPipeline() (offscreen) interpret the same data.
     // }}}
 
-    struct CRISPY_PACKED vec2 // NOLINT
-    {
-        float x;
-        float y;
-    };
-
-    struct CRISPY_PACKED vec3 // NOLINT
-    {
-        float x;
-        float y;
-        float z;
-    };
-
-    struct CRISPY_PACKED vec4 // NOLINT
-    {
-        float x;
-        float y;
-        float z;
-        float w;
-    };
-
-    constexpr bool isPowerOfTwo(uint32_t value) noexcept
-    {
-        //.
-        return (value & (value - 1)) == 0;
-    }
-
     // Returns first non-zero argument.
     template <typename T, typename... More>
     constexpr T firstNonZero(T a, More... more) noexcept
@@ -161,7 +135,9 @@ RhiRenderer::RhiRenderer(vtbackend::ImageSize targetSurfaceSize,
                          vtrasterizer::PageMargin margin):
     _startTime { chrono::steady_clock::now().time_since_epoch() }, _margin { margin }
 {
-    displayLog()("RhiRenderer: Constructing with render size {}.", _renderTargetSize);
+    // Log the requested argument, not _renderTargetSize: setRenderSize() below is what assigns the member,
+    // so reading it here would always report the default-constructed 0x0.
+    displayLog()("RhiRenderer: Constructing with render size {}.", targetSurfaceSize);
     setRenderSize(targetSurfaceSize);
 }
 
@@ -210,15 +186,12 @@ void RhiRenderer::initialize()
 {
     // The renderer no longer owns raw OpenGL state. The RHI pipelines, buffers, atlas texture and sampler
     // are built lazily from the render node's prepare() via createPipelines() once the scene graph's QRhi
-    // and the frame's render-pass descriptor are available. We only flip the initialized flag and set the
-    // host image-row alignment used by texture uploads.
+    // and the frame's render-pass descriptor are available (texture uploads set their own row alignment via
+    // QRhiTextureSubresourceUploadDescription). So there is nothing to do here but flip the initialized flag.
     if (_initialized)
         return;
 
     _initialized = true;
-
-    // Image row alignment is 1 byte (OpenGL defaults to 4).
-    _transferOptions.setAlignment(1);
 }
 
 void RhiRenderer::clearCache()
@@ -266,6 +239,24 @@ void RhiRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
         if (!_atlasSampler->create())
             errorLog()("Failed to create RHI atlas sampler.");
     }
+}
+
+void RhiRenderer::rebindAtlasTexture(RhiPipeline& pipeline, QRhiBuffer* uniformBuffer)
+{
+    if (!pipeline.srb)
+        return;
+    // The binding layout is unchanged (uniform buffer at 0, atlas sampler at 1); only the atlas texture
+    // object differs after a recreate. Rebuild the QRhiShaderResourceBindings in place so the pipeline keeps
+    // using the same srb object while pointing binding 1 at the new _atlasTexture.
+    pipeline.srb->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(0,
+                                                 QRhiShaderResourceBinding::VertexStage
+                                                     | QRhiShaderResourceBinding::FragmentStage,
+                                                 uniformBuffer),
+        QRhiShaderResourceBinding::sampledTexture(
+            1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()),
+    });
+    pipeline.srb->create();
 }
 
 RhiRenderer::PassDescriptor RhiRenderer::passDescriptor(bool isText)
@@ -757,32 +748,27 @@ void RhiRenderer::applyScissor(QRhiGraphicsPipeline* pipeline, std::optional<Sci
 
 void RhiRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
 {
-    Require(isPowerOfTwo(unbox(param.size.width)));
-    Require(isPowerOfTwo(unbox(param.size.height)));
+    // std::has_single_bit is the standard power-of-two predicate (unbox() yields the unsigned extent it
+    // requires); it also rejects 0, which a zero-sized atlas would be, unlike the old hand-rolled check.
+    Require(std::has_single_bit(unbox(param.size.width)));
+    Require(std::has_single_bit(unbox(param.size.height)));
     Require(param.properties.format == atlas::Format::RGBA);
 
     // (Re)create the atlas texture only when its GPU extent actually changes — a ConfigureAtlas may be
     // scheduled repeatedly at the same size (e.g. on the initial resize burst), and recreating a multi-MB
     // texture every time is wasteful. createPipelines() may also have stood up a 1x1 placeholder texture
-    // before the real size was known, which this first real configure replaces. When recreated, refresh the
-    // text pipeline's shader-resource bindings so they reference the new texture object (the sampler and
-    // uniform buffer are reused, and the binding layout is unchanged, so the pipeline keeps using the same
-    // QRhiShaderResourceBindings object).
+    // before the real size was known, which this first real configure replaces. When recreated, refresh
+    // EVERY atlas-sampling pipeline's shader-resource bindings so they reference the new texture object; the
+    // sampler and uniform buffers are reused and the binding layout is unchanged, so each pipeline keeps its
+    // QRhiShaderResourceBindings object. The offscreen screenshot text pipeline (built once by
+    // ensureScreenshotTarget, which has a same-size early-out) samples the same atlas and shares the
+    // swapchain text pipeline's uniform buffer, so it must be rebound here too — otherwise a later
+    // screenshot samples the freed old atlas texture (use-after-free).
     if (!_atlasTexture || _atlasCreatedSize != param.size)
     {
         createAtlasTexture(_rhi, param.size);
-        if (_textPipeline.srb)
-        {
-            _textPipeline.srb->setBindings({
-                QRhiShaderResourceBinding::uniformBuffer(0,
-                                                         QRhiShaderResourceBinding::VertexStage
-                                                             | QRhiShaderResourceBinding::FragmentStage,
-                                                         _textPipeline.uniformBuffer.get()),
-                QRhiShaderResourceBinding::sampledTexture(
-                    1, QRhiShaderResourceBinding::FragmentStage, _atlasTexture.get(), _atlasSampler.get()),
-            });
-            _textPipeline.srb->create();
-        }
+        rebindAtlasTexture(_textPipeline, _textPipeline.uniformBuffer.get());
+        rebindAtlasTexture(_screenshotTextPipeline, _textPipeline.uniformBuffer.get());
     }
 
     // No full-texture clear: the rasterizer only ever samples atlas tiles it has uploaded, so untouched

@@ -14,7 +14,6 @@
 #include <crispy/StrongHash.h>
 
 #include <QtGui/QMatrix4x4>
-#include <QtOpenGL/QOpenGLPixelTransferOptions>
 #include <QtQuick/QQuickWindow>
 
 #include <chrono>
@@ -289,6 +288,17 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     /// @param size The atlas texture size in pixels (power of two).
     void createAtlasTexture(QRhi* rhi, ImageSize size);
 
+    /// Re-points a text pipeline's shader-resource bindings (binding 1) at the current _atlasTexture.
+    ///
+    /// Every SRB that samples the glyph atlas holds a reference to a specific QRhiTexture object; when
+    /// createAtlasTexture() replaces _atlasTexture (destroying the old one), every such SRB must be
+    /// rebound or it samples a freed texture. Call this for all atlas-sampling pipelines after a recreate.
+    /// @param pipeline      The pipeline whose srb references the atlas (no-op if it has no srb).
+    /// @param uniformBuffer The uniform buffer bound at slot 0. The screenshot pipelines share the
+    ///                      swapchain pipeline's buffer (their own uniformBuffer field is null), so it is
+    ///                      passed explicitly rather than read from @p pipeline.
+    void rebindAtlasTexture(RhiPipeline& pipeline, QRhiBuffer* uniformBuffer);
+
     /// Appends one execute() call's filled-rect (background) geometry to the per-frame accumulator.
     ///
     /// Copies the current _rectBuffer into _frameRectVertices and records a FrameDrawItem (vertex range +
@@ -391,8 +401,6 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     // staged by setScissorRect()/clearScissorRect() so Phase 3 can map it to QRhiCommandBuffer::setScissor.
     // std::nullopt means "use the node clip / full node area".
     std::optional<ScissorRect> _innerScissor;
-
-    QOpenGLPixelTransferOptions _transferOptions;
 
     vtrasterizer::PageMargin _margin {};
 
