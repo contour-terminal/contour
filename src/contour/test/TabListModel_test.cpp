@@ -57,16 +57,18 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     // constructible, so the contract is tested through this stand-in). Pin each role to the production
     // value so a reorder/insert in TerminalSessionManager::Roles is a COMPILE error here rather than a
     // silently-passing stale test. If a role is added, add it here AND to data()/roleNames() below.
-    static_assert(static_cast<int>(TitleRole) == static_cast<int>(contour::TerminalSessionManager::TitleRole));
-    static_assert(static_cast<int>(ColorRole) == static_cast<int>(contour::TerminalSessionManager::ColorRole));
-    static_assert(
-        static_cast<int>(IsActiveRole) == static_cast<int>(contour::TerminalSessionManager::IsActiveRole));
-    static_assert(
-        static_cast<int>(PaneCountRole) == static_cast<int>(contour::TerminalSessionManager::PaneCountRole));
-    static_assert(
-        static_cast<int>(SessionIdRole) == static_cast<int>(contour::TerminalSessionManager::SessionIdRole));
-    static_assert(
-        static_cast<int>(RawTitleRole) == static_cast<int>(contour::TerminalSessionManager::RawTitleRole));
+    static_assert(static_cast<int>(TitleRole)
+                  == static_cast<int>(contour::TerminalSessionManager::TitleRole));
+    static_assert(static_cast<int>(ColorRole)
+                  == static_cast<int>(contour::TerminalSessionManager::ColorRole));
+    static_assert(static_cast<int>(IsActiveRole)
+                  == static_cast<int>(contour::TerminalSessionManager::IsActiveRole));
+    static_assert(static_cast<int>(PaneCountRole)
+                  == static_cast<int>(contour::TerminalSessionManager::PaneCountRole));
+    static_assert(static_cast<int>(SessionIdRole)
+                  == static_cast<int>(contour::TerminalSessionManager::SessionIdRole));
+    static_assert(static_cast<int>(RawTitleRole)
+                  == static_cast<int>(contour::TerminalSessionManager::RawTitleRole));
 
     TabListModel():
         _model { *this,
@@ -140,25 +142,32 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     }
     // }}}
 
-    // {{{ vtmux::ModelEvents — identical begin/end* mapping to TerminalSessionManager
-    void tabAdded(WindowId, TabId, int index) override
+    // {{{ vtmux::ModelEvents — identical begin/end* bracketing to TerminalSessionManager
+    void tabAboutToBeAdded(WindowId, int index) override { beginInsertRows(QModelIndex(), index, index); }
+    void tabAdded(WindowId, TabId, int) override
     {
-        beginInsertRows(QModelIndex(), index, index);
         endInsertRows();
         refreshAllTabTitles();
     }
-    void tabClosed(WindowId, TabId, int index) override
+    void tabAboutToBeRemoved(WindowId, int index) override { beginRemoveRows(QModelIndex(), index, index); }
+    void tabClosed(WindowId, TabId, int) override
     {
-        beginRemoveRows(QModelIndex(), index, index);
         endRemoveRows();
         refreshAllTabTitles();
     }
-    void tabMoved(WindowId, TabId, int fromIndex, int toIndex) override
+    void tabAboutToBeMoved(WindowId, int fromIndex, int toIndex) override
     {
         // Qt's moveRows: when moving DOWN, the destination row is one past the target.
         auto const dest = toIndex > fromIndex ? toIndex + 1 : toIndex;
-        beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), dest);
-        endMoveRows();
+        _tabMoveInProgress = beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), dest);
+    }
+    void tabMoved(WindowId, TabId, int, int) override
+    {
+        if (_tabMoveInProgress)
+        {
+            endMoveRows();
+            _tabMoveInProgress = false;
+        }
         refreshAllTabTitles();
     }
     void activeTabChanged(WindowId, TabId, int index) override
@@ -254,6 +263,7 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     Window* _window;
     std::string _tabLabelTemplate = "{WindowTitle}";
     std::map<uint64_t, std::string> _sessionTitles;
+    bool _tabMoveInProgress = false; // carries beginMoveRows()'s result to tabMoved(), as in the manager
 };
 
 } // namespace
@@ -262,8 +272,11 @@ TEST_CASE("TabListModel: rows track tabs and a split does not add a row", "[cont
 {
     // The Catch2 main builds a QGuiApplication for us (see test_main.cpp).
     TabListModel m;
-    // Attaching the tester makes every subsequent model mutation contract-checked.
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    // Attaching the tester makes every subsequent model mutation contract-checked. Fatal mode (qFatal ->
+    // abort) is required to actually enforce the contract here: this is a Catch2 harness, not QtTest, so
+    // Warning mode would only qWarning() and Catch2 would never observe the violation (the test would
+    // still PASS with a broken model contract). An abort is observed by the runner as a hard failure.
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     CHECK(m.rowCount() == 0);
 
@@ -289,7 +302,7 @@ TEST_CASE("TabListModel: closing a tab removes exactly one row via the remove co
           "[contour][gui][model]")
 {
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     auto* a = m.model().createTab(m.window().id());
     auto* b = m.model().createTab(m.window().id());
@@ -309,7 +322,7 @@ TEST_CASE("TabListModel: closing one pane of a split tab keeps the tab row", "[c
     // must absorb the sibling and keep the row — it must NOT remove the tab row (which would orphan
     // the surviving pane's shell). Closing the now-single tab's last pane removes the row.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     auto* keep = m.model().createTab(m.window().id());  // row 0, single pane
     auto* split = m.model().createTab(m.window().id()); // row 1, will be split
@@ -336,7 +349,7 @@ TEST_CASE("TabListModel: activating a tab by row updates the model's active tab"
     // the model's active tab (so the rendered split tree and later split/close act on it) and fire
     // activeTabChanged with the new row — the "tab switch leaves the model active tab stale" finding.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     auto* a = m.model().createTab(m.window().id()); // row 0
     auto* b = m.model().createTab(m.window().id()); // row 1
@@ -371,7 +384,7 @@ TEST_CASE("TabListModel: switching the active tab repaints the old and new rows'
     // no delegate re-reads isActive and the highlight stays on the old tab. The earlier "activating a
     // tab by row" test only checks the role VALUES; this one asserts the dataChanged SIGNAL.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     m.model().createTab(m.window().id());           // row 0
     m.model().createTab(m.window().id());           // row 1
@@ -414,7 +427,7 @@ TEST_CASE("TabListModel: reordering a tab uses the row-move contract", "[contour
     // index convention (toIndex+1 for a downward move) and the begin/end pairing; an in-place
     // dataChanged that lied about a move would leave the row count/order inconsistent here.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     auto* a = m.model().createTab(m.window().id());
     auto* b = m.model().createTab(m.window().id());
@@ -445,7 +458,7 @@ TEST_CASE("TabListModel: a model-driven ratio change routes to the split node", 
     // The empty-paneRatioChanged finding: a model-driven setPaneRatio (not the QML drag) must reach
     // the split node's proxy slot, keyed by the split node's PaneId, so the divider re-binds.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     auto* tab = m.model().createTab(m.window().id());
     m.model().splitActivePane(tab->id(), SplitState::Vertical, 0.5);
@@ -467,7 +480,7 @@ TEST_CASE("TabListModel: focusing another pane notifies active-session consumers
     // activeSessionChanged() from activePaneChanged to keep window-level bindings (the window title)
     // following the focused pane. Assert that a pane-focus change does fire that notification.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     auto* tab = m.model().createTab(m.window().id());
     auto* newLeaf = m.model().splitActivePane(tab->id(), SplitState::Vertical, 0.5);
@@ -491,7 +504,7 @@ TEST_CASE("TabListModel: closeOtherTabs/closeTabsToRight keep a split tab intact
     // a per-pane vector. A kept tab that is split must survive with BOTH panes — the pane-space
     // indexing it replaced would have mismatched rows and panes.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     auto* a = m.model().createTab(m.window().id());
     auto* keep = m.model().createTab(m.window().id()); // will be split
@@ -522,7 +535,7 @@ TEST_CASE("TabListModel: closeOtherTabs/closeTabsToRight keep a split tab intact
 TEST_CASE("TabListModel: out-of-range and parented indices yield empty data", "[contour][gui][model]")
 {
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.model().createTab(m.window().id());
 
     CHECK_FALSE(m.data(m.index(5), TabListModel::TitleRole).isValid());
@@ -535,7 +548,7 @@ TEST_CASE("TabListModel: the default tab-label template shows the session title 
     // With the default "{WindowTitle}" template, TitleRole reproduces the pre-template behavior:
     // the tab shows its active leaf session's own title, with no position prefix.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     auto* a = m.model().createTab(m.window().id());
     auto* b = m.model().createTab(m.window().id());
@@ -550,7 +563,7 @@ TEST_CASE("TabListModel: a positional template prefixes the 1-based tab position
           "[contour][gui][model][tablabel]")
 {
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.setTabLabelTemplate("{TabPosition}: {WindowTitle}");
 
     auto* a = m.model().createTab(m.window().id());
@@ -567,7 +580,7 @@ TEST_CASE("TabListModel: a user rename overrides the profile template", "[contou
     // A rename replaces the profile's tab-label template for that one tab. A plain rename (no
     // placeholders) therefore shows verbatim, without the position prefix the profile template adds.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.setTabLabelTemplate("{TabPosition}: {WindowTitle}");
 
     auto* a = m.model().createTab(m.window().id());
@@ -588,7 +601,7 @@ TEST_CASE("TabListModel: a rename containing placeholders is itself expanded",
     // and a rename combining placeholders and literals expands all of them. This is the fix for the
     // reported "{WindowTitle} printed literally when set as the tab name" behavior.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.setTabLabelTemplate("plain"); // profile template differs, to prove the rename drives expansion
 
     auto* a = m.model().createTab(m.window().id());
@@ -607,7 +620,7 @@ TEST_CASE("TabListModel: a split tab shows the multi-pane sentinel, not the temp
           "[contour][gui][model][tablabel]")
 {
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.setTabLabelTemplate("{TabPosition}: {WindowTitle}");
 
     auto* a = m.model().createTab(m.window().id());
@@ -625,7 +638,7 @@ TEST_CASE("TabListModel: closing a tab renumbers positional labels and re-emits 
     // every later tab. tabClosed must re-emit TitleRole across the surviving rows so the strip
     // renumbers; without it, later tabs would keep their old numbers until some other event.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.setTabLabelTemplate("{TabPosition}: {WindowTitle}");
 
     auto* a = m.model().createTab(m.window().id());
@@ -675,7 +688,7 @@ TEST_CASE("TabListModel: setting a tab title exposes the raw template and the ex
     // The reported bug: setting "a: {WindowTitle}" must show "a: <title>" on the tab, while the rename
     // editor (RawTitleRole) must still show the un-expanded "a: {WindowTitle}" so editing keeps it.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.setTabLabelTemplate("{TabPosition}: {WindowTitle}");
 
     auto* a = m.model().createTab(m.window().id());
@@ -691,7 +704,7 @@ TEST_CASE("TabListModel: a plain rename round-trips verbatim in both roles",
           "[contour][gui][model][tablabel]")
 {
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.setTabLabelTemplate("{TabPosition}: {WindowTitle}");
 
     auto* a = m.model().createTab(m.window().id());
@@ -707,7 +720,7 @@ TEST_CASE("TabListModel: a never-renamed tab has an empty raw title", "[contour]
     // The editor pre-fill: a tab that was never renamed opens the rename field blank, so accepting an
     // empty edit does not freeze the displayed expansion as a literal name.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.setTabLabelTemplate("{WindowTitle}");
 
     auto* a = m.model().createTab(m.window().id());
@@ -721,7 +734,7 @@ TEST_CASE("TabListModel: resetting a tab title clears the raw role and restores 
           "[contour][gui][model][tablabel]")
 {
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.setTabLabelTemplate("{TabPosition}: {WindowTitle}");
 
     auto* a = m.model().createTab(m.window().id());
@@ -740,7 +753,7 @@ TEST_CASE("TabListModel: setting and clearing a title emits dataChanged covering
     // The editor binds to RawTitleRole, so a rename/reset must invalidate that role or a re-opened
     // editor would show a stale template.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
     auto* a = m.model().createTab(m.window().id());
     m.setSessionTitle(a->activePane()->session(), "vim");
@@ -777,7 +790,7 @@ TEST_CASE("TabListModel: a templated rename's raw role survives a positional ren
     // Proves the displayed/edit split holds across structural change: closing a sibling renumbers the
     // displayed {TabPosition} but must NOT rewrite the stored rename template the editor reads.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.setTabLabelTemplate("plain");
 
     auto* a = m.model().createTab(m.window().id());
@@ -800,7 +813,7 @@ TEST_CASE("TabListModel: a tab rename republishes the indicator status line",
     // color change does. Before the fix tabTitleChanged() refreshed only the QML tab-strip row and
     // skipped updateStatusLine(), so the status line kept the old name until an unrelated event.
     TabListModel m;
-    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Warning);
+    QAbstractItemModelTester tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     auto* a = m.model().createTab(m.window().id());
 
     SECTION("a rename refreshes the status line, like a color change does")

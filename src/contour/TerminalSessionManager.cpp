@@ -665,15 +665,21 @@ int TerminalSessionManager::activeTabIndex() const noexcept
 }
 
 // {{{ vtmux::ModelEvents
-void TerminalSessionManager::tabAdded(vtmux::WindowId, vtmux::TabId, int index)
+void TerminalSessionManager::tabAboutToBeAdded(vtmux::WindowId, int index)
 {
-    // tabAdded is a structural row insertion only. The active-tab work (activeTabIndexChanged + the
+    // beginInsertRows() must run while rowCount() still reports the OLD tab count — the model fires this
+    // before it grows _tabs, so the Qt contract holds. endInsertRows() is fired from tabAdded().
+    beginInsertRows(QModelIndex(), index, index);
+}
+
+void TerminalSessionManager::tabAdded(vtmux::WindowId, vtmux::TabId, int)
+{
+    // Close the insertion begun in tabAboutToBeAdded(). The active-tab work (activeTabIndexChanged + the
     // PaneProxy tree rebuild) belongs to activeTabChanged, which createTab always fires right after
     // tabAdded because a new tab becomes active. Doing it here too made every new tab/window walk
     // the active-tab pane tree and re-trigger the QML focus-restore binding twice. Adding a tab that
     // does NOT become active also must not rebuild the *current* active tab's proxies, so deferring
     // is the more correct behavior, not just the cheaper one.
-    beginInsertRows(QModelIndex(), index, index);
     endInsertRows();
     // A middle insert shifts the {TabPosition} of every later tab; refresh all labels so positional
     // templates renumber. An append leaves earlier positions unchanged, but the whole-column refresh
@@ -681,24 +687,39 @@ void TerminalSessionManager::tabAdded(vtmux::WindowId, vtmux::TabId, int index)
     refreshAllTabTitles();
 }
 
-void TerminalSessionManager::tabClosed(vtmux::WindowId, vtmux::TabId, int index)
+void TerminalSessionManager::tabAboutToBeRemoved(vtmux::WindowId, int index)
 {
+    // beginRemoveRows() must run while the row still exists; endRemoveRows() fires from tabClosed().
     beginRemoveRows(QModelIndex(), index, index);
+}
+
+void TerminalSessionManager::tabClosed(vtmux::WindowId, vtmux::TabId, int)
+{
     endRemoveRows();
     emit activeTabIndexChanged();
     // Closing a tab renumbers every tab after it; refresh all labels so positional templates update.
     refreshAllTabTitles();
 }
 
-void TerminalSessionManager::tabMoved(vtmux::WindowId, vtmux::TabId, int fromIndex, int toIndex)
+void TerminalSessionManager::tabAboutToBeMoved(vtmux::WindowId, int fromIndex, int toIndex)
 {
     // Project the reorder as a real row move so persistent indices, the view's currentIndex and the
-    // tab strip's move animation follow the tab — a dataChanged() over the range would only
-    // re-decorate rows in place and leave the view's row mapping wrong. Qt's beginMoveRows wants the
-    // destination row *before* which the row is inserted: for a downward move that is toIndex + 1.
+    // tab strip's move animation follow the tab — a dataChanged() over the range would only re-decorate
+    // rows in place and leave the view's row mapping wrong. beginMoveRows() must run BEFORE the model
+    // reorders its vector (it validates the destination against the pre-move layout). Qt's beginMoveRows
+    // wants the destination row *before* which the row is inserted: for a downward move that is
+    // toIndex + 1. Remember whether it accepted the move so tabMoved() only closes it when it began.
     auto const destination = toIndex > fromIndex ? toIndex + 1 : toIndex;
-    if (beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), destination))
+    _tabMoveInProgress = beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), destination);
+}
+
+void TerminalSessionManager::tabMoved(vtmux::WindowId, vtmux::TabId, int, int)
+{
+    if (_tabMoveInProgress)
+    {
         endMoveRows();
+        _tabMoveInProgress = false;
+    }
     emit activeTabIndexChanged();
     // A reorder changes the {TabPosition} of every tab between the source and destination; refresh
     // all labels so positional templates renumber.

@@ -221,8 +221,11 @@ class TerminalSessionManager: public QAbstractListModel, public vtmux::ModelEven
     // session-bookkeeping logic is unit-testable without this Qt/app-heavy header.
 
     // {{{ vtmux::ModelEvents — turn model changes into Qt model/signal notifications
+    void tabAboutToBeAdded(vtmux::WindowId window, int index) override;
     void tabAdded(vtmux::WindowId window, vtmux::TabId tab, int index) override;
+    void tabAboutToBeRemoved(vtmux::WindowId window, int index) override;
     void tabClosed(vtmux::WindowId window, vtmux::TabId tab, int index) override;
+    void tabAboutToBeMoved(vtmux::WindowId window, int fromIndex, int toIndex) override;
     void tabMoved(vtmux::WindowId window, vtmux::TabId tab, int fromIndex, int toIndex) override;
     void activeTabChanged(vtmux::WindowId window, vtmux::TabId tab, int index) override;
     void paneSplit(vtmux::TabId tab, vtmux::PaneId splitNode, vtmux::PaneId newLeaf) override;
@@ -465,6 +468,10 @@ class TerminalSessionManager: public QAbstractListModel, public vtmux::ModelEven
     // The id pre-minted for the next tab the model is about to create, consumed by the model's
     // SessionAllocator so a model tab and its backing TerminalSession share one id.
     std::optional<vtmux::SessionId> _pendingSessionId;
+    // Carries beginMoveRows()'s result from tabAboutToBeMoved() to tabMoved(): endMoveRows() must be
+    // called iff the matching beginMoveRows() returned true (Qt rejects a no-op move). The model brackets
+    // the reorder across the two ModelEvents callbacks, so the flag can't be a local.
+    bool _tabMoveInProgress = false;
 
     // PaneProxy tree for the active tab (the recursive split QML renders from it). Proxies are
     // owned here and reused by PaneId across rebuilds so a surviving pane's QML item / display is

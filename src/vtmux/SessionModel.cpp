@@ -63,10 +63,14 @@ namespace
 // {{{ SessionModel ctor
 
 SessionModel::SessionModel(ModelEvents& events, SessionAllocator allocator):
-    _events { events },
-    _allocateSession { std::move(allocator) },
-    _colorPalette { std::begin(DefaultPalette), std::end(DefaultPalette) }
+    _events { events }, _allocateSession { std::move(allocator) }
 {
+}
+
+std::span<vtbackend::RGBColor const> SessionModel::colorPalette() const noexcept
+{
+    // View over the single constexpr table (static storage duration) — no per-instance copy/allocation.
+    return DefaultPalette;
 }
 
 // }}}
@@ -110,8 +114,11 @@ Tab* SessionModel::createTab(WindowId windowId)
     auto const rootPaneId = _nextPaneId++;
     auto const session = _allocateSession();
 
+    // Bracket the insertion so a Qt host's beginInsertRows() runs BEFORE the tab set grows (its contract
+    // requires rowCount() to still report the old count at that point) and endInsertRows() after.
+    auto const index = static_cast<int>(win->_tabs.size());
+    _events.tabAboutToBeAdded(windowId, index);
     win->_tabs.push_back(std::make_unique<Tab>(tabId, rootPaneId, session));
-    auto const index = static_cast<int>(win->_tabs.size()) - 1;
     _events.tabAdded(windowId, tabId, index);
 
     win->_activeTabIndex = index;
@@ -126,6 +133,9 @@ void SessionModel::closeTabAt(Window& win, int index)
     auto const tabId = win._tabs[static_cast<size_t>(index)]->id();
 
     auto const previousActiveIndex = win._activeTabIndex;
+    // Bracket the removal: a Qt host's beginRemoveRows() must run while the tab is still present (old
+    // rowCount), endRemoveRows() after the erase.
+    _events.tabAboutToBeRemoved(win.id(), index);
     win._tabs.erase(win._tabs.begin() + index);
     _events.tabClosed(win.id(), tabId, index);
 
@@ -219,6 +229,9 @@ void SessionModel::moveTab(WindowId windowId, TabId tabId, int toIndex)
     auto* activeTab = win->activeTab();
     auto const previousActiveIndex = win->_activeTabIndex;
 
+    // Bracket the reorder: a Qt host's beginMoveRows() must run before the vector is mutated (it reads
+    // the pre-move layout to validate the destination), endMoveRows() after.
+    _events.tabAboutToBeMoved(windowId, from, to);
     auto held = std::move(win->_tabs[static_cast<size_t>(from)]);
     win->_tabs.erase(win->_tabs.begin() + from);
     win->_tabs.insert(win->_tabs.begin() + to, std::move(held));

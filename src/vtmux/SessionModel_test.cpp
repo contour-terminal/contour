@@ -20,13 +20,25 @@ struct RecordingEvents: ModelEvents
 {
     std::vector<std::string> log;
 
+    void tabAboutToBeAdded(WindowId, int index) override
+    {
+        log.push_back(std::format("tabAboutToBeAdded:{}", index));
+    }
     void tabAdded(WindowId, TabId t, int index) override
     {
         log.push_back(std::format("tabAdded:{}:{}", t.value, index));
     }
+    void tabAboutToBeRemoved(WindowId, int index) override
+    {
+        log.push_back(std::format("tabAboutToBeRemoved:{}", index));
+    }
     void tabClosed(WindowId, TabId t, int index) override
     {
         log.push_back(std::format("tabClosed:{}:{}", t.value, index));
+    }
+    void tabAboutToBeMoved(WindowId, int from, int to) override
+    {
+        log.push_back(std::format("tabAboutToBeMoved:{}>{}", from, to));
     }
     void tabMoved(WindowId, TabId t, int from, int to) override
     {
@@ -110,6 +122,47 @@ TEST_CASE("SessionModel: createTab fires tabAdded immediately followed by active
     // activeTabChanged for the new tab comes strictly after its tabAdded.
     CHECK(addedIt < activeIt);
     CHECK(std::next(addedIt) == activeIt); // immediately after, nothing in between
+}
+
+TEST_CASE("SessionModel: structural tab events bracket the mutation", "[vtmux][model][tab]")
+{
+    // Every structural change fires a paired about-to/after event so a Qt QAbstractItemModel host can map
+    // them to beginInsertRows/endInsertRows (etc.), whose contract requires the "begin" call while the
+    // model still reports the OLD row count. Assert both the pairing and the ordering the host relies on.
+    Fixture f;
+    auto* win = f.model.createWindow();
+
+    // Insert: tabAboutToBeAdded must precede tabAdded, at the append index.
+    auto* a = f.model.createTab(win->id());
+    auto* b = f.model.createTab(win->id());
+    auto const aboutAdd = std::ranges::find(f.events.log, "tabAboutToBeAdded:0");
+    auto const added = std::ranges::find(f.events.log, std::format("tabAdded:{}:0", a->id().value));
+    REQUIRE(aboutAdd != f.events.log.end());
+    REQUIRE(added != f.events.log.end());
+    CHECK(aboutAdd < added);
+    CHECK(std::next(aboutAdd) == added); // strictly bracketing, nothing between
+
+    // Move: tabAboutToBeMoved must precede tabMoved.
+    f.model.moveTab(win->id(), a->id(), 1);
+    auto const aboutMove = std::ranges::find(f.events.log, "tabAboutToBeMoved:0>1");
+    auto const moved = std::ranges::find(f.events.log, std::format("tabMoved:{}:0>1", a->id().value));
+    REQUIRE(aboutMove != f.events.log.end());
+    REQUIRE(moved != f.events.log.end());
+    CHECK(aboutMove < moved);
+    CHECK(std::next(aboutMove) == moved);
+
+    // Remove: tabAboutToBeRemoved must precede tabClosed. `b` now sits at row 0 after the move above.
+    // Capture b's id and row BEFORE the close destroys the Tab (reading them after would be a dangling
+    // read, the very bug Tab::closePane was hardened against).
+    auto const bId = b->id().value;
+    auto const bRow = win->indexOf(b->id());
+    f.model.closeTab(win->id(), b->id());
+    auto const aboutRemove = std::ranges::find(f.events.log, std::format("tabAboutToBeRemoved:{}", bRow));
+    auto const closed = std::ranges::find(f.events.log, std::format("tabClosed:{}:{}", bId, bRow));
+    REQUIRE(aboutRemove != f.events.log.end());
+    REQUIRE(closed != f.events.log.end());
+    CHECK(aboutRemove < closed);
+    CHECK(std::next(aboutRemove) == closed);
 }
 
 TEST_CASE("SessionModel: activateTab and closeTab keep the active index sane", "[vtmux][model][tab]")
@@ -638,4 +691,14 @@ TEST_CASE("SessionModel: color palette is non-empty and shared", "[vtmux][model]
     Fixture f;
     CHECK_FALSE(f.model.colorPalette().empty());
     CHECK(f.model.colorPalette().size() >= 8);
+
+    // colorPalette() is a view over a single static constexpr table (no per-instance copy/allocation):
+    // repeated calls, and calls on distinct models, must all view the SAME backing storage.
+    auto const first = f.model.colorPalette();
+    auto const again = f.model.colorPalette();
+    CHECK(first.data() == again.data());
+    CHECK(first.size() == again.size());
+
+    Fixture other;
+    CHECK(other.model.colorPalette().data() == first.data());
 }

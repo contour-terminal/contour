@@ -26,13 +26,43 @@ class ModelEvents
     ModelEvents& operator=(ModelEvents&&) = default;
     virtual ~ModelEvents() = default;
 
-    /// A new tab was appended to @p window at position @p index.
+    /// A new tab is about to be appended to @p window at position @p index, before it is inserted.
+    ///
+    /// Paired with tabAdded(): this "before" half fires while the model still holds the OLD tab set, the
+    /// "after" half once the tab exists. A Qt QAbstractItemModel host maps this pair to
+    /// beginInsertRows()/endInsertRows(), whose contract requires the begin call while rowCount() still
+    /// reports the old count. The default is a no-op so non-Qt hosts (e.g. a daemon that only reacts to
+    /// completed changes) can ignore it.
+    /// @param window The window receiving the tab.
+    /// @param index  The position the new tab will occupy.
+    virtual void tabAboutToBeAdded(WindowId window, int index) { (void) window, (void) index; }
+
+    /// A new tab was appended to @p window at position @p index. Paired with tabAboutToBeAdded().
     virtual void tabAdded(WindowId window, TabId tab, int index) = 0;
 
-    /// The tab @p tab was removed from @p window (it was at @p index before removal).
+    /// The tab @p tab at @p index is about to be removed from @p window, before it is erased.
+    ///
+    /// Paired with tabClosed(); maps to beginRemoveRows()/endRemoveRows() on a Qt host. Default no-op.
+    /// @param window The window losing the tab.
+    /// @param index  The position of the tab about to be removed.
+    virtual void tabAboutToBeRemoved(WindowId window, int index) { (void) window, (void) index; }
+
+    /// The tab @p tab was removed from @p window (it was at @p index before removal). Paired with
+    /// tabAboutToBeRemoved().
     virtual void tabClosed(WindowId window, TabId tab, int index) = 0;
 
-    /// A tab moved within its window from @p fromIndex to @p toIndex.
+    /// A tab is about to move within @p window from @p fromIndex to @p toIndex, before the reorder.
+    ///
+    /// Paired with tabMoved(); maps to beginMoveRows()/endMoveRows() on a Qt host. Default no-op.
+    /// @param window    The window whose tab moves.
+    /// @param fromIndex The tab's current position.
+    /// @param toIndex   The tab's destination position.
+    virtual void tabAboutToBeMoved(WindowId window, int fromIndex, int toIndex)
+    {
+        (void) window, (void) fromIndex, (void) toIndex;
+    }
+
+    /// A tab moved within its window from @p fromIndex to @p toIndex. Paired with tabAboutToBeMoved().
     virtual void tabMoved(WindowId window, TabId tab, int fromIndex, int toIndex) = 0;
 
     /// The active tab of @p window changed to @p tab (at @p index).
