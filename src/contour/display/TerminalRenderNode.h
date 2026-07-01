@@ -62,11 +62,13 @@ class TerminalRenderNode: public QSGRenderNode
     ///         them so the scene graph re-establishes its own viewport/scissor for subsequent nodes.
     [[nodiscard]] StateFlags changedStates() const override;
 
-    /// @return Rendering hints. NoExternalRendering tells Qt we only issue QRhi commands (no external/native
-    ///         API calls), so it need not isolate native GL state around us. BoundedRectRendering bounds the
-    ///         draw to rect() for clipping/culling; the terminal is not depth-aware and not guaranteed
-    ///         opaque (transparent window for see-through), so neither DepthAwareRendering nor
-    ///         OpaqueRendering is set.
+    /// @return Rendering hints: @c NoExternalRendering | @c DepthAwareRendering. NoExternalRendering tells
+    ///         Qt we only issue QRhi commands (no external/native API calls), so it need not isolate native
+    ///         GL state around us. DepthAwareRendering opts the node into the scene graph's depth-ordered
+    ///         pass (its pipeline depth-tests against Qt's projection-supplied per-node depth); this is
+    ///         required for the node's output to survive into the frame, matching Qt's custom-render-node
+    ///         example. OpaqueRendering is deliberately NOT set: the terminal may be transparent (see-through
+    ///         window). See TerminalRenderNode.cpp for the authoritative flag choice.
     [[nodiscard]] RenderingFlags flags() const override;
 
     /// @return The node's bounding rectangle in item-local coordinates (the full terminal item).
@@ -77,8 +79,19 @@ class TerminalRenderNode: public QSGRenderNode
     /// back-pointer so a late render() cannot touch a torn-down display.
     void releaseResources() override;
 
+    /// Re-establishes the non-owning display back-pointer.
+    ///
+    /// Qt may call releaseResources() (which nulls @c _display) on a node it then *reuses* rather than
+    /// destroys — on scene-graph invalidation paths such as a render-loop switch, a window hide/show or
+    /// some DPR changes. updatePaintNode() calls this on every reused node so a released-but-reused node
+    /// re-links to its display; without it prepare()/render() would early-out on a null @c _display and
+    /// the terminal would stay black until the node was actually destroyed and recreated.
+    /// @param display The owning terminal display; non-owning.
+    void setDisplay(TerminalDisplay* display) noexcept { _display = display; }
+
   private:
-    TerminalDisplay* _display; //!< Owning display; non-owning back-pointer, cleared in releaseResources().
+    TerminalDisplay* _display; //!< Owning display; non-owning back-pointer, cleared in releaseResources()
+                               //!< and re-established by updatePaintNode() via setDisplay() on reuse.
 };
 
 } // namespace contour::display

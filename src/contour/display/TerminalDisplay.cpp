@@ -1192,6 +1192,11 @@ QSGNode* TerminalDisplay::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*
     auto* node = static_cast<TerminalRenderNode*>(oldNode);
     if (!node)
         node = new TerminalRenderNode(this);
+    else
+        // Qt may have called releaseResources() (nulling the node's display back-pointer) on this same
+        // node without destroying it — on scene-graph invalidation paths that reuse the node. Re-link it
+        // to this display every frame, or a released-but-reused node would render nothing (black terminal).
+        node->setDisplay(this);
 
     // Content changes every frame the terminal is dirty; mark the node so Qt invokes render() again.
     node->markDirty(QSGNode::DirtyMaterial);

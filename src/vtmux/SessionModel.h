@@ -156,8 +156,10 @@ class SessionModel
     [[nodiscard]] Tab* findTab(TabId tab) const noexcept;
 
     /// The predefined tab-color palette offered to the user (a grid of swatches, WT-style). Both the
-    /// GUI and a future daemon expose the same set so all clients see identical choices.
-    [[nodiscard]] std::span<vtbackend::RGBColor const> colorPalette() const noexcept { return _colorPalette; }
+    /// GUI and a future daemon expose the same set so all clients see identical choices. Backed by a
+    /// single constexpr table with static storage duration, so this hands back a view over it — no
+    /// per-instance copy or allocation.
+    [[nodiscard]] std::span<vtbackend::RGBColor const> colorPalette() const noexcept;
 
     // }}}
 
@@ -172,7 +174,6 @@ class SessionModel
     Tab::SessionTitleResolver _titleResolver;
 
     std::vector<std::unique_ptr<Window>> _windows;
-    std::vector<vtbackend::RGBColor> _colorPalette;
 
     WindowId _nextWindowId { 1 };
     TabId _nextTabId { 1 };

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <ranges>
 #include <span>
 #include <vector>
 
@@ -73,11 +74,10 @@ inline constexpr std::size_t ScreenshotBytesPerPixel = 4;
     auto const availableRows = source.size() / rowBytes;
     auto const rows = std::min<std::size_t>(static_cast<std::size_t>(height), availableRows);
 
-    for (std::size_t row = 0; row < rows; ++row)
+    for (auto const row: std::views::iota(std::size_t { 0 }, rows))
     {
-        auto const srcRow = row;
         auto const dstRow = flip ? (static_cast<std::size_t>(height) - 1 - row) : row;
-        auto const src = source.subspan(srcRow * rowBytes, rowBytes);
+        auto const src = source.subspan(row * rowBytes, rowBytes);
         std::ranges::copy(src, out.begin() + static_cast<std::ptrdiff_t>(dstRow * rowBytes));
     }
     return out;
