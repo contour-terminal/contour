@@ -1771,10 +1771,9 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
     // with the indicator status line active (statusLineHeight() == 1, the GUI default) would yield a
     // zero-line main page and trip applyPageSizeToCurrentBuffer()/verifyState(). The frontend already
     // clamps the TOTAL to >= 1x1 (helper.cpp), which is sufficient only when no status line is shown;
-    // clamp here so the backend invariant holds for every caller and every status-line height.
-    auto const minimumLines = statusLineHeight() + LineCount(1);
-    totalPageSize.lines = std::max(totalPageSize.lines, minimumLines);
-    totalPageSize.columns = std::max(totalPageSize.columns, ColumnCount(1));
+    // clamp here so the backend invariant holds for every caller and every status-line height. Frontend
+    // callers query the same rule via clampedTotalPageSize() to keep their bookkeeping in agreement.
+    totalPageSize = clampedTotalPageSize(totalPageSize);
 
     // Finalize any active screen transition on resize (snapshot dimensions no longer match).
     if (_screenTransition.active)

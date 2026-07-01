@@ -185,7 +185,9 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
         file << "test";
     }
 
-    auto const cleanup = crispy::finally { [&]() { fs::remove_all(tmpRoot); } };
+    auto const cleanup = crispy::finally { [&]() {
+        fs::remove_all(tmpRoot);
+    } };
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
     auto constexpr UiHandledHint = false;
 
@@ -494,6 +496,56 @@ TEST_CASE("Terminal.RIS", "[terminal]")
     mc.terminal.forceRedraw({});
 
     CHECK(mc.terminal.statusDisplayType() == StatusDisplayType::None);
+}
+
+TEST_CASE("Terminal.clampedTotalPageSize", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // clampedTotalPageSize() is the single authority for the resize lower-bound: the total page must leave
+    // at least one main-display line ON TOP of the visible status line(s). Frontend callers (helper.cpp's
+    // resize early-out, TerminalSessionManager's renderer-geometry sync) query it so their bookkeeping
+    // matches what resizeScreen() actually applies. This pins that contract for both status-line states.
+    auto mc = MockTerm { ColumnCount(20), LineCount(5) };
+
+    SECTION("no status line: clamps only to a 1x1 floor")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::None);
+        REQUIRE(mc.terminal.statusLineHeight() == LineCount(0));
+
+        // A sub-1 request is raised to the 1x1 minimum; a comfortably-sized request passes through.
+        CHECK(mc.terminal.clampedTotalPageSize(PageSize { LineCount(0), ColumnCount(0) })
+              == PageSize { LineCount(1), ColumnCount(1) });
+        CHECK(mc.terminal.clampedTotalPageSize(PageSize { LineCount(10), ColumnCount(40) })
+              == PageSize { LineCount(10), ColumnCount(40) });
+    }
+
+    SECTION("indicator status line: floor rises to statusLineHeight()+1")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        REQUIRE(mc.terminal.statusLineHeight() == LineCount(1));
+
+        // The GUI-default case behind the resize-early-out finding: a 1-line request clamps up to 2, so a
+        // caller comparing its own LineCount(1)-clamped value against the applied size must query this to
+        // agree (otherwise 1 != 2 defeats the early-out forever below two cell-rows).
+        CHECK(mc.terminal.clampedTotalPageSize(PageSize { LineCount(1), ColumnCount(20) })
+              == PageSize { LineCount(2), ColumnCount(20) });
+        // A total already above the floor is unchanged.
+        CHECK(mc.terminal.clampedTotalPageSize(PageSize { LineCount(5), ColumnCount(20) })
+              == PageSize { LineCount(5), ColumnCount(20) });
+    }
+
+    SECTION("the clamp matches what resizeScreen() actually applies")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        auto const requested = PageSize { LineCount(1), ColumnCount(20) };
+        {
+            auto const _ = std::scoped_lock { mc.terminal };
+            mc.terminal.resizeScreen(requested, std::nullopt);
+        }
+        // resizeScreen() clamped the total internally; clampedTotalPageSize() predicts that exact result.
+        CHECK(mc.terminal.totalPageSize() == mc.terminal.clampedTotalPageSize(requested));
+    }
 }
 
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")

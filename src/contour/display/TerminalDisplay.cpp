@@ -295,6 +295,17 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     if (_session == newSession)
         return;
 
+    // A null newSession means "detach": the split-pane QML binding (PaneNode.qml
+    // `session: root.node ? root.node.session : null`) transiently resolves to null while a pane's Loader
+    // is still active during a split collapse, so the `session` property WRITE can arrive here as nullptr.
+    // The rest of this function unconditionally dereferences newSession (profile(), start(), attachDisplay,
+    // ...), so route a null through the existing detach path instead of segfaulting the whole window.
+    if (newSession == nullptr)
+    {
+        releaseSession();
+        return;
+    }
+
     // This will print the same pointer address for `this` but a new one for newSession (model data).
     displayLog()("Assigning session to display({} <- {}): shell={}, terminalSize={}, fontSize={}, "
                  "contentScale={}",

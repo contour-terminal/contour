@@ -829,7 +829,12 @@ void applyResize(vtbackend::ImageSize newPixelSize,
 
     auto const l = scoped_lock { terminal };
 
-    if (newPageSize == terminal.totalPageSize())
+    // Compare against what resizeScreen() will *actually* apply, not the raw newPageSize: resizeScreen()
+    // clamps the total up to statusLineHeight()+1, so at sub-2-row heights our LineCount(1)-clamped
+    // newPageSize can never equal terminal.totalPageSize(). Without this the early-out is permanently
+    // defeated below two cell-rows and every drag frame re-runs resizeScreen() + clearSelection(),
+    // wiping the active selection and storming SIGWINCH at the child shell.
+    if (terminal.clampedTotalPageSize(newPageSize) == terminal.totalPageSize())
     {
         displayLog()("No resize necessary. New size is same as old size of {}.", newPageSize);
         return;
