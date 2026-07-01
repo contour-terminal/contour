@@ -224,8 +224,12 @@ TerminalSession* TerminalSessionManager::activateSession(TerminalSession* sessio
         // staging, so the renderer's published/live grid metrics would stay stale (diagnostics and any
         // gridMetrics() reader would see the wrong size/margin). Push the full geometry (page size, pixel
         // size and margin) into the renderer so its grid metrics stay consistent with the terminal — a
-        // page-size-only sync would leave the previous session's margin live until a later resize.
-        _activeDisplay->syncRendererGeometry(totalPageSize, pixels);
+        // page-size-only sync would leave the previous session's margin live until a later resize. Feed
+        // the *clamped* page size resizeScreen() actually applied: on a sub-2-row display the raw
+        // totalPageSize is below statusLineHeight()+1, so an unclamped sync would size the renderer's grid
+        // smaller than the terminal and leave the status line (or bottom row) unrendered/mis-clipped.
+        _activeDisplay->syncRendererGeometry(
+            displayState.currentSession->terminal().clampedTotalPageSize(totalPageSize), pixels);
     }
 
     // The active-tab index published to QML is the row of THIS display's currentSession (see
@@ -466,17 +470,20 @@ void TerminalSessionManager::closeTab()
     terminateSessions(sessionsInTab(tab));
 }
 
-void TerminalSessionManager::moveTabToRow(TerminalSession* session, int targetRow)
+void TerminalSessionManager::moveTabByTab(vtmux::Tab* tab, int targetRow)
 {
-    // Reorder the tab through the authoritative model so the tab strip and status line — both
-    // model-driven — actually move. (The legacy _sessions swap touched neither.)
-    if (_modelWindow == nullptr)
-        return;
-    auto* tab = tabHostingSession(session);
-    if (tab == nullptr)
+    // The single move mechanism: reorder the tab through the authoritative model so the tab strip and
+    // status line — both model-driven — actually move (the legacy _sessions swap touched neither), then
+    // refresh. Every move entry point funnels through here so this post-move refresh lives in one place.
+    if (_modelWindow == nullptr || tab == nullptr)
         return;
     _model->moveTab(_modelWindow->id(), tab->id(), targetRow);
     updateStatusLine();
+}
+
+void TerminalSessionManager::moveTabToRow(TerminalSession* session, int targetRow)
+{
+    moveTabByTab(tabHostingSession(session), targetRow);
 }
 
 void TerminalSessionManager::moveTabTo(int position)
@@ -484,7 +491,12 @@ void TerminalSessionManager::moveTabTo(int position)
     // position is 1-based (the keybinding's argument); the model is 0-based tab-space.
     if (_modelWindow == nullptr || position < 1 || position > _modelWindow->tabCount())
         return;
-    moveTabToRow(_displayStates[_activeDisplay].currentSession, position - 1);
+    // Resolve the active session via activeSession() rather than _displayStates[_activeDisplay]: the
+    // latter's operator[] would default-insert a persistent {nullptr -> DisplayState{}} entry when no
+    // display is active (e.g. right after detachDisplay evicts one), leaving a stale null-key state for
+    // every later map scan to skip. activeSession() uses find() (no insert) and returns nullptr, which
+    // moveTabToRow already rejects.
+    moveTabToRow(activeSession(), position - 1);
 }
 
 void TerminalSessionManager::moveTabToLeft(TerminalSession* session)
@@ -893,11 +905,7 @@ void TerminalSessionManager::moveTab(int fromIndex, int toIndex)
     auto const tabCount = _modelWindow->tabCount();
     if (fromIndex < 0 || fromIndex >= tabCount || toIndex < 0 || toIndex >= tabCount)
         return;
-    if (auto* tab = tabAtRow(fromIndex); tab != nullptr)
-    {
-        _model->moveTab(_modelWindow->id(), tab->id(), toIndex);
-        updateStatusLine();
-    }
+    moveTabByTab(tabAtRow(fromIndex), toIndex);
 }
 
 void TerminalSessionManager::setTabTitle(int index, QString const& title)
@@ -958,17 +966,19 @@ void TerminalSessionManager::terminateSessions(std::span<TerminalSession* const>
 }
 
 std::vector<TerminalSession*> TerminalSessionManager::gatherSessionsOfTabsWhere(
-    std::function<bool(vtmux::Tab*)> const& predicate) const
+    std::function<bool(int row, vtmux::Tab*)> const& predicate) const
 {
     // Collect the backing sessions of every tab matching @p predicate. Used by the bulk-close operations,
     // which must gather the doomed sessions BEFORE the model mutates (so the tabs still exist), then close
     // structurally through the unit-tested model method, then terminate the gathered sessions. terminate()
     // -> removeSession then only cleans up the Qt bookkeeping, so we close in tab-space, not pane-space.
+    // The row is handed to the predicate so a positional test (closeTabsToRight) compares directly instead
+    // of re-deriving it with a linear rowOfTab() scan per tab (which made the anchor comparison O(tabs^2)).
     std::vector<TerminalSession*> doomed;
     if (_modelWindow == nullptr)
         return doomed;
     for (auto const row: std::views::iota(0, _modelWindow->tabCount()))
-        if (auto* tab = _modelWindow->tabAt(row); tab != nullptr && predicate(tab))
+        if (auto* tab = _modelWindow->tabAt(row); tab != nullptr && predicate(row, tab))
             for (auto* session: sessionsInTab(tab))
                 doomed.push_back(session);
     return doomed;
@@ -981,7 +991,7 @@ void TerminalSessionManager::closeOtherTabs(int index)
         return;
 
     auto const doomed =
-        gatherSessionsOfTabsWhere([keep](vtmux::Tab* tab) { return tab->id() != keep->id(); });
+        gatherSessionsOfTabsWhere([keep](int, vtmux::Tab* tab) { return tab->id() != keep->id(); });
     _model->closeOtherTabs(_modelWindow->id(), keep->id());
     terminateSessions(doomed);
 }
@@ -992,9 +1002,9 @@ void TerminalSessionManager::closeTabsToRight(int index)
     if (anchor == nullptr || _modelWindow == nullptr)
         return;
 
-    // Tabs strictly to the right of @p index. tabAt() is row-ordered, so compare each candidate's row.
-    auto const doomed =
-        gatherSessionsOfTabsWhere([this, index](vtmux::Tab* tab) { return rowOfTab(tab->id()) > index; });
+    // Tabs strictly to the right of @p index. The gather scan is already row-ordered and hands us the row,
+    // so compare it directly instead of re-deriving it with a linear rowOfTab() scan per candidate.
+    auto const doomed = gatherSessionsOfTabsWhere([index](int row, vtmux::Tab*) { return row > index; });
     _model->closeTabsToRight(_modelWindow->id(), anchor->id());
     terminateSessions(doomed);
 }

@@ -314,10 +314,12 @@ class TerminalSessionManager: public QAbstractListModel, public vtmux::ModelEven
     /// Gathers the backing sessions of every tab in the window matching @p predicate, in row order.
     /// Shared by the bulk-close operations (closeOtherTabs / closeTabsToRight), which snapshot the doomed
     /// sessions before the model mutates. Returns empty when there is no window.
-    /// @param predicate Selects which tabs' sessions to gather.
+    /// @param predicate Selects which tabs' sessions to gather. Receives the tab's row (already known to
+    ///                  the row-ordered scan) so a positional predicate need not re-derive it via a linear
+    ///                  rowOfTab() lookup, and the tab itself.
     /// @return The matching tabs' backing sessions.
     [[nodiscard]] std::vector<TerminalSession*> gatherSessionsOfTabsWhere(
-        std::function<bool(vtmux::Tab*)> const& predicate) const;
+        std::function<bool(int row, vtmux::Tab*)> const& predicate) const;
 
     /// Terminates each of @p sessions, the single whole-tab close primitive shared by all close
     /// paths (CloseTab, the tab ✕ button, "Close Other Tabs", "Close Tabs to the Right").
@@ -355,14 +357,21 @@ class TerminalSessionManager: public QAbstractListModel, public vtmux::ModelEven
         return findTabHostingSession(session->modelSessionId());
     }
 
-    /// Shared move primitive for the three public move-tab entry points: reorders the tab hosting @p
-    /// session to model row @p targetRow through the authoritative model and refreshes the status line.
-    /// The callers own their distinct target-row computation and bounds checks; this factors out only the
-    /// common resolve-tab / null-check / moveTab / updateStatusLine mechanism.
+    /// Shared move primitive for the public move-tab entry points: reorders the tab hosting @p session to
+    /// model row @p targetRow through the authoritative model and refreshes the status line. The callers
+    /// own their distinct target-row computation and bounds checks; this resolves the session to its tab
+    /// then defers to moveTabByTab() for the common move / updateStatusLine mechanism.
     /// @param session   The backing session whose tab to move (nullptr, unknown, or no model window is a
     ///                  no-op).
     /// @param targetRow The destination row in 0-based model tab-space.
     void moveTabToRow(TerminalSession* session, int targetRow);
+
+    /// The single move mechanism: reorders @p tab to model row @p targetRow through the authoritative
+    /// model and refreshes the status line. Every move entry point funnels through here so the post-move
+    /// refresh lives in exactly one place.
+    /// @param tab       The tab to move (nullptr, or no model window, is a no-op).
+    /// @param targetRow The destination row in 0-based model tab-space.
+    void moveTabByTab(vtmux::Tab* tab, int targetRow);
 
     /// The tab a pane action should target: the tab hosting @p acting (the session that received the
     /// keybinding) when known, else the model's active tab. Keyboard pane actions must act on the tab
