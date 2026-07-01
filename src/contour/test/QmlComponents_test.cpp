@@ -35,8 +35,12 @@ class MockTabController: public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
+    // Mirrors TerminalSessionManager::multimediaReady, which SessionChrome.qml's bell Loader gates on.
+    Q_PROPERTY(bool multimediaReady READ multimediaReady CONSTANT)
 
   public:
+    [[nodiscard]] bool multimediaReady() const noexcept { return false; }
+
     enum Roles : int
     {
         TitleRole = Qt::UserRole + 1,
@@ -235,6 +239,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/contour/ui/WindowControls.qml"),
         QStringLiteral("qrc:/contour/ui/ResizeBorder.qml"),
         QStringLiteral("qrc:/contour/ui/TitleBar.qml"),
+        QStringLiteral("qrc:/contour/ui/SessionChrome.qml"),
     };
 
     for (auto const& url: components)
@@ -271,6 +276,44 @@ TEST_CASE("GUI tab strip instantiates and binds against a populated model (offsc
     // The strip realizes its three mock tabs without QML runtime errors (which would otherwise be
     // reported on the component as creation errors).
     CHECK(controller.rowCount() == 3);
+}
+
+TEST_CASE("SessionChrome instantiates and wires a (null) session without errors (offscreen)",
+          "[contour][gui][qml]")
+{
+    // SessionChrome is the per-session chrome (scrollbar, bell, permission dialogs, notification/alert
+    // wiring) shared by Terminal.qml and TerminalPane.qml. Merely loading it catches syntax errors;
+    // instantiating it against a null session exercises the null-guarded scrollbar/dialog bindings and
+    // the wireSession() early-return, which is exactly the transient state a split pane hits on teardown.
+    QQmlEngine engine;
+    MockTabController controller; // provides the `terminalSessions.multimediaReady` the bell Loader gates on
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/SessionChrome.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    {
+        INFO("SessionChrome.qml status: " << static_cast<int>(component.status()));
+        INFO("SessionChrome.qml errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+    }
+
+    // Instantiate with an explicit null session (the required property) — the bindings must resolve
+    // without dereferencing it.
+    QVariantMap initial;
+    initial.insert("session", QVariant::fromValue(static_cast<QObject*>(nullptr)));
+    std::unique_ptr<QObject> chrome(component.createWithInitialProperties(initial));
+    REQUIRE(chrome != nullptr);
+    {
+        INFO("SessionChrome creation errors: " << component.errorString().toStdString());
+        REQUIRE_FALSE(component.isError());
+    }
+    QCoreApplication::processEvents();
+
+    // wireSession(null) must be a no-op (the pane-teardown path), not a crash.
+    QMetaObject::invokeMethod(chrome.get(), "wireSession", Q_ARG(QVariant, QVariant::fromValue(nullptr)));
+    QCoreApplication::processEvents();
+    CHECK(chrome != nullptr);
 }
 
 TEST_CASE("PaneNode renders a split tree without recursive-instantiation errors (offscreen)",

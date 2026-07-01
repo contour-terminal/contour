@@ -10,6 +10,7 @@
         <file>shell-integration/shell-integration.bash</file>
         <file>ui/RequestPermission.qml</file>
         <file>ui/BellSound.qml</file>
+        <file>ui/SessionChrome.qml</file>
         <file>ui/Terminal.qml</file>
         <file>ui/TitleBar.qml</file>
         <file>ui/TabStrip.qml</file>

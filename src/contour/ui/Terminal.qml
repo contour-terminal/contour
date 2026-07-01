@@ -89,108 +89,12 @@ ContourTerminal
         }
     }
 
-
-    ScrollBar {
-        id: vbar
-        anchors.top: parent.top
-        anchors.right : session.isScrollbarRight ? parent.right : undefined
-        anchors.left : session.isScrollbarRight ? undefined : parent.left
-        anchors.bottom: parent.bottom
-        visible : session.isScrollbarVisible
-        orientation: Qt.Vertical
-        policy: session.isScrollbarVisible ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
-        minimumSize : 0.1
-        size : vtWidget.session.pageLineCount / (vtWidget.session.pageLineCount + vtWidget.session.historyLineCount)
-        stepSize : 1.0 / (vtWidget.session.pageLineCount + vtWidget.session.historyLineCount)
-    }
-
-    // Deferred multimedia loading: the bell Loader activates only after the
-    // background thread has finished probing FFmpeg/VDPAU/VA-API/Vulkan drivers.
-    property real _pendingBellVolume: -1
-
-    Loader {
-        id: bellLoader
-        active: terminalSessions.multimediaReady
-        source: "BellSound.qml"
-        onLoaded: {
-            item.source = Qt.binding(function() { return vtWidget.session.bellSource; });
-            if (vtWidget._pendingBellVolume >= 0) {
-                item.play(vtWidget._pendingBellVolume);
-                vtWidget._pendingBellVolume = -1;
-            }
-        }
-    }
-
-    RequestPermission {
-        id: requestFontChangeDialog
-        text: "The host application is requesting to change the display font."
-        onYesToAllClicked: vtWidget.session.applyPendingFontChange(true, true);
-        onYesClicked: vtWidget.session.applyPendingFontChange(true, false);
-        onNoToAllClicked: vtWidget.session.applyPendingFontChange(false, true);
-        onNoClicked: vtWidget.session.applyPendingFontChange(false, false);
-        onRejected: {
-            console.log("[Terminal] font change request rejected.", vtWidget.session)
-            if (vtWidget.session !== null)
-                vtWidget.session.applyPendingFontChange(false, false);
-        }
-    }
-
-
-    RequestPermission {
-        id: requestLargeFilePaste
-        text: "The host application is going to paste large file, are you sure?"
-        onYesToAllClicked: vtWidget.session.applyPendingPaste(true, true);
-        onYesClicked: vtWidget.session.applyPendingPaste(true, false);
-        onNoToAllClicked: vtWidget.session.applyPendingPaste(false, true);
-        onNoClicked: vtWidget.session.applyPendingPaste(false, false);
-        onRejected: {
-            console.log("[Terminal] large file paste is rejected.", vtWidget.session)
-            if (vtWidget.session !== null)
-                vtWidget.session.applyPendingPaste(false, false);
-        }
-    }
-
-
-
-    RequestPermission {
-        id: requestBufferCaptureDialog
-        text: "The host application is requesting to capture the terminal buffer."
-        onYesToAllClicked: vtWidget.session.executePendingBufferCapture(true, true);
-        onYesClicked: vtWidget.session.executePendingBufferCapture(true, false);
-        onNoToAllClicked: vtWidget.session.executePendingBufferCapture(false, true);
-        onNoClicked: vtWidget.session.executePendingBufferCapture(false, false);
-        onRejected: {
-            console.log("[Terminal] Buffer capture request rejected.")
-            vtWidget.session.executePendingBufferCapture(false, false);
-        }
-    }
-
-    RequestPermission {
-        id: requestShowHostWritableStatusLine
-        text: "The host application is requesting to show the host-writable statusline."
-        onYesToAllClicked: vtWidget.session.executeShowHostWritableStatusLine(true, true);
-        onYesClicked: vtWidget.session.executeShowHostWritableStatusLine(true, false);
-        onNoToAllClicked: vtWidget.session.executeShowHostWritableStatusLine(false, true);
-        onNoClicked: vtWidget.session.executeShowHostWritableStatusLine(false, false);
-        onRejected: vtWidget.session.executeShowHostWritableStatusLine(false, false);
-    }
-
-    // Callback, to be invoked whenever the GUI scrollbar has been changed.
-    // This will update the VT's viewport respectively.
-    function onScrollBarPositionChanged() {
-        let vt = vtWidget.session;
-        let totalLineCount = (vt.pageLineCount + vt.historyLineCount);
-        if(vbar.active)
-                vt.scrollOffset = vt.historyLineCount - vbar.position * totalLineCount;
-    }
-
-    // Callback to be invoked whenever the VT's viewport is changing.
-    // This will update the GUI (vertical) scrollbar respectively.
-    function updateScrollBarPosition() {
-        let vt = vtWidget.session;
-        let totalLineCount = (vt.pageLineCount + vt.historyLineCount);
-
-        vbar.position = (vt.historyLineCount - vt.scrollOffset) / totalLineCount;
+    // Shared per-session chrome (scrollbar, bell, permission dialogs, notification/alert wiring),
+    // shared with the split-pane view (TerminalPane.qml).
+    SessionChrome {
+        id: chrome
+        session: vtWidget.session
+        displayItem: vtWidget
     }
 
     function updateSizeWidget() {
@@ -208,18 +112,6 @@ ContourTerminal
         console.log("Client process terminated. Closing the window.");
         if (terminalSessions.canCloseWindow())
             Window.window.close(); // https://stackoverflow.com/a/53829662/386670
-    }
-
-
-    function playBell(volume) {
-        if (bellLoader.status === Loader.Ready)
-            bellLoader.item.play(volume);
-        else
-            _pendingBellVolume = volume;
-    }
-
-    function doAlert() {
-        Window.window.alert(0);
     }
 
     function updateFontSize() {
@@ -241,27 +133,8 @@ ContourTerminal
     onSessionChanged: (s) => {
         let vt = vtWidget.session;
 
-        // Connect bell control code with an actual sound effect.
-        vt.onBell.connect(playBell);
-
-        // Connect alert control of the window
-        vt.onAlert.connect(doAlert);
-
-        // Link showNotification signal.
-        vt.onShowNotification.connect(vtWidget.showNotification);
-
-        // Link opacityChanged signal.
+        // Link opacityChanged signal (single-pane / window-level only, not shared with SessionChrome).
         vt.onOpacityChanged.connect(vtWidget.opacityChanged);
-
-        // Update the VT's viewport whenever the scrollbar's position changes.
-        vbar.onPositionChanged.connect(onScrollBarPositionChanged);
-
-        // Update the scrollbar position whenever the scrollbar size changes, because
-        // the position is calculated based on scrollbar's size.
-        vbar.onSizeChanged.connect(updateScrollBarPosition);
-
-        // Update the scrollbar's position whenever the VT's viewport changes.
-        vt.onScrollOffsetChanged.connect(updateScrollBarPosition);
 
         // Update font size of elements
         vt.fontSizeChanged.connect(updateFontSize);
@@ -271,12 +144,9 @@ ContourTerminal
         vt.lineCountChanged.connect(updateSizeWidget);
         vt.columnsCountChanged.connect(updateSizeWidget);
 
-        // Permission-wall related hooks.
-        vt.requestPermissionForFontChange.connect(requestFontChangeDialog.open);
-        vt.requestPermissionForBufferCapture.connect(requestBufferCaptureDialog.open);
-        vt.requestPermissionForShowHostWritableStatusLine.connect(requestShowHostWritableStatusLine.open);
-        vt.requestPermissionForPasteLargeFile.connect(requestLargeFilePaste.open);
-        forceActiveFocus();
+        // Shared per-session wiring (bell, alert, notifications, scrollbar, permission dialogs).
+        chrome.wireSession(vt);
 
+        forceActiveFocus();
     }
 }
