@@ -53,14 +53,19 @@ SessionId Tab::closePane(Pane* leaf)
     bool const siblingIsLeaf = sibling->isLeaf();
     auto const siblingId = sibling->id();
 
+    // Decide whether the active leaf is about to be invalidated BEFORE closeChild() runs: it absorbs the
+    // sibling's contents into the parent and destroys both the closed leaf and the old sibling Pane
+    // object, leaving `leaf`, `sibling`, and possibly `_activeLeaf` dangling. Reading (even comparing)
+    // those pointers after absorption is undefined behaviour, so capture the decision as a plain bool now.
+    bool const activeLeafInvalidated = _activeLeaf == leaf || _activeLeaf == sibling;
+
     auto const closedSession = parent->closeChild(leaf);
 
     forgetFromMru(closedId);
 
-    // If the active leaf was the one closed (or lived inside the closed subtree, which cannot happen
-    // here since we only close leaves), pick a new active leaf from the MRU, falling back to the
-    // first surviving leaf.
-    if (_activeLeaf == leaf || _activeLeaf == sibling /* sibling object was absorbed away */)
+    // If the active leaf was the one closed or the sibling that was absorbed away, pick a new active leaf
+    // from the MRU, falling back to the first surviving leaf.
+    if (activeLeafInvalidated)
     {
         Pane* next = nullptr;
         for (auto const id: _mru)

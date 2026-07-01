@@ -103,6 +103,34 @@ TEST_CASE("Tab: closing a pane absorbs the sibling and updates the active pane",
     CHECK(tab.isLastPane(tab.activePane()));
 }
 
+TEST_CASE("Tab: closing the non-active sibling keeps the absorbed active leaf", "[vtmux][tab][close]")
+{
+    // Regression for the dangling-pointer read in closePane(): with the active leaf being the sibling
+    // that closeChild() absorbs (and destroys the old Pane object of), the active-leaf reselection must
+    // not depend on comparing against the freed sibling pointer. Scenario: split (right active), focus
+    // Left (left active), then close the NON-active right pane -- the active leaf is the absorbed one.
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+
+    auto* right = tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    auto* left = tab.rootPane()->first();
+    REQUIRE(tab.focusDirection(FocusDirection::Left) == left);
+    REQUIRE(tab.activePane() == left); // the sibling that will be absorbed by closing `right`
+
+    auto const leftSession = left->session();   // capture before the node is absorbed away
+    auto const rightSession = right->session(); // capture before `right` is destroyed by the close
+    auto const closedSession = tab.closePane(right);
+    CHECK(closedSession == rightSession);
+
+    // The tab collapses to the single surviving leaf, which carries the previously-active session, and
+    // it is the active + last pane. Reaching here without a use-after-free is the point of the test.
+    CHECK(tab.paneCount() == 1);
+    REQUIRE(tab.activePane() != nullptr);
+    CHECK(tab.activePane()->isLeaf());
+    CHECK(tab.activePane()->session() == leftSession);
+    CHECK(tab.isLastPane(tab.activePane()));
+}
+
 TEST_CASE("Tab: isLastPane is true only for a single-pane tab", "[vtmux][tab][close]")
 {
     Ids ids;
