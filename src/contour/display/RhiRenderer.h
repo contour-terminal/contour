@@ -14,7 +14,6 @@
 #include <crispy/StrongHash.h>
 
 #include <QtGui/QMatrix4x4>
-#include <QtGui/QOpenGLExtraFunctions>
 #include <QtOpenGL/QOpenGLPixelTransferOptions>
 #include <QtQuick/QQuickWindow>
 
@@ -61,10 +60,7 @@ struct RhiPipeline
     QRhiResourcePtr<QRhiBuffer> uniformBuffer; ///< Dynamic std140 uniform buffer (shared by both stages).
 };
 
-class OpenGLRenderer final:
-    public vtrasterizer::RenderTarget,
-    public vtrasterizer::atlas::AtlasBackend,
-    public QOpenGLExtraFunctions
+class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer::atlas::AtlasBackend
 {
     using ImageSize = vtbackend::ImageSize;
 
@@ -82,11 +78,11 @@ class OpenGLRenderer final:
      * @param textureTileSize   Size in pixels for each tile. This should be the grid cell size.
      * @param margin            Page margin.
      */
-    OpenGLRenderer(vtbackend::ImageSize targetSurfaceSize,
-                   vtbackend::ImageSize textureTileSize,
-                   vtrasterizer::PageMargin margin);
+    RhiRenderer(vtbackend::ImageSize targetSurfaceSize,
+                vtbackend::ImageSize textureTileSize,
+                vtrasterizer::PageMargin margin);
 
-    ~OpenGLRenderer() override;
+    ~RhiRenderer() override;
 
     /// (Re)builds the RHI graphics pipelines, shader resource bindings and GPU buffers for both render
     /// passes against the scene graph's live RHI and render pass.
@@ -268,7 +264,7 @@ class OpenGLRenderer final:
     struct RenderBatch
     {
         std::vector<vtrasterizer::atlas::RenderTile> renderTiles;
-        std::vector<GLfloat> buffer;
+        std::vector<float> buffer;
         uint32_t userdata = 0;
 
         void clear()
@@ -359,8 +355,8 @@ class OpenGLRenderer final:
         std::optional<ScissorRect> scissor; ///< Transient inner scissor for this draw (raw; pre node-clip).
     };
 
-    std::vector<GLfloat> _frameRectVertices;    ///< Accumulated rect-pass vertices for the current frame.
-    std::vector<GLfloat> _frameTextVertices;    ///< Accumulated text-pass vertices for the current frame.
+    std::vector<float> _frameRectVertices;      ///< Accumulated rect-pass vertices for the current frame.
+    std::vector<float> _frameTextVertices;      ///< Accumulated text-pass vertices for the current frame.
     std::vector<FrameDrawItem> _frameDrawItems; ///< Ordered draw calls for the current frame.
 
     // The single resource-update batch accumulated across this frame's execute() calls (vertex/uniform
@@ -398,7 +394,7 @@ class OpenGLRenderer final:
 
     // CPU-side interleaved vertex buffer for the filled-rect (background) pass, populated by
     // renderRectangle() and uploaded/drawn in execute().
-    std::vector<GLfloat> _rectBuffer;
+    std::vector<float> _rectBuffer;
 
     std::optional<ScreenshotCallback> _pendingScreenshotCallback;
 

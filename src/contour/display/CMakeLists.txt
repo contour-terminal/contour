@@ -5,7 +5,7 @@ set(QT_RESOURCES DisplayResources.qrc)
 
 add_library(ContourTerminalDisplay STATIC
     Blur.cpp Blur.h
-    OpenGLRenderer.cpp OpenGLRenderer.h
+    RhiRenderer.cpp RhiRenderer.h
     ShaderConfig.cpp ShaderConfig.h
     TerminalDisplay.cpp TerminalDisplay.h
     TerminalRenderNode.cpp TerminalRenderNode.h
@@ -54,7 +54,7 @@ target_link_libraries(ContourTerminalDisplay PUBLIC vtrasterizer)
 target_link_libraries(ContourTerminalDisplay PUBLIC
     Qt6::Core
     Qt6::Gui
-    Qt6::GuiPrivate # rhi/qrhi.h is a private header (RHI resource model in OpenGLRenderer)
+    Qt6::GuiPrivate # rhi/qrhi.h is a private header (RHI resource model in RhiRenderer)
     Qt6::Multimedia
     Qt6::OpenGL
     Qt6::Quick

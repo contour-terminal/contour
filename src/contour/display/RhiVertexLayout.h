@@ -6,7 +6,7 @@
 namespace contour::display
 {
 
-/// GPU data-layout contracts shared between the RHI renderer (OpenGLRenderer) and the baked shaders.
+/// GPU data-layout contracts shared between the RHI renderer (RhiRenderer) and the baked shaders.
 ///
 /// These describe how vertex attributes are interleaved in the per-frame vertex buffers and how the std140
 /// uniform blocks are laid out. They are the binding agreement between the C++ side (which writes the

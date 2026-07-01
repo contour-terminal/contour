@@ -2,7 +2,7 @@
 #include <contour/Actions.h>
 #include <contour/BlurBehind.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/display/OpenGLRenderer.h>
+#include <contour/display/RhiRenderer.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/display/TerminalRenderNode.h>
 #include <contour/helper.h>
@@ -564,7 +564,7 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
 class CleanupJob: public QRunnable
 {
   public:
-    explicit CleanupJob(OpenGLRenderer* renderer): _renderer { renderer } {}
+    explicit CleanupJob(RhiRenderer* renderer): _renderer { renderer } {}
 
     void run() override
     {
@@ -573,7 +573,7 @@ class CleanupJob: public QRunnable
     }
 
   private:
-    OpenGLRenderer* _renderer;
+    RhiRenderer* _renderer;
 };
 
 void TerminalDisplay::releaseResources()
@@ -917,7 +917,7 @@ void TerminalDisplay::createRenderer()
                      windowSize.height());
     }
 
-    _renderTarget = new OpenGLRenderer(precalculatedTargetSize, textureTileSize, viewportMargin);
+    _renderTarget = new RhiRenderer(precalculatedTargetSize, textureTileSize, viewportMargin);
     _renderer->setRenderTarget(*_renderTarget);
 
     // The terminal no longer paints from the window's beforeRendering/afterRendering signals (which fired

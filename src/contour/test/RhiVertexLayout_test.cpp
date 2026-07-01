@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for the RHI GPU data-layout contracts (vertex strides/offsets and std140 uniform-block
-// layouts) and the scissor-clip nesting policy used by the RHI terminal renderer (OpenGLRenderer).
+// layouts) and the scissor-clip nesting policy used by the RHI terminal renderer (RhiRenderer).
 //
 // These are the binding agreement between the C++ side (which writes vertex/uniform buffers via
 // QRhiResourceUpdateBatch) and the baked `.qsb` shaders (whose attribute locations and std140 uniform

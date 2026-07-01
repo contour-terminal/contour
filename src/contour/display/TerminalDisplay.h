@@ -47,7 +47,7 @@ class TerminalSessionManager;
 namespace contour::display
 {
 
-class OpenGLRenderer;
+class RhiRenderer;
 
 // It currently can handles multiple terminals inside via tabs support.
 // that is managed by TerminalSessionManager.
@@ -439,7 +439,7 @@ class TerminalDisplay: public QQuickItem
 #endif
     std::unique_ptr<vtrasterizer::Renderer> _renderer;
     bool _renderingPressure = false;
-    display::OpenGLRenderer* _renderTarget = nullptr;
+    display::RhiRenderer* _renderTarget = nullptr;
     bool _maximizedState = false;
     bool _titleBarVisible = true; ///< Whether the native window frame is shown (show_title_bar);
                                   ///< (re)initialized from the profile. false => frameless + custom CSD.

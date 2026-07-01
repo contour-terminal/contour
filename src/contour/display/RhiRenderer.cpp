@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/display/Blur.h>
-#include <contour/display/OpenGLRenderer.h>
+#include <contour/display/RhiRenderer.h>
 #include <contour/display/RhiVertexLayout.h>
 #include <contour/display/ShaderConfig.h>
 #include <contour/helper.h>
@@ -42,8 +42,8 @@ namespace contour::display
 
 namespace ZAxisDepths
 {
-    constexpr GLfloat BackgroundSGR = 0.0f;
-    constexpr GLfloat Text = 0.0f;
+    constexpr float BackgroundSGR = 0.0f;
+    constexpr float Text = 0.0f;
 } // namespace ZAxisDepths
 
 namespace
@@ -120,16 +120,16 @@ namespace
  *
  */
 
-OpenGLRenderer::OpenGLRenderer(vtbackend::ImageSize targetSurfaceSize,
-                               [[maybe_unused]] vtbackend::ImageSize textureTileSize,
-                               vtrasterizer::PageMargin margin):
+RhiRenderer::RhiRenderer(vtbackend::ImageSize targetSurfaceSize,
+                         [[maybe_unused]] vtbackend::ImageSize textureTileSize,
+                         vtrasterizer::PageMargin margin):
     _startTime { chrono::steady_clock::now().time_since_epoch() }, _margin { margin }
 {
-    displayLog()("OpenGLRenderer: Constructing with render size {}.", _renderTargetSize);
+    displayLog()("RhiRenderer: Constructing with render size {}.", _renderTargetSize);
     setRenderSize(targetSurfaceSize);
 }
 
-void OpenGLRenderer::setRenderSize(vtbackend::ImageSize targetSurfaceSize)
+void RhiRenderer::setRenderSize(vtbackend::ImageSize targetSurfaceSize)
 {
     if (_renderTargetSize == targetSurfaceSize)
         return;
@@ -143,34 +143,34 @@ void OpenGLRenderer::setRenderSize(vtbackend::ImageSize targetSurfaceSize)
     displayLog()("Setting render target size to {}.", _renderTargetSize);
 }
 
-void OpenGLRenderer::setProjectionMatrix(QMatrix4x4 const& matrix) noexcept
+void RhiRenderer::setProjectionMatrix(QMatrix4x4 const& matrix) noexcept
 {
     _projectionMatrix = matrix;
 }
 
-void OpenGLRenderer::setModelMatrix(QMatrix4x4 const& matrix) noexcept
+void RhiRenderer::setModelMatrix(QMatrix4x4 const& matrix) noexcept
 {
     _modelMatrix = matrix;
 }
 
-void OpenGLRenderer::setMargin(vtrasterizer::PageMargin margin) noexcept
+void RhiRenderer::setMargin(vtrasterizer::PageMargin margin) noexcept
 {
     _margin = margin;
 }
 
-atlas::AtlasBackend& OpenGLRenderer::textureScheduler()
+atlas::AtlasBackend& RhiRenderer::textureScheduler()
 {
     return *this;
 }
 
-OpenGLRenderer::~OpenGLRenderer()
+RhiRenderer::~RhiRenderer()
 {
-    displayLog()("~OpenGLRenderer");
+    displayLog()("~RhiRenderer");
     // RHI resources are released through their std::unique_ptr<QRhiResource*, QRhiResourceDeleter>
     // members in reverse declaration order; nothing raw to clean up here.
 }
 
-void OpenGLRenderer::initialize()
+void RhiRenderer::initialize()
 {
     // The renderer no longer owns raw OpenGL state. The RHI pipelines, buffers, atlas texture and sampler
     // are built lazily from the render node's prepare() via createPipelines() once the scene graph's QRhi
@@ -185,12 +185,12 @@ void OpenGLRenderer::initialize()
     _transferOptions.setAlignment(1);
 }
 
-void OpenGLRenderer::clearCache()
+void RhiRenderer::clearCache()
 {
 }
 
 // {{{ RHI pipeline + atlas construction
-QShader OpenGLRenderer::loadShader(QString const& resourcePath)
+QShader RhiRenderer::loadShader(QString const& resourcePath)
 {
     QFile file(resourcePath);
     if (!file.open(QIODevice::ReadOnly))
@@ -204,7 +204,7 @@ QShader OpenGLRenderer::loadShader(QString const& resourcePath)
     return shader;
 }
 
-void OpenGLRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
+void RhiRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
 {
     auto const pixelSize = QSize(unbox<int>(size.width), unbox<int>(size.height));
 
@@ -232,7 +232,7 @@ void OpenGLRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
     }
 }
 
-void OpenGLRenderer::createRectPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
+void RhiRenderer::createRectPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
 {
     auto const vertexShader = loadShader(BackgroundVertexShaderPath);
     auto const fragmentShader = loadShader(BackgroundFragmentShaderPath);
@@ -305,7 +305,7 @@ void OpenGLRenderer::createRectPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpD
     _rectPipeline.pipeline.reset(pipeline);
 }
 
-void OpenGLRenderer::createTextPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
+void RhiRenderer::createTextPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
 {
     auto const vertexShader = loadShader(TextVertexShaderPath);
     auto const fragmentShader = loadShader(TextFragmentShaderPath);
@@ -380,7 +380,7 @@ void OpenGLRenderer::createTextPipeline(QRhi* rhi, QRhiRenderPassDescriptor* rpD
     _textPipeline.pipeline.reset(pipeline);
 }
 
-void OpenGLRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
+void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
 {
     Require(rhi != nullptr);
     Require(rpDesc != nullptr);
@@ -412,12 +412,12 @@ void OpenGLRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc
 // }}}
 
 // {{{ AtlasBackend impl
-ImageSize OpenGLRenderer::atlasSize() const noexcept
+ImageSize RhiRenderer::atlasSize() const noexcept
 {
     return _atlasTextureSize;
 }
 
-void OpenGLRenderer::configureAtlas(atlas::ConfigureAtlas atlas)
+void RhiRenderer::configureAtlas(atlas::ConfigureAtlas atlas)
 {
     // schedule atlas creation
     _scheduledExecutions.configureAtlas.emplace(atlas);
@@ -427,7 +427,7 @@ void OpenGLRenderer::configureAtlas(atlas::ConfigureAtlas atlas)
     displayLog()("configureAtlas: {} {}", atlas.size, atlas.properties.format);
 }
 
-void OpenGLRenderer::uploadTile(atlas::UploadTile tile)
+void RhiRenderer::uploadTile(atlas::UploadTile tile)
 {
     // clang-format off
     if (!(tile.bitmapSize.width <= _atlasProperties.tileSize.width))
@@ -439,44 +439,44 @@ void OpenGLRenderer::uploadTile(atlas::UploadTile tile)
     _scheduledExecutions.uploadTiles.emplace_back(std::move(tile));
 }
 
-void OpenGLRenderer::renderTile(atlas::RenderTile tile)
+void RhiRenderer::renderTile(atlas::RenderTile tile)
 {
     RenderBatch& batch = _scheduledExecutions.renderBatch;
 
     // atlas texture Vertices to locate the tile
-    auto const x = static_cast<GLfloat>(tile.x.value);
-    auto const y = static_cast<GLfloat>(tile.y.value);
+    auto const x = static_cast<float>(tile.x.value);
+    auto const y = static_cast<float>(tile.y.value);
     auto const z = ZAxisDepths::Text;
 
     // tile bitmap size on target render surface
-    GLfloat const r = unbox<GLfloat>(firstNonZero(tile.targetSize.width, tile.bitmapSize.width));
-    GLfloat const s = unbox<GLfloat>(firstNonZero(tile.targetSize.height, tile.bitmapSize.height));
+    float const r = unbox<float>(firstNonZero(tile.targetSize.width, tile.bitmapSize.width));
+    float const s = unbox<float>(firstNonZero(tile.targetSize.height, tile.bitmapSize.height));
 
     // normalized TexCoords
-    GLfloat const nx = tile.normalizedLocation.x;
-    GLfloat const ny = tile.normalizedLocation.y;
-    GLfloat const nw = tile.normalizedLocation.width;
-    GLfloat const nh = tile.normalizedLocation.height;
+    float const nx = tile.normalizedLocation.x;
+    float const ny = tile.normalizedLocation.y;
+    float const nw = tile.normalizedLocation.width;
+    float const nh = tile.normalizedLocation.height;
 
     // These two are currently not used.
     // This used to be used for the z-plane into the 3D texture,
     // but I've reverted back to a 2D texture atlas for now.
-    GLfloat const i = 0;
+    float const i = 0;
 
     // Tile dependant userdata.
     // This is current the fragment shader's selector that
     // determines how to operate on this tile (images vs gray-scale anti-aliased
     // glyphs vs LCD subpixel antialiased glyphs)
-    auto const u = static_cast<GLfloat>(tile.fragmentShaderSelector);
+    auto const u = static_cast<float>(tile.fragmentShaderSelector);
 
     // color
-    GLfloat const cr = tile.color[0];
-    GLfloat const cg = tile.color[1];
-    GLfloat const cb = tile.color[2];
-    GLfloat const ca = tile.color[3];
+    float const cr = tile.color[0];
+    float const cg = tile.color[1];
+    float const cb = tile.color[2];
+    float const ca = tile.color[3];
 
     // clang-format off
-    GLfloat const vertices[6 * 11] = {
+    float const vertices[6 * 11] = {
         // first triangle
     // <X      Y      Z> <X        Y        I  U>  <R   G   B   A>
         x,     y + s, z,  nx,      ny + nh, i, u,  cr, cg, cb, ca, // left top
@@ -501,7 +501,7 @@ void OpenGLRenderer::renderTile(atlas::RenderTile tile)
 // }}}
 
 // {{{ executor impl
-void OpenGLRenderer::execute(std::chrono::steady_clock::time_point now)
+void RhiRenderer::execute(std::chrono::steady_clock::time_point now)
 {
     // One *staging* step of the frame, driven from the render node's prepare() (via the terminal render →
     // execute() call chain). vtrasterizer's Renderer may call execute() several times per frame (smooth
@@ -550,7 +550,7 @@ void OpenGLRenderer::execute(std::chrono::steady_clock::time_point now)
     _scheduledExecutions.clear();
 }
 
-void OpenGLRenderer::recordRectPass()
+void RhiRenderer::recordRectPass()
 {
     if (_rectBuffer.empty())
         return;
@@ -567,7 +567,7 @@ void OpenGLRenderer::recordRectPass()
     });
 }
 
-void OpenGLRenderer::recordTextPass()
+void RhiRenderer::recordTextPass()
 {
     RenderBatch const& batch = _scheduledExecutions.renderBatch;
     if (batch.renderTiles.empty())
@@ -586,7 +586,7 @@ void OpenGLRenderer::recordTextPass()
     });
 }
 
-void OpenGLRenderer::flushFrame()
+void RhiRenderer::flushFrame()
 {
     // End of the staging phase (the node's prepare()): upload the frame's accumulated vertex buffers and the
     // shared uniform blocks, schedule any deferred atlas readback, then queue the whole resource batch onto
@@ -604,7 +604,7 @@ void OpenGLRenderer::flushFrame()
     // block (mat4 u_transform @0, float u_time @64).
     if (!_frameRectVertices.empty())
     {
-        auto const bytes = static_cast<quint32>(_frameRectVertices.size() * sizeof(GLfloat));
+        auto const bytes = static_cast<quint32>(_frameRectVertices.size() * sizeof(float));
         if (!_rectPipeline.vertexBuffer || _rectPipeline.vertexBuffer->size() < bytes)
         {
             _rectPipeline.vertexBuffer.reset(
@@ -625,7 +625,7 @@ void OpenGLRenderer::flushFrame()
     // @64, float pixel_x @68, vec4 u_textOutlineColor @80).
     if (!_frameTextVertices.empty())
     {
-        auto const bytes = static_cast<quint32>(_frameTextVertices.size() * sizeof(GLfloat));
+        auto const bytes = static_cast<quint32>(_frameTextVertices.size() * sizeof(float));
         if (!_textPipeline.vertexBuffer || _textPipeline.vertexBuffer->size() < bytes)
         {
             _textPipeline.vertexBuffer.reset(
@@ -665,7 +665,7 @@ void OpenGLRenderer::flushFrame()
     _frameUpdates = nullptr;
 }
 
-void OpenGLRenderer::recordDraws()
+void RhiRenderer::recordDraws()
 {
     // The *draw* half of the frame, driven from the render node's render() (inside the active render pass).
     // The prepare() phase staged the geometry/atlas and flushFrame() uploaded it; here we replay the queued
@@ -704,8 +704,7 @@ void OpenGLRenderer::recordDraws()
     _frameTextVertices.clear();
 }
 
-void OpenGLRenderer::applyScissor(QRhiGraphicsPipeline* pipeline,
-                                  std::optional<ScissorRect> const& innerScissor)
+void RhiRenderer::applyScissor(QRhiGraphicsPipeline* pipeline, std::optional<ScissorRect> const& innerScissor)
 {
     if ((pipeline->flags() & QRhiGraphicsPipeline::UsesScissor) == 0)
         return;
@@ -733,7 +732,7 @@ void OpenGLRenderer::applyScissor(QRhiGraphicsPipeline* pipeline,
     _commandBuffer->setScissor(QRhiScissor(r.x, r.y, std::max(0, r.width), std::max(0, r.height)));
 }
 
-void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
+void RhiRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
 {
     Require(isPowerOfTwo(unbox(param.size.width)));
     Require(isPowerOfTwo(unbox(param.size.height)));
@@ -768,7 +767,7 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     // the OpenGL RHI backend rejected as an "invalid texture upload" on a freshly created large texture.
 }
 
-void OpenGLRenderer::executeUploadTile(QRhiResourceUpdateBatch& updates, atlas::UploadTile const& param)
+void RhiRenderer::executeUploadTile(QRhiResourceUpdateBatch& updates, atlas::UploadTile const& param)
 {
     // {{{ Force RGBA: the atlas texture is RGBA8, but tiles may arrive as Red (alpha-mask glyphs) or RGB.
     auto const tileWidth = unbox<int>(param.bitmapSize.width);
@@ -825,17 +824,17 @@ void OpenGLRenderer::executeUploadTile(QRhiResourceUpdateBatch& updates, atlas::
                           QRhiTextureUploadDescription(QRhiTextureUploadEntry(0, 0, desc)));
 }
 
-void OpenGLRenderer::renderRectangle(int ix, int iy, Width width, Height height, RGBAColor color)
+void RhiRenderer::renderRectangle(int ix, int iy, Width width, Height height, RGBAColor color)
 {
-    auto const x = static_cast<GLfloat>(ix);
-    auto const y = static_cast<GLfloat>(iy);
+    auto const x = static_cast<float>(ix);
+    auto const y = static_cast<float>(iy);
     auto const z = ZAxisDepths::BackgroundSGR;
-    auto const r = unbox<GLfloat>(width);
-    auto const s = unbox<GLfloat>(height);
+    auto const r = unbox<float>(width);
+    auto const s = unbox<float>(height);
     auto const [cr, cg, cb, ca] = atlas::normalize(color);
 
     // clang-format off
-    GLfloat const vertices[6 * 7] = {
+    float const vertices[6 * 7] = {
         // first triangle
         x,     y + s, z, cr, cg, cb, ca,
         x,     y,     z, cr, cg, cb, ca,
@@ -851,7 +850,7 @@ void OpenGLRenderer::renderRectangle(int ix, int iy, Width width, Height height,
     crispy::copy(vertices, back_inserter(_rectBuffer));
 }
 
-void OpenGLRenderer::setScissorRect(int x, int y, int width, int height)
+void RhiRenderer::setScissorRect(int x, int y, int width, int height)
 {
     // A transient inner scissor (e.g. smooth scroll / cursor clip) staged by vtrasterizer's Renderer during
     // the staging phase (the node's prepare()). It is stored raw here; recordDraws() intersects it with the
@@ -859,19 +858,19 @@ void OpenGLRenderer::setScissorRect(int x, int y, int width, int height)
     _innerScissor = ScissorRect { .x = x, .y = y, .width = width, .height = height };
 }
 
-void OpenGLRenderer::clearScissorRect()
+void RhiRenderer::clearScissorRect()
 {
     // No transient inner scissor for subsequent geometry: draws fall back to the bare node clip (applied in
     // recordDraws()). std::nullopt means "no inner scissor", not "no clip".
     _innerScissor = std::nullopt;
 }
 
-void OpenGLRenderer::setNodeScissorRect(std::optional<ScissorRect> const& rect)
+void RhiRenderer::setNodeScissorRect(std::optional<ScissorRect> const& rect)
 {
     _nodeScissor = rect;
 }
 
-void OpenGLRenderer::clearNodeScissorRect() noexcept
+void RhiRenderer::clearNodeScissorRect() noexcept
 {
     // Only forget the stored node clip; do NOT touch GPU state. The scene graph re-establishes its own
     // scissor after the node renders, so clearing the staged rectangles is enough to prevent a later,
@@ -880,7 +879,7 @@ void OpenGLRenderer::clearNodeScissorRect() noexcept
     _innerScissor.reset();
 }
 
-optional<vtrasterizer::AtlasTextureScreenshot> OpenGLRenderer::readAtlas()
+optional<vtrasterizer::AtlasTextureScreenshot> RhiRenderer::readAtlas()
 {
     // Atlas readback is deferred: a readBackTexture() scheduled into a frame's resource batch only completes
     // after the command buffer for that frame is submitted (past the end of the render pass). We therefore
@@ -911,12 +910,12 @@ optional<vtrasterizer::AtlasTextureScreenshot> OpenGLRenderer::readAtlas()
     return { std::move(output) };
 }
 
-void OpenGLRenderer::scheduleScreenshot(ScreenshotCallback callback)
+void RhiRenderer::scheduleScreenshot(ScreenshotCallback callback)
 {
     _pendingScreenshotCallback = std::move(callback);
 }
 
-pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
+pair<ImageSize, vector<uint8_t>> RhiRenderer::takeScreenshot()
 {
     // TODO(rhi): full framebuffer readback. A render-target readback only completes after the pass ends, so
     // (like readAtlas) it would need a deferred/one-frame-latency capture; the live render target's color
@@ -933,14 +932,14 @@ pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
 }
 // }}}
 
-void OpenGLRenderer::setTextOutline(float /*thickness*/, vtbackend::RGBAColor color)
+void RhiRenderer::setTextOutline(float /*thickness*/, vtbackend::RGBAColor color)
 {
     // The outline color is consumed by the text pipeline's uniform block at draw time (Phase 3 writes it
     // into the dynamic uniform buffer). Just store it here.
     _textOutlineColor = color;
 }
 
-void OpenGLRenderer::inspect(std::ostream& /*output*/) const
+void RhiRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 

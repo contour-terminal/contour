@@ -182,7 +182,7 @@ constexpr std::array<float, 4> normalize(vtbackend::RGBAColor color) noexcept
 /// AtlasBackend interface, performs the actual atlas operations, such as
 /// texture creation, upload, render, and destruction.
 ///
-/// @see OpenGLRenderer
+/// @see RhiRenderer
 class AtlasBackend
 {
   public:
