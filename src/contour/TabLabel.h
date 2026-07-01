@@ -25,12 +25,12 @@ struct TabLabelContext
 /// through unchanged. Recognized placeholders (case-sensitive) are substituted from @p ctx:
 ///   - `{WindowTitle}` → @p ctx.windowTitle
 ///   - `{TabPosition}` → @p ctx.position (1-based)
-/// Any unrecognized placeholder expands to the empty string (matching StatusLineBuilder). Placeholder
-/// flags/attributes (e.g. `{WindowTitle:Bold}`) are accepted but ignored, since tab labels are plain
-/// text. A malformed, unterminated placeholder (an opening `{` with no closing `}`) is likewise
-/// treated as unrecognized and expands to empty. A literal brace is written by doubling it: `{{` and
-/// `}}` expand to `{` and `}` (so a rename like `build {{123}}` shows `build {123}` while
-/// `{WindowTitle}` still tracks the title).
+/// An unrecognized placeholder is echoed verbatim — its exact original `{...}` slice — matching
+/// parseStatusLineSegment so both surfaces show the user what they typed rather than dropping it.
+/// Placeholder flags/attributes (e.g. `{WindowTitle:Bold}`) are accepted but ignored, since tab labels
+/// are plain text. There is no brace escaping: braces that do not form a recognized placeholder are
+/// literal, so a rename like `build {{123}}` shows `build {{123}}` verbatim, while `{WindowTitle}`
+/// still tracks the title.
 ///
 /// @param tmpl The template string. It must outlive the call: the parser yields fragments that borrow
 ///             from @p tmpl, but they are consumed before this function returns, so the result owns no
