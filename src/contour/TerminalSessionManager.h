@@ -355,6 +355,15 @@ class TerminalSessionManager: public QAbstractListModel, public vtmux::ModelEven
         return findTabHostingSession(session->modelSessionId());
     }
 
+    /// Shared move primitive for the three public move-tab entry points: reorders the tab hosting @p
+    /// session to model row @p targetRow through the authoritative model and refreshes the status line.
+    /// The callers own their distinct target-row computation and bounds checks; this factors out only the
+    /// common resolve-tab / null-check / moveTab / updateStatusLine mechanism.
+    /// @param session   The backing session whose tab to move (nullptr, unknown, or no model window is a
+    ///                  no-op).
+    /// @param targetRow The destination row in 0-based model tab-space.
+    void moveTabToRow(TerminalSession* session, int targetRow);
+
     /// The tab a pane action should target: the tab hosting @p acting (the session that received the
     /// keybinding) when known, else the model's active tab. Keyboard pane actions must act on the tab
     /// the user is typing in, which can differ from the model's active tab in a desynced/multi-display

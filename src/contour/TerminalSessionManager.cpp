@@ -426,7 +426,15 @@ void TerminalSessionManager::closeWindow()
     _sessionsById.clear();
     _tabBySession.clear();
     _sessions.clear();
-    _displayStates.erase(closingDisplay);
+    // Drop every display of the closing window, not just the active one: when the last window has split
+    // panes it owns several displays (one per pane). Erasing only closingDisplay would leave the sibling
+    // pane displays behind as stale _displayStates entries whose currentSession/previousSession still name
+    // TerminalSessions we just cleared from the registries — a dangling pointer any later
+    // updateStatusLine()/activeTabIndex() would dereference. Mirror the not-last-window branch above.
+    auto* const closingWindow = windowOf(closingDisplay);
+    std::erase_if(_displayStates, [&](auto const& entry) {
+        return entry.first == nullptr || windowOf(entry.first) == closingWindow;
+    });
     _activeDisplay = nullptr;
 }
 
@@ -458,50 +466,43 @@ void TerminalSessionManager::closeTab()
     terminateSessions(sessionsInTab(tab));
 }
 
-void TerminalSessionManager::moveTabTo(int position)
+void TerminalSessionManager::moveTabToRow(TerminalSession* session, int targetRow)
 {
-    // position is 1-based (the keybinding's argument); the model is 0-based tab-space. Reorder the
-    // active display's tab through the authoritative model so the tab strip and status line — both
+    // Reorder the tab through the authoritative model so the tab strip and status line — both
     // model-driven — actually move. (The legacy _sessions swap touched neither.)
     if (_modelWindow == nullptr)
         return;
-    auto* tab = tabHostingSession(_displayStates[_activeDisplay].currentSession);
+    auto* tab = tabHostingSession(session);
     if (tab == nullptr)
         return;
-    if (position < 1 || position > _modelWindow->tabCount())
-        return;
-    _model->moveTab(_modelWindow->id(), tab->id(), position - 1);
+    _model->moveTab(_modelWindow->id(), tab->id(), targetRow);
     updateStatusLine();
+}
+
+void TerminalSessionManager::moveTabTo(int position)
+{
+    // position is 1-based (the keybinding's argument); the model is 0-based tab-space.
+    if (_modelWindow == nullptr || position < 1 || position > _modelWindow->tabCount())
+        return;
+    moveTabToRow(_displayStates[_activeDisplay].currentSession, position - 1);
 }
 
 void TerminalSessionManager::moveTabToLeft(TerminalSession* session)
 {
-    if (_modelWindow == nullptr)
-        return;
     auto* tab = tabHostingSession(session);
     if (tab == nullptr)
         return;
-    auto const row = rowOfTab(tab->id());
-    if (row > 0)
-    {
-        _model->moveTab(_modelWindow->id(), tab->id(), row - 1);
-        updateStatusLine();
-    }
+    if (auto const row = rowOfTab(tab->id()); row > 0)
+        moveTabToRow(session, row - 1);
 }
 
 void TerminalSessionManager::moveTabToRight(TerminalSession* session)
 {
-    if (_modelWindow == nullptr)
-        return;
     auto* tab = tabHostingSession(session);
-    if (tab == nullptr)
+    if (tab == nullptr || _modelWindow == nullptr)
         return;
-    auto const row = rowOfTab(tab->id());
-    if (row >= 0 && row + 1 < _modelWindow->tabCount())
-    {
-        _model->moveTab(_modelWindow->id(), tab->id(), row + 1);
-        updateStatusLine();
-    }
+    if (auto const row = rowOfTab(tab->id()); row >= 0 && row + 1 < _modelWindow->tabCount())
+        moveTabToRow(session, row + 1);
 }
 
 void TerminalSessionManager::currentSessionIsTerminated()
@@ -992,8 +993,8 @@ void TerminalSessionManager::closeTabsToRight(int index)
         return;
 
     // Tabs strictly to the right of @p index. tabAt() is row-ordered, so compare each candidate's row.
-    auto const doomed = gatherSessionsOfTabsWhere(
-        [this, index](vtmux::Tab* tab) { return rowOfTab(tab->id()) > index; });
+    auto const doomed =
+        gatherSessionsOfTabsWhere([this, index](vtmux::Tab* tab) { return rowOfTab(tab->id()) > index; });
     _model->closeTabsToRight(_modelWindow->id(), anchor->id());
     terminateSessions(doomed);
 }
@@ -1014,6 +1015,15 @@ void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* act
     auto* tab = paneActionTargetTab(acting);
     if (tab == nullptr)
         return;
+
+    // Split beside the pane the keybinding actually fired from. _model->splitActivePane splits the tab's
+    // model-active pane, so if the acting session's pane is not already the active one (focus vs.
+    // model-active can diverge in a multi-pane tab), make it active first — otherwise both the split and
+    // the inherited cwd below would target the wrong pane. When acting is null (QML) or not a leaf of this
+    // tab, fall back to the tab's current active pane.
+    if (acting != nullptr)
+        if (auto* actingLeaf = tab->rootPane()->findLeaf(acting->modelSessionId()); actingLeaf != nullptr)
+            _model->setActivePane(tab->id(), actingLeaf->id());
 
     // Inherit the working directory of the pane we are splitting from. Use the session's own
     // accessor so the split pane inherits the cwd on every platform — the previous inline extraction

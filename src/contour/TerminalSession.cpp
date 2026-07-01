@@ -396,24 +396,22 @@ void TerminalSession::mainLoop()
 
 void TerminalSession::terminate()
 {
-    if (_display)
-    {
-        // An attached display routes the teardown through the GUI: closeDisplay() emits terminated(),
-        // which is wired to onClosed() -> sessionClosed -> TerminalSessionManager::removeSession.
-        sessionLog()("Terminated. Closing display.");
-        _display->closeDisplay();
-        return;
-    }
-
-    // No display attached (a background tab/split pane whose display was detached on the last tab
-    // switch). closeDisplay() is unavailable, but the PTY device is the display-independent close
-    // trigger: closing it makes ExitWatcherThread's waitForClosed() return and post onClosed() onto
-    // this session's thread, which fires sessionClosed -> removeSession. Without this the close was a
-    // silent no-op and the session plus its shell process leaked. Idempotent: a second close on an
+    // Closing the PTY device is the display-independent teardown trigger on BOTH paths: it makes
+    // ExitWatcherThread's waitForClosed() return and post onClosed() onto this session's thread, which
+    // fires sessionClosed -> TerminalSessionManager::removeSession. Routing the display case through
+    // closeDisplay() alone was not enough: closeDisplay() only emits terminated(), whose QML handler
+    // closes the tab only when canCloseWindow() holds (false while a multi-tab window still has more
+    // sessions than displays), so closing the *active* tab of a multi-tab window never reached
+    // removeSession and leaked the session plus its shell process. Idempotent: a second close on an
     // already-closed device is a no-op (matching onClosed()'s own guard).
-    sessionLog()("Terminated without a display. Closing PTY device.");
+    sessionLog()("Terminated. Closing PTY device{}.", _display ? " and display" : "");
     if (!_terminal.device().isClosed())
         _terminal.device().close();
+
+    // If a display is attached, also let the GUI tear its view down. Not the session-removal trigger
+    // (that is the device().close() above); this just releases the display-side resources.
+    if (_display)
+        _display->closeDisplay();
 }
 
 // {{{ Events implementations
