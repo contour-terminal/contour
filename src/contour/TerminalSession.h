@@ -3,6 +3,7 @@
 
 #include <contour/Actions.h>
 #include <contour/Audio.h>
+#include <contour/ColorConversion.h>
 #include <contour/Config.h>
 #if defined(__linux__)
     #include <contour/FreeDesktopNotifier.h>
@@ -20,11 +21,14 @@
 #include <QtCore/QThread>
 #include <QtQml/QJSValue>
 
+#include <atomic>
 #include <cstdint>
 #include <format>
 #include <thread>
 
 #include <qcolor.h>
+
+#include <vtmux/Primitives.h>
 
 namespace contour
 {
@@ -117,13 +121,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     }
     QString pathToBackground() const
     {
-        if (const auto& p =
-                std::get_if<std::filesystem::path>(&(_terminal.colorPalette().backgroundImage->location)))
-        {
-            return QString("file:") + QString(p->string().c_str());
-        }
-        else
+        // backgroundImage is a shared_ptr that is null whenever no background image is configured (the
+        // common case), so it must be checked before dereferencing ->location — otherwise this is a null
+        // member access (undefined behavior, caught by UBSan) even though it happens not to crash in
+        // practice.
+        auto const& backgroundImage = _terminal.colorPalette().backgroundImage;
+        if (!backgroundImage)
             return QString();
+
+        if (const auto* p = std::get_if<std::filesystem::path>(&backgroundImage->location))
+            return QString("file:") + QString(p->string().c_str());
+
+        return QString();
     }
     QColor getBackgroundColor() const noexcept
     {
@@ -131,7 +140,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                          ? _terminal.colorPalette().defaultForeground
                          : _terminal.colorPalette().defaultBackground;
         auto alpha = static_cast<uint8_t>(_profile.background.value().opacity);
-        return QColor(color.red, color.green, color.blue, alpha);
+        return toQColor(color, alpha);
     }
     float getOpacityBackground() const noexcept
     {
@@ -219,6 +228,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
+
+    /// The id by which the vtmux layout model refers to this session. Set when the manager mirrors
+    /// the session into the model. Identifies the leaf pane that hosts this session.
+    [[nodiscard]] vtmux::SessionId modelSessionId() const noexcept { return _modelSessionId; }
+    void setModelSessionId(vtmux::SessionId id) noexcept { _modelSessionId = id; }
+
     std::optional<std::string> name() const
     {
         // Resolve under the terminal's _stateMutex: this runs on the GUI thread (via
@@ -228,10 +243,22 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return terminal().resolvedTabName();
     }
 
+    /// The raw OS-window title, for the GUI tab-label {WindowTitle} placeholder.
+    ///
+    /// Distinct from name(): name() goes through resolvedTabName(), which honors TabsNamingMode and
+    /// returns nullopt unless Title mode is active (the status-line {Tabs} semantics). The GUI tab
+    /// label wants the raw title regardless of mode, read thread-safely.
+    /// @return The raw window title (empty if none has been set).
+    [[nodiscard]] std::string resolvedWindowTitle() const { return terminal().resolvedWindowTitle(); }
+
     /// Starts the VT background thread.
     void start();
 
     /// Initiates termination of this session, regardless of the underlying terminal state.
+    /// Works whether or not a display is attached: with a display the teardown is routed through
+    /// closeDisplay(); without one the PTY device is closed directly so the same
+    /// onClosed() -> sessionClosed -> TerminalSessionManager::removeSession path still runs (so a
+    /// background tab/split-pane session does not leak when closed).
     void terminate();
 
     config::Config const& config() const noexcept { return _config; }
@@ -241,6 +268,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     vtbackend::Terminal& terminal() noexcept { return _terminal; }
     vtbackend::Terminal const& terminal() const noexcept { return _terminal; }
     vtbackend::ScreenType currentScreenType() const noexcept { return _currentScreenType; }
+
+    /// The session's current working directory, for inheritance when spawning a new tab, window or
+    /// split pane from this one. On non-Windows this reads the local Process's working directory (when
+    /// the device is a local process); on Windows it queries the terminal's reported cwd under the
+    /// terminal lock. Falls back to "." when no working directory can be determined (e.g. an SSH
+    /// session on non-Windows). Centralizing this here keeps every spawn path — new tab, new window and
+    /// split pane — using the same logic, including the Windows fallback.
+    /// @return The working directory path, or "." if unavailable.
+    [[nodiscard]] std::string workingDirectory() const;
 
     display::TerminalDisplay* display() noexcept { return _display; }
     display::TerminalDisplay const* display() const noexcept { return _display; }
@@ -386,6 +422,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::SwitchToTabLeft);
     bool operator()(actions::SwitchToTabRight);
     bool operator()(actions::SetTabName);
+    bool operator()(actions::SplitVertical);
+    bool operator()(actions::SplitHorizontal);
+    bool operator()(actions::ClosePane);
+    bool operator()(actions::FocusPaneLeft);
+    bool operator()(actions::FocusPaneRight);
+    bool operator()(actions::FocusPaneUp);
+    bool operator()(actions::FocusPaneDown);
 
     void scheduleRedraw();
 
@@ -480,6 +523,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     //
     TerminalSessionManager* _manager;
     int _id;
+    vtmux::SessionId _modelSessionId {};
     std::chrono::steady_clock::time_point _startTime;
     config::Config _config;
     std::string _profileName;
@@ -496,7 +540,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     std::unique_ptr<QFileSystemWatcher> _configFileChangeWatcher;
 
-    bool _terminating = false;
+    std::atomic<bool> _terminating { false };
     std::thread::id _mainLoopThreadID {};
     std::unique_ptr<std::thread> _screenUpdateThread;
 

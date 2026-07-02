@@ -86,7 +86,7 @@ struct RenderTileAttributes
 /**
  * Terminal render target interface, for example OpenGL, DirectX, or software-rasterization.
  *
- * @see OpenGLRenderer
+ * @see RhiRenderer
  */
 class RenderTarget
 {

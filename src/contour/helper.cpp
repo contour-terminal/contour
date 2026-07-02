@@ -793,10 +793,17 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     auto const oldPageSize = session.terminal().totalPageSize();
     // Read the published cell size once (lock-free), reused for both the page size and margin below.
     vtbackend::ImageSize const cellSize = renderer.publishedCellSize();
-    auto const newPageSize = pageSizeForPixels(
+    auto newPageSize = pageSizeForPixels(
         newPixelSize,
         cellSize,
         applyContentScale(session.profile().margins.value(), session.display()->contentScale()));
+
+    // A render surface smaller than a single cell (e.g. transiently while a layout settles, or a
+    // pane shrunk to nothing) yields a zero-sized page. resizeScreen()/clampToScreen() require at
+    // least 1x1, so clamp here rather than letting an invalid page size reach the backend.
+    newPageSize.lines = std::max(newPageSize.lines, vtbackend::LineCount(1));
+    newPageSize.columns = std::max(newPageSize.columns, vtbackend::ColumnCount(1));
+
     vtbackend::Terminal& terminal = session.terminal();
 
     auto const newMargin = computeMargin(
@@ -822,7 +829,12 @@ void applyResize(vtbackend::ImageSize newPixelSize,
 
     auto const l = scoped_lock { terminal };
 
-    if (newPageSize == terminal.totalPageSize())
+    // Compare against what resizeScreen() will *actually* apply, not the raw newPageSize: resizeScreen()
+    // clamps the total up to statusLineHeight()+1, so at sub-2-row heights our LineCount(1)-clamped
+    // newPageSize can never equal terminal.totalPageSize(). Without this the early-out is permanently
+    // defeated below two cell-rows and every drag frame re-runs resizeScreen() + clearSelection(),
+    // wiping the active selection and storming SIGWINCH at the child shell.
+    if (terminal.clampedTotalPageSize(newPageSize) == terminal.totalPageSize())
     {
         displayLog()("No resize necessary. New size is same as old size of {}.", newPageSize);
         return;

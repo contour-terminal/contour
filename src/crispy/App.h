@@ -28,6 +28,15 @@ class app
 
     virtual int run(int argc, char const* argv[]);
 
+    /// Parses @p argv into the parameter store WITHOUT dispatching to any command handler, populating
+    /// parameters() with the syntax's defaults plus whatever @p argv overrides. This is the same parse
+    /// step run() performs internally, exposed so tests can construct an app instance with a fully-formed
+    /// parameters() (e.g. so a default profile resolves) without launching the GUI event loop.
+    /// @param argc Argument count.
+    /// @param argv Argument vector (argv[0] is the program name).
+    /// @return true if parsing succeeded (parameters() is now populated), false otherwise.
+    [[nodiscard]] bool parseParametersForTesting(int argc, char const* argv[]);
+
     [[nodiscard]] std::string const& appName() const noexcept { return _appName; }
     [[nodiscard]] std::string const& appVersion() const noexcept { return _appVersion; }
     [[nodiscard]] std::filesystem::path const& localStateDir() const noexcept { return _localStateDir; }

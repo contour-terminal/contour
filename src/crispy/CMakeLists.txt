@@ -136,6 +136,7 @@ if(CRISPY_TESTING)
         utils_test.cpp
         result_test.cpp
         ring_test.cpp
+        read_selector_test.cpp
         sort_test.cpp
         times_test.cpp
     )

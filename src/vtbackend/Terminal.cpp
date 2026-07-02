@@ -175,7 +175,9 @@ Terminal::Terminal(Events& eventListener,
     _effectiveImageCanvasSize { _settings.maxImageSize },
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
                                                              _maxSixelColorRegisters) },
-    _imagePool { [this](Image const* image) { discardImage(*image); } },
+    _imagePool { [this](Image const* image) {
+        discardImage(*image);
+    } },
     _hyperlinks { .cache = HyperlinkCache { 1024 } },
     _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
     _parser { std::ref(_sequenceBuilder) },
@@ -1764,6 +1766,15 @@ SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
+    // The total page must leave room for at least one main-display line ON TOP of the visible status
+    // line(s): the main page is derived as `totalPageSize - statusLineHeight()` below, so a 1x1 total
+    // with the indicator status line active (statusLineHeight() == 1, the GUI default) would yield a
+    // zero-line main page and trip applyPageSizeToCurrentBuffer()/verifyState(). The frontend already
+    // clamps the TOTAL to >= 1x1 (helper.cpp), which is sufficient only when no status line is shown;
+    // clamp here so the backend invariant holds for every caller and every status-line height. Frontend
+    // callers query the same rule via clampedTotalPageSize() to keep their bookkeeping in agreement.
+    totalPageSize = clampedTotalPageSize(totalPageSize);
+
     // Finalize any active screen transition on resize (snapshot dimensions no longer match).
     if (_screenTransition.active)
         finalizeScreenTransition();
@@ -2401,12 +2412,22 @@ void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode mode)
 
 void Terminal::setWindowTitle(string_view title)
 {
+    // Writes _windowTitle lock-free intentionally: the parser-thread callers (OSC 0/2 dispatch in
+    // Screen, save/restoreWindowTitle) reach this from inside writeToScreen()'s _stateMutex hold, so
+    // the write is already serialized under the lock; taking the non-recursive _stateMutex here would
+    // self-deadlock. GUI-thread readers must use resolvedWindowTitle(), which locks and copies.
     _windowTitle = title;
     _eventListener.setWindowTitle(title);
 }
 
 std::string const& Terminal::windowTitle() const noexcept
 {
+    return _windowTitle;
+}
+
+std::string Terminal::resolvedWindowTitle() const
+{
+    auto const l = std::lock_guard { _stateMutex };
     return _windowTitle;
 }
 

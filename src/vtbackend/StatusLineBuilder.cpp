@@ -124,6 +124,9 @@ std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
     if (interpolation.name == "InputMode")
         return StatusLineDefinitions::InputMode { styles };
 
+    if (interpolation.name == "TraceMode")
+        return StatusLineDefinitions::TraceMode { styles };
+
     if (interpolation.name == "ProtectedMode")
         return StatusLineDefinitions::ProtectedMode { styles };
 
@@ -171,17 +174,26 @@ StatusLineSegment parseStatusLineSegment(std::string_view text)
 
     auto const interpolations = crispy::parse_interpolated_string(text);
 
+    // An un-styled literal Text item wrapping the given source bytes; used both for the plain-text
+    // fragments and for the verbatim echo of an unrecognized placeholder.
+    auto const literalText = [](std::string_view s) {
+        return StatusLineDefinitions::Text { StatusLineDefinitions::Styles {}, std::string(s) };
+    };
+
     for (auto const& fragment: interpolations)
     {
         if (std::holds_alternative<std::string_view>(fragment))
-        {
-            segment.emplace_back(StatusLineDefinitions::Text {
-                StatusLineDefinitions::Styles {}, std::string(std::get<std::string_view>(fragment)) });
-        }
-        else if (auto const item = makeStatusLineItem(std::get<crispy::string_interpolation>(fragment)))
-        {
+            segment.emplace_back(literalText(std::get<std::string_view>(fragment)));
+        // Pass the fragment variant straight through (no copy): makeStatusLineItem takes it by const ref,
+        // so binding the string_interpolation into a temporary variant here would deep-copy its flag set
+        // and attribute map.
+        else if (auto const item = makeStatusLineItem(fragment))
             segment.emplace_back(*item);
-        }
+        else
+            // An unrecognized placeholder is echoed verbatim (its exact original `{...}` slice) rather than
+            // dropped, so the user sees what they typed — matching expandTabLabel's tab-strip handling so
+            // both surfaces treat unknown placeholders identically.
+            segment.emplace_back(literalText(std::get<crispy::string_interpolation>(fragment).whole));
     }
 
     return segment;
@@ -386,6 +398,11 @@ struct VTSerializer
 
     std::string visit(StatusLineDefinitions::TraceMode const&)
     {
+        // Trace mode is off in Normal execution; render nothing then (mirrors ProtectedMode's gating), so
+        // the default status line's {TraceMode} segment is empty unless tracing is actually active.
+        if (vt.executionMode() == ExecutionMode::Normal)
+            return {};
+
         std::string result;
 
         result += "TRACING";

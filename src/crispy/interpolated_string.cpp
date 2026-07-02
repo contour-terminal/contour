@@ -56,8 +56,31 @@ string_interpolation parse_interpolation(std::string_view text)
 interpolated_string parse_interpolated_string(std::string_view text)
 {
     // "< {Clock:Bold,Italic,Color=#FFFF00} | {VTType} | {InputMode} {Search:Bold,Color=Yellow} >"
+    //
+    // NB: There is no brace escaping. Every "{...}" run is parsed as a placeholder; braces cannot be
+    // emitted literally. (An earlier attempt at "{{"/"}}" escaping was dropped to preserve backward
+    // compatibility with existing templates that legitimately contained doubled braces.) Each parsed
+    // interpolation carries its exact original "{...}" slice in `whole`, so a consumer that does not
+    // recognize the name can emit it verbatim rather than dropping it (see expandTabLabel /
+    // parseStatusLineSegment).
 
     auto fragments = interpolated_string {};
+
+    // Builds an interpolation for the placeholder spanning [openBrace, closeBrace] (closeBrace == npos for
+    // an unterminated trailing placeholder, which extends to the end of the input). Captures the whole
+    // source slice — braces included — so unrecognized placeholders can be echoed verbatim downstream.
+    auto makeInterpolation = [text](size_t openBrace, size_t closeBrace) {
+        auto const terminated = closeBrace != std::string_view::npos;
+        // The whole source slice, braces included; extends to end-of-input when unterminated.
+        auto const whole =
+            terminated ? text.substr(openBrace, closeBrace - openBrace + 1) : text.substr(openBrace);
+        // A closed placeholder strips both braces before parsing; an unterminated one keeps the leading
+        // '{' in the name (so "{WindowTitle" stays unrecognized and echoes verbatim, rather than behaving
+        // like a valid "{WindowTitle}").
+        auto interpolation = parse_interpolation(terminated ? whole.substr(1, whole.size() - 2) : whole);
+        interpolation.whole = whole;
+        return interpolation;
+    };
 
     size_t pos = 0;
     while (pos < text.size())
@@ -78,16 +101,13 @@ interpolated_string parse_interpolated_string(std::string_view text)
         if (closeBrace == std::string_view::npos)
         {
             // no matching close brace found, so we're done.
-            fragments.emplace_back(parse_interpolation(text.substr(openBrace)));
+            fragments.emplace_back(makeInterpolation(openBrace, closeBrace));
             return fragments;
         }
-        else
-        {
-            // add interpolation fragment
-            auto const fragment = text.substr(openBrace + 1, closeBrace - openBrace - 1);
-            fragments.emplace_back(parse_interpolation(fragment));
-            pos = closeBrace + 1;
-        }
+
+        // add interpolation fragment
+        fragments.emplace_back(makeInterpolation(openBrace, closeBrace));
+        pos = closeBrace + 1;
     }
 
     return fragments;

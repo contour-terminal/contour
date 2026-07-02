@@ -290,6 +290,22 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 {
     sessionLog()("Attaching session to display {}x{}.", newDisplay.width(), newDisplay.height());
 
+    // Enforce the one-session-one-display invariant: if a different display is still attached (e.g.
+    // the hidden single-pane view after the active tab was split, which is only made invisible — not
+    // destroyed — by QML), tell it to release this session first. Otherwise both displays would
+    // believe they own the session, _display would silently flip to whichever attached last, and the
+    // stale display's later detachDisplay() would trip the _display == &display precondition.
+    if (_display != nullptr && _display != &newDisplay)
+    {
+        auto* oldDisplay = _display;
+        oldDisplay->releaseSession();
+        // releaseSession() only nulls the old display's own _session; keep the manager's
+        // _displayStates[oldDisplay] in sync too, so a later FocusOnDisplay(oldDisplay) does not
+        // re-activate this session on a display that no longer owns it.
+        if (_manager != nullptr)
+            _manager->onSessionDetachedFromDisplay(oldDisplay, this);
+    }
+
     // We're being called by newDisplay!
     _display = &newDisplay;
 
@@ -380,11 +396,22 @@ void TerminalSession::mainLoop()
 
 void TerminalSession::terminate()
 {
-    if (!_display)
-        return;
+    // Closing the PTY device is the display-independent teardown trigger on BOTH paths: it makes
+    // ExitWatcherThread's waitForClosed() return and post onClosed() onto this session's thread, which
+    // fires sessionClosed -> TerminalSessionManager::removeSession. Routing the display case through
+    // closeDisplay() alone was not enough: closeDisplay() only emits terminated(), whose QML handler
+    // closes the tab only when canCloseWindow() holds (false while a multi-tab window still has more
+    // sessions than displays), so closing the *active* tab of a multi-tab window never reached
+    // removeSession and leaked the session plus its shell process. Idempotent: a second close on an
+    // already-closed device is a no-op (matching onClosed()'s own guard).
+    sessionLog()("Terminated. Closing PTY device{}.", _display ? " and display" : "");
+    if (!_terminal.device().isClosed())
+        _terminal.device().close();
 
-    sessionLog()("Terminated. Closing display.");
-    _display->closeDisplay();
+    // If a display is attached, also let the GUI tear its view down. Not the session-removal trigger
+    // (that is the device().close() above); this just releases the display-side resources.
+    if (_display)
+        _display->closeDisplay();
 }
 
 // {{{ Events implementations
@@ -994,10 +1021,16 @@ std::tuple<LineOffset, ColumnOffset> TerminalSession::consumeScroll() noexcept
 
 QString TerminalSession::title() const
 {
+    // Bound to main.qml's window `title:`, so Qt re-evaluates this on the GUI thread whenever the title
+    // changes — concurrently with the parser thread's OSC 0/2 writer (setWindowTitle assigns _windowTitle
+    // under _stateMutex). Read the locked copy via resolvedWindowTitle() rather than the lock-free
+    // windowTitle() reference, which would tear (or use-after-free on a string reallocation) against that
+    // writer. Native tabs/splits make these GUI-thread title reads far more frequent.
+    auto const windowTitle = resolvedWindowTitle();
 #if !defined(NDEBUG)
-    return QString::fromStdString(terminal().windowTitle() + " - Contour (DEBUG)");
+    return QString::fromStdString(windowTitle + " - Contour (DEBUG)");
 #else
-    return QString::fromStdString(terminal().windowTitle() + " - Contour");
+    return QString::fromStdString(windowTitle + " - Contour");
 #endif
 }
 
@@ -1015,7 +1048,10 @@ void TerminalSession::refreshGuiTabInfoForStatusLine()
     if (_display)
         _display->post([self = QPointer<TerminalSession> { this }]() {
             if (self)
-                self->_manager->update();
+            {
+                self->_manager->update();                                     // indicator status line
+                self->_manager->refreshTabForSession(self->modelSessionId()); // GUI tab strip label
+            }
         });
 }
 
@@ -1080,18 +1116,13 @@ void handleAction(auto const& actions, auto eventType, auto callback)
         callback(*actions);
     else if (eventType == KeyboardEventType::Repeat)
     {
-        // filter out actions that are not repeatable
-        std::vector<actions::Action> tmpActions;
-        auto set = crispy::overloaded {
-            [&]([[maybe_unused]] actions::NonRepeatableActionConcept auto const& action) {},
-            [&](auto const& action) { tmpActions.emplace_back(action); },
-        };
-
-        for (auto const& action: *actions)
-        {
-            std::visit(set, action);
-        }
-        callback(tmpActions);
+        // Drop actions that must not fire on auto-repeat (e.g. CloseTab/ClosePane/CreateNewTab). The
+        // overwhelmingly common held keys (characters, arrows) bind only repeatable actions, so avoid
+        // allocating a filtered copy unless there is actually a non-repeatable action to drop.
+        if (std::ranges::none_of(*actions, actions::isNonRepeatable))
+            callback(*actions);
+        else
+            callback(actions::filterRepeatableActions(*actions));
     }
 }
 
@@ -1893,6 +1924,48 @@ bool TerminalSession::operator()(actions::SetTabName)
     return true;
 }
 
+bool TerminalSession::operator()(actions::SplitVertical)
+{
+    _manager->splitActivePane(/*vertical*/ true, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SplitHorizontal)
+{
+    _manager->splitActivePane(/*vertical*/ false, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::ClosePane)
+{
+    _manager->closeActivePane(/*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::FocusPaneLeft)
+{
+    _manager->focusPane(vtmux::FocusDirection::Left, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::FocusPaneRight)
+{
+    _manager->focusPane(vtmux::FocusDirection::Right, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::FocusPaneUp)
+{
+    _manager->focusPane(vtmux::FocusDirection::Up, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::FocusPaneDown)
+{
+    _manager->focusPane(vtmux::FocusDirection::Down, /*acting*/ this);
+    return true;
+}
+
 // }}}
 // {{{ implementation helpers
 void TerminalSession::setDefaultCursor()
@@ -1963,18 +2036,21 @@ bool TerminalSession::executeAction(actions::Action const& action)
     return visit(*this, action);
 }
 
+std::string TerminalSession::workingDirectory() const
+{
+#if !defined(_WIN32)
+    if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
+        return ptyProcess->workingDirectory();
+#else
+    auto const _l = scoped_lock { _terminal };
+    return _terminal.currentWorkingDirectory();
+#endif
+    return "."s;
+}
+
 void TerminalSession::spawnNewTerminal(string const& profileName)
 {
-    auto const wd = [this]() -> string {
-#if !defined(_WIN32)
-        if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
-            return ptyProcess->workingDirectory();
-#else
-        auto const _l = scoped_lock { _terminal };
-        return _terminal.currentWorkingDirectory();
-#endif
-        return "."s;
-    }();
+    auto const wd = workingDirectory();
 
     if (_config.spawnNewProcess.value())
     {
@@ -2004,6 +2080,12 @@ void TerminalSession::activateProfile(string const& newProfileName)
     _profileName = newProfileName;
     _profile = *newProfile;
     configureTerminal();
+
+    // The tab-label template lives in the profile, so a reload may change every tab's label. This runs
+    // on the GUI thread (config-reload path), so refresh the tab strip directly. Guarded because a
+    // session may be configured before it is attached to a manager.
+    if (_manager != nullptr)
+        _manager->refreshAllTabTitles();
 }
 
 void TerminalSession::configureTerminal()
@@ -2092,7 +2174,10 @@ void TerminalSession::configureDisplay()
     _display->setHyperlinkDecoration(_profile.hyperlinkDecoration.value().normal,
                                      _profile.hyperlinkDecoration.value().hover);
 
-    setWindowTitle(_terminal.windowTitle());
+    // Re-emit the current title to the freshly-attached display. This runs on the GUI thread, so read
+    // it via resolvedWindowTitle() (locked copy) rather than the lock-free windowTitle() reference,
+    // which could tear against a concurrent parser-thread title write.
+    setWindowTitle(_terminal.resolvedWindowTitle());
 }
 
 uint8_t TerminalSession::matchModeFlags() const

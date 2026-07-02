@@ -181,6 +181,9 @@ struct MouseConfig
 
 struct IndicatorConfig
 {
+    // The default indicator status line keeps the {Tabs} segment so the in-terminal tab list is still
+    // shown even when the GUI tab strip is hidden or unavailable. (Tabs are also surfaced as first-class
+    // GUI tabs in the window title bar; the two are complementary.)
     std::string left { " {InputMode:Bold,Color=#FFFF00}"
                        "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
                        "{Tabs:ActiveColor=#FFFF00,Left= │ }"
@@ -408,7 +411,11 @@ struct TerminalProfile
     ConfigEntry<vtpty::SshHostConfig, documentation::SshHostConfig> ssh {};
     ConfigEntry<bool, documentation::EscapeSandbox> escapeSandbox { true };
     ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
-    ConfigEntry<bool, documentation::ShowTitleBar> showTitleBar { true };
+    // show_title_bar now selects the WINDOW DECORATION: true = native server-side frame (+ the OS's
+    // own min/max/close controls; our tab strip then omits its custom ones), false = frameless with
+    // full client-side decoration (our tab strip draws the controls). Defaults to false so the
+    // out-of-box look is the custom CSD tab strip, matching the prior Linux/Windows appearance.
+    ConfigEntry<bool, documentation::ShowTitleBar> showTitleBar { false };
     ConfigEntry<bool, documentation::ShowIndicatorOnResize> sizeIndicatorOnResize { true };
     ConfigEntry<bool, documentation::Fullscreen> fullscreen { false };
     ConfigEntry<bool, documentation::Maximized> maximized { false };
@@ -469,6 +476,7 @@ struct TerminalProfile
     ConfigEntry<std::vector<HintPatternConfig>, documentation::HintPatterns> hintPatterns {};
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
+    ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{WindowTitle}" };
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 
@@ -535,6 +543,22 @@ const InputMappings defaultInputMappings {
                           .modifiers { vtbackend::Modifier::Shift },
                           .input = vtbackend::Key::RightArrow,
                           .binding = { { actions::SwitchToTabRight {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::LeftArrow,
+                          .binding = { { actions::FocusPaneLeft {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::RightArrow,
+                          .binding = { { actions::FocusPaneRight {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::UpArrow,
+                          .binding = { { actions::FocusPaneUp {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::DownArrow,
+                          .binding = { { actions::FocusPaneDown {} } } },
         //     KeyInputMapping { .modes { vtbackend::MatchModes {} },
         //                       .modifiers { vtbackend::Modifiers {  vtbackend::Modifier {
         //                       vtbackend::Modifier::Shift }
@@ -594,6 +618,18 @@ const InputMappings defaultInputMappings {
                            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                            .input = 'T',
                            .binding = { { actions::CreateNewTab {} } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'E',
+                           .binding = { { actions::SplitVertical {} } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'O',
+                           .binding = { { actions::SplitHorizontal {} } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'X',
+                           .binding = { { actions::ClosePane {} } } },
         CharInputMapping { .modes { vtbackend::MatchModes {} },
                            .modifiers { vtbackend::Modifier::Alt },
                            .input = '1',

@@ -109,10 +109,14 @@ constexpr StringLiteral FullscreenConfig {
     "\n"
 };
 
-constexpr StringLiteral ShowTitleBarConfig { "{comment} When this profile is *activated*, this flag decides\n"
-                                             "{comment} whether or not the title bar will be shown\n"
-                                             "show_title_bar: {}\n"
-                                             "\n" };
+constexpr StringLiteral ShowTitleBarConfig {
+    "{comment} When this profile is *activated*, this flag selects the window decoration:\n"
+    "{comment}   true  = the native (server-side) title bar and its window controls;\n"
+    "{comment}   false = a frameless window with Contour's own client-side tab strip and controls.\n"
+    "{comment} The tab strip is shown either way; only the min/max/close controls move to the OS frame.\n"
+    "show_title_bar: {}\n"
+    "\n"
+};
 
 constexpr StringLiteral ShowIndicatorOnResizeConfig {
     "{comment} When this profile is *activated*, this flag decides\n"
@@ -151,6 +155,15 @@ constexpr StringLiteral CopyLastMarkRangeOffsetConfig {
 
 constexpr StringLiteral WMClassConfig {
     "{comment} Defines the class part of the WM_CLASS property of the window.\n"
+};
+
+constexpr StringLiteral TabLabelConfig {
+    "{comment} Default template for the text shown on each GUI tab.\n"
+    "{comment} Supported placeholders:\n"
+    "{comment}   {{WindowTitle}}  the active pane's window/tab title\n"
+    "{comment}   {{TabPosition}}  the tab's 1-based position\n"
+    "{comment} Renaming a tab overrides this default; the rename may itself use the same placeholders.\n"
+    "{comment} Split tabs show \"Multiple panes\" instead.\n"
 };
 
 constexpr StringLiteral MarginsConfig {
@@ -489,6 +502,9 @@ constexpr StringLiteral StatusLineConfig {
     "    {comment} Synchronize the window title with the Host Writable status_line if\n"
     "    {comment} and only if the host writable status line was denied to be shown.\n"
     "    sync_to_window_title: {}\n"
+    "    {comment} Each segment is a template of literal text and {{Placeholder}} markers (e.g.\n"
+    "    {comment} {{Clock}}, {{VTType}}). There is no brace escaping: any {{...}} that is not a\n"
+    "    {comment} recognized placeholder is echoed verbatim, so you see exactly what you typed.\n"
     "    indicator:\n"
     "        left: \"{}\"\n"
     "        middle: \"{}\"\n"
@@ -1384,6 +1400,23 @@ constexpr StringLiteral WMClassWeb {
     "\n"
 };
 
+constexpr StringLiteral TabLabelWeb {
+    "\n"
+    "Default template for the text shown on each GUI tab. The value is a string with optional `{Name}` "
+    "placeholders that are substituted per tab:\n"
+    "\n"
+    "- `{WindowTitle}` — the active pane's window/tab title.\n"
+    "- `{TabPosition}` — the tab's 1-based position in the window.\n"
+    "\n"
+    "Literal text outside placeholders is kept verbatim, and an unknown placeholder is echoed verbatim (you "
+    "see exactly the `{Name}` you typed). Renaming a tab overrides this default for that tab; the rename "
+    "text "
+    "may itself contain the "
+    "same placeholders (so renaming a tab to `{WindowTitle}` tracks its title). A tab holding a split is "
+    "shown as `Multiple panes`.\n"
+    "\n"
+};
+
 constexpr StringLiteral TerminalIdWeb {
     "\n"
     "configuration option allows you to specify the terminal type that will be advertised by the terminal "
@@ -1899,6 +1932,7 @@ using SeachModeSwitch = DocumentationEntry<SeachModeSwitchConfig, SeachModeSwitc
 using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYankWeb>;
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
+using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
 using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;
 using TerminalSize = DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>;
 using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;

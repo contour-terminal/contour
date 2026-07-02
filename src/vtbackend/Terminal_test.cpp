@@ -185,7 +185,9 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
         file << "test";
     }
 
-    auto const cleanup = crispy::finally { [&]() { fs::remove_all(tmpRoot); } };
+    auto const cleanup = crispy::finally { [&]() {
+        fs::remove_all(tmpRoot);
+    } };
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
     auto constexpr UiHandledHint = false;
 
@@ -494,6 +496,56 @@ TEST_CASE("Terminal.RIS", "[terminal]")
     mc.terminal.forceRedraw({});
 
     CHECK(mc.terminal.statusDisplayType() == StatusDisplayType::None);
+}
+
+TEST_CASE("Terminal.clampedTotalPageSize", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // clampedTotalPageSize() is the single authority for the resize lower-bound: the total page must leave
+    // at least one main-display line ON TOP of the visible status line(s). Frontend callers (helper.cpp's
+    // resize early-out, TerminalSessionManager's renderer-geometry sync) query it so their bookkeeping
+    // matches what resizeScreen() actually applies. This pins that contract for both status-line states.
+    auto mc = MockTerm { ColumnCount(20), LineCount(5) };
+
+    SECTION("no status line: clamps only to a 1x1 floor")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::None);
+        REQUIRE(mc.terminal.statusLineHeight() == LineCount(0));
+
+        // A sub-1 request is raised to the 1x1 minimum; a comfortably-sized request passes through.
+        CHECK(mc.terminal.clampedTotalPageSize(PageSize { LineCount(0), ColumnCount(0) })
+              == PageSize { LineCount(1), ColumnCount(1) });
+        CHECK(mc.terminal.clampedTotalPageSize(PageSize { LineCount(10), ColumnCount(40) })
+              == PageSize { LineCount(10), ColumnCount(40) });
+    }
+
+    SECTION("indicator status line: floor rises to statusLineHeight()+1")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        REQUIRE(mc.terminal.statusLineHeight() == LineCount(1));
+
+        // The GUI-default case behind the resize-early-out finding: a 1-line request clamps up to 2, so a
+        // caller comparing its own LineCount(1)-clamped value against the applied size must query this to
+        // agree (otherwise 1 != 2 defeats the early-out forever below two cell-rows).
+        CHECK(mc.terminal.clampedTotalPageSize(PageSize { LineCount(1), ColumnCount(20) })
+              == PageSize { LineCount(2), ColumnCount(20) });
+        // A total already above the floor is unchanged.
+        CHECK(mc.terminal.clampedTotalPageSize(PageSize { LineCount(5), ColumnCount(20) })
+              == PageSize { LineCount(5), ColumnCount(20) });
+    }
+
+    SECTION("the clamp matches what resizeScreen() actually applies")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        auto const requested = PageSize { LineCount(1), ColumnCount(20) };
+        {
+            auto const _ = std::scoped_lock { mc.terminal };
+            mc.terminal.resizeScreen(requested, std::nullopt);
+        }
+        // resizeScreen() clamped the total internally; clampedTotalPageSize() predicts that exact result.
+        CHECK(mc.terminal.totalPageSize() == mc.terminal.clampedTotalPageSize(requested));
+    }
 }
 
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
@@ -1250,6 +1302,51 @@ TEST_CASE("Terminal.momentumScroll.cancelled_by_begin", "[terminal]")
     terminal.handleScrollPhase(vtbackend::ScrollPhase::Begin, 0.0f, ClockBase + 50ms);
 
     CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.resizeScreen.minimal_one_by_one", "[terminal]")
+{
+    // Regression: when the render surface collapses below one cell (e.g. a pane shrunk to nothing,
+    // or a transient layout state) the frontend clamps the page size to a minimum of 1x1 before
+    // calling resizeScreen(). The backend must accept a 1x1 page without tripping the
+    // clampToScreen() bounds assert (which fires when a page dimension reaches zero).
+    auto mc = MockTerm { PageSize { LineCount { 10 }, ColumnCount { 20 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    terminal.tick(chrono::steady_clock::time_point());
+
+    REQUIRE_NOTHROW(terminal.resizeScreen(PageSize { LineCount { 1 }, ColumnCount { 1 } }));
+    CHECK(terminal.pageSize().lines == LineCount { 1 });
+    CHECK(terminal.pageSize().columns == ColumnCount { 1 });
+
+    // And it can grow back from the degenerate size.
+    REQUIRE_NOTHROW(terminal.resizeScreen(PageSize { LineCount { 10 }, ColumnCount { 20 } }));
+    CHECK(terminal.pageSize().lines == LineCount { 10 });
+}
+
+TEST_CASE("Terminal.resizeScreen.minimal_one_by_one.with_status_line", "[terminal]")
+{
+    // Regression: the same degenerate 1x1 resize, but with the indicator status line VISIBLE — the
+    // contour GUI default. resizeScreen derives the main page as `totalPageSize - statusLineHeight()`,
+    // so a 1x1 total here would leave a ZERO-line main page (1 - 1) and trip
+    // applyPageSizeToCurrentBuffer()/verifyState(). The plain test above misses this because MockTerm
+    // defaults statusDisplayType to None (statusLineHeight() == 0). resizeScreen must clamp the total
+    // up so at least one main-display line survives on top of the status line.
+    auto mc = MockTerm { PageSize { LineCount { 10 }, ColumnCount { 20 } }, LineCount { 10 } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.tick(chrono::steady_clock::time_point());
+    REQUIRE(terminal.statusLineHeight() == LineCount { 1 });
+
+    REQUIRE_NOTHROW(terminal.resizeScreen(PageSize { LineCount { 1 }, ColumnCount { 1 } }));
+    // The total was clamped up to leave one main line above the one status line; the main page
+    // (what the PTY/shell sees) never collapses to zero.
+    CHECK(terminal.pageSize().lines >= LineCount { 1 });
+    CHECK(terminal.pageSize().columns == ColumnCount { 1 });
+    CHECK(terminal.totalPageSize().lines >= LineCount { 2 });
+
+    // And it can grow back from the degenerate size.
+    REQUIRE_NOTHROW(terminal.resizeScreen(PageSize { LineCount { 10 }, ColumnCount { 20 } }));
+    CHECK(terminal.pageSize().lines == LineCount { 9 }); // 10 total - 1 status line
 }
 
 TEST_CASE("Terminal.momentumScroll.cancelled_by_resize", "[terminal]")
