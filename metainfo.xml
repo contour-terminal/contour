@@ -131,6 +131,7 @@
           <li>Adds Ctrl-click support for opening detected local filesystem paths under the mouse cursor (#1947)</li>
           <li>Fixes terminal grid not syncing to the window tile size on tiling Wayland compositors, where a freshly-spawned terminal was mis-sized until a manual resize (#1955)</li>
           <li>Fixes crashes and heap corruption when rapidly changing the font or window size, caused by data races between the UI thread and the Qt Scene Graph render thread; geometry/font changes are now deferred and applied on the render thread (#1922, probably #1712, #408)</li>
+          <li>Fixes crash on Windows when opening a new tab while the active pane (e.g. vim, emacs, or another full-screen program) had reported its working directory via OSC 7, caused by passing the raw `file://` URL to CreateProcess() instead of the extracted filesystem path</li>
         </ul>
       </description>
     </release>

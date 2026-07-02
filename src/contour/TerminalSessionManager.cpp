@@ -3,6 +3,7 @@
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
 
+#include <vtbackend/HintModeHandler.h>
 #include <vtbackend/primitives.h>
 
 #include <vtpty/Process.h>
@@ -96,9 +97,16 @@ TerminalSession* TerminalSessionManager::createSessionInBackground()
     if (!_sessions.empty())
     {
         auto& terminal = _sessions[0]->terminal();
+        std::string cwdUrl;
         {
             auto _l = std::scoped_lock { terminal };
-            ptyPath = terminal.currentWorkingDirectory();
+            cwdUrl = terminal.currentWorkingDirectory();
+        }
+        if (!cwdUrl.empty())
+        {
+            auto path = vtbackend::extractPathFromFileUrl(cwdUrl);
+            if (!path.empty())
+                ptyPath = std::move(path);
         }
     }
 #endif
