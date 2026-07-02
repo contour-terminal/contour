@@ -51,7 +51,8 @@ ApplicationWindow
     // updateImplicitSize(), which is asynchronous relative to Component.onCompleted — so apply it via a
     // one-shot on implicitWindowSizeChanged rather than a binding. A binding would re-evaluate on every later
     // implicit-size change (e.g. a DPR change) and snap the window back, overriding any WM-assigned geometry;
-    // tiling WMs and manual resizes expect the window to keep its assigned size. _sized latches the one-shot.
+    // tiling WMs and manual resizes expect the window to keep its assigned size. _initialSizeApplied latches
+    // the one-shot.
     property bool _initialSizeApplied: false
     Connections {
         target: terminalSessions

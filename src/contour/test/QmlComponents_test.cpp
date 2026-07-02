@@ -8,6 +8,8 @@
 // loads with no QML errors. This catches QML syntax/binding regressions deterministically without
 // having to boot a full terminal session.
 
+#include <contour/test/QmlMessageCapture.h>
+
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QObject>
@@ -246,11 +248,10 @@ class MockPaneProxy: public QObject
     [[nodiscard]] QObject* session() const { return _session; }
     [[nodiscard]] bool active() const { return _active; }
 
-    // setRatio (from the divider drag) records the last written value; activate() (from a pane tap) is
-    // call-tracked so click->activate routing is observable.
-    Q_INVOKABLE void setRatio(double r) { lastSetRatio = r; }
+    // setRatio (from the divider drag) is a no-op stub — the QML calls it, no test asserts the value.
+    // activate() (from a pane tap) is call-tracked so click->activate routing is observable.
+    Q_INVOKABLE void setRatio(double) {}
     Q_INVOKABLE void activate() { ++activateCalls; }
-    double lastSetRatio = -1.0;
     int activateCalls = 0;
 
     // Drivers used by the behavioral split tests to reproduce lifecycle transitions.
@@ -268,12 +269,12 @@ class MockPaneProxy: public QObject
         _active = a;
         emit changed();
     }
-    /// Turn this leaf into a split node with two leaf children along @p orientation (2=Vertical/side-by-side,
-    /// 1=Horizontal/stacked, matching vtmux::SplitState), then notify.
-    void becomeSplit(MockPaneProxy* a, MockPaneProxy* b, int orientation = 2)
+    /// Turn this leaf into a split node with two leaf children (as vtmux Pane::split does), then notify.
+    /// The split axis defaults to Vertical (2, matching vtmux::SplitState); use setOrientation() to change
+    /// it.
+    void becomeSplit(MockPaneProxy* a, MockPaneProxy* b)
     {
         _leaf = false;
-        _orientation = orientation;
         _first = a;
         _second = b;
         a->setParent(this);
@@ -283,11 +284,6 @@ class MockPaneProxy: public QObject
     void setOrientation(int o)
     {
         _orientation = o;
-        emit changed();
-    }
-    void setRatioProperty(double r)
-    {
-        _ratio = r;
         emit changed();
     }
     /// Collapse this split node back to a leaf (as Tab::closePane absorbs the sibling), adopting @p
@@ -349,57 +345,6 @@ class StubContourTerminal: public QQuickItem
   private:
     QObject* _session = nullptr;
 };
-
-// {{{ RAII QML-warning capture (see also the global gate in test_main.cpp)
-class QmlWarningCapture;
-
-// The active guard the message-handler trampoline appends to (a file-scope anonymous-namespace pointer,
-// because qInstallMessageHandler takes a plain function pointer). One guard alive at a time (tests are
-// sequential).
-QmlWarningCapture* activeWarningCapture = nullptr;
-
-/// RAII guard that installs a Qt message handler capturing warning/critical messages for the lifetime of the
-/// scope, then restores the previous handler on destruction. Exception-safe (restores during unwinding on a
-/// Catch2 REQUIRE throw) and de-duplicates the manual install/restore boilerplate.
-class QmlWarningCapture
-{
-  public:
-    QmlWarningCapture()
-    {
-        activeWarningCapture = this;
-        _previous = qInstallMessageHandler(&QmlWarningCapture::trampoline);
-    }
-    ~QmlWarningCapture()
-    {
-        qInstallMessageHandler(_previous);
-        activeWarningCapture = nullptr;
-    }
-    QmlWarningCapture(QmlWarningCapture const&) = delete;
-    QmlWarningCapture& operator=(QmlWarningCapture const&) = delete;
-    QmlWarningCapture(QmlWarningCapture&&) = delete;
-    QmlWarningCapture& operator=(QmlWarningCapture&&) = delete;
-
-    [[nodiscard]] QStringList const& warnings() const noexcept { return _warnings; }
-
-    template <typename Predicate>
-    [[nodiscard]] long count(Predicate predicate) const
-    {
-        return std::count_if(_warnings.begin(), _warnings.end(), predicate);
-    }
-
-    void record(QString const& msg) { _warnings << msg; }
-
-  private:
-    static void trampoline(QtMsgType type, QMessageLogContext const&, QString const& msg)
-    {
-        if (activeWarningCapture != nullptr && (type == QtWarningMsg || type == QtCriticalMsg))
-            activeWarningCapture->record(msg);
-    }
-
-    QStringList _warnings;
-    QtMessageHandler _previous = nullptr;
-};
-// }}}
 
 /// Loads a QML component from the contour resources and returns its error string list (empty when
 /// the component is valid). The mock controller and a dummy window are exposed as context
@@ -526,7 +471,7 @@ TEST_CASE("PaneNode renders a split tree without recursive-instantiation errors 
     // component error, so we must watch the message handler).
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    QmlWarningCapture warnings;
+    contour::test::QmlMessageCapture warnings;
 
     // A split node (vertical) with two leaf children.
     auto* leftLeaf = new MockPaneProxy(/*leaf*/ true);
@@ -549,7 +494,7 @@ TEST_CASE("PaneNode renders a split tree without recursive-instantiation errors 
     QCoreApplication::processEvents();
 
     REQUIRE(paneNode != nullptr);
-    for (auto const& w: warnings.warnings())
+    for (auto const& w: warnings.messages())
         INFO("QML warning: " << w.toStdString());
     // No "instantiated recursively" / "Type PaneNode unavailable" warnings.
     auto const recursionWarnings = warnings.count(
@@ -579,7 +524,7 @@ TEST_CASE("PaneNode survives node becoming null during split teardown (offscreen
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    QmlWarningCapture warnings;
+    contour::test::QmlMessageCapture warnings;
 
     auto* leftLeaf = new MockPaneProxy(/*leaf*/ true);
     auto* rightLeaf = new MockPaneProxy(/*leaf*/ true);
@@ -598,7 +543,7 @@ TEST_CASE("PaneNode survives node becoming null during split teardown (offscreen
     paneNode->setProperty("node", QVariant::fromValue(static_cast<QObject*>(nullptr)));
     QCoreApplication::processEvents();
 
-    for (auto const& w: warnings.warnings())
+    for (auto const& w: warnings.messages())
         INFO("QML warning: " << w.toStdString());
     auto const nullDerefWarnings =
         warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("null"); });
@@ -755,7 +700,7 @@ TEST_CASE("PaneNode renders a SINGLE leaf as the whole window without TypeErrors
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    QmlWarningCapture warnings;
+    contour::test::QmlMessageCapture warnings;
     MockPaneProxy leaf(/*leaf*/ true);
 
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
@@ -769,7 +714,7 @@ TEST_CASE("PaneNode renders a SINGLE leaf as the whole window without TypeErrors
     QCoreApplication::processEvents();
 
     REQUIRE(paneNode != nullptr);
-    for (auto const& w: warnings.warnings())
+    for (auto const& w: warnings.messages())
         INFO("QML warning: " << w.toStdString());
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
           == 0);
@@ -791,7 +736,7 @@ TEST_CASE("TerminalPane.onTerminated closes the window only when it is the last 
     window.resize(400, 300);
     window.show();
 
-    QmlWarningCapture warnings;
+    contour::test::QmlMessageCapture warnings;
 
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TerminalPane.qml")));
     while (component.status() == QQmlComponent::Loading)
@@ -820,7 +765,7 @@ TEST_CASE("TerminalPane.onTerminated closes the window only when it is the last 
     QCoreApplication::processEvents();
     CHECK(controller.canCloseWindowCalls == 1);
 
-    for (auto const& w: warnings.warnings())
+    for (auto const& w: warnings.messages())
         INFO("QML warning: " << w.toStdString());
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
           == 0);
@@ -881,7 +826,7 @@ TEST_CASE("split: rebinding a leaf's session through null does not raise a TypeE
     MockPaneProxy leaf(/*leaf*/ true);
     leaf.setSession(&sessionA);
 
-    QmlWarningCapture warnings;
+    contour::test::QmlMessageCapture warnings;
 
     auto root = instantiatePaneNode(engine, window, leaf);
     REQUIRE(root != nullptr);
@@ -895,7 +840,7 @@ TEST_CASE("split: rebinding a leaf's session through null does not raise a TypeE
     sessionB.setPageSize(120, 50); // a stale handler bound to A (or a null pane) would throw here
     QCoreApplication::processEvents();
 
-    for (auto const& w: warnings.warnings())
+    for (auto const& w: warnings.messages())
         INFO("QML warning: " << w.toStdString());
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
           == 0);
@@ -916,7 +861,7 @@ TEST_CASE("split: a pane created already-active renders without error (offscreen
     window.resize(400, 300);
     window.show();
 
-    QmlWarningCapture warnings;
+    contour::test::QmlMessageCapture warnings;
 
     MockSession session;
     MockPaneProxy leaf(/*leaf*/ true);
@@ -932,7 +877,7 @@ TEST_CASE("split: a pane created already-active renders without error (offscreen
     auto* pane = rootItem->findChild<StubContourTerminal*>();
     REQUIRE(pane != nullptr);
     CHECK(pane->property("paneActive").toBool());
-    for (auto const& w: warnings.warnings())
+    for (auto const& w: warnings.messages())
         INFO("QML warning: " << w.toStdString());
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
           == 0);
@@ -957,7 +902,7 @@ TEST_CASE("split: a leaf becoming a split node renders two panes without errors 
     MockPaneProxy rootNode(/*leaf*/ true);
     rootNode.setSession(&original);
 
-    QmlWarningCapture warnings;
+    contour::test::QmlMessageCapture warnings;
 
     auto rootObj = instantiatePaneNode(engine, window, rootNode);
     REQUIRE(rootObj != nullptr);
@@ -972,7 +917,7 @@ TEST_CASE("split: a leaf becoming a split node renders two panes without errors 
     rootNode.becomeSplit(leftLeaf, rightLeaf);
     QCoreApplication::processEvents();
 
-    for (auto const& w: warnings.warnings())
+    for (auto const& w: warnings.messages())
         INFO("QML warning: " << w.toStdString());
     auto const badWarnings = warnings.count([](QString const& w) {
         return w.contains("TypeError") || w.contains("of null") || w.contains("recursively")
@@ -1004,7 +949,7 @@ TEST_CASE("split: collapsing a split node back to a leaf keeps the survivor rend
     right->setSession(&closing);
     MockPaneProxy rootNode(/*leaf*/ false, left, right);
 
-    QmlWarningCapture warnings;
+    contour::test::QmlMessageCapture warnings;
 
     auto rootObj = instantiatePaneNode(engine, window, rootNode);
     REQUIRE(rootObj != nullptr);
@@ -1018,7 +963,7 @@ TEST_CASE("split: collapsing a split node back to a leaf keeps the survivor rend
     survivor.setOpacity(0.8F);
     QCoreApplication::processEvents();
 
-    for (auto const& w: warnings.warnings())
+    for (auto const& w: warnings.messages())
         INFO("QML warning: " << w.toStdString());
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
           == 0);
@@ -1152,15 +1097,8 @@ TEST_CASE("TerminalPane: active-pane focus border width follows node.active (off
     leaf.setSession(&session);
     leaf.setActive(false);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
-    while (component.status() == QQmlComponent::Loading)
-        QCoreApplication::processEvents();
-    REQUIRE(component.isReady());
-    QVariantMap initial;
-    initial.insert("node", QVariant::fromValue(static_cast<QObject*>(&leaf)));
-    std::unique_ptr<QObject> paneNode(component.createWithInitialProperties(initial));
+    auto paneNode = instantiatePaneNode(engine, window, leaf);
     REQUIRE(paneNode != nullptr);
-    QCoreApplication::processEvents();
 
     auto* rootItem = qobject_cast<QQuickItem*>(paneNode.get());
     REQUIRE(rootItem != nullptr);
@@ -1204,15 +1142,8 @@ TEST_CASE("PaneNode: tapping a leaf routes to node.activate(), guarded against a
     MockPaneProxy leaf(/*leaf*/ true);
     leaf.setSession(&session);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
-    while (component.status() == QQmlComponent::Loading)
-        QCoreApplication::processEvents();
-    REQUIRE(component.isReady());
-    QVariantMap initial;
-    initial.insert("node", QVariant::fromValue(static_cast<QObject*>(&leaf)));
-    std::unique_ptr<QObject> paneNode(component.createWithInitialProperties(initial));
+    auto paneNode = instantiatePaneNode(engine, window, leaf);
     REQUIRE(paneNode != nullptr);
-    QCoreApplication::processEvents();
 
     auto* rootItem = qobject_cast<QQuickItem*>(paneNode.get());
     REQUIRE(rootItem != nullptr);
@@ -1238,7 +1169,7 @@ TEST_CASE("PaneNode: a nested 3-pane tree renders three panes without warnings (
     window.resize(600, 400);
     window.show();
 
-    QmlWarningCapture warnings;
+    contour::test::QmlMessageCapture warnings;
 
     // root = [ leaf | split(leaf, leaf) ]  -> three TerminalPane leaves.
     auto* a = new MockPaneProxy(/*leaf*/ true);
@@ -1255,13 +1186,15 @@ TEST_CASE("PaneNode: a nested 3-pane tree renders three panes without warnings (
     initial.insert("node", QVariant::fromValue(static_cast<QObject*>(&root)));
     std::unique_ptr<QObject> paneNode(component.createWithInitialProperties(initial));
     REQUIRE(paneNode != nullptr);
+    // Pump twice: the nested split instantiates its children via URL Loaders (PaneNode loads PaneNode.qml by
+    // URL to break the recursion), so the deepest leaves settle on a later event-loop turn than the root.
     QCoreApplication::processEvents();
     QCoreApplication::processEvents();
 
     auto* rootItem = qobject_cast<QQuickItem*>(paneNode.get());
     REQUIRE(rootItem != nullptr);
     CHECK(rootItem->findChildren<StubContourTerminal*>().size() == 3);
-    for (auto const& w: warnings.warnings())
+    for (auto const& w: warnings.messages())
         INFO("QML warning: " << w.toStdString());
     auto const badWarnings = warnings.count([](QString const& w) {
         return w.contains("TypeError") || w.contains("of null") || w.contains("recursively")

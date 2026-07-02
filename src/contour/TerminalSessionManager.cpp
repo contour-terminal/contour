@@ -288,39 +288,29 @@ void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
     // Bridge the (window-level) title-bar and implicit-size state of whichever display is active to the
     // manager's own signals, so the QML window bindings (flags/controls/resize border/initial size) that
     // are bound to terminalSessions.* re-evaluate when the active display changes or toggles its title bar.
-    // Re-point the connections from the previous active display to the new one.
+    // Re-point the connections from the previous active display to the new one. One `rewire` lambda drives
+    // both the disconnect and connect halves so the two sets are, by construction, exact mirrors — adding a
+    // bridged signal is a single edit, not two mirror-image blocks to keep in lockstep.
     if (_activeDisplay != display)
     {
+        auto rewire = [this](display::TerminalDisplay* d, auto op) {
+            op(d,
+               &display::TerminalDisplay::titleBarVisibleChanged,
+               this,
+               &TerminalSessionManager::titleBarVisibleChanged);
+            op(d,
+               &display::TerminalDisplay::implicitWidthChanged,
+               this,
+               &TerminalSessionManager::implicitWindowSizeChanged);
+            op(d,
+               &display::TerminalDisplay::implicitHeightChanged,
+               this,
+               &TerminalSessionManager::implicitWindowSizeChanged);
+        };
         if (_activeDisplay != nullptr)
-        {
-            QObject::disconnect(_activeDisplay,
-                                &display::TerminalDisplay::titleBarVisibleChanged,
-                                this,
-                                &TerminalSessionManager::titleBarVisibleChanged);
-            QObject::disconnect(_activeDisplay,
-                                &display::TerminalDisplay::implicitWidthChanged,
-                                this,
-                                &TerminalSessionManager::implicitWindowSizeChanged);
-            QObject::disconnect(_activeDisplay,
-                                &display::TerminalDisplay::implicitHeightChanged,
-                                this,
-                                &TerminalSessionManager::implicitWindowSizeChanged);
-        }
+            rewire(_activeDisplay, [](auto... args) { QObject::disconnect(args...); });
         if (display != nullptr)
-        {
-            QObject::connect(display,
-                             &display::TerminalDisplay::titleBarVisibleChanged,
-                             this,
-                             &TerminalSessionManager::titleBarVisibleChanged);
-            QObject::connect(display,
-                             &display::TerminalDisplay::implicitWidthChanged,
-                             this,
-                             &TerminalSessionManager::implicitWindowSizeChanged);
-            QObject::connect(display,
-                             &display::TerminalDisplay::implicitHeightChanged,
-                             this,
-                             &TerminalSessionManager::implicitWindowSizeChanged);
-        }
+            rewire(display, [](auto... args) { QObject::connect(args...); });
     }
 
     _activeDisplay = display;
@@ -345,6 +335,10 @@ void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
     // and stop — never let the legacy machinery reassign a session-owning display.
     if (display->hasSession())
     {
+        // TODO: this re-sync only papers the dual-source-of-truth (pane tree via setSession() vs the legacy
+        // _displayStates map) back over for the next focus-in. The deeper fix is to retire
+        // _displayStates.currentSession for the sole-renderer path and derive the active session from the
+        // active tab's active leaf, dropping activateSession()/tryFindSessionForDisplayOrClose() here.
         _displayStates[_activeDisplay].currentSession = &display->session();
         updateStatusLine();
         return;
