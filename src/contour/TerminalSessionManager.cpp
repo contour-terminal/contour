@@ -331,6 +331,25 @@ void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
     emit titleBarVisibleChanged();
     emit implicitWindowSizeChanged();
 
+    // In the pane-tree (sole-renderer) model, a display gets its session EXCLUSIVELY from the QML `session:`
+    // binding via setSession() — which does NOT write _displayStates. So a pane that just focused in already
+    // owns its session; it only needs to become the active display, NOT be handed a (different) session.
+    //
+    // The legacy session-assignment path below (tryFindSessionForDisplayOrClose / activateSession) predates
+    // the pane tree and drives session->display assignment off _displayStates alone. Because _displayStates
+    // is blind to pane-tree attachments, that path would look at a freshly-focused pane with an empty
+    // _displayStates entry, decide some OTHER pane's session is "free", and activateSession() it onto this
+    // display — whose attachDisplay() then calls releaseSession() on the pane that actually owned it,
+    // blacking it out (the "first pane goes black after the second split" bug). Guard against it: if this
+    // display already carries a session, sync _displayStates to it (so a later focus-in sees it as owned)
+    // and stop — never let the legacy machinery reassign a session-owning display.
+    if (display->hasSession())
+    {
+        _displayStates[_activeDisplay].currentSession = &display->session();
+        updateStatusLine();
+        return;
+    }
+
     // if we have a session in nullptr display, set it to this one
     if (_displayStates[nullptr].currentSession != nullptr)
     {

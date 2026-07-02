@@ -1264,8 +1264,17 @@ void TerminalDisplay::destroyRenderer()
 // }}}
 
 // {{{ Qt Display Input Event handling & forwarding
+//
+// Every handler below forwards to a send*Event(..., *_session) that binds the session by reference. A
+// session-less display must ignore all input: during a split/collapse a pane can be shown while its
+// _session is transiently null (the QML `session` binding rebinds via setSession/releaseSession across the
+// hand-off), and Qt still delivers hover/mouse/key events to it. Dereferencing *_session then binds a null
+// reference (UB -> crash on the first _session access, e.g. terminal().totalPageSize() during a hover). A
+// display with no session has nothing to route input to, so early-out.
 void TerminalDisplay::keyPressEvent(QKeyEvent* keyEvent)
 {
+    if (!_session)
+        return;
     sendKeyEvent(keyEvent,
                  keyEvent->isAutoRepeat() ? vtbackend::KeyboardEventType::Repeat
                                           : vtbackend::KeyboardEventType::Press,
@@ -1274,23 +1283,29 @@ void TerminalDisplay::keyPressEvent(QKeyEvent* keyEvent)
 
 void TerminalDisplay::keyReleaseEvent(QKeyEvent* keyEvent)
 {
-    if (keyEvent->isAutoRepeat())
+    if (!_session || keyEvent->isAutoRepeat())
         return;
     sendKeyEvent(keyEvent, vtbackend::KeyboardEventType::Release, *_session);
 }
 
 void TerminalDisplay::wheelEvent(QWheelEvent* event)
 {
+    if (!_session)
+        return;
     sendWheelEvent(event, *_session);
 }
 
 void TerminalDisplay::mousePressEvent(QMouseEvent* event)
 {
+    if (!_session)
+        return;
     sendMousePressEvent(event, *_session);
 }
 
 void TerminalDisplay::mouseMoveEvent(QMouseEvent* event)
 {
+    if (!_session)
+        return;
     sendMouseMoveEvent(event, *_session);
 
     // Start, update, or stop auto-scroll based on whether the mouse is outside the content area
@@ -1313,11 +1328,15 @@ void TerminalDisplay::mouseMoveEvent(QMouseEvent* event)
 void TerminalDisplay::hoverMoveEvent(QHoverEvent* event)
 {
     QQuickItem::hoverMoveEvent(event);
+    if (!_session)
+        return;
     sendMouseMoveEvent(event, *_session);
 }
 
 void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (!_session)
+        return;
     _autoScrollTimer.stop();
     _autoScrollState = {};
     sendMouseReleaseEvent(event, *_session);
@@ -1348,6 +1367,8 @@ void TerminalDisplay::focusOutEvent(QFocusEvent* event)
 #if QT_CONFIG(im)
 void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
 {
+    if (!_session)
+        return;
     terminal().updateInputMethodPreeditString(event->preeditString().toStdString());
 
     if (!event->commitString().isEmpty())

@@ -999,3 +999,51 @@ TEST_CASE("SessionModel: closePane guard and last-pane paths", "[vtmux][model][f
     CHECK(f.events.sawPrefix("tabClosed"));
     CHECK(f.model.findTab(tab) == nullptr); // tab is gone
 }
+
+TEST_CASE("SessionModel: a second split preserves every earlier leaf's id and session (no theft)",
+          "[vtmux][model][split]")
+{
+    // Regression for "the first pane goes black after the second split": at the MODEL layer, splitting the
+    // active (2nd) pane to make a 3rd must leave the FIRST pane's leaf id AND session completely untouched —
+    // Pane::split only mutates the active-leaf subtree. (The GUI-thread session-STEAL that actually blacked
+    // out the first pane was in TerminalSessionManager::FocusOnDisplay/tryFindSessionForDisplayOrClose, fixed
+    // separately; this pins the model invariant those relied on: sibling sessions are stable across a split.)
+    Fixture f;
+    auto const [win, tab, rootLeaf] = makeTab(f.model);
+
+    // Split #1: splits the original leaf -> [ firstLeaf(orig session) | secondLeaf ].
+    auto* second = f.model.splitActivePane(tab, SplitState::Vertical);
+    REQUIRE(second != nullptr);
+    auto* firstLeaf = f.model.findTab(tab)->rootPane()->first();
+    auto const firstId = firstLeaf->id();
+    auto const firstSession = firstLeaf->session();
+    auto const secondId = second->id();
+    auto const secondSession = second->session();
+
+    // Split #2: splits the active (second) leaf -> [ first | [ second | third ] ]. The first pane is a
+    // sibling of the subtree being split and must not be touched.
+    auto* third = f.model.splitActivePane(tab, SplitState::Vertical);
+    REQUIRE(third != nullptr);
+    REQUIRE(f.model.findTab(tab)->paneCount() == 3);
+
+    // The first pane's leaf still resolves by its ORIGINAL id to its ORIGINAL, non-empty session.
+    auto* firstAfter = f.model.findTab(tab)->rootPane()->findPane(firstId);
+    REQUIRE(firstAfter != nullptr);
+    CHECK(firstAfter->isLeaf());
+    CHECK(firstAfter->session().value == firstSession.value);
+    CHECK(firstSession.value != 0); // a real allocated session, not the empty SessionId{}
+
+    // All three leaves carry distinct, non-empty sessions.
+    std::vector<uint64_t> leafSessions;
+    f.model.findTab(tab)->rootPane()->walkTree([&](Pane& p) {
+        if (p.isLeaf())
+            leafSessions.push_back(p.session().value);
+    });
+    REQUIRE(leafSessions.size() == 3);
+    std::ranges::sort(leafSessions);
+    CHECK(std::ranges::adjacent_find(leafSessions) == leafSessions.end()); // all distinct
+    CHECK(std::ranges::none_of(leafSessions, [](uint64_t s) { return s == 0; }));
+    // The second pane's session also survived the split that turned its leaf into a split node's child.
+    CHECK(std::ranges::find(leafSessions, secondSession.value) != leafSessions.end());
+    (void) secondId;
+}
