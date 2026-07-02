@@ -3,6 +3,7 @@
 
 #include <format>
 #include <string>
+#include <vector>
 
 #include <vtmux/Tab.h>
 
@@ -174,4 +175,119 @@ TEST_CASE("Tab: color override can be set and reset", "[vtmux][tab][color]")
 
     tab.resetColor();
     CHECK_FALSE(tab.color().has_value());
+}
+
+TEST_CASE("Tab: closing the active leaf of a 3-pane tab reselects the most-recently-used survivor",
+          "[vtmux][tab][close][focus]")
+{
+    // The MRU-driven reselection loop is never run with >2 panes, so its ORDERING is unverified — this is
+    // where "closed a pane and focus jumped to the wrong pane" bugs live. Build 3 leaves, seed a known MRU by
+    // focusing them in order, then close the active leaf and assert the NEXT most-recently-used survivor
+    // (not an arbitrary fallback) becomes active.
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+
+    // Split twice for three leaves. After split #1: root = [orig | second]; `second` is the active new leaf.
+    // Split #2 splits the active `second` into [second | third]; so the tree is [orig | [second | third]]
+    // and `third` is active. Collect the three actual LEAVES by walking the tree (splitActivePane's return
+    // is the new leaf; the intermediate `second` pane became an internal split node after split #2, so we do
+    // NOT hold onto it as a leaf).
+    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    REQUIRE(tab.paneCount() == 3);
+
+    std::vector<Pane*> leaves;
+    tab.rootPane()->walkTree([&](Pane& p) {
+        if (p.isLeaf())
+            leaves.push_back(&p);
+    });
+    REQUIRE(leaves.size() == 3);
+    // Pre-order leaf visit gives [orig, second-leaf, third]. Name them by position.
+    auto* orig = leaves[0];
+    auto* mid = leaves[1];
+    auto* last = leaves[2];
+
+    // Seed a known MRU by focusing each leaf; end on `last` so the MRU front-to-back is last, mid, orig.
+    tab.setActivePane(orig);
+    tab.setActivePane(mid);
+    tab.setActivePane(last);
+    REQUIRE(tab.activePane() == last);
+    auto const midId = mid->id();
+
+    // Close the active leaf `last`. Reselection walks the MRU for the next surviving leaf -> `mid` (more
+    // recently used than orig), NOT the firstLeaf fallback (which would pick orig).
+    tab.closePane(last);
+    CHECK(tab.paneCount() == 2);
+    CHECK(tab.activePane()->id() == midId);
+
+    // Closing a NON-active leaf leaves the active session unchanged. NB: after the collapse the surviving
+    // Pane *object* is replaced (closeChild absorbs the survivor into the parent), so identity is the
+    // session, not the Pane pointer — assert the session is preserved.
+    auto* activeBefore = tab.activePane();
+    auto const activeSessionBefore = activeBefore->session();
+    Pane* nonActive = nullptr;
+    tab.rootPane()->walkTree([&](Pane& p) {
+        if (p.isLeaf() && &p != activeBefore)
+            nonActive = &p;
+    });
+    REQUIRE(nonActive != nullptr);
+    tab.closePane(nonActive);
+    CHECK(tab.paneCount() == 1);
+    CHECK(tab.activePane()->session() == activeSessionBefore);
+}
+
+TEST_CASE("Tab: focusDirection has no wrap-around and returns nullptr at every edge", "[vtmux][tab][focus]")
+{
+    // Per-edge null and non-wrap are the boundary cases users hit constantly; only Left-null was covered.
+    // Build root Vertical [ left | right ], then split the active `right` Horizontally -> [ rtTop / rtBottom
+    // ].
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    auto* rtBottom = tab.splitActivePane(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session());
+    REQUIRE(tab.activePane() == rtBottom);
+
+    // Identify the leaves by pre-order walk: [left, rtTop, rtBottom].
+    std::vector<Pane*> leaves;
+    tab.rootPane()->walkTree([&](Pane& p) {
+        if (p.isLeaf())
+            leaves.push_back(&p);
+    });
+    REQUIRE(leaves.size() == 3);
+    auto* left = leaves[0];
+    auto* rtTop = leaves[1];
+    REQUIRE(leaves[2] == rtBottom);
+
+    // rtBottom edges: no Down (bottom), no Right (rightmost column). Down/Right must NOT wrap to the
+    // top/left.
+    CHECK(tab.focusDirection(FocusDirection::Down) == nullptr);
+    CHECK(tab.activePane() == rtBottom);
+    CHECK(tab.focusDirection(FocusDirection::Right) == nullptr);
+    CHECK(tab.activePane() == rtBottom);
+
+    // From rtTop: no Up (top edge), no Right (rightmost).
+    tab.setActivePane(rtTop);
+    CHECK(tab.focusDirection(FocusDirection::Up) == nullptr);
+    CHECK(tab.activePane() == rtTop);
+    CHECK(tab.focusDirection(FocusDirection::Right) == nullptr);
+
+    // From left: no Left (leftmost), no Up/Down (no horizontal split on its path). Left must NOT wrap right.
+    tab.setActivePane(left);
+    CHECK(tab.focusDirection(FocusDirection::Left) == nullptr);
+    CHECK(tab.activePane() == left);
+    CHECK(tab.focusDirection(FocusDirection::Up) == nullptr);
+    CHECK(tab.focusDirection(FocusDirection::Down) == nullptr);
+}
+
+TEST_CASE("Tab: splitting an already-split tab adds a third leaf and activates it", "[vtmux][tab][split]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    REQUIRE(tab.paneCount() == 2);
+    // Split the active pane again.
+    auto* third = tab.splitActivePane(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session());
+    REQUIRE(third != nullptr);
+    CHECK(tab.paneCount() == 3);
+    CHECK(tab.activePane() == third); // the new leaf is active
 }

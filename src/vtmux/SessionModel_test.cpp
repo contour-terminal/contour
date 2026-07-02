@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -48,21 +49,40 @@ struct RecordingEvents: ModelEvents
     {
         log.push_back(std::format("activeTab:{}:{}", t.value, index));
     }
-    void paneSplit(TabId t, PaneId, PaneId newLeaf) override
+    void paneSplit(TabId t, PaneId splitNode, PaneId newLeaf) override
     {
         log.push_back(std::format("paneSplit:{}:{}", t.value, newLeaf.value));
+        lastSplitNode = splitNode;
+        lastNewLeaf = newLeaf;
     }
-    void paneClosed(TabId t, PaneId closed, PaneId) override
+    void paneClosed(TabId t, PaneId closed, PaneId survivor) override
     {
-        log.push_back(std::format("paneClosed:{}:{}", t.value, closed.value));
+        // Log the survivor too, so the collapse/fold contract (which leaf absorbs) can be asserted.
+        log.push_back(std::format("paneClosed:{}:{}:{}", t.value, closed.value, survivor.value));
+        lastClosedSurvivor = survivor;
     }
     void activePaneChanged(TabId t, PaneId leaf) override
     {
         log.push_back(std::format("activePane:{}:{}", t.value, leaf.value));
+        lastActivePane = leaf;
     }
     void paneRatioChanged(TabId, PaneId node, double ratio) override
     {
         log.push_back(std::format("ratio:{}:{}", node.value, ratio));
+        lastRatio = ratio;
+    }
+
+    // Last-seen values for direct assertions (the log strings are for ordering/count).
+    std::optional<PaneId> lastSplitNode;
+    std::optional<PaneId> lastNewLeaf;
+    std::optional<PaneId> lastClosedSurvivor;
+    std::optional<PaneId> lastActivePane;
+    std::optional<double> lastRatio;
+
+    /// Count how many log entries start with @p prefix (for exact-once assertions).
+    [[nodiscard]] long countPrefix(std::string const& prefix) const
+    {
+        return std::count_if(log.begin(), log.end(), [&](auto const& e) { return e.rfind(prefix, 0) == 0; });
     }
     void tabTitleChanged(TabId t) override { log.push_back(std::format("title:{}", t.value)); }
     void tabColorChanged(TabId t) override { log.push_back(std::format("color:{}", t.value)); }
@@ -701,4 +721,281 @@ TEST_CASE("SessionModel: color palette is non-empty and shared", "[vtmux][model]
 
     Fixture other;
     CHECK(other.model.colorPalette().data() == first.data());
+}
+
+// ============================================================================================
+// Pane-operation coverage: focus / fold(collapse) / resize / activation event contracts. These pin the
+// model-layer behaviour behind the split GUI so a focus/collapse/ratio regression fails here (headless,
+// deterministic) rather than shipping — Qt keyboard focus does not resolve offscreen, so the model is the
+// only reliable oracle for focus correctness.
+// ============================================================================================
+
+namespace
+{
+/// Builds a window + single-pane tab and returns (windowId, tabId, rootLeafId).
+struct TabSetup
+{
+    WindowId window;
+    TabId tab;
+    PaneId rootLeaf;
+};
+
+[[nodiscard]] TabSetup makeTab(SessionModel& model)
+{
+    auto* win = model.createWindow();
+    auto* tab = model.createTab(win->id());
+    return { win->id(), tab->id(), tab->rootPane()->id() };
+}
+} // namespace
+
+TEST_CASE("SessionModel: focusDirection moves the active pane across a nested split and names the neighbor",
+          "[vtmux][model][focus]")
+{
+    // focusDirection had ZERO coverage. Build a nested tree and assert each direction activates the
+    // geometrically-correct neighbor, a no-neighbor direction is a silent no-op, and bad ids do nothing.
+    // This is the model-layer oracle for the "move focus across nested splits" behaviour the goal calls out.
+    Fixture f;
+    auto const [win, tab, rootLeaf] = makeTab(f.model);
+
+    // Vertical split (side-by-side): left | right. New leaf (right) is active.
+    auto* right = f.model.splitActivePane(tab, SplitState::Vertical);
+    REQUIRE(right != nullptr);
+    auto const rightId = right->id();
+    // `left` is the original session's leaf (rootLeaf migrated into the first child on split).
+    auto* leftPane = f.model.findTab(tab)->rootPane()->first();
+    REQUIRE(leftPane != nullptr);
+    auto const leftId = leftPane->first() ? leftPane->first()->id() : leftPane->id();
+
+    f.events.log.clear();
+
+    // Move focus Left: from the active right leaf to the left leaf.
+    f.model.focusDirection(tab, FocusDirection::Left);
+    REQUIRE(f.events.lastActivePane.has_value());
+    CHECK(f.events.lastActivePane->value == leftId.value);
+    CHECK(f.model.findTab(tab)->activePane()->id().value == leftId.value);
+    CHECK(f.events.countPrefix("activePane") == 1);
+
+    // Move Right: back to the right leaf.
+    f.events.log.clear();
+    f.model.focusDirection(tab, FocusDirection::Right);
+    REQUIRE(f.events.lastActivePane.has_value());
+    CHECK(f.events.lastActivePane->value == rightId.value);
+    CHECK(f.events.countPrefix("activePane") == 1);
+
+    // No vertical neighbor above/below in a purely-vertical split: Up/Down are silent no-ops.
+    f.events.log.clear();
+    auto const activeBefore = f.model.findTab(tab)->activePane()->id().value;
+    f.model.focusDirection(tab, FocusDirection::Up);
+    f.model.focusDirection(tab, FocusDirection::Down);
+    CHECK(f.events.countPrefix("activePane") == 0);
+    CHECK(f.model.findTab(tab)->activePane()->id().value == activeBefore);
+
+    // Unknown tab id: no-op, no events.
+    f.events.log.clear();
+    f.model.focusDirection(TabId { 999999 }, FocusDirection::Left);
+    CHECK(f.events.log.empty());
+}
+
+TEST_CASE("SessionModel: closePane reports the correct survivor and reactivates it (both children)",
+          "[vtmux][model][fold]")
+{
+    // The collapse/fold contract: closing one leaf of a 2-pane tab must report the sibling as survivor and
+    // make it the active pane, and the tab survives with one pane. Cover closing BOTH the original and the
+    // new leaf — a wrong-survivor / wrong-active-pane bug is a top split-bug source.
+    auto check = [](bool closeOriginal) {
+        Fixture f;
+        auto const [win, tab, rootLeaf] = makeTab(f.model);
+        auto* newLeaf = f.model.splitActivePane(tab, SplitState::Vertical);
+        REQUIRE(newLeaf != nullptr);
+        auto const newLeafId = newLeaf->id();
+        // The original session migrated into the first child on split; find that leaf id.
+        auto* firstChild = f.model.findTab(tab)->rootPane()->first();
+        auto const originalLeafId = firstChild->id();
+
+        auto const toClose = closeOriginal ? originalLeafId : newLeafId;
+        auto const survivor = closeOriginal ? newLeafId : originalLeafId;
+
+        f.events.log.clear();
+        f.model.closePane(win, tab, toClose);
+
+        // paneClosed carries the correct survivor, and the survivor becomes active.
+        REQUIRE(f.events.lastClosedSurvivor.has_value());
+        CHECK(f.events.lastClosedSurvivor->value == survivor.value);
+        REQUIRE(f.events.lastActivePane.has_value());
+        CHECK(f.events.lastActivePane->value == survivor.value);
+
+        auto* t = f.model.findTab(tab);
+        REQUIRE(t != nullptr);
+        CHECK(t->paneCount() == 1);
+        CHECK(t->activePane()->id().value == survivor.value);
+        CHECK_FALSE(t->hasMultiplePanes());
+
+        // Event order: paneClosed -> activePane -> title, contiguous.
+        auto const closedIt =
+            std::ranges::find_if(f.events.log, [](auto const& e) { return e.rfind("paneClosed", 0) == 0; });
+        auto const activeIt =
+            std::ranges::find_if(f.events.log, [](auto const& e) { return e.rfind("activePane", 0) == 0; });
+        REQUIRE(closedIt != f.events.log.end());
+        REQUIRE(activeIt != f.events.log.end());
+        CHECK(std::next(closedIt) == activeIt);
+    };
+
+    SECTION("closing the original (first) leaf")
+    {
+        check(/*closeOriginal*/ true);
+    }
+    SECTION("closing the new (second) leaf")
+    {
+        check(/*closeOriginal*/ false);
+    }
+}
+
+TEST_CASE("SessionModel: setPaneRatio clamps stored ratio AND emitted value, no-op on leaf/unknown",
+          "[vtmux][model][resize]")
+{
+    // Confirmed bug fix: the model clamped the stored ratio but emitted the RAW request, so the GUI divider
+    // and the model disagreed at the extremes. Assert both the stored node ratio and the emitted event value
+    // are clamped, and that the operation is a guarded no-op on a leaf / unknown ids.
+    Fixture f;
+    auto const [win, tab, rootLeaf] = makeTab(f.model);
+    auto* newLeaf = f.model.splitActivePane(tab, SplitState::Vertical);
+    REQUIRE(newLeaf != nullptr);
+    auto* splitNode = f.model.findTab(tab)->rootPane(); // the root became a split node
+    REQUIRE_FALSE(splitNode->isLeaf());
+    auto const splitNodeId = splitNode->id();
+
+    constexpr double MinRatio = 0.05;
+
+    // Over-large: clamp to 1 - MinRatio in BOTH the stored value and the emitted event.
+    f.events.log.clear();
+    f.model.setPaneRatio(tab, splitNodeId, 1.0);
+    CHECK(splitNode->ratio() == Catch::Approx(1.0 - MinRatio));
+    REQUIRE(f.events.lastRatio.has_value());
+    CHECK(*f.events.lastRatio == Catch::Approx(1.0 - MinRatio));
+
+    // Too-small: clamp to MinRatio.
+    f.events.log.clear();
+    f.model.setPaneRatio(tab, splitNodeId, 0.0);
+    CHECK(splitNode->ratio() == Catch::Approx(MinRatio));
+    REQUIRE(f.events.lastRatio.has_value());
+    CHECK(*f.events.lastRatio == Catch::Approx(MinRatio));
+
+    // In-range passes through unchanged.
+    f.events.log.clear();
+    f.model.setPaneRatio(tab, splitNodeId, 0.3);
+    CHECK(splitNode->ratio() == Catch::Approx(0.3));
+    CHECK(*f.events.lastRatio == Catch::Approx(0.3));
+
+    // No-op: on a LEAF id.
+    f.events.log.clear();
+    f.model.setPaneRatio(tab, newLeaf->id(), 0.4);
+    CHECK(f.events.log.empty());
+    // No-op: unknown pane id and unknown tab id.
+    f.model.setPaneRatio(tab, PaneId { 999999 }, 0.4);
+    f.model.setPaneRatio(TabId { 999999 }, splitNodeId, 0.4);
+    CHECK(f.events.log.empty());
+}
+
+TEST_CASE("SessionModel: setActivePane fires activePaneChanged, no-op on already-active/internal/unknown",
+          "[vtmux][model][focus]")
+{
+    // setActivePane (click-to-focus routing) had ZERO coverage. Assert it activates a leaf, is a no-op on the
+    // already-active leaf, and rejects internal split-node ids and unknown ids (the spurious-event/bad-id
+    // guards).
+    Fixture f;
+    auto const [win, tab, rootLeaf] = makeTab(f.model);
+    auto* newLeaf = f.model.splitActivePane(tab, SplitState::Vertical); // new leaf active
+    REQUIRE(newLeaf != nullptr);
+    auto* firstChild = f.model.findTab(tab)->rootPane()->first();
+    auto const originalLeafId = firstChild->id();
+    auto const splitNodeId = f.model.findTab(tab)->rootPane()->id();
+
+    // Activate the non-active (original) leaf -> exactly one activePaneChanged.
+    f.events.log.clear();
+    f.model.setActivePane(tab, originalLeafId);
+    CHECK(f.events.countPrefix("activePane") == 1);
+    CHECK(f.model.findTab(tab)->activePane()->id().value == originalLeafId.value);
+
+    // Re-selecting the already-active leaf -> NO event.
+    f.events.log.clear();
+    f.model.setActivePane(tab, originalLeafId);
+    CHECK(f.events.countPrefix("activePane") == 0);
+
+    // Internal split-node id (not a leaf) -> NO event.
+    f.events.log.clear();
+    f.model.setActivePane(tab, splitNodeId);
+    CHECK(f.events.countPrefix("activePane") == 0);
+
+    // Unknown ids -> no-op.
+    f.model.setActivePane(tab, PaneId { 999999 });
+    f.model.setActivePane(TabId { 999999 }, originalLeafId);
+    CHECK(f.events.countPrefix("activePane") == 0);
+}
+
+TEST_CASE("SessionModel: splitActivePane fires paneSplit->activePaneChanged->tabTitleChanged, once, in order",
+          "[vtmux][model][split]")
+{
+    // The manager/GUI depend on this exact ordering and multiplicity; today only an order-agnostic prefix
+    // check exists, so a duplicate/reordered emission would slip through.
+    Fixture f;
+    auto const [win, tab, rootLeaf] = makeTab(f.model);
+
+    f.events.log.clear();
+    auto* newLeaf = f.model.splitActivePane(tab, SplitState::Vertical);
+    REQUIRE(newLeaf != nullptr);
+
+    CHECK(f.events.countPrefix("paneSplit") == 1);
+    CHECK(f.events.countPrefix("activePane") == 1);
+    CHECK(f.events.countPrefix("title") == 1);
+
+    auto const splitIt =
+        std::ranges::find_if(f.events.log, [](auto const& e) { return e.rfind("paneSplit", 0) == 0; });
+    auto const activeIt =
+        std::ranges::find_if(f.events.log, [](auto const& e) { return e.rfind("activePane", 0) == 0; });
+    auto const titleIt =
+        std::ranges::find_if(f.events.log, [](auto const& e) { return e.rfind("title", 0) == 0; });
+    REQUIRE(splitIt != f.events.log.end());
+    REQUIRE(activeIt != f.events.log.end());
+    REQUIRE(titleIt != f.events.log.end());
+    CHECK(std::next(splitIt) == activeIt);
+    CHECK(std::next(activeIt) == titleIt);
+    // The activated pane is the new leaf.
+    REQUIRE(f.events.lastActivePane.has_value());
+    CHECK(f.events.lastActivePane->value == newLeaf->id().value);
+
+    // Unknown tab id -> zero events.
+    f.events.log.clear();
+    CHECK(f.model.splitActivePane(TabId { 999999 }, SplitState::Vertical) == nullptr);
+    CHECK(f.events.log.empty());
+}
+
+TEST_CASE("SessionModel: closePane guard and last-pane paths", "[vtmux][model][fold]")
+{
+    Fixture f;
+    auto const [win, tab, rootLeaf] = makeTab(f.model);
+    auto* newLeaf = f.model.splitActivePane(tab, SplitState::Vertical);
+    REQUIRE(newLeaf != nullptr);
+    auto const splitNodeId = f.model.findTab(tab)->rootPane()->id();
+
+    // Guards: internal-node id, unknown leaf id, unknown tab -> zero events.
+    f.events.log.clear();
+    f.model.closePane(win, tab, splitNodeId);       // not a leaf
+    f.model.closePane(win, tab, PaneId { 999999 }); // unknown
+    f.model.closePane(win, TabId { 999999 }, newLeaf->id());
+    CHECK(f.events.log.empty());
+
+    // Close one pane -> collapse (paneClosed, tab survives).
+    f.model.closePane(win, tab, newLeaf->id());
+    CHECK(f.events.countPrefix("paneClosed") == 1);
+    REQUIRE(f.model.findTab(tab) != nullptr);
+    CHECK(f.model.findTab(tab)->paneCount() == 1);
+
+    // Closing the LAST remaining pane routes to closeTab (tabClosed bracket), not paneClosed.
+    auto const lastLeafId = f.model.findTab(tab)->rootPane()->id();
+    f.events.log.clear();
+    f.model.closePane(win, tab, lastLeafId);
+    CHECK(f.events.countPrefix("paneClosed") == 0);
+    CHECK(f.events.sawPrefix("tabAboutToBeRemoved"));
+    CHECK(f.events.sawPrefix("tabClosed"));
+    CHECK(f.model.findTab(tab) == nullptr); // tab is gone
 }

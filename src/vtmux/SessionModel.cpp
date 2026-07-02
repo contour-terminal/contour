@@ -342,7 +342,10 @@ void SessionModel::setPaneRatio(TabId tabId, PaneId splitNodeId, double ratio)
     if (node == nullptr || node->isLeaf())
         return;
     node->setRatio(ratio);
-    _events.paneRatioChanged(tabId, splitNodeId, ratio);
+    // Emit the CLAMPED value the node actually stored (setRatio() clamps to [MinimumRatio, 1-MinimumRatio]),
+    // not the raw request — otherwise the GUI divider and the model disagree at the extremes (a drag to the
+    // edge would echo back an out-of-range ratio the model never adopted).
+    _events.paneRatioChanged(tabId, splitNodeId, node->ratio());
 }
 
 // }}}

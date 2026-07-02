@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <vector>
 
 #include <vtmux/Pane.h>
+#include <vtmux/Primitives.h>
 
 using namespace vtmux;
 
@@ -232,4 +234,134 @@ TEST_CASE("Pane: setRatio clamps into the open interval (0, 1)", "[vtmux][pane][
         root.setRatio(5.0);
         CHECK(root.ratio() < 1.0);
     }
+
+    SECTION("clamps to the EXACT boundary values (0.05 / 0.95), not merely inside (0,1)")
+    {
+        // Pin the actual bounds: a regression that changed MinimumRatio (e.g. to 0.001) would still satisfy
+        // the >0 && <1 checks above, so assert the precise clamp targets.
+        root.setRatio(0.0);
+        CHECK(root.ratio() == Catch::Approx(0.05));
+        root.setRatio(1.0);
+        CHECK(root.ratio() == Catch::Approx(0.95));
+    }
+}
+
+TEST_CASE("Pane: closeChild absorbs a split-node survivor and re-parents its grandchildren",
+          "[vtmux][pane][close]")
+{
+    // The survivor-is-a-split re-parenting branch is otherwise never exercised (the existing nested test only
+    // collapses to a LEAF survivor). A wrong/dangling _parent here breaks every later neighbor()/closePane
+    // walk up the tree.
+    Ids ids;
+    Pane root { ids.pane(), ids.session() };
+
+    // Split so root has: first = leaf A, second = B. Then split B into (B1, B2) so the survivor is a split.
+    auto const [a, b] = root.split(SplitState::Vertical, ids.pane(), ids.pane(), ids.session(), 0.5);
+    auto const closedSessionOfA = a->session();
+    auto const [b1, b2] = b->split(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session(), 0.3);
+    auto const b1Id = b1->id();
+    auto const b2Id = b2->id();
+    auto const bAxis = b->splitState();
+    auto const bRatio = b->ratio();
+
+    // Capture B1/B2 sessions before absorption (the Pane objects for A and B are destroyed by closeChild).
+    auto const b1Session = b1->session();
+    auto const b2Session = b2->session();
+
+    // Close A -> root must BECOME B: take B's axis/ratio/children, and B's grandchildren re-parent to root.
+    auto const returned = root.closeChild(a);
+
+    CHECK(returned == closedSessionOfA); // returns the closed leaf's session
+    CHECK_FALSE(root.isLeaf());
+    CHECK(root.splitState() == bAxis);
+    CHECK(root.ratio() == Catch::Approx(bRatio));
+    REQUIRE(root.first() != nullptr);
+    REQUIRE(root.second() != nullptr);
+    CHECK(root.first()->id() == b1Id);
+    CHECK(root.second()->id() == b2Id);
+    CHECK(root.first()->session() == b1Session);
+    CHECK(root.second()->session() == b2Session);
+    // CRUCIAL: the absorbed grandchildren now parent to root, not the freed B.
+    CHECK(root.first()->parent() == &root);
+    CHECK(root.second()->parent() == &root);
+    CHECK(root.leafCount() == 2);
+}
+
+TEST_CASE("Pane: split ratio persists across a subsequent child split and is inherited on collapse",
+          "[vtmux][pane][resize]")
+{
+    // Ratio PERSISTENCE has no coverage: no test reads ratio() after a split-of-child or a collapse. A
+    // layout/restore regression that reset or failed to inherit ratios would pass every other test.
+    Ids ids;
+
+    SECTION("outer split ratio survives splitting one of its children")
+    {
+        Pane root { ids.pane(), ids.session() };
+        auto const [first, second] =
+            root.split(SplitState::Vertical, ids.pane(), ids.pane(), ids.session(), 0.7);
+        CHECK(root.ratio() == Catch::Approx(0.7)); // exact, not just in-range
+        // Split the second child; the OUTER root ratio must be untouched.
+        second->split(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session(), 0.25);
+        CHECK(root.ratio() == Catch::Approx(0.7));
+        CHECK(second->ratio() == Catch::Approx(0.25));
+    }
+
+    SECTION("survivor's ratio is inherited when a split collapses onto its split survivor")
+    {
+        Pane root { ids.pane(), ids.session() };
+        auto const [a, b] = root.split(SplitState::Vertical, ids.pane(), ids.pane(), ids.session(), 0.5);
+        b->split(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session(), 0.3);
+        root.closeChild(a); // root becomes B, inheriting B's 0.3 ratio
+        CHECK(root.ratio() == Catch::Approx(0.3));
+    }
+
+    SECTION("an out-of-range initial split ratio is clamped by split()")
+    {
+        Pane low { ids.pane(), ids.session() };
+        low.split(SplitState::Vertical, ids.pane(), ids.pane(), ids.session(), 0.0);
+        CHECK(low.ratio() == Catch::Approx(0.05));
+
+        Pane high { ids.pane(), ids.session() };
+        high.split(SplitState::Vertical, ids.pane(), ids.pane(), ids.session(), 1.0);
+        CHECK(high.ratio() == Catch::Approx(0.95));
+    }
+}
+
+TEST_CASE("Pane: neighbor walks up through mismatched-axis ancestors and is null at a deep tree edge",
+          "[vtmux][pane][focus]")
+{
+    // neighbor() is the core of directional focus. Build a tree where the nearest matching-axis ancestor is
+    // several levels up through an opposite-axis split, so the ancestor-walk (skip same-axis ancestor when
+    // the leaf is on the wrong side, keep walking up) is exercised — and assert null at a deep edge.
+    Ids ids;
+    Pane root { ids.pane(), ids.session() };
+
+    // root: Vertical split -> [ left | right ]. right is a Horizontal split -> [ rtTop / rtBottom ].
+    auto const [left, right] = root.split(SplitState::Vertical, ids.pane(), ids.pane(), ids.session(), 0.5);
+    auto const leftId = left->id();
+    auto const [rtTop, rtBottom] =
+        right->split(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session(), 0.5);
+
+    // From rtTop, moving Left must cross the VERTICAL root split (skipping the horizontal parent) to the
+    // left leaf — the multi-level walk-up.
+    auto* leftNeighborOfTop = root.neighbor(rtTop, FocusDirection::Left);
+    REQUIRE(leftNeighborOfTop != nullptr);
+    CHECK(leftNeighborOfTop->id() == leftId);
+    // rtBottom's Left neighbor is likewise the left leaf.
+    auto* leftNeighborOfBottom = root.neighbor(rtBottom, FocusDirection::Left);
+    REQUIRE(leftNeighborOfBottom != nullptr);
+    CHECK(leftNeighborOfBottom->id() == leftId);
+
+    // Up/Down WITHIN the right horizontal split: rtTop's Down neighbor is rtBottom and vice versa.
+    CHECK(root.neighbor(rtTop, FocusDirection::Down) == rtBottom);
+    CHECK(root.neighbor(rtBottom, FocusDirection::Up) == rtTop);
+
+    // Edges: the left leaf has no Left neighbor; rtTop has no Up neighbor (top of the tree); rtBottom no
+    // Down.
+    CHECK(root.neighbor(left, FocusDirection::Left) == nullptr);
+    CHECK(root.neighbor(rtTop, FocusDirection::Up) == nullptr);
+    CHECK(root.neighbor(rtBottom, FocusDirection::Down) == nullptr);
+    // The left leaf has no Up/Down neighbor at all (no horizontal split on its path).
+    CHECK(root.neighbor(left, FocusDirection::Up) == nullptr);
+    CHECK(root.neighbor(left, FocusDirection::Down) == nullptr);
 }
