@@ -179,6 +179,10 @@ class OpenGLRenderer final:
     int _textOutlineColorLocation = -1;
 
     vtbackend::RGBAColor _textOutlineColor { 0x00, 0x00, 0x00, 0xFF };
+    // Set whenever _textOutlineColor changes but could not be uploaded immediately (e.g. setTextOutline()
+    // was called from the GUI thread without a current OpenGL context). Consumed by execute() on the
+    // render thread, which always has the context current while _textShader is bound.
+    bool _textOutlineColorDirty = false;
 
     // private data members for rendering textures
     //

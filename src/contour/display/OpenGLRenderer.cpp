@@ -16,6 +16,7 @@
 #include <QtCore/QtGlobal>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
+#include <QtGui/QOpenGLContext>
 
 #include <algorithm>
 #include <array>
@@ -596,6 +597,12 @@ void OpenGLRenderer::execute(std::chrono::steady_clock::time_point now)
         // TODO: only upload when it actually DOES change
         _textShader->setUniformValue(_textProjectionLocation, mvp);
         _textShader->setUniformValue(_textTimeLocation, timeValue);
+        if (_textOutlineColorDirty)
+        {
+            auto const [cr, cg, cb, ca] = atlas::normalize(_textOutlineColor);
+            _textShader->setUniformValue(_textOutlineColorLocation, QVector4D(cr, cg, cb, ca));
+            _textOutlineColorDirty = false;
+        }
         executeRenderTextures();
     });
 
@@ -830,10 +837,22 @@ void OpenGLRenderer::setTextOutline(float /*thickness*/, vtbackend::RGBAColor co
     if (!_initialized || !_textShader)
         return;
 
+    // Font/DPI reconfiguration can be applied synchronously from the GUI thread (e.g. during initial
+    // display setup, or while the window is minimized/occluded), not just from the render thread that
+    // normally owns the current OpenGL context. Calling into the shader without a current context here
+    // caused GL_INVALID_OPERATION (1282) on setUniformValue(). Defer the upload to execute() (always
+    // called on the render thread, with the context current) instead of dropping it.
+    if (!QOpenGLContext::currentContext())
+    {
+        _textOutlineColorDirty = true;
+        return;
+    }
+
     bound(*_textShader, [&]() {
         auto const [cr, cg, cb, ca] = atlas::normalize(_textOutlineColor);
         CHECKED_GL(_textShader->setUniformValue(_textOutlineColorLocation, QVector4D(cr, cg, cb, ca)));
     });
+    _textOutlineColorDirty = false;
 }
 
 void OpenGLRenderer::inspect(std::ostream& /*output*/) const

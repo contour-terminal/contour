@@ -131,6 +131,7 @@
           <li>Adds Ctrl-click support for opening detected local filesystem paths under the mouse cursor (#1947)</li>
           <li>Fixes terminal grid not syncing to the window tile size on tiling Wayland compositors, where a freshly-spawned terminal was mis-sized until a manual resize (#1955)</li>
           <li>Fixes crashes and heap corruption when rapidly changing the font or window size, caused by data races between the UI thread and the Qt Scene Graph render thread; geometry/font changes are now deferred and applied on the render thread (#1922, probably #1712, #408)</li>
+          <li>Fixes GL_INVALID_OPERATION (1282) OpenGL error when applying a font/DPI reconfiguration synchronously from the GUI thread (e.g. minimized/occluded window) without a current OpenGL context; the text outline color uniform upload is now deferred to the render thread instead of erroring</li>
         </ul>
       </description>
     </release>
