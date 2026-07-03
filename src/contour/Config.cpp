@@ -14,9 +14,9 @@
 #include <yaml-cpp/emitter.h>
 
 #include <QtCore/QFile>
-#include <QtGui/QOpenGLContext>
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -67,6 +67,27 @@ namespace
 {
 
     auto const configLog = logstore::category("config", "Logs configuration file loading.");
+
+    /// Parses a resize/direction keyword ("Left"/"Right"/"Up"/"Down", case-insensitive) into the
+    /// action-layer Direction enum.
+    /// @param name The direction keyword from the config.
+    /// @return The matching Direction, or nullopt if @p name is not a known direction.
+    std::optional<actions::Direction> parseResizeDirection(std::string const& name)
+    {
+        // Data-driven: one row per direction keyword. Adding a synonym is adding a row.
+        using Row = std::pair<std::string_view, actions::Direction>;
+        static constexpr std::array<Row, 4> Mapping { {
+            { "left", actions::Direction::Left },
+            { "right", actions::Direction::Right },
+            { "up", actions::Direction::Up },
+            { "down", actions::Direction::Down },
+        } };
+        auto const lowered = crispy::toLower(name);
+        for (auto const& [keyword, direction]: Mapping)
+            if (keyword == lowered)
+                return direction;
+        return std::nullopt;
+    }
 
     optional<std::string> readFile(fs::path const& path)
     {
@@ -358,11 +379,24 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     auto const child = node[entry];
     if (child)
     {
-        auto renderBackendStr = crispy::toUpper(child.as<std::string>());
-        if (renderBackendStr == "OPENGL")
+        auto const rawValue = child.as<std::string>();
+        auto const renderBackendStr = crispy::toUpper(rawValue);
+        if (renderBackendStr == "AUTO" || renderBackendStr == "DEFAULT")
+            where = RenderingBackend::Auto;
+        else if (renderBackendStr == "OPENGL")
             where = RenderingBackend::OpenGL;
+        else if (renderBackendStr == "VULKAN")
+            where = RenderingBackend::Vulkan;
+        else if (renderBackendStr == "DIRECT3D11" || renderBackendStr == "D3D11")
+            where = RenderingBackend::Direct3D11;
+        else if (renderBackendStr == "DIRECT3D12" || renderBackendStr == "D3D12")
+            where = RenderingBackend::Direct3D12;
+        else if (renderBackendStr == "METAL")
+            where = RenderingBackend::Metal;
         else if (renderBackendStr == "SOFTWARE")
             where = RenderingBackend::Software;
+        else
+            errorLog()("Unknown renderer backend '{}'; falling back to {}.", rawValue, where);
 
         logger()("Loading entry: {}, value {}", entry, where);
     }
@@ -434,6 +468,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "escape_sandbox", where.escapeSandbox);
         loadFromEntry(child, "copy_last_mark_range_offset", where.copyLastMarkRangeOffset);
         loadFromEntry(child, "show_title_bar", where.showTitleBar);
+        loadFromEntry(child, "dim_unfocused", where.dimUnfocused);
         loadFromEntry(child, "size_indicator_on_resize", where.sizeIndicatorOnResize);
         loadFromEntry(child, "fullscreen", where.fullscreen);
         loadFromEntry(child, "maximized", where.maximized);
@@ -441,6 +476,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "insert_after_yank", where.insertAfterYank);
         loadFromEntry(child, "bell", where.bell);
         loadFromEntry(child, "wm_class", where.wmClass);
+        loadFromEntry(child, "tab_label", where.tabLabel);
         loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
         loadFromEntry(child, "margins", where.margins);
         loadFromEntry(child, "terminal_id", where.terminalId);
@@ -1021,15 +1057,18 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtbackend::VTType& where)
 {
     auto parseModifierKey = [](std::string const& key) -> std::optional<vtbackend::VTType> {
+        // Compare case-insensitively: `key` is lowercased below, so the mapping keys must be too —
+        // otherwise NO terminal_id value ever matches and the setting is silently ignored (the
+        // mappings were uppercase while the lookup key was lowercased).
         auto const literal = crispy::toLower(key);
 
         using Type = vtbackend::VTType;
         auto constexpr static Mappings = std::array<std::pair<std::string_view, Type>, 10> {
-            std::pair { "VT100", Type::VT100 }, std::pair { "VT220", Type::VT220 },
-            std::pair { "VT240", Type::VT240 }, std::pair { "VT330", Type::VT330 },
-            std::pair { "VT340", Type::VT340 }, std::pair { "VT320", Type::VT320 },
-            std::pair { "VT420", Type::VT420 }, std::pair { "VT510", Type::VT510 },
-            std::pair { "VT520", Type::VT520 }, std::pair { "VT525", Type::VT525 }
+            std::pair { "vt100", Type::VT100 }, std::pair { "vt220", Type::VT220 },
+            std::pair { "vt240", Type::VT240 }, std::pair { "vt330", Type::VT330 },
+            std::pair { "vt340", Type::VT340 }, std::pair { "vt320", Type::VT320 },
+            std::pair { "vt420", Type::VT420 }, std::pair { "vt510", Type::VT510 },
+            std::pair { "vt520", Type::VT520 }, std::pair { "vt525", Type::VT525 }
         };
         for (auto const& mapping: Mappings)
             if (mapping.first == literal)
@@ -1401,7 +1440,11 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
         loadFromEntry(child, "size", where.size);
         loadFromEntry(child, "locator", where.fontLocator);
-        loadFromEntry(child, "text_shaping.engine", where.textShapingEngine);
+        // The engine lives under the nested `text_shaping:` map (as documented and generated), not a
+        // literal flat "text_shaping.engine" key — a YAML node lookup by the dotted string never
+        // matched, so a configured engine was silently ignored. Navigate the nested map.
+        if (auto const textShaping = child["text_shaping"])
+            loadFromEntry(textShaping, "engine", where.textShapingEngine);
         loadFromEntry(child, "builtin_box_drawing", where.builtinBoxDrawing);
         loadFromEntry(child, "max_fallback_count", where.maxFallbackCount);
         loadFromEntry(child, "render_mode", where.renderMode);
@@ -2057,6 +2100,19 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             }
             else
                 return std::nullopt;
+        }
+
+        if (holds_alternative<actions::ResizePane>(action))
+        {
+            auto const directionNode = node["direction"];
+            if (!directionNode || !directionNode.IsScalar())
+                return std::nullopt; // direction is required
+            auto const parsed = parseResizeDirection(directionNode.as<std::string>());
+            if (!parsed.has_value())
+                return std::nullopt; // unknown direction string
+            auto const percentNode = node["percent"];
+            auto const percent = (percentNode && percentNode.IsScalar()) ? percentNode.as<int>() : 5;
+            return actions::ResizePane { *parsed, percent };
         }
 
         if (holds_alternative<actions::NewTerminal>(action))

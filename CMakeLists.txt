@@ -150,6 +150,17 @@ endif()
 
 if(CONTOUR_TESTING)
     enable_testing()
+
+    # Lint the GitHub Actions workflows locally so a workflow-file error (which silently breaks CI
+    # dispatch on GitHub — a check-suite with zero jobs failing at 0s) is caught by `ctest` before
+    # it is pushed. Skips gracefully if actionlint cannot be obtained (see the script). Not gated on
+    # a build target, so it runs even in a fresh tree.
+    if(NOT WIN32)
+        add_test(NAME check_workflows
+                 COMMAND ${CMAKE_COMMAND} -E env bash
+                         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-workflows.sh")
+        set_tests_properties(check_workflows PROPERTIES LABELS "lint" TIMEOUT 120)
+    endif()
 endif()
 # ----------------------------------------------------------------------------
 
@@ -169,8 +180,16 @@ if(CONTOUR_FRONTEND_GUI)
     include(FindQt)
 endif()
 
+# The vendored third-party code (fetched via CPM/FetchContent) must NOT be run through clang-tidy: it
+# has no .clang-tidy config (clang-tidy then aborts with "no checks enabled") and is not ours to lint.
+# CMAKE_CXX_CLANG_TIDY is inherited by every target created after it is set, so stash it across the
+# dependency fetch and restore it only for our own first-party src/ tree.
+set(_CONTOUR_SAVED_CLANG_TIDY "${CMAKE_CXX_CLANG_TIDY}")
+unset(CMAKE_CXX_CLANG_TIDY)
 include(ContourThirdParties)
+set(CMAKE_CXX_CLANG_TIDY "${_CONTOUR_SAVED_CLANG_TIDY}")
 add_subdirectory(src)
+unset(CMAKE_CXX_CLANG_TIDY)
 add_subdirectory(examples)
 
 # ----------------------------------------------------------------------------

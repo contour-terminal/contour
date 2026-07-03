@@ -94,7 +94,7 @@ class CaptureBufferCollector: public vtparser::NullParserEvents
 
 namespace
 {
-    struct TTY
+    struct TTY final: CaptureTransport
     {
         bool configured = false;
 #if !defined(_WIN32)
@@ -104,7 +104,7 @@ namespace
         DWORD savedModes {};
 #endif
 
-        ~TTY()
+        ~TTY() override
         {
 #if !defined(_WIN32)
             tcsetattr(fd, TCSANOW, &savedModes);
@@ -153,7 +153,7 @@ namespace
 #endif
         }
 
-        int wait(timeval* timeout) const
+        int wait(timeval* timeout) override
         {
 #if defined(_WIN32)
             auto const fd0 = GetStdHandle(STD_INPUT_HANDLE);
@@ -193,9 +193,9 @@ namespace
 #endif
         }
 
-        [[nodiscard]] int write(string_view text) const { return write(text.data(), text.size()); }
+        int write(string_view text) override { return write(text.data(), text.size()); }
 
-        int read(void* buf, size_t size) const
+        int read(void* buf, size_t size) override
         {
 #if defined(_WIN32)
             DWORD nread {};
@@ -207,42 +207,43 @@ namespace
             return static_cast<int>(::read(fd, buf, size));
 #endif
         }
-
-        optional<tuple<int, int>> screenSize(timeval* timeout) const
-        {
-            // Naive implementation. TODO: use select() to poll and time out properly.
-            if (write("\033[18t") < 0)
-                return nullopt;
-
-            // Consume reply: `CSI 8 ; <LINES> ; <COLUMNS> t`
-            string reply;
-            for (;;)
-            {
-                if (wait(timeout) <= 0)
-                    return nullopt;
-
-                char ch {};
-                if (read(&ch, sizeof(ch)) != sizeof(ch))
-                    return nullopt;
-
-                if (ch == 't')
-                    break;
-
-                reply.push_back(ch);
-            }
-
-            auto const screenSizeReply = crispy::split(reply, ';');
-            if (screenSizeReply.size() != 3)
-                return nullopt;
-
-            auto const columns = stoi(string(screenSizeReply.at(1)));
-            auto const lines = stoi(string(screenSizeReply.at(2)));
-            return tuple { columns, lines };
-        }
     };
 
+    /// Queries the peer terminal's screen size over @p input (CSI 18 t / CSI 8;lines;cols t reply).
+    optional<tuple<int, int>> queryScreenSize(CaptureTransport& input, timeval* timeout)
+    {
+        // Naive implementation. TODO: use select() to poll and time out properly.
+        if (input.write("\033[18t") < 0)
+            return nullopt;
+
+        // Consume reply: `CSI 8 ; <LINES> ; <COLUMNS> t`
+        string reply;
+        for (;;)
+        {
+            if (input.wait(timeout) <= 0)
+                return nullopt;
+
+            char ch {};
+            if (input.read(&ch, sizeof(ch)) != sizeof(ch))
+                return nullopt;
+
+            if (ch == 't')
+                break;
+
+            reply.push_back(ch);
+        }
+
+        auto const screenSizeReply = crispy::split(reply, ';');
+        if (screenSizeReply.size() != 3)
+            return nullopt;
+
+        auto const columns = stoi(string(screenSizeReply.at(1)));
+        auto const lines = stoi(string(screenSizeReply.at(2)));
+        return tuple { columns, lines };
+    }
+
     // Reads a response chunk.
-    bool readCaptureReply(TTY& input, timeval* timeout, bool words, ostream& output)
+    bool readCaptureReply(CaptureTransport& input, timeval* timeout, bool words, ostream& output)
     {
         auto captureBufferCollector = CaptureBufferCollector { output, words };
         auto parser = vtparser::Parser<vtparser::ParserEvents> { captureBufferCollector };
@@ -279,19 +280,15 @@ namespace
     }
 } // namespace
 
-bool captureScreen(CaptureSettings const& settings)
+bool captureScreen(CaptureSettings const& settings, CaptureTransport& transport, ostream& output)
 {
-    auto tty = TTY {};
-    if (!tty.configured)
-        return false;
-
     auto constexpr MicrosPerSecond = 1'000'000;
     auto const timeoutMicros = int(settings.timeout * MicrosPerSecond);
     auto timeout = timeval {};
     timeout.tv_sec = timeoutMicros / MicrosPerSecond;
     timeout.tv_usec = timeoutMicros % MicrosPerSecond;
 
-    auto const screenSizeOpt = tty.screenSize(&timeout);
+    auto const screenSizeOpt = queryScreenSize(transport, &timeout);
     if (!screenSizeOpt.has_value())
     {
         cerr << "Could not get current screen size.\r\n";
@@ -309,6 +306,22 @@ bool captureScreen(CaptureSettings const& settings)
                             settings.outputFile);
 
     // request screen capture
+    if (transport.write(std::format("\033[>{};{}t", settings.logicalLines ? '1' : '0', settings.lineCount))
+        < 0)
+    {
+        cerr << "Could not request screen capture.\r\n";
+        return false;
+    }
+
+    return readCaptureReply(transport, &timeout, settings.words, output);
+}
+
+bool captureScreen(CaptureSettings const& settings)
+{
+    auto tty = TTY {};
+    if (!tty.configured)
+        return false;
+
     reference_wrapper<ostream> output(cout);
     unique_ptr<ostream> customOutput;
     if (settings.outputFile != "-"sv)
@@ -317,13 +330,7 @@ bool captureScreen(CaptureSettings const& settings)
         output = *customOutput;
     }
 
-    if (tty.write(std::format("\033[>{};{}t", settings.logicalLines ? '1' : '0', settings.lineCount)) < 0)
-    {
-        cerr << "Could not request screen capture.\r\n";
-        return false;
-    }
-
-    return readCaptureReply(tty, &timeout, settings.words, output);
+    return captureScreen(settings, tty, output);
 }
 
 } // namespace contour

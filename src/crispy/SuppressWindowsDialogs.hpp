@@ -2,10 +2,12 @@
 #pragma once
 
 /// @file SuppressWindowsDialogs.hpp
-/// @brief Suppresses Windows GUI dialogs (assert, abort, crash) during test execution.
+/// @brief Suppresses Windows GUI dialogs (assert, abort, crash) for non-interactive runs.
 ///
-/// Call suppressWindowsDialogs() at the start of main() in every test executable
-/// to prevent modal dialog boxes from blocking CI and interactive test runs.
+/// Call suppressWindowsDialogs() at the start of main() in any executable that must run
+/// unattended — every test runner, and the application itself when launched without a debugger
+/// (CI, scripted GUI/verification runs) — to prevent a modal CRT assert/abort/crash dialog from
+/// blocking a headless run. The reports are redirected to stderr instead, so they are still visible.
 
 #if defined(_WIN32)
     #include <cstdlib>
@@ -14,7 +16,7 @@
     #include <crtdbg.h>
 #endif
 
-namespace crispy::testing
+namespace crispy
 {
 
 /// @brief Suppresses all Windows GUI dialogs that can appear during test execution.
@@ -50,4 +52,4 @@ inline void suppressWindowsDialogs()
 #endif
 }
 
-} // namespace crispy::testing
+} // namespace crispy

@@ -139,8 +139,6 @@ jobs:
     name: "Check clang-tidy"
     runs-on: ubuntu-24.04
     if: github.ref != 'refs/heads/master'
-    env:
-      CLANG_VERSION: ${{ env.LLVM_VERSION }}
     steps:
     - uses: actions/checkout@v4
     - name: ccache
@@ -161,12 +159,19 @@ jobs:
       run: sudo env QTVER=6 ./scripts/install-deps.sh
     - name: "Post-fix embedded dependency permissions."
       run: sudo find _deps/sources -exec chown $UID {} \;
+    # Ubuntu 24.04's distro Qt (6.4.2) lacks the Qt6::GuiPrivate CMake package the RHI renderer needs;
+    # install a modern Qt6 over it (see the build matrix job for the same rationale).
+    - name: "Install Qt (GuiPrivate-capable)"
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: "6.9.*"
+        modules: qtmultimedia qt5compat qtshadertools
     - name: Install clang
       run: |
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh ${CLANG_VERSION}
-        sudo apt-get install clang-tidy-${CLANG_VERSION}
+        sudo ./llvm.sh ${LLVM_VERSION}
+        sudo apt-get install clang-tidy-${LLVM_VERSION}
     - name: "cmake"
       run: |
         cmake \
@@ -174,9 +179,9 @@ jobs:
               -B build \
               -G Ninja \
               -D CONTOUR_WAYLAND=OFF \
-              -D CMAKE_CXX_COMPILER="clang++-${CLANG_VERSION}" \
+              -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
               -D ENABLE_TIDY=ON \
-              -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-${CLANG_VERSION}
+              -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-${LLVM_VERSION}
     - name: "build"
       run: cmake --build build
 
@@ -721,6 +726,15 @@ jobs:
         run: sudo env QTVER="${{ matrix.qt_version }}" SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
+      # Ubuntu 24.04's distro Qt is 6.4.2, which does not provide the Qt6::GuiPrivate CMake package
+      # the RHI renderer needs (rhi/qrhi.h). Install a modern Qt6 over it; install-qt-action prepends
+      # its Qt to CMAKE_PREFIX_PATH via the Qt6_DIR/QT_ROOT_DIR env vars it exports, so find_package
+      # resolves this one ahead of the distro package.
+      - name: "Install Qt (GuiPrivate-capable)"
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.9.*"
+          modules: qtmultimedia qt5compat qtshadertools
       - name: Install GCC
         if: ${{ startsWith(matrix.compiler, 'GCC') }}
         run: sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
@@ -767,6 +781,17 @@ jobs:
         run: cmake --build --preset gcc-debug -- -j3
       - name: "tests"
         run: cmake --build --preset gcc-debug --target test
+      - name: "install weston (headless compositor for display-gated GUI tests)"
+        # Non-gating until proven on a GitHub runner: the local run is green (headless weston,
+        # 32 cases), but this step has not yet been validated on ubuntu-24.04 CI, so it must not
+        # be able to fail the matrix. Drop continue-on-error once a real runner has passed it.
+        continue-on-error: true
+        run: sudo apt-get install -qy weston qt6-wayland
+      - name: "display-gated GUI tests (headless weston)"
+        # Real-compositor run of the [display] suite (skipped by the offscreen ctest above): a
+        # private headless weston instance provides a stable Wayland compositor without GPU or X.
+        continue-on-error: true
+        run: ./scripts/run-display-tests.sh out/gcc-debug/src/contour/contour_gui_test
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 14' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04'}}
         uses: actions/upload-artifact@v4
@@ -833,7 +858,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ['24.04']
+        os_version: ['26.04']
     runs-on: ubuntu-${{ matrix.os_version }}
     steps:
       - name: Checkout code
@@ -1005,7 +1030,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ['24.04']
+        os_version: ['26.04']
     runs-on: ubuntu-${{ matrix.os_version }}
     env:
       # I'm giving up on eliminating all leaks for now.
@@ -1031,7 +1056,10 @@ jobs:
     - name: "install dependencies"
       run: ./scripts/ci/notcurses-install-deps.sh
     - name: "install contour"
-      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+      # `apt-get install ./<file>.deb` (note the ./) resolves and pulls the package's declared runtime
+      # dependencies (Qt6, libyaml-cpp, …) for this exact release — unlike `dpkg -i`, which fails if any
+      # dependency is absent. This is why the runtime-deps script no longer hardcodes Qt package names.
+      run: sudo apt-get install -y "./contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
     - name: "contour executable test"
       run: |
         contour version
@@ -1066,7 +1094,10 @@ jobs:
   # {{{ GUI: external test: notcurses
   test_notcurses:
     name: "GUI: notcurses-demo ${{ matrix.name }}"
-    runs-on: ubuntu-24.04
+    # Must match the OS the consumed .deb targets (26.04): a 26.04-built package links Qt 6.10 and a
+    # newer libstdc++ than a 24.04 runner provides, so running it there fails with GLIBCXX/Qt-version
+    # "not found" at load time.
+    runs-on: ubuntu-26.04
     needs: [package_for_Ubuntu]
     strategy:
       fail-fast: false
@@ -1101,16 +1132,24 @@ jobs:
         REPOSITORY: ${{ github.event.repository.name }}
     - uses: actions/download-artifact@v4
       with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb"
     - name: "install dependencies"
       run: ./scripts/ci/notcurses-install-deps.sh
     - name: "git clone"
       run: git clone https://github.com/dankamongmen/notcurses.git
     - name: "configure cmake"
+      # The smoke test only needs the notcurses-demo binary, so build the minimum: skip the C++
+      # bindings and the doctest-based test suite (USE_DOCTEST/BUILD_TESTING — the source of the
+      # doctest dependency that broke configure), the proof-of-concept binaries (USE_POC), and the
+      # pandoc man pages. NB: the option is USE_CXX, not USE_CPP — the old -DUSE_CPP=OFF was a no-op,
+      # which is why the C++/doctest path stayed enabled.
       run: |
         cmake -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX=/home/runner/opt/notcurses \
-              -DUSE_CPP=OFF \
+              -DUSE_CXX=OFF \
+              -DUSE_DOCTEST=OFF \
+              -DBUILD_TESTING=OFF \
+              -DUSE_POC=OFF \
               -DUSE_DEFLATE=OFF \
               -DUSE_MULTIMEDIA=ffmpeg \
               -DUSE_PANDOC=OFF \
@@ -1125,7 +1164,8 @@ jobs:
       timeout-minutes: 1
       run: LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib" ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
     - name: "install contour"
-      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
+      # See the quick-shell-exit job: apt-get resolves the .deb's declared deps for this release.
+      run: sudo apt-get install -y "./contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb"
     - name: "contour executable test"
       run: |
         contour version
@@ -1175,7 +1215,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ['24.04']
+        os_version: ['26.04']
     runs-on: ubuntu-${{ matrix.os_version}}
     needs: [package_for_Ubuntu]
     steps:
@@ -1247,7 +1287,7 @@ jobs:
       - name: "fetch artifact: Ubuntu 24.04"
         uses: actions/download-artifact@v4
         with:
-          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
+          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
       - name: "fetch artifact: MacOS (ARM)"
         uses: actions/download-artifact@v4
         with:

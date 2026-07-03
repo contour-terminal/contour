@@ -3,6 +3,8 @@
 
 #if defined(__linux__)
 
+    #include <contour/NotificationRouter.h>
+
     #include <vtbackend/DesktopNotification.h>
 
     #include <QtCore/QObject>
@@ -10,7 +12,6 @@
 
     #include <cstdint>
     #include <string>
-    #include <unordered_map>
 
 namespace contour
 {
@@ -60,11 +61,8 @@ class FreeDesktopNotifier: public QObject
     void onActionInvoked(uint id, QString const& actionKey);
 
   private:
-    /// Maps D-Bus uint32_t notification IDs to OSC 99 string identifiers.
-    std::unordered_map<uint32_t, std::string> _dbusToOsc;
-
-    /// Maps OSC 99 string identifiers to D-Bus uint32_t notification IDs.
-    std::unordered_map<std::string, uint32_t> _oscToDbus;
+    /// The transport-independent OSC-id ⇄ server-id bookkeeping and urgency policy.
+    NotificationRouter _router;
 
     /// The D-Bus interface proxy for org.freedesktop.Notifications.
     std::unique_ptr<QDBusInterface> _interface;

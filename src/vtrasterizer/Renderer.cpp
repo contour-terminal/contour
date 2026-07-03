@@ -192,6 +192,16 @@ void Renderer::setRenderTarget(RenderTarget& renderTarget)
     configureTextureAtlas();
 }
 
+void Renderer::detachRenderTarget() noexcept
+{
+    _renderTarget = nullptr;
+    // The atlas references the dead target's texture scheduler; drop it with the target. The next
+    // setRenderTarget() rebuilds it (configureTextureAtlas) and re-points every renderable.
+    _textureAtlas.reset();
+    for (gsl::not_null<Renderable*> const& renderable: renderables())
+        renderable->detachRenderTarget();
+}
+
 void Renderer::configureTextureAtlas()
 {
     Require(_renderTarget);

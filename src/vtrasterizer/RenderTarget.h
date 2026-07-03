@@ -86,7 +86,7 @@ struct RenderTileAttributes
 /**
  * Terminal render target interface, for example OpenGL, DirectX, or software-rasterization.
  *
- * @see OpenGLRenderer
+ * @see RhiRenderer
  */
 class RenderTarget
 {
@@ -167,6 +167,21 @@ class Renderable
 
     virtual void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator);
     virtual void setTextureAtlas(TextureAtlas& atlas) { _textureAtlas = &atlas; }
+
+    /// Severs every reference into the current render target (target, atlas, scheduler, allocator).
+    ///
+    /// Called when the render target is destroyed while this renderable survives — the scene graph
+    /// invalidates and re-creates its context (window grab of an unexposed window, GPU loss,
+    /// re-parenting), destroying the RenderTarget out from under the long-lived renderer. Without the
+    /// detach, the next setup pass reads the freed target through these pointers (use-after-free on
+    /// the render thread). setRenderTarget()/setTextureAtlas() re-wire everything on re-attach.
+    virtual void detachRenderTarget() noexcept
+    {
+        _renderTarget = nullptr;
+        _textureAtlas = nullptr;
+        _textureScheduler = nullptr;
+        _directMappingAllocator = nullptr;
+    }
 
     [[nodiscard]] TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
                                                               std::vector<uint8_t> bitmap,

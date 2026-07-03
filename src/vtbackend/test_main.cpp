@@ -9,7 +9,7 @@
 
 int main(int argc, char const* argv[])
 {
-    crispy::testing::suppressWindowsDialogs();
+    crispy::suppressWindowsDialogs();
 
     char const* logFilterString = getenv("LOG");
     if (logFilterString)

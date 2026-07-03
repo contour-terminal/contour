@@ -1,0 +1,69 @@
+# Coverage-oriented contour config for the contour_e2e_custom_config test.
+#
+# Deliberately diverges from the built-in defaults on every axis that has its own YAML loader
+# branch (profile knobs, scrollbar, status line, fonts, a custom color scheme with a
+# background image + blur), so an offscreen end-to-end run drives the Config.cpp parsing
+# paths AND the live render paths behind them (background image, blur, scrollbar, indicator
+# status line). @BACKGROUND_IMAGE_PATH@ is substituted by CMake (configure_file) with an
+# absolute path to a repo image, because config paths resolve ~/variables only, not
+# config-relative paths.
+
+platform_plugin: auto
+default_profile: main
+early_exit_threshold: 5
+reflow_on_resize: true
+live_config: false
+
+profiles:
+    main:
+        shell: /bin/sh
+        arguments: []
+        initial_working_directory: "~"
+        show_title_bar: true
+        dim_unfocused: 0.3
+        size_indicator_on_resize: true
+        fullscreen: false
+        maximized: false
+        terminal_id: VT525
+        terminal_size:
+            columns: 100
+            lines: 30
+        margins:
+            horizontal: 4
+            vertical: 2
+        history:
+            limit: 200
+            auto_scroll_on_update: true
+            scroll_multiplier: 3
+        scrollbar:
+            position: Right
+        status_line:
+            display: indicator
+            position: Bottom
+        font:
+            size: 10
+        background:
+            opacity: 0.9
+            blur: false
+        colors: coverage
+        bell:
+            sound: "off"
+            alert: false
+
+color_schemes:
+    coverage:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+            bright_foreground: '#FFFFFF'
+            dimmed_foreground: '#808080'
+        background_image:
+            path: '@BACKGROUND_IMAGE_PATH@'
+            opacity: 0.5
+            blur: true
+        hyperlink_decoration:
+            normal: dotted
+            hover: underline
+        cursor:
+            default: '#B0B0B0'
+            text: '#101010'

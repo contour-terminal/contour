@@ -2,13 +2,24 @@
 
 ### `renderer.backend`
 
-Currently two rendering backends are supported. `OpenGL`, the default,
-and `software`, which will force a fall back to a software-emulated OpenGL
-driver. Specifying `default` will automatically pick the default.
+Selects which Qt RHI graphics API drives the terminal display. Supported values:
+
+| Value | Meaning |
+|-------|---------|
+| `auto` | **Default.** Let Qt pick the platform-native backend: Direct3D 11 on Windows, Metal on macOS, OpenGL on Linux. |
+| `OpenGL` | Force the OpenGL backend on every platform. |
+| `vulkan` | Force the Vulkan backend (Windows and Linux). |
+| `direct3d11` | Force the Direct3D 11 backend (Windows only). |
+| `direct3d12` | Force the Direct3D 12 backend (Windows only). |
+| `metal` | Force the Metal backend (macOS only). |
+| `software` | Force a software-emulated OpenGL rasterizer. |
+
+A backend that the running platform cannot provide (e.g. `metal` on Windows) falls back to `auto`
+with a warning. `OpenGL` remains the safe fallback if a native backend misbehaves on your hardware.
 
 ```yml
 renderer:
-    backend: OpenGL
+    backend: auto
 ```
 
 ### `renderer.tile_hashtable_slots`

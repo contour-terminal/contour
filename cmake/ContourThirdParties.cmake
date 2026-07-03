@@ -167,6 +167,14 @@ else()
     set(THIRDPARTY_BUILTIN_termbench "(bench-headless disabled)")
 endif()
 
+# The vendored termbench-pro must never be run through clang-tidy (it has no .clang-tidy config, so tidy
+# aborts the build with "no checks enabled"). Clearing the per-target property is order-independent —
+# unlike unsetting the CMAKE_CXX_CLANG_TIDY variable, it holds no matter when/where the target is
+# realized. Applied to the library target and, when present, the CPM-added source-tree targets.
+if(TARGET termbench)
+    set_target_properties(termbench PROPERTIES CXX_CLANG_TIDY "")
+endif()
+
 if(COMMAND ContourThirdParties_Embed_boxed_cpp)
     ContourThirdParties_Embed_boxed_cpp()
     subproject_version(boxed-cpp boxed_cpp_version)

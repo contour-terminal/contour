@@ -7,7 +7,7 @@
 
 int main(int argc, char const* argv[])
 {
-    crispy::testing::suppressWindowsDialogs();
+    crispy::suppressWindowsDialogs();
 
     int const result = Catch::Session().run(argc, argv);
     return result;

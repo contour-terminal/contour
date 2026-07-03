@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/CaptureScreen.h>
+#include <contour/CatImageArgs.h>
 #include <contour/Config.h>
 #include <contour/ContourApp.h>
 
@@ -297,7 +298,7 @@ Let's go through the different sections of the global configurations in the file
 ```yaml
 platform_plugin: auto
 renderer:
-    backend: OpenGL
+    backend: auto
     tile_hashtable_slots: 4096
     tile_cache_count: 4000
     tile_direct_mapping: true
@@ -472,79 +473,8 @@ int ContourApp::captureAction()
 
 namespace
 {
-    /// Parses a size string in the format "WxH" (e.g. "80x24").
-    /// Returns {0,0} if the format is invalid.
-    crispy::size parseSize(string_view text)
-    {
-        auto const pos = text.find('x');
-        if (pos == string_view::npos || pos == 0 || pos == text.size() - 1)
-            return crispy::size {};
-
-        auto const widthStr = text.substr(0, pos);
-        auto const heightStr = text.substr(pos + 1);
-
-        int width = 0;
-        int height = 0;
-        auto [widthEnd, widthErr] =
-            std::from_chars(widthStr.data(), widthStr.data() + widthStr.size(), width);
-        auto [heightEnd, heightErr] =
-            std::from_chars(heightStr.data(), heightStr.data() + heightStr.size(), height);
-
-        if (widthErr != std::errc {} || heightErr != std::errc {})
-            return crispy::size {};
-
-        return crispy::size { .width = width, .height = height };
-    }
-
-    /// Parses an image alignment string.
-    vtbackend::ImageAlignment parseImageAlignment(string_view text)
-    {
-        if (text == "top-start")
-            return vtbackend::ImageAlignment::TopStart;
-        if (text == "top-center")
-            return vtbackend::ImageAlignment::TopCenter;
-        if (text == "top-end")
-            return vtbackend::ImageAlignment::TopEnd;
-        if (text == "middle-start")
-            return vtbackend::ImageAlignment::MiddleStart;
-        if (text == "middle-center" || text == "center")
-            return vtbackend::ImageAlignment::MiddleCenter;
-        if (text == "middle-end")
-            return vtbackend::ImageAlignment::MiddleEnd;
-        if (text == "bottom-start")
-            return vtbackend::ImageAlignment::BottomStart;
-        if (text == "bottom-center")
-            return vtbackend::ImageAlignment::BottomCenter;
-        if (text == "bottom-end")
-            return vtbackend::ImageAlignment::BottomEnd;
-        return vtbackend::ImageAlignment::MiddleCenter;
-    }
-
-    /// Parses an image resize policy string.
-    vtbackend::ImageResize parseImageResize(string_view text)
-    {
-        if (text == "no" || text == "none")
-            return vtbackend::ImageResize::NoResize;
-        if (text == "fit")
-            return vtbackend::ImageResize::ResizeToFit;
-        if (text == "fill")
-            return vtbackend::ImageResize::ResizeToFill;
-        if (text == "stretch")
-            return vtbackend::ImageResize::StretchToFill;
-        return vtbackend::ImageResize::ResizeToFit;
-    }
-
-    /// Parses an image layer value string (0/1/2).
-    int parseImageLayer(string_view text)
-    {
-        if (text == "0" || text == "below")
-            return 0;
-        if (text == "1" || text == "replace")
-            return 1;
-        if (text == "2" || text == "above")
-            return 2;
-        return 1; // default: replace
-    }
+    // The pure `contour cat` image-argument parsers live in CatImageArgs.h (unit-tested there); the
+    // callers below use parseCatSize/parseCatAlignment/parseCatResize/parseCatLayer directly.
 
     /// Reads a file in binary mode, returning its raw bytes.
     /// Returns an empty vector on any failure or if the file exceeds @p maxSize bytes.
@@ -627,10 +557,10 @@ int ContourApp::catAction()
         return EXIT_FAILURE;
     }
 
-    auto const resizePolicy = parseImageResize(parameters().get<string>("contour.cat.resize"));
-    auto const alignmentPolicy = parseImageAlignment(parameters().get<string>("contour.cat.align"));
-    auto const size = parseSize(parameters().get<string>("contour.cat.size"));
-    auto const layer = parseImageLayer(parameters().get<string>("contour.cat.layer"));
+    auto const resizePolicy = parseCatResize(parameters().get<string>("contour.cat.resize"));
+    auto const alignmentPolicy = parseCatAlignment(parameters().get<string>("contour.cat.align"));
+    auto const size = parseCatSize(parameters().get<string>("contour.cat.size"));
+    auto const layer = parseCatLayer(parameters().get<string>("contour.cat.layer"));
     auto const fileName = parameters().verbatim.front();
 
     displayImage(resizePolicy, alignmentPolicy, size, layer, fileName);
