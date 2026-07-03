@@ -16,6 +16,13 @@ struct string_interpolation
     std::set<std::string_view> flags;
     std::map<std::string_view, std::string_view> attributes;
 
+    /// The exact original source slice this interpolation was parsed from, including the surrounding
+    /// braces (e.g. "{Clock:Bold}"). A view into the parsed input (zero-copy), so it stays valid only as
+    /// long as that input does. Lets a consumer that does not recognize @ref name emit the placeholder
+    /// verbatim instead of dropping it, without lossily re-serializing the (order-normalized) flags and
+    /// attributes. Empty for an interpolation built directly via parse_interpolation() (no brace context).
+    std::string_view whole;
+
     bool operator==(string_interpolation const& rhs) const noexcept
     {
         return name == rhs.name && flags == rhs.flags && attributes == rhs.attributes;

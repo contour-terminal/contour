@@ -145,6 +145,7 @@ if(LIBTERMINAL_TESTING)
         Screen_test.cpp
         Image_test.cpp
         Sequence_test.cpp
+        StatusLineBuilder_test.cpp
         Terminal_test.cpp
         ShellIntegration_test.cpp
         LineSoA_test.cpp
