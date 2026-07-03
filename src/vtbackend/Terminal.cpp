@@ -2401,12 +2401,22 @@ void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode mode)
 
 void Terminal::setWindowTitle(string_view title)
 {
+    // Writes _windowTitle lock-free intentionally: the parser-thread callers (OSC 0/2 dispatch in
+    // Screen, save/restoreWindowTitle) reach this from inside writeToScreen()'s _stateMutex hold, so
+    // the write is already serialized under the lock; taking the non-recursive _stateMutex here would
+    // self-deadlock. GUI-thread readers must use resolvedWindowTitle(), which locks and copies.
     _windowTitle = title;
     _eventListener.setWindowTitle(title);
 }
 
 std::string const& Terminal::windowTitle() const noexcept
 {
+    return _windowTitle;
+}
+
+std::string Terminal::resolvedWindowTitle() const
+{
+    auto const l = std::lock_guard { _stateMutex };
     return _windowTitle;
 }
 
