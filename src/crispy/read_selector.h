@@ -4,11 +4,16 @@
 #include <crispy/assert.h>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <deque>
-#include <initializer_list>
+#include <memory>
+#include <mutex>
 #include <optional>
+#include <ranges>
 #include <vector>
 
 #if !defined(_WIN32)
@@ -49,26 +54,24 @@ class posix_read_selector
         }
     }
 
-    static posix_read_selector create(std::initializer_list<int> fds)
-    {
-        auto selector = posix_read_selector {};
-        for (auto const fd: fds)
-            selector.want_read(fd);
-        return selector;
-    }
-
     void want_read(int fd) noexcept
     {
+        auto const _ = std::scoped_lock { _fdsMutex };
         assert(fd >= 0);
         assert(std::count(_fds.begin(), _fds.end(), fd) == 0);
         _fds.push_back(fd);
         std::ranges::sort(_fds);
     }
 
-    [[nodiscard]] size_t size() const noexcept { return _fds.size(); }
+    [[nodiscard]] size_t size() const noexcept
+    {
+        auto const _ = std::scoped_lock { _fdsMutex };
+        return _fds.size();
+    }
 
     void cancel_read(int fd) noexcept
     {
+        auto const _ = std::scoped_lock { _fdsMutex };
         assert(std::count(_fds.begin(), _fds.end(), fd) == 1);
         auto gc = std::ranges::remove(_fds, fd);
         _fds.erase(gc.begin(), gc.end());
@@ -84,10 +87,21 @@ class posix_read_selector
         }
     }
 
+    /// Reports whether @p fd is still a registered read-interest.
+    ///
+    /// Used by the caller to re-validate, after wait_one() returned, that a concurrent cancel_read()
+    /// (e.g. from close() on another thread) has not removed the fd in the meantime — reading from a
+    /// cancelled/closed fd must be avoided.
+    /// @param fd The file descriptor to test.
+    /// @return true iff @p fd is currently registered for read interest.
+    [[nodiscard]] bool is_wanted(int fd) const noexcept
+    {
+        auto const _ = std::scoped_lock { _fdsMutex };
+        return std::ranges::find(_fds, fd) != _fds.end();
+    }
+
     std::optional<int> wait_one(std::optional<std::chrono::milliseconds> timeout = std::nullopt) noexcept
     {
-        assert(!_fds.empty());
-
         if (auto const fd = try_pop_pending(); fd.has_value())
             return fd;
 
@@ -95,12 +109,21 @@ class posix_read_selector
         FD_ZERO(&_writer);
         FD_ZERO(&_except);
 
+        // Snapshot the registered fds under the lock, then run the blocking select() WITHOUT holding it:
+        // a concurrent cancel_read()/want_read() mutates the shared _fds vector, so iterating it here
+        // unsynchronized is a data race (garbage/dangling fd handed to select, or a crash). The lock must
+        // not span select() itself, or close()'s cancel_read() would block for the whole wait, defeating
+        // the independent break-pipe wakeup. A cancel_read() that lands after this snapshot is still
+        // handled: the break-pipe wakeup returns select(), and the caller re-checks is_wanted().
         int maxfd = _breakPipeReader.get();
         FD_SET(_breakPipeReader.get(), &_reader);
-        for (auto const fd: _fds)
         {
-            FD_SET(fd, &_reader);
-            maxfd = std::max(maxfd, fd);
+            auto const _ = std::scoped_lock { _fdsMutex };
+            for (auto const fd: _fds)
+            {
+                FD_SET(fd, &_reader);
+                maxfd = std::max(maxfd, fd);
+            }
         }
 
         auto tv = std::unique_ptr<timeval>();
@@ -124,9 +147,12 @@ class posix_read_selector
                 ;
         }
 
-        for (int const fd: _fds)
-            if (FD_ISSET(fd, &_reader))
-                _pending.push_back(fd);
+        {
+            auto const _ = std::scoped_lock { _fdsMutex };
+            for (int const fd: _fds)
+                if (FD_ISSET(fd, &_reader))
+                    _pending.push_back(fd);
+        }
 
         return try_pop_pending();
     }
@@ -149,6 +175,9 @@ class posix_read_selector
     fd_set _reader {};
     fd_set _writer {};
     fd_set _except {};
+    mutable std::mutex _fdsMutex; //!< Guards @c _fds against concurrent cancel_read()/want_read() while
+                                  //!< wait_one() snapshots it; the epoll backend delegates this to the
+                                  //!< kernel, the posix backend must synchronize the vector itself.
     std::vector<int> _fds;
     std::deque<int> _pending;
     file_descriptor _breakPipeReader;
@@ -169,6 +198,7 @@ class epoll_read_selector
     void want_read(int fd) noexcept;
     void cancel_read(int fd) noexcept;
     [[nodiscard]] size_t size() const noexcept;
+    [[nodiscard]] bool is_wanted(int fd) const noexcept;
 
     void wakeup() const noexcept;
     std::optional<int> wait_one(std::optional<std::chrono::milliseconds> timeout = std::nullopt) noexcept;
@@ -179,7 +209,8 @@ class epoll_read_selector
   private:
     file_descriptor _epollFd;
     file_descriptor _eventFd;
-    size_t _size = 0;
+    mutable std::mutex _fdsMutex; //!< Guards @c _fds against concurrent cancel_read()/want_read().
+    std::vector<int> _fds;
     std::deque<int> _pending;
 };
 
@@ -201,7 +232,8 @@ inline void epoll_read_selector::want_read(int fd) noexcept
     event.events = EPOLLIN;
     event.data.fd = fd;
     epoll_ctl(_epollFd, EPOLL_CTL_ADD, fd, &event);
-    _size++;
+    auto const _ = std::scoped_lock { _fdsMutex };
+    _fds.push_back(fd);
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
@@ -211,12 +243,21 @@ inline void epoll_read_selector::cancel_read(int fd) noexcept
     event.events = EPOLLIN;
     event.data.fd = fd;
     epoll_ctl(_epollFd, EPOLL_CTL_DEL, fd, &event);
-    _size--;
+    auto const _ = std::scoped_lock { _fdsMutex };
+    auto gc = std::ranges::remove(_fds, fd);
+    _fds.erase(gc.begin(), gc.end());
 }
 
 inline size_t epoll_read_selector::size() const noexcept
 {
-    return _size;
+    auto const _ = std::scoped_lock { _fdsMutex };
+    return _fds.size();
+}
+
+inline bool epoll_read_selector::is_wanted(int fd) const noexcept
+{
+    auto const _ = std::scoped_lock { _fdsMutex };
+    return std::ranges::find(_fds, fd) != _fds.end();
 }
 
 inline void epoll_read_selector::wakeup() const noexcept
