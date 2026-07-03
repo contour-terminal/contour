@@ -132,6 +132,21 @@
           <li>Fixes terminal grid not syncing to the window tile size on tiling Wayland compositors, where a freshly-spawned terminal was mis-sized until a manual resize (#1955)</li>
           <li>Fixes crashes and heap corruption when rapidly changing the font or window size, caused by data races between the UI thread and the Qt Scene Graph render thread; geometry/font changes are now deferred and applied on the render thread (#1922, probably #1712, #408)</li>
           <li>Fixes crash on Windows when opening a new tab while the active pane (e.g. vim, emacs, or another full-screen program) had reported its working directory via OSC 7, caused by passing the raw `file://` URL to CreateProcess() instead of the extracted filesystem path</li>
+          <li>Fixes window resize oscillation/flicker: the terminal no longer fights the window manager by resizing its own window from resize events; the grid floors to the given size (sub-cell remainder renders as padding) while X11/macOS keep WM-side cell snapping via size hints</li>
+          <li>Fixes window spawn flicker: the window is sized from the real font metrics before it is first shown and opens directly in the profile's window state, instead of appearing at a default size and jumping</li>
+          <li>Fixes programmatic window resizes (CSI 8 t) shrinking the window by the title-bar height on every call, and CSI 4 t resizing the grid without the window; in split windows both now solve the pane layout so the requesting pane receives its exact grid</li>
+          <li>Changes display-scale changes (moving to a monitor with a different scale, late Wayland fractional-scale arrival) to preserve the terminal's columns and lines with a single corrective window resize</li>
+          <li>Changes font zoom to keep the window and pane size fixed and adjust the terminal's columns and lines (and the child PTY size) instead of resizing the window</li>
+          <li>Fixes the KDE forced-font-DPI override being read from the X11 key in Wayland sessions (now honors forceFontDPIWayland) and no longer re-reads the setting file on every frame</li>
+          <li>Fixes multi-monitor handling: the window no longer re-pins itself to the widest screen on every frame, refresh-rate/DPI tracking follows the window's actual screen after a monitor move, and new windows open on the spawning window's screen</li>
+          <li>Adds first-class GUI tabs presented in a custom window title bar, replacing the status-line tab list (the {Tabs} status-line directive remains supported for existing configs)</li>
+          <li>Adds split panes — split the active pane vertically (Ctrl+Shift+E) or horizontally (Ctrl+Shift+O), close a pane (Ctrl+Shift+X), and move pane focus with Alt+Shift+Arrow</li>
+          <li>Adds pane management actions: swap the active pane with a neighbor (Ctrl+Alt+Arrow), resize it (Ctrl+Shift+Alt+Arrow), flip a split's orientation (Ctrl+Shift+Backslash), and move a pane to a new position in the split tree (unbound by default)</li>
+          <li>Adds dragging tabs: reorder a tab within its strip, drag it into another window, or tear it out into a new window, with a live drop-position indicator showing where it will land; the running terminal survives the move (within the same process)</li>
+          <li>Adds double-click-to-rename and a color-swatch picker for tabs via the tab context menu</li>
+          <li>Adds the dim_unfocused profile option: dims a pane while it is not the focused one (an inactive pane of a split, or any pane of an unfocused window) by blending it toward its background color; 0.0 (default) disables dimming</li>
+          <li>Fixes the input-method (IME) candidate window opening at the wrong position: the reported cursor rectangle now honors the configured window margin and the pane's position inside a split, and widens over double-width (CJK) characters</li>
+          <li>Changes the window to use a custom client-side-decorated title bar (tab strip plus window controls) by default on all platforms; set show_title_bar: true to use the native server-side window decoration instead, in which case the tab strip is kept but its window controls defer to the OS frame</li>
         </ul>
       </description>
     </release>
