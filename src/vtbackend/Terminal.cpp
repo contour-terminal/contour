@@ -175,9 +175,7 @@ Terminal::Terminal(Events& eventListener,
     _effectiveImageCanvasSize { _settings.maxImageSize },
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
                                                              _maxSixelColorRegisters) },
-    _imagePool { [this](Image const* image) {
-        discardImage(*image);
-    } },
+    _imagePool { [this](Image const* image) { discardImage(*image); } },
     _hyperlinks { .cache = HyperlinkCache { 1024 } },
     _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
     _parser { std::ref(_sequenceBuilder) },
@@ -1840,9 +1838,16 @@ void Terminal::verifyState()
 
     _currentScreen->verifyState();
 
+    // Margins are terminal state, so verify them against the terminal's OWN main-display page size —
+    // the exact basis resizeScreen() fills them with. pageSize() would compare against the PTY's page
+    // size instead, which freezes once the PTY closes (UnixPty::resizeScreen early-returns without a
+    // master fd), so any grid change after the shell exited (DPR settlement, window growth, pane
+    // teardown reflows) made the two legitimately diverge and aborted debug builds.
+    auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
     Require(0 <= *currentPageMargin().horizontal.from
-            && *currentPageMargin().horizontal.to < *pageSize().columns);
-    Require(0 <= *currentPageMargin().vertical.from && *currentPageMargin().vertical.to < *pageSize().lines);
+            && *currentPageMargin().horizontal.to < *mainDisplayPageSize.columns);
+    Require(0 <= *currentPageMargin().vertical.from
+            && *currentPageMargin().vertical.to < *mainDisplayPageSize.lines);
 #endif
 }
 

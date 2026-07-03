@@ -185,9 +185,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
         file << "test";
     }
 
-    auto const cleanup = crispy::finally { [&]() {
-        fs::remove_all(tmpRoot);
-    } };
+    auto const cleanup = crispy::finally { [&]() { fs::remove_all(tmpRoot); } };
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
     auto constexpr UiHandledHint = false;
 
