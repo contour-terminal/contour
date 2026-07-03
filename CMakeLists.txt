@@ -129,8 +129,21 @@ else()
 endif()
 
 if(NOT(CONTOUR_SANITIZE STREQUAL "OFF"))
-    message(STATUS "Enabling ${san} sanitizer.")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope")
+    # Map the selected sanitizer mode to its -fsanitize set. "address" also enables UndefinedBehaviorSanitizer
+    # (ASan+UBSan compose; ASan+TSan do not). Keep the flags in one variable so both the compile and the link
+    # step receive them — a sanitizer runtime must be linked in, not only compiled against.
+    if(CONTOUR_SANITIZE STREQUAL "address")
+        set(CONTOUR_SANITIZE_FLAGS "-fsanitize=address,undefined -fsanitize-address-use-after-scope")
+    elseif(CONTOUR_SANITIZE STREQUAL "thread")
+        set(CONTOUR_SANITIZE_FLAGS "-fsanitize=thread")
+    else()
+        set(CONTOUR_SANITIZE_FLAGS "-fsanitize=${CONTOUR_SANITIZE}")
+    endif()
+    message(STATUS "Enabling ${CONTOUR_SANITIZE} sanitizer (flags: ${CONTOUR_SANITIZE_FLAGS}).")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer ${CONTOUR_SANITIZE_FLAGS}")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-omit-frame-pointer ${CONTOUR_SANITIZE_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CONTOUR_SANITIZE_FLAGS}")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CONTOUR_SANITIZE_FLAGS}")
 else()
     message(STATUS "No sanitizer enabled.")
 endif()
