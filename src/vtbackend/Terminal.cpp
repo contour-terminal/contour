@@ -175,7 +175,9 @@ Terminal::Terminal(Events& eventListener,
     _effectiveImageCanvasSize { _settings.maxImageSize },
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
                                                              _maxSixelColorRegisters) },
-    _imagePool { [this](Image const* image) { discardImage(*image); } },
+    _imagePool { [this](Image const* image) {
+        discardImage(*image);
+    } },
     _hyperlinks { .cache = HyperlinkCache { 1024 } },
     _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
     _parser { std::ref(_sequenceBuilder) },
@@ -1764,6 +1766,15 @@ SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
+    // The total page must leave room for at least one main-display line ON TOP of the visible status
+    // line(s): the main page is derived as `totalPageSize - statusLineHeight()` below, so a 1x1 total
+    // with the indicator status line active (statusLineHeight() == 1, the GUI default) would yield a
+    // zero-line main page and trip applyPageSizeToCurrentBuffer()/verifyState(). The frontend already
+    // clamps the TOTAL to >= 1x1 (helper.cpp), which is sufficient only when no status line is shown;
+    // clamp here so the backend invariant holds for every caller and every status-line height. Frontend
+    // callers query the same rule via clampedTotalPageSize() to keep their bookkeeping in agreement.
+    totalPageSize = clampedTotalPageSize(totalPageSize);
+
     // Finalize any active screen transition on resize (snapshot dimensions no longer match).
     if (_screenTransition.active)
         finalizeScreenTransition();
