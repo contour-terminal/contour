@@ -83,6 +83,14 @@
             "cacheVariables": {
                 "CONTOUR_SANITIZE": "address"
             }
+        },
+        {
+            "name": "clang-coverage",
+            "displayName": "Clang Debug + Coverage",
+            "inherits": "clang-debug",
+            "cacheVariables": {
+                "CONTOUR_COVERAGE": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -110,6 +118,11 @@
             "name": "clang-asan",
             "displayName": "Clang - Debug + ASan/UBSan",
             "configurePreset": "clang-asan"
+        },
+        {
+            "name": "clang-coverage",
+            "displayName": "Clang - Debug + Coverage",
+            "configurePreset": "clang-coverage"
         }
     ],
     "testPresets": [
@@ -127,6 +140,17 @@
         {
             "name": "clang-asan",
             "configurePreset": "clang-asan",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": true
+            }
+        },
+        {
+            "name": "clang-coverage",
+            "configurePreset": "clang-coverage",
             "output": {
                 "outputOnFailure": true
             },
