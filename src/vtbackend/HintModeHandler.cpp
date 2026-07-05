@@ -279,7 +279,14 @@ auto extractPathFromFileUrl(std::string const& url) -> std::string
         if (isDriveLetterPath(remainder))
             return std::string(remainder);
         if (auto const pos = remainder.find('/'); pos != std::string::npos)
-            return std::string(remainder.substr(pos));
+        {
+            // file://host/C:/path → C:/path : strip the leading slash before a Windows drive
+            // letter so a host-qualified URL still yields a valid native absolute path.
+            auto pathPart = remainder.substr(pos);
+            if (pathPart.size() >= 3 && isDriveLetterPath(pathPart.substr(1)))
+                return std::string(pathPart.substr(1));
+            return std::string(pathPart);
+        }
         return {};
     }
 

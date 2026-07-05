@@ -566,6 +566,16 @@ TEST_CASE("extractPathFromFileUrl.WindowsDriveLetter", "[hintmode]")
     CHECK(extractPathFromFileUrl("file://d:/temp/x") == "d:/temp/x");
 }
 
+TEST_CASE("extractPathFromFileUrl.WindowsDriveLetterWithHost", "[hintmode]")
+{
+    // OSC 7 on Windows commonly reports a real hostname *and* a drive-letter path
+    // (e.g. "file://MYPC/C:/Users/user"). The leading slash before the drive letter
+    // must still be stripped, otherwise callers get an invalid "/C:/..." path that
+    // Windows CreateProcess() rejects with ERROR_DIRECTORY ("directory name is invalid").
+    CHECK(extractPathFromFileUrl("file://hostname/C:/Users/user") == "C:/Users/user");
+    CHECK(extractPathFromFileUrl("file://MYPC/d:/temp/x") == "d:/temp/x");
+}
+
 TEST_CASE("HintModeHandler.CwdRelativeFilesystemValidation", "[hintmode]")
 {
     namespace fs = std::filesystem;
