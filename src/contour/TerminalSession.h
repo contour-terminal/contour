@@ -529,7 +529,24 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     int executeAllActions(std::vector<actions::Action> const& actions);
     bool executeAction(actions::Action const& action);
     void spawnNewTerminal(std::string const& profileName);
-    void activateProfile(std::string const& newProfileName);
+
+    /// Whether activating a profile should also resize the window to the profile's configured
+    /// terminal_size. Data-driven so the resize is tied to the *intent* of the activation, not to
+    /// the activation itself: an explicit profile switch (a keybinding / OSC request) should fit the
+    /// new profile's grid, but a passive config-file reload must preserve the user's live window
+    /// size. See activateProfile().
+    enum class ProfileWindowSizePolicy : uint8_t
+    {
+        Preserve, ///< Keep the current window size (config-file reload).
+        Apply,    ///< Resize the window to the profile's terminal_size (explicit profile switch).
+    };
+
+    /// Activates the named profile: applies it to the terminal and, per @p windowSizePolicy,
+    /// optionally resizes the window to the profile's configured terminal_size.
+    /// @param newProfileName The profile to activate (tolerant of a removed profile, keeps default).
+    /// @param windowSizePolicy Whether to resize the window to the profile's terminal_size.
+    void activateProfile(std::string const& newProfileName,
+                         ProfileWindowSizePolicy windowSizePolicy = ProfileWindowSizePolicy::Preserve);
     bool reloadConfigWithProfile(std::string const& profileName);
     bool resetConfig();
     void followHyperlink(vtbackend::HyperlinkInfo const& hyperlink);
