@@ -213,12 +213,35 @@ class WindowController: public QAbstractListModel
     /// Sets the declared chrome height (QML binding write) and refreshes the WM size hints.
     void setChromeHeight(int height);
 
+    /// How much of the WM size-hint set @ref updateSizeHintsFor may (re)write.
+    ///
+    /// The character-cell resize grid (base + increment, the X11 @c PResizeInc pair) is deliberately
+    /// CLEARED while the window is maximized/fullscreen (see @c showWithoutSizeIncrements) so the WM
+    /// fills the screen exactly rather than snapping to the nearest cell multiple. An INCIDENTAL hint
+    /// refresh (a split's font reconcile, a DPR settle, a title-bar toggle) must therefore not re-arm
+    /// the increment while the window is non-normal — on WMs that honor @c PResizeInc that re-writes a
+    /// sub-cell gap around the maximized window, and can even drop the maximized state. The @c minimum
+    /// hint is always safe (it never disturbs the maximized state) and is written unconditionally.
+    enum class HintApplyMode : uint8_t
+    {
+        /// Incidental refresh: write the resize grid only while the window is @c Windowed; write
+        /// @c minimum always. Used by font/DPI/chrome refreshes that may fire while maximized.
+        RespectWindowState,
+        /// Establishing the normal-state hints: write the full set unconditionally. Used by the
+        /// restore-into-normal paths, which call this BEFORE @c showNormal() settles @c visibility()
+        /// (so a live @c visibility() read would still see the old maximized value); they KNOW the
+        /// window is becoming normal, so intent — not the not-yet-settled state — drives the write.
+        Full,
+    };
+
     /// Recomputes and applies the WM size hints (minimum/base/increment) for this window from
     /// @p requester's cell geometry, profile margins, content scale and the declared chrome.
     /// Refresh triggers: font/DPI reconfiguration (via the display), chrome changes, and
     /// restore-from-fullscreen/maximize. NEVER called from a resize path.
     /// @param requester The display whose cell geometry defines the hints (the active pane).
-    void updateSizeHintsFor(display::TerminalDisplay& requester);
+    /// @param mode Whether to gate the resize grid on the live window state (@ref HintApplyMode).
+    void updateSizeHintsFor(display::TerminalDisplay& requester,
+                            HintApplyMode mode = HintApplyMode::RespectWindowState);
 
     /// Shows this window fullscreen (size increments cleared while non-normal).
     /// @param requester The display forwarding the request (resolves the OS window).

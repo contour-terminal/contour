@@ -734,6 +734,39 @@ TEST_CASE("display: window show-mode changes run through the live display", "[di
     h.pump();
 }
 
+TEST_CASE("display: an incidental hint refresh does not re-arm the resize grid while maximized",
+          "[display][geometry]")
+{
+    // [P2] defense-in-depth: maximizing clears the WM size-increment (showWithoutSizeIncrements) so the
+    // window fills the screen exactly. An INCIDENTAL hint refresh while maximized — a split's font
+    // reconcile, a DPR settle, a title-bar toggle — must NOT re-write a non-zero increment (a sub-cell
+    // gap around the maximized window on WMs honoring PResizeInc, and a potential maximize-drop).
+    // Restoring to normal must, by contrast, re-arm the grid.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    auto& controller = h.bindController();
+
+    controller.setWindowMaximized(*h.display);
+    h.pump();
+    if (h.window->visibility() != QQuickWindow::Visibility::Maximized)
+    {
+        WARN("Compositor did not honor maximize for a bare window; skipping the increment assertion.");
+        return;
+    }
+    // Maximize zeroed the increment.
+    CHECK(h.window->sizeIncrement() == QSize(0, 0));
+
+    // Incidental refresh (default RespectWindowState): the increment must stay zeroed while maximized.
+    controller.updateSizeHintsFor(*h.display);
+    h.pump();
+    CHECK(h.window->sizeIncrement() == QSize(0, 0));
+
+    // Restoring to normal re-establishes the interactive-resize grid (Full mode inside setWindowNormal).
+    controller.setWindowNormal(*h.display);
+    h.pump();
+    CHECK(h.window->sizeIncrement() != QSize(0, 0));
+}
+
 TEST_CASE("display: font DPI and refresh-rate/screen hooks re-derive metrics on the live display",
           "[display][metrics]")
 {

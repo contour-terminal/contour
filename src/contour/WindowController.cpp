@@ -511,7 +511,7 @@ void WindowController::setChromeHeight(int height)
         updateSizeHintsFor(*_activeDisplay);
 }
 
-void WindowController::updateSizeHintsFor(display::TerminalDisplay& requester)
+void WindowController::updateSizeHintsFor(display::TerminalDisplay& requester, HintApplyMode mode)
 {
     auto* osWindow = osWindowFor(requester);
     if (osWindow == nullptr || !requester.hasSession())
@@ -522,15 +522,24 @@ void WindowController::updateSizeHintsFor(display::TerminalDisplay& requester)
     auto const margins = toGeometryMargins(requester.session().profile().margins.value());
     auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome());
 
+    // The character-cell resize grid (base + increment) is cleared while maximized/fullscreen. An
+    // incidental refresh (RespectWindowState) must not re-arm it while the window is non-normal — that
+    // would put a sub-cell gap around a maximized window on WMs honoring PResizeInc, and can drop the
+    // maximized state entirely. The restore-into-normal paths pass Full: they run BEFORE showNormal()
+    // settles visibility(), so they cannot rely on a live read and instead declare their intent. The
+    // minimum hint never disturbs the maximized state, so it is always applied.
+    auto const applyResizeGrid =
+        mode == HintApplyMode::Full || osWindow->visibility() == QQuickWindow::Visibility::Windowed;
+
     // Apply only the hints this platform can safely honor. macOS omits base + increment: Qt's Cocoa
     // plugin writes the base size straight into `-[NSWindow setFrame:]`, so a small base HARD-RESIZES the
     // freshly-mapped window to title-bar-only — the invisible-window regression. See sizeHintPolicyFor().
     auto const policy = geometry::sizeHintPolicyFor(geometry::currentSizeHintPlatform());
     if (policy.applyMinimum)
         osWindow->setMinimumSize(QSize(hints.minimum.width, hints.minimum.height));
-    if (policy.applyBase)
+    if (policy.applyBase && applyResizeGrid)
         osWindow->setBaseSize(QSize(hints.base.width, hints.base.height));
-    if (policy.applyIncrement)
+    if (policy.applyIncrement && applyResizeGrid)
         osWindow->setSizeIncrement(QSize(hints.increment.width, hints.increment.height));
 
     displayLog()("Size hints: min={}x{}, base={}x{}, increment={}x{} (cellSize={}, scale={}, chrome={})",
@@ -578,7 +587,10 @@ void WindowController::setWindowNormal(display::TerminalDisplay& requester)
     auto* osWindow = osWindowFor(requester);
     if (osWindow == nullptr)
         return;
-    updateSizeHintsFor(requester);
+    // Full: we are restoring into normal, so re-establish the interactive-resize grid unconditionally.
+    // visibility() is still Maximized/FullScreen here (showNormal() below settles it asynchronously), so
+    // the intent — not a live state read — must drive the increment write.
+    updateSizeHintsFor(requester, HintApplyMode::Full);
     osWindow->showNormal();
     _maximizedState = false;
 }
@@ -709,7 +721,9 @@ void WindowController::toggleFullScreen(display::TerminalDisplay& requester)
     }
     else
     {
-        updateSizeHintsFor(requester);
+        // Restoring into normal (see setWindowNormal): re-establish the resize grid unconditionally
+        // before showNormal() settles visibility().
+        updateSizeHintsFor(requester, HintApplyMode::Full);
         osWindow->showNormal();
     }
 }
