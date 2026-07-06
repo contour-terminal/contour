@@ -734,6 +734,37 @@ TEST_CASE("display: window show-mode changes run through the live display", "[di
     h.pump();
 }
 
+TEST_CASE("display: re-configuring a display leaves a maximized window maximized", "[display][geometry]")
+{
+    // Regression: maximize the window, then split — the window must STAY maximized. A split gives its
+    // new leaf a fresh TerminalDisplay whose first render sync creates a renderer and POSTS
+    // configureDisplay(). configureDisplay() used to re-assert the profile's (default: non-maximized)
+    // window state, calling setWindowNormal() -> showNormal() and dropping the user's maximized state.
+    // Here we drive the exact posted call directly on the same live session and assert the state holds.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    auto& controller =
+        h.bindController(); // so windowController() resolves and the show-mode actually applies
+
+    controller.setWindowMaximized(*h.display);
+    h.pump();
+
+    // The compositor may refuse to maximize a bare window; only assert the invariant when it took hold
+    // (otherwise there is no maximized state to preserve — not a failure of the fix).
+    if (h.window->visibility() != QQuickWindow::Visibility::Maximized)
+    {
+        WARN("Compositor did not honor maximize for a bare window; skipping the invariant assertion.");
+        return;
+    }
+
+    // The split-leaf renderer-setup path: re-run configureDisplay() on the already-maximized window.
+    CHECK_NOTHROW(h.session->configureDisplay());
+    h.pump();
+
+    // Post-fix: configureDisplay() no longer touches window show-mode, so the window stays maximized.
+    CHECK(h.window->visibility() == QQuickWindow::Visibility::Maximized);
+}
+
 TEST_CASE("display: an incidental hint refresh does not re-arm the resize grid while maximized",
           "[display][geometry]")
 {

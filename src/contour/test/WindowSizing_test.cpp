@@ -142,6 +142,35 @@ TEST_CASE("tab switching never touches window geometry", "[contour][sizing]")
     CHECK(window.minimumSize() == minimum);
 }
 
+TEST_CASE("a maximized window survives a tab switch", "[contour][sizing]")
+{
+    // Same invariant as splitting: content re-binding (here a tab switch) must never drop the window's
+    // show-state. Whatever the offscreen platform settles the visibility to after setWindowMaximized(),
+    // activating another tab and switching back must leave it unchanged — the tab path must not route
+    // through any show-mode call.
+    TestApp app;
+    auto& manager = app.manager();
+    ScopedController controller { manager };
+    QQuickWindow window;
+    controller->bindWindow(&window);
+    window.show();
+    QCoreApplication::processEvents();
+
+    REQUIRE(manager.model().createTab(controller->windowId()) != nullptr);
+    REQUIRE(manager.model().createTab(controller->windowId()) != nullptr);
+
+    contour::display::TerminalDisplay requester;
+    controller->setWindowMaximized(requester);
+    QCoreApplication::processEvents();
+    auto const visibility = window.visibility();
+
+    controller->activateTab(1);
+    controller->activateTab(0);
+    QCoreApplication::processEvents();
+
+    CHECK(window.visibility() == visibility);
+}
+
 TEST_CASE("toggleMaximized routes both directions through the show-mode protocol", "[contour][sizing]")
 {
     // The QML window controls / title-bar double-click entry point: maximizing must clear the WM

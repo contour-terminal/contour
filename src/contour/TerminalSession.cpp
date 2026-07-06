@@ -2422,13 +2422,15 @@ void TerminalSession::configureDisplay()
         _terminal.setMaxImageSize(actualScreenSize, actualScreenSize);
     }
 
-    if (_profile.maximized.value())
-        _display->setWindowMaximized();
-    else
-        _display->setWindowNormal();
-
-    if (_profile.fullscreen.value() != _display->isFullScreen())
-        _display->toggleFullScreen();
+    // NB: The profile's window show-mode (maximized/fullscreen/normal) is deliberately NOT applied
+    // here. Window-state authority belongs solely to WindowController::showInitial() — which maps
+    // every window (fresh or tab-transplant receiver) directly into the profile's state on open —
+    // and to the explicit user actions (toggleMaximized/toggleFullScreen). configureDisplay() runs
+    // on EVERY renderer (re)creation: the first pane, but also each split leaf's fresh
+    // TerminalDisplay and any scene-graph re-creation after an unexpose. Re-asserting the profile's
+    // (default: non-maximized) state on those would drop the user's live maximized/fullscreen state
+    // — the "window unmaximizes when I split" regression. Splitting is a pure content-area
+    // operation; the QWindow's geometry and state must not change.
 
     _terminal.setRefreshRate(_display->refreshRate());
     _display->setFonts(_profile.fonts.value());
