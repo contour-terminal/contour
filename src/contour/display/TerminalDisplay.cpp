@@ -2,8 +2,12 @@
 #include <contour/Actions.h>
 #include <contour/BlurBehind.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/display/OpenGLRenderer.h>
+#include <contour/WindowController.h>
+#include <contour/display/ContentScale.h>
+#include <contour/display/ImeQueryRect.h>
+#include <contour/display/RhiRenderer.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/display/TerminalRenderNode.h>
 #include <contour/helper.h>
 
 #include <vtbackend/Color.h>
@@ -17,17 +21,18 @@
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
-#include <QtCore/QFileSystemWatcher>
 #include <QtCore/QMetaEnum>
 #include <QtCore/QMetaObject>
 #include <QtCore/QProcess>
 #include <QtCore/QRunnable>
+#include <QtCore/QSemaphore>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
+#include <QtGui/QOpenGLContext>
 #include <QtGui/QScreen>
 #include <QtNetwork/QHostInfo>
 #include <QtQml/QQmlContext>
@@ -39,14 +44,12 @@
 #include <fstream>
 #include <ranges>
 #include <string_view>
-#include <tuple>
 #include <variant>
 #include <vector>
 
-namespace fs = std::filesystem;
+#include <rhi/qrhi.h>
 
-// Temporarily disabled (I think it was macOS that didn't like glDebugMessageCallback).
-// #define CONTOUR_DEBUG_OPENGL 1
+namespace fs = std::filesystem;
 
 #if defined(_MSC_VER)
     #define __PRETTY_FUNCTION__ __FUNCDNAME__
@@ -54,9 +57,9 @@ namespace fs = std::filesystem;
 
 // Must be in global namespace
 // NB: must be publicly visible, and due to -Wmissing-declarations, we better tell the compiler.
-void initializeResourcesForContourFrontendOpenGL();
+void initializeDisplayResources();
 
-void initializeResourcesForContourFrontendOpenGL()
+void initializeDisplayResources()
 {
     Q_INIT_RESOURCE(DisplayResources);
 }
@@ -86,114 +89,6 @@ using actions::Action;
 // {{{ helper
 namespace
 {
-#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
-    void glMessageCallback(GLenum _source,
-                           GLenum _type,
-                           [[maybe_unused]] GLuint _id,
-                           GLenum _severity,
-                           [[maybe_unused]] GLsizei _length,
-                           GLchar const* _message,
-                           [[maybe_unused]] void const* _userParam)
-    {
-        string const sourceName = [&]() {
-            switch (_source)
-            {
-    #if defined(GL_DEBUG_SOURCE_API_ARB)
-                case GL_DEBUG_SOURCE_API_ARB: return "API"s;
-    #endif
-    #if defined(GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB)
-                case GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB: return "window system"s;
-    #endif
-    #if defined(GL_DEBUG_SOURCE_SHADER_COMPILER_ARB)
-                case GL_DEBUG_SOURCE_SHADER_COMPILER_ARB: return "shader compiler"s;
-    #endif
-    #if defined(GL_DEBUG_SOURCE_THIRD_PARTY_ARB)
-                case GL_DEBUG_SOURCE_THIRD_PARTY_ARB: return "third party"s;
-    #endif
-    #if defined(GL_DEBUG_SOURCE_APPLICATION_ARB)
-                case GL_DEBUG_SOURCE_APPLICATION_ARB: return "application"s;
-    #endif
-    #if defined(GL_DEBUG_SOURCE_OTHER_ARB)
-                case GL_DEBUG_SOURCE_OTHER_ARB: return "other"s;
-    #endif
-                default: return std::format("{}", _severity);
-            }
-        }();
-        string const typeName = [&]() {
-            switch (_type)
-            {
-    #if defined(GL_DEBUG_TYPE_ERROR)
-                case GL_DEBUG_TYPE_ERROR: return "error"s;
-    #endif
-    #if defined(GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR)
-                case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "deprecated"s;
-    #endif
-    #if defined(GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR)
-                case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR: return "undefined"s;
-    #endif
-    #if defined(GL_DEBUG_TYPE_PORTABILITY)
-                case GL_DEBUG_TYPE_PORTABILITY: return "portability"s;
-    #endif
-    #if defined(GL_DEBUG_TYPE_PERFORMANCE)
-                case GL_DEBUG_TYPE_PERFORMANCE: return "performance"s;
-    #endif
-    #if defined(GL_DEBUG_TYPE_OTHER)
-                case GL_DEBUG_TYPE_OTHER: return "other"s;
-    #endif
-                default: return std::format("{}", _severity);
-            }
-        }();
-        string const debugSeverity = [&]() {
-            switch (_severity)
-            {
-    #if defined(GL_DEBUG_SEVERITY_LOW)
-                case GL_DEBUG_SEVERITY_LOW: return "low"s;
-    #endif
-    #if defined(GL_DEBUG_SEVERITY_MEDIUM)
-                case GL_DEBUG_SEVERITY_MEDIUM: return "medium"s;
-    #endif
-    #if defined(GL_DEBUG_SEVERITY_HIGH)
-                case GL_DEBUG_SEVERITY_HIGH: return "high"s;
-    #endif
-    #if defined(GL_DEBUG_SEVERITY_NOTIFICATION)
-                case GL_DEBUG_SEVERITY_NOTIFICATION: return "notification"s;
-    #endif
-                default: return std::format("{}", _severity);
-            }
-        }();
-        auto const tag = []([[maybe_unused]] GLint _type) {
-            switch (_type)
-            {
-    #ifdef GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR
-                case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "DEPRECATED";
-    #endif
-    #ifdef GL_DEBUG_TYPE_MARKER
-                case GL_DEBUG_TYPE_MARKER: return "MARKER";
-    #endif
-    #ifdef GL_DEBUG_TYPE_OTHER
-                case GL_DEBUG_TYPE_OTHER: return "OTHER";
-    #endif
-    #ifdef GL_DEBUG_TYPE_PORTABILITY
-                case GL_DEBUG_TYPE_PORTABILITY: return "PORTABILITY";
-    #endif
-    #ifdef GL_DEBUG_TYPE_PERFORMANCE
-                case GL_DEBUG_TYPE_PERFORMANCE: return "PERFORMANCE";
-    #endif
-    #ifdef GL_DEBUG_TYPE_ERROR
-                case GL_DEBUG_TYPE_ERROR: return "ERROR";
-    #endif
-                default: return "UNKNOWN";
-            }
-        }(_type);
-
-        displayLog()("[OpenGL/{}]: type:{}, source:{}, severity:{}; {}",
-                     tag,
-                     typeName,
-                     sourceName,
-                     debugSeverity,
-                     _message);
-    }
-#endif
 
     std::string unhandledExceptionMessage(std::string_view const& where, exception const& e)
     {
@@ -206,32 +101,6 @@ namespace
         cerr << unhandledExceptionMessage(where, e) << '\n';
     }
 
-    // Returns the config file containing the user-configured DPI setting for KDE desktops.
-    [[maybe_unused]] std::optional<fs::path> kcmFontsFilePath()
-    {
-#if !defined(__APPLE__) && !defined(_WIN32)
-        auto const xdgConfigHome = config::configHome("");
-        auto const kcmFontsFile = xdgConfigHome / "kcmfonts";
-        if (fs::exists(kcmFontsFile))
-            return { kcmFontsFile };
-#endif
-
-        return nullopt;
-    }
-
-    QScreen* findScreenWithBiggestWidth(QScreen* startScreen)
-    {
-        auto* screenToUse = startScreen;
-        for (auto* screen: startScreen->virtualSiblings())
-        {
-            if (screen->size().width() > screenToUse->size().width())
-            {
-                screenToUse = screen;
-            }
-        }
-        return screenToUse;
-    }
-
 } // namespace
 // }}}
 
@@ -239,14 +108,18 @@ namespace
 TerminalDisplay::TerminalDisplay(QQuickItem* parent):
     QQuickItem(parent),
     _startTime { steady_clock::time_point::min() },
-    _lastFontDPI { fontDPI() },
     _updateTimer(this),
-    _autoScrollTimer(this),
-    _filesystemWatcher(this)
+    _autoScrollTimer(this)
 {
+    // Seed the DPI dedup baseline in the BODY, not the member-init list: fontDPI() -> contentScale()
+    // reads _forcedFontDpiProvider (and any future member), and init-list evaluation follows member
+    // DECLARATION order — an init-list call would read members that are not initialized yet (UB,
+    // trapped by UBSan as soon as a real display was constructed).
+    _lastFontDPI = fontDPI();
+
     startupLog()("TerminalDisplay constructed (QML component instantiation reached)");
     auto const timer = ScopedTimer(startupLog, "TerminalDisplay constructor");
-    initializeResourcesForContourFrontendOpenGL();
+    initializeDisplayResources();
 
     setFlag(Flag::ItemIsFocusScope);
     setFlag(Flag::ItemHasContents);
@@ -262,11 +135,6 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
 
     connect(this, &QQuickItem::windowChanged, this, &TerminalDisplay::handleWindowChanged);
 
-    // setMouseTracking(true);
-    // setFormat(createSurfaceFormat());
-    //
-    // TODO: setAttribute(Qt::WA_InputMethodEnabled, true);
-
     _updateTimer.setSingleShot(true);
     connect(&_updateTimer, &QTimer::timeout, this, &TerminalDisplay::scheduleRedraw, Qt::QueuedConnection);
 
@@ -278,6 +146,41 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
 TerminalDisplay::~TerminalDisplay()
 {
     displayLog()("Destroying terminal widget.");
+    // ~QQuickItem (running AFTER this body) unparents the item and re-emits windowChanged(nullptr)
+    // — at which point the TerminalDisplay part of `this` no longer exists, so the ctor's
+    // windowChanged→handleWindowChanged connection would invoke a slot on a half-destroyed object
+    // (Qt asserts in debug, UB in release). Sever it first: a dying display has no window business.
+    QObject::disconnect(this, &QQuickItem::windowChanged, this, &TerminalDisplay::handleWindowChanged);
+
+    // The render node's prepare()/render() run in the scene graph's RENDER phase — the GUI thread is
+    // NOT blocked there, so a frame may be mid-flight inside this display right now. Two steps make
+    // destruction race-free: (1) publish null in the shared liveness cell, so any FUTURE node callback
+    // no-ops; (2) fence out the possibly in-flight frame that loaded `this` before the store — a
+    // NoStage render job runs on the render thread as soon as the current frame completes (or runs
+    // synchronously right here when no render loop is active), so once it releases, the render thread
+    // can no longer be executing display/renderer code.
+    _nodeLiveness->store(nullptr, std::memory_order_release);
+    if (auto* win = window(); win != nullptr)
+    {
+        QSemaphore fence;
+        win->scheduleRenderJob(QRunnable::create([&fence]() { fence.release(); }), QQuickWindow::NoStage);
+        fence.acquire();
+    }
+
+    // Free the RHI renderer. It is normally released by the scene-graph node's releaseResources() or
+    // by sceneGraphInvalidated() → cleanup(), but neither fires when the item is still parented into a
+    // window that is simply destroyed (the offscreen/bare-QQuickWindow teardown path) — the renderer
+    // and its GPU pipelines would leak. The render-thread fence above has quiesced the render thread,
+    // so releasing the RHI resources here is safe; destroyRenderer() is idempotent, so a later
+    // node/invalidation teardown that also runs it is a no-op.
+    destroyRenderer();
+
+    // Evict this display from the manager's per-display bookkeeping before it is freed, so no
+    // dangling TerminalDisplay* key (or its dangling currentSession) survives in _displayStates. Use
+    // the cached manager rather than _session->getTerminalManager(): a closed split pane is destroyed
+    // after its session was already detached (_session == nullptr), so the session route would miss it.
+    if (_manager != nullptr)
+        _manager->detachDisplay(this);
     if (_session)
         _session->detachDisplay(*this);
 }
@@ -287,6 +190,17 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     displayLog()("TerminalDisplay::setSession: {} -> {}\n", (void*) _session, (void*) newSession);
     if (_session == newSession)
         return;
+
+    // A null newSession means "detach": the split-pane QML binding (PaneNode.qml
+    // `session: root.node ? root.node.session : null`) transiently resolves to null while a pane's Loader
+    // is still active during a split collapse, so the `session` property WRITE can arrive here as nullptr.
+    // The rest of this function unconditionally dereferences newSession (profile(), start(), attachDisplay,
+    // ...), so route a null through the existing detach path instead of segfaulting the whole window.
+    if (newSession == nullptr)
+    {
+        releaseSession();
+        return;
+    }
 
     // This will print the same pointer address for `this` but a new one for newSession (model data).
     displayLog()("Assigning session to display({} <- {}): shell={}, terminalSize={}, fontSize={}, "
@@ -311,6 +225,20 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     _session = newSession;
 
+    // Cache the manager so ~TerminalDisplay can self-evict from _displayStates even if this pane is
+    // closed before it ever receives focus (focus-in is the other place the cache is set).
+    if (auto* manager = newSession->getTerminalManager(); manager != nullptr)
+        _manager = manager;
+
+    // Inject the app-wide forced-DPI provider (one cached instance; see ContentScale.h) and refresh the
+    // font DPI whenever the platform override changes at runtime.
+    if (auto* provider = newSession->forcedFontDpiProvider();
+        provider != nullptr && provider != _forcedFontDpiProvider)
+    {
+        _forcedFontDpiProvider = provider;
+        connect(provider, &ForcedFontDpiProvider::changed, this, &TerminalDisplay::applyFontDPI);
+    }
+
     QObject::connect(newSession, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
 
     auto const imeEnabled = profile().inputMethodEditor.value();
@@ -322,7 +250,14 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
         _session->start();
     }
 
-    window()->setFlag(Qt::FramelessWindowHint, !profile().showTitleBar.value());
+    // NB: The window frame is owned by QML now. main.qml makes the window frameless on the platforms
+    // that use the custom client-side TitleBar (the tab strip + window controls). The profile's
+    // show_title_bar setting controls the *custom* bar's visibility (not the native frame, which
+    // would otherwise double-decorate); main.qml binds the TitleBar's visibility to the CONTROLLER's
+    // titleBarVisible. Only SEED the window default here (first-write-wins): re-applying the profile
+    // value on every session rebind silently reverted a runtime ToggleTitleBar on each tab switch.
+    if (auto* controller = windowController())
+        controller->seedTitleBarVisible(profile().showTitleBar.value());
 
     if (!_renderer)
     {
@@ -335,17 +270,37 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
             _session->config().renderer.value().textureAtlasTileCount,
             _session->config().renderer.value().textureAtlasDirectMapping,
             _session->profile().hyperlinkDecoration.value().normal,
-            _session->profile().hyperlinkDecoration.value().hover
-            // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
-        );
+            _session->profile().hyperlinkDecoration.value().hover);
 
         // setup once with the renderer creation
         applyFontDPI();
-        updateImplicitSize();
-        updateSizeConstraints();
+        notifyCellGeometryChanged();
     }
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
+
+    // Reconcile a session re-bound onto a display that is ALREADY rendering (a new tab, or switching to a
+    // background tab) to the INCOMING session's own state — the single TerminalDisplay/_renderer is reused
+    // across tabs, so anything left on it by the previous tab leaks unless re-seeded here. Only a
+    // newly-spawned window's first session enforces the profile via createRenderer()'s one-time seed (while
+    // _renderTarget is still null), so gating on hasRenderTarget() cleanly excludes that path.
+    if (hasRenderTarget())
+    {
+        // Font is pane-local: the renderer keeps whatever font the last-active tab pushed, so without this
+        // a font-size/-family change on one tab visibly persists after switching to another. setFontSize()
+        // persists the runtime size into the session's own _profile.fonts, so re-seeding from
+        // profile().fonts restores THIS session's value (never a stale profile default) — the property that
+        // makes fonts safe to re-apply on rebind where a blanket profile re-apply is not. Done BEFORE the
+        // grid refit so applyDisplaySizeToGrid() fits against the final cell size; setFonts() itself already
+        // reflows the grid, and both steps are idempotent when nothing changed.
+        setFonts(_session->profile().fonts.value());
+
+        // attachDisplay() above only round-trips the session's stale page size
+        // (resizeScreen(totalPageSize(), pixelSize())); for a live window the WINDOW is the size authority,
+        // so refit the incoming session to this display's real current extent (grid AND child PTY).
+        // Idempotent: applyResize() no-ops when the page already matches.
+        applyDisplaySizeToGrid();
+    }
 
     _session->terminal().setImageDecoder(
         [](vtbackend::ImageFormat format,
@@ -379,15 +334,25 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     emit sessionChanged(newSession);
 }
 
-vtbackend::PageSize TerminalDisplay::windowSize() const noexcept
+void TerminalDisplay::releaseSession()
 {
     if (!_session)
-        return vtbackend::PageSize { LineCount(25), ColumnCount(80) };
-
-    return profile().terminalSize.value();
+        return;
+    displayLog()("TerminalDisplay::releaseSession: dropping session {} (taken over by another display)",
+                 (void*) _session);
+    QObject::disconnect(_session, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
+    // Clear the session's back-pointer as well: on the transient-null collapse path (setSession(nullptr))
+    // no other display takes the session over before this one may be destroyed, and ~TerminalDisplay
+    // skips detachDisplay() once _session is null — leaving the session posting into a freed display.
+    // Guarded on the back-pointer because the hand-off path (TerminalSession::attachDisplay) repoints
+    // it right after this call returns.
+    if (_session->display() == this)
+        _session->detachDisplay(*this);
+    _session = nullptr;
+    emit sessionChanged(nullptr);
 }
 
-void TerminalDisplay::sizeChanged()
+void TerminalDisplay::applyDisplaySizeToGrid()
 {
     if (!_session || !_renderTarget)
         return;
@@ -396,86 +361,22 @@ void TerminalDisplay::sizeChanged()
         // This can happen when the window is minimized, or when the window is not yet fully initialized.
         return;
 
-    // During initial display setup, the Wayland compositor may revert the window to
-    // the stale pre-DPR-correction geometry via a configure event (e.g. in response to
-    // showNormal()). Detect this by checking if BOTH dimensions match the saved stale
-    // size (the window dimensions before DPR correction in createRenderer). This is more
-    // specific than checking against implicitSize, which would also falsely trigger on
-    // intentional WM-driven resizes (e.g. tiling WM assigning the window a tile size).
-    //
-    // Crucially, only treat the saved size as "stale" if the implicit size has
-    // actually changed since createRenderer() — i.e. a DPR correction really
-    // happened. Without that check, a tiling WM that maps the window directly at
-    // its tile size (so width() == _lastVirtual* with no DPR correction) is
-    // wrongly "corrected" down to the implicit 80x25, leaving a tiny near-square
-    // window until a manual resize.
-    auto const implicitSizeChanged = std::abs(implicitWidth() - _initialImplicitWidth) > 0.5
-                                     || std::abs(implicitHeight() - _initialImplicitHeight) > 0.5;
-    if (steady_clock::now() < _initialResizeDeadline && implicitSizeChanged
-        && std::abs(width() - _lastVirtualWidth) <= 0.5 && std::abs(height() - _lastVirtualHeight) <= 0.5)
-    {
-        displayLog()("Correcting initial window size from {}x{} (stale) to {}x{} (implicit)",
-                     width(),
-                     height(),
-                     implicitWidth(),
-                     implicitHeight());
-        post([this]() {
-            if (auto* currentWindow = window(); currentWindow)
-                currentWindow->resize(static_cast<int>(std::ceil(implicitWidth())),
-                                      static_cast<int>(std::ceil(implicitHeight())));
-        });
-        return;
-    }
+    // Window->grid, the ONLY reaction to a size change: floor this item's device-pixel extent to a grid
+    // and apply it; the sub-cell remainder renders as background padding. This path never mutates the
+    // QWindow — the WM's size is obeyed as-is (grid alignment during interactive resizes is the WM's job,
+    // via the size-increment hint where the platform supports it) — so a resize event can never re-enter
+    // itself. Grid->window resizes exist only for content-driven requests through the WindowController.
+    auto const deviceSize = geometry::availableDevicePixels(width(), height(), contentScale());
+    displayLog()("Display size changed to {}x{} virtual ({} device).", width(), height(), deviceSize);
+    applyResize(deviceSize, *_session, *_renderer);
+}
 
-    displayLog()("Size changed to {}x{} virtual", width(), height());
-
-    auto const virtualSize = vtbackend::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
-    auto const actualPixelSize = virtualSize * contentScale();
-    displayLog()("Resizing view to {} virtual ({} actual).", virtualSize, actualPixelSize);
-    applyResize(actualPixelSize, *_session, *_renderer);
-
-    // Client-side snap to cell-grid boundaries.
-    // On X11/macOS, setSizeIncrement() handles this in the WM — the snap is a no-op.
-    // On Wayland (xdg-shell has no size-increment hint), this is the only mechanism.
-    if (!_snapPending && !isFullScreen() && window()->visibility() != QQuickWindow::Visibility::Maximized
-        && steady_clock::now() >= _initialResizeDeadline)
-    {
-        _snapPending = true;
-        post([this]() {
-            if (!_session || !_renderTarget || !window())
-            {
-                _snapPending = false;
-                return;
-            }
-            if (isFullScreen() || window()->visibility() == QQuickWindow::Visibility::Maximized)
-            {
-                _snapPending = false;
-                return;
-            }
-
-            auto const dpr = contentScale();
-            auto const snappedActualSize = pixelSize();
-            auto const snappedVirtualWidth =
-                static_cast<int>(std::ceil(static_cast<double>(unbox(snappedActualSize.width)) / dpr));
-            auto const snappedVirtualHeight =
-                static_cast<int>(std::ceil(static_cast<double>(unbox(snappedActualSize.height)) / dpr));
-
-            auto const currentWidth = window()->width();
-            auto const currentHeight = window()->height();
-
-            if (snappedVirtualWidth != currentWidth || snappedVirtualHeight != currentHeight)
-            {
-                displayLog()("Snapping window from {}x{} to {}x{} virtual (grid-aligned, actual {})",
-                             currentWidth,
-                             currentHeight,
-                             snappedVirtualWidth,
-                             snappedVirtualHeight,
-                             snappedActualSize);
-                window()->resize(snappedVirtualWidth, snappedVirtualHeight);
-            }
-            _snapPending = false;
-        });
-    }
+void TerminalDisplay::geometryChange(QRectF const& newGeometry, QRectF const& oldGeometry)
+{
+    QQuickItem::geometryChange(newGeometry, oldGeometry);
+    // One reflow per committed geometry change (position-only moves are irrelevant to the grid).
+    if (newGeometry.size() != oldGeometry.size())
+        applyDisplaySizeToGrid();
 }
 
 void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
@@ -501,40 +402,57 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
                 &TerminalDisplay::cleanup,
                 Qt::DirectConnection);
 
-        connect(this, &QQuickItem::widthChanged, this, &TerminalDisplay::sizeChanged, Qt::DirectConnection);
-        connect(this, &QQuickItem::heightChanged, this, &TerminalDisplay::sizeChanged, Qt::DirectConnection);
+        // setSession() may have run before a window existed, in which case windowController() could not
+        // route to THIS window's controller (it matches by the display's OS window) and the profile's
+        // show_title_bar seed was dropped or mis-targeted a no-op. Re-seed now that the window exists;
+        // seedTitleBarVisible is first-write-wins per window, so an already-seeded window is unaffected.
+        if (_session != nullptr)
+            if (auto* controller = windowController())
+                controller->seedTitleBarVisible(_session->profile().showTitleBar.value());
     }
     else
         displayLog()("Detaching widget {} from window.", (void*) this);
 }
 
+/// Deletes an RhiRenderer on the render thread (where its RHI/GPU resources must be released).
+/// Takes ownership of the renderer for its lifetime; the scheduling code hands over the unique_ptr.
 class CleanupJob: public QRunnable
 {
   public:
-    explicit CleanupJob(OpenGLRenderer* renderer): _renderer { renderer } {}
+    explicit CleanupJob(std::unique_ptr<RhiRenderer> renderer): _renderer { std::move(renderer) } {}
 
-    void run() override
-    {
-        delete _renderer;
-        _renderer = nullptr;
-    }
+    void run() override { _renderer.reset(); }
 
   private:
-    OpenGLRenderer* _renderer;
+    std::unique_ptr<RhiRenderer> _renderer;
 };
 
 void TerminalDisplay::releaseResources()
 {
     displayLog()("Releasing resources.");
-    window()->scheduleRenderJob(new CleanupJob(_renderTarget), QQuickWindow::BeforeSynchronizingStage);
-    _renderTarget = nullptr;
+    // QQuickItem::releaseResources() runs on the GUI thread, but GL teardown must happen on the render
+    // thread with the context current — so defer it via a render job. The renderer may already be gone
+    // (the scene-graph node's releaseResources() destroys it on the render thread), in which case there
+    // is nothing to schedule.
+    // window() can already be null if the item was unparented from the scene before releaseResources() runs;
+    // scheduling a render job then would dereference null. The CleanupJob takes ownership of _renderTarget
+    // and deletes it on the render thread, so only null the pointer once the job has taken it. Without a
+    // window we must NOT null _renderTarget here — otherwise the deferred destroyRenderer() (via the
+    // scene-graph node's releaseResources()/cleanup(), which runs on the render thread) would see nullptr and
+    // the renderer would leak. Leaving it set lets that path delete it.
+    if (_renderTarget && window())
+    {
+        // Hand ownership of the renderer to the render-thread job (which frees it where its GPU
+        // resources live); std::move leaves _renderTarget null.
+        window()->scheduleRenderJob(new CleanupJob(std::move(_renderTarget)),
+                                    QQuickWindow::BeforeSynchronizingStage);
+    }
 }
 
 void TerminalDisplay::cleanup()
 {
     displayLog()("Cleaning up.");
-    delete _renderTarget;
-    _renderTarget = nullptr;
+    destroyRenderer();
 }
 
 void TerminalDisplay::onAutoScrollTick()
@@ -546,6 +464,11 @@ void TerminalDisplay::onAutoScrollTick()
 
 void TerminalDisplay::onRefreshRateChanged()
 {
+    // Guard like the sibling applyFontDPI slot: the screen hooks outlive both the session (transiently
+    // null during a split collapse) and the window (a closed pane's item awaiting deferred deletion),
+    // and refreshRate() dereferences window()->screen().
+    if (_session == nullptr || window() == nullptr)
+        return;
     auto const rate = refreshRate();
     displayLog()("Refresh rate changed to {}.", rate.value);
     _session->terminal().setRefreshRate(rate);
@@ -556,17 +479,51 @@ void TerminalDisplay::configureScreenHooks()
     Require(window());
 
     QScreen* screen = window()->screen();
+    if (screen == _hookedScreen)
+        return;
 
-    connect(window(), SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged()));
-    connect(screen, SIGNAL(refreshRateChanged(qreal)), this, SLOT(onRefreshRateChanged()));
-    connect(screen, SIGNAL(logicalDotsPerInchChanged(qreal)), this, SLOT(applyFontDPI()));
-    // connect(screen, SIGNAL(physicalDotsPerInchChanged(qreal)), this, SLOT(applyFontDPI()));
+    // Re-wire the per-screen hooks to the CURRENT screen: they were previously bound once to the
+    // creation-time screen, so after a monitor move refresh-rate/DPI signals kept arriving from the
+    // wrong screen.
+    if (_hookedScreen != nullptr)
+        disconnect(_hookedScreen, nullptr, this, nullptr);
+    _hookedScreen = screen;
+
+    connect(window(), &QWindow::screenChanged, this, &TerminalDisplay::onScreenChanged, Qt::UniqueConnection);
+    if (screen != nullptr)
+    {
+        connect(screen, SIGNAL(refreshRateChanged(qreal)), this, SLOT(onRefreshRateChanged()));
+        connect(screen, SIGNAL(logicalDotsPerInchChanged(qreal)), this, SLOT(applyFontDPI()));
+    }
+}
+
+void TerminalDisplay::applyContentScaleChange()
+{
+    applyFontDPI();
+    // Without a render target, applyFontDPI() only STAGES the font reload (its no-target branch);
+    // publishedCellSize() would keep the pre-change metrics and any geometry derived from it would be
+    // stale. The staged apply needs no GPU, so materialize it now. With a render target this is a
+    // no-op (applyFontDPI already applied synchronously).
+    if (_renderer && _session && window())
+        applyStagedFontReconfigNow();
 }
 
 void TerminalDisplay::onScreenChanged()
 {
     displayLog()("Screen changed.");
+    configureScreenHooks(); // re-home the per-screen hooks to the new screen
     applyFontDPI();
+    // Re-derive the screen-dependent terminal facts from the ACTUAL screen (the window-level
+    // grid-preserving resize, if any, is the controller's scale-settlement handler's job).
+    if (_session != nullptr && window() != nullptr && window()->screen() != nullptr)
+    {
+        _session->terminal().setRefreshRate(refreshRate());
+        auto const dpr = contentScale();
+        auto const screenSize = window()->screen()->size() * dpr;
+        auto const maxImageSize =
+            ImageSize { Width::cast_from(screenSize.width()), Height::cast_from(screenSize.height()) };
+        _session->terminal().setMaxImageSize(maxImageSize, maxImageSize);
+    }
 }
 
 void TerminalDisplay::applyFontDPI()
@@ -602,8 +559,8 @@ void TerminalDisplay::applyFontDPI()
     {
         // During createRenderer() the render target does not exist yet; the staged change is
         // materialized explicitly there via applyStagedReconfigDuringSetup(). With no render target
-        // there is also no frame to drive. The implicit size / constraints still depend on the DPR
-        // directly, so recompute those (they do not need the render target) and return.
+        // there is also no frame to drive. The WM size hints still depend on the DPR directly, so
+        // refresh those (they do not need the render target) and return.
         //
         // _lastFontDPI is deliberately NOT committed here: the staged DPI is not materialized yet (the
         // renderer still publishes the old DPI), so there is nothing to confirm. createRenderer() commits
@@ -611,8 +568,7 @@ void TerminalDisplay::applyFontDPI()
         // record a success that has not happened.
         if (window())
         {
-            updateImplicitSize();
-            updateSizeConstraints();
+            notifyCellGeometryChanged();
         }
         return;
     }
@@ -621,16 +577,13 @@ void TerminalDisplay::applyFontDPI()
     // via the shared policy used for every discrete font reconfiguration (see applyStagedFontReconfigNow).
     auto const cellSizeChanged = applyStagedFontReconfigNow();
 
-    // The implicit (virtual) size and the WM size-increment hint derive from the DPR/contentScale, not
-    // only from the cell pixel size, so a DPI change must recompute them even when the new cell metrics
-    // round to the SAME pixel size (cellSizeChanged == false, so applyStagedFontReconfigNow() did not run
-    // the geometry recompute). Skipping this on a fractional-scaling display left the window's virtual
-    // size and resize increments computed at the old DPR. When the cell size did change,
-    // applyStagedFontReconfigNow() already ran these, so only do it for the unchanged-cell-size case.
+    // The WM size-increment hint derives from the DPR/contentScale, not only from the cell pixel size,
+    // so a DPI change must refresh it even when the new cell metrics round to the SAME pixel size
+    // (cellSizeChanged == false, so applyStagedFontReconfigNow() did not run the geometry recompute).
+    // When the cell size did change, applyStagedFontReconfigNow() already ran this.
     if (!cellSizeChanged && window())
     {
-        updateImplicitSize();
-        updateSizeConstraints();
+        notifyCellGeometryChanged();
     }
 
     scheduleRedraw();
@@ -685,44 +638,65 @@ void TerminalDisplay::logDisplayInfo()
     // clang-format on
 }
 
-void TerminalDisplay::watchKdeDpiSetting()
-{
-#if defined(__unix__)
-    auto const kcmFontsFile = kcmFontsFilePath();
-    if (kcmFontsFile.has_value())
-    {
-        _filesystemWatcher.addPath(QString::fromStdString(kcmFontsFile->string()));
-        connect(&_filesystemWatcher, SIGNAL(fileChanged(const QString&)), this, SLOT(onDpiConfigChanged()));
-    }
-#endif
-}
-
-void TerminalDisplay::onDpiConfigChanged()
-{
-    applyFontDPI();
-    watchKdeDpiSetting(); // re-watch file
-}
-
 void TerminalDisplay::onSceneGrapheInitialized()
 {
     displayLog()("onSceneGrapheInitialized ({}x{}, DPR {})", width(), height(), contentScale());
+}
 
-#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
-    CHECKED_GL(glEnable(GL_DEBUG_OUTPUT));
-    CHECKED_GL(glDebugMessageCallback(&glMessageCallback, this));
-#endif
+void TerminalDisplay::logRhiBackendInfoOnce()
+{
+    // Complements the "[FYI] Qt platform" line of the configuration dump: which rendering
+    // implementation Qt RHI actually resolved (OpenGL/Vulkan/Metal/D3D11, and the device driving
+    // it). QQuickWindow::rhi() is still null when sceneGraphInitialized fires, so this runs on the
+    // first sync phase instead — on the render thread with the RHI (and, for the OpenGL backend,
+    // its context) live, which also lets it report the real context version and profile.
+    if (_rhiBackendLogged)
+        return;
+    auto const* rhi = window() != nullptr ? window()->rhi() : nullptr;
+    if (rhi == nullptr)
+        return;
+    _rhiBackendLogged = true;
+
+    displayLog()("[FYI] Qt RHI backend      : {} on {}",
+                 rhi->backendName(),
+                 rhi->driverInfo().deviceName.toStdString());
+    if (auto const* glContext = QOpenGLContext::currentContext())
+    {
+        auto const profileName = [](QSurfaceFormat::OpenGLContextProfile profile) {
+            switch (profile)
+            {
+                case QSurfaceFormat::CoreProfile: return "core";
+                case QSurfaceFormat::CompatibilityProfile: return "compatibility";
+                case QSurfaceFormat::NoProfile: break;
+            }
+            return "no profile";
+        };
+        auto const format = glContext->format();
+        displayLog()("[FYI] OpenGL context      : {}.{} {} ({})",
+                     format.majorVersion(),
+                     format.minorVersion(),
+                     profileName(format.profile()),
+                     glContext->isOpenGLES() ? "OpenGL ES" : "desktop OpenGL");
+    }
 }
 
 void TerminalDisplay::onBeforeSynchronize()
 {
-    if (!_session)
+    // Reached on the render thread during the sync phase. Closing a split pane unparents this item from the
+    // scene graph, so window() starts returning null while the TerminalDisplay object is still alive and
+    // still connected to beforeSynchronizing (QQuickItem clears its window before ~QObject runs the
+    // this-context auto-disconnect). _session is nulled independently by releaseSession(), so it is not a
+    // reliable proxy for window() liveness — guard window() too, or line 795's window()->screen() faults on
+    // a null QWindow. Matches the window() guards the sibling render paths already use (see recordFrameRhi,
+    // scheduleRedraw).
+    if (!_session || !window())
         return;
+
+    logRhiBackendInfoOnce();
 
     if (width() < 1.0 || height() < 1.0)
         // e.g. this can happen when the window is not yet fully initialized
         return;
-
-    window()->setScreen(findScreenWithBiggestWidth(window()->screen()));
 
     if (_sessionChanged)
     {
@@ -737,41 +711,23 @@ void TerminalDisplay::onBeforeSynchronize()
 
         // Also check if the terminal terminated faster than the frontend needed to render the first frame.
         if (terminal().device().isClosed())
-            // Then we inform the session about it.
-            _session->onClosed();
+        {
+            // Inform the session — but NOT synchronously: onBeforeSynchronize() runs on the render thread
+            // (Qt::DirectConnection) during the sync phase, and onClosed() emits sessionClosed, whose
+            // TerminalSessionManager::removeSession slot prunes the pane and tears this display down. Doing
+            // that mid-sync frees state the remainder of the sync/render still dereferences → a teardown
+            // SEGV on the render thread (seen intermittently on fast-exiting sessions). Post it to the
+            // session's own thread instead, matching how every other GUI-mutating callback in this render
+            // path is deferred (and how TerminalSession fires onClosed() from its exit watcher). The inner
+            // guard covers the display being torn down between this post and its dispatch.
+            postToObject(_session, [session = _session]() { session->onClosed(); });
+        }
     }
 
-    auto const dpr = contentScale();
-    auto const windowSize = window()->size() * dpr;
-
-    auto const viewSize =
-        ImageSize { Width::cast_from(windowSize.width()), Height::cast_from(windowSize.height()) };
-
-    _renderTarget->setRenderSize(
-        ImageSize { Width::cast_from(windowSize.width()), Height::cast_from(windowSize.height()) });
-    _renderTarget->setModelMatrix(createModelMatrix());
-    _renderTarget->setTranslation(float(x() * dpr), float(y() * dpr), float(z() * dpr));
-    _renderTarget->setViewSize(viewSize);
-
-    // Reconcile the terminal grid (page size) with the actual surface.
-    //
-    // This runs on the render thread and sets the render viewport from the live
-    // window()->size(). The grid (page size) is computed separately by the GUI-
-    // thread sizeChanged()/applyResize(). At initial map under a tiling WM the
-    // final surface size can arrive here after sizeChanged() last ran, leaving the
-    // grid at a stale, larger page size than the viewport — so the bottom rows
-    // render off-screen until a manual resize nudges sizeChanged() again.
-    //
-    // Detect that divergence and post a sizeChanged() to the GUI thread (where the
-    // resize must happen). applyResize() no-ops when the page size already matches,
-    // and the per-frame cost when in sync is a single page-size comparison.
-    auto const expectedPageSize = pageSizeForPixels(
-        viewSize, _renderer->publishedCellSize(), applyContentScale(profile().margins.value(), dpr));
-    if (expectedPageSize != _session->terminal().totalPageSize())
-        post([this]() {
-            if (_session && _renderTarget && window())
-                sizeChanged();
-        });
+    // No per-frame geometry reconciliation here: the grid follows the item's committed geometry via
+    // geometryChange() on the GUI thread — every surface change the WM commits (including a tiling WM's
+    // initial map) arrives there. The render size itself is published from updatePaintNode, and the
+    // placement transform comes from the scene graph at render time.
 }
 
 void TerminalDisplay::createRenderer()
@@ -780,20 +736,6 @@ void TerminalDisplay::createRenderer()
     Require(_renderer);
     Require(_session);
     Require(window());
-
-    // Save the stale (pre-DPR-correction) window dimensions so sizeChanged() can
-    // identify Wayland compositor configure reversions specifically, without
-    // misidentifying intentional WM-driven resizes (e.g. tiling WM assigning a
-    // tile size) as reversions.
-    _lastVirtualWidth = width();
-    _lastVirtualHeight = height();
-
-    // Snapshot the implicit size before applyFontDPI() may recompute it. The
-    // stale-geometry correction in sizeChanged() compares against this to tell a
-    // real DPR-correction reversion (implicit size changed) from a legitimate
-    // WM-assigned size that simply hasn't changed (implicit size unchanged).
-    _initialImplicitWidth = implicitWidth();
-    _initialImplicitHeight = implicitHeight();
 
     // Catch DPR corrections that occurred between setSession() and first render
     // (e.g., Qt correcting from integer-ceiling DPR=2 to actual fractional DPR=1.5
@@ -816,28 +758,23 @@ void TerminalDisplay::createRenderer()
     // of triggering a full redundant font reload + geometry recompute + spurious resizeScreen()/SIGWINCH.
     _lastFontDPI = fontDPI();
 
-    // applyFontDPI()'s no-render-target branch already computed updateImplicitSize() — but against the
-    // still-stale (pre-correction) cell size, because the staged DPI was only materialized just above. On
-    // a fractional-scaling display where Qt corrected the DPR between setSession() and here, that implicit
-    // size is wrong, and applyResize() below derives the initial geometry from it, opening the window at
-    // the wrong pixel size / column count for a frame. Recompute it now that the corrected cell size is
-    // live. _initialImplicitWidth/Height (snapshotted above) intentionally keep the pre-correction values
-    // for sizeChanged()'s reversion detection, so they are left untouched.
+    // applyFontDPI()'s no-render-target branch already refreshed the WM hints — but against the
+    // still-stale (pre-correction) cell size, because the staged DPI was only materialized just above.
+    // Refresh them now that the corrected cell size is live.
     if (window())
     {
-        updateImplicitSize();
-        updateSizeConstraints();
+        notifyCellGeometryChanged();
     }
 
     auto const textureTileSize = gridMetrics().cellSize;
-    auto const viewportMargin = vtrasterizer::PageMargin {}; // TODO margin
-    auto const precalculatedViewSize = [this]() -> ImageSize {
-        auto const uiSize = ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
-        return uiSize * contentScale();
-    }();
+    // The render target size is this item's device-pixel extent (the bottom-left-origin reference for the
+    // inner smooth-scroll scissor); it is re-published each frame from updatePaintNode. The placement
+    // within the window comes from the scene graph's transform at render time, not from a window-sized
+    // surface, so only the item size is needed here. The configured window margin is owned by the
+    // geometry layer (contour::geometry / helper.cpp applyResize -> PageMargin -> GridMetrics::map()),
+    // not by the render target.
     auto const precalculatedTargetSize = [this]() -> ImageSize {
-        auto const uiSize =
-            ImageSize { Width::cast_from(window()->width()), Height::cast_from(window()->height()) };
+        auto const uiSize = ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
         return uiSize * contentScale();
     }();
 
@@ -857,55 +794,34 @@ void TerminalDisplay::createRenderer()
                      windowSize.height());
     }
 
-    _renderTarget = new OpenGLRenderer(builtinShaderConfig(ShaderClass::Text),
-                                       builtinShaderConfig(ShaderClass::Background),
-                                       precalculatedViewSize,
-                                       precalculatedTargetSize,
-                                       textureTileSize,
-                                       viewportMargin);
-    _renderTarget->setWindow(window());
+    _renderTarget = std::make_unique<RhiRenderer>(precalculatedTargetSize, textureTileSize);
     _renderer->setRenderTarget(*_renderTarget);
 
-    connect(window(),
-            &QQuickWindow::beforeRendering,
-            this,
-            &TerminalDisplay::onBeforeRendering,
-            Qt::ConnectionType::DirectConnection);
-
-    // connect(window(),
-    //         &QQuickWindow::beforeRenderPassRecording,
-    //         this,
-    //         &TerminalDisplay::paint,
-    //         Qt::DirectConnection);
-
-    connect(window(),
-            &QQuickWindow::afterRendering,
-            this,
-            &TerminalDisplay::onAfterRendering,
-            Qt::DirectConnection);
+    // The terminal no longer paints from the window's beforeRendering/afterRendering signals (which fired
+    // after the whole QML scene was composited and let the terminal overpaint popups). Rendering is now
+    // driven by the scene graph through TerminalRenderNode (see updatePaintNode/renderFrame), so it
+    // composites in z-order. The renderer's one-time GL initialization happens lazily on the first
+    // renderFrame(), where the scene graph's GL context is current.
 
     configureScreenHooks();
-    watchKdeDpiSetting();
 
-    // Use implicit dimensions (correct for configured terminal size at current DPR)
-    // rather than widget width()/height() which lag behind QML binding propagation
-    // during beforeSynchronizing (GUI thread is blocked, bindings haven't evaluated).
-    {
-        auto const implicitVirtualSize = ImageSize { vtbackend::Width::cast_from(implicitWidth()),
-                                                     vtbackend::Height::cast_from(implicitHeight()) };
-        auto const actualPixelSize = implicitVirtualSize * contentScale();
-        applyResize(actualPixelSize, *_session, *_renderer);
-    }
-
-    // Allow sizeChanged() to correct Wayland configure reversions for 500ms.
-    _initialResizeDeadline = steady_clock::now() + std::chrono::milliseconds(500);
+    // Seed the grid from this item's current extent (window->grid, floor semantics). During the first
+    // sync the anchor layout may not have fully propagated yet; that is fine: geometryChange() re-derives
+    // the grid the moment the committed geometry changes, and applyResize() no-ops once they match.
+    applyResize(geometry::availableDevicePixels(width(), height(), contentScale()), *_session, *_renderer);
 
     // Defer configureDisplay() until the GUI thread processes QML binding propagation
-    // and the window is committed at the correct implicit size (e.g. 1136x600 at DPR 1.5).
+    // and the window is committed at its final initial size (e.g. 1136x600 at DPR 1.5).
     // Calling it synchronously here (render thread, GUI blocked) causes setWindowNormal()
     // → showNormal() to trigger a Wayland configure event that uses the stale pre-DPR-correction
     // window geometry (e.g. 1115x585 at DPR 2.0), reverting the terminal to the wrong size.
-    post([this]() { _session->configureDisplay(); });
+    // Re-check _session inside the lambda: post() runs it later on the GUI event loop, and the display can be
+    // torn down (releaseSession -> _session == null) between this schedule and its dispatch, matching the
+    // inner-guard pattern of the other post() lambdas here (863/1134).
+    post([this]() {
+        if (_session)
+            _session->configureDisplay();
+    });
 
     displayLog()("Implicit size: {}x{}", implicitWidth(), implicitHeight());
 }
@@ -926,13 +842,110 @@ QMatrix4x4 TerminalDisplay::createModelMatrix() const
     return result;
 }
 
-void TerminalDisplay::onBeforeRendering()
+void TerminalDisplay::prepareFrameRhi(QRhi* rhi,
+                                      QRhiCommandBuffer* cb,
+                                      QRhiRenderTarget* rt,
+                                      QRhiRenderPassDescriptor* rpDesc,
+                                      QMatrix4x4 const& itemToClip,
+                                      QPoint itemOriginDevice)
 {
-    if (_renderTarget->initialized())
+    // _session is nulled by releaseSession() independently of _renderTarget teardown, so on pane close there
+    // is a window where _renderTarget is still set but _session is already null. paint() (below) dereferences
+    // the session via terminal()/_session->terminal(), which is assert-only (a no-op under NDEBUG) — so guard
+    // _session here to avoid a null deref in release builds.
+    if (!_renderTarget || !_session || rhi == nullptr || cb == nullptr || rt == nullptr || rpDesc == nullptr)
         return;
 
-    logDisplayInfo();
-    _renderTarget->initialize();
+    // Snapshot the render target into a local for the rest of this frame. prepare() runs on the render
+    // thread with the GUI thread UNBLOCKED, and releaseResources() nulls the _renderTarget member with a
+    // std::move() on the GUI thread (handing ownership to a BeforeSynchronizingStage CleanupJob). Reading
+    // the member on each line below is therefore a TOCTOU: it passes the guard above, then the GUI thread
+    // moves-out the member mid-frame, and the next member access is a call on a null RhiRenderer (observed
+    // as a SEGV in flushFrame() on fast-exiting sessions). The CleanupJob that actually deletes the object
+    // runs at BeforeSynchronizingStage on THIS render thread, so it cannot overlap this render-phase call —
+    // only the member null-out can, and the local pins a stable pointer for the whole frame.
+    auto* const renderTarget = _renderTarget.get();
+
+    // Lazily flag the renderer as initialized on the first prepare (sets host image-row alignment); the
+    // actual RHI resources are built by createPipelines() below. This formerly lived in the renderFrame
+    // initialize() call when the renderer still owned raw GL state.
+    if (!renderTarget->initialized())
+    {
+        logDisplayInfo();
+        renderTarget->initialize();
+    }
+
+    // Build (or reuse cached) graphics pipelines for the current render pass. prepare() runs before the
+    // render pass is recording, which is the only valid point to create RHI graphics pipelines.
+    renderTarget->createPipelines(rhi, rpDesc);
+    if (!renderTarget->pipelinesReady())
+        return;
+
+    // Hand the per-frame RHI submission handles to the renderer so the staging done in paint() (terminal
+    // render → execute()) queues its resource uploads onto this command buffer, before the scene graph
+    // begins the render pass. The node clip (Qt's RenderState) is not available in prepare(); it is applied
+    // in recordFrameRhi() at draw time. Any transient inner scissor captured during staging is stored raw
+    // and intersected with the node clip there.
+    renderTarget->beginFrame(rhi, cb, rt);
+
+    // Install the scene graph's transform: the renderer feeds item-local, top-left-origin pixel vertices
+    // through this combined projection * node-matrix, so the grid lands exactly where this item sits in
+    // the window — no own ortho or translation needed. The render size and model matrix were snapshotted
+    // in updatePaintNode while the GUI thread was blocked.
+    renderTarget->setProjectionMatrix(itemToClip);
+
+    // Install this item's device-pixel offset inside the render target: the rasterizer's transient inner
+    // scissor is item-relative, but the GPU scissor addresses the window's framebuffer, so applyScissor()
+    // must translate by this offset (a split pane is not at the window's bottom-left).
+    renderTarget->setItemOriginInTarget(itemOriginDevice.x(), itemOriginDevice.y());
+
+    // Run the terminal render (which calls the renderer's execute() one or more times to accumulate this
+    // frame's geometry), then flush the accumulated vertex/atlas uploads onto the command buffer before the
+    // scene graph begins the render pass. Use the pinned local for flushFrame() for the same reason as
+    // above (paint() re-guards _renderTarget/_session internally and no-ops if either was torn down).
+    paint();
+    renderTarget->flushFrame();
+
+    // Deliver a screenshot captured on the previous frame (its readback has completed by now), then, if a
+    // capture is pending, replay this frame's staged draws into the offscreen screenshot texture and schedule
+    // its readback. Both happen here in prepare(), before the scene graph begins its render pass — the only
+    // point at which a fresh beginPass/endPass into the offscreen target is legal (passes cannot nest).
+    // Uses the pinned local for the same GUI-thread-null-out reason as above.
+    renderTarget->deliverScreenshot();
+    if (renderTarget->screenshotRequested())
+        renderTarget->recordScreenshotPass(rhi, cb);
+}
+
+void TerminalDisplay::recordFrameRhi(QSGRenderNode::RenderState const* state)
+{
+    if (!_renderTarget)
+        return;
+
+    // Pin the render target for this frame: like prepareFrameRhi(), this runs on the render thread with the
+    // GUI thread unblocked, so releaseResources() can std::move the _renderTarget member to null between the
+    // guard above and the member accesses below (a TOCTOU null call). The object itself is only deleted by a
+    // BeforeSynchronizingStage job on this same render thread, so it cannot vanish mid-call — only the member
+    // null-out races us, and the local pins a stable pointer.
+    auto* const renderTarget = _renderTarget.get();
+
+    // Install Qt's node clip for this frame (only available now, from the RenderState). recordDraws()
+    // intersects it with each pass's transient inner scissor (smooth scroll / cursor) captured during
+    // staging. std::nullopt when Qt is not clipping the node.
+    if (state->scissorEnabled())
+    {
+        auto const r = state->scissorRect();
+        renderTarget->setNodeScissorRect(
+            ScissorRect { .x = r.x(), .y = r.y(), .width = r.width(), .height = r.height() });
+    }
+    else
+        renderTarget->setNodeScissorRect(std::nullopt);
+
+    // Issue the draw commands staged during prepareFrameRhi(), now that the scene graph's render pass is
+    // recording. No-op if nothing was staged (e.g. pipelines were not ready in prepare()).
+    renderTarget->recordDraws();
+
+    // Forget the node clip (member only), so a later code path never intersects against a stale rectangle.
+    renderTarget->clearNodeScissorRect();
 }
 
 void TerminalDisplay::paint()
@@ -943,14 +956,13 @@ void TerminalDisplay::paint()
     if (_startTime == steady_clock::time_point::min())
         _startTime = steady_clock::now();
 
-    if (!_renderTarget)
+    // Everything below dereferences the session via terminal() (assert-only, so a null deref in release);
+    // _session can be null here while _renderTarget still lives during pane-close teardown.
+    if (!_renderTarget || !_session)
         return;
 
     try
     {
-        window()->beginExternalCommands();
-        auto const _ = gsl::finally([this]() { window()->endExternalCommands(); });
-
         [[maybe_unused]] auto const lastState = _state.fetchAndClear();
 
 #if defined(CONTOUR_PERF_STATS)
@@ -969,10 +981,11 @@ void TerminalDisplay::paint()
 #endif
 
         terminal().tick(steady_clock::now());
+
         auto const fontReconfigApplied = _renderer->render(terminal(), _renderingPressure);
 
-        // The lazily-applied font/DPI change made the cell size current only now; re-derive page size,
-        // implicit size (a DPI change alters it) and constraints against it (the triggering resize didn't).
+        // The lazily-applied font/DPI change made the cell size current only now; re-derive page size
+        // and the WM size hints against it (the triggering resize didn't).
         // render() consumes the "font reconfig applied" signal under _applyMutex and returns it, so this
         // render-thread path and the GUI-thread applyStagedReconfigNow() can never both consume it.
         //
@@ -997,6 +1010,46 @@ void TerminalDisplay::paint()
             doDumpStateInternal();
             _doDumpState = false;
         }
+
+        if (_saveScreenshot)
+        {
+            // Deferred capture (RHI offscreen readback lands one frame later). Bind the destination now and
+            // deliver when the pixels are ready. Clearing _saveScreenshot immediately prevents re-arming the
+            // request every frame while the readback is in flight.
+            auto const destination = _saveScreenshot.value();
+            _saveScreenshot = std::nullopt;
+            requestScreenshot([destination](QImage const& image) {
+                std::visit(crispy::overloaded { [&](std::filesystem::path const& path) {
+                                                   image.save(QString::fromStdString(path.string()));
+                                               },
+                                                [&](std::monostate) {
+                                                    if (QClipboard* clipboard = QGuiApplication::clipboard();
+                                                        clipboard != nullptr)
+                                                        clipboard->setImage(image, QClipboard::Clipboard);
+                                                } },
+                           destination);
+            });
+        }
+
+        // Schedule the next frame if needed. update() (re-evaluating the scene-graph node) must run on the
+        // GUI thread, so it is post()ed from this render-thread path — mirroring scheduleRedraw().
+        auto const requestUpdate = [this]() {
+            post([this]() { update(); });
+        };
+
+        if (!_state.finish())
+            requestUpdate();
+
+        // Update the terminal's world clock, so nextRender() knows when to render next (if needed).
+        terminal().tick(steady_clock::now());
+
+        if (auto const timeoutOpt = terminal().nextRender(); timeoutOpt.has_value())
+        {
+            if (*timeoutOpt == chrono::milliseconds::min())
+                requestUpdate();
+            else
+                post([this, timeout = *timeoutOpt]() { _updateTimer.start(timeout); });
+        }
     }
     catch (exception const& e)
     {
@@ -1013,56 +1066,84 @@ float TerminalDisplay::uptime() const noexcept
     return uptimeSecs;
 }
 
-void TerminalDisplay::onAfterRendering()
+QSGNode* TerminalDisplay::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* /*data*/)
 {
-    // This method is called after the QML scene has been rendered.
-    // We use this to schedule the next rendering frame, if needed.
-    // This signal is emitted from the scene graph rendering thread
-    paint();
-    if (_saveScreenshot)
+    // Runs on the render thread with the GUI thread blocked (safe to touch both). Create the RHI
+    // renderer on demand (formerly done from the window's render signals) and the scene-graph node that
+    // draws the terminal in z-order.
+    if (width() < 1.0 || height() < 1.0 || !_session)
     {
-        std::visit(crispy::overloaded { [&](const std::filesystem::path& path) {
-                                           screenshot().save(QString::fromStdString(path.string()));
-                                       },
-                                        [&](std::monostate) {
-                                            if (QClipboard* clipboard = QGuiApplication::clipboard();
-                                                clipboard != nullptr)
-                                                clipboard->setImage(screenshot(), QClipboard::Clipboard);
-                                        } },
-                   _saveScreenshot.value());
-
-        _saveScreenshot = std::nullopt;
+        // Nothing to draw yet; drop any existing node so we recreate it once we have a size/session.
+        delete oldNode;
+        return nullptr;
     }
 
-    if (!_state.finish())
-    {
-        if (window())
-            window()->update();
-    }
+    if (!_renderTarget)
+        createRenderer();
 
-    // Update the terminal's world clock, such that nextRender() knows when to render next (if needed).
-    terminal().tick(steady_clock::now());
+    // updatePaintNode runs during the synchronize phase with the GUI thread blocked, so this is the safe
+    // point to read item geometry — the GUI thread cannot mutate it concurrently. Snapshot the item's
+    // device-pixel render size here and push it to the renderer, rather than reading it from the render
+    // thread in renderFrame() (where the GUI thread is unblocked). The render size is the bottom-left-origin
+    // reference frame for the transient inner scissor.
+    auto const geometry = itemDevicePixelGeometry();
+    _renderTarget->setRenderSize(ImageSize { Width::cast_from(std::lround(geometry.width)),
+                                             Height::cast_from(std::lround(geometry.height)) });
 
-    auto timeoutOpt = terminal().nextRender();
-    if (!timeoutOpt.has_value())
-        return;
+    // The model matrix (QML transforms applied to this item) is also read here while the GUI thread is
+    // blocked; the scene-graph node only composes Qt's projection/node matrices on top of it at render.
+    _renderTarget->setModelMatrix(createModelMatrix());
 
-    auto const timeout = *timeoutOpt;
-    if (timeout == chrono::milliseconds::min())
-    {
-        if (window())
-            window()->update();
-    }
+    auto* node = static_cast<TerminalRenderNode*>(oldNode);
+    if (!node)
+        node = new TerminalRenderNode(_nodeLiveness);
     else
-    {
-        post([this, timeout]() { _updateTimer.start(timeout); });
-    }
+        // Qt may have called releaseResources() (dropping the node's liveness link) on this same node
+        // without destroying it — on scene-graph invalidation paths that reuse the node. Re-link it to
+        // this display every frame, or a released-but-reused node would render nothing (black terminal).
+        node->setLiveness(_nodeLiveness);
+
+    // Content changes every frame the terminal is dirty; mark the node so Qt invokes render() again.
+    node->markDirty(QSGNode::DirtyMaterial);
+    return node;
+}
+
+void TerminalDisplay::releaseRenderResources()
+{
+    // Called by TerminalRenderNode on the render thread as the node is torn down — the right place to free
+    // the RHI renderer's GPU resources, which must be released on the render thread.
+    destroyRenderer();
+}
+
+void TerminalDisplay::destroyRenderer()
+{
+    // Single, idempotent renderer teardown shared by all entry points (the scene-graph node's
+    // releaseResources, sceneGraphInvalidated → cleanup). delete of nullptr is a no-op, so calling this
+    // more than once across those paths frees the renderer exactly once. Must run on the render thread
+    // (the RHI resources it owns are released there).
+    //
+    // The long-lived vtrasterizer::Renderer survives this target: sever its references FIRST, or the
+    // next createRenderer() setup pass (staged reconfig before the new target is installed) reads the
+    // freed target on the render thread. The scene graph destroys/re-creates its context routinely —
+    // grabbing an unexposed window, GPU loss, invalidation — so this cycle is a normal code path.
+    if (_renderer)
+        _renderer->detachRenderTarget();
+    _renderTarget.reset();
 }
 // }}}
 
 // {{{ Qt Display Input Event handling & forwarding
+//
+// Every handler below forwards to a send*Event(..., *_session) that binds the session by reference. A
+// session-less display must ignore all input: during a split/collapse a pane can be shown while its
+// _session is transiently null (the QML `session` binding rebinds via setSession/releaseSession across the
+// hand-off), and Qt still delivers hover/mouse/key events to it. Dereferencing *_session then binds a null
+// reference (UB -> crash on the first _session access, e.g. terminal().totalPageSize() during a hover). A
+// display with no session has nothing to route input to, so early-out.
 void TerminalDisplay::keyPressEvent(QKeyEvent* keyEvent)
 {
+    if (!_session)
+        return;
     sendKeyEvent(keyEvent,
                  keyEvent->isAutoRepeat() ? vtbackend::KeyboardEventType::Repeat
                                           : vtbackend::KeyboardEventType::Press,
@@ -1071,23 +1152,29 @@ void TerminalDisplay::keyPressEvent(QKeyEvent* keyEvent)
 
 void TerminalDisplay::keyReleaseEvent(QKeyEvent* keyEvent)
 {
-    if (keyEvent->isAutoRepeat())
+    if (!_session || keyEvent->isAutoRepeat())
         return;
     sendKeyEvent(keyEvent, vtbackend::KeyboardEventType::Release, *_session);
 }
 
 void TerminalDisplay::wheelEvent(QWheelEvent* event)
 {
+    if (!_session)
+        return;
     sendWheelEvent(event, *_session);
 }
 
 void TerminalDisplay::mousePressEvent(QMouseEvent* event)
 {
+    if (!_session)
+        return;
     sendMousePressEvent(event, *_session);
 }
 
 void TerminalDisplay::mouseMoveEvent(QMouseEvent* event)
 {
+    if (!_session)
+        return;
     sendMouseMoveEvent(event, *_session);
 
     // Start, update, or stop auto-scroll based on whether the mouse is outside the content area
@@ -1110,11 +1197,15 @@ void TerminalDisplay::mouseMoveEvent(QMouseEvent* event)
 void TerminalDisplay::hoverMoveEvent(QHoverEvent* event)
 {
     QQuickItem::hoverMoveEvent(event);
+    if (!_session)
+        return;
     sendMouseMoveEvent(event, *_session);
 }
 
 void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (!_session)
+        return;
     _autoScrollTimer.stop();
     _autoScrollState = {};
     sendMouseReleaseEvent(event, *_session);
@@ -1126,21 +1217,32 @@ void TerminalDisplay::focusInEvent(QFocusEvent* event)
 
     if (_session)
     {
-        _session->getTerminalManager()->FocusOnDisplay(this);
-        _session->sendFocusInEvent(); // TODO: paint with "normal" colors
+        // Cache the manager so ~TerminalDisplay can self-evict from _displayStates even after the
+        // session is gone (see the destructor). This focus-in is also where the display first enters
+        // _displayStates (FocusOnDisplay), so the cache and the registration are set together.
+        _manager = _session->getTerminalManager();
+        _manager->FocusOnDisplay(this); // record the active display before moving VT focus
+        // Route VT focus through the manager's single authority (model tab/pane changes use the same
+        // seam), so it stays correct even when no Qt focus event fires. Dimming is done in QML.
+        _manager->setFocusedSession(_session);
     }
 }
 
 void TerminalDisplay::focusOutEvent(QFocusEvent* event)
 {
     QQuickItem::focusOutEvent(event);
+    // A focus loss clears VT focus, but only if this session still holds it: when focus moved to
+    // another pane/tab the model already re-pointed it, and this stale focus-out must not cancel that.
     if (_session)
-        _session->sendFocusOutEvent(); // TODO maybe paint with "faint" colors
+        if (auto* manager = _session->getTerminalManager())
+            manager->clearFocusIfCurrent(_session);
 }
 
 #if QT_CONFIG(im)
 void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
 {
+    if (!_session)
+        return;
     terminal().updateInputMethodPreeditString(event->preeditString().toStdString());
 
     if (!event->commitString().isEmpty())
@@ -1156,49 +1258,36 @@ void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
 
 QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
 {
-    // Read the published cell size once (lock-free), then reuse it: avoids three locked GridMetrics
-    // copies per query (this fires on every keystroke with an IME active) and prevents a torn read where
-    // the width and height could come from different published values across a concurrent font apply.
-    auto const cellSize = _renderer->publishedCellSize();
+    // Qt may query while the pane is still wiring up (or tearing down); without a renderer or
+    // session there is no grid to answer from.
+    if (!_renderer || !_session)
+        return QQuickItem::inputMethodQuery(query);
 
-    auto const getCursorPosition = [&]() -> QPoint {
-        QPoint cursorPos = QPoint();
-        if (terminal().isCursorInViewport())
-        {
-            auto const dpr = contentScale();
-            auto const gridCursorPos = terminal().currentScreen().cursor().position;
-            cursorPos.setX(int(unbox<double>(gridCursorPos.column) * unbox<double>(cellSize.width)));
-            cursorPos.setY(int(unbox<double>(gridCursorPos.line) * unbox<double>(cellSize.height)));
-            cursorPos /= dpr;
-        }
-        return cursorPos;
-    };
+    // One locked GridMetrics copy per query (this fires on every keystroke with an IME active): it
+    // yields the cell size AND the page margin tear-free, where two separate reads could straddle a
+    // concurrent font apply.
+    auto const metrics = _renderer->gridMetrics();
 
     switch (query)
     {
-        case Qt::ImCursorRectangle: {
-            auto theContentsRect = QRect(); // TODO: contentsRect();
-            auto result = QRect();
-            auto const dpr = contentScale();
-            auto const cursorPos = getCursorPosition();
-            result.setLeft(theContentsRect.left() + cursorPos.x());
-            result.setTop(theContentsRect.top() + cursorPos.y());
-            result.setWidth(
-                int(unbox<double>(cellSize.width) / dpr)); // TODO: respect double-width characters
-            result.setHeight(int(unbox<double>(cellSize.height) / dpr));
-            return result;
-            break;
-        }
-        // TODO?: case Qt::ImCursorRectangle:
-        // case Qt::ImMicroFocus: {
-        //     auto const cursorPos = getCursorPosition();
-        //     return imageToDisplay(QRect(cursorPos.x(), cursorPos.y(), 1, 1));
-        // }
-        // case Qt::ImFont:
-        //     return QFont("monospace", 10);
+        case Qt::ImCursorRectangle:
+            // Item-local logical coordinates (QQuickWindow maps them to window/global space, so a
+            // pane inside a split needs no extra offset); the grid is inset by the page margin, and
+            // a double-width character under the cursor widens the rect to the full glyph.
+            if (terminal().isCursorInViewport())
+            {
+                auto const cursor = terminal().currentScreen().cursor().position;
+                auto const cellWidth = terminal().currentScreen().cellWidthAt(cursor);
+                return imeCursorRectangle(
+                    metrics.pageMargin, metrics.cellSize, cursor, cellWidth, contentScale());
+            }
+            return QRectF();
         case Qt::ImCursorPosition:
-            // return the cursor position within the current line
-            return getCursorPosition().x();
+            // Qt contract: the cursor's CHARACTER index within ImSurroundingText (the current
+            // line), i.e. the grid column — not a pixel offset.
+            if (terminal().isCursorInViewport())
+                return unbox<int>(terminal().currentScreen().cursor().position.column);
+            return 0;
         case Qt::ImSurroundingText:
             // return the text from the current line
             if (terminal().isCursorInViewport())
@@ -1247,138 +1336,37 @@ void TerminalDisplay::onScrollBarValueChanged(int value)
     scheduleRedraw();
 }
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-std::optional<double> TerminalDisplay::queryContentScaleOverride() const
-{
-#if !defined(__APPLE__) && !defined(_WIN32)
-    auto const kcmFontsFile = kcmFontsFilePath();
-    if (!kcmFontsFile)
-        return std::nullopt;
-
-    auto const contents = crispy::readFileAsString(*kcmFontsFile);
-    for (auto const line: crispy::split(contents, '\n'))
-    {
-        auto const fields = crispy::split(line, '=');
-        if (fields.size() == 2 && fields[0] == "forceFontDPI"sv)
-        {
-            auto const forcedDPI = static_cast<double>(crispy::to_integer(fields[1]).value_or(0.0));
-            if (forcedDPI >= 96.0)
-            {
-                auto const dpr = forcedDPI / 96.0;
-                if (_lastReportedContentScale.value_or(0.0) != dpr)
-                {
-                    _lastReportedContentScale = dpr;
-                    displayLog()("Forcing DPI to {} (DPR {}) as read from config file {}.",
-                                 forcedDPI,
-                                 dpr,
-                                 kcmFontsFile.value().string());
-                }
-                return dpr;
-            }
-        }
-    }
-#endif
-    return std::nullopt;
-}
-
 double TerminalDisplay::contentScale() const
 {
-    if (auto const contentScaleOverride = queryContentScaleOverride())
-        return *contentScaleOverride;
-
-    if (!window())
-        return 1.0;
-
-    return window()->devicePixelRatio();
+    // THE content-scale read: the cached app-wide forced-DPI override (injected in setSession) wins over
+    // the window's DPR; pre-window the resolver falls back to 1.0. One shared implementation with the
+    // pre-show sizing path (see display/ContentScale.h) — no per-call file I/O.
+    return contentScaleForWindow(window(), _forcedFontDpiProvider);
 }
 
-/// Computes the required size of the widget to fit the given terminal size.
-///
-/// @param terminalSize the terminal size in rows and columns
-/// @param cellSize     the size of a single cell in pixels (with content scale already applied)
-constexpr ImageSize computeRequiredSize(config::WindowMargins margins,
-                                        ImageSize cellSize,
-                                        PageSize totalPageSize) noexcept
+TerminalDisplay::DevicePixelGeometry TerminalDisplay::itemDevicePixelGeometry() const
 {
-    // We multiply by 2 because the margins are applied to both sides of the terminal.
-    auto const marginSize = ImageSize { vtbackend::Width::cast_from(unbox(margins.horizontal) * 2),
-                                        vtbackend::Height::cast_from(unbox(margins.vertical) * 2) };
-
-    return (cellSize * totalPageSize + marginSize);
-}
-
-void TerminalDisplay::updateImplicitSize()
-{
-    assert(_renderer);
-    assert(_session);
-    assert(window());
-
-    auto const totalPageSize = _session->terminal().totalPageSize();
+    // The item's device-pixel extent. Scene position is no longer needed: the scene graph supplies the
+    // item→clip transform at render time (see renderFrame), so callers want only the size.
     auto const dpr = contentScale();
-
-    auto const actualGridCellSize = _renderer->publishedCellSize();
-    auto const scaledMargins = applyContentScale(_session->profile().margins.value(), dpr);
-
-    // Compute the required size in actual pixels using exact integer arithmetic,
-    // then convert to virtual pixels. This avoids compounding ceil-per-cell rounding errors
-    // that would otherwise cause extra pixels and wrong column/line counts at fractional DPR.
-    auto const actualRequiredSize = computeRequiredSize(scaledMargins, actualGridCellSize, totalPageSize);
-
-    auto const virtualWidth = std::ceil(static_cast<double>(unbox(actualRequiredSize.width)) / dpr);
-    auto const virtualHeight = std::ceil(static_cast<double>(unbox(actualRequiredSize.height)) / dpr);
-
-    displayLog()("Implicit display size set to {}x{} (actualRequired: {}, cellSize: {}, contentScale: {}, "
-                 "pageSize: {})",
-                 virtualWidth,
-                 virtualHeight,
-                 actualRequiredSize,
-                 actualGridCellSize,
-                 dpr,
-                 totalPageSize);
-
-    setImplicitWidth(virtualWidth);
-    setImplicitHeight(virtualHeight);
+    return DevicePixelGeometry {
+        .width = width() * dpr,
+        .height = height() * dpr,
+    };
 }
 
-void TerminalDisplay::updateSizeConstraints()
+WindowController* TerminalDisplay::windowController()
 {
-    Require(window());
-    Require(_renderer);
-    assert(_session);
+    return _manager != nullptr ? _manager->controllerForDisplay(this) : nullptr;
+}
 
-    auto const dpr = contentScale();
-    auto const actualCellSize = _renderer->publishedCellSize();
-    auto const margins = _session->profile().margins.value();
-
-    // Minimum size (existing logic, unchanged)
-    auto constexpr MinimumTotalPageSize = PageSize { LineCount(5), ColumnCount(10) };
-    auto const minimumSize = computeRequiredSize(margins, actualCellSize * (1.0 / dpr), MinimumTotalPageSize);
-    window()->setMinimumSize(QSize(unbox<int>(minimumSize.width), unbox<int>(minimumSize.height)));
-
-    // Base size: the margin area not participating in the increment grid.
-    // Margins from config are in virtual pixels, applied on both sides.
-    auto const baseWidth = static_cast<int>(2 * unbox(margins.horizontal));
-    auto const baseHeight = static_cast<int>(2 * unbox(margins.vertical));
-    window()->setBaseSize(QSize(baseWidth, baseHeight));
-
-    // Size increment: virtual cell size.
-    // ceil ensures the increment always covers the full cell at fractional DPR.
-    auto const virtualCellWidth =
-        static_cast<int>(std::ceil(static_cast<double>(unbox(actualCellSize.width)) / dpr));
-    auto const virtualCellHeight =
-        static_cast<int>(std::ceil(static_cast<double>(unbox(actualCellSize.height)) / dpr));
-    window()->setSizeIncrement(QSize(virtualCellWidth, virtualCellHeight));
-
-    displayLog()("Size constraints: minSize={}x{}, baseSize={}x{}, sizeIncrement={}x{} "
-                 "(cellSize={}, dpr={})",
-                 unbox<int>(minimumSize.width),
-                 unbox<int>(minimumSize.height),
-                 baseWidth,
-                 baseHeight,
-                 virtualCellWidth,
-                 virtualCellHeight,
-                 actualCellSize,
-                 dpr);
+void TerminalDisplay::notifyCellGeometryChanged()
+{
+    // Window-level hints are the controller's job (the window-geometry authority); it derives them from
+    // this display's cell size, margins, content scale and the QML-declared chrome. Displays without a
+    // controller (offscreen tests) simply have no WM hints to maintain.
+    if (auto* controller = windowController())
+        controller->updateSizeHintsFor(*this);
 }
 // }}}
 
@@ -1406,11 +1394,10 @@ bool TerminalDisplay::isFullScreen() const
 vtbackend::ImageSize TerminalDisplay::pixelSize() const
 {
     assert(_session);
-    auto const scaledWindowMargins = applyContentScale(_session->profile().margins.value(), contentScale());
-    auto const scaledWindowMarginsPixels =
-        vtbackend::ImageSize { Width::cast_from(unbox(scaledWindowMargins.horizontal) * 2),
-                               Height::cast_from(unbox(scaledWindowMargins.vertical) * 2) };
-    return _renderer->publishedCellSize() * _session->terminal().totalPageSize() + scaledWindowMarginsPixels;
+    return geometry::requiredPixelsForPage(
+        _session->terminal().totalPageSize(),
+        _renderer->publishedCellSize(),
+        geometry::scaled(toGeometryMargins(_session->profile().margins.value()), contentScale()));
 }
 
 vtbackend::ImageSize TerminalDisplay::cellSize() const
@@ -1447,42 +1434,65 @@ void TerminalDisplay::inspect()
 
 void TerminalDisplay::doDumpState()
 {
+    // Arms the dump; paint() (render thread) services it on the next frame. NB: on the at-exit path
+    // the screenshot half cannot yet complete offscreen (the deferred RHI readback needs scene-graph
+    // frames the offscreen platform does not schedule) — see ROADMAP.md. The ordering + GL-gate
+    // fixes make the SCREEN-STATE dump reach paint() correctly; the screenshot remains a known gap.
     _doDumpState = true;
 }
 
-QImage TerminalDisplay::screenshot()
+QImage TerminalDisplay::screenshotImageFromBuffer(std::vector<uint8_t> const& rgbaBuffer,
+                                                  vtbackend::ImageSize pixelSize)
 {
-    // A one-off render for the screenshot; any font-reconfig recompute it signals is handled by the
-    // regular paint() path, so the return value is intentionally ignored here.
-    (void) _renderer->render(terminal(), _renderingPressure);
-    auto [size, image] = _renderTarget->takeScreenshot();
-
-    return QImage(image.data(),
-                  size.width.as<int>(),
-                  size.height.as<int>(),
+    // The offscreen-texture readback delivers a top-left-origin RGBA8 buffer, so — unlike the old
+    // glReadPixels backbuffer path — no vertical flip is applied here. copy() detaches from the (transient)
+    // source buffer so the returned image stays valid after it is freed.
+    return QImage(rgbaBuffer.data(),
+                  pixelSize.width.as<int>(),
+                  pixelSize.height.as<int>(),
                   QImage::Format_RGBA8888_Premultiplied)
-        .transformed(QTransform().scale(1, -1));
+        .copy();
+}
+
+void TerminalDisplay::requestScreenshot(std::function<void(QImage)> onReady)
+{
+    if (!_renderTarget)
+        return;
+
+    // Deferred capture: the RHI renders the terminal into an offscreen texture and reads it back one frame
+    // later. Wrap the caller's continuation so it receives a ready-to-use QImage. update() nudges the scene
+    // graph to run a frame so the capture + readback actually happen — but both callers (paint(),
+    // doDumpStateInternal()) run on the QSGRenderThread, where QQuickItem::update() must not be called
+    // directly, so post it to the GUI thread and re-check liveness at dispatch (mirroring paint()).
+    _renderTarget->scheduleScreenshot([onReady = std::move(onReady)](std::vector<uint8_t> const& rgbaBuffer,
+                                                                     vtbackend::ImageSize pixelSize) {
+        onReady(screenshotImageFromBuffer(rgbaBuffer, pixelSize));
+    });
+    post([this]() {
+        if (window())
+            update();
+    });
 }
 
 void TerminalDisplay::doDumpStateInternal()
 {
-
-    auto finally = crispy::finally { [this] {
+    // On the at-exit dump path the session must be terminated once the dump is complete. The screenshot is
+    // now a *deferred* RHI readback (requestScreenshot only schedules the offscreen capture; the PNG lands a
+    // frame or two later), so termination must be chained onto the screenshot's completion — terminating
+    // eagerly here would tear the window down before the readback runs and screenshot.png would never be
+    // written. terminateOnExit() is invoked from every path that does not reach that deferred callback (the
+    // early-outs below and the no-renderer case in requestScreenshot); the callback owns termination on the
+    // normal path.
+    auto const terminateOnExit = [this] {
         if (_session->terminal().device().isClosed() && _session->app().dumpStateAtExit().has_value())
             _session->terminate();
-    } };
+    };
 
-    if (!QOpenGLContext::currentContext())
-    {
-        errorLog()("Cannot dump state: no OpenGL context available");
-        return;
-    }
-    if (!QOpenGLContext::currentContext()->makeCurrent(window()))
-    {
-        errorLog()("Cannot dump state: cannot make current");
-        return;
-    }
-
+    // NB: no QOpenGLContext gate here. This runs inside paint() on the scene-graph render thread,
+    // where rendering goes through the RHI (not a raw Qt QOpenGLContext), so the old
+    // currentContext()/makeCurrent() check spuriously failed under the RHI render loop and skipped
+    // the entire dump. The screen-state dump below needs no GL, and the screenshot uses the RHI
+    // readback path (requestScreenshot), which schedules its own offscreen pass.
     Require(_session);
     Require(_renderer);
 
@@ -1549,42 +1559,47 @@ void TerminalDisplay::doDumpStateInternal()
     } while (0);
 
     auto screenshotFilePath = targetDir / "screenshot.png";
-    displayLog()("Saving screenshot to: {}", screenshotFilePath.generic_string());
-    screenshot().save(QString::fromStdString(screenshotFilePath.string()));
+    displayLog()("Requesting screenshot for state dump: {}", screenshotFilePath.generic_string());
+
+    // Deferred capture: the RHI reads the offscreen render back a frame or two later, so save it when it
+    // arrives and only *then* terminate on the at-exit path — terminating now would close the window before
+    // the readback completes and the PNG would never be written. If there is no renderer, requestScreenshot
+    // never invokes the callback, so terminate here to avoid leaking the session on that path.
+    if (!_renderTarget)
+    {
+        terminateOnExit();
+        return;
+    }
+    requestScreenshot([screenshotFilePath, terminateOnExit](QImage const& image) {
+        image.save(QString::fromStdString(screenshotFilePath.string()));
+        terminateOnExit();
+    });
 }
 
 void TerminalDisplay::resizeTerminalToDisplaySize()
 {
-    // Resize widget (same pixels, but adjusted terminal rows/columns and margin)
+    // Refit the grid to this item's current extent (same pixels, adjusted rows/columns and margin).
     Require(_renderer != nullptr);
     Require(_session != nullptr);
 
-    auto const virtualDisplaySize =
-        ImageSize { vtbackend::Width::cast_from(width()), vtbackend::Height::cast_from(height()) };
-    auto const actualDisplaySize = virtualDisplaySize * contentScale();
-    applyResize(actualDisplaySize, *_session, *_renderer);
+    applyResize(geometry::availableDevicePixels(width(), height(), contentScale()), *_session, *_renderer);
 }
 
 void TerminalDisplay::resizeWindow(vtbackend::Width newWidth, vtbackend::Height newHeight)
 {
     Require(_session != nullptr);
 
-    if (isFullScreen())
-    {
-        displayLog()("Application request to resize window in full screen mode denied.");
-        return;
-    }
-
-    applyResize(vtbackend::ImageSize { newWidth, newHeight }, *_session, *_renderer);
+    // CSI 4 t: pixel-size request for this pane's content area (device pixels). Routed through the
+    // controller choke point: it resizes the WINDOW, and the grid follows from the resulting resize
+    // event via the normal window->grid path. (The former direct applyResize() here resized the grid
+    // WITHOUT the window — a guaranteed grid/window divergence.)
+    if (auto* controller = windowController())
+        controller->resizeWindowForContentPixels(*this, vtbackend::ImageSize { newWidth, newHeight });
 }
 
 void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend::ColumnCount newColumnCount)
 {
-    if (isFullScreen())
-    {
-        displayLog()("Application request to resize window in full screen mode denied.");
-        return;
-    }
+    Require(_session != nullptr);
 
     // The TUI app requests the usable area (what the PTY reports via TIOCSWINSZ),
     // not the total page size. Add back the status line height to get the total page size.
@@ -1594,39 +1609,19 @@ void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend:
     if (*newLineCount)
         requestedPageSize.lines = newLineCount + terminal().statusLineHeight();
 
-    // Compute the target pixel size in device (scaled) pixels first, using the same
-    // cell size and scaled margins that pageSizeForPixels() will use in the reverse
-    // direction. This avoids cumulative rounding errors from the previous approach
-    // of computing an unscaled cell size separately (which involved two std::ceil
-    // operations that could inflate the pixel count).
-    auto const cellSize = _renderer->publishedCellSize();
-    auto const scaledMargins = applyContentScale(_session->profile().margins.value(), contentScale());
-    auto const targetScaledSize = vtbackend::ImageSize {
-        cellSize.width * boxed_cast<vtbackend::Width>(requestedPageSize.columns)
-            + vtbackend::Width::cast_from(2 * unbox(scaledMargins.horizontal)),
-        cellSize.height * boxed_cast<vtbackend::Height>(requestedPageSize.lines)
-            + vtbackend::Height::cast_from(2 * unbox(scaledMargins.vertical)),
-    };
-
-    // Convert to logical (unscaled) pixels for Qt with a single ceil division.
-    // sizeChanged() will multiply back by contentScale(), recovering targetScaledSize
-    // (possibly +1 pixel due to ceil, which is safe: floor((target+delta)/cellSize) == M
-    // as long as delta < cellSize, which holds for all reasonable contentScale values).
-    auto const unscaledViewSize = targetScaledSize / contentScale();
-    window()->resize(QSize(unscaledViewSize.width.as<int>(), unscaledViewSize.height.as<int>()));
+    if (auto* controller = windowController())
+        controller->resizeWindowForPage(*this, requestedPageSize);
 }
 
 void TerminalDisplay::recomputeGeometryAfterFontReconfig()
 {
     // Re-derive the geometry that depends on the (now current) cell size after a font/DPI reconfiguration:
     // the terminal page size + render-surface margin (resizeTerminalToDisplaySize, which also drives the
-    // resizeScreen()/SIGWINCH to the child) and the Qt window's implicit size + size constraints. Callers
-    // must ensure the display is fully alive (live _session, _renderer and window()) — updateImplicitSize()
-    // and updateSizeConstraints() Require(window()) and would abort otherwise.
+    // resizeScreen()/SIGWINCH to the child) and the WM size hints. Callers must ensure the display is
+    // fully alive (live _session, _renderer and window()).
     Require(_session && _renderer && window());
     resizeTerminalToDisplaySize();
-    updateImplicitSize();
-    updateSizeConstraints();
+    notifyCellGeometryChanged();
 }
 
 bool TerminalDisplay::applyStagedFontReconfigNow()
@@ -1655,8 +1650,7 @@ bool TerminalDisplay::applyStagedFontReconfigNow()
     //
     // @return true if the cell size actually changed (a geometry recompute against it was performed). DPI
     //         changes that round to the same cell pixel size return false but still alter DPR-derived
-    //         window geometry; applyFontDPI() recomputes the implicit size / size constraints itself for
-    //         that case.
+    //         window geometry; applyFontDPI() refreshes the WM size hints itself for that case.
     auto const fontReconfigApplied = _renderer->applyStagedReconfigDuringSetup();
     if (fontReconfigApplied && _session && window())
     {
@@ -1693,10 +1687,14 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
     if (!_renderer->setFontSize(newFontSize))
         return false;
 
-    // The font change is only *staged*; apply it synchronously and re-derive the page size against the
-    // new cell size now (recomputing without the apply would use the *stale* cell size).
+    // Font zoom is window/pane-preserving: neither the QWindow nor this pane changes size. The font
+    // change is only *staged*; apply it synchronously so the grid reflows in place against this item's
+    // fixed pixel extent (applyStagedFontReconfigNow drives that, unconditionally — the grid ALWAYS fits
+    // the item), re-deriving the page size against the new cell size. A larger font therefore yields
+    // fewer columns/rows and a smaller font more; that reflow drives resizeScreen()/SIGWINCH so the child
+    // learns its new size. This is deliberate: the window is never resized to restore the old cell count.
+    // (Recomputing without the apply would use the *stale* cell size.)
     applyStagedFontReconfigNow();
-    // logDisplayInfo();
 
     // Report whether the change actually took: the render-thread apply catches and swallows font-load
     // failures (keeping the previous font), so the caller must not record a size the renderer never
@@ -1704,37 +1702,6 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
     // The request is the exact value just staged (no arithmetic in between), so an exact compare is
     // correct: equal means the apply loaded it, unequal means it was swallowed.
     return _renderer->fontDescriptions().size.pt == newFontSize.pt;
-}
-
-bool TerminalDisplay::setPageSize(PageSize newPageSize)
-{
-    if (newPageSize == terminal().pageSize())
-        return false;
-
-    // Derive the view size from the *requested* page size (not the configured profile size), reading the
-    // published cell size once (lock-free) to avoid two locked GridMetrics copies and a torn read.
-    auto const cellSize = _renderer->publishedCellSize();
-    auto const viewSize = ImageSize { Width(*cellSize.width * unbox<unsigned>(newPageSize.columns)),
-                                      Height(*cellSize.height * unbox<unsigned>(newPageSize.lines)) };
-    _renderer->setPageSize(newPageSize);
-    auto const l = scoped_lock { terminal() };
-    terminal().resizeScreen(newPageSize, viewSize);
-    return true;
-}
-
-void TerminalDisplay::syncRendererGeometry(PageSize totalPageSize, vtbackend::ImageSize pixelSize)
-{
-    Require(_renderer != nullptr);
-    // The caller resized the terminal directly (bypassing the renderer's geometry staging). Push the
-    // *full* geometry — page size, render-surface pixel size and margin — into the renderer, not just the
-    // page size: a page-size-only sync would leave the previous session's margin in the live grid metrics
-    // until some later resize nudged it, so a session-switch could render with the wrong margins (bottom
-    // rows mis-clipped) on a display whose first post-switch frame is delayed. The margin is derived from
-    // the renderer's published cell size and the profile margins, exactly as helper::applyResize() does.
-    auto const cellSize = _renderer->publishedCellSize();
-    auto const margin = computeMargin(
-        cellSize, totalPageSize, pixelSize, applyContentScale(profile().margins.value(), contentScale()));
-    _renderer->applyResize(pixelSize, totalPageSize, margin);
 }
 
 void TerminalDisplay::setMouseCursorShape(MouseCursorShape newCursorShape)
@@ -1745,22 +1712,20 @@ void TerminalDisplay::setMouseCursorShape(MouseCursorShape newCursorShape)
 
 void TerminalDisplay::setWindowFullScreen()
 {
-    window()->setSizeIncrement(QSize(0, 0));
-    window()->showFullScreen();
+    if (auto* controller = windowController())
+        controller->setWindowFullScreen(*this);
 }
 
 void TerminalDisplay::setWindowMaximized()
 {
-    window()->setSizeIncrement(QSize(0, 0));
-    window()->showMaximized();
-    _maximizedState = true;
+    if (auto* controller = windowController())
+        controller->setWindowMaximized(*this);
 }
 
 void TerminalDisplay::setWindowNormal()
 {
-    updateSizeConstraints();
-    window()->showNormal();
-    _maximizedState = false;
+    if (auto* controller = windowController())
+        controller->setWindowNormal(*this);
 }
 
 void TerminalDisplay::setBlurBehind(bool enable)
@@ -1770,30 +1735,17 @@ void TerminalDisplay::setBlurBehind(bool enable)
 
 void TerminalDisplay::toggleFullScreen()
 {
-    if (!isFullScreen())
-    {
-        _maximizedState = window()->visibility() == QQuickWindow::Visibility::Maximized;
-        window()->setSizeIncrement(QSize(0, 0));
-        window()->showFullScreen();
-    }
-    else if (_maximizedState)
-    {
-        window()->setSizeIncrement(QSize(0, 0));
-        window()->showMaximized();
-    }
-    else
-    {
-        updateSizeConstraints();
-        window()->showNormal();
-    }
+    if (auto* controller = windowController())
+        controller->toggleFullScreen(*this);
 }
 
 void TerminalDisplay::toggleTitleBar()
 {
-    auto const currentlyFrameless = (window()->flags() & Qt::FramelessWindowHint) != 0;
-    _maximizedState = window()->visibility() == QQuickWindow::Visibility::Maximized;
-
-    window()->setFlag(Qt::FramelessWindowHint, !currentlyFrameless);
+    // Title-bar visibility is WINDOW state: it lives on the WindowController (the window authority),
+    // so a toggle from any pane flips the whole window's decoration and survives pane-focus changes
+    // and tab switches (per-display storage silently reverted it on the next focus).
+    if (auto* controller = windowController())
+        controller->toggleTitleBar();
 }
 
 void TerminalDisplay::toggleInputMethodEditorHandling()
@@ -1812,6 +1764,17 @@ void TerminalDisplay::setHyperlinkDecoration(vtrasterizer::Decorator normal, vtr
 // {{{ TerminalDisplay: terminal events
 void TerminalDisplay::scheduleRedraw()
 {
+    // Reached synchronously from the backend/parser thread (TerminalSession::screenUpdated ->
+    // scheduleRedraw) while a VT sequence is processed. During a split, the GUI thread hands this session
+    // from the hidden single-pane display to the new pane display: attachDisplay() calls the old display's
+    // releaseSession(), which nulls its _session before the session's _display is repointed. In that window
+    // the parser thread can land here on a display whose _session is already null. A released display has
+    // nothing to redraw, so bail out. hasSession() reads _session once; the pointed-to session (when
+    // non-null) owns the very thread calling us and is joined in its own destructor, so it cannot be freed
+    // mid-call — the check is sufficient without a lock.
+    if (!hasSession())
+        return;
+
     auto const currentHistoryLineCount = terminal().currentScreen().historyLineCount();
     if (currentHistoryLineCount != _lastHistoryLineCount)
     {
@@ -1820,8 +1783,14 @@ void TerminalDisplay::scheduleRedraw()
     }
 
     // QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
-    if (window())
-        post([this]() { window()->update(); });
+    // post() queues the lambda to run LATER on the GUI event loop, so window() must be re-checked at the
+    // point of USE, not only here at scheduling time: closing a split pane unparents this item (window() ->
+    // null) between the post and its dispatch, and window()->update() on the null window then segfaults
+    // (member call on null QQuickWindow). Guarding only the outer post() is a check-then-use-later race.
+    post([this]() {
+        if (window())
+            window()->update();
+    });
 }
 
 void TerminalDisplay::renderBufferUpdated()
@@ -1837,6 +1806,12 @@ void TerminalDisplay::closeDisplay()
 
 void TerminalDisplay::onSelectionCompleted()
 {
+    // Like scheduleRedraw(), this can be reached from the backend thread during a split-pane session
+    // hand-off, when this display's _session was just nulled by releaseSession(). Extracting the selection
+    // then would dereference the null session via terminal(); a released display owns no selection, so bail.
+    if (!hasSession())
+        return;
+
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = terminal().extractSelectionText();

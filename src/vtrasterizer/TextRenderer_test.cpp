@@ -1330,7 +1330,7 @@ TEST_CASE("Renderer.reconfig.page_geometry_preserved_across_dpi_change", "[rende
 
 int main(int argc, char* argv[])
 {
-    crispy::testing::suppressWindowsDialogs();
+    crispy::suppressWindowsDialogs();
 
     auto const tempDir = std::filesystem::temp_directory_path();
     auto const _ = crispy::finally { [&] { std::filesystem::remove(testFontPath); } };

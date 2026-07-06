@@ -25,8 +25,8 @@ class Audio: public QObject
     void handlePlayback(int volume, int duration, std::vector<int> const& notes);
 
   private:
+    /// Appends the PCM synthesis of @p notes (see contour::audio, AudioNote.h) to the playback buffer.
     void fillBuffer(int volume, int duration, gsl::span<const int> notes);
-    static std::vector<std::int16_t> createMusicalNote(double volume, int duration, int note) noexcept;
 
     QByteArray _byteArray;
     QBuffer _audioBuffer;

@@ -308,16 +308,41 @@ std::optional<Pty::ReadResult> UnixPty::read(crispy::buffer_object<char>& storag
                                              std::optional<std::chrono::milliseconds> timeout,
                                              size_t size)
 {
-    assert(_readSelector.size() > 0);
+    // This runs on the session's read thread while close() may run concurrently on the GUI thread
+    // (e.g. when a GUI tab is closed). _readSelector is internally thread-safe: want_read/cancel_read/
+    // wait_one serialize their own access to the registered-fd set, so the blocking wait_one() is safe
+    // to call unlocked -- and it MUST stay unlocked, or a concurrent close() would block trying to
+    // cancel_read()/wakeup() and the teardown would deadlock. The wakeup writes a separate,
+    // always-registered eventfd/break-pipe, so a blocked wait_one() is woken regardless of the
+    // selector's fd contents.
 
-    if (auto const fd = _readSelector.wait_one(timeout); fd.has_value())
+    // Blocking wait. On an empty selector (master closed by a concurrent close() plus a prior
+    // stdout-fastpipe EOF) wait_one() blocks on the break-pipe until the timeout or the next wakeup(),
+    // rather than spinning: returning EAGAIN immediately here would make the caller's read loop busy-spin
+    // a CPU core until the session is torn down.
+    auto const fd = _readSelector.wait_one(timeout);
+    if (!fd.has_value())
     {
-        auto const l = scoped_lock { storage };
-        if (auto x = readSome(*fd, storage.hotEnd(), std::min(size, storage.bytesAvailable())))
-            return ReadResult { .data = x.value(), .fromStdoutFastPipe = *fd == _stdoutFastPipe.reader() };
-    }
-    else
         errno = EAGAIN;
+        return std::nullopt;
+    }
+
+    // Locked read and bookkeeping. readSome() may cancel_read the stdout-fastpipe on EOF, so it mutates
+    // shared state under _mutex. Re-validate first: if close() ran between the wait and here it removed
+    // the master fd from the selector, so the returned fd is no longer wanted -- do not ::read() a
+    // just-closed (and possibly already recycled) fd. A fastpipe fd that is still wanted remains
+    // drainable. is_wanted() reflects the current registration on both selector backends, so this
+    // detects the concurrent close() that the stale `_masterFd.is_closed()` check could not.
+    auto const _ = std::scoped_lock { _mutex };
+    if (!_readSelector.is_wanted(*fd))
+    {
+        errno = EAGAIN;
+        return std::nullopt;
+    }
+
+    auto const l = scoped_lock { storage };
+    if (auto x = readSome(*fd, storage.hotEnd(), std::min(size, storage.bytesAvailable())))
+        return ReadResult { .data = x.value(), .fromStdoutFastPipe = *fd == _stdoutFastPipe.reader() };
     return std::nullopt;
 }
 
@@ -325,6 +350,19 @@ int UnixPty::write(std::string_view data)
 {
     auto const* buf = data.data();
     auto const size = data.size();
+
+    // Serialize against a concurrent close() (a routine GUI operation now that tabs and panes close
+    // PTYs mid-session): an unlocked ::write() could hit a just-closed -- and possibly already
+    // recycled -- fd, injecting the data into an unrelated file or another pane's PTY. The fast path
+    // is a non-blocking write, so the lock is held only briefly; the blocking continuation below is a
+    // rare fallback (PTY buffer full) bounded by the child draining its side, and holding _mutex
+    // across it pins the fd open for the duration -- the invariant the fd-validity check relies on.
+    auto const _ = std::scoped_lock { _mutex };
+    if (_masterFd.is_closed())
+    {
+        errno = EPIPE;
+        return -1;
+    }
 
     ssize_t const rv = ::write(_masterFd, buf, size);
     if (ptyOutLog)

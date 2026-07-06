@@ -91,6 +91,23 @@ optional<Action> fromString(string const& name)
         mapAction<actions::SwitchToTabLeft>("SwitchToTabLeft"),
         mapAction<actions::SwitchToTabRight>("SwitchToTabRight"),
         mapAction<actions::SetTabName>("SetTabName"),
+        mapAction<actions::SplitVertical>("SplitVertical"),
+        mapAction<actions::SplitHorizontal>("SplitHorizontal"),
+        mapAction<actions::ClosePane>("ClosePane"),
+        mapAction<actions::FocusPaneLeft>("FocusPaneLeft"),
+        mapAction<actions::FocusPaneRight>("FocusPaneRight"),
+        mapAction<actions::FocusPaneUp>("FocusPaneUp"),
+        mapAction<actions::FocusPaneDown>("FocusPaneDown"),
+        mapAction<actions::SwapPaneLeft>("SwapPaneLeft"),
+        mapAction<actions::SwapPaneRight>("SwapPaneRight"),
+        mapAction<actions::SwapPaneUp>("SwapPaneUp"),
+        mapAction<actions::SwapPaneDown>("SwapPaneDown"),
+        mapAction<actions::MovePaneLeft>("MovePaneLeft"),
+        mapAction<actions::MovePaneRight>("MovePaneRight"),
+        mapAction<actions::MovePaneUp>("MovePaneUp"),
+        mapAction<actions::MovePaneDown>("MovePaneDown"),
+        mapAction<actions::ToggleSplitOrientation>("ToggleSplitOrientation"),
+        mapAction<actions::ResizePane>("ResizePane"),
     };
 
     auto const lowerCaseName = toLower(name);

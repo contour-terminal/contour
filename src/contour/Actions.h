@@ -12,6 +12,7 @@
 #include <string>
 #include <tuple>
 #include <variant>
+#include <vector>
 
 namespace contour::actions
 {
@@ -30,6 +31,19 @@ enum class CopyFormat : uint8_t
 
     // Copies the selection as PNG image.
     PNG,
+};
+
+/// A cardinal direction for directional pane actions (resize).
+///
+/// Kept local to the action layer (rather than reusing vtmux::FocusDirection) so this layer stays
+/// transport-agnostic — it describes *what the user asked for*, and the dispatch handler translates it
+/// to the model's vtmux::FocusDirection. Mirrors how CopyFormat is a local enum.
+enum class Direction : uint8_t
+{
+    Left,
+    Right,
+    Up,
+    Down,
 };
 
 // clang-format off
@@ -96,6 +110,23 @@ struct SwitchToPreviousTab{};
 struct SwitchToTabLeft{};
 struct SwitchToTabRight{};
 struct SetTabName{};
+struct SplitVertical{};    // split the active pane left/right
+struct SplitHorizontal{};  // split the active pane top/bottom
+struct ClosePane{};
+struct FocusPaneLeft{};
+struct FocusPaneRight{};
+struct FocusPaneUp{};
+struct FocusPaneDown{};
+struct SwapPaneLeft{};      // swap the active pane with its left neighbor
+struct SwapPaneRight{};     // swap the active pane with its right neighbor
+struct SwapPaneUp{};        // swap the active pane with its upper neighbor
+struct SwapPaneDown{};      // swap the active pane with its lower neighbor
+struct MovePaneLeft{};      // re-parent the active pane past its left neighbor
+struct MovePaneRight{};     // re-parent the active pane past its right neighbor
+struct MovePaneUp{};        // re-parent the active pane past its upper neighbor
+struct MovePaneDown{};      // re-parent the active pane past its lower neighbor
+struct ToggleSplitOrientation{}; // flip the active pane's split axis (H<->V)
+struct ResizePane{ Direction direction; int percent = 5; }; // grow/shrink the active pane
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -160,10 +191,75 @@ using Action = std::variant<CancelSelection,
                             SwitchToPreviousTab,
                             SwitchToTabLeft,
                             SwitchToTabRight,
-                            SetTabName>;
+                            SetTabName,
+                            SplitVertical,
+                            SplitHorizontal,
+                            ClosePane,
+                            FocusPaneLeft,
+                            FocusPaneRight,
+                            FocusPaneUp,
+                            FocusPaneDown,
+                            SwapPaneLeft,
+                            SwapPaneRight,
+                            SwapPaneUp,
+                            SwapPaneDown,
+                            MovePaneLeft,
+                            MovePaneRight,
+                            MovePaneUp,
+                            MovePaneDown,
+                            ToggleSplitOrientation,
+                            ResizePane>;
 
+/// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
+///
+/// These are structural/destructive actions where a held key must not be amplified into a burst:
+/// creating or closing a tab, closing a pane, and splitting a pane. Splitting is included because
+/// each fire forks a new shell process and shrinks the layout, so a held split key would spawn a
+/// burst of panes until they collapse — the same amplification the tab/pane actions guard against.
+/// The keyboard dispatch (handleAction) consults this concept to filter such actions out of
+/// KeyboardEventType::Repeat events.
 template <typename T>
-concept NonRepeatableActionConcept = crispy::one_of<T, CreateNewTab, CloseTab>;
+concept NonRepeatableActionConcept = crispy::one_of<T,
+                                                    CreateNewTab,
+                                                    CloseTab,
+                                                    ClosePane,
+                                                    SplitVertical,
+                                                    SplitHorizontal,
+                                                    SwapPaneLeft,
+                                                    SwapPaneRight,
+                                                    SwapPaneUp,
+                                                    SwapPaneDown,
+                                                    MovePaneLeft,
+                                                    MovePaneRight,
+                                                    MovePaneUp,
+                                                    MovePaneDown,
+                                                    ToggleSplitOrientation>;
+
+/// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
+/// member), false otherwise.
+[[nodiscard]] inline bool isNonRepeatable(Action const& action) noexcept
+{
+    return std::visit(crispy::overloaded {
+                          [](NonRepeatableActionConcept auto const&) { return true; },
+                          [](auto const&) { return false; },
+                      },
+                      action);
+}
+
+/// Filters @p actions down to those that may fire on a keyboard auto-repeat event, dropping every
+/// NonRepeatableActionConcept member (so a held key cannot be amplified into a burst of, e.g.,
+/// tab/pane closes).
+/// @param actions The actions bound to the key being repeated.
+/// @return A copy containing only the repeatable actions, preserving order.
+[[nodiscard]] inline std::vector<Action> filterRepeatableActions(std::vector<Action> const& actions)
+{
+    std::vector<Action> result;
+    result.reserve(actions.size());
+    for (auto const& action: actions)
+        if (!isNonRepeatable(action))
+            result.push_back(action);
+    return result;
+}
 
 std::optional<Action> fromString(std::string const& name);
 
@@ -300,6 +396,32 @@ namespace documentation
     constexpr inline std::string_view SwitchToTabLeft { "Switch to tab to the left" };
     constexpr inline std::string_view SwitchToTabRight { "Switch to tab to the right" };
     constexpr inline std::string_view SetTabName { "Set the name of the current tab" };
+    constexpr inline std::string_view SplitVertical {
+        "Splits the active pane into two side-by-side panes (a vertical divider)."
+    };
+    constexpr inline std::string_view SplitHorizontal {
+        "Splits the active pane into two stacked panes (a horizontal divider)."
+    };
+    constexpr inline std::string_view ClosePane { "Closes the active pane (or the tab if it is the last "
+                                                  "pane)." };
+    constexpr inline std::string_view FocusPaneLeft { "Moves pane focus to the left." };
+    constexpr inline std::string_view FocusPaneRight { "Moves pane focus to the right." };
+    constexpr inline std::string_view FocusPaneUp { "Moves pane focus up." };
+    constexpr inline std::string_view FocusPaneDown { "Moves pane focus down." };
+    constexpr inline std::string_view SwapPaneLeft { "Swaps the active pane with its left neighbor." };
+    constexpr inline std::string_view SwapPaneRight { "Swaps the active pane with its right neighbor." };
+    constexpr inline std::string_view SwapPaneUp { "Swaps the active pane with its upper neighbor." };
+    constexpr inline std::string_view SwapPaneDown { "Swaps the active pane with its lower neighbor." };
+    constexpr inline std::string_view MovePaneLeft { "Moves the active pane past its left neighbor." };
+    constexpr inline std::string_view MovePaneRight { "Moves the active pane past its right neighbor." };
+    constexpr inline std::string_view MovePaneUp { "Moves the active pane past its upper neighbor." };
+    constexpr inline std::string_view MovePaneDown { "Moves the active pane past its lower neighbor." };
+    constexpr inline std::string_view ToggleSplitOrientation {
+        "Flips the orientation of the active pane's split (horizontal <-> vertical)."
+    };
+    constexpr inline std::string_view ResizePane {
+        "Grows or shrinks the active pane in the given direction (by an optional percent)."
+    };
 } // namespace documentation
 
 constexpr inline auto getDocumentation()
@@ -368,6 +490,23 @@ constexpr inline auto getDocumentation()
         std::tuple { Action { SwitchToTabLeft {} }, documentation::SwitchToTabLeft },
         std::tuple { Action { SwitchToTabRight {} }, documentation::SwitchToTabRight },
         std::tuple { Action { SetTabName {} }, documentation::SetTabName },
+        std::tuple { Action { SplitVertical {} }, documentation::SplitVertical },
+        std::tuple { Action { SplitHorizontal {} }, documentation::SplitHorizontal },
+        std::tuple { Action { ClosePane {} }, documentation::ClosePane },
+        std::tuple { Action { FocusPaneLeft {} }, documentation::FocusPaneLeft },
+        std::tuple { Action { FocusPaneRight {} }, documentation::FocusPaneRight },
+        std::tuple { Action { FocusPaneUp {} }, documentation::FocusPaneUp },
+        std::tuple { Action { FocusPaneDown {} }, documentation::FocusPaneDown },
+        std::tuple { Action { SwapPaneLeft {} }, documentation::SwapPaneLeft },
+        std::tuple { Action { SwapPaneRight {} }, documentation::SwapPaneRight },
+        std::tuple { Action { SwapPaneUp {} }, documentation::SwapPaneUp },
+        std::tuple { Action { SwapPaneDown {} }, documentation::SwapPaneDown },
+        std::tuple { Action { MovePaneLeft {} }, documentation::MovePaneLeft },
+        std::tuple { Action { MovePaneRight {} }, documentation::MovePaneRight },
+        std::tuple { Action { MovePaneUp {} }, documentation::MovePaneUp },
+        std::tuple { Action { MovePaneDown {} }, documentation::MovePaneDown },
+        std::tuple { Action { ToggleSplitOrientation {} }, documentation::ToggleSplitOrientation },
+        std::tuple { Action { ResizePane { Direction::Right } }, documentation::ResizePane },
     };
 }
 
@@ -450,6 +589,22 @@ DECLARE_ACTION_FMT(SwitchToPreviousTab)
 DECLARE_ACTION_FMT(SwitchToTabLeft)
 DECLARE_ACTION_FMT(SwitchToTabRight)
 DECLARE_ACTION_FMT(SetTabName)
+DECLARE_ACTION_FMT(SplitVertical)
+DECLARE_ACTION_FMT(SplitHorizontal)
+DECLARE_ACTION_FMT(ClosePane)
+DECLARE_ACTION_FMT(FocusPaneLeft)
+DECLARE_ACTION_FMT(FocusPaneRight)
+DECLARE_ACTION_FMT(FocusPaneUp)
+DECLARE_ACTION_FMT(FocusPaneDown)
+DECLARE_ACTION_FMT(SwapPaneLeft)
+DECLARE_ACTION_FMT(SwapPaneRight)
+DECLARE_ACTION_FMT(SwapPaneUp)
+DECLARE_ACTION_FMT(SwapPaneDown)
+DECLARE_ACTION_FMT(MovePaneLeft)
+DECLARE_ACTION_FMT(MovePaneRight)
+DECLARE_ACTION_FMT(MovePaneUp)
+DECLARE_ACTION_FMT(MovePaneDown)
+DECLARE_ACTION_FMT(ToggleSplitOrientation)
 // }}}
 #undef DECLARE_ACTION_FMT
 
@@ -468,6 +623,36 @@ struct std::formatter<contour::actions::SwitchToTab>: std::formatter<std::string
     auto format(contour::actions::SwitchToTab const& value, auto& ctx) const
     {
         return formatter<string>::format(std::format("SwitchToTab {{ position: {} }}", value.position), ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::actions::Direction>: std::formatter<std::string_view>
+{
+    auto format(contour::actions::Direction value, auto& ctx) const
+    {
+        using contour::actions::Direction;
+        auto const name = [value]() -> string_view {
+            switch (value)
+            {
+                case Direction::Left: return "Left";
+                case Direction::Right: return "Right";
+                case Direction::Up: return "Up";
+                case Direction::Down: return "Down";
+            }
+            return "Right"; // unreachable: the switch is exhaustive over the enum
+        }();
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::actions::ResizePane>: std::formatter<std::string>
+{
+    auto format(contour::actions::ResizePane const& value, auto& ctx) const
+    {
+        return formatter<string>::format(
+            std::format("ResizePane {{ direction: {}, percent: {} }}", value.direction, value.percent), ctx);
     }
 };
 
@@ -544,6 +729,30 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(SwitchToTabLeft);
         HANDLE_ACTION(SwitchToTabRight);
         HANDLE_ACTION(SetTabName);
+        HANDLE_ACTION(SplitVertical);
+        HANDLE_ACTION(SplitHorizontal);
+        HANDLE_ACTION(ClosePane);
+        HANDLE_ACTION(FocusPaneLeft);
+        HANDLE_ACTION(FocusPaneRight);
+        HANDLE_ACTION(FocusPaneUp);
+        HANDLE_ACTION(FocusPaneDown);
+        HANDLE_ACTION(SwapPaneLeft);
+        HANDLE_ACTION(SwapPaneRight);
+        HANDLE_ACTION(SwapPaneUp);
+        HANDLE_ACTION(SwapPaneDown);
+        HANDLE_ACTION(MovePaneLeft);
+        HANDLE_ACTION(MovePaneRight);
+        HANDLE_ACTION(MovePaneUp);
+        HANDLE_ACTION(MovePaneDown);
+        HANDLE_ACTION(ToggleSplitOrientation);
+        if (std::holds_alternative<contour::actions::ResizePane>(_action))
+        {
+            // Flat sibling-key form (like MoveTabTo/SwitchToTab below), so a serialized binding is a
+            // valid YAML flow map: `action: ResizePane, direction: Left, percent: 5`. A nested `{ }`
+            // (the ResizePane debug formatter's form) would break the enclosing `{ ... }` map.
+            const auto action = std::get<contour::actions::ResizePane>(_action);
+            name = std::format("ResizePane, direction: {}, percent: {}", action.direction, action.percent);
+        }
         if (std::holds_alternative<contour::actions::MoveTabTo>(_action))
         {
             const auto action = std::get<contour::actions::MoveTabTo>(_action);

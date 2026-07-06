@@ -14,18 +14,6 @@ namespace contour
 namespace
 {
     auto const notifierLog = logstore::category("gui.notifier", "Desktop notification backend");
-
-    /// Converts NotificationUrgency to the D-Bus urgency byte value.
-    uint8_t toDBusUrgency(vtbackend::NotificationUrgency urgency)
-    {
-        switch (urgency)
-        {
-            case vtbackend::NotificationUrgency::Low: return 0;
-            case vtbackend::NotificationUrgency::Normal: return 1;
-            case vtbackend::NotificationUrgency::Critical: return 2;
-        }
-        return 1;
-    }
 } // namespace
 
 FreeDesktopNotifier::FreeDesktopNotifier(QObject* parent): QObject(parent)
@@ -73,12 +61,10 @@ void FreeDesktopNotifier::notify(vtbackend::DesktopNotification const& notificat
 
     // Build hints map with urgency level.
     QVariantMap hints;
-    hints["urgency"] = QVariant::fromValue(toDBusUrgency(notification.urgency));
+    hints["urgency"] = QVariant::fromValue(NotificationRouter::toFreedesktopUrgency(notification.urgency));
 
     // Check if we're replacing an existing notification.
-    uint32_t replacesId = 0;
-    if (auto it = _oscToDbus.find(notification.identifier); it != _oscToDbus.end())
-        replacesId = it->second;
+    auto const replacesId = _router.replacementFor(notification.identifier);
 
     // Build actions list. The default action is triggered on click.
     QStringList actions;
@@ -101,14 +87,7 @@ void FreeDesktopNotifier::notify(vtbackend::DesktopNotification const& notificat
     {
         auto const dbusId = reply.value();
         notifierLog()("Notification sent: id='{}' -> dbus_id={}", notification.identifier, dbusId);
-
-        // Remove stale reverse mapping when replacing a notification.
-        if (replacesId != 0)
-            _dbusToOsc.erase(replacesId);
-
-        // Update the bidirectional ID mapping.
-        _dbusToOsc[dbusId] = notification.identifier;
-        _oscToDbus[notification.identifier] = dbusId;
+        _router.onSent(notification.identifier, dbusId, replacesId);
     }
     else
     {
@@ -121,47 +100,33 @@ void FreeDesktopNotifier::close(std::string const& identifier)
     if (!_interface || !_interface->isValid())
         return;
 
-    auto it = _oscToDbus.find(identifier);
-    if (it == _oscToDbus.end())
+    auto const dbusId = _router.takeForClose(identifier);
+    if (!dbusId.has_value())
         return;
 
-    auto const dbusId = it->second;
-    _interface->call("CloseNotification", dbusId);
-
-    // Clean up mappings.
-    _dbusToOsc.erase(dbusId);
-    _oscToDbus.erase(it);
+    _interface->call("CloseNotification", *dbusId);
 }
 
 void FreeDesktopNotifier::onNotificationClosed(uint id, uint reason)
 {
-    auto it = _dbusToOsc.find(id);
-    if (it == _dbusToOsc.end())
+    auto const oscId = _router.takeForServerEvent(id);
+    if (!oscId.has_value())
         return;
 
-    auto const identifier = QString::fromStdString(it->second);
     notifierLog()("Notification closed: dbus_id={} reason={}", id, reason);
-
-    // Clean up mappings.
-    auto const oscId = it->second;
-    _dbusToOsc.erase(it);
-    _oscToDbus.erase(oscId);
-
-    emit notificationClosed(identifier, reason);
+    emit notificationClosed(QString::fromStdString(*oscId), reason);
 }
 
 void FreeDesktopNotifier::onActionInvoked(uint id, QString const& actionKey)
 {
     (void) actionKey; // We only register "default" action.
 
-    auto it = _dbusToOsc.find(id);
-    if (it == _dbusToOsc.end())
+    auto const oscId = _router.takeForServerEvent(id);
+    if (!oscId.has_value())
         return;
 
-    auto const identifier = QString::fromStdString(it->second);
     notifierLog()("Notification activated: dbus_id={}", id);
-
-    emit actionInvoked(identifier);
+    emit actionInvoked(QString::fromStdString(*oscId));
 }
 
 } // namespace contour

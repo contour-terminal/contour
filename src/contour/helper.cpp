@@ -56,6 +56,40 @@ using vtbackend::Width;
 namespace contour
 {
 
+namespace
+{
+#if defined(_WIN32)
+    // Bit positions Contour uses to carry the CapsLock/NumLock toggle state into makeModifiers()
+    // through its `nativeModifiers` argument on Windows, where Qt's native modifier mask omits lock
+    // toggles. (X11 encodes these as 0x02/0x10 and macOS as 0x00010000, read in their own branches.)
+    constexpr quint32 Win32CapsLockBit = 0x0001;
+    constexpr quint32 Win32NumLockBit = 0x0002;
+#endif
+
+    /// Returns the native modifier mask to hand makeModifiers() for a key event, with the CapsLock/
+    /// NumLock toggle state folded in. This is the single OS-boundary seam for lock state: on Windows
+    /// it reads the live toggle state from the OS (GetKeyState) — which Qt does not surface in its
+    /// native modifier mask — and encodes it into the Win32 lock bits; on X11/Wayland/macOS the lock
+    /// state already rides in Qt's native mask, so it is returned unchanged. Isolating the ambient
+    /// query here keeps makeModifiers() a pure function of its arguments, and therefore unit-testable
+    /// without depending on the machine's live lock state.
+    /// @param qtNativeModifiers Qt's native modifier mask for the event (QKeyEvent::nativeModifiers()).
+    /// @return The native modifier mask to pass to makeModifiers().
+    [[nodiscard]] quint32 nativeModifiersWithLockState([[maybe_unused]] quint32 qtNativeModifiers) noexcept
+    {
+#if defined(_WIN32)
+        quint32 bits = 0;
+        if ((GetKeyState(VK_CAPITAL) & 0x0001) != 0)
+            bits |= Win32CapsLockBit;
+        if ((GetKeyState(VK_NUMLOCK) & 0x0001) != 0)
+            bits |= Win32NumLockBit;
+        return bits;
+#else
+        return qtNativeModifiers;
+#endif
+    }
+} // namespace
+
 vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
                                    quint32 nativeModifiers,
                                    [[maybe_unused]] bool stripAltGr)
@@ -86,11 +120,14 @@ vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
             modifiers = modifiers.without(AltGrEquivalent);
     }
 
-    // Windows: Query lock states directly via Win32 API
-    // GetKeyState returns toggle state in low-order bit (0x0001)
-    if (GetKeyState(VK_CAPITAL) & 0x0001)
+    // Windows: CapsLock/NumLock are not part of Qt's native modifier mask, so the Qt event boundary
+    // (nativeModifiersWithLockState) folds the live toggle state into these bits before calling us.
+    // Reading it from the argument here — rather than querying GetKeyState directly — keeps this
+    // mapping pure and testable, matching the X11/macOS branches which also read lock state from
+    // nativeModifiers.
+    if ((nativeModifiers & Win32CapsLockBit) != 0)
         modifiers |= Modifier::CapsLock;
-    if (GetKeyState(VK_NUMLOCK) & 0x0001)
+    if ((nativeModifiers & Win32NumLockBit) != 0)
         modifiers |= Modifier::NumLock;
 
 #elif defined(__APPLE__)
@@ -450,8 +487,9 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     }; // }}}
 
     auto const isWin32Mode = session.terminal().isModeEnabled(vtbackend::DECMode::Win32InputMode);
-    auto const modifiers =
-        makeModifiers(event->modifiers(), event->nativeModifiers(), /*stripAltGr=*/!isWin32Mode);
+    auto const modifiers = makeModifiers(event->modifiers(),
+                                         nativeModifiersWithLockState(event->nativeModifiers()),
+                                         /*stripAltGr=*/!isWin32Mode);
     auto const key = event->key();
 
     if (event->modifiers().testFlag(Qt::KeypadModifier))
@@ -569,6 +607,11 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
 void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 {
+    // A display-less session (a background pane during a split/tab rebind) has no geometry or
+    // content scale to map display-space coordinates with; drop the event, matching the other
+    // display-dependent event paths' guards.
+    if (session.display() == nullptr)
+        return;
     auto const phase = event->phase();
     // Allow zero-delta events through if they carry phase info (e.g. ScrollEnd).
     if (event->pixelDelta().isNull() && event->angleDelta().isNull() && phase != Qt::ScrollEnd
@@ -616,6 +659,11 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 
 void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
 {
+    // A display-less session (a background pane during a split/tab rebind) has no geometry or
+    // content scale to map display-space coordinates with; drop the event, matching the other
+    // display-dependent event paths' guards.
+    if (session.display() == nullptr)
+        return;
     session.sendMousePressEvent(
         makeModifiers(event->modifiers()),
         makeMouseButton(event->button()),
@@ -625,6 +673,11 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
 
 void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
 {
+    // A display-less session (a background pane during a split/tab rebind) has no geometry or
+    // content scale to map display-space coordinates with; drop the event, matching the other
+    // display-dependent event paths' guards.
+    if (session.display() == nullptr)
+        return;
     session.sendMouseReleaseEvent(
         makeModifiers(event->modifiers()),
         makeMouseButton(event->button()),
@@ -634,6 +687,11 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
 
 void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
 {
+    // A display-less session (a background pane during a split/tab rebind) has no geometry or
+    // content scale to map display-space coordinates with; drop the event, matching the other
+    // display-dependent event paths' guards.
+    if (session.display() == nullptr)
+        return;
     session.sendMouseMoveEvent(
         makeModifiers(event->modifiers()),
         makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
@@ -643,6 +701,11 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
 
 void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
 {
+    // A display-less session (a background pane during a split/tab rebind) has no geometry or
+    // content scale to map display-space coordinates with; drop the event, matching the other
+    // display-dependent event paths' guards.
+    if (session.display() == nullptr)
+        return;
     auto const position = event->position().toPoint();
     session.sendMouseMoveEvent(
         makeModifiers(event->modifiers()),
@@ -676,10 +739,10 @@ AutoScrollInfo computeAutoScrollInfo(QMouseEvent const* event, TerminalSession c
     return {};
 }
 
-void spawnNewTerminal(string const& programPath,
-                      string const& configPath,
-                      string const& profileName,
-                      string const& cwdUrl)
+SpawnTerminalCommand buildSpawnTerminalCommand(string const& programPath,
+                                               string const& configPath,
+                                               string const& profileName,
+                                               string const& cwdUrl)
 {
     auto const wd = [&]() -> QString {
         auto const url = QUrl(QString::fromUtf8(cwdUrl.c_str()));
@@ -693,19 +756,19 @@ void spawnNewTerminal(string const& programPath,
             return QString();
     }();
 
-    QString const program = QString::fromUtf8(programPath.c_str());
-    QStringList args;
+    SpawnTerminalCommand command;
+    command.program = QString::fromUtf8(programPath.c_str());
 
     if (!configPath.empty())
-        args << "config" << QString::fromStdString(configPath);
+        command.arguments << "config" << QString::fromStdString(configPath);
 
     if (!profileName.empty())
-        args << "profile" << QString::fromStdString(profileName);
+        command.arguments << "profile" << QString::fromStdString(profileName);
 
     if (!wd.isEmpty())
-        args << "working-directory" << wd;
+        command.arguments << "working-directory" << wd;
 
-    QProcess::startDetached(program, args);
+    return command;
 }
 
 vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer)
@@ -743,21 +806,6 @@ vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer)
              .emoji = fonts.emoji.toPattern() };
 }
 
-vtrasterizer::PageMargin computeMargin(ImageSize cellSize,
-                                       PageSize charCells,
-                                       ImageSize displaySize,
-                                       config::WindowMargins minimumMargins) noexcept
-{
-    auto const usedHeight = unbox(charCells.lines) * unbox(cellSize.height);
-
-    auto const topMargin = unbox<int>(minimumMargins.vertical);
-    auto const bottomMargin = unbox<int>(std::min(
-        config::VerticalMargin(unbox(displaySize.height) - usedHeight - topMargin), minimumMargins.vertical));
-    auto const leftMargin = unbox<int>(minimumMargins.horizontal);
-
-    return { .left = leftMargin, .top = topMargin, .bottom = bottomMargin };
-}
-
 vtrasterizer::FontDescriptions sanitizeFontDescription(vtrasterizer::FontDescriptions fonts, text::DPI dpi)
 {
     if (fonts.dpi.x <= 0 || fonts.dpi.y <= 0)
@@ -790,45 +838,48 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     if (*newPixelSize.width == 0 || *newPixelSize.height == 0)
         return;
 
-    auto const oldPageSize = session.terminal().totalPageSize();
+    vtbackend::Terminal& terminal = session.terminal();
+    auto const oldPageSize = terminal.totalPageSize();
     // Read the published cell size once (lock-free), reused for both the page size and margin below.
     vtbackend::ImageSize const cellSize = renderer.publishedCellSize();
-    auto const newPageSize = pageSizeForPixels(
-        newPixelSize,
-        cellSize,
-        applyContentScale(session.profile().margins.value(), session.display()->contentScale()));
-    vtbackend::Terminal& terminal = session.terminal();
+    auto const marginsDevicePx = geometry::scaled(toGeometryMargins(session.profile().margins.value()),
+                                                  session.display()->contentScale());
 
-    auto const newMargin = computeMargin(
-        cellSize,
-        newPageSize,
-        newPixelSize,
-        applyContentScale(session.profile().margins.value(), session.display()->contentScale()));
-    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    // Fit the grid with the terminal's own total-page clamp injected, so the renderer geometry published
+    // below and what resizeScreen() will actually apply can never disagree: resizeScreen() raises the
+    // total up to statusLineHeight()+1 lines and 1 column, and a fit computed against an unclamped page
+    // would permanently defeat the early-out below two cell-rows (re-running resizeScreen() +
+    // clearSelection() on every drag frame, wiping the selection and storming SIGWINCH at the child).
+    auto const fit = geometry::fitPageToPixels(newPixelSize, cellSize, marginsDevicePx, [&](auto page) {
+        return terminal.clampedTotalPageSize(page);
+    });
 
-    if (oldPageSize.lines != newPageSize.lines)
-        emit session.lineCountChanged(newPageSize.lines.as<int>());
+    renderer.applyResize(newPixelSize, fit.pageSize, fit.pageMargin);
 
-    if (oldPageSize.columns != newPageSize.columns)
-        emit session.columnsCountChanged(newPageSize.columns.as<int>());
+    if (oldPageSize.lines != fit.pageSize.lines)
+        emit session.lineCountChanged(fit.pageSize.lines.as<int>());
 
-    auto const viewSize = cellSize * newPageSize;
+    if (oldPageSize.columns != fit.pageSize.columns)
+        emit session.columnsCountChanged(fit.pageSize.columns.as<int>());
+
+    auto const viewSize = cellSize * fit.pageSize;
     displayLog()("Applying resize {}/{} pixels (margins {}) and {} -> {} cells.",
                  viewSize,
                  newPixelSize,
                  session.profile().margins.value(),
                  terminal.pageSize(),
-                 newPageSize);
+                 fit.pageSize);
 
     auto const l = scoped_lock { terminal };
 
-    if (newPageSize == terminal.totalPageSize())
+    // fit.pageSize is already clamped (see above), so a direct comparison decides the early-out.
+    if (fit.pageSize == terminal.totalPageSize())
     {
-        displayLog()("No resize necessary. New size is same as old size of {}.", newPageSize);
+        displayLog()("No resize necessary. New size is same as old size of {}.", fit.pageSize);
         return;
     }
 
-    terminal.resizeScreen(newPageSize, viewSize);
+    terminal.resizeScreen(fit.pageSize, viewSize);
     terminal.clearSelection();
 }
 

@@ -1,45 +1,13 @@
 
 #include <contour/Audio.h>
+#include <contour/AudioNote.h>
 
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
-#include <crispy/times.h>
 
 #include <QtMultimedia/QMediaDevices>
 
-#include <cmath>
-
 using namespace contour;
-
-namespace
-{
-constexpr double SampleRate = 44100;
-
-// On Windows, this cannot be constexpr just yet, because std::fmod is not constexpr in MSVC (yet).
-#if !defined(_WIN32)
-    #define CONSTEXPR_UNLESS_MSVC constexpr
-#else
-    #define CONSTEXPR_UNLESS_MSVC
-#endif
-
-CONSTEXPR_UNLESS_MSVC double square_wave(double x) noexcept
-{
-    x = std::fmod(x, 2);
-    return std::isgreater(x, 1) ? -1 : 1;
-}
-
-auto createMusicalNote(double volume, double duration, double frequency) noexcept
-{
-    duration = duration / 32.0;
-    volume /= 7;
-    std::vector<std::int16_t> buffer;
-    buffer.reserve(static_cast<size_t>(std::ceil(duration * SampleRate)));
-    for (const auto i: crispy::times(static_cast<int>(std::ceil(duration * SampleRate))))
-        buffer.push_back(static_cast<int16_t>(0x7fff * volume * square_wave(frequency / SampleRate * i * 2)));
-    return buffer;
-}
-
-} // namespace
 
 Audio::Audio()
 {
@@ -74,22 +42,26 @@ Audio::~Audio()
 
 void Audio::fillBuffer(int volume, int duration, gsl::span<int const> notes)
 {
-    for (auto const i: notes)
-    {
-        auto b = createMusicalNote(volume, duration, i);
-        _byteArray.append(reinterpret_cast<char const*>(b.data()), static_cast<int>(2 * b.size()));
-    }
+    // The note→PCM assembly is pure (audio::renderNotesToPcm, unit-tested); this only appends the
+    // bytes into the Qt buffer the sink reads from.
+    auto const pcm =
+        audio::renderNotesToPcm(volume, duration, std::span<int const>(notes.data(), notes.size()));
+    _byteArray.append(pcm.data(), static_cast<int>(pcm.size()));
 }
 
 void Audio::handlePlayback(int volume, int duration, std::vector<int> const& notes)
 {
     Require(_audioSink);
-    if (_audioSink->state() == QAudio::State::ActiveState)
-    {
-        fillBuffer(volume, duration, gsl::span(notes.data(), notes.size()));
-        return;
-    }
+
+    // Append the new notes to the shared byte buffer regardless of the sink state.
     fillBuffer(volume, duration, gsl::span(notes.data(), notes.size()));
+
+    // When the sink is already draining the buffer, the appended bytes are picked up in place — do
+    // not re-open the buffer or restart the sink (that would rewind playback). Only prime and start
+    // the sink when it is idle/stopped.
+    if (_audioSink->state() == QAudio::State::ActiveState)
+        return;
+
     _audioBuffer.setBuffer(&_byteArray);
     _audioBuffer.open(QIODevice::ReadWrite);
     _audioSink->start(&_audioBuffer);
@@ -113,11 +85,4 @@ void Audio::handleStateChanged(QAudio::State state)
             break;
         default: break;
     }
-}
-
-std::vector<std::int16_t> Audio::createMusicalNote(double volume, int duration, int note) noexcept
-{
-    Require(static_cast<int>(note) >= 0 && static_cast<int>(note) < 26);
-    double const frequency = note == 0 ? 0 : 440.0 * std::pow(2, (note + 2) / 12.0);
-    return ::createMusicalNote(volume, duration, frequency);
 }

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Config.h>
 #include <contour/ContourGuiApp.h>
+#include <contour/PaneProxy.h>
+#include <contour/QtExternalLauncher.h>
+#include <contour/RenderingBackendSelection.h>
+#include <contour/SessionFactory.h>
+#include <contour/WindowController.h>
+#include <contour/display/ContentScale.h>
 #include <contour/display/TerminalDisplay.h>
 
 #include <vtpty/Process.h>
@@ -24,12 +30,17 @@
 #include <QtMultimedia/QMediaDevices>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
+#include <QtQuick/QQuickWindow>
+#include <QtQuick/QSGRendererInterface>
 #include <QtWidgets/QApplication>
 
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <thread>
 #include <vector>
+
+#include <QtQuickControls2/QQuickStyle>
 
 using std::bind;
 using std::cerr;
@@ -53,7 +64,12 @@ namespace CLI = crispy::cli;
 namespace contour
 {
 
-ContourGuiApp::ContourGuiApp(): _sessionManager(*this)
+ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
+                             std::unique_ptr<ExternalLauncher> externalLauncher):
+    _sessionFactory(sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this)),
+    _externalLauncher(externalLauncher ? std::move(externalLauncher)
+                                       : std::make_unique<QtExternalLauncher>()),
+    _sessionManager(*this, *_sessionFactory)
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
@@ -360,18 +376,12 @@ int ContourGuiApp::terminalGuiAction()
     QGuiApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta, true);
 #endif
 
-    switch (_config.renderer.value().renderingBackend)
-    {
-        case config::RenderingBackend::OpenGL:
-            QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, false);
-            break;
-        case config::RenderingBackend::Software:
-            QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, true);
-            break;
-        case config::RenderingBackend::Default:
-            // Don't do anything.
-            break;
-    }
+    // Software rendering must be requested before the QApplication is constructed. The concrete RHI
+    // graphics API (OpenGL/Vulkan/Direct3D/Metal/auto) is selected further below via
+    // QQuickWindow::setGraphicsApi, once the QApplication exists.
+    QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL,
+                                  _config.renderer.value().renderingBackend
+                                      == config::RenderingBackend::Software);
 
     auto const* profile = _config.profile(profileName());
     if (!profile)
@@ -451,10 +461,47 @@ int ContourGuiApp::terminalGuiAction()
     });
 #endif
 
-    // Enforce OpenGL over any other. As much as I'd love to provide other backends, too.
-    // We currently only support OpenGL.
-    // If anyone feels happy about it, I'd love to at least provide Vulkan. ;-)
-    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    // Pin the Fusion Qt Quick Controls style app-wide so the hand-drawn tab strip, its controls, and the
+    // tab context menu render, blend, and stay readable on every OS. Qt otherwise picks the native style
+    // per platform (e.g. Windows/FluentWinUI3 on Qt 6.7+, whose opaque button chrome and dark-only menu
+    // text clash with our custom palette-driven title bar) or the flat Basic style, neither of which
+    // gives the menu an opaque, themed, readable surface on our transparent window. NB: set
+    // unconditionally — QQuickStyle::name() already resolves to the (non-empty) native default here, so
+    // guarding on it silently skips Fusion.
+    QQuickStyle::setStyle("Fusion");
+
+    // Select the Qt RHI graphics API from the configured renderer backend, before the first
+    // QQuickWindow is created. RenderingBackend::Auto leaves the choice to Qt, which resolves the
+    // platform-native backend (Direct3D 11 on Windows, Metal on macOS, OpenGL on Linux). The renderer
+    // is backend-portable (RhiRenderer uses QRhi::clipSpaceCorrMatrix()/isYUpInFramebuffer(), and the
+    // shaders are compiled for every backend), so no GL-specific assumptions leak through here.
+    auto const graphicsApiFor =
+        [](config::RenderingBackend backend) -> std::optional<QSGRendererInterface::GraphicsApi> {
+        switch (backend)
+        {
+            case config::RenderingBackend::Auto: return std::nullopt;
+            case config::RenderingBackend::OpenGL: return QSGRendererInterface::OpenGL;
+            case config::RenderingBackend::Software: return QSGRendererInterface::OpenGL;
+            case config::RenderingBackend::Vulkan: return QSGRendererInterface::Vulkan;
+            case config::RenderingBackend::Direct3D11: return QSGRendererInterface::Direct3D11;
+            case config::RenderingBackend::Direct3D12: return QSGRendererInterface::Direct3D12;
+            case config::RenderingBackend::Metal: return QSGRendererInterface::Metal;
+        }
+        return std::nullopt;
+    };
+
+    // Resolve the configured backend against what this platform can actually composite (see
+    // RenderingBackendSelection.h): an unavailable backend — including desktop OpenGL on macOS, which
+    // maps a window but never composites the scene graph, leaving the user with an invisible window —
+    // self-heals to Auto so a mis-set config never prevents startup or hangs on a dead window.
+    auto const configuredBackend = _config.renderer.value().renderingBackend;
+    auto const requestedBackend = resolveRenderingBackend(currentRhiPlatform(), configuredBackend);
+    if (requestedBackend != configuredBackend)
+        errorLog()("Renderer backend {} is not available on this platform; falling back to auto.",
+                   configuredBackend);
+
+    if (auto const api = graphicsApiFor(requestedBackend))
+        QQuickWindow::setGraphicsApi(*api);
 
     QGuiApplication::setWindowIcon(QIcon(":/contour/logo-256.png"));
 
@@ -466,7 +513,11 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterType<display::TerminalDisplay>("Contour.Terminal", 1, 0, "ContourTerminal");
     qmlRegisterUncreatableType<TerminalSession>("Contour.Terminal", 1, 0, "TerminalSession", "Use factory.");
     qmlRegisterUncreatableType<TerminalSessionManager>("Contour.Terminal", 1, 0, "TerminalSessionManager", "Do not use me directly.");
+    qmlRegisterUncreatableType<PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
+    qmlRegisterUncreatableType<WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
     qRegisterMetaType<TerminalSession*>("TerminalSession*");
+    qRegisterMetaType<PaneProxy*>("PaneProxy*");
+    qRegisterMetaType<WindowController*>("WindowController*");
     // clang-format on
 
     {
@@ -497,30 +548,12 @@ int ContourGuiApp::terminalGuiAction()
         newWindow();
     }
 
-    auto rv = QApplication::exec();
-
-    if (_exitStatus.has_value())
-    {
-#if defined(VTPTY_LIBSSH2)
-        if (holds_alternative<SshSession::ExitStatus>(*_exitStatus))
-        {
-            auto const sshExitStatus = get<SshSession::ExitStatus>(*_exitStatus);
-            if (holds_alternative<SshSession::NormalExit>(sshExitStatus))
-                rv = get<SshSession::NormalExit>(sshExitStatus).exitCode;
-            else if (holds_alternative<SshSession::SignalExit>(sshExitStatus))
-                rv = EXIT_FAILURE;
-        }
-        else
-#endif
-            if (holds_alternative<Process::ExitStatus>(*_exitStatus))
-        {
-            auto const processExitStatus = get<Process::ExitStatus>(*_exitStatus);
-            if (holds_alternative<Process::NormalExit>(processExitStatus))
-                rv = get<Process::NormalExit>(processExitStatus).exitCode;
-            else if (holds_alternative<Process::SignalExit>(processExitStatus))
-                rv = EXIT_FAILURE;
-        }
-    }
+    // Run the event loop FIRST (it populates _exitStatus via onExit during the run), THEN map that
+    // status to the process exit code. The mapping is the pure exitCodeFor() (ExitCode.h), extracted
+    // so it is unit-testable without the event loop. NB: sequenced explicitly — passing exec() as an
+    // argument alongside _exitStatus would read _exitStatus before the loop populated it.
+    auto const loopResult = QApplication::exec();
+    auto const rv = exitCodeFor(_exitStatus, loopResult);
 
     // Ensure the multimedia warmup thread has finished before destroying Qt objects.
     if (multimediaWarmupThread.joinable())
@@ -583,9 +616,29 @@ void ContourGuiApp::ensureTermInfoFile()
         fs::copy_file(sandboxTerminfoFile, hostTerminfoBaseDirectory / "contour");
 }
 
-void ContourGuiApp::newWindow()
+void ContourGuiApp::newWindow(QScreen* targetScreen)
 {
-    _qmlEngine->load(resolveResource("ui/main.qml"));
+    _pendingSpawnScreen = targetScreen;
+    // The engine is always up when one window spawns another (the GUI is running); the guard makes
+    // the stage/consume contract exercisable headlessly, where no QML engine exists.
+    if (_qmlEngine)
+        _qmlEngine->load(resolveResource("ui/main.qml"));
+}
+
+QScreen* ContourGuiApp::takePendingSpawnScreen() noexcept
+{
+    auto* screen = _pendingSpawnScreen.data();
+    _pendingSpawnScreen.clear();
+    return screen;
+}
+
+display::ForcedFontDpiProvider* ContourGuiApp::forcedFontDpiProvider()
+{
+    // Lazy: the provider inspects QGuiApplication::platformName(), so it must not be constructed before
+    // the Qt application. First use is a display's setSession(), which is well past that point.
+    if (!_forcedFontDpiProvider && QCoreApplication::instance() != nullptr)
+        _forcedFontDpiProvider = std::make_unique<display::ForcedFontDpiProvider>();
+    return _forcedFontDpiProvider.get();
 }
 
 } // namespace contour

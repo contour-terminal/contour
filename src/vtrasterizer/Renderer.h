@@ -80,6 +80,18 @@ class Renderer
     RenderTarget& renderTarget() noexcept { return *_renderTarget; }
     [[nodiscard]] bool hasRenderTarget() const noexcept { return _renderTarget != nullptr; }
 
+    /// Severs this renderer's (and every renderable's) references into the render target BEFORE the
+    /// target is destroyed, when the renderer itself survives the target.
+    ///
+    /// The scene graph destroys and re-creates its context (unexposed-window grabs, GPU loss,
+    /// invalidation on teardown) while the terminal renderer lives on; the display then destroys the
+    /// RenderTarget and later hands the renderer a fresh one. Without this detach, the setup pass in
+    /// between (staged font reconfig -> configureTextureAtlas) dereferences the freed target on the
+    /// render thread — a use-after-free. After detaching, that setup pass behaves exactly like the
+    /// very first pre-target run (its no-target guards apply), and setRenderTarget() re-wires
+    /// everything, atlas included.
+    void detachRenderTarget() noexcept;
+
     bool setFontSize(text::font_size fontSize);
     void updateFontMetrics();
 

@@ -181,6 +181,9 @@ struct MouseConfig
 
 struct IndicatorConfig
 {
+    // The default indicator status line keeps the {Tabs} segment so the in-terminal tab list is still
+    // shown even when the GUI tab strip is hidden or unavailable. (Tabs are also surfaced as first-class
+    // GUI tabs in the window title bar; the two are complementary.)
     std::string left { " {InputMode:Bold,Color=#FFFF00}"
                        "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
                        "{Tabs:ActiveColor=#FFFF00,Left= │ }"
@@ -245,16 +248,26 @@ struct SimpleColorConfig
 
 using ColorConfig = std::variant<SimpleColorConfig, DualColorConfig>;
 
+/// Selects which Qt RHI graphics API drives the terminal display.
+///
+/// @c Auto lets Qt resolve the platform-native backend (Direct3D 11 on Windows, Metal on macOS,
+/// OpenGL on Linux); the remaining values force a specific backend, and @c Software forces a
+/// software-emulated OpenGL rasterizer. A backend that the running platform cannot provide
+/// (e.g. Metal on Windows) falls back to @c Auto with a warning.
 enum class RenderingBackend : uint8_t
 {
-    Default,
-    Software,
+    Auto,
     OpenGL,
+    Vulkan,
+    Direct3D11,
+    Direct3D12,
+    Metal,
+    Software,
 };
 
 struct RendererConfig
 {
-    RenderingBackend renderingBackend { RenderingBackend::Default };
+    RenderingBackend renderingBackend { RenderingBackend::Auto };
     crispy::lru_capacity textureAtlasTileCount { 4000u };
     crispy::strong_hashtable_size textureAtlasHashtableSlots { 4096u };
     bool textureAtlasDirectMapping { false };
@@ -408,7 +421,15 @@ struct TerminalProfile
     ConfigEntry<vtpty::SshHostConfig, documentation::SshHostConfig> ssh {};
     ConfigEntry<bool, documentation::EscapeSandbox> escapeSandbox { true };
     ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
-    ConfigEntry<bool, documentation::ShowTitleBar> showTitleBar { true };
+    // show_title_bar now selects the WINDOW DECORATION: true = native server-side frame (+ the OS's
+    // own min/max/close controls; our tab strip then omits its custom ones), false = frameless with
+    // full client-side decoration (our tab strip draws the controls). Defaults to false so the
+    // out-of-box look is the custom CSD tab strip, matching the prior Linux/Windows appearance.
+    ConfigEntry<bool, documentation::ShowTitleBar> showTitleBar { false };
+    // Blend amount (0.0 = off .. 1.0 = fully background-colored) applied to a pane while it is not
+    // the focused one: an inactive pane of a split, or any pane of an unfocused window. Composited
+    // in QML (TerminalPane.qml); the renderer is untouched.
+    ConfigEntry<double, documentation::DimUnfocused> dimUnfocused { 0.0 };
     ConfigEntry<bool, documentation::ShowIndicatorOnResize> sizeIndicatorOnResize { true };
     ConfigEntry<bool, documentation::Fullscreen> fullscreen { false };
     ConfigEntry<bool, documentation::Maximized> maximized { false };
@@ -469,6 +490,7 @@ struct TerminalProfile
     ConfigEntry<std::vector<HintPatternConfig>, documentation::HintPatterns> hintPatterns {};
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
+    ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{WindowTitle}" };
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 
@@ -535,6 +557,60 @@ const InputMappings defaultInputMappings {
                           .modifiers { vtbackend::Modifier::Shift },
                           .input = vtbackend::Key::RightArrow,
                           .binding = { { actions::SwitchToTabRight {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::LeftArrow,
+                          .binding = { { actions::FocusPaneLeft {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::RightArrow,
+                          .binding = { { actions::FocusPaneRight {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::UpArrow,
+                          .binding = { { actions::FocusPaneUp {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::DownArrow,
+                          .binding = { { actions::FocusPaneDown {} } } },
+        // Ctrl+Alt+Arrow: swap the active pane with its neighbor (the two terminals trade slots).
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                          .input = vtbackend::Key::LeftArrow,
+                          .binding = { { actions::SwapPaneLeft {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                          .input = vtbackend::Key::RightArrow,
+                          .binding = { { actions::SwapPaneRight {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                          .input = vtbackend::Key::UpArrow,
+                          .binding = { { actions::SwapPaneUp {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                          .input = vtbackend::Key::DownArrow,
+                          .binding = { { actions::SwapPaneDown {} } } },
+        // Ctrl+Shift+Alt+Arrow: grow/shrink the active pane by moving the divider in that direction.
+        KeyInputMapping {
+            .modes { vtbackend::MatchModes {} },
+            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+            .input = vtbackend::Key::LeftArrow,
+            .binding = { { actions::ResizePane { .direction = actions::Direction::Left } } } },
+        KeyInputMapping {
+            .modes { vtbackend::MatchModes {} },
+            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+            .input = vtbackend::Key::RightArrow,
+            .binding = { { actions::ResizePane { .direction = actions::Direction::Right } } } },
+        KeyInputMapping {
+            .modes { vtbackend::MatchModes {} },
+            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+            .input = vtbackend::Key::UpArrow,
+            .binding = { { actions::ResizePane { .direction = actions::Direction::Up } } } },
+        KeyInputMapping {
+            .modes { vtbackend::MatchModes {} },
+            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+            .input = vtbackend::Key::DownArrow,
+            .binding = { { actions::ResizePane { .direction = actions::Direction::Down } } } },
         //     KeyInputMapping { .modes { vtbackend::MatchModes {} },
         //                       .modifiers { vtbackend::Modifiers {  vtbackend::Modifier {
         //                       vtbackend::Modifier::Shift }
@@ -594,6 +670,23 @@ const InputMappings defaultInputMappings {
                            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                            .input = 'T',
                            .binding = { { actions::CreateNewTab {} } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'E',
+                           .binding = { { actions::SplitVertical {} } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'O',
+                           .binding = { { actions::SplitHorizontal {} } } },
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'X',
+                           .binding = { { actions::ClosePane {} } } },
+        // Ctrl+Shift+Backslash: flip the active pane's split orientation (horizontal <-> vertical).
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = '\\',
+                           .binding = { { actions::ToggleSplitOrientation {} } } },
         CharInputMapping { .modes { vtbackend::MatchModes {} },
                            .modifiers { vtbackend::Modifier::Alt },
                            .input = '1',
@@ -833,22 +926,44 @@ struct Config
         vtrasterizer::BoxDrawingRenderer::BrailleStyle::Circle
     };
 
+    /// Looks up a profile by name, returning nullptr if none exists — the FALLIBLE lookup for
+    /// runtime input (a keybinding or {ChangeProfile} naming a profile the user may have removed).
+    /// @param name Profile name to find.
+    /// @return The profile, or nullptr if @p name is not configured.
+    [[nodiscard]] TerminalProfile* findProfile(std::string const& name) noexcept
+    {
+        auto i = profiles.value().find(name);
+        return i != profiles.value().end() ? &i->second : nullptr;
+    }
+    /// @copydoc findProfile
+    [[nodiscard]] TerminalProfile const* findProfile(std::string const& name) const noexcept
+    {
+        auto i = profiles.value().find(name);
+        return i != profiles.value().end() ? &i->second : nullptr;
+    }
+
+    /// Looks up a profile by name whose existence is a PRECONDITION (asserts on a miss). Use only
+    /// where the name provably names a configured profile (e.g. the default profile); for runtime
+    /// input use findProfile(), which reports a miss instead of aborting.
+    /// @param name Profile name that must exist.
+    /// @return The profile (never nullptr in a correct program).
     TerminalProfile* profile(std::string const& name) noexcept
     {
         assert(!name.empty());
-        if (auto i = profiles.value().find(name); i != profiles.value().end())
-            return &i->second;
-        assert(false && "Profile not found.");
-        return nullptr;
+        auto* const found = findProfile(name);
+        assert(found != nullptr && "Profile not found.");
+        return found;
     }
 
+    /// @copydoc profile
     [[nodiscard]] TerminalProfile const* profile(std::string const& name) const
     {
         assert(!name.empty());
-        if (auto i = profiles.value().find(name); i != profiles.value().end())
-            return &i->second;
-        assert(false && "Profile not found.");
-        crispy::unreachable();
+        auto const* const found = findProfile(name);
+        assert(found != nullptr && "Profile not found.");
+        if (found == nullptr)
+            crispy::unreachable();
+        return found;
     }
 
     TerminalProfile& profile() noexcept
@@ -1771,8 +1886,12 @@ struct std::formatter<contour::config::RenderingBackend>: formatter<std::string_
         std::string_view name;
         switch (val)
         {
-            case contour::config::RenderingBackend::Default: name = "default"; break;
+            case contour::config::RenderingBackend::Auto: name = "auto"; break;
             case contour::config::RenderingBackend::OpenGL: name = "OpenGL"; break;
+            case contour::config::RenderingBackend::Vulkan: name = "vulkan"; break;
+            case contour::config::RenderingBackend::Direct3D11: name = "direct3d11"; break;
+            case contour::config::RenderingBackend::Direct3D12: name = "direct3d12"; break;
+            case contour::config::RenderingBackend::Metal: name = "metal"; break;
             case contour::config::RenderingBackend::Software: name = "software"; break;
         }
         return formatter<std::string_view>::format(name, ctx);

@@ -606,6 +606,22 @@ class Terminal
         crispy::unreachable();
     }
 
+    /// Clamps a requested total page size to the minimum the backend can accept for the currently
+    /// visible status line, applying exactly the rule resizeScreen() enforces internally.
+    ///
+    /// The main page is derived as `total - statusLineHeight()`, so the total must leave room for at
+    /// least one main-display line on top of the status line(s). Frontend callers use this to keep their
+    /// own bookkeeping (resize early-outs, renderer geometry) in agreement with what resizeScreen() will
+    /// actually apply, rather than re-deriving the `statusLineHeight() + 1` rule at each call site.
+    /// @param requested The requested total page size (main page + status line).
+    /// @return The requested size raised to at least `statusLineHeight() + 1` lines and 1 column.
+    [[nodiscard]] PageSize clampedTotalPageSize(PageSize requested) const noexcept
+    {
+        requested.lines = std::max(requested.lines, statusLineHeight() + LineCount(1));
+        requested.columns = std::max(requested.columns, ColumnCount(1));
+        return requested;
+    }
+
     /// Resizes the terminal screen to the given amount of grid cells with their pixel dimensions.
     /// Important! In case a status line is currently visible, the status line count is being
     /// accumulated into the screen size, too.
@@ -1155,6 +1171,19 @@ class Terminal
     void setWindowTitle(std::string_view title);
     void setTabName(std::string_view title);
     [[nodiscard]] std::string const& windowTitle() const noexcept;
+
+    /// Returns a copy of the raw OS-window title (OSC 0/2), read under _stateMutex.
+    ///
+    /// Unlike windowTitle() — which returns a reference with no lock — this is safe to call from the
+    /// GUI thread: _windowTitle is written on the parser thread under _stateMutex (writeToScreen()
+    /// holds the lock across the whole parse, within which setWindowTitle()/restoreWindowTitle() run).
+    /// A by-value copy is required; a reference handed back after the lock releases would race the
+    /// writer (torn read / use-after-free on string reallocation). Unlike resolvedTabName(), this
+    /// ignores TabsNamingMode and always yields the raw title — for the GUI tab-label {WindowTitle}
+    /// placeholder, which must not depend on the status-line-derived naming mode.
+    /// @return The raw window title.
+    [[nodiscard]] std::string resolvedWindowTitle() const;
+
     [[nodiscard]] std::optional<std::string> tabName() const noexcept;
 
     /// Resolves the indicator status-line tab label for this terminal under a single _stateMutex hold.

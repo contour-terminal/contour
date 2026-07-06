@@ -1,15 +1,39 @@
-uniform highp mat4 vs_projection;                 // projection matrix (flips around the coordinate system)
+#version 440
 
-layout (location = 0) in highp vec3 vs_vertex;    // target vertex coordinates
-layout (location = 1) in highp vec4 vs_texCoords; // 2D-atlas texture coordinates
-layout (location = 2) in highp vec4 vs_colors;    // custom foreground colors
+// Qt RHI (Vulkan-style GLSL) vertex shader for the terminal text/glyph pass.
+//
+// Uniform block layout (std140, binding=0). Shared by text.vert and text.frag so
+// a single uniform buffer feeds both stages.
+//
+//   field               | type   | std140 offset | size (bytes)
+//   --------------------+--------+---------------+-------------
+//   u_transform         | mat4   |  0            | 64
+//   u_time              | float  | 64            |  4
+//   pixel_x             | float  | 68            |  4
+//   (pad before vec4)   |        | 72            |  8   (vec4 needs 16-byte align)
+//   u_textOutlineColor  | vec4   | 80            | 16
+//                       |        | (block size = 96)
+//
+// u_transform is the item-local -> clip-space matrix (formerly vs_projection).
+layout(std140, binding = 0) uniform Buf
+{
+    mat4 u_transform;
+    float u_time;
+    float pixel_x;
+    vec4 u_textOutlineColor;
+}
+ubuf;
 
-out highp vec4 fs_TexCoord;
-out highp vec4 fs_textColor;
+layout(location = 0) in vec3 vs_vertex;    // target vertex coordinates
+layout(location = 1) in vec4 vs_texCoords; // 2D-atlas texture coordinates
+layout(location = 2) in vec4 vs_colors;    // custom foreground colors
+
+layout(location = 0) out vec4 fs_TexCoord;
+layout(location = 1) out vec4 fs_textColor;
 
 void main()
 {
-    gl_Position = vs_projection * vec4(vs_vertex.xyz, 1.0);
+    gl_Position = ubuf.u_transform * vec4(vs_vertex.xyz, 1.0);
 
     fs_TexCoord = vs_texCoords;
     fs_textColor = vs_colors;

@@ -252,12 +252,12 @@ install_deps_ubuntu() {
             qml6-module-qt5compat-graphicaleffects
             qt6-base-dev
             qt6-base-dev-tools
+            qt6-base-private-dev
             qt6-declarative-dev
             qt6-multimedia-dev
-            qt6-multimedia-dev
             qt6-qpa-plugins
+            qt6-shadertools-dev
             qt6-wayland-dev
-            qt6-wayland-dev-tools
             libwayland-dev
             wayland-protocols
         "
@@ -289,6 +289,15 @@ install_deps_ubuntu() {
         if [ "$RELEASE" = "23.04" ]; then
             packages="$packages qml6-moduile-qtquick3d-spatialaudio"
         fi
+        # qt6-wayland-dev-tools (the qtwaylandscanner tool) is a separate package up to Ubuntu 24.04;
+        # from 25.04/26.04 it is folded into qt6-wayland-dev and the standalone package no longer has
+        # an installation candidate (which would fail the whole `apt install` batch). Only request it
+        # on the releases that still ship it.
+        case "$RELEASE" in
+            "22.04" | "22.10" | "23.04" | "23.10" | "24.04" | "24.10")
+                packages="$packages qt6-wayland-dev-tools"
+                ;;
+        esac
     fi
 
     fetch_and_unpack_gsl

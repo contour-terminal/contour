@@ -1,0 +1,902 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <contour/ColorConversion.h>
+#include <contour/ContourGuiApp.h>
+#include <contour/PaneProxy.h>
+#include <contour/TabColorScheme.h>
+#include <contour/TabLabel.h>
+#include <contour/TerminalSession.h>
+#include <contour/TerminalSessionManager.h>
+#include <contour/WindowController.h>
+#include <contour/helper.h>
+
+#include <QtGui/QCursor>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QScreen>
+#include <QtQml/QQmlEngine>
+
+#include <ranges>
+
+#include <vtmux/Pane.h>
+#include <vtmux/PaneLayout.h>
+#include <vtmux/SessionModel.h>
+#include <vtmux/Tab.h>
+
+namespace contour
+{
+
+WindowController::WindowController(TerminalSessionManager& manager, vtmux::WindowId windowId) noexcept:
+    _manager { manager }, _windowId { windowId }
+{
+}
+
+WindowController::~WindowController() = default;
+
+vtmux::Window* WindowController::window() const noexcept
+{
+    // Resolve the backing vtmux::Window strictly by this controller's own WindowId, so each controller
+    // adapts exactly its window (correct for N windows). For the first controller this is the same object
+    // the manager's ctor minted as _modelWindow.
+    return _manager.model().window(_windowId);
+}
+
+vtmux::Tab* WindowController::activeModelTab() const noexcept
+{
+    auto* win = window();
+    return win != nullptr ? win->activeTab() : nullptr;
+}
+
+vtmux::Tab* WindowController::tabAtRow(int index) const noexcept
+{
+    auto* win = window();
+    return win != nullptr ? win->tabAt(index) : nullptr;
+}
+
+int WindowController::rowOfTab(vtmux::TabId tab) const noexcept
+{
+    auto* win = window();
+    return win != nullptr ? win->indexOf(tab) : -1;
+}
+
+// {{{ QAbstractListModel
+QHash<int, QByteArray> WindowController::roleNames() const
+{
+    return {
+        { Qt::DisplayRole, "display" }, { TitleRole, "title" },         { ColorRole, "accentColor" },
+        { IsActiveRole, "isActive" },   { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
+        { RawTitleRole, "rawTitle" },
+    };
+}
+
+QVariant WindowController::data(QModelIndex const& index, int role) const
+{
+    auto const row = index.row();
+    if (row < 0 || row >= rowCount())
+        return {};
+
+    auto* tab = tabAtRow(row);
+    auto* session = tab != nullptr ? _manager.sessionForId(tab->activePane()->session()) : nullptr;
+
+    switch (role)
+    {
+        case Qt::DisplayRole:
+        case SessionIdRole: return session != nullptr ? QVariant(session->id()) : QVariant {};
+        case TitleRole: return resolvedTabLabel(tab, session, row);
+        case RawTitleRole:
+            return tab != nullptr ? QString::fromStdString(tab->runtimeTitle().value_or("")) : QString {};
+        case ColorRole:
+            if (tab != nullptr && tab->color().has_value())
+                return toQColor(*tab->color());
+            return QColor(Qt::transparent);
+        case IsActiveRole: return row == activeTabIndex();
+        case PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
+        default: return {};
+    }
+}
+
+int WindowController::rowCount(QModelIndex const& parent) const
+{
+    Q_UNUSED(parent);
+    auto* win = window();
+    return win != nullptr ? win->tabCount() : 0;
+}
+// }}}
+
+int WindowController::count() const noexcept
+{
+    auto* win = window();
+    return win != nullptr ? win->tabCount() : 0;
+}
+
+int WindowController::activeTabIndex() const noexcept
+{
+    auto* win = window();
+    return win != nullptr ? win->activeTabIndex() : -1;
+}
+
+QString WindowController::resolvedTabLabel(vtmux::Tab* tab, TerminalSession* session, int row) const
+{
+    if (tab == nullptr)
+        return session != nullptr ? QString::fromStdString(session->name().value_or("")) : QString {};
+
+    auto const windowTitle = session != nullptr ? session->resolvedWindowTitle() : std::string {};
+
+    auto templ = std::string_view {};
+    if (auto const& renamed = tab->runtimeTitle(); renamed.has_value())
+        templ = *renamed;
+    else if (tab->hasMultiplePanes())
+        templ = vtmux::Tab::MultiplePanesLabel;
+    else if (session != nullptr)
+        templ = session->profile().tabLabel.value();
+    else
+        return QString::fromStdString(windowTitle);
+
+    return QString::fromStdString(
+        expandTabLabel(templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle }));
+}
+
+// {{{ Tab-strip invokables — structural/session-lifetime ops delegate to the manager, tagged with
+// THIS window's id, so the same operation issued from any OS window targets that window's tabs.
+// Pure per-tab attributes (title, color) resolve the tab locally and write the model directly.
+void WindowController::createNewTab()
+{
+    _manager.createNewTab(_windowId);
+}
+
+void WindowController::activateTab(int index)
+{
+    _manager.activateTab(_windowId, index);
+}
+
+void WindowController::moveTab(int fromIndex, int toIndex)
+{
+    _manager.moveTab(_windowId, fromIndex, toIndex);
+}
+
+void WindowController::moveTabIntoThisWindow(quint64 sourceWindowId, int fromIndex, int toIndex)
+{
+    _manager.moveTabToWindow(vtmux::WindowId { sourceWindowId }, fromIndex, _windowId, toIndex);
+}
+
+void WindowController::tearOffTab(int index)
+{
+    // Open the new window on this window's current screen (the best pre-show DPR predictor), matching
+    // how spawning a new terminal picks the spawning window's screen.
+    _manager.tearOffTabToNewWindow(_windowId, index, _osWindow != nullptr ? _osWindow->screen() : nullptr);
+}
+
+void WindowController::setTabTitle(int index, QString const& title)
+{
+    if (auto* tab = tabAtRow(index); tab != nullptr)
+        _manager.model().setTabTitle(tab->id(), title.toStdString());
+}
+
+void WindowController::resetTabTitle(int index)
+{
+    if (auto* tab = tabAtRow(index); tab != nullptr)
+        _manager.model().resetTabTitle(tab->id());
+}
+
+void WindowController::setTabColor(int index, QColor const& color)
+{
+    if (auto* tab = tabAtRow(index); tab != nullptr)
+        _manager.model().setTabColor(tab->id(), toRGBColor(color));
+}
+
+void WindowController::resetTabColor(int index)
+{
+    if (auto* tab = tabAtRow(index); tab != nullptr)
+        _manager.model().resetTabColor(tab->id());
+}
+
+void WindowController::closeTabAtIndex(int index)
+{
+    _manager.closeTabAtIndex(_windowId, index);
+}
+
+void WindowController::closeOtherTabs(int index)
+{
+    _manager.closeOtherTabs(_windowId, index);
+}
+
+void WindowController::closeTabsToRight(int index)
+{
+    _manager.closeTabsToRight(_windowId, index);
+}
+
+QVariantList WindowController::tabColorPalette() const
+{
+    return _manager.tabColorPalette();
+}
+
+namespace
+{
+    /// Maps the two focus axes (tab-active, window-active) plus hover to a single tab visual state.
+    [[nodiscard]] TabVisualState tabVisualStateFor(bool active, bool hovered, bool windowActive) noexcept
+    {
+        if (active)
+            return TabVisualState::Active;
+        if (hovered)
+            return TabVisualState::Hover;
+        return windowActive ? TabVisualState::Inactive : TabVisualState::InactiveWindowUnfocused;
+    }
+} // namespace
+
+QColor WindowController::tabBackgroundColor(QColor const& tabColor,
+                                            QColor const& rowBackground,
+                                            bool const active,
+                                            bool const hovered,
+                                            bool const windowActive) const
+{
+    auto const state = tabVisualStateFor(active, hovered, windowActive);
+    return toQColor(contour::tabBackgroundColor(toRGBColor(tabColor), toRGBColor(rowBackground), state));
+}
+
+QColor WindowController::tabTextColor(QColor const& tabBackground) const
+{
+    return toQColor(contrastingTextColor(toRGBColor(tabBackground)));
+}
+
+void WindowController::closeWindow()
+{
+    // Re-entry guard: the _osWindow->close() at the end fires QML's `onClosing`, which calls back into
+    // closeWindow(). Run the teardown exactly once regardless of which door started the close (the user
+    // clicking the window's close button -> onClosing -> here, OR a programmatic close of a window whose
+    // last tab was dragged away -> here -> close() -> onClosing -> here again).
+    if (_closing)
+        return;
+    _closing = true;
+
+    // Tear down THIS OS window on real per-window identity (no _displayStates / QQuickWindow grouping).
+    // Ordering matters: gather this window's sessions BEFORE removing the model window, remove the model
+    // window (which fires tabClosed -> onTabClosed row removal), explicitly prune our own PaneProxy tree
+    // (removeWindow does NOT fire activeTabChanged for the final index-0 tab, so the rebuild that would
+    // prune the tree never runs — clear it here or _activeTabRootProxy keeps a cached Pane* into the
+    // just-freed model tree), then terminate the gathered sessions (their sessionClosed -> removeSession
+    // degrades to local registry cleanup because their tabs are already gone), and finally close the OS
+    // window and ask the manager to drop this controller.
+    auto* win = window();
+    std::vector<TerminalSession*> doomed;
+    if (win != nullptr)
+        for (auto const row: std::views::iota(0, win->tabCount()))
+            if (auto* tab = win->tabAt(row); tab != nullptr)
+                for (auto* session: _manager.sessionsOfTab(tab))
+                    doomed.push_back(session);
+
+    _manager.model().removeWindow(_windowId);
+
+    // Prune our PaneProxy tree explicitly (see above): clear each cached Pane* first so any getter that
+    // runs before deleteLater() takes effect sees no stale pointer, then drop the root.
+    for (auto const& [id, proxy]: _paneProxies)
+    {
+        proxy->setPane(nullptr, vtmux::TabId {});
+        proxy->deleteLater();
+    }
+    _paneProxies.clear();
+    if (_activeTabRootProxy != nullptr)
+    {
+        _activeTabRootProxy = nullptr;
+        emit activeTabRootPaneChanged();
+    }
+
+    _manager.terminate(doomed);
+
+    // Close the OS window itself. When the user clicked the close button, the QQuickWindow is already
+    // closing and this is a harmless no-op; when we got here programmatically (an emptied window after a
+    // tab was dragged out), this is what actually removes the lingering window — otherwise its title bar
+    // / tab strip stays on screen as a ghost. The re-entrant onClosing -> closeWindow() is absorbed by
+    // the _closing guard above.
+    if (_osWindow != nullptr)
+        _osWindow->close();
+
+    // Drop this controller from the manager registry (and, if it was the last window, the manager clears
+    // its shared session registries). Must be last — it deleteLater()s this object.
+    _manager.removeWindowController(_windowId);
+}
+
+bool WindowController::canCloseWindow() const noexcept
+{
+    // Per-window: the window may close only when THIS window has no remaining pane sessions. onTerminated
+    // runs AFTER removeSession has erased the closing pane's session and collapsed its split, so an empty
+    // session set for this window means that was its last pane; while any pane remains the split just
+    // collapsed and the window stays open. Counting only THIS window's sessions (not all sessions) is what
+    // lets the last pane of window A close A while window B still has sessions.
+    auto* win = window();
+    if (win == nullptr)
+        return true;
+    for (auto const row: std::views::iota(0, win->tabCount()))
+        if (auto* tab = win->tabAt(row); tab != nullptr)
+            if (!_manager.sessionsOfTab(tab).empty())
+                return false;
+    return true;
+}
+// }}}
+
+// {{{ Window-service reads
+TerminalSession* WindowController::activeSession() const noexcept
+{
+    if (auto* tab = activeModelTab())
+        if (auto* active = tab->activePane())
+            if (auto* session = _manager.sessionForId(active->session()))
+                return session;
+    return nullptr;
+}
+
+bool WindowController::titleBarVisible() const noexcept
+{
+    return _titleBarVisible;
+}
+
+void WindowController::seedTitleBarVisible(bool visible)
+{
+    // First-write-wins: the seed arrives from TerminalDisplay::setSession/handleWindowChanged on EVERY
+    // session rebind (tab switch, split collapse), but only the first one carries the window's initial
+    // profile value — later ones must not reset a runtime ToggleTitleBar.
+    if (_titleBarSeeded)
+        return;
+    _titleBarSeeded = true;
+    setTitleBarVisible(visible);
+}
+
+void WindowController::setTitleBarVisible(bool visible)
+{
+    // Apply the native window-frame decoration unconditionally (not only on change) so a seed
+    // re-asserts the frame on a freshly adopted window even when the value already matched: shown =>
+    // keep the native frame, hidden => frameless so the custom client-side TitleBar is the only
+    // decoration. This is the C++ counterpart of main.qml's `flags` binding (both keyed on the same
+    // titleBarVisible value); main.qml drops our custom min/max/close controls whenever the native
+    // frame shows, so the two decorations never stack.
+    if (_osWindow != nullptr)
+        _osWindow->setFlag(Qt::FramelessWindowHint, !visible);
+
+    if (_titleBarVisible == visible)
+        return;
+    _titleBarVisible = visible;
+    emit titleBarVisibleChanged();
+}
+
+void WindowController::toggleTitleBar()
+{
+    // Under client-side decoration the title bar is our custom QML TitleBar, not the OS frame; toggling
+    // flips the custom bar's visibility and the window stays frameless. On macOS (native frame kept)
+    // setTitleBarVisible() drives the frame itself. Window-scoped: a toggle from any pane flips the
+    // whole window and survives pane-focus changes and tab switches.
+    setTitleBarVisible(!_titleBarVisible);
+}
+
+bool WindowController::isMultimediaReady() const noexcept
+{
+    return _manager.isMultimediaReady();
+}
+// }}}
+
+void WindowController::focusDisplay(display::TerminalDisplay* display)
+{
+    // No per-display state bridging: the window services (titleBarVisible & friends) are controller-owned
+    // window state now, so they neither change nor need re-notifying when the focused pane changes.
+    _activeDisplay = display;
+
+    // Adopt this display's OS window the first time one focuses in, so the manager can later route a
+    // focus/close for that window to this controller (ownsOSWindow). (bindWindow() normally already did
+    // this at spawn; this covers displays re-homed across windows.)
+    if (display != nullptr && display->window() != nullptr)
+        _osWindow = display->window();
+}
+
+// {{{ Window-geometry authority
+void WindowController::bindWindow(QQuickWindow* osWindow)
+{
+    if (osWindow == nullptr)
+        return;
+
+    _osWindow = osWindow;
+
+    // Assign the pre-show target screen — the DPR predictor for the headless cell metrics. Order:
+    // the spawning window's screen (staged by ContourGuiApp::newWindow), else the screen under the
+    // cursor (where WMs place new windows; not globally meaningful on Wayland), else Qt's default
+    // (the primary screen).
+    auto* target = _manager.app().takePendingSpawnScreen();
+    if (target == nullptr && QGuiApplication::platformName() != QStringLiteral("wayland"))
+        target = QGuiApplication::screenAt(QCursor::pos());
+    if (target != nullptr)
+        osWindow->setScreen(target);
+
+    // Scale-settlement hooks: QEvent::DevicePixelRatioChange is the only reliable per-window DPR
+    // signal (it is how a late Wayland fractional scale or a KDE integer->fractional correction
+    // arrives); screenChanged covers mixed-DPR monitor moves.
+    osWindow->installEventFilter(this);
+    connect(osWindow,
+            &QWindow::screenChanged,
+            this,
+            &WindowController::onWindowScaleMaybeChanged,
+            Qt::UniqueConnection);
+}
+
+void WindowController::showInitial()
+{
+    if (_osWindow == nullptr)
+        return;
+
+    auto* session = activeSession();
+    auto* display = session != nullptr ? session->display() : nullptr;
+
+    if (display == nullptr || !display->hasSession())
+    {
+        // Never leave the user windowless: map at whatever size the window has.
+        displayLog()("showInitial: no display metrics available; showing at default size.");
+        _osWindow->show();
+        return;
+    }
+
+    // Size the still-unmapped window from the REAL cell metrics (headless FreeType math, done during
+    // session attach) at the target screen's resolved scale, so the first map is the final geometry.
+    auto const scale = display->contentScale();
+    auto const marginsDevice = geometry::scaled(toGeometryMargins(session->profile().margins.value()), scale);
+    auto const totalPage = session->terminal().totalPageSize();
+    auto const size =
+        geometry::windowSizeForPage(totalPage, display->cellSize(), marginsDevice, scale, chrome());
+
+    displayLog()("Initial window size {}x{} (page {}, cell {}, scale {}, chrome {}).",
+                 size.width,
+                 size.height,
+                 totalPage,
+                 display->cellSize(),
+                 scale,
+                 _chromeHeight);
+    _osWindow->resize(size.width, size.height);
+    _lastAppliedScale = scale;
+
+    // First map lands directly in the profile's window state (no post-map normal->maximized jump).
+    if (session->profile().fullscreen.value())
+        setWindowFullScreen(*display);
+    else if (session->profile().maximized.value())
+        setWindowMaximized(*display);
+    else
+        setWindowNormal(*display);
+}
+
+bool WindowController::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == _osWindow && event->type() == QEvent::DevicePixelRatioChange)
+        onWindowScaleMaybeChanged();
+    return QAbstractListModel::eventFilter(watched, event);
+}
+
+void WindowController::onWindowScaleMaybeChanged()
+{
+    auto* session = activeSession();
+    auto* display = session != nullptr ? session->display() : nullptr;
+    if (display == nullptr || !display->hasSession())
+        return;
+
+    auto const newScale = display->contentScale();
+    if (newScale == _lastAppliedScale)
+        return; // idempotence latch: absorbs signal storms and self-induced echoes
+    _lastAppliedScale = newScale;
+
+    auto const pageBefore = session->terminal().totalPageSize();
+    displayLog()("Content scale settled to {} (page {}).", newScale, pageBefore);
+
+    // New scale => new font DPI => new cell size; this reflows the grid in place (unconditionally
+    // correct: the grid always fits the item) and guarantees cellSize() is fresh even when the scale
+    // settles before the first frame (no render target yet) — the corrective resize below must not
+    // compute from stale metrics.
+    display->applyContentScaleChange();
+
+    // Grid-preserving settlement: ONE corrective window resize restoring the page at the new cell
+    // size — cells scale uniformly across all panes of the window, so fixed split ratios preserve
+    // every pane's grid. Skipped while our own content-driven resize is in flight (a window
+    // straddling mixed-DPR monitors could otherwise answer its own resize forever) and in
+    // fullscreen/maximized (never resize those; the reflow stands).
+    if (_inContentDrivenResize)
+        return;
+    if (_osWindow != nullptr && _osWindow->visibility() == QQuickWindow::Visibility::Windowed)
+        resizeWindowForPage(*display, pageBefore);
+}
+
+QQuickWindow* WindowController::osWindowFor(display::TerminalDisplay& requester) noexcept
+{
+    auto* requesterWindow = requester.window();
+    if (_osWindow == nullptr && requesterWindow != nullptr)
+        _osWindow = requesterWindow;
+    return requesterWindow != nullptr ? requesterWindow : _osWindow;
+}
+
+void WindowController::setChromeHeight(int height)
+{
+    if (_chromeHeight == height)
+        return;
+    _chromeHeight = height;
+    emit chromeHeightChanged();
+    if (_activeDisplay != nullptr)
+        updateSizeHintsFor(*_activeDisplay);
+}
+
+void WindowController::updateSizeHintsFor(display::TerminalDisplay& requester)
+{
+    auto* osWindow = osWindowFor(requester);
+    if (osWindow == nullptr || !requester.hasSession())
+        return;
+
+    auto const scale = requester.contentScale();
+    auto const cellSize = requester.cellSize();
+    auto const margins = toGeometryMargins(requester.session().profile().margins.value());
+    auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome());
+
+    // Apply only the hints this platform can safely honor. macOS omits base + increment: Qt's Cocoa
+    // plugin writes the base size straight into `-[NSWindow setFrame:]`, so a small base HARD-RESIZES the
+    // freshly-mapped window to title-bar-only — the invisible-window regression. See sizeHintPolicyFor().
+    auto const policy = geometry::sizeHintPolicyFor(geometry::currentSizeHintPlatform());
+    if (policy.applyMinimum)
+        osWindow->setMinimumSize(QSize(hints.minimum.width, hints.minimum.height));
+    if (policy.applyBase)
+        osWindow->setBaseSize(QSize(hints.base.width, hints.base.height));
+    if (policy.applyIncrement)
+        osWindow->setSizeIncrement(QSize(hints.increment.width, hints.increment.height));
+
+    displayLog()("Size hints: min={}x{}, base={}x{}, increment={}x{} (cellSize={}, scale={}, chrome={})",
+                 hints.minimum.width,
+                 hints.minimum.height,
+                 hints.base.width,
+                 hints.base.height,
+                 hints.increment.width,
+                 hints.increment.height,
+                 cellSize,
+                 scale,
+                 _chromeHeight);
+}
+
+namespace
+{
+    /// Shows @p osWindow in a non-normal state: WM size increments only make sense for interactive
+    /// resizes of a normal window, so clear them first (setWindowNormal()'s hint refresh restores them).
+    void showWithoutSizeIncrements(QQuickWindow& osWindow, void (QWindow::*show)())
+    {
+        osWindow.setSizeIncrement(QSize(0, 0));
+        (osWindow.*show)();
+    }
+} // namespace
+
+void WindowController::setWindowFullScreen(display::TerminalDisplay& requester)
+{
+    auto* osWindow = osWindowFor(requester);
+    if (osWindow == nullptr)
+        return;
+    showWithoutSizeIncrements(*osWindow, &QWindow::showFullScreen);
+}
+
+void WindowController::setWindowMaximized(display::TerminalDisplay& requester)
+{
+    auto* osWindow = osWindowFor(requester);
+    if (osWindow == nullptr)
+        return;
+    showWithoutSizeIncrements(*osWindow, &QWindow::showMaximized);
+    _maximizedState = true;
+}
+
+void WindowController::setWindowNormal(display::TerminalDisplay& requester)
+{
+    auto* osWindow = osWindowFor(requester);
+    if (osWindow == nullptr)
+        return;
+    updateSizeHintsFor(requester);
+    osWindow->showNormal();
+    _maximizedState = false;
+}
+
+void WindowController::toggleMaximized()
+{
+    if (_osWindow == nullptr)
+        return;
+    // Route through the show-mode protocol: maximizing must clear the WM size increments (a WM that
+    // honors PResizeInc in non-normal states would otherwise leave a sub-cell gap around the maximized
+    // window), and restoring must re-apply the interactive-resize hints (else resizing stops snapping
+    // to the character grid until an unrelated font/DPI event refreshes them). Direct
+    // QWindow::showMaximized()/showNormal() calls skip both, hence this invokable for QML. The
+    // display-less fallbacks cover the pre-first-focus window, where no hints exist to maintain yet.
+    if (_osWindow->visibility() == QQuickWindow::Visibility::Maximized)
+    {
+        if (_activeDisplay != nullptr)
+            setWindowNormal(*_activeDisplay);
+        else
+            _osWindow->showNormal();
+    }
+    else
+    {
+        if (_activeDisplay != nullptr)
+            setWindowMaximized(*_activeDisplay);
+        else
+        {
+            showWithoutSizeIncrements(*_osWindow, &QWindow::showMaximized);
+            _maximizedState = true;
+        }
+    }
+}
+
+void WindowController::minimizeWindow()
+{
+    if (_osWindow != nullptr)
+        _osWindow->showMinimized();
+}
+
+bool WindowController::resizeWindowForPage(display::TerminalDisplay& requester,
+                                           vtbackend::PageSize totalPageSize)
+{
+    if (!requester.hasSession())
+        return false;
+
+    auto const scale = requester.contentScale();
+    auto const marginsDevice =
+        geometry::scaled(toGeometryMargins(requester.session().profile().margins.value()), scale);
+    // The pane's requirement as a logical extent (ceil side of the rounding law; chrome added later).
+    auto const leafLogical = geometry::windowSizeForPage(
+        totalPageSize, requester.cellSize(), marginsDevice, scale, geometry::Chrome {});
+    return applyContentDrivenResize(requester, leafLogical);
+}
+
+bool WindowController::resizeWindowForContentPixels(display::TerminalDisplay& requester,
+                                                    vtbackend::ImageSize contentDevicePx)
+{
+    if (!requester.hasSession())
+        return false;
+    return applyContentDrivenResize(
+        requester, geometry::logicalSizeForDevicePixels(contentDevicePx, requester.contentScale()));
+}
+
+bool WindowController::applyContentDrivenResize(display::TerminalDisplay& requester,
+                                                geometry::LogicalSize leafContentLogical)
+{
+    auto* osWindow = osWindowFor(requester);
+    if (osWindow == nullptr)
+        return false;
+
+    if (osWindow->visibility() == QQuickWindow::Visibility::FullScreen
+        || osWindow->visibility() == QQuickWindow::Visibility::Maximized)
+    {
+        displayLog()("Refusing content-driven window resize while fullscreen/maximized.");
+        return false;
+    }
+
+    // Solve the pane tree: the content area must be large enough that THIS leaf receives its
+    // requirement at fixed split ratios (identity for an unsplit tab).
+    auto* tab = activeModelTab();
+    auto* leaf = tab != nullptr && tab->rootPane() != nullptr && requester.hasSession()
+                     ? tab->rootPane()->findLeaf(requester.session().modelSessionId())
+                     : nullptr;
+    if (leaf == nullptr)
+    {
+        displayLog()("Refusing content-driven window resize: requesting pane is not in the active tab.");
+        return false;
+    }
+
+    // PaneNode.qml's explicit `handle:` binds its thickness to the same constant (via the session
+    // manager's splitHandleThickness property), so solver and rendered handle cannot diverge.
+    auto const content = vtmux::contentSizeForLeaf(
+        *leaf,
+        vtmux::LayoutSize { .width = leafContentLogical.width, .height = leafContentLogical.height },
+        vtmux::DefaultSplitHandleThickness);
+
+    displayLog()("Content-driven window resize: leaf {}x{} -> content {}x{} + {} chrome.",
+                 leafContentLogical.width,
+                 leafContentLogical.height,
+                 content.width,
+                 content.height,
+                 _chromeHeight);
+
+    // Straddle guard for the DPR-settlement handler: a resize can move the window's center across a
+    // mixed-DPR monitor boundary, whose DevicePixelRatioChange must NOT answer with another resize.
+    // The flag covers the synchronous effects; the queued reset re-arms after the event settles.
+    _inContentDrivenResize = true;
+    osWindow->resize(content.width, content.height + _chromeHeight);
+    QMetaObject::invokeMethod(this, [this]() { _inContentDrivenResize = false; }, Qt::QueuedConnection);
+    return true;
+}
+
+void WindowController::toggleFullScreen(display::TerminalDisplay& requester)
+{
+    auto* osWindow = osWindowFor(requester);
+    if (osWindow == nullptr)
+        return;
+
+    if (osWindow->visibility() != QQuickWindow::Visibility::FullScreen)
+    {
+        // Remember whether to restore into maximized on the way out.
+        _maximizedState = osWindow->visibility() == QQuickWindow::Visibility::Maximized;
+        showWithoutSizeIncrements(*osWindow, &QWindow::showFullScreen);
+    }
+    else if (_maximizedState)
+    {
+        showWithoutSizeIncrements(*osWindow, &QWindow::showMaximized);
+    }
+    else
+    {
+        updateSizeHintsFor(requester);
+        osWindow->showNormal();
+    }
+}
+// }}}
+
+void WindowController::onDisplayDetached(display::TerminalDisplay* display) noexcept
+{
+    if (_activeDisplay == display)
+        _activeDisplay = nullptr;
+}
+
+// {{{ PaneProxy tree
+PaneProxy* WindowController::getProxy(vtmux::PaneId id)
+{
+    auto it = _paneProxies.find(id.value);
+    if (it != _paneProxies.end())
+        return it->second;
+    auto* proxy = new PaneProxy(_manager, id);
+    // Parent the proxy to this controller: the rebuild/close paths deleteLater() pruned proxies
+    // explicitly, but a controller torn down through removeWindowController() alone (without a
+    // preceding closeWindow(), e.g. in tests) would otherwise strand its live proxies.
+    proxy->setParent(this);
+    QQmlEngine::setObjectOwnership(proxy, QQmlEngine::CppOwnership);
+    _paneProxies[id.value] = proxy;
+    return proxy;
+}
+
+void WindowController::rebuildActiveTabPaneProxies()
+{
+    vtmux::Tab* tab = activeModelTab();
+
+    std::unordered_map<uint64_t, vtmux::Pane*> live;
+    if (tab != nullptr)
+        tab->rootPane()->walkTree([&](vtmux::Pane& p) { live[p.id().value] = &p; });
+
+    for (auto const& [idValue, p]: live)
+    {
+        auto* proxy = getProxy(vtmux::PaneId { idValue });
+        // live is only populated when tab != nullptr, so tab->id() is safe here. The tab id keys the
+        // proxy's write-backs (setRatio/activate) to exactly this tab.
+        proxy->setPane(p, tab->id());
+        if (p->isLeaf())
+            proxy->setChildren(nullptr, nullptr);
+        else
+            proxy->setChildren(getProxy(p->first()->id()), getProxy(p->second()->id()));
+        proxy->notifyChanged();
+        proxy->notifyActiveChanged();
+    }
+
+    for (auto it = _paneProxies.begin(); it != _paneProxies.end();)
+    {
+        if (!live.contains(it->first))
+        {
+            it->second->setPane(nullptr, vtmux::TabId {});
+            it->second->deleteLater();
+            it = _paneProxies.erase(it);
+        }
+        else
+            ++it;
+    }
+
+    auto* newRoot = tab != nullptr ? getProxy(tab->rootPane()->id()) : nullptr;
+    if (newRoot != _activeTabRootProxy)
+    {
+        _activeTabRootProxy = newRoot;
+        emit activeTabRootPaneChanged();
+        emit activeSessionChanged();
+    }
+}
+
+void WindowController::notifyActivePaneChanged()
+{
+    for (auto const& [id, proxy]: _paneProxies)
+        proxy->notifyActiveChanged();
+}
+
+void WindowController::notifyRatioChanged(vtmux::PaneId splitNode)
+{
+    if (auto const it = _paneProxies.find(splitNode.value); it != _paneProxies.end())
+        it->second->notifyRatioChanged();
+}
+// }}}
+
+// {{{ ModelEvents hooks (Qt row/signal emissions on THIS controller's list-model)
+void WindowController::onTabAboutToBeAdded(int index)
+{
+    beginInsertRows(QModelIndex(), index, index);
+}
+
+void WindowController::onTabAdded(int)
+{
+    endInsertRows();
+    emit countChanged();
+    refreshAllTabTitles();
+}
+
+void WindowController::onTabAboutToBeRemoved(int index)
+{
+    beginRemoveRows(QModelIndex(), index, index);
+}
+
+void WindowController::onTabClosed()
+{
+    endRemoveRows();
+    emit countChanged();
+    emit activeTabIndexChanged();
+    refreshAllTabTitles();
+}
+
+void WindowController::onTabAboutToBeMoved(int fromIndex, int toIndex)
+{
+    auto const destination = toIndex > fromIndex ? toIndex + 1 : toIndex;
+    _tabMoveInProgress = beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), destination);
+}
+
+void WindowController::onTabMoved()
+{
+    if (_tabMoveInProgress)
+    {
+        endMoveRows();
+        _tabMoveInProgress = false;
+    }
+    emit activeTabIndexChanged();
+    refreshAllTabTitles();
+}
+
+void WindowController::onActiveTabChanged()
+{
+    emit activeTabIndexChanged();
+    refreshActiveTabHighlight();
+    rebuildActiveTabPaneProxies();
+}
+
+void WindowController::notifyTabRowChanged(vtmux::TabId tab, QList<int> const& roles)
+{
+    if (auto const row = rowOfTab(tab); row >= 0)
+        emit dataChanged(index(row), index(row), roles);
+}
+
+void WindowController::refreshActiveTabHighlight()
+{
+    if (auto const rows = rowCount(); rows > 0)
+        emit dataChanged(index(0), index(rows - 1), { IsActiveRole });
+}
+
+void WindowController::refreshAllTabTitles()
+{
+    if (auto const rows = rowCount(); rows > 0)
+        emit dataChanged(index(0), index(rows - 1), { TitleRole });
+}
+
+void WindowController::updateStatusLine()
+{
+    // Per-window status-line fan-out (no _displayStates). Build THIS window's tab list once (identical for
+    // every pane in the window), then publish it into every visible leaf session of every tab, with the
+    // active-tab marker computed PER TAB — so each pane's indicator status line highlights the tab it
+    // belongs to, and a rename/recolor in a background window still refreshes that window's status line.
+    auto* win = window();
+    if (win == nullptr)
+        return;
+
+    auto const tabCount = win->tabCount();
+    auto const& resolver = _manager.model().sessionTitleResolver();
+
+    std::vector<vtbackend::TabsInfo::Tab> tabs;
+    tabs.reserve(static_cast<size_t>(tabCount));
+    for (auto const row: std::views::iota(0, tabCount))
+    {
+        auto* tab = win->tabAt(row);
+        if (tab == nullptr)
+            continue;
+        auto const color = tab->color().value_or(vtbackend::RGBColor { 0, 0, 0 });
+        tabs.push_back({ .name = tab->title(resolver), .color = color });
+    }
+
+    for (auto const row: std::views::iota(0, tabCount))
+    {
+        auto* tab = win->tabAt(row);
+        if (tab == nullptr)
+            continue;
+        // The marker is 1-based and identical for every pane of this tab (they share the tab's row).
+        auto const marker = static_cast<size_t>(row) + 1;
+        for (auto* session: _manager.sessionsOfTab(tab))
+            session->terminal().setGuiTabInfoForStatusLine(
+                vtbackend::TabsInfo { .tabs = tabs, .activeTabPosition = marker });
+    }
+}
+// }}}
+
+} // namespace contour

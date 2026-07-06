@@ -275,7 +275,6 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
     auto const subOffsetX = static_cast<int>(_imageOffset.x.value);
     auto const subOffsetY = static_cast<int>(_imageOffset.y.value);
     auto const imageWidth = unbox<int>(_image->width());
-    auto const imageHeight = unbox<int>(_image->height());
     auto const effectiveImageSize = ImageSize { Width(subWidth), Height(subHeight) };
     auto const targetSize = computeTargetSize(_resizePolicy, effectiveImageSize, gridSize);
     auto const paramWidth = unbox<int>(targetSize.width);
@@ -291,6 +290,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
     uint8_t* target = fragmentData.data();
 
 #if defined(VTBACKEND_SIMD_FOUND)
+    auto const imageHeight = unbox<int>(_image->height());
     auto const simdContext = SimdContext {
         .width = unbox<int>(cellSize.width),
         .cellX = cellX,

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Actions.h>
 #include <contour/ContourGuiApp.h>
+#include <contour/ExternalLauncher.h>
 #include <contour/TerminalSession.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
 
+#include <vtbackend/HintModeHandler.h>
 #include <vtbackend/MatchModes.h>
 #include <vtbackend/Terminal.h>
 #include <vtbackend/ViCommands.h>
@@ -22,12 +24,10 @@
 #include <QtCore/QMetaObject>
 #include <QtCore/QMimeData>
 #include <QtCore/QPointer>
-#include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtGui/QClipboard>
-#include <QtGui/QDesktopServices>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
@@ -130,11 +130,15 @@ namespace
 
     vtbackend::Settings createSettingsFromConfig(config::Config const& config,
                                                  config::TerminalProfile const& profile,
-                                                 ColorPreference colorPreference)
+                                                 ColorPreference colorPreference,
+                                                 std::optional<vtbackend::PageSize> initialPageSize)
     {
         auto settings = vtbackend::Settings {};
 
-        settings.pageSize = profile.terminalSize.value();
+        // A new tab/split inherits the live window's running grid; only a brand-new window falls back to
+        // the profile's configured terminalSize. Applied here so the terminal is BORN at the right size,
+        // not just corrected once a display attaches (which never happens for a background tab).
+        settings.pageSize = initialPageSize.value_or(profile.terminalSize.value());
         settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
         settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
         settings.maxHistoryLineCount = profile.history.value().maxHistoryLineCount;
@@ -215,6 +219,19 @@ namespace
         return nextSessionId++;
     }
 
+    /// Resolves the profile a session should run under: the explicitly requested @p requested when it
+    /// is non-empty and present in @p config, otherwise the application default @p appDefault. A
+    /// requested-but-unknown name never aborts (unlike Config::profile()'s assert) — it falls back to
+    /// the default, matching activateProfile()'s runtime tolerance for a removed profile.
+    std::string resolveProfileName(config::Config const& config,
+                                   std::string const& requested,
+                                   std::string const& appDefault)
+    {
+        if (!requested.empty() && config.findProfile(requested) != nullptr)
+            return requested;
+        return appDefault;
+    }
+
     class ExitWatcherThread: public QThread
     {
       public:
@@ -236,12 +253,14 @@ namespace
 
 TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                  unique_ptr<vtpty::Pty> pty,
-                                 ContourGuiApp& app):
+                                 ContourGuiApp& app,
+                                 std::string profileName,
+                                 std::optional<vtbackend::PageSize> initialPageSize):
     _manager { manager },
     _id { createSessionId() },
     _startTime { steady_clock::now() },
     _config { app.config() },
-    _profileName { app.profileName() },
+    _profileName { resolveProfileName(_config, profileName, app.profileName()) },
     _profile { *_config.profile(_profileName) },
     _app { app },
     _currentColorPreference { app.colorPreference() },
@@ -249,7 +268,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _accumulatedAngleScroll {},
     _terminal { *this,
                 std::move(pty),
-                createSettingsFromConfig(_config, _profile, _currentColorPreference),
+                createSettingsFromConfig(_config, _profile, _currentColorPreference, initialPageSize),
                 std::chrono::steady_clock::now() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) }
 {
@@ -286,9 +305,26 @@ void TerminalSession::detachDisplay(display::TerminalDisplay& display)
     _display = nullptr;
 }
 
+display::ForcedFontDpiProvider* TerminalSession::forcedFontDpiProvider() noexcept
+{
+    return _app.forcedFontDpiProvider();
+}
+
 void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 {
     sessionLog()("Attaching session to display {}x{}.", newDisplay.width(), newDisplay.height());
+
+    // Enforce the one-session-one-display invariant: if a different display is still attached (e.g.
+    // the hidden single-pane view after the active tab was split, which is only made invisible — not
+    // destroyed — by QML), tell it to release this session first. Otherwise both displays would
+    // believe they own the session, _display would silently flip to whichever attached last, and the
+    // stale display's later detachDisplay() would trip the _display == &display precondition.
+    if (_display != nullptr && _display != &newDisplay)
+    {
+        // One session, one display: release the old display's hold. Session->display ownership lives on
+        // the pane tree now, so there is no manager-side per-display map to keep in sync.
+        _display->releaseSession();
+    }
 
     // We're being called by newDisplay!
     _display = &newDisplay;
@@ -297,13 +333,20 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
         // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
         auto const l = scoped_lock { _terminal };
         _terminal.resizeScreen(_terminal.totalPageSize(), _display->pixelSize());
-        _terminal.setRefreshRate(_display->refreshRate());
+        // refreshRate() dereferences window()->screen(); pre-window (see below) the posted
+        // configureDisplay() sets it once the window exists.
+        if (_display->window() != nullptr)
+            _terminal.setRefreshRate(_display->refreshRate());
     }
 
     // Ensure max image size is based on the actual display dimensions,
     // not just the (possibly zero) config default.
     // This is needed because configureDisplay() is only called from createRenderer(),
     // which only runs once for the first session.
+    // setSession() (our caller) may run before the item is parented into a window (URL-loaded PaneNode
+    // children during a split rebuild) — skip the screen-derived part then: renderer creation requires a
+    // window and re-derives it via the posted configureDisplay(), as does onScreenChanged().
+    if (_display->window() != nullptr && _display->window()->screen() != nullptr)
     {
         auto const dpr = _display->contentScale();
         auto const qActualScreenSize = _display->window()->screen()->size() * dpr;
@@ -380,11 +423,44 @@ void TerminalSession::mainLoop()
 
 void TerminalSession::terminate()
 {
-    if (!_display)
-        return;
+    // Closing the PTY device is the display-independent teardown trigger on BOTH paths: it makes
+    // ExitWatcherThread's waitForClosed() return and post onClosed() onto this session's thread, which
+    // fires sessionClosed -> TerminalSessionManager::removeSession. Routing the display case through
+    // closeDisplay() alone was not enough: closeDisplay() only emits terminated(), whose QML handler
+    // closes the tab only when canCloseWindow() holds (false while a multi-tab window still has more
+    // sessions than displays), so closing the *active* tab of a multi-tab window never reached
+    // removeSession and leaked the session plus its shell process. Idempotent: a second close on an
+    // already-closed device is a no-op (matching onClosed()'s own guard).
+    sessionLog()("Terminated. Closing PTY device{}.", _display ? " and display" : "");
+    // Deliberate close: set BEFORE closing the device so onClosed() (which the exit watcher fires as
+    // soon as it observes the close) skips the early-exit notice and emits sessionClosed as usual —
+    // the notice is only for shells that die on their own right after startup, and taking it here
+    // would leave the tab unpruned, waiting for a key press the user never intended to give.
+    _terminationRequested = true;
+    if (!_terminal.device().isClosed())
+        _terminal.device().close();
+    else
+    {
+        // The device is already closed: if onClosed() already showed the early-exit notice, this
+        // deliberate close is the acknowledgement — prune the pane now, mirroring sendKeyEvent()'s
+        // acknowledge path; otherwise closing a notice-showing tab/pane would be a silent no-op.
+        // _onClosedMutex serializes with an in-flight onClosed() so the notice cannot be armed after
+        // the check.
+        auto const armed = [this]() {
+            auto const _ = std::scoped_lock { _onClosedMutex };
+            auto const value = _terminatedAndWaitingForKeyPress;
+            _terminatedAndWaitingForKeyPress = false;
+            return value;
+        }();
+        if (armed)
+            emit sessionClosed(*this);
+    }
 
-    sessionLog()("Terminated. Closing display.");
-    _display->closeDisplay();
+    // If a display is attached, also let the GUI tear its view down. Not the session-removal trigger
+    // (that is the device().close() above); this just releases the display-side resources. Re-read
+    // _display: the sessionClosed prune above may have torn the display down with the pane.
+    if (_display)
+        _display->closeDisplay();
 }
 
 // {{{ Events implementations
@@ -403,7 +479,12 @@ void TerminalSession::bufferChanged(vtbackend::ScreenType type)
 
     _currentScreenType = type;
     emit isScrollbarVisibleChanged();
-    _display->post([this, type]() { _display->bufferChanged(type); });
+    // Re-check _display at dispatch: a tab switch or split collapse may have detached it (via
+    // TerminalDisplay::setSession -> detachDisplay) between this post and the GUI thread running it.
+    _display->post([this, type]() {
+        if (_display)
+            _display->bufferChanged(type);
+    });
 }
 
 void TerminalSession::screenUpdated()
@@ -565,6 +646,19 @@ void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remembe
 
 vtbackend::FontDef TerminalSession::getFontDef()
 {
+    // A display-less session (a background pane during a split/tab rebind) has no renderer to read
+    // live font metrics from; answer the VT font query from the profile's configured fonts instead
+    // of dereferencing a null display.
+    if (!_display)
+    {
+        auto const& fonts = _profile.fonts.value();
+        return vtbackend::FontDef { .size = fonts.size.pt,
+                                    .regular = fonts.regular.toPattern(),
+                                    .bold = fonts.bold.toPattern(),
+                                    .italic = fonts.italic.toPattern(),
+                                    .boldItalic = fonts.boldItalic.toPattern(),
+                                    .emoji = fonts.emoji.toPattern() };
+    }
     return _display->getFontDef();
 }
 
@@ -639,14 +733,17 @@ void TerminalSession::openDocument(std::string_view fileOrUrl)
     auto const text = QString::fromUtf8(fileOrUrl.data(), static_cast<int>(fileOrUrl.size()));
     auto url = QUrl(text);
 
-    if (url.scheme().isEmpty())
+    // A single-letter scheme is a Windows drive letter (e.g. "C:\path"), not a real URL scheme —
+    // QUrl otherwise parses "C:" as the scheme and the path never resolves as a local file. Treat
+    // such a value (and a genuinely scheme-less one) as a filesystem path.
+    if (url.scheme().isEmpty() || url.scheme().size() == 1)
     {
         auto const fileInfo = QFileInfo(text);
         if (fileInfo.exists())
             url = QUrl::fromLocalFile(fileInfo.absoluteFilePath());
     }
 
-    if (!QDesktopServices::openUrl(url))
+    if (!_app.externalLauncher().openUrl(url))
         errorLog()("Could not open document \"{}\".", fileOrUrl);
 }
 
@@ -796,11 +893,12 @@ void TerminalSession::onClosed()
     else
         sessionLog()("Process terminated after {} seconds.", diff.count());
 
-    emit sessionClosed(*this);
-
-    if (diff < _app.earlyExitThreshold())
+    if (diff < _app.earlyExitThreshold() && !_terminationRequested)
     {
-        // auto const w = _terminal.pageSize().columns.as<int>();
+        // Deliberately do NOT emit sessionClosed here: removeSession() would prune this pane from the
+        // model and tear down its QML item, destroying the very screen the message below is shown on
+        // (and leaving an empty window behind that nothing can close). The pane stays fully alive until
+        // the acknowledging key press (see sendKeyEvent/sendCharEvent), which prunes and closes then.
         auto constexpr SGR = "\033[1;38:2::255:255:255m\033[48:2::255:0:0m"sv;
         auto constexpr EL = "\033[K"sv;
         auto constexpr TextLines = array<string_view, 2> { "Shell terminated too quickly.",
@@ -821,12 +919,28 @@ void TerminalSession::onClosed()
         return;
     }
 
+    // The at-exit state dump MUST run before the model prune: sessionClosed -> removeSession tears
+    // this pane's display down, and the dump (screen + renderer inspection + screenshot) needs a live
+    // display. inspect() drives the display's own bounded frame pump and terminates the session once
+    // the deferred readback has delivered, so the prune happens on that second close.
     if (_app.dumpStateAtExit().has_value())
-        inspect();
-    else if (_display)
     {
-        sessionLog()("Terminal device is closed. Notify manager.");
+        inspect();
+        return;
+    }
+
+    // Prune this pane from the model FIRST (sessionClosed -> removeSession -> closePane collapses the
+    // split / removes the tab), THEN emit terminated() on the display: TerminalPane.onTerminated closes
+    // the OS window only when canCloseWindow() sees no remaining pane sessions, which requires this
+    // session to be gone already (the order canCloseWindow() documents). Re-check _display after the
+    // emit: the model prune may have torn the display down with the pane.
+    emit sessionClosed(*this);
+
+    if (_display)
+    {
+        sessionLog()("Terminal device is closed. Notify manager and close the pane display.");
         _manager->currentSessionIsTerminated();
+        _display->closeDisplay();
     }
     else
         sessionLog()("Terminal device is closed. But no display available (yet).");
@@ -836,10 +950,15 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
-        QMimeData const* md = clipboard->mimeData();
-        sessionLog()("pasteFromClipboard: mime data contains {} formats.", md->formats().size());
-        for (int i = 0; i < md->formats().size(); ++i)
-            sessionLog()("pasteFromClipboard[{}]: {}\n", i, md->formats().at(i).toStdString());
+        // mimeData() returns nullptr when the clipboard is empty or unavailable (e.g. on the
+        // offscreen platform, or a headless session with nothing ever copied). Guard it: an empty
+        // clipboard is a paste no-op, not a crash. The format logging only runs when data exists.
+        if (QMimeData const* md = clipboard->mimeData(); md != nullptr)
+        {
+            sessionLog()("pasteFromClipboard: mime data contains {} formats.", md->formats().size());
+            for (int i = 0; i < md->formats().size(); ++i)
+                sessionLog()("pasteFromClipboard[{}]: {}\n", i, md->formats().at(i).toStdString());
+        }
 
         auto const text = clipboard->text(QClipboard::Clipboard);
 
@@ -847,9 +966,12 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
         if (text.size() > 1024 * 1024)
         {
             sessionLog()("Clipboard contains huge text. Ignoring.");
-            _display->post([this]() {
-                emit showNotification("Screenshot", QString::fromStdString("Paste is too big"));
-            });
+            // A display-less session (background pane, headless test) has nowhere to toast the
+            // rejection; the paste is ignored either way.
+            if (_display)
+                _display->post([this]() {
+                    emit showNotification("Screenshot", QString::fromStdString("Paste is too big"));
+                });
             return;
         }
         // 512 KB soft limit to ask user for permission
@@ -930,13 +1052,21 @@ void TerminalSession::requestWindowResize(LineCount lines, ColumnCount columns)
         return;
 
     sessionLog()("Application request to resize window: {}x{} cells", columns, lines);
-    _display->post([this, lines, columns]() { _display->resizeWindow(lines, columns); });
+    // Re-check _display at dispatch: pane rebinding may detach it before the GUI thread runs this.
+    _display->post([this, lines, columns]() {
+        if (_display)
+            _display->resizeWindow(lines, columns);
+    });
 }
 
 void TerminalSession::resizeTerminalToDisplaySize()
 {
+    // Re-check _display at dispatch: pane rebinding may detach it before the GUI thread runs this.
     if (_display)
-        _display->post([this]() { _display->resizeTerminalToDisplaySize(); });
+        _display->post([this]() {
+            if (_display)
+                _display->resizeTerminalToDisplaySize();
+        });
 }
 
 void TerminalSession::requestWindowResize(Width width, Height height)
@@ -945,7 +1075,11 @@ void TerminalSession::requestWindowResize(Width width, Height height)
         return;
 
     sessionLog()("Application request to resize window: {}x{} pixels", width, height);
-    _display->post([this, width, height]() { _display->resizeWindow(width, height); });
+    // Re-check _display at dispatch: pane rebinding may detach it before the GUI thread runs this.
+    _display->post([this, width, height]() {
+        if (_display)
+            _display->resizeWindow(width, height);
+    });
 }
 
 void TerminalSession::addToAccumulatedScroll(crispy::point pixelDelta, crispy::point angleDelta) noexcept
@@ -994,10 +1128,16 @@ std::tuple<LineOffset, ColumnOffset> TerminalSession::consumeScroll() noexcept
 
 QString TerminalSession::title() const
 {
+    // Bound to main.qml's window `title:`, so Qt re-evaluates this on the GUI thread whenever the title
+    // changes — concurrently with the parser thread's OSC 0/2 writer (setWindowTitle assigns _windowTitle
+    // under _stateMutex). Read the locked copy via resolvedWindowTitle() rather than the lock-free
+    // windowTitle() reference, which would tear (or use-after-free on a string reallocation) against that
+    // writer. Native tabs/splits make these GUI-thread title reads far more frequent.
+    auto const windowTitle = resolvedWindowTitle();
 #if !defined(NDEBUG)
-    return QString::fromStdString(terminal().windowTitle() + " - Contour (DEBUG)");
+    return QString::fromStdString(windowTitle + " - Contour (DEBUG)");
 #else
-    return QString::fromStdString(terminal().windowTitle() + " - Contour");
+    return QString::fromStdString(windowTitle + " - Contour");
 #endif
 }
 
@@ -1015,7 +1155,10 @@ void TerminalSession::refreshGuiTabInfoForStatusLine()
     if (_display)
         _display->post([self = QPointer<TerminalSession> { this }]() {
             if (self)
-                self->_manager->update();
+            {
+                self->_manager->update();                                     // indicator status line
+                self->_manager->refreshTabForSession(self->modelSessionId()); // GUI tab strip label
+            }
         });
 }
 
@@ -1080,18 +1223,13 @@ void handleAction(auto const& actions, auto eventType, auto callback)
         callback(*actions);
     else if (eventType == KeyboardEventType::Repeat)
     {
-        // filter out actions that are not repeatable
-        std::vector<actions::Action> tmpActions;
-        auto set = crispy::overloaded {
-            [&]([[maybe_unused]] actions::NonRepeatableActionConcept auto const& action) {},
-            [&](auto const& action) { tmpActions.emplace_back(action); },
-        };
-
-        for (auto const& action: *actions)
-        {
-            std::visit(set, action);
-        }
-        callback(tmpActions);
+        // Drop actions that must not fire on auto-repeat (e.g. CloseTab/ClosePane/CreateNewTab). The
+        // overwhelmingly common held keys (characters, arrows) bind only repeatable actions, so avoid
+        // allocating a filtered copy unless there is actually a non-repeatable action to drop.
+        if (std::ranges::none_of(*actions, actions::isNonRepeatable))
+            callback(*actions);
+        else
+            callback(actions::filterRepeatableActions(*actions));
     }
 }
 
@@ -1101,12 +1239,19 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
 
     if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
     {
-        sessionLog()("Terminated and waiting for key press. Closing display.");
-        _display->closeDisplay();
+        sessionLog()("Terminated and waiting for key press. Closing pane.");
+        // Prune-then-terminate, mirroring onClosed()'s normal path: remove this pane from the model
+        // first so canCloseWindow() can approve closing the window, then let the QML side act on
+        // terminated(). _display re-checked: the prune may tear the display down with the pane.
+        emit sessionClosed(*this);
+        if (_display)
+            _display->closeDisplay();
         return;
     }
 
-    if (_profile.mouse.value().hideWhileTyping)
+    // Guarded like sendCharEvent: a display-less session (background pane, headless test) has no
+    // mouse cursor to hide.
+    if (_profile.mouse.value().hideWhileTyping && _display != nullptr)
         _display->setMouseCursorShape(MouseCursorShape::Hidden);
 
     if (eventType != KeyboardEventType::Release)
@@ -1133,18 +1278,22 @@ void TerminalSession::sendCharEvent(
                modifiers,
                crispy::escape(unicode::convert_to<char>(value)));
 
-    if (_display)
+    // The early-exit-notice acknowledge must run whether or not a display is attached, exactly like
+    // sendKeyEvent above: the notice can be showing on a background/display-less pane, and a
+    // character key must dismiss it too (previously this was nested under `if (_display)`, so a
+    // character press never closed a display-less notice while a key press did — an inconsistency).
+    if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
     {
-        if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
-        {
-            sessionLog()("Terminated and waiting for key press. Closing display.");
+        sessionLog()("Terminated and waiting for key press. Closing pane.");
+        // Prune-then-terminate; see sendKeyEvent() for the rationale.
+        emit sessionClosed(*this);
+        if (_display)
             _display->closeDisplay();
-            return;
-        }
-
-        if (_profile.mouse.value().hideWhileTyping)
-            _display->setMouseCursorShape(MouseCursorShape::Hidden);
+        return;
     }
+
+    if (_profile.mouse.value().hideWhileTyping && _display != nullptr)
+        _display->setMouseCursorShape(MouseCursorShape::Hidden);
 
     if (eventType != KeyboardEventType::Release)
     {
@@ -1203,7 +1352,9 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     crispy::locked(_terminal,
                    [&]() { _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint); });
 
-    if (pos != _currentMousePosition)
+    // The cursor shape lives on the display; a display-less session (background pane, headless
+    // test) has no cursor to change.
+    if (pos != _currentMousePosition && _display != nullptr)
     {
         // Change cursor shape only when changing grid cell.
         _currentMousePosition = pos;
@@ -1512,9 +1663,9 @@ bool TerminalSession::operator()(actions::NoSearchHighlight)
     return true;
 }
 
-bool TerminalSession::operator()(actions::OpenConfiguration) const
+bool TerminalSession::operator()(actions::OpenConfiguration)
 {
-    if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(_config.configFile.string().c_str()))))
+    if (!_app.externalLauncher().openUrl(QUrl(QString::fromUtf8(_config.configFile.string().c_str()))))
         errorLog()("Could not open configuration file \"{}\".", _config.configFile.generic_string());
 
     return true;
@@ -1524,7 +1675,7 @@ bool TerminalSession::operator()(actions::OpenFileManager)
 {
     auto const l = scoped_lock { terminal() };
     auto const& cwd = terminal().currentWorkingDirectory();
-    if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(cwd.c_str()))))
+    if (!_app.externalLauncher().openUrl(QUrl(QString::fromUtf8(cwd.c_str()))))
         errorLog()("Could not open file \"{}\".", cwd);
 
     return true;
@@ -1533,7 +1684,8 @@ bool TerminalSession::operator()(actions::OpenFileManager)
 bool TerminalSession::operator()(actions::OpenSelection)
 {
     crispy::locked(_terminal, [&]() {
-        QDesktopServices::openUrl(QUrl(QString::fromUtf8(terminal().extractSelectionText().c_str())));
+        (void) _app.externalLauncher().openUrl(
+            QUrl(QString::fromUtf8(terminal().extractSelectionText().c_str())));
     });
     return true;
 }
@@ -1834,20 +1986,19 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
 
 bool TerminalSession::operator()(actions::CreateNewTab)
 {
-    _manager->allowCreation();
-    _manager->createSession();
+    _manager->createNewTab(this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::CloseTab)
 {
-    _manager->closeTab();
+    _manager->closeTab(this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::MoveTabTo event)
 {
-    _manager->moveTabTo(event.position);
+    _manager->moveTabTo(event.position, this);
     return true;
 }
 
@@ -1865,31 +2016,153 @@ bool TerminalSession::operator()(actions::MoveTabToRight)
 
 bool TerminalSession::operator()(actions::SwitchToTab const& event)
 {
-    _manager->switchToTab(event.position);
+    _manager->switchToTab(event.position, this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwitchToPreviousTab)
 {
-    _manager->switchToPreviousTab();
+    _manager->switchToPreviousTab(this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwitchToTabLeft)
 {
-    _manager->switchToTabLeft();
+    _manager->switchToTabLeft(this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwitchToTabRight)
 {
-    _manager->switchToTabRight();
+    _manager->switchToTabRight(this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::SetTabName)
 {
     terminal().requestTabName();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SplitVertical)
+{
+    _manager->splitActivePane(/*vertical*/ true, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SplitHorizontal)
+{
+    _manager->splitActivePane(/*vertical*/ false, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::ClosePane)
+{
+    _manager->closeActivePane(/*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::FocusPaneLeft)
+{
+    _manager->focusPane(vtmux::FocusDirection::Left, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::FocusPaneRight)
+{
+    _manager->focusPane(vtmux::FocusDirection::Right, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::FocusPaneUp)
+{
+    _manager->focusPane(vtmux::FocusDirection::Up, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::FocusPaneDown)
+{
+    _manager->focusPane(vtmux::FocusDirection::Down, /*acting*/ this);
+    return true;
+}
+
+namespace
+{
+    /// Translates an action-layer Direction (transport-agnostic) into the model's FocusDirection.
+    /// @param direction The direction the user requested.
+    /// @return The corresponding vtmux::FocusDirection.
+    [[nodiscard]] constexpr vtmux::FocusDirection toFocusDirection(actions::Direction direction) noexcept
+    {
+        switch (direction)
+        {
+            case actions::Direction::Left: return vtmux::FocusDirection::Left;
+            case actions::Direction::Right: return vtmux::FocusDirection::Right;
+            case actions::Direction::Up: return vtmux::FocusDirection::Up;
+            case actions::Direction::Down: return vtmux::FocusDirection::Down;
+        }
+        return vtmux::FocusDirection::Left;
+    }
+} // namespace
+
+bool TerminalSession::operator()(actions::SwapPaneLeft)
+{
+    _manager->swapPane(vtmux::FocusDirection::Left, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SwapPaneRight)
+{
+    _manager->swapPane(vtmux::FocusDirection::Right, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SwapPaneUp)
+{
+    _manager->swapPane(vtmux::FocusDirection::Up, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SwapPaneDown)
+{
+    _manager->swapPane(vtmux::FocusDirection::Down, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::MovePaneLeft)
+{
+    _manager->movePane(vtmux::FocusDirection::Left, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::MovePaneRight)
+{
+    _manager->movePane(vtmux::FocusDirection::Right, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::MovePaneUp)
+{
+    _manager->movePane(vtmux::FocusDirection::Up, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::MovePaneDown)
+{
+    _manager->movePane(vtmux::FocusDirection::Down, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::ToggleSplitOrientation)
+{
+    _manager->toggleActivePaneOrientation(/*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::ResizePane const& action)
+{
+    // percent is a whole-number step; convert to the (0, 1) ratio fraction the model nudges by.
+    _manager->resizeActivePane(
+        toFocusDirection(action.direction), static_cast<double>(action.percent) / 100.0, /*acting*/ this);
     return true;
 }
 
@@ -1963,37 +2236,57 @@ bool TerminalSession::executeAction(actions::Action const& action)
     return visit(*this, action);
 }
 
+std::string TerminalSession::workingDirectory() const
+{
+#if !defined(_WIN32)
+    if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
+        return ptyProcess->workingDirectory();
+#else
+    // On Windows the CWD is only known via OSC 7, which reports it as a file:// URL. Passing that raw
+    // URL to CreateProcess() as a new tab/split's working directory fails with ERROR_DIRECTORY and
+    // crashes the app, so extract the filesystem path first (fix from master's OSC-7 crash fix).
+    std::string cwdUrl;
+    {
+        auto const _l = scoped_lock { _terminal };
+        cwdUrl = _terminal.currentWorkingDirectory();
+    }
+    if (!cwdUrl.empty())
+        if (auto path = vtbackend::extractPathFromFileUrl(cwdUrl); !path.empty())
+            return path;
+#endif
+    return "."s;
+}
+
 void TerminalSession::spawnNewTerminal(string const& profileName)
 {
-    auto const wd = [this]() -> string {
-#if !defined(_WIN32)
-        if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
-            return ptyProcess->workingDirectory();
-#else
-        auto const _l = scoped_lock { _terminal };
-        return _terminal.currentWorkingDirectory();
-#endif
-        return "."s;
-    }();
+    auto const wd = workingDirectory();
 
     if (_config.spawnNewProcess.value())
     {
         sessionLog()("spawning new process");
-        ::contour::spawnNewTerminal(_app.programPath(), _config.configFile.generic_string(), profileName, wd);
+        auto const command = ::contour::buildSpawnTerminalCommand(
+            _app.programPath(), _config.configFile.generic_string(), profileName, wd);
+        _app.externalLauncher().runDetached(command.program, command.arguments);
     }
     else
     {
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
-        _manager->doNotSwitchToNewSession();
-        _manager->allowCreation();
-        _app.newWindow();
+        // The new window mints its own WindowController + first tab in main.qml's Component.onCompleted,
+        // so no session-staging handshake is needed.
+        // A window spawned from an existing one should open on that window's screen (the best
+        // pre-show DPR predictor); the new window's bindWindow() consumes it.
+        _app.newWindow(_display != nullptr && _display->window() != nullptr ? _display->window()->screen()
+                                                                            : nullptr);
     }
 }
 
 void TerminalSession::activateProfile(string const& newProfileName)
 {
-    auto* newProfile = _config.profile(newProfileName);
+    // findProfile() (not profile()): the name comes from runtime input (a keybinding or the
+    // {ChangeProfile} action) and may reference a profile the user removed. profile() asserts on a
+    // miss — a precondition for callers with a proven-present name — and would abort the app here.
+    auto* newProfile = _config.findProfile(newProfileName);
     if (!newProfile)
     {
         sessionLog()("Cannot change profile. No such profile: '{}'.", newProfileName);
@@ -2004,6 +2297,29 @@ void TerminalSession::activateProfile(string const& newProfileName)
     _profileName = newProfileName;
     _profile = *newProfile;
     configureTerminal();
+
+    // The unfocused-dim amount lives in the profile; a reload/switch may change it, and
+    // TerminalPane.qml's overlay binds to the property.
+    emit dimUnfocusedChanged();
+
+    // A profile switch may change the configured grid (terminal_size); ask the window to fit it — a
+    // content-driven grid->window request through the controller choke point (refused when
+    // fullscreen/maximized; a WM refusal leaves the reflowed grid). Posted like the sibling display
+    // calls; the inner _display re-check covers a teardown between schedule and dispatch.
+    if (_display != nullptr)
+    {
+        auto const configuredSize = _profile.terminalSize.value();
+        _display->post([this, configuredSize]() {
+            if (_display != nullptr)
+                _display->resizeWindow(configuredSize.lines, configuredSize.columns);
+        });
+    }
+
+    // The tab-label template lives in the profile, so a reload may change every tab's label. This runs
+    // on the GUI thread (config-reload path), so refresh the tab strip directly. Guarded because a
+    // session may be configured before it is attached to a manager.
+    if (_manager != nullptr)
+        _manager->refreshAllTabTitles();
 }
 
 void TerminalSession::configureTerminal()
@@ -2066,6 +2382,22 @@ void TerminalSession::configureDisplay()
     if (!_display)
         return;
 
+    // This runs as a POSTED call (createRenderer defers it to the GUI loop), so it can dispatch after
+    // this pane was already torn out of its window — window() returns null while the display object is
+    // still alive (the same independent-teardown hazard the render-thread slots guard against). A
+    // detached display has nothing to configure; dereferencing window()->screen() would crash.
+    if (_display->window() == nullptr)
+        return;
+
+    // Same hazard, other resource: the scene graph can be INVALIDATED between the post and this
+    // dispatch (X11/XWayland does so whenever the window is unexposed or its surface is recreated),
+    // tearing the render target down while display and window stay alive. setFonts() below requires a
+    // live render target by contract. Bailing out is the designed re-entry path, not a skip: every
+    // render-target (re)creation re-posts configureDisplay() (see TerminalDisplay::createRenderer),
+    // so configuration re-runs once rendering is possible again.
+    if (!_display->hasRenderTarget())
+        return;
+
     sessionLog()("Configuring display.");
     _display->setBlurBehind(_profile.background.value().blur);
 
@@ -2092,7 +2424,10 @@ void TerminalSession::configureDisplay()
     _display->setHyperlinkDecoration(_profile.hyperlinkDecoration.value().normal,
                                      _profile.hyperlinkDecoration.value().hover);
 
-    setWindowTitle(_terminal.windowTitle());
+    // Re-emit the current title to the freshly-attached display. This runs on the GUI thread, so read
+    // it via resolvedWindowTitle() (locked copy) rather than the lock-free windowTitle() reference,
+    // which could tear against a concurrent parser-thread title write.
+    setWindowTitle(_terminal.resolvedWindowTitle());
 }
 
 uint8_t TerminalSession::matchModeFlags() const
@@ -2125,6 +2460,17 @@ uint8_t TerminalSession::matchModeFlags() const
 
 void TerminalSession::setFontSize(text::font_size size)
 {
+    // No display (a background tab/split pane whose display was detached on the last tab switch):
+    // there is no renderer to reconfigure, so persist the requested size to the profile directly. It
+    // is applied when a display re-attaches (setSession seeds the renderer from profile().fonts). This
+    // guards the IncreaseFontSize/DecreaseFontSize/ResetFontSize keybindings, which a background pane
+    // can receive — the same null-_display crash class as the other guarded action paths.
+    if (_display == nullptr)
+    {
+        _profile.fonts.value().size = size;
+        return;
+    }
+
     // _display->setFontSize() stages the change and applies it synchronously (applyStagedFontReconfigNow),
     // then returns whether the rendered font actually became @p size: false if the size was out of range
     // (not even staged) or if the render-thread apply failed and was swallowed (font-load/atlas error,
@@ -2205,7 +2551,7 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
         args.append("config");
         args.append(QString::fromStdString(_config.configFile.string()));
         args.append(QString::fromUtf8(hyperlink.path().data(), static_cast<int>(hyperlink.path().size())));
-        QProcess::execute(QString::fromStdString(_app.programPath()), args);
+        _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
     }
     else if (isLocal && fileInfo.isFile() && editorEnv && *editorEnv)
     {
@@ -2214,12 +2560,12 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
         args.append(QString::fromStdString(_config.configFile.string()));
         args.append(QString::fromStdString(editorEnv));
         args.append(QString::fromUtf8(hyperlink.path().data(), static_cast<int>(hyperlink.path().size())));
-        QProcess::execute(QString::fromStdString(_app.programPath()), args);
+        _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
     }
     else if (isLocal)
-        QDesktopServices::openUrl(QUrl(hyperlink.uri.c_str()));
+        (void) _app.externalLauncher().openUrl(QUrl(hyperlink.uri.c_str()));
     else
-        QDesktopServices::openUrl(QString::fromUtf8(hyperlink.uri.c_str()));
+        (void) _app.externalLauncher().openUrl(QUrl(QString::fromUtf8(hyperlink.uri.c_str())));
 }
 
 void TerminalSession::onConfigReload()

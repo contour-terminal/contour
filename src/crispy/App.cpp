@@ -201,6 +201,16 @@ int app::versionAction()
 }
 
 // customize debuglog transform to shorten the file_name output a bit
+bool app::parseParametersForTesting(int argc, char const* argv[])
+{
+    _syntax = parameterDefinition();
+    optional<CLI::flag_store> flagsOpt = CLI::parse(_syntax.value(), argc, argv);
+    if (!flagsOpt.has_value())
+        return false;
+    _flags = std::move(flagsOpt.value());
+    return true;
+}
+
 int app::run(int argc, char const* argv[])
 {
     try

@@ -6,6 +6,8 @@
     #include <contour/ContourApp.h>
 #endif
 
+#include <crispy/SuppressWindowsDialogs.hpp>
+
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
 
@@ -135,6 +137,12 @@ int main(int argc, char const* argv[])
 {
 #if defined(_WIN32)
     tryAttachConsole();
+
+    // Route CRT assert/abort/crash reporting to stderr instead of a modal dialog when no debugger is
+    // attached (CI, scripted GUI/verification runs), so an assertion can never block a headless run.
+    // Under an attached debugger the dialogs and debug breaks are kept so interactive debugging works.
+    if (!IsDebuggerPresent())
+        crispy::suppressWindowsDialogs();
 #endif
 
     qInstallMessageHandler(qtCustomMessageOutput);

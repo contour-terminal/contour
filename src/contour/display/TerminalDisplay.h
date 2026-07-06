@@ -4,6 +4,8 @@
 #include <contour/Actions.h>
 #include <contour/Config.h>
 #include <contour/TerminalSession.h>
+#include <contour/display/ContentScale.h>
+#include <contour/display/TerminalRenderNode.h>
 #include <contour/helper.h>
 
 #include <vtbackend/Color.h>
@@ -14,13 +16,13 @@
 
 #include <crispy/deferred.h>
 
-#include <QtCore/QFileSystemWatcher>
 #include <QtCore/QPoint>
+#include <QtCore/QSize>
 #include <QtCore/QTimer>
-#include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QVector4D>
 #include <QtQml/QtQml>
 #include <QtQuick/QQuickItem>
+#include <QtQuick/QSGRenderNode>
 
 #include <filesystem>
 #include <memory>
@@ -30,10 +32,24 @@
     #include <atomic>
 #endif
 
+QT_BEGIN_NAMESPACE
+class QRhi;
+class QRhiCommandBuffer;
+class QRhiRenderTarget;
+class QRhiRenderPassDescriptor;
+class QScreen;
+QT_END_NAMESPACE
+
+namespace contour
+{
+class TerminalSessionManager;
+class WindowController;
+} // namespace contour
+
 namespace contour::display
 {
 
-class OpenGLRenderer;
+class RhiRenderer;
 
 // It currently can handles multiple terminals inside via tabs support.
 // that is managed by TerminalSessionManager.
@@ -59,6 +75,11 @@ class TerminalDisplay: public QQuickItem
         else
             return "No session";
     }
+
+    // NB: The title-bar visibility is WINDOW state and lives on the WindowController (the window
+    // authority), not per display: storing it per pane made a ToggleTitleBar silently revert on the
+    // next pane-focus change or tab switch. setSession()/handleWindowChanged() only SEED the window's
+    // initial value from the profile (first-write-wins) via WindowController::seedTitleBarVisible().
     // }}}
 
     [[nodiscard]] config::TerminalProfile const& profile() const noexcept
@@ -81,16 +102,28 @@ class TerminalDisplay: public QQuickItem
 
     [[nodiscard]] bool hasSession() const noexcept { return _session != nullptr; }
 
+    /// Whether the RHI render target currently exists. False before the first scene-graph sync and
+    /// after a scene-graph invalidation (destroyRenderer) — posted GUI callbacks that reach
+    /// render-target-dependent methods (e.g. setFonts) must re-check this at dispatch time, the same
+    /// way they re-check window().
+    [[nodiscard]] bool hasRenderTarget() const noexcept { return _renderTarget != nullptr; }
+
     // NB: Use TerminalSession.attachDisplay, that one is calling this here. TODO(PR) ?
     void setSession(TerminalSession* newSession);
+
+    /// Clears this display's session pointer, and — if the session's back-pointer still names this
+    /// display — the session's back-pointer too. Called by TerminalSession::attachDisplay when another
+    /// display takes over the session (the back-pointer is repointed right after), so a stale display
+    /// (e.g. the hidden single-pane view after a split) stops believing it is attached; and by
+    /// setSession(nullptr) on the transient-null collapse path, where clearing the back-pointer keeps
+    /// the session from posting into this display after it is destroyed.
+    void releaseSession();
 
     [[nodiscard]] TerminalSession& session() noexcept
     {
         assert(_session != nullptr);
         return *_session;
     }
-
-    [[nodiscard]] vtbackend::PageSize windowSize() const noexcept;
 
     // {{{ Input handling
     void keyPressEvent(QKeyEvent* keyEvent) override;
@@ -108,6 +141,45 @@ class TerminalDisplay: public QQuickItem
 #endif
     bool event(QEvent* event) override;
     // }}}
+
+    /// Prepares (stages) one terminal frame for the RHI, called by TerminalRenderNode from
+    /// QSGRenderNode::prepare() — before the scene graph begins the render pass.
+    ///
+    /// Builds the renderer's RHI graphics pipelines for @p rpDesc (cached; rebuilt only on RHI / render-pass
+    /// change), hands the live submission handles (@p rhi, @p cb, @p rt) to the renderer, installs the scene
+    /// graph's transform (@p itemToClip) and clip rectangle (from @p state), then runs the terminal render.
+    /// The renderer uploads its geometry/atlas and records cb->resourceUpdate() here, because Qt's RHI
+    /// render-node contract requires resource uploads to be issued before the render pass (in prepare()),
+    /// leaving only draw commands for render(). The draw commands themselves are issued later by
+    /// recordFrameRhi() once the pass is recording.
+    /// @param rhi        The scene graph's RHI instance.
+    /// @param cb         The command buffer to queue resource updates onto.
+    /// @param rt         The render target the pass renders into.
+    /// @param rpDesc     The render-pass descriptor the pipelines are baked against.
+    /// @param itemToClip The composed projection * node-matrix transform mapping item-local pixels to clip.
+    /// @param itemOriginDevice This item's top-left corner inside the render target, in device pixels
+    ///                   (top-left origin) — the offset that maps the rasterizer's item-relative inner
+    ///                   scissor into render-target coordinates (a split pane is not at the origin).
+    void prepareFrameRhi(QRhi* rhi,
+                         QRhiCommandBuffer* cb,
+                         QRhiRenderTarget* rt,
+                         QRhiRenderPassDescriptor* rpDesc,
+                         QMatrix4x4 const& itemToClip,
+                         QPoint itemOriginDevice);
+
+    /// Records the staged frame's draw commands into the command buffer, called by TerminalRenderNode from
+    /// QSGRenderNode::render() — inside the active render pass.
+    ///
+    /// The geometry/atlas were uploaded during prepareFrameRhi() (the node's prepare() phase); this installs
+    /// the node clip (Qt's @p state scissor, only known now the pass records) and issues the
+    /// pipeline/viewport/scissor/draw commands so the terminal composites in z-order under popups.
+    /// @param state The scene-graph render state, for the node clip rectangle applied to the draws.
+    void recordFrameRhi(QSGRenderNode::RenderState const* state);
+
+    /// Releases the OpenGL renderer owned via the scene-graph node. Called by TerminalRenderNode on the
+    /// render thread when the node is destroyed (or the scene graph is invalidated), where GL teardown
+    /// must happen. Safe to call when no renderer exists.
+    void releaseRenderResources();
 
     // {{{ TerminalDisplay API
     void closeDisplay();
@@ -136,18 +208,6 @@ class TerminalDisplay: public QQuickItem
     /// from a just-requested size while a staged change is pending or after a swallowed font-load failure.
     [[nodiscard]] text::font_size fontSize() const { return _renderer->fontDescriptions().size; }
 
-    bool setPageSize(vtbackend::PageSize newPageSize);
-
-    /// Pushes the full geometry (page size, render-surface pixel size and margin) into the renderer.
-    ///
-    /// For callers that resize the terminal directly (bypassing setPageSize()/applyResize()), so the
-    /// renderer's grid metrics — including the margin — stay consistent with the terminal's. Does not
-    /// resize the terminal itself.
-    ///
-    /// @param totalPageSize  the terminal's total page size (including the status line) to publish.
-    /// @param pixelSize      the render-surface size in pixels to publish.
-    void syncRendererGeometry(vtbackend::PageSize totalPageSize, vtbackend::ImageSize pixelSize);
-
     void setMouseCursorShape(MouseCursorShape newCursorShape);
     void setWindowFullScreen();
     void setWindowMaximized();
@@ -167,7 +227,6 @@ class TerminalDisplay: public QQuickItem
     void setScreenshotOutput(auto&& where) { _saveScreenshot = std::forward<decltype(where)>(where); }
     // }}}
 
-    [[nodiscard]] std::optional<double> queryContentScaleOverride() const;
     [[nodiscard]] double contentScale() const;
 
     Q_INVOKABLE void logDisplayInfo();
@@ -177,24 +236,38 @@ class TerminalDisplay: public QQuickItem
     [[nodiscard]] QString profileName() const { return QString::fromStdString(_profileName); }
     void setProfileName(QString const& name) { _profileName = name.toStdString(); }
 
+  protected:
+    /// Scene-graph extension point: creates/updates the TerminalRenderNode that draws the terminal in
+    /// z-order. On first call it lazily creates the OpenGL renderer (formerly done from the render
+    /// signals) and the node; on subsequent calls it marks the node dirty so Qt re-renders. Runs on the
+    /// render thread with the GUI thread blocked.
+    /// @param oldNode The previously returned node, or nullptr on first call.
+    /// @return The TerminalRenderNode for this item (owned by the scene graph).
+    QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* data) override;
+
+    /// One callback per committed item-geometry change (Qt's canonical resize hook, replacing the two
+    /// per-axis widthChanged/heightChanged signals): drives the window->grid reflow.
+    void geometryChange(QRectF const& newGeometry, QRectF const& oldGeometry) override;
+
   public Q_SLOTS:
     void onAutoScrollTick();
     void onSceneGrapheInitialized();
     void onBeforeSynchronize();
-    void onBeforeRendering();
-    void paint();
 
     void handleWindowChanged(QQuickWindow* newWindow);
-    void sizeChanged();
     void cleanup();
 
-    void onAfterRendering();
     void onScrollBarValueChanged(int value);
     void onRefreshRateChanged();
     void applyFontDPI();
     void onScreenChanged();
-    void onDpiConfigChanged();
     void doDumpState();
+
+    /// Re-resolves the font DPI after a content-scale change and guarantees the resulting cell metrics
+    /// are materialized SYNCHRONOUSLY — even before the render target exists, where applyFontDPI()
+    /// alone only stages the reload (the staged apply is CPU-side FreeType work; pattern borrowed from
+    /// createRenderer()). Callers may derive geometry from cellSize() immediately afterwards.
+    void applyContentScaleChange();
 
   signals:
     void profileNameChanged();
@@ -219,61 +292,91 @@ class TerminalDisplay: public QQuickItem
         return unbox(terminal().currentScreen().historyLineCount());
     }
 
-    [[nodiscard]] vtbackend::PageSize calculatePageSize() const
-    {
-        assert(_renderer);
-        assert(_session);
-
-        // auto const availablePixels = gridMetrics().cellSize * _session->terminal().pageSize();
-        auto const availablePixels = pixelSize();
-        // Use the lock-free publishedCellSize() for the divisor — the same accessor pixelSize() uses for
-        // the dividend — so both reads resolve from one source (and one atomic load that cannot tear
-        // against a concurrent render-thread font apply), rather than mixing it with the mutex-guarded
-        // gridMetrics().cellSize.
-        return pageSizeForPixels(availablePixels,
-                                 _renderer->publishedCellSize(),
-                                 applyContentScale(_session->profile().margins.value(), contentScale()));
-    }
-
   private:
     // helper methods
     //
     void doDumpStateInternal();
-    QImage screenshot();
+
+    /// Logs the resolved Qt RHI backend (graphics API + device, and the OpenGL context version when
+    /// that backend is in use) once, complementing the "[FYI] Qt platform" configuration line.
+    /// Called from the sync phase, where QQuickWindow::rhi() is live (it is still null at
+    /// sceneGraphInitialized time).
+    void logRhiBackendInfoOnce();
+
+    /// Requests a deferred screenshot of the terminal's rendered output and delivers it as a QImage.
+    ///
+    /// The RHI captures the terminal into an offscreen texture and reads it back one frame later (a texture
+    /// readback only completes after the frame is submitted), so this cannot return synchronously. @p onReady
+    /// is invoked (on the render thread, from the frame that completes the readback) with the captured image.
+    /// @param onReady Receives the captured QImage once the readback completes.
+    void requestScreenshot(std::function<void(QImage)> onReady);
+
+    /// Wraps a raw RGBA8 readback buffer (top-left origin, as the offscreen-texture readback delivers) into a
+    /// QImage that owns a copy of the pixels.
+    /// @param rgbaBuffer Tightly-packed RGBA8 pixels, width*height*4 bytes.
+    /// @param pixelSize  The image size in pixels.
+    /// @return A QImage owning a deep copy of the pixels (safe after @p rgbaBuffer is freed).
+    [[nodiscard]] static QImage screenshotImageFromBuffer(std::vector<uint8_t> const& rgbaBuffer,
+                                                          vtbackend::ImageSize pixelSize);
     void createRenderer();
+
+    /// Runs the OpenGL terminal render (grid, cursor, decorations) into the scene graph's current target.
+    /// Invoked from renderFrame() after the transform and clip have been installed on the renderer. Also
+    /// drives the per-frame bookkeeping: consuming a lazily applied font/DPI reconfiguration, taking a
+    /// pending screenshot, and scheduling the next frame via update().
+    void paint();
+
+    /// Frees the OpenGL renderer (GL resources). Idempotent and shared by every teardown path (the
+    /// scene-graph node's releaseResources, sceneGraphInvalidated → cleanup). Must run on the render
+    /// thread with the GL context current.
+    void destroyRenderer();
     [[nodiscard]] QMatrix4x4 createModelMatrix() const;
     void configureScreenHooks();
-    void watchKdeDpiSetting();
     [[nodiscard]] float uptime() const noexcept;
 
     /// Applies a staged font/DPI reconfiguration synchronously on the GUI thread and re-derives geometry
-    /// (page size, implicit size, constraints, and the resizeScreen()/SIGWINCH to the child) against the
+    /// (page size, margin, the resizeScreen()/SIGWINCH to the child, and the WM size hints) against the
     /// resulting cell size. This is the single policy for all discrete font reconfigurations (size,
     /// family, DPI); see the definition for why these are applied inline rather than deferred to a frame.
     ///
     /// @return true if the cell size changed (and the geometry recompute against it ran). A DPI change
     ///         that rounds to the same cell pixel size returns false but still needs the DPR-derived
-    ///         implicit size / size constraints recomputed — applyFontDPI() does that unconditionally.
+    ///         WM size hints refreshed — applyFontDPI() does that unconditionally.
     bool applyStagedFontReconfigNow();
 
     /// Re-derives the geometry that depends on the cell size after a font/DPI reconfiguration: the
-    /// terminal page size + margin (and the resizeScreen()/SIGWINCH to the child) and the Qt window's
-    /// implicit size + size constraints. Shared by the synchronous (applyStagedFontReconfigNow) and the
-    /// deferred frame (paint()) reconfig paths so the two cannot diverge. Requires a live display.
+    /// terminal page size + margin (and the resizeScreen()/SIGWINCH to the child) and the WM size hints.
+    /// Shared by the synchronous (applyStagedFontReconfigNow) and the deferred frame (paint()) reconfig
+    /// paths so the two cannot diverge. Requires a live display.
     void recomputeGeometryAfterFontReconfig();
 
-    /// Updates all window size constraints: minimum size, base size, and size increment.
-    /// Configures the window manager to constrain user resizes to exact cell boundaries.
-    void updateSizeConstraints();
+    /// This display item's extent in DEVICE PIXELS: the item width/height multiplied by the device pixel
+    /// ratio. The scene graph supplies the item→clip placement transform at render time, so callers need
+    /// only the size — not the scene position the terminal used to derive its own translation.
+    struct DevicePixelGeometry
+    {
+        double width = 0.0;  //!< Item width, in device pixels.
+        double height = 0.0; //!< Item height, in device pixels.
+    };
 
-    // Updates the recommended size in (virtual pixels) based on:
-    // - the grid cell size (based on the current font size and DPI),
-    // - configured window margins, and
-    // - the terminal's screen size.
-    void updateImplicitSize();
+    /// @return This item's device-pixel extent (see DevicePixelGeometry).
+    [[nodiscard]] DevicePixelGeometry itemDevicePixelGeometry() const;
+
+    /// Window->grid, the ONLY reaction to a size change: floors this item's device-pixel extent to a
+    /// grid via the geometry module and applies it (helper::applyResize). Never mutates the QWindow, so
+    /// a resize event can never re-enter itself. Shared by geometryChange() and
+    /// resizeTerminalToDisplaySize().
+    void applyDisplaySizeToGrid();
+
+    /// This display's per-OS-window controller (the window-geometry authority), or nullptr when the
+    /// display is not registered with a manager (offscreen tests).
+    [[nodiscard]] WindowController* windowController();
+
+    /// Notifies the window-geometry authority that this display's cell geometry (font/DPI/margins)
+    /// changed, so it refreshes the WM size hints. No-op without a controller.
+    void notifyCellGeometryChanged();
 
     void statsSummary();
-    void doResize(crispy::size size);
 
     [[nodiscard]] vtrasterizer::GridMetrics gridMetrics() const noexcept { return _renderer->gridMetrics(); }
 
@@ -294,26 +397,30 @@ class TerminalDisplay: public QQuickItem
     std::string _profileName;
     std::string _programPath;
     TerminalSession* _session = nullptr;
+    /// The session manager this display is registered with, cached the first time the display learns
+    /// of one (focus-in / setSession). Used by ~TerminalDisplay to evict this display from the
+    /// manager's per-display bookkeeping even when the session has already been detached (a closed
+    /// split pane is destroyed session-less), which a _session-routed call could not reach.
+    TerminalSessionManager* _manager = nullptr;
     std::chrono::steady_clock::time_point _startTime;
-    std::chrono::steady_clock::time_point _initialResizeDeadline {};
-    double _lastVirtualWidth {};
-    double _lastVirtualHeight {};
-    // Implicit (configured) size snapshot taken in createRenderer(). The stale-
-    // geometry correction in sizeChanged() only applies when the implicit size has
-    // since changed (i.e. a DPR correction actually happened) — otherwise the saved
-    // _lastVirtual* size is legitimate (e.g. a tiling WM's tile) and must be kept.
-    double _initialImplicitWidth {};
-    double _initialImplicitHeight {};
-    text::DPI _lastFontDPI;
-#if !defined(__APPLE__) && !defined(_WIN32)
-    mutable std::optional<double> _lastReportedContentScale;
-#endif
+    text::DPI _lastFontDPI {};
+    /// The app-wide forced-font-DPI provider (see ContentScale.h), injected in setSession(). Null until
+    /// then (and in tests): contentScale() falls back to the window DPR.
+    ForcedFontDpiProvider const* _forcedFontDpiProvider = nullptr;
     std::unique_ptr<vtrasterizer::Renderer> _renderer;
     bool _renderingPressure = false;
-    display::OpenGLRenderer* _renderTarget = nullptr;
-    bool _maximizedState = false;
-    bool _snapPending = false; ///< Guards against redundant snap-to-grid post() calls.
+    /// The RHI render target. Owned here; released on the render thread (its GPU resources must be)
+    /// via destroyRenderer() / CleanupJob, or by ~TerminalDisplay's RAII on a bare-window teardown.
+    std::unique_ptr<display::RhiRenderer> _renderTarget;
+    /// Shared liveness cell handed to every TerminalRenderNode (see DisplayLiveness): the node's
+    /// render-phase callbacks load the display from it, and ~TerminalDisplay publishes null + fences
+    /// the render thread, making GUI-thread destruction safe against an in-flight frame.
+    DisplayLiveness _nodeLiveness = std::make_shared<std::atomic<TerminalDisplay*>>(this);
     bool _sessionChanged = false;
+    bool _rhiBackendLogged = false; ///< One-shot latch for logRhiBackendInfoOnce().
+    /// The screen the per-screen hooks (refresh rate, logical DPI) are currently connected to;
+    /// re-homed by configureScreenHooks() whenever the window changes screens.
+    QScreen* _hookedScreen = nullptr;
     // update() timer used to animate the blinking cursor.
     QTimer _updateTimer;
 
@@ -325,8 +432,6 @@ class TerminalDisplay: public QQuickItem
     RenderStateManager _state;
     bool _doDumpState = false;
     std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
-
-    QFileSystemWatcher _filesystemWatcher;
 
     vtbackend::LineCount _lastHistoryLineCount = vtbackend::LineCount(0);
 

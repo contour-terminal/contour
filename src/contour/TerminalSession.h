@@ -3,6 +3,7 @@
 
 #include <contour/Actions.h>
 #include <contour/Audio.h>
+#include <contour/ColorConversion.h>
 #include <contour/Config.h>
 #if defined(__linux__)
     #include <contour/FreeDesktopNotifier.h>
@@ -20,19 +21,23 @@
 #include <QtCore/QThread>
 #include <QtQml/QJSValue>
 
+#include <atomic>
 #include <cstdint>
 #include <format>
 #include <thread>
 
 #include <qcolor.h>
 
+#include <vtmux/Primitives.h>
+
 namespace contour
 {
 
 namespace display
 {
+    class ForcedFontDpiProvider;
     class TerminalDisplay;
-}
+} // namespace display
 
 class ContourGuiApp;
 class TerminalSessionManager;
@@ -73,6 +78,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(int scrollOffset READ scrollOffset WRITE setScrollOffset NOTIFY scrollOffsetChanged)
     Q_PROPERTY(QString title READ title WRITE setTitle NOTIFY titleChanged)
     Q_PROPERTY(float opacity READ getOpacity NOTIFY opacityChanged)
+    Q_PROPERTY(float dimUnfocused READ getDimUnfocused NOTIFY dimUnfocusedChanged)
     Q_PROPERTY(QString pathToBackground READ pathToBackground NOTIFY pathToBackgroundChanged)
     Q_PROPERTY(float opacityBackground READ getOpacityBackground NOTIFY opacityBackgroundChanged)
     Q_PROPERTY(bool isImageBackground READ getIsImageBackground NOTIFY isImageBackgroundChanged)
@@ -115,15 +121,23 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         return static_cast<float>(_profile.background.value().opacity) / std::numeric_limits<uint8_t>::max();
     }
+    /// Blend amount (0.0 = off .. 1.0) applied by TerminalPane.qml while this pane is unfocused
+    /// (dim_unfocused profile option).
+    float getDimUnfocused() const noexcept { return static_cast<float>(_profile.dimUnfocused.value()); }
     QString pathToBackground() const
     {
-        if (const auto& p =
-                std::get_if<std::filesystem::path>(&(_terminal.colorPalette().backgroundImage->location)))
-        {
-            return QString("file:") + QString(p->string().c_str());
-        }
-        else
+        // backgroundImage is a shared_ptr that is null whenever no background image is configured (the
+        // common case), so it must be checked before dereferencing ->location — otherwise this is a null
+        // member access (undefined behavior, caught by UBSan) even though it happens not to crash in
+        // practice.
+        auto const& backgroundImage = _terminal.colorPalette().backgroundImage;
+        if (!backgroundImage)
             return QString();
+
+        if (const auto* p = std::get_if<std::filesystem::path>(&backgroundImage->location))
+            return QString("file:") + QString(p->string().c_str());
+
+        return QString();
     }
     QColor getBackgroundColor() const noexcept
     {
@@ -131,7 +145,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                          ? _terminal.colorPalette().defaultForeground
                          : _terminal.colorPalette().defaultBackground;
         auto alpha = static_cast<uint8_t>(_profile.background.value().opacity);
-        return QColor(color.red, color.green, color.blue, alpha);
+        return toQColor(color, alpha);
     }
     float getOpacityBackground() const noexcept
     {
@@ -212,13 +226,35 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /**
      * Constructs a single terminal session.
      *
-     * @param pty a PTY object (can be process, networked, mockup, ...)
-     * @param display fronend display to render the terminal.
+     * @param manager the owning session manager (may be null for a standalone/headless session).
+     * @param pty a PTY object (can be process, networked, mockup, ...).
+     * @param app the owning application, providing the shared config and defaults.
+     * @param profileName the profile to run this session under. Empty (the default) selects the
+     *        application's default profile (@c app.profileName()). Naming a profile explicitly is a
+     *        composition-time choice — a session's profile is intrinsic to it — used to spawn a
+     *        session under a profile other than the application default (and by tests to exercise
+     *        config-driven behaviour). The name must resolve in @c app.config(); an unknown name
+     *        falls back to the application default.
+     * @param initialPageSize the terminal's initial total page size. Empty (the default) uses the
+     *        profile's configured @c terminalSize; a new tab/split passes the live window's running
+     *        page size here so the terminal grid — not just the child PTY — is born at the current
+     *        window size instead of the profile default (see
+     *        TerminalSessionManager::createSessionInBackground).
      */
-    TerminalSession(TerminalSessionManager* manager, std::unique_ptr<vtpty::Pty> pty, ContourGuiApp& app);
+    TerminalSession(TerminalSessionManager* manager,
+                    std::unique_ptr<vtpty::Pty> pty,
+                    ContourGuiApp& app,
+                    std::string profileName = {},
+                    std::optional<vtbackend::PageSize> initialPageSize = std::nullopt);
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
+
+    /// The id by which the vtmux layout model refers to this session. Set when the manager mirrors
+    /// the session into the model. Identifies the leaf pane that hosts this session.
+    [[nodiscard]] vtmux::SessionId modelSessionId() const noexcept { return _modelSessionId; }
+    void setModelSessionId(vtmux::SessionId id) noexcept { _modelSessionId = id; }
+
     std::optional<std::string> name() const
     {
         // Resolve under the terminal's _stateMutex: this runs on the GUI thread (via
@@ -228,10 +264,22 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return terminal().resolvedTabName();
     }
 
+    /// The raw OS-window title, for the GUI tab-label {WindowTitle} placeholder.
+    ///
+    /// Distinct from name(): name() goes through resolvedTabName(), which honors TabsNamingMode and
+    /// returns nullopt unless Title mode is active (the status-line {Tabs} semantics). The GUI tab
+    /// label wants the raw title regardless of mode, read thread-safely.
+    /// @return The raw window title (empty if none has been set).
+    [[nodiscard]] std::string resolvedWindowTitle() const { return terminal().resolvedWindowTitle(); }
+
     /// Starts the VT background thread.
     void start();
 
     /// Initiates termination of this session, regardless of the underlying terminal state.
+    /// Works whether or not a display is attached: with a display the teardown is routed through
+    /// closeDisplay(); without one the PTY device is closed directly so the same
+    /// onClosed() -> sessionClosed -> TerminalSessionManager::removeSession path still runs (so a
+    /// background tab/split-pane session does not leak when closed).
     void terminate();
 
     config::Config const& config() const noexcept { return _config; }
@@ -242,6 +290,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     vtbackend::Terminal const& terminal() const noexcept { return _terminal; }
     vtbackend::ScreenType currentScreenType() const noexcept { return _currentScreenType; }
 
+    /// The session's current working directory, for inheritance when spawning a new tab, window or
+    /// split pane from this one. On non-Windows this reads the local Process's working directory (when
+    /// the device is a local process); on Windows it queries the terminal's reported cwd under the
+    /// terminal lock. Falls back to "." when no working directory can be determined (e.g. an SSH
+    /// session on non-Windows). Centralizing this here keeps every spawn path — new tab, new window and
+    /// split pane — using the same logic, including the Windows fallback.
+    /// @return The working directory path, or "." if unavailable.
+    [[nodiscard]] std::string workingDirectory() const;
+
     display::TerminalDisplay* display() noexcept { return _display; }
     display::TerminalDisplay const* display() const noexcept { return _display; }
 
@@ -249,6 +306,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void detachDisplay(display::TerminalDisplay& display);
 
     TerminalSessionManager* getTerminalManager() const noexcept { return _manager; }
+
+    /// The app-wide forced-font-DPI provider (see display/ContentScale.h), for injection into the
+    /// display. Routed through the session so the display layer needs no ContourGuiApp dependency.
+    /// @return The provider, or nullptr when no Qt application exists (tests).
+    [[nodiscard]] display::ForcedFontDpiProvider* forcedFontDpiProvider() noexcept;
 
     Q_INVOKABLE void applyPendingFontChange(bool allow, bool remember);
     Q_INVOKABLE void applyPendingPaste(bool allow, bool remember);
@@ -340,7 +402,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::IncreaseOpacity);
     bool operator()(actions::NewTerminal const&);
     bool operator()(actions::NoSearchHighlight);
-    bool operator()(actions::OpenConfiguration) const;
+    bool operator()(actions::OpenConfiguration);
     bool operator()(actions::OpenFileManager);
     bool operator()(actions::OpenSelection);
     bool operator()(actions::PasteClipboard);
@@ -386,6 +448,23 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::SwitchToTabLeft);
     bool operator()(actions::SwitchToTabRight);
     bool operator()(actions::SetTabName);
+    bool operator()(actions::SplitVertical);
+    bool operator()(actions::SplitHorizontal);
+    bool operator()(actions::ClosePane);
+    bool operator()(actions::FocusPaneLeft);
+    bool operator()(actions::FocusPaneRight);
+    bool operator()(actions::FocusPaneUp);
+    bool operator()(actions::FocusPaneDown);
+    bool operator()(actions::SwapPaneLeft);
+    bool operator()(actions::SwapPaneRight);
+    bool operator()(actions::SwapPaneUp);
+    bool operator()(actions::SwapPaneDown);
+    bool operator()(actions::MovePaneLeft);
+    bool operator()(actions::MovePaneRight);
+    bool operator()(actions::MovePaneUp);
+    bool operator()(actions::MovePaneDown);
+    bool operator()(actions::ToggleSplitOrientation);
+    bool operator()(actions::ResizePane const& action);
 
     void scheduleRedraw();
 
@@ -421,6 +500,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void isScrollbarRightChanged();
     void isScrollbarVisibleChanged();
     void opacityChanged();
+    void dimUnfocusedChanged();
     void onBell(float volume);
     void onAlert();
     void requestPermissionForFontChange();
@@ -480,6 +560,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     //
     TerminalSessionManager* _manager;
     int _id;
+    vtmux::SessionId _modelSessionId {};
     std::chrono::steady_clock::time_point _startTime;
     config::Config _config;
     std::string _profileName;
@@ -496,7 +577,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     std::unique_ptr<QFileSystemWatcher> _configFileChangeWatcher;
 
-    bool _terminating = false;
+    std::atomic<bool> _terminating { false };
     std::thread::id _mainLoopThreadID {};
     std::unique_ptr<std::thread> _screenUpdateThread;
 
@@ -523,6 +604,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     std::atomic<bool> _onClosedHandled = false;
     std::mutex _onClosedMutex;
+
+    /// Set by terminate() before it closes the PTY: tells onClosed() (exit-watcher thread) that this
+    /// close was deliberate (tab/pane/window close, at-exit dump) and must NOT be routed through the
+    /// early-exit "shell terminated too quickly" notice, which exists only for shells dying on their
+    /// own shortly after startup.
+    std::atomic<bool> _terminationRequested = false;
 
 #if defined(__linux__)
     FreeDesktopNotifier _desktopNotifier;

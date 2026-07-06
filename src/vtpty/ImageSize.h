@@ -17,10 +17,10 @@ namespace detail::tags
 }
 // clang-format on
 
-/// Representsthe width in pixels of an image (see ImageSize).
+/// Represents the width in pixels of an image (see ImageSize).
 using Width = boxed::boxed<unsigned, detail::tags::Width>;
 
-/// Representsthe height in pixels of an image (see ImageSize).
+/// Represents the height in pixels of an image (see ImageSize).
 using Height = boxed::boxed<unsigned, detail::tags::Height>;
 
 /// ImageSize represents the 2-dimensional size of an image (pixmap).
@@ -50,27 +50,32 @@ constexpr bool operator<(ImageSize a, ImageSize b) noexcept
     return a.width < b.width || (a.width == b.width && a.height < b.height);
 }
 
-constexpr ImageSize operator+(ImageSize a, ImageSize b) noexcept
-{
-    return ImageSize { .width = a.width + b.width, .height = a.height + b.height };
-}
-
+/// Component-wise subtraction, saturating at zero.
+///
+/// Width and Height are unsigned; a plain subtraction would wrap around on underflow.
+/// Degenerate inputs (subtrahend larger than minuend) clamp the affected axis to zero
+/// instead — clamp, don't wrap (same philosophy as contour's window-geometry module).
 constexpr ImageSize operator-(ImageSize a, ImageSize b) noexcept
 {
-    return ImageSize { .width = a.width - b.width, .height = a.height - b.height };
+    return ImageSize { .width = a.width > b.width ? a.width - b.width : Width(0),
+                       .height = a.height > b.height ? a.height - b.height : Height(0) };
 }
 
-constexpr ImageSize operator/(ImageSize a, ImageSize b) noexcept
-{
-    return ImageSize { .width = a.width / b.width, .height = a.height / b.height };
-}
-
+/// Component-wise division by a scalar, rounding UP to the next full pixel.
+///
+/// Used to derive downsampled pixmap sizes from supersampled ones; rounding up
+/// guarantees the result never loses a partially covered pixel row/column.
 inline ImageSize operator/(ImageSize a, double scalar) noexcept
 {
     return ImageSize { .width = Width::cast_from(std::ceil(double(*a.width) / scalar)),
                        .height = Height::cast_from(std::ceil(double(*a.height) / scalar)) };
 }
 
+/// Component-wise multiplication by a scalar, rounding UP to the next full pixel.
+///
+/// Contract: callers size render targets and supersampling buffers with this
+/// (logical size × content scale); rounding up guarantees the target is never
+/// smaller than the content it must hold.
 inline ImageSize operator*(ImageSize a, double scalar) noexcept
 {
     return ImageSize { .width = Width::cast_from(std::ceil(double(*a.width) * scalar)),

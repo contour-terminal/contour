@@ -139,6 +139,12 @@ if(CRISPY_TESTING)
         sort_test.cpp
         times_test.cpp
     )
+    # read_selector is a POSIX select()/epoll() construct (uses fd_set, sys/select.h); its header is
+    # only ever compiled through the UNIX-gated UnixPty. The test likewise only builds off Windows,
+    # where MSVC would otherwise choke on the unavailable fd_set type.
+    if(NOT WIN32)
+        target_sources(crispy_test PRIVATE read_selector_test.cpp)
+    endif()
     target_link_libraries(crispy_test Catch2::Catch2 crispy::core)
     add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)
 

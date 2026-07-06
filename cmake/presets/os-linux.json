@@ -75,6 +75,22 @@
                 "CMAKE_C_COMPILER": "clang",
                 "CMAKE_INSTALL_PREFIX": "/usr/local"
             }
+        },
+        {
+            "name": "clang-asan",
+            "displayName": "Clang Debug + ASan/UBSan",
+            "inherits": "clang-debug",
+            "cacheVariables": {
+                "CONTOUR_SANITIZE": "address"
+            }
+        },
+        {
+            "name": "clang-coverage",
+            "displayName": "Clang Debug + Coverage",
+            "inherits": "clang-debug",
+            "cacheVariables": {
+                "CONTOUR_COVERAGE": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -97,12 +113,44 @@
             "name": "clang-release",
             "displayName": "Clang - RelWithDebInfo",
             "configurePreset": "clang-release"
+        },
+        {
+            "name": "clang-asan",
+            "displayName": "Clang - Debug + ASan/UBSan",
+            "configurePreset": "clang-asan"
+        },
+        {
+            "name": "clang-coverage",
+            "displayName": "Clang - Debug + Coverage",
+            "configurePreset": "clang-coverage"
         }
     ],
     "testPresets": [
         {
             "name": "clang-debug",
             "configurePreset": "clang-debug",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": true
+            }
+        },
+        {
+            "name": "clang-asan",
+            "configurePreset": "clang-asan",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": true
+            }
+        },
+        {
+            "name": "clang-coverage",
+            "configurePreset": "clang-coverage",
             "output": {
                 "outputOnFailure": true
             },

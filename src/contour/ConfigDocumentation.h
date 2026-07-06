@@ -109,10 +109,23 @@ constexpr StringLiteral FullscreenConfig {
     "\n"
 };
 
-constexpr StringLiteral ShowTitleBarConfig { "{comment} When this profile is *activated*, this flag decides\n"
-                                             "{comment} whether or not the title bar will be shown\n"
-                                             "show_title_bar: {}\n"
-                                             "\n" };
+constexpr StringLiteral ShowTitleBarConfig {
+    "{comment} When this profile is *activated*, this flag selects the window decoration:\n"
+    "{comment}   true  = the native (server-side) title bar and its window controls;\n"
+    "{comment}   false = a frameless window with Contour's own client-side tab strip and controls.\n"
+    "{comment} The tab strip is shown either way; only the min/max/close controls move to the OS frame.\n"
+    "show_title_bar: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral DimUnfocusedConfig {
+    "{comment} Dims a pane while it is not the focused one — an inactive pane of a split, or any\n"
+    "{comment} pane of an unfocused window — by blending it toward its own background color.\n"
+    "{comment} The value is the blend amount between 0.0 (dimming disabled; the default) and 1.0\n"
+    "{comment} (fully blended to the background color).\n"
+    "dim_unfocused: {}\n"
+    "\n"
+};
 
 constexpr StringLiteral ShowIndicatorOnResizeConfig {
     "{comment} When this profile is *activated*, this flag decides\n"
@@ -151,6 +164,15 @@ constexpr StringLiteral CopyLastMarkRangeOffsetConfig {
 
 constexpr StringLiteral WMClassConfig {
     "{comment} Defines the class part of the WM_CLASS property of the window.\n"
+};
+
+constexpr StringLiteral TabLabelConfig {
+    "{comment} Default template for the text shown on each GUI tab.\n"
+    "{comment} Supported placeholders:\n"
+    "{comment}   {{WindowTitle}}  the active pane's window/tab title\n"
+    "{comment}   {{TabPosition}}  the tab's 1-based position\n"
+    "{comment} Renaming a tab overrides this default; the rename may itself use the same placeholders.\n"
+    "{comment} Split tabs show \"Multiple panes\" instead.\n"
 };
 
 constexpr StringLiteral MarginsConfig {
@@ -489,6 +511,9 @@ constexpr StringLiteral StatusLineConfig {
     "    {comment} Synchronize the window title with the Host Writable status_line if\n"
     "    {comment} and only if the host writable status line was denied to be shown.\n"
     "    sync_to_window_title: {}\n"
+    "    {comment} Each segment is a template of literal text and {{Placeholder}} markers (e.g.\n"
+    "    {comment} {{Clock}}, {{VTType}}). There is no brace escaping: any {{...}} that is not a\n"
+    "    {comment} recognized placeholder is echoed verbatim, so you see exactly what you typed.\n"
     "    indicator:\n"
     "        left: \"{}\"\n"
     "        middle: \"{}\"\n"
@@ -568,11 +593,16 @@ constexpr StringLiteral PlatformPluginConfig {
 
 constexpr StringLiteral RendererConfig {
     "renderer:\n"
-    "    {comment} Backend to use for rendering the terminal onto the screen\n"
+    "    {comment} Qt RHI graphics API used to render the terminal onto the screen.\n"
     "    {comment} Possible values are:\n"
-    "    {comment} - default     Uses the default rendering option as decided by the terminal.\n"
-    "    {comment} - software    Uses software-based rendering.\n"
-    "    {comment} - OpenGL      Use (possibly) hardware accelerated OpenGL\n"
+    "    {comment} - auto        Native backend per platform (Direct3D 11/Windows, Metal/macOS, "
+    "OpenGL/Linux).\n"
+    "    {comment} - OpenGL      Force the OpenGL backend on every platform.\n"
+    "    {comment} - vulkan      Force the Vulkan backend (Windows and Linux).\n"
+    "    {comment} - direct3d11  Force the Direct3D 11 backend (Windows only).\n"
+    "    {comment} - direct3d12  Force the Direct3D 12 backend (Windows only).\n"
+    "    {comment} - metal       Force the Metal backend (macOS only).\n"
+    "    {comment} - software    Force a software-emulated OpenGL rasterizer.\n"
     "    backend: {}\n"
     "\n"
     "    {comment} Enables/disables the use of direct-mapped texture atlas tiles for\n"
@@ -1177,8 +1207,9 @@ constexpr StringLiteral PlatformPluginWeb {
 
 constexpr StringLiteral RendererWeb {
     "section contains configuration options related to the VT Renderer, which is responsible for rendering "
-    "the terminal onto the screen. It includes the `backend` option to specify  the rendering backend, with "
-    "possible values of `default`, `software`, or `OpenGL`. The other options in this section control the "
+    "the terminal onto the screen. It includes the `backend` option to specify the Qt RHI graphics API, with "
+    "possible values of `auto` (the native backend per platform), `OpenGL`, `vulkan`, `direct3d11`, "
+    "`direct3d12`, `metal`, or `software`. The other options in this section control the "
     "tile mapping and caching for performance optimization. "
 };
 
@@ -1384,6 +1415,26 @@ constexpr StringLiteral WMClassWeb {
     "\n"
 };
 
+// NB: Documentation strings are std::vformat FORMAT templates (Writer::format), so every literal
+// brace must be doubled — a bare `{WindowTitle}` here is an invalid arg-id that makes the whole
+// `contour documentation configuration profile` subcommand throw before printing anything.
+constexpr StringLiteral TabLabelWeb {
+    "\n"
+    "Default template for the text shown on each GUI tab. The value is a string with optional `{{Name}}` "
+    "placeholders that are substituted per tab:\n"
+    "\n"
+    "- `{{WindowTitle}}` — the active pane's window/tab title.\n"
+    "- `{{TabPosition}}` — the tab's 1-based position in the window.\n"
+    "\n"
+    "Literal text outside placeholders is kept verbatim, and an unknown placeholder is echoed verbatim (you "
+    "see exactly the `{{Name}}` you typed). Renaming a tab overrides this default for that tab; the rename "
+    "text "
+    "may itself contain the "
+    "same placeholders (so renaming a tab to `{{WindowTitle}}` tracks its title). A tab holding a split is "
+    "shown as `Multiple panes`.\n"
+    "\n"
+};
+
 constexpr StringLiteral TerminalIdWeb {
     "\n"
     "configuration option allows you to specify the terminal type that will be advertised by the terminal "
@@ -1522,7 +1573,6 @@ constexpr StringLiteral FontsWeb {
     "  profile_name:\n"
     "    font:\n"
     "      size: 12\n"
-    "      dpi_scale: 1.0\n"
     "      locator: native\n"
     "      text_shaping:\n"
     "        engine: native\n"
@@ -1539,8 +1589,6 @@ constexpr StringLiteral FontsWeb {
     "```\n"
     ":octicons-horizontal-rule-16: ==size== Specifies the initial font size in pixels. The default value is "
     "12. <br/>\n"
-    ":octicons-horizontal-rule-16: ==dpi_scale== Allows applying a DPI scaling factor on top of the system's "
-    "configured DPI. The default value is 1.0. <br/>\n"
     ":octicons-horizontal-rule-16: ==locator==  Determines the font locator engine to use for locating font "
     "files and font fallback. Possible values are `native` and `mock`.<br/> `native` will use the "
     "operating-system native font location service (e.g. CoreText on macOS and DirectWrite on Windows), "
@@ -1799,6 +1847,19 @@ constexpr StringLiteral ShowTitleBarWeb { "configuration option determines wheth
 
 };
 
+constexpr StringLiteral DimUnfocusedWeb {
+    "configuration option dims a pane while it is not the focused one (an inactive pane of a split, or "
+    "any pane of an unfocused window) by blending it toward its own background color. The value is the "
+    "blend amount between 0.0 (dimming disabled; the default) and 1.0 (fully blended to the "
+    "background).\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    dim_unfocused: 0.3\n"
+    "```\n"
+    "\n"
+};
+
 constexpr StringLiteral ShowIndicatorOnResizeWeb {
     "configuration option determines whether or not the size indicator will be shown when terminal will "
     "resized.\n"
@@ -1893,12 +1954,14 @@ using SshHostConfig = DocumentationEntry<SshHostConfigConfig, SshHostConfigWeb>;
 using Maximized = DocumentationEntry<MaximizedConfig, MaximizedWeb>;
 using Fullscreen = DocumentationEntry<FullscreenConfig, FullscreenWeb>;
 using ShowTitleBar = DocumentationEntry<ShowTitleBarConfig, ShowTitleBarWeb>;
+using DimUnfocused = DocumentationEntry<DimUnfocusedConfig, DimUnfocusedWeb>;
 using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, ShowIndicatorOnResizeWeb>;
 using Mouse = DocumentationEntry<MouseConfig, MouseWeb>;
 using SeachModeSwitch = DocumentationEntry<SeachModeSwitchConfig, SeachModeSwitchWeb>;
 using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYankWeb>;
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
+using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
 using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;
 using TerminalSize = DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>;
 using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;

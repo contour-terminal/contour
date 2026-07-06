@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/Config.h>
+#include <contour/WindowGeometry.h>
 
 #include <vtbackend/InputGenerator.h>
 
@@ -10,6 +11,8 @@
 #include <crispy/logstore.h>
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QString>
+#include <QtCore/QStringList>
 #include <QtCore/Qt>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
@@ -161,44 +164,37 @@ struct AutoScrollInfo
 /// @return AutoScrollInfo with direction and speed; direction == 0 means mouse is inside content area.
 AutoScrollInfo computeAutoScrollInfo(QMouseEvent const* event, TerminalSession const& session) noexcept;
 
-void spawnNewTerminal(std::string const& programPath,
-                      std::string const& configPath,
-                      std::string const& profileName,
-                      std::string const& cwdUrl);
+/// A resolved "spawn a new contour process" command: the program to run plus its argument list.
+struct SpawnTerminalCommand
+{
+    QString program;
+    QStringList arguments;
+};
+
+/// Builds the command line for spawning a new detached contour process (pure; no launching), so the
+/// argument assembly (config/profile/working-directory flags and the cwd-URL host filtering) is
+/// unit-testable without starting a process.
+/// @param programPath The contour executable path.
+/// @param configPath The active config file (added as `config <path>` when non-empty).
+/// @param profileName The profile to open (added as `profile <name>` when non-empty).
+/// @param cwdUrl The working directory as a file URL; only a local-host path is forwarded.
+/// @return The program + arguments to hand to a detached-process launcher.
+[[nodiscard]] SpawnTerminalCommand buildSpawnTerminalCommand(std::string const& programPath,
+                                                             std::string const& configPath,
+                                                             std::string const& profileName,
+                                                             std::string const& cwdUrl);
 
 vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer);
-
-constexpr config::WindowMargins applyContentScale(config::WindowMargins margins, double contentScale) noexcept
-{
-    return { .horizontal =
-                 config::HorizontalMargin(static_cast<int>(unbox(margins.horizontal) * contentScale)),
-             .vertical = config::VerticalMargin(static_cast<int>(unbox(margins.vertical) * contentScale)) };
-}
-
-vtrasterizer::PageMargin computeMargin(vtbackend::ImageSize cellSize,
-                                       vtbackend::PageSize charCells,
-                                       vtbackend::ImageSize displaySize,
-                                       config::WindowMargins minimumMargins) noexcept;
 
 vtrasterizer::FontDescriptions sanitizeFontDescription(vtrasterizer::FontDescriptions fonts,
                                                        text::DPI screenDPI);
 
-constexpr vtbackend::PageSize pageSizeForPixels(vtbackend::ImageSize totalViewSize,
-                                                vtbackend::ImageSize cellSize,
-                                                config::WindowMargins margins)
+/// Adapts configured window margins to the geometry module's margin type.
+/// @param margins Configured margins (logical or device pixels — the unit passes through unchanged).
+/// @return The same margins as geometry::Margins.
+constexpr geometry::Margins toGeometryMargins(config::WindowMargins margins) noexcept
 {
-    // NB: Multiplied by 2, because margins are applied on both sides of the terminal.
-    auto const marginSize =
-        vtbackend::ImageSize { vtbackend::Width::cast_from(2 * unbox(margins.horizontal)),
-                               vtbackend::Height::cast_from(2 * unbox(margins.vertical)) };
-
-    auto const usableViewSize = totalViewSize - marginSize;
-
-    auto const result =
-        vtbackend::PageSize { boxed_cast<vtbackend::LineCount>((usableViewSize / cellSize).height),
-                              boxed_cast<vtbackend::ColumnCount>((usableViewSize / cellSize).width) };
-
-    return result;
+    return { .horizontal = unbox<int>(margins.horizontal), .vertical = unbox<int>(margins.vertical) };
 }
 
 void applyResize(vtbackend::ImageSize newPixelSize,
@@ -295,27 +291,6 @@ struct RenderStateManager
         }
     }
 };
-
-#define CONSUME_GL_ERRORS()                                                       \
-    do                                                                            \
-    {                                                                             \
-        GLenum err {};                                                            \
-        while ((err = glGetError()) != GL_NO_ERROR)                               \
-            errorLog()("Ignoring GL error {} in {}:{}", err, __FILE__, __LINE__); \
-    } while (0)
-
-#define CHECKED_GL(code)                                            \
-    [&]() -> bool {                                                 \
-        (code);                                                     \
-        GLenum err {};                                              \
-        int fails = 0;                                              \
-        while ((err = glGetError()) != GL_NO_ERROR)                 \
-        {                                                           \
-            errorLog()("OpenGL error {} for call: {}", err, #code); \
-            fails++;                                                \
-        }                                                           \
-        return fails == 0;                                          \
-    }()
 
 } // namespace contour
 

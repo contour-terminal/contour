@@ -1764,6 +1764,15 @@ SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
+    // The total page must leave room for at least one main-display line ON TOP of the visible status
+    // line(s): the main page is derived as `totalPageSize - statusLineHeight()` below, so a 1x1 total
+    // with the indicator status line active (statusLineHeight() == 1, the GUI default) would yield a
+    // zero-line main page and trip applyPageSizeToCurrentBuffer()/verifyState(). The frontend already
+    // clamps the TOTAL to >= 1x1 (helper.cpp), which is sufficient only when no status line is shown;
+    // clamp here so the backend invariant holds for every caller and every status-line height. Frontend
+    // callers query the same rule via clampedTotalPageSize() to keep their bookkeeping in agreement.
+    totalPageSize = clampedTotalPageSize(totalPageSize);
+
     // Finalize any active screen transition on resize (snapshot dimensions no longer match).
     if (_screenTransition.active)
         finalizeScreenTransition();
@@ -1829,9 +1838,16 @@ void Terminal::verifyState()
 
     _currentScreen->verifyState();
 
+    // Margins are terminal state, so verify them against the terminal's OWN main-display page size —
+    // the exact basis resizeScreen() fills them with. pageSize() would compare against the PTY's page
+    // size instead, which freezes once the PTY closes (UnixPty::resizeScreen early-returns without a
+    // master fd), so any grid change after the shell exited (DPR settlement, window growth, pane
+    // teardown reflows) made the two legitimately diverge and aborted debug builds.
+    auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
     Require(0 <= *currentPageMargin().horizontal.from
-            && *currentPageMargin().horizontal.to < *pageSize().columns);
-    Require(0 <= *currentPageMargin().vertical.from && *currentPageMargin().vertical.to < *pageSize().lines);
+            && *currentPageMargin().horizontal.to < *mainDisplayPageSize.columns);
+    Require(0 <= *currentPageMargin().vertical.from
+            && *currentPageMargin().vertical.to < *mainDisplayPageSize.lines);
 #endif
 }
 
@@ -2401,12 +2417,22 @@ void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode mode)
 
 void Terminal::setWindowTitle(string_view title)
 {
+    // Writes _windowTitle lock-free intentionally: the parser-thread callers (OSC 0/2 dispatch in
+    // Screen, save/restoreWindowTitle) reach this from inside writeToScreen()'s _stateMutex hold, so
+    // the write is already serialized under the lock; taking the non-recursive _stateMutex here would
+    // self-deadlock. GUI-thread readers must use resolvedWindowTitle(), which locks and copies.
     _windowTitle = title;
     _eventListener.setWindowTitle(title);
 }
 
 std::string const& Terminal::windowTitle() const noexcept
 {
+    return _windowTitle;
+}
+
+std::string Terminal::resolvedWindowTitle() const
+{
+    auto const l = std::lock_guard { _stateMutex };
     return _windowTitle;
 }
 
