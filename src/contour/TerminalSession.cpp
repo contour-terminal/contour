@@ -2427,10 +2427,10 @@ void TerminalSession::configureDisplay()
     // every window (fresh or tab-transplant receiver) directly into the profile's state on open —
     // and to the explicit user actions (toggleMaximized/toggleFullScreen). configureDisplay() runs
     // on EVERY renderer (re)creation: the first pane, but also each split leaf's fresh
-    // TerminalDisplay and any scene-graph re-creation after an unexpose. Re-asserting the profile's
-    // (default: non-maximized) state on those would drop the user's live maximized/fullscreen state
-    // — the "window unmaximizes when I split" regression. Splitting is a pure content-area
-    // operation; the QWindow's geometry and state must not change.
+    // TerminalDisplay and any scene-graph re-creation after the window loses and regains its surface.
+    // Re-asserting the profile's (default: non-maximized) state on those would drop the user's live
+    // maximized/fullscreen state — the "window leaves maximized when I split" regression. Splitting is
+    // a pure content-area operation; the QWindow's geometry and state must not change.
 
     _terminal.setRefreshRate(_display->refreshRate());
     _display->setFonts(_profile.fonts.value());
