@@ -6,6 +6,8 @@
     #include <contour/ContourApp.h>
 #endif
 
+#include <contour/BenignQtMessages.h>
+
 #include <crispy/SuppressWindowsDialogs.hpp>
 
 #include <QtCore/QByteArray>
@@ -14,6 +16,9 @@
 #if __has_include(<QtCore/QtLogging>)
     #include <QtCore/QtLogging>
 #endif
+
+#include <cstddef>
+#include <string_view>
 
 #if defined(_WIN32)
     #include <cstdio>
@@ -86,6 +91,16 @@ void tryAttachConsole()
 void qtCustomMessageOutput(QtMsgType type, const QMessageLogContext& context, const QString& msg)
 {
     QByteArray const localMsg = msg.toLocal8Bit();
+
+    // Drop known-benign, source-unfixable Qt-internal noise (see BenignQtMessages.h) before it reaches
+    // the user, so it never dilutes Contour's real diagnostics. Never suppress a fatal message: Qt
+    // considers it terminal, and swallowing it would skip the abort() below and leave the process running
+    // in an undefined state.
+    if (type != QtFatalMsg
+        && contour::isBenignQtMessage(
+            std::string_view { localMsg.constData(), static_cast<size_t>(localMsg.size()) }))
+        return;
+
     switch (type)
     {
         case QtDebugMsg:

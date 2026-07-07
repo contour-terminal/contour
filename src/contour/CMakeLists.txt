@@ -280,6 +280,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/test_main.cpp
             test/Actions_test.cpp
             test/AudioNote_test.cpp
+            test/BenignQtMessages_test.cpp
             test/CaptureScreen_test.cpp
             test/CatImageArgs_test.cpp
             test/Config_test.cpp
