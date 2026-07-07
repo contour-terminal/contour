@@ -337,21 +337,6 @@ void ViInputHandler::setMode(ViMode theMode)
 
 Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
-    if (_promptEditMode != PromptMode::Disabled)
-    {
-        if (eventType == KeyboardEventType::Release)
-            return Handled { true };
-        // TODO: support cursor movements.
-        switch (key)
-        {
-            case Key::Backspace: return handlePromptEditor('\x08', modifiers);
-            case Key::Enter: return handlePromptEditor('\x0D', modifiers);
-            case Key::Escape: return handlePromptEditor('\x1B', modifiers);
-            default: break;
-        }
-        return Handled { true };
-    }
-
     if (_searchEditMode != PromptMode::Disabled)
     {
         if (eventType == KeyboardEventType::Release)
@@ -541,32 +526,6 @@ Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
     return Handled { true };
 }
 
-Handled ViInputHandler::handlePromptEditor(char32_t ch, Modifiers modifiers)
-{
-    assert(_promptEditMode != PromptMode::Disabled);
-
-    handleEditor(
-        ch,
-        modifiers,
-        _promptText,
-        _promptEditMode,
-        _settings,
-        [&](auto mode) { setMode(mode); },
-        [&]() { _executor->promptCancel(); },
-        [&]() {
-            _executor->promptDone();
-            if (_setTabNameCallback)
-            {
-                _setTabNameCallback.value()(_promptText);
-                setMode(ViMode::Insert);
-                _setTabNameCallback = std::nullopt;
-            }
-        },
-        [&](const auto& val) { _executor->updatePromptText(val); });
-
-    return Handled { true };
-}
-
 Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers, KeyboardEventType eventType)
 {
     if (_searchEditMode != PromptMode::Disabled)
@@ -574,13 +533,6 @@ Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers, Key
         if (eventType == KeyboardEventType::Release)
             return Handled { true };
         return handleSearchEditor(ch, modifiers);
-    }
-
-    if (_promptEditMode != PromptMode::Disabled)
-    {
-        if (eventType == KeyboardEventType::Release)
-            return Handled { true };
-        return handlePromptEditor(ch, modifiers);
     }
 
     if (_viMode == ViMode::Insert)

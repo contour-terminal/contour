@@ -166,12 +166,6 @@ struct Search
     bool initiatedByDoubleClick = false;
 };
 
-struct Prompt
-{
-    std::string prompt;
-    std::string text;
-};
-
 // Mandates what execution mode the terminal will take to process VT sequences.
 //
 enum class ExecutionMode : uint8_t
@@ -1208,8 +1202,6 @@ class Terminal
     [[nodiscard]] bool focused() const noexcept { return _focused; }
     [[nodiscard]] Search& search() noexcept { return _search; }
     [[nodiscard]] Search const& search() const noexcept { return _search; }
-    [[nodiscard]] Prompt& prompt() noexcept { return _prompt; }
-    [[nodiscard]] Prompt const& prompt() const noexcept { return _prompt; }
 
     // {{{ hint mode
     /// Activates hint mode by scanning visible lines for regex matches.
@@ -1333,9 +1325,6 @@ class Terminal
     bool setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick);
     void clearSearch();
 
-    void setPrompt(std::string prompt);
-    void setPromptText(std::string text);
-
     // Tests if the grid cell at the given location does contain a word delimiter.
     [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;
     [[nodiscard]] bool wordDelimited(CellLocation position,
@@ -1458,7 +1447,6 @@ class Terminal
     }
 
     TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
-    void requestTabName();
 
   private:
     /// Scroll the viewport to the bottom if `settings().autoScrollOnUpdate` is enabled.
@@ -1767,7 +1755,6 @@ class Terminal
     ActiveStatusDisplay _activeStatusDisplay = ActiveStatusDisplay::Main;
 
     Search _search;
-    Prompt _prompt;
 
     CursorDisplay _cursorDisplay = CursorDisplay::Steady;
     CursorShape _cursorShape = CursorShape::Block;

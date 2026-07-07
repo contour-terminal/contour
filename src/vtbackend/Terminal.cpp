@@ -2438,34 +2438,10 @@ std::string Terminal::resolvedWindowTitle() const
 
 void Terminal::setTabName(string_view title)
 {
-    // Parser-thread path (SETTABNAME escape sequence): writeToScreen() already holds _stateMutex across
-    // the whole parse, so _tabName is written under the lock here. The GUI interactive-prompt path goes
-    // through requestTabName(), which takes _stateMutex itself before mutating _tabName — it must NOT call
-    // this method (that would write _tabName lock-free, racing the parser thread and resolvedTabName()).
+    // Parser-thread path (SETTABNAME escape sequence, OSC 30): writeToScreen() already holds _stateMutex
+    // across the whole parse, so _tabName is written under the lock here.
     _tabName = title;
     _eventListener.setTabName(title);
-}
-
-void Terminal::requestTabName()
-{
-    // The interactively-entered name arrives on the GUI thread, where _stateMutex is NOT held (unlike the
-    // parser-thread SETTABNAME path). _tabName is read on the GUI thread by resolvedTabName() and written
-    // on the parser thread by setTabName(), both under _stateMutex, so this writer must take the lock too;
-    // assigning _tabName lock-free would be a data race (torn read / use-after-free on string reallocation).
-    //
-    // The event-listener notification (-> TerminalSession::setTabName -> refreshGuiTabInfoForStatusLine,
-    // which only post()s to the GUI loop) is done OUTSIDE the lock to keep the _stateMutex hold minimal and
-    // avoid taking GUI-side locks under it. We do not route through setTabName() because that writes
-    // _tabName without the lock.
-    inputHandler().setTabName([this](std::string const& name) {
-        {
-            auto const l = std::lock_guard { _stateMutex };
-            _tabName = name;
-        }
-        // Notify with the local argument, not _tabName: reading the member after releasing the lock would
-        // again race the parser thread.
-        _eventListener.setTabName(name);
-    });
 }
 
 std::optional<std::string> Terminal::tabName() const noexcept
@@ -3531,16 +3507,6 @@ bool Terminal::setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick
 
     _search.pattern = std::move(text);
     return true;
-}
-
-void Terminal::setPrompt(std::string prompt)
-{
-    _prompt.prompt = std::move(prompt);
-}
-
-void Terminal::setPromptText(std::string text)
-{
-    _prompt.text = std::move(text);
 }
 
 optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)
