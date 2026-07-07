@@ -370,7 +370,12 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     //                lineBuffer.text.view(),
     //                flags);
 
-    _useCursorlineColoring = false;
+    // A trivial line can now sit under the (vi) cursor after the AoS→SoA migration — a plain-text
+    // line with uniform SGR stays trivial even when the normal-mode cursor is on it. So the
+    // cursorline decision must be made here too, exactly as startLine() does for inflated lines;
+    // hard-coding it to false (the old invariant "cursor lines are always inflated") dropped the
+    // current-line highlight on plain-text lines.
+    _useCursorlineColoring = isCursorLine(lineOffset);
     _currentLineFlags = flags;
 
     auto const frontIndex = _output->cells.size();
@@ -383,8 +388,17 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     // which affects background/foreground color again.
     // We're not testing for cursor shape (which should be done in order to be 100% correct)
     // because it's not really draining performance.
-    bool const canRenderViaSimpleLine =
-        (!_terminal->isSelected(lineOffset) || !_includeSelection) && !gridLineContainsCursor(lineOffset);
+    // A vi yank/motion highlight range (like a selection) recolors part of the line, so a trivial
+    // line intersecting it must drop to the per-cell path where makeColorsForCell() applies the
+    // yankHighlight. _highlightRange lives in grid coordinates, so translate this screen line first
+    // (matching how makeColorsForCell() queries isHighlighted() with grid coordinates).
+    auto const gridLine =
+        _terminal->viewport()
+            .translateScreenToGridCoordinate(CellLocation { .line = lineOffset, .column = ColumnOffset(0) })
+            .line;
+    bool const canRenderViaSimpleLine = (!_terminal->isSelected(lineOffset) || !_includeSelection)
+                                        && !gridLineContainsCursor(lineOffset)
+                                        && !_terminal->isHighlighted(gridLine);
 
     if (canRenderViaSimpleLine)
     {

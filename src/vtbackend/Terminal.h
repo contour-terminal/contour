@@ -1072,7 +1072,17 @@ class Terminal
                && _selection->containsLine(line);
     }
 
+    /// Tests whether the given cell is covered by the active (vi yank/motion) highlight range.
+    /// @param cell The absolute grid coordinate to test.
+    /// @return true if a highlight range is active and contains @p cell.
     bool isHighlighted(CellLocation cell) const noexcept;
+
+    /// Tests whether the given grid line intersects the active highlight range.
+    /// Mirrors isSelected(LineOffset) so the render fast path can cheaply decide whether a
+    /// trivial (uniform-SGR) line must drop to the per-cell path to receive the highlight.
+    /// @param line The absolute grid line offset to test.
+    /// @return true if a highlight range is active and spans @p line.
+    [[nodiscard]] bool isHighlighted(LineOffset line) const noexcept;
     float blinkState() const noexcept { return _slowBlinker.opacity(_currentTime, _settings.blinkStyle); }
     float rapidBlinkState() const noexcept
     {

@@ -3651,6 +3651,21 @@ bool Terminal::isHighlighted(CellLocation cell) const noexcept // NOLINT(bugpron
                _highlightRange.value());
 }
 
+bool Terminal::isHighlighted(LineOffset line) const noexcept // NOLINT(bugprone-exception-escape)
+{
+    // A line intersects the highlight range when it falls between the range's endpoints, whichever
+    // way round they were recorded. Linear and rectangular highlights share the same line span
+    // (the rectangle only additionally constrains columns, which do not matter for a line test).
+    return _highlightRange.has_value()
+           && std::visit(
+               [line](auto&& highlightRange) {
+                   auto const lo = std::min(highlightRange.from.line, highlightRange.to.line);
+                   auto const hi = std::max(highlightRange.from.line, highlightRange.to.line);
+                   return lo <= line && line <= hi;
+               },
+               _highlightRange.value());
+}
+
 void Terminal::onSelectionUpdated()
 {
     if (!isModeEnabled(DECMode::ReportGridCellSelection))
