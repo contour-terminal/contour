@@ -2605,7 +2605,9 @@ TEST_CASE("Terminal.Cursorline.trivialLineUnderCursorIsHighlighted", "[terminal]
     // grid line 0: plain text (trivial), 1: colorized (inflated), 2: empty (trivial),
     // 3: plain text (trivial).
     mc.writeToScreen("plain0\r\n");
-    mc.writeToScreen("\033[38;2;255;0;0mcolor1\033[m\r\n");
+    mc.writeToScreen("\033[38;2;255;0;0m"); // red foreground
+    mc.writeToScreen("tinted1");
+    mc.writeToScreen("\033[m\r\n"); // reset SGR
     mc.writeToScreen("\r\n");
     mc.writeToScreen("plain3");
 
@@ -2642,7 +2644,9 @@ TEST_CASE("Terminal.Cursorline.notShownInInsertMode", "[terminal][vi]")
     auto& terminal = mc.terminal;
     auto constexpr ClockBase = chrono::steady_clock::time_point();
     terminal.tick(ClockBase);
-    mc.writeToScreen("plainA\r\nplainB\r\nplainC");
+    mc.writeToScreen("plainA\r\n");
+    mc.writeToScreen("plainB\r\n");
+    mc.writeToScreen("plainC");
 
     // Stays in the default insert mode (no status line, no cursorline).
     terminal.tick(ClockBase + chrono::seconds(1));
@@ -2662,7 +2666,8 @@ TEST_CASE("Terminal.Cursorline.nonCursorTrivialLineNotHighlighted", "[terminal][
     auto& terminal = mc.terminal;
     auto constexpr ClockBase = chrono::steady_clock::time_point();
     terminal.tick(ClockBase);
-    mc.writeToScreen("plainA\r\nplainB");
+    mc.writeToScreen("plainA\r\n");
+    mc.writeToScreen("plainB");
 
     terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
     terminal.moveNormalModeCursorTo(
@@ -2688,7 +2693,9 @@ TEST_CASE("Terminal.YankHighlight.trivialLineIsHighlighted", "[terminal][vi]")
     auto& terminal = mc.terminal;
     auto constexpr ClockBase = chrono::steady_clock::time_point();
     terminal.tick(ClockBase);
-    mc.writeToScreen("plainA\r\nplainB\r\nplainC");
+    mc.writeToScreen("plainA\r\n");
+    mc.writeToScreen("plainB\r\n");
+    mc.writeToScreen("plainC");
 
     // Highlight grid line 1 (a plain-text trivial line) while still in insert mode so no
     // status-line resize shifts coordinates; the highlight alone must recolor the trivial line.
