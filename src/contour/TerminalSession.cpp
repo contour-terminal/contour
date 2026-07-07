@@ -1185,7 +1185,11 @@ void TerminalSession::setTerminalProfile(string const& configProfileName)
     if (!_display)
         return;
 
-    _display->post([this, name = string(configProfileName)]() { activateProfile(name); });
+    // OSC-driven profile switch (application explicitly requested it): fit the window to the new
+    // profile's terminal_size, as with the {ChangeProfile} keybinding.
+    _display->post([this, name = string(configProfileName)]() {
+        activateProfile(name, ProfileWindowSizePolicy::Apply);
+    });
 }
 
 void TerminalSession::discardImage(vtbackend::Image const& image)
@@ -1448,7 +1452,8 @@ bool TerminalSession::operator()(actions::ChangeProfile const& action)
     if (action.name == _profileName)
         return true;
 
-    activateProfile(action.name);
+    // Explicit user action: fit the window to the new profile's terminal_size.
+    activateProfile(action.name, ProfileWindowSizePolicy::Apply);
     return true;
 }
 
@@ -2189,6 +2194,8 @@ bool TerminalSession::reloadConfig(config::Config newConfig, string const& profi
     // clang-format on
 
     _config = std::move(newConfig);
+    // Passive config-file reload: keep the user's live window size (default Preserve policy). Only an
+    // explicit profile switch re-fits the window to the profile's terminal_size.
     activateProfile(profileName);
 
     return true;
@@ -2281,7 +2288,7 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     }
 }
 
-void TerminalSession::activateProfile(string const& newProfileName)
+void TerminalSession::activateProfile(string const& newProfileName, ProfileWindowSizePolicy windowSizePolicy)
 {
     // findProfile() (not profile()): the name comes from runtime input (a keybinding or the
     // {ChangeProfile} action) and may reference a profile the user removed. profile() asserts on a
@@ -2302,11 +2309,17 @@ void TerminalSession::activateProfile(string const& newProfileName)
     // TerminalPane.qml's overlay binds to the property.
     emit dimUnfocusedChanged();
 
-    // A profile switch may change the configured grid (terminal_size); ask the window to fit it — a
-    // content-driven grid->window request through the controller choke point (refused when
-    // fullscreen/maximized; a WM refusal leaves the reflowed grid). Posted like the sibling display
-    // calls; the inner _display re-check covers a teardown between schedule and dispatch.
-    if (_display != nullptr)
+    // An EXPLICIT profile switch (keybinding / OSC request) may change the configured grid
+    // (terminal_size); ask the window to fit it — a content-driven grid->window request through the
+    // controller choke point (refused when fullscreen/maximized; a WM refusal leaves the reflowed
+    // grid). Posted like the sibling display calls; the inner _display re-check covers a teardown
+    // between schedule and dispatch.
+    //
+    // A passive config-file RELOAD must NOT resize: the window size is the user's live authority once
+    // the window is mapped, so re-fitting to terminal_size on every save would silently discard an
+    // interactively-set size (and, with one file-watcher per pane, fire N competing resizes at once).
+    // Hence the policy gate — the resize is tied to the intent of the activation, not the activation.
+    if (_display != nullptr && windowSizePolicy == ProfileWindowSizePolicy::Apply)
     {
         auto const configuredSize = _profile.terminalSize.value();
         _display->post([this, configuredSize]() {
@@ -2409,13 +2422,15 @@ void TerminalSession::configureDisplay()
         _terminal.setMaxImageSize(actualScreenSize, actualScreenSize);
     }
 
-    if (_profile.maximized.value())
-        _display->setWindowMaximized();
-    else
-        _display->setWindowNormal();
-
-    if (_profile.fullscreen.value() != _display->isFullScreen())
-        _display->toggleFullScreen();
+    // NB: The profile's window show-mode (maximized/fullscreen/normal) is deliberately NOT applied
+    // here. Window-state authority belongs solely to WindowController::showInitial() — which maps
+    // every window (fresh or tab-transplant receiver) directly into the profile's state on open —
+    // and to the explicit user actions (toggleMaximized/toggleFullScreen). configureDisplay() runs
+    // on EVERY renderer (re)creation: the first pane, but also each split leaf's fresh
+    // TerminalDisplay and any scene-graph re-creation after the window loses and regains its surface.
+    // Re-asserting the profile's (default: non-maximized) state on those would drop the user's live
+    // maximized/fullscreen state — the "window leaves maximized when I split" regression. Splitting is
+    // a pure content-area operation; the QWindow's geometry and state must not change.
 
     _terminal.setRefreshRate(_display->refreshRate());
     _display->setFonts(_profile.fonts.value());

@@ -812,9 +812,10 @@ void TerminalDisplay::createRenderer()
 
     // Defer configureDisplay() until the GUI thread processes QML binding propagation
     // and the window is committed at its final initial size (e.g. 1136x600 at DPR 1.5).
-    // Calling it synchronously here (render thread, GUI blocked) causes setWindowNormal()
-    // → showNormal() to trigger a Wayland configure event that uses the stale pre-DPR-correction
-    // window geometry (e.g. 1115x585 at DPR 2.0), reverting the terminal to the wrong size.
+    // configureDisplay() drives setFonts()/resizeTerminalToDisplaySize() against the display's
+    // metrics; running it synchronously here (render thread, GUI blocked) would compute geometry
+    // from the stale pre-DPR-correction window size (e.g. 1115x585 at DPR 2.0) instead of the
+    // committed final size, reverting the terminal to the wrong dimensions.
     // Re-check _session inside the lambda: post() runs it later on the GUI event loop, and the display can be
     // torn down (releaseSession -> _session == null) between this schedule and its dispatch, matching the
     // inner-guard pattern of the other post() lambdas here (863/1134).
