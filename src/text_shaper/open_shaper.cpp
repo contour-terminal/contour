@@ -665,7 +665,17 @@ struct open_shaper::private_open_shaper // {{{
             throw runtime_error { "freetype: Failed to initialize. "s + ftErrorStr(ec) };
 
         if (auto const ec = FT_Library_SetLcdFilter(ft, FT_LCD_FILTER_DEFAULT); ec != FT_Err_Ok)
-            errorLog()("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
+        {
+            // FreeType built without FT_CONFIG_OPTION_SUBPIXEL_RENDERING (e.g. Homebrew's on macOS)
+            // makes FT_Library_SetLcdFilter a no-op that returns FT_Err_Unimplemented_Feature. That is
+            // expected — LCD/subpixel filtering is simply unavailable — so keep it at render-log
+            // verbosity (off by default) instead of alarming the user on every startup. Any other,
+            // genuinely unexpected error code still surfaces via errorLog().
+            if (ec == FT_Err_Unimplemented_Feature)
+                rasterizerLog()("freetype: LCD filter unavailable (subpixel rendering not built in).");
+            else
+                errorLog()("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
+        }
     }
 
     /// Extends fontInfo.fallbacks by appending the next batch from allFallbacks.
