@@ -41,6 +41,16 @@ ApplicationWindow
     // remain reachable whether or not the native title bar is used.
     property bool showCustomTitleBar: true
 
+    // Diagnostic lifecycle/notification traces below are routed through a category that is off by
+    // default (Warning floor), so they stay silent during normal use (closing a window and firing a
+    // notification are expected events) but can be re-enabled for debugging via
+    // QT_LOGGING_RULES="contour.window.debug=true".
+    LoggingCategory {
+        id: windowLog
+        name: "contour.window"
+        defaultLogLevel: LoggingCategory.Warning
+    }
+
     // The window title follows the ACTIVE PANE's session: focusing another pane changes
     // terminalSessions.activeSession (which emits activeSessionChanged on a pane-focus change as well as on
     // a tab switch), and this binding also re-evaluates when that session's own title changes. Empty string
@@ -145,7 +155,7 @@ ApplicationWindow
     }
 
     onClosing: {
-        console.log("Terminal closed. Removing session.");
+        console.debug(windowLog, "Terminal closed. Removing session.");
         if (appWindow.win)
             appWindow.win.closeWindow();
     }
@@ -153,7 +163,7 @@ ApplicationWindow
     function showNotification(title, content) {
         // "OSC 777 ; notify ; <TITLE> ; <CONTENT> ST"
         // Example: printf "\033]777;notify;Hello Title;Hello Content\033\\"
-        console.log("main: notification [%1] %2".arg(title).arg(content));
+        console.debug(windowLog, "main: notification [%1] %2".arg(title).arg(content));
         if (trayIcon.supportsMessages)
         {
             trayIcon.show();
@@ -162,7 +172,7 @@ ApplicationWindow
                                  60 * 1000);
         }
         else
-            console.log("main: Notification system not supported!");
+            console.warn("main: Notification system not supported!");
     }
 
     // NB: This requires Qt 5.12+
