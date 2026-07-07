@@ -176,6 +176,14 @@ void WindowController::resetTabTitle(int index)
         _manager.model().resetTabTitle(tab->id());
 }
 
+void WindowController::beginActiveTabTitleEdit()
+{
+    auto const index = activeTabIndex();
+    if (index < 0)
+        return;
+    emit tabTitleEditRequested(index);
+}
+
 void WindowController::setTabColor(int index, QColor const& color)
 {
     if (auto* tab = tabAtRow(index); tab != nullptr)

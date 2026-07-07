@@ -109,7 +109,7 @@ struct SwitchToTab{ int position; };
 struct SwitchToPreviousTab{};
 struct SwitchToTabLeft{};
 struct SwitchToTabRight{};
-struct SetTabName{};
+struct SetTabTitle{};
 struct SplitVertical{};    // split the active pane left/right
 struct SplitHorizontal{};  // split the active pane top/bottom
 struct ClosePane{};
@@ -191,7 +191,7 @@ using Action = std::variant<CancelSelection,
                             SwitchToPreviousTab,
                             SwitchToTabLeft,
                             SwitchToTabRight,
-                            SetTabName,
+                            SetTabTitle,
                             SplitVertical,
                             SplitHorizontal,
                             ClosePane,
@@ -395,7 +395,9 @@ namespace documentation
     constexpr inline std::string_view SwitchToPreviousTab { "Switch to the previously focused tab" };
     constexpr inline std::string_view SwitchToTabLeft { "Switch to tab to the left" };
     constexpr inline std::string_view SwitchToTabRight { "Switch to tab to the right" };
-    constexpr inline std::string_view SetTabName { "Set the name of the current tab" };
+    constexpr inline std::string_view SetTabTitle {
+        "Rename the current tab inline (opens the tab-title editor)"
+    };
     constexpr inline std::string_view SplitVertical {
         "Splits the active pane into two side-by-side panes (a vertical divider)."
     };
@@ -489,7 +491,7 @@ constexpr inline auto getDocumentation()
         std::tuple { Action { SwitchToPreviousTab {} }, documentation::SwitchToPreviousTab },
         std::tuple { Action { SwitchToTabLeft {} }, documentation::SwitchToTabLeft },
         std::tuple { Action { SwitchToTabRight {} }, documentation::SwitchToTabRight },
-        std::tuple { Action { SetTabName {} }, documentation::SetTabName },
+        std::tuple { Action { SetTabTitle {} }, documentation::SetTabTitle },
         std::tuple { Action { SplitVertical {} }, documentation::SplitVertical },
         std::tuple { Action { SplitHorizontal {} }, documentation::SplitHorizontal },
         std::tuple { Action { ClosePane {} }, documentation::ClosePane },
@@ -588,7 +590,7 @@ DECLARE_ACTION_FMT(MoveTabToRight)
 DECLARE_ACTION_FMT(SwitchToPreviousTab)
 DECLARE_ACTION_FMT(SwitchToTabLeft)
 DECLARE_ACTION_FMT(SwitchToTabRight)
-DECLARE_ACTION_FMT(SetTabName)
+DECLARE_ACTION_FMT(SetTabTitle)
 DECLARE_ACTION_FMT(SplitVertical)
 DECLARE_ACTION_FMT(SplitHorizontal)
 DECLARE_ACTION_FMT(ClosePane)
@@ -728,7 +730,7 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(SwitchToPreviousTab);
         HANDLE_ACTION(SwitchToTabLeft);
         HANDLE_ACTION(SwitchToTabRight);
-        HANDLE_ACTION(SetTabName);
+        HANDLE_ACTION(SetTabTitle);
         HANDLE_ACTION(SplitVertical);
         HANDLE_ACTION(SplitHorizontal);
         HANDLE_ACTION(ClosePane);

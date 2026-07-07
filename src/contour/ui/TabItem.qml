@@ -252,4 +252,15 @@ Item {
         tabIndex: root.tabIndex
         onRenameRequested: renameLoader.start()
     }
+
+    // Keyboard entry point (the SetTabTitle action): the WindowController emits
+    // tabTitleEditRequested(index) for the active tab; the matching delegate opens its editor.
+    // The active tab's delegate is always realized, so an in-delegate Connections reliably fires.
+    Connections {
+        target: root.controller
+        function onTabTitleEditRequested(index) {
+            if (index === root.tabIndex)
+                renameLoader.start()
+        }
+    }
 }

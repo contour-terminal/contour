@@ -27,6 +27,7 @@
 
 #include <algorithm>
 
+#include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 #include <vtmux/Pane.h>
 #include <vtmux/SessionModel.h>
@@ -141,6 +142,47 @@ TEST_CASE("REGRESSION: tab operations from a second window target that window, n
         CHECK(windowB->count() == 1);
         CHECK(windowA->count() == 2);
     }
+}
+
+TEST_CASE("beginActiveTabTitleEdit requests the active tab's inline editor, per window",
+          "[contour][multiwindow]")
+{
+    // The SetTabTitle action asks the acting window's WindowController to open the inline title
+    // editor for its ACTIVE tab; the controller signals tabTitleEditRequested(activeTabIndex) so
+    // the matching QML TabItem starts editing. Verify the signal fires with the active tab's row,
+    // and only on the window whose controller was asked (no cross-window leakage).
+    TestApp app;
+    auto& manager = app.manager();
+    ScopedController windowA { manager };
+    ScopedController windowB { manager };
+    createTabs(manager, *windowA, 2);
+    createTabs(manager, *windowB, 3);
+
+    windowB->activateTab(2);
+    REQUIRE(windowB->activeTabIndex() == 2);
+
+    auto spyB = QSignalSpy(windowB.controller, &contour::WindowController::tabTitleEditRequested);
+    auto spyA = QSignalSpy(windowA.controller, &contour::WindowController::tabTitleEditRequested);
+
+    windowB->beginActiveTabTitleEdit();
+
+    REQUIRE(spyB.count() == 1);
+    CHECK(spyB.takeFirst().at(0).toInt() == 2); // window B's active tab row
+    CHECK(spyA.count() == 0);                   // window A's controller was not asked
+}
+
+TEST_CASE("beginActiveTabTitleEdit is a no-op when the window has no tabs", "[contour][multiwindow]")
+{
+    // Guard: with no active tab (activeTabIndex() < 0) the controller must not emit, so the QML
+    // editor is never asked to open on a nonexistent tab.
+    TestApp app;
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    REQUIRE(window->activeTabIndex() < 0);
+
+    auto spy = QSignalSpy(window.controller, &contour::WindowController::tabTitleEditRequested);
+    window->beginActiveTabTitleEdit();
+    CHECK(spy.count() == 0);
 }
 
 TEST_CASE("REGRESSION: pane-proxy writes (ratio, activate) target their own window's tab",

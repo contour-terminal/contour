@@ -114,6 +114,10 @@ class WindowController: public QAbstractListModel
     Q_INVOKABLE void tearOffTab(int index);
     Q_INVOKABLE void setTabTitle(int index, QString const& title);
     Q_INVOKABLE void resetTabTitle(int index);
+    /// Asks the active tab's QML delegate to open its inline title editor (the keyboard entry point
+    /// for the SetTabTitle action). No-op when this window has no active tab. Emits
+    /// tabTitleEditRequested() with the active tab's row so exactly that TabItem starts editing.
+    Q_INVOKABLE void beginActiveTabTitleEdit();
     Q_INVOKABLE void setTabColor(int index, QColor const& color);
     Q_INVOKABLE void resetTabColor(int index);
     Q_INVOKABLE void closeTabAtIndex(int index);
@@ -322,6 +326,10 @@ class WindowController: public QAbstractListModel
   signals:
     void countChanged();
     void activeTabIndexChanged();
+    /// Requests that the tab at @p index open its inline title editor. Per-window (this controller
+    /// is the tab-strip model), so it only reaches this window's TabItems; the delegate whose row
+    /// matches @p index starts editing.
+    void tabTitleEditRequested(int index);
     void multimediaReadyChanged();
     void activeTabRootPaneChanged();
     void titleBarVisibleChanged();

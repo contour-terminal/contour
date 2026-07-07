@@ -302,7 +302,7 @@ TEST_CASE("TerminalSession: tab actions from an unregistered session are guarded
     CHECK_NOTHROW((*session)(contour::actions::FocusPaneDown {}));
     CHECK_NOTHROW((*session)(contour::actions::MoveTabTo { .position = 1 }));
     CHECK_NOTHROW((*session)(contour::actions::SwitchToTab { .position = 1 }));
-    CHECK_NOTHROW((*session)(contour::actions::SetTabName {}));
+    CHECK_NOTHROW((*session)(contour::actions::SetTabTitle {}));
 }
 
 TEST_CASE("TerminalSession: opener, paste and reload actions run without a display",

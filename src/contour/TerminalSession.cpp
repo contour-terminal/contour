@@ -2052,9 +2052,12 @@ bool TerminalSession::operator()(actions::SwitchToTabRight)
     return true;
 }
 
-bool TerminalSession::operator()(actions::SetTabName)
+bool TerminalSession::operator()(actions::SetTabTitle)
 {
-    terminal().requestTabName();
+    // Open the GUI-native inline tab-title editor for the active tab, rather than the old
+    // in-terminal vi-mode name prompt (terminal().requestTabName()), which predates GUI-native
+    // tabs. Routed through the manager like every other tab op so it targets this session's window.
+    _manager->beginTabTitleEdit(/*acting*/ this);
     return true;
 }
 
