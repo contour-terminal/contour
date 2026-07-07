@@ -376,6 +376,15 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
     // a stale one.
     refreshGuiTabInfoForStatusLine();
 
+    // Similarly, terminal replies (e.g. answers to VT capability queries that shells like fish
+    // send right at startup) that were generated while no display was attached were queued in
+    // the input generator but never flushed: screenUpdated() only posts flushInput() when
+    // _display is set, and the shell may be blocked waiting for the reply, producing no further
+    // PTY output that would trigger another flush. Without this, the shell hangs until the next
+    // focus/input event finally flushes the queue (observed as a multi-second startup stall).
+    if (_terminal.hasInput())
+        _display->post(bind(&TerminalSession::flushInput, this));
+
     scheduleRedraw();
 }
 
