@@ -13,6 +13,7 @@
 
 #include <QtCore/QTemporaryDir>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -972,6 +973,43 @@ profiles:
     CHECK(simple->colors.defaultForeground == vtbackend::RGBColor { 0xE0E0E0 });
 }
 
+TEST_CASE("Config: vi_mode_cursorline color loads from YAML", "[config]")
+{
+    // Regression: the loader key was misspelled ("vi_mode_cursosrline"), so the documented
+    // `vi_mode_cursorline` key was silently ignored. Assert the correctly-spelled key now takes
+    // effect (and thus that the normal-mode current-line highlight is user-configurable).
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+color_schemes:
+    myscheme:
+        default:
+            background: '0x101010'
+            foreground: '0xE0E0E0'
+        vi_mode_cursorline:
+            foreground: '0x123456'
+            foreground_alpha: 0.3
+            background: '0xABCDEF'
+            background_alpha: 0.7
+profiles:
+    main:
+        shell: /bin/sh
+        colors: myscheme
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const* simple = std::get_if<contour::config::SimpleColorConfig>(&profile->colors.value());
+    REQUIRE(simple != nullptr);
+    auto const& cursorline = simple->colors.normalModeCursorline;
+    REQUIRE(std::holds_alternative<vtbackend::RGBColor>(cursorline.background));
+    CHECK(std::get<vtbackend::RGBColor>(cursorline.background) == vtbackend::RGBColor { 0xABCDEF });
+    CHECK(cursorline.backgroundAlpha == Catch::Approx(0.7f));
+    REQUIRE(std::holds_alternative<vtbackend::RGBColor>(cursorline.foreground));
+    CHECK(std::get<vtbackend::RGBColor>(cursorline.foreground) == vtbackend::RGBColor { 0x123456 });
+    CHECK(cursorline.foregroundAlpha == Catch::Approx(0.3f));
+}
+
 TEST_CASE("Config: createDefaultConfig writes a loadable file into a fresh directory", "[config]")
 {
     // createDefaultConfig() creates the parent directory chain and writes the generated default
@@ -1141,4 +1179,42 @@ profiles:
     // NewTerminal and ReloadConfig without a profile still bind (argless fallback); the rest are
     // rejected. The document loads regardless.
     CHECK(config.profile("main") != nullptr);
+}
+
+TEST_CASE("Config: SetTabTitle action binds, old SetTabName name is rejected", "[config]")
+{
+    // The tab-rename action was renamed SetTabName -> SetTabTitle. The new name must resolve to a
+    // binding; the retired name must NOT (fromString() returns nullopt, so it is dropped).
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: 'R', action: SetTabTitle }
+    - { mods: [Control, Shift], key: 'N', action: SetTabName }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value();
+    auto const bindsTo = [&](auto actionTag) {
+        auto const inKey = std::ranges::any_of(mappings.keyMappings, [&](auto const& m) {
+            return std::holds_alternative<decltype(actionTag)>(m.binding.at(0));
+        });
+        auto const inChar = std::ranges::any_of(mappings.charMappings, [&](auto const& m) {
+            return std::holds_alternative<decltype(actionTag)>(m.binding.at(0));
+        });
+        return inKey || inChar;
+    };
+
+    CHECK(bindsTo(contour::actions::SetTabTitle {}));
+    // The retired "SetTabName" string does not resolve, so it is dropped: exactly ONE SetTabTitle
+    // binding survives (the 'R' line), while the 'N'/SetTabName line adds nothing. Count across both
+    // key and char mapping lists (an uppercase letter key may land in either).
+    auto const countIn = [](auto const& list) {
+        return std::ranges::count_if(list, [](auto const& m) {
+            return std::holds_alternative<contour::actions::SetTabTitle>(m.binding.at(0));
+        });
+    };
+    CHECK(countIn(mappings.keyMappings) + countIn(mappings.charMappings) == 1);
 }

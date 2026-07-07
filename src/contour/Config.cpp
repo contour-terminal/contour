@@ -620,7 +620,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
 
     loadWithLog("cursor", where.cursor);
     loadWithLog("vi_mode_highlight", where.yankHighlight);
-    loadWithLog("vi_mode_cursosrline", where.normalModeCursorline);
+    loadWithLog("vi_mode_cursorline", where.normalModeCursorline);
     loadWithLog("selection", where.selection);
     loadWithLog("search_highlight", where.searchHighlight);
     loadWithLog("search_highlight_focused", where.searchHighlightFocused);
