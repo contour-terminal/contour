@@ -40,6 +40,16 @@ ContourTerminal {
     // Raised when the user clicks this pane, so the owner can make it active.
     signal activated()
 
+    // Lifecycle traces below are diagnostics, not user-facing events: they fire on the perfectly
+    // normal "the shell exited" path. Route them through a category that is off by default (Warning
+    // floor) so they stay silent in normal use but can be re-enabled for debugging via
+    // QT_LOGGING_RULES="contour.pane.debug=true".
+    LoggingCategory {
+        id: paneLog
+        name: "contour.pane"
+        defaultLogLevel: LoggingCategory.Warning
+    }
+
     visible: true
 
     // Item opacity follows the session's (profile) opacity, matching the single-pane view. Null-guarded
@@ -51,7 +61,7 @@ ContourTerminal {
     // the split (driven by paneClosed -> rebuildActiveTabPaneProxies) without closing the window. This is
     // the sole window-close path now that the pane tree is the only renderer.
     onTerminated: {
-        console.log("Client process terminated in pane.");
+        console.debug(paneLog, "Client process terminated in pane.");
         // Ask THIS OS window's controller (main.qml's `win`) whether its last pane just exited. Per-window,
         // so the last pane of this window closes only this window; other in-process windows are unaffected.
         if (Window.window && Window.window.win && Window.window.win.canCloseWindow())

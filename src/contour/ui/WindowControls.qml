@@ -31,7 +31,10 @@ RowLayout {
         id: control
         Layout.fillHeight: true
         implicitWidth: 44
-        font.family: "monospace"
+        // The glyphs below are Unicode window-control symbols (—, ❐, ▢, ✕), not code, so they render
+        // fine in the default UI font. Do NOT pin a "monospace"/"Monospace" family here: that generic
+        // alias has no match on some platforms (notably macOS), forcing Qt into an expensive
+        // font-family-alias populate ("Populating font family aliases took … ms") on startup.
         font.pointSize: 10
         // Window controls must not steal keyboard focus from the terminal.
         focusPolicy: Qt.NoFocus
