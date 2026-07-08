@@ -12,6 +12,7 @@
 #include <array>
 #include <format>
 #include <iterator>
+#include <ranges>
 #include <string_view>
 #include <unordered_map>
 
@@ -1153,12 +1154,6 @@ namespace
         return 0; // should never happen
     }
 
-    constexpr bool isMouseWheel(MouseButton button) noexcept
-    {
-        return button == MouseButton::WheelUp || button == MouseButton::WheelDown
-               || button == MouseButton::WheelLeft || button == MouseButton::WheelRight;
-    }
-
     constexpr uint8_t buttonX10(MouseButton button) noexcept
     {
         return isMouseWheel(button) ? uint8_t(buttonNumber(button) + 0x3c) : buttonNumber(button);
@@ -1362,33 +1357,47 @@ bool InputGenerator::generateMousePress(
 
     _currentMousePosition = pos;
 
+    // Wheel-notch -> cursor-key sequences, indexed by wheel mode. Add a wheel mode = add a row.
+    struct WheelCursorKeys
+    {
+        std::string_view up;
+        std::string_view down;
+    };
+    auto const cursorKeysFor = [](MouseWheelMode mode) -> WheelCursorKeys {
+        switch (mode)
+        {
+            case MouseWheelMode::NormalCursorKeys: return { .up = "\033[A", .down = "\033[B" };
+            case MouseWheelMode::ApplicationCursorKeys: return { .up = "\033OA", .down = "\033OB" };
+            case MouseWheelMode::Default: return {};
+        }
+        return {};
+    };
+
+    // Alternate-scroll: on the alt screen (less/most/man) the wheel translates to cursor keys.
+    // Runs before the protocol gate; setMouseProtocol resets the mode so tracking apps are unaffected.
+    if (!_passiveMouseTracking && isMouseWheel(button))
+    {
+        auto const keys = cursorKeysFor(mouseWheelMode());
+        auto const sequence = [&]() -> std::string_view {
+            switch (button)
+            {
+                case MouseButton::WheelUp: return keys.up;
+                case MouseButton::WheelDown: return keys.down;
+                default: return {};
+            }
+        }();
+        if (!sequence.empty())
+        {
+            // One cursor-key per notch, repeated to match the primary-screen scroll multiplier.
+            auto success = false;
+            for ([[maybe_unused]] auto const _: std::views::iota(0u, mouseWheelScrollMultiplier()))
+                success = append(sequence);
+            return logged(success);
+        }
+    }
+
     if (!_mouseProtocol.has_value())
         return false;
-
-    switch (mouseWheelMode())
-    {
-        case MouseWheelMode::NormalCursorKeys:
-            if (_passiveMouseTracking)
-                break;
-            switch (button)
-            {
-                case MouseButton::WheelUp: return logged(append("\033[A"));
-                case MouseButton::WheelDown: return logged(append("\033[B"));
-                default: break;
-            }
-            break;
-        case MouseWheelMode::ApplicationCursorKeys:
-            if (_passiveMouseTracking)
-                break;
-            switch (button)
-            {
-                case MouseButton::WheelUp: return logged(append("\033OA"));
-                case MouseButton::WheelDown: return logged(append("\033OB"));
-                default: break;
-            }
-            break;
-        case MouseWheelMode::Default: break;
-    }
 
     if (!isMouseWheel(button))
         if (!_currentlyPressedMouseButtons.count(button))

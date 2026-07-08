@@ -1188,6 +1188,9 @@ class Terminal
     void setMouseProtocol(MouseProtocol protocol, bool enabled);
     void setMouseTransport(MouseTransport transport);
     void setMouseWheelMode(InputGenerator::MouseWheelMode mode);
+    /// Sets alternate-scroll lines per wheel notch, syncing @ref Settings and the input generator.
+    /// @param lines Lines per notch (values below 1 are clamped to 1 at emit time).
+    void setMouseWheelScrollMultiplier(LineCount lines);
     void setModifyOtherKeys(int mode);
     [[nodiscard]] int modifyOtherKeys() const noexcept;
     void setWindowTitle(std::string_view title);
@@ -1512,11 +1515,27 @@ class Terminal
                && modifiers.contains(_settings.mouseProtocolBypassModifiers);
     }
 
+    /// Shared gate for handing a mouse event to the app: input allowed, no bypass modifier
+    /// (usually Shift), and Vi Insert mode. The two callers add their distinguishing condition.
+    bool mouseInputAllowedInInsertMode(Modifiers currentlyPressedModifier) const noexcept
+    {
+        return allowInput() && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier)
+               && _inputHandler.mode() == ViMode::Insert;
+    }
+
     bool allowPassMouseEventToApp(Modifiers currentlyPressedModifier) const noexcept
     {
-        return _inputGenerator.mouseProtocol().has_value() && allowInput()
-               && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier)
-               && _inputHandler.mode() == ViMode::Insert;
+        return _inputGenerator.mouseProtocol().has_value()
+               && mouseInputAllowedInInsertMode(currentlyPressedModifier);
+    }
+
+    /// No-protocol counterpart to @ref allowPassMouseEventToApp: fires when a wheel notch should
+    /// become cursor keys (alternate-scroll), i.e. wheel mode is non-Default (alt screen / ?1007).
+    bool allowWheelTranslationToApp(MouseButton button, Modifiers currentlyPressedModifier) const noexcept
+    {
+        return isMouseWheel(button)
+               && _inputGenerator.mouseWheelMode() != InputGenerator::MouseWheelMode::Default
+               && mouseInputAllowedInInsertMode(currentlyPressedModifier);
     }
 
     // Reads from PTY.

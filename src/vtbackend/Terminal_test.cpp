@@ -3039,4 +3039,169 @@ TEST_CASE("Terminal.YankHighlight.trivialLineIsHighlighted", "[terminal][vi]")
 }
 // }}}
 
+// {{{ mouse wheel alternate-scroll (GitHub #1951)
+
+TEST_CASE("Terminal.Wheel.AltScreen.NoProtocol.emits_cursor_keys", "[terminal]")
+{
+    // #1951: on the alt screen (less/most/man) with no mouse protocol, a wheel notch must
+    // translate into cursor keys so the pager scrolls. Before the fix, replyData() stayed empty.
+    using namespace vtbackend;
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto constexpr NoPixel = PixelCoordinate {};
+    auto constexpr UiHandledHint = false;
+    mock.terminal.tick(1s);
+
+    // Enter the alternate screen (DECSET ?1049).
+    mock.writeToScreen("\033[?1049h");
+    mock.terminal.tick(1s);
+    REQUIRE(mock.terminal.isAlternateScreen());
+
+    mock.resetReplyData();
+    auto const handledDown =
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, UiHandledHint);
+    CHECK(handledDown == Handled { true });
+    CHECK(e(mock.replyData()) == e("\033[B")); // default multiplier is 1 in MockTerm
+
+    mock.resetReplyData();
+    auto const handledUp =
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelUp, NoPixel, UiHandledHint);
+    CHECK(handledUp == Handled { true });
+    CHECK(e(mock.replyData()) == e("\033[A"));
+}
+
+TEST_CASE("Terminal.Wheel.AltScreen.AppCursorKeys.emits_SS3", "[terminal]")
+{
+    // DECCKM (?1h) on the alternate screen selects application cursor keys (SS3 form).
+    using namespace vtbackend;
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto constexpr NoPixel = PixelCoordinate {};
+    mock.terminal.tick(1s);
+
+    mock.writeToScreen("\033[?1049h"); // alt screen
+    mock.writeToScreen("\033[?1h");    // DECCKM: application cursor keys
+    mock.terminal.tick(1s);
+    REQUIRE(mock.terminal.isAlternateScreen());
+
+    mock.resetReplyData();
+    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+          == Handled { true });
+    CHECK(e(mock.replyData()) == e("\033OB"));
+}
+
+TEST_CASE("Terminal.Wheel.AltScreen.DECSET1007.emits_cursor_keys", "[terminal]")
+{
+    // DECSET ?1007 (alternate-scroll) was previously a no-op because of the mouse-protocol
+    // gate; it must now produce cursor keys on the alternate screen.
+    using namespace vtbackend;
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto constexpr NoPixel = PixelCoordinate {};
+    mock.terminal.tick(1s);
+
+    mock.writeToScreen("\033[?1049h"); // alt screen
+    mock.writeToScreen("\033[?1007h"); // alternate-scroll -> application cursor keys
+    mock.terminal.tick(1s);
+
+    mock.resetReplyData();
+    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+          == Handled { true });
+    CHECK(e(mock.replyData()) == e("\033OB"));
+}
+
+TEST_CASE("Terminal.Wheel.AltScreen.AppTracking.passes_through_as_SGR", "[terminal]")
+{
+    // With an app-enabled protocol (`less --mouse`, `ov`: ?1000h/?1002h + SGR ?1006h), the wheel
+    // must be reported to the app, NOT translated to cursor keys. Guards the passthrough case.
+    using namespace vtbackend;
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto constexpr NoPixel = PixelCoordinate {};
+    mock.terminal.tick(1s);
+
+    mock.writeToScreen("\033[?1049h");                       // alt screen
+    mock.writeToScreen("\033[?1000h\033[?1002h\033[?1006h"); // less --mouse style
+    mock.terminal.tick(1s);
+
+    mock.resetReplyData();
+    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+          == Handled { true });
+    // SGR mouse report, not a cursor key.
+    CHECK(e(mock.replyData()).starts_with(e("\033[<")));
+    CHECK(e(mock.replyData()).find(e("\033[B")) == std::string::npos);
+}
+
+TEST_CASE("Terminal.Wheel.PrimaryScreen.NoProtocol.local_scroll", "[terminal]")
+{
+    // Primary screen, no protocol: wheel mode is Default, so the backend does not handle it
+    // (the frontend scrolls scrollback). No bytes are sent and the event is reported unhandled.
+    using namespace vtbackend;
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto constexpr NoPixel = PixelCoordinate {};
+    mock.terminal.tick(1s);
+    REQUIRE(mock.terminal.isPrimaryScreen());
+
+    mock.resetReplyData();
+    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+          == Handled { false });
+    CHECK(mock.replyData().empty());
+}
+
+TEST_CASE("Terminal.Wheel.AltScreen.ShiftBypass.not_handled", "[terminal]")
+{
+    // Holding the bypass modifier (Shift by default) must let the wheel event fall through to
+    // the frontend's Shift+Wheel binding (page-scroll), so the backend reports it unhandled
+    // and emits nothing.
+    using namespace vtbackend;
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto constexpr NoPixel = PixelCoordinate {};
+    mock.terminal.tick(1s);
+
+    mock.writeToScreen("\033[?1049h");
+    mock.terminal.tick(1s);
+
+    mock.resetReplyData();
+    CHECK(mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::WheelDown, NoPixel, false)
+          == Handled { false });
+    CHECK(mock.replyData().empty());
+}
+
+TEST_CASE("Terminal.Wheel.AltScreen.ViNormalMode.no_cursor_keys", "[terminal]")
+{
+    // In Vi normal mode the wheel must not inject cursor keys into the app.
+    using namespace vtbackend;
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto constexpr NoPixel = PixelCoordinate {};
+    mock.terminal.tick(1s);
+
+    mock.writeToScreen("\033[?1049h");
+    mock.terminal.tick(1s);
+    mock.terminal.inputHandler().setMode(ViMode::Normal);
+
+    mock.resetReplyData();
+    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+          == Handled { false });
+    CHECK(mock.replyData().empty());
+
+    mock.terminal.inputHandler().setMode(ViMode::Insert);
+}
+
+TEST_CASE("Terminal.Wheel.AltScreen.ScrollMultiplier.repeats_cursor_keys", "[terminal]")
+{
+    // With a scroll multiplier of 3, one alt-screen wheel notch emits 3 cursor keys, matching
+    // the primary-screen scrollback feel.
+    using namespace vtbackend;
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto constexpr NoPixel = PixelCoordinate {};
+    mock.terminal.tick(1s);
+
+    mock.writeToScreen("\033[?1049h");
+    mock.terminal.tick(1s);
+    mock.terminal.setMouseWheelScrollMultiplier(LineCount(3));
+
+    mock.resetReplyData();
+    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+          == Handled { true });
+    CHECK(e(mock.replyData()) == e("\033[B\033[B\033[B"));
+}
+
+// }}}
+
 // NOLINTEND(misc-const-correctness)

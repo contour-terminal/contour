@@ -107,6 +107,7 @@
     <release version="0.7.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes mouse-wheel scrolling in alternate-screen pagers such as less, most and man: a wheel notch now scrolls them out of the box (via alternate-scroll, emitting cursor-key presses) even when the pager has not enabled a mouse protocol, matching the behavior of other terminals; DECSET ?1007 works accordingly (#1951)</li>
           <li>Smooths mouse-wheel scrolling: a wheel notch now glides to rest with inertia instead of jumping whole lines, giving the mouse wheel the same smooth feel as a touchpad. Active whenever smooth_scrolling is enabled</li>
           <li>Fixes CMAKE_BUILD_TYPE=None builds no longer having NDEBUG force-defined, so distribution packagers get a neutral build that keeps assertions and debug symbols intact; the expensive internal terminal-state invariant checks are now gated behind the new CONTOUR_VERIFY_STATE option instead of NDEBUG (#1956)</li>
           <li>Adds profile options tab_bar_position (Top/Bottom) and tab_bar_visibility (Always/Never/Multiple) to place the GUI tab bar at the top or bottom of the window and to hide it entirely or only show it when more than one tab is open</li>

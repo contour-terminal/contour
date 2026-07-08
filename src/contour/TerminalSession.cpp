@@ -142,6 +142,7 @@ namespace
         settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
         settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
         settings.maxHistoryLineCount = profile.history.value().maxHistoryLineCount;
+        settings.mouseWheelScrollMultiplier = profile.history.value().historyScrollMultiplier;
         settings.autoScrollOnUpdate = profile.history.value().autoScrollOnUpdate;
         settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset.value();
         settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
@@ -1129,6 +1130,8 @@ std::tuple<LineOffset, ColumnOffset> TerminalSession::consumeScroll() noexcept
     _accumulatedAngleScroll -= angleSteps * angleStepSize;
     _accumulatedPixelScroll = {};
 
+    // One step per notch; do NOT apply historyScrollMultiplier here (the ScrollUp/Down actions
+    // and the backend's mouseWheelScrollMultiplier own it) or the alt-screen wheel double-counts.
     return {
         LineOffset::cast_from(angleSteps.y),
         ColumnOffset::cast_from(angleSteps.x),
@@ -2375,6 +2378,7 @@ void TerminalSession::configureTerminal()
     configureCursor(_profile.modeInsert.value().cursor);
     updateColorPreference(_app.colorPreference());
     _terminal.setMaxHistoryLineCount(_profile.history.value().maxHistoryLineCount);
+    _terminal.setMouseWheelScrollMultiplier(_profile.history.value().historyScrollMultiplier);
     _terminal.settings().autoScrollOnUpdate = _profile.history.value().autoScrollOnUpdate;
     _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());

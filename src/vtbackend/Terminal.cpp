@@ -201,6 +201,9 @@ Terminal::Terminal(Events& eventListener,
 
     _savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
 
+    _inputGenerator.setMouseWheelScrollMultiplier(
+        static_cast<unsigned>(unbox(_settings.mouseWheelScrollMultiplier)));
+
     // TODO(should be this instead?): hardReset();
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::AutoRepeat, true);
@@ -973,8 +976,10 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
             return Handled { true };
     }
 
+    // Hand the event to the input generator for app tracking or wheel->cursor-key translation;
+    // generateMousePress() self-rejects the cases where neither applies.
     auto const eventHandledByApp =
-        allowPassMouseEventToApp(modifiers)
+        (allowPassMouseEventToApp(modifiers) || allowWheelTranslationToApp(button, modifiers))
         && _inputGenerator.generateMousePress(
             modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
 
@@ -2486,6 +2491,12 @@ void Terminal::setMouseTransport(MouseTransport transport)
 void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode mode)
 {
     _inputGenerator.setMouseWheelMode(mode);
+}
+
+void Terminal::setMouseWheelScrollMultiplier(LineCount lines)
+{
+    _settings.mouseWheelScrollMultiplier = lines;
+    _inputGenerator.setMouseWheelScrollMultiplier(static_cast<unsigned>(unbox(lines)));
 }
 
 void Terminal::setWindowTitle(string_view title)

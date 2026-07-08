@@ -80,6 +80,10 @@ struct Settings
     /// Enables momentum (inertia) scrolling for touchpad gestures.
     bool momentumScrolling = true;
 
+    /// Lines one wheel notch scrolls during alternate-scroll (wheel -> cursor keys).
+    /// Mirrors the frontend history scroll multiplier; values below 1 are treated as 1.
+    LineCount mouseWheelScrollMultiplier { LineCount(1) };
+
     /// When true, PTY/app-caused updates (key input forwarded to the PTY, buffer
     /// switches, scrollback clears, etc.) force the viewport to snap to the
     /// bottom. When false, the viewport stays wherever the user parked it.
