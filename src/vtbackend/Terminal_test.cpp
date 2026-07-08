@@ -1302,6 +1302,332 @@ TEST_CASE("Terminal.momentumScroll.cancelled_by_begin", "[terminal]")
     CHECK_FALSE(terminal.isMomentumScrollActive());
 }
 
+// {{{ Wheel-glide (smooth mouse-wheel scrolling)
+
+namespace
+{
+/// Total scroll displacement in pixels: whole-line offset plus the sub-cell pixel remainder.
+[[nodiscard]] float totalScrollPixels(vtbackend::Terminal const& terminal, float cellHeight) noexcept
+{
+    return static_cast<float>(terminal.viewport().scrollOffset().value) * cellHeight
+           + terminal.smoothScrollPixelOffset();
+}
+} // namespace
+
+TEST_CASE("Terminal.wheelGlide.single_notch_glides_over_frames", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 40 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 30; ++i)
+        mc.writeToScreen("line\r\n");
+
+    auto constexpr CellHeight = 20.0f;
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // One notch worth of pixels: 9 lines * 20px = 180px (matches helper.cpp's angle-to-pixel math).
+    auto constexpr NotchPixels = 180.0f;
+    terminal.injectWheelMomentum(NotchPixels, ClockBase);
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // Frame 1: the glide must NOT jump the full notch distance instantly.
+    terminal.tick(ClockBase + 16ms);
+    auto const afterFrame1 = totalScrollPixels(terminal, CellHeight);
+    CHECK(afterFrame1 > 0.0f);
+    CHECK(afterFrame1 < NotchPixels);
+
+    // Subsequent frames advance monotonically toward the target.
+    terminal.tick(ClockBase + 33ms);
+    auto const afterFrame2 = totalScrollPixels(terminal, CellHeight);
+    CHECK(afterFrame2 >= afterFrame1);
+
+    // After enough time the glide settles near the intended distance and stops.
+    for (auto t = 50; t <= 600; t += 16)
+        terminal.tick(ClockBase + chrono::milliseconds { t });
+
+    auto const settled = totalScrollPixels(terminal, CellHeight);
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+    // Lands within one line of the intended distance (tuned impulse, not floaty).
+    CHECK(settled == Catch::Approx(NotchPixels).margin(CellHeight));
+}
+
+TEST_CASE("Terminal.wheelGlide.rapid_notches_accumulate", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 60 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 50; ++i)
+        mc.writeToScreen("line\r\n");
+
+    auto constexpr CellHeight = 20.0f;
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Two notches in quick succession accumulate into one longer glide.
+    terminal.injectWheelMomentum(180.0f, ClockBase);
+    terminal.injectWheelMomentum(180.0f, ClockBase + 8ms);
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    for (auto t = 16; t <= 800; t += 16)
+        terminal.tick(ClockBase + chrono::milliseconds { t });
+
+    auto const settled = totalScrollPixels(terminal, CellHeight);
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+    // Both notches contribute; total lands near their sum (within a line).
+    CHECK(settled == Catch::Approx(360.0f).margin(CellHeight));
+}
+
+TEST_CASE("Terminal.wheelGlide.direction_reversal", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 60 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 50; ++i)
+        mc.writeToScreen("line\r\n");
+
+    auto constexpr CellHeight = 20.0f;
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Scroll up, then reverse before the first glide settles: velocity is signed-accumulated.
+    terminal.injectWheelMomentum(180.0f, ClockBase);
+    terminal.tick(ClockBase + 8ms);
+    terminal.injectWheelMomentum(-120.0f, ClockBase + 12ms);
+
+    for (auto t = 20; t <= 800; t += 16)
+        terminal.tick(ClockBase + chrono::milliseconds { t });
+
+    auto const settled = totalScrollPixels(terminal, CellHeight);
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+    // Net displacement trends toward +60px (up), never overshooting far past it.
+    CHECK(settled > 0.0f);
+    CHECK(settled < 180.0f);
+}
+
+TEST_CASE("Terminal.wheelGlide.clamps_at_history_top", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 20 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 12; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    auto const historyLines = terminal.primaryScreen().historyLineCount().as<int>();
+    REQUIRE(historyLines > 0);
+
+    // Inject far more than the scrollable distance; the glide must stop at the wall, not spin.
+    terminal.injectWheelMomentum(static_cast<float>(historyLines + 20) * 20.0f, ClockBase);
+
+    for (auto t = 16; t <= 800; t += 16)
+        terminal.tick(ClockBase + chrono::milliseconds { t });
+
+    CHECK(terminal.viewport().scrollOffset().value == historyLines);
+    CHECK(terminal.smoothScrollPixelOffset() == 0.0f);
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.wheelGlide.inactive_on_alt_screen", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 20 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Switch to alternate screen; the wheel glide must not arm there.
+    mc.writeToScreen("\033[?1049h");
+    REQUIRE(terminal.isAlternateScreen());
+
+    auto const offsetBefore = terminal.viewport().scrollOffset().value;
+    terminal.injectWheelMomentum(180.0f, ClockBase);
+
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+    CHECK(terminal.viewport().scrollOffset().value == offsetBefore);
+}
+
+TEST_CASE("Terminal.wheelGlide.cancelled_by_reset", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 20 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 12; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    terminal.injectWheelMomentum(180.0f, ClockBase);
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // resetSmoothScroll (called on resize / page switch / scroll-to-bottom / new output) cancels it.
+    terminal.resetSmoothScroll();
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.wheelGlide.gated_on_smoothScrolling_only", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 20 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 12; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Independent of momentumScrolling: with momentum off but smooth on, the wheel still glides.
+    terminal.settings().smoothScrolling = true;
+    terminal.settings().momentumScrolling = false;
+    terminal.injectWheelMomentum(180.0f, ClockBase);
+    CHECK(terminal.isMomentumScrollActive());
+    terminal.cancelMomentumScroll();
+
+    // With smooth scrolling off, the wheel glide does not arm (legacy line path handles it).
+    terminal.settings().smoothScrolling = false;
+    terminal.injectWheelMomentum(180.0f, ClockBase);
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.wheelGlide.nextRender_schedules_while_active", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 40 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 30; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    terminal.injectWheelMomentum(180.0f, ClockBase);
+    terminal.tick(ClockBase + 16ms);
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // While a glide is active, nextRender() schedules a frame at (or below) the refresh interval.
+    auto const wakeup = terminal.nextRender();
+    REQUIRE(wakeup.has_value());
+    CHECK(wakeup->count() > 0);
+}
+
+TEST_CASE("Terminal.wheelGlide.opposing_notches_do_not_spin_forever", "[terminal]")
+{
+    // Regression: two exactly-opposing notches delivered before a frame tick accumulate to a net
+    // velocity of exactly 0.0f. Arming at velocity 0 would anchor the fraction-of-seed stop
+    // threshold to 0, so shouldStop() could never fire — the glide would stay active forever and
+    // keep waking the render loop (continuous CPU/battery drain). It must instead refuse to arm.
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 40 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 30; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // First notch arms a glide; the exactly-opposing second notch (same magnitude, same time point,
+    // no tick() in between) drives the accumulated velocity to precisely 0.
+    REQUIRE(terminal.injectWheelMomentum(180.0f, ClockBase) == SmoothScrollResult::Applied);
+    REQUIRE(terminal.isMomentumScrollActive());
+    auto const result = terminal.injectWheelMomentum(-180.0f, ClockBase);
+
+    // The degenerate notch neither arms nor leaves the previous glide running; the caller is told to
+    // fall through to the legacy line path.
+    CHECK(result == SmoothScrollResult::InvalidCellSize);
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+
+    // Advance well past any plausible glide duration: still inactive, and nextRender() no longer
+    // requests wake-ups on account of momentum.
+    for (auto t = 16; t <= 2000; t += 16)
+        terminal.tick(ClockBase + chrono::milliseconds { t });
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+TEST_CASE("Terminal.wheelGlide.reports_result_for_caller_fallthrough", "[terminal]")
+{
+    // The SmoothScrollResult return value is the seam helper.cpp uses to decide whether to consume
+    // the wheel notch (Applied) or fall through to the legacy line-based scroll (anything else).
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 20 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 12; ++i)
+        mc.writeToScreen("line\r\n");
+
+    SECTION("unknown cell size (not laid out yet) -> InvalidCellSize, no arm")
+    {
+        // No setCellPixelSize(): the display has not laid out, so cell height is still 0.
+        REQUIRE(terminal.cellPixelSize().height.as<int>() == 0);
+        CHECK(terminal.injectWheelMomentum(180.0f, ClockBase) == SmoothScrollResult::InvalidCellSize);
+        CHECK_FALSE(terminal.isMomentumScrollActive());
+    }
+
+    SECTION("smooth scrolling disabled -> Disabled, no arm")
+    {
+        terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+        terminal.settings().smoothScrolling = false;
+        CHECK(terminal.injectWheelMomentum(180.0f, ClockBase) == SmoothScrollResult::Disabled);
+        CHECK_FALSE(terminal.isMomentumScrollActive());
+    }
+
+    SECTION("alternate screen -> Disabled, no arm")
+    {
+        terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+        mc.writeToScreen("\033[?1049h");
+        REQUIRE(terminal.isAlternateScreen());
+        CHECK(terminal.injectWheelMomentum(180.0f, ClockBase) == SmoothScrollResult::Disabled);
+        CHECK_FALSE(terminal.isMomentumScrollActive());
+    }
+
+    SECTION("healthy notch -> Applied, arms a glide")
+    {
+        terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+        CHECK(terminal.injectWheelMomentum(180.0f, ClockBase) == SmoothScrollResult::Applied);
+        CHECK(terminal.isMomentumScrollActive());
+    }
+}
+
+TEST_CASE("Terminal.momentumScroll.stray_update_cancels_active_glide", "[terminal]")
+{
+    // Regression: a touchpad Update phase arriving while a wheel glide is still in flight, without a
+    // preceding Begin (the only phase that used to cancel momentum), would let BOTH the immediate
+    // apply of the Update and the live glide move the viewport -> double-scroll. The first sample of
+    // a fresh gesture (tracker still empty) must cancel any active momentum first.
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 40 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    for (auto i = 0; i < 30; ++i)
+        mc.writeToScreen("line\r\n");
+
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    // Arm a wheel glide, let it run for a frame so it is genuinely mid-flight.
+    REQUIRE(terminal.injectWheelMomentum(180.0f, ClockBase) == SmoothScrollResult::Applied);
+    terminal.tick(ClockBase + 16ms);
+    REQUIRE(terminal.isMomentumScrollActive());
+
+    // A stray Update (no Begin) is the first sample of a new gesture -> it must cancel the glide.
+    terminal.handleScrollPhase(vtbackend::ScrollPhase::Update, 40.0f, ClockBase + 24ms);
+    CHECK_FALSE(terminal.isMomentumScrollActive());
+}
+
+// }}} Wheel-glide (smooth mouse-wheel scrolling)
+
 TEST_CASE("Terminal.resizeScreen.minimal_one_by_one", "[terminal]")
 {
     // Regression: when the render surface collapses below one cell (e.g. a pane shrunk to nothing,

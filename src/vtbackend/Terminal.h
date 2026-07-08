@@ -725,6 +725,24 @@ class Terminal
     /// Returns true if a momentum scroll animation is currently active.
     [[nodiscard]] bool isMomentumScrollActive() const noexcept;
 
+    /// Injects a discrete mouse-wheel notch as a momentum impulse (primary screen only).
+    ///
+    /// Mouse wheels deliver phase-less notches; without this they would snap the viewport by
+    /// whole lines. This converts the notch's pixel distance into an initial velocity so the
+    /// viewport glides to rest under (wheel-specific) friction, giving mouse-wheel scrolling the
+    /// same smooth feel as a touchpad. Gated on smoothScrolling only (independent of
+    /// momentumScrolling). Accumulates with any active wheel glide so rapid notches build up.
+    ///
+    /// @param pixelDelta Signed pixels for this notch (positive = scroll up into history).
+    /// @param now        Current time point for the momentum animation.
+    /// @return SmoothScrollResult::Applied if a glide was armed (caller should consume the event),
+    ///         SmoothScrollResult::Disabled if smooth scrolling is off or on the alternate screen,
+    ///         SmoothScrollResult::InvalidCellSize if the cell pixel height is unknown (0) or the
+    ///         accumulated velocity degenerated to zero — in both non-Applied cases the caller must
+    ///         fall through to the legacy line-based scroll path.
+    SmoothScrollResult injectWheelMomentum(float pixelDelta,
+                                           std::chrono::steady_clock::time_point now) noexcept;
+
     // }}} Momentum scrolling API
 
     // }}}
@@ -1640,21 +1658,70 @@ class Terminal
     };
 
     /// Holds state for an active momentum (inertia) scroll animation.
+    /// Physics tuning for a momentum glide. Each scroll source (touchpad, mouse wheel) is one row of
+    /// this data rather than a branch in the code — adding a source is a new @c MomentumTuning value,
+    /// not another `if` scattered across the momentum methods.
+    struct MomentumTuning
+    {
+        float frictionDecayPerSecond; ///< Velocity multiplier per second (v *= f^dt); smaller = faster stop.
+        float minVelocityThreshold;   ///< Absolute px/s floor to stop at; 0 disables this rule.
+        float stopVelocityFractionOfSeed; ///< Stop below this fraction of the seed velocity; 0 disables this
+                                          ///< rule.
+    };
+
+    /// Touchpad inertia: gentle friction, stops at an absolute floor (classic macOS/iOS feel).
+    static constexpr MomentumTuning TouchpadMomentumTuning {
+        .frictionDecayPerSecond = 0.05f,    ///< ~95% decay per second.
+        .minVelocityThreshold = 10.0f,      ///< px/s below which momentum stops.
+        .stopVelocityFractionOfSeed = 0.0f, ///< unused for touchpad.
+    };
+
+    // Mouse-wheel glide: a discrete notch is turned into an inertial glide by seeding an initial
+    // velocity and letting friction bleed it out. Two properties are wanted:
+    //   1. The glide settles quickly and crisply (front-loaded ease-out feel), not floaty.
+    //   2. It lands at the notch's *intended* distance, identically regardless of how many notches
+    //      accumulated — a consistent feel independent of scroll speed.
+    // With v(t) = v0 * f^t, the distance from v0 down to a stop velocity v_stop is (v0 - v_stop)/(-ln f).
+    // Stopping at a fixed FRACTION of the seed velocity makes both the settle time and the landed
+    // fraction independent of v0 (hence of the notch count). The seed velocity is
+    //   v0 = distance * (-ln f) * WheelSeedCorrection,
+    // where WheelSeedCorrection cancels the fixed fractional shortfall plus the discrete integrator's
+    // per-frame overshoot so the glide lands on the intended distance (~1px).
+    /// Mouse-wheel inertia: aggressive friction (~300ms crisp glide), stops at a fraction of the seed.
+    static constexpr MomentumTuning WheelMomentumTuning {
+        .frictionDecayPerSecond = 0.0005f,
+        .minVelocityThreshold = 0.0f,        ///< unused for the wheel.
+        .stopVelocityFractionOfSeed = 0.10f, ///< cuts the long low-velocity tail.
+    };
+    /// Seed-velocity correction so a wheel glide lands on the intended distance (see derivation above).
+    static constexpr float WheelSeedCorrection = 1.0326f;
+
     struct ScrollMomentumState
     {
         bool active = false;
-        float velocity = 0.0f; ///< pixels/second (positive = scroll up into history).
+        MomentumTuning tuning = TouchpadMomentumTuning; ///< Physics for the active glide (source-specific).
+        float velocity = 0.0f;        ///< pixels/second (positive = scroll up into history).
+        float initialVelocity = 0.0f; ///< |seed velocity|; anchors the fraction-of-seed stop rule.
         std::chrono::steady_clock::time_point lastUpdate {};
 
+        /// True once the glide's velocity has decayed below its (source-specific) stop threshold.
         [[nodiscard]] bool shouldStop() const noexcept;
 
-        static constexpr float FrictionDecayPerSecond = 0.05f; ///< ~95% decay per second.
-        static constexpr float MinVelocityThreshold = 10.0f;   ///< px/s below which momentum stops.
-        static constexpr float StartThreshold = 50.0f;         ///< px/s required to start momentum.
+        static constexpr float StartThreshold = 50.0f; ///< Touchpad: px/s required to start momentum.
     };
 
     ScrollMomentumState _scrollMomentum;
     VelocityTracker _scrollVelocityTracker;
+
+    /// Starts (or reseeds) a momentum glide at @p velocity with the given @p tuning and wakes the
+    /// render loop. Shared by the touchpad (handleScrollPhase) and mouse-wheel (injectWheelMomentum)
+    /// entry points so the "arm state + kick loop" sequence lives in one place.
+    /// @param velocity Seed velocity in px/s (positive = scroll up into history).
+    /// @param tuning   Source-specific physics (friction + stop rule).
+    /// @param now      Current time point.
+    void armMomentum(float velocity,
+                     MomentumTuning const& tuning,
+                     std::chrono::steady_clock::time_point now) noexcept;
     // }}}
 
     // {{{ Displays this terminal manages

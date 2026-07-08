@@ -205,8 +205,10 @@ TEST_CASE("wheel and mouse event helpers route through the session", "[helper][i
                        false);
         pty.stdinBuffer().clear();
         contour::sendWheelEvent(&ev, *session);
-        // Wheel scrolls the viewport (no PTY bytes without mouse-report mode for wheel) — must not
-        // crash display-less; direction handling ran.
+        // A display-less session drops wheel events before mapping (session.display() == nullptr),
+        // so this only pins that the phase-less-wheel path is non-crashing offscreen. The actual
+        // routing into the wheel-glide momentum path is covered by the model-layer
+        // Terminal.wheelGlide.* tests and the display-gated DisplayRendering wheel case.
     }
     {
         QMouseEvent press(QEvent::MouseButtonPress,

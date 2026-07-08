@@ -1605,10 +1605,21 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
         auto const dt = chrono::duration<float>(now - _scrollMomentum.lastUpdate).count();
         if (dt > 0.0f)
         {
-            auto const result = applySmoothScrollPixelDelta(_scrollMomentum.velocity * dt);
-            _scrollMomentum.velocity *= std::pow(ScrollMomentumState::FrictionDecayPerSecond, dt);
+            // Snapshot the viewport position so we can detect a no-progress frame (glide hit the
+            // history top / viewport bottom). applySmoothScrollPixelDelta clamps but still returns
+            // Applied, so the result alone does not signal the boundary.
+            auto const positionBefore = std::pair { _viewport.scrollOffset(), _viewport.pixelOffset() };
+            auto const requestedDelta = _scrollMomentum.velocity * dt;
+
+            auto const result = applySmoothScrollPixelDelta(requestedDelta);
+            _scrollMomentum.velocity *= std::pow(_scrollMomentum.tuning.frictionDecayPerSecond, dt);
             _scrollMomentum.lastUpdate = now;
-            if (_scrollMomentum.shouldStop() || result == SmoothScrollResult::Disabled)
+
+            auto const hitBoundary =
+                requestedDelta != 0.0f
+                && std::pair { _viewport.scrollOffset(), _viewport.pixelOffset() } == positionBefore;
+
+            if (_scrollMomentum.shouldStop() || result != SmoothScrollResult::Applied || hitBoundary)
                 cancelMomentumScroll();
         }
     }
@@ -1667,7 +1678,14 @@ float Terminal::VelocityTracker::computeVelocity() const noexcept
 
 bool Terminal::ScrollMomentumState::shouldStop() const noexcept
 {
-    return !active || std::abs(velocity) < MinVelocityThreshold;
+    if (!active)
+        return true;
+    // One stop rule for every source: whichever of the two thresholds the tuning enables (the other
+    // is 0). Touchpad uses an absolute px/s floor; the wheel glide uses a fraction of its seed
+    // velocity so its settle time and landed distance stay independent of the notch count.
+    auto const threshold =
+        std::max(tuning.minVelocityThreshold, tuning.stopVelocityFractionOfSeed * initialVelocity);
+    return std::abs(velocity) < threshold;
 }
 
 // }}} ScrollMomentumState
@@ -1687,19 +1705,19 @@ void Terminal::handleScrollPhase(ScrollPhase phase,
             cancelMomentumScroll();
             _scrollVelocityTracker.reset();
             break;
-        case ScrollPhase::Update: _scrollVelocityTracker.addSample(now, pixelDelta); break;
+        case ScrollPhase::Update:
+            // The first sample of a gesture (tracker still empty) supersedes any momentum still in
+            // flight — including a mouse-wheel glide. This also covers a stray Update that arrives
+            // without a preceding Begin: without it, the immediate apply in the caller plus the live
+            // glide would both move the viewport, double-scrolling the content.
+            if (_scrollVelocityTracker.count == 0)
+                cancelMomentumScroll();
+            _scrollVelocityTracker.addSample(now, pixelDelta);
+            break;
         case ScrollPhase::End: {
             auto const velocity = _scrollVelocityTracker.computeVelocity();
             if (std::abs(velocity) >= ScrollMomentumState::StartThreshold)
-            {
-                _scrollMomentum.active = true;
-                _scrollMomentum.velocity = velocity;
-                _scrollMomentum.lastUpdate = now;
-                // Kick-start the render loop so that tick() is called each frame.
-                // Without this, the display idles after the last wheel event and
-                // momentum would only advance on the next unrelated input (e.g. mouse move).
-                breakLoopAndRefreshRenderBuffer();
-            }
+                armMomentum(velocity, TouchpadMomentumTuning, now);
             _scrollVelocityTracker.reset();
             break;
         }
@@ -1714,13 +1732,68 @@ void Terminal::handleScrollPhase(ScrollPhase phase,
 
 void Terminal::cancelMomentumScroll() noexcept
 {
-    _scrollMomentum.active = false;
-    _scrollMomentum.velocity = 0.0f;
+    _scrollMomentum = ScrollMomentumState {};
 }
 
 bool Terminal::isMomentumScrollActive() const noexcept
 {
     return _scrollMomentum.active;
+}
+
+SmoothScrollResult Terminal::injectWheelMomentum(float pixelDelta,
+                                                 chrono::steady_clock::time_point now) noexcept
+{
+    // Gated on smoothScrolling only (independent of momentumScrolling, which governs touchpad
+    // inertia). Alt screen keeps the legacy line-based wheel path.
+    if (!_settings.smoothScrolling || isAlternateScreen())
+        return SmoothScrollResult::Disabled;
+
+    // The cell height is not needed by the seed math below (pixelDelta already arrives in pixels),
+    // but a zero height signals the display has not laid out yet: refuse to arm and let the caller
+    // fall through to the line-based path rather than silently swallowing the notch.
+    auto const cellHeight = static_cast<float>(_cellPixelSize.height.as<int>());
+    if (cellHeight <= 0.0f)
+        return SmoothScrollResult::InvalidCellSize;
+
+    // Seed velocity so that, under the wheel friction and the fractional stop threshold, the glide
+    // integrates to the intended distance (see the derivation on WheelMomentumTuning).
+    auto const v0 = pixelDelta * -std::log(WheelMomentumTuning.frictionDecayPerSecond) * WheelSeedCorrection;
+
+    // Adding to an already-active wheel glide lets rapid notches build one longer, still-consistent
+    // glide (armMomentum re-anchors the fraction-of-seed stop threshold to the accumulated velocity).
+    auto const isWheelGlideActive =
+        _scrollMomentum.active && _scrollMomentum.tuning.stopVelocityFractionOfSeed != 0.0f;
+    auto const velocity = isWheelGlideActive ? _scrollMomentum.velocity + v0 : v0;
+
+    // Two exactly-opposing notches (e.g. +N then -N before a frame tick) accumulate to zero. Arming
+    // at velocity 0 would anchor the fraction-of-seed stop threshold to 0, so shouldStop() could
+    // never fire and the glide would spin forever. Cancel any residual glide and refuse to arm.
+    if (velocity == 0.0f)
+    {
+        cancelMomentumScroll();
+        return SmoothScrollResult::InvalidCellSize;
+    }
+
+    armMomentum(velocity, WheelMomentumTuning, now);
+    return SmoothScrollResult::Applied;
+}
+
+void Terminal::armMomentum(float velocity,
+                           MomentumTuning const& tuning,
+                           chrono::steady_clock::time_point now) noexcept
+{
+    _scrollMomentum.active = true;
+    _scrollMomentum.tuning = tuning;
+    _scrollMomentum.velocity = velocity;
+    // Anchor the fraction-of-seed stop rule to this (possibly accumulated) velocity so the glide
+    // stops crisply rather than crawling toward an ever-smaller threshold.
+    _scrollMomentum.initialVelocity = std::abs(velocity);
+    _scrollMomentum.lastUpdate = now;
+
+    // Kick the render loop so tick() advances the glide even when the display is otherwise idle;
+    // without this the display idles after the last input and momentum would only advance on the
+    // next unrelated event (e.g. a mouse move).
+    breakLoopAndRefreshRenderBuffer();
 }
 
 // }}} Momentum scrolling
