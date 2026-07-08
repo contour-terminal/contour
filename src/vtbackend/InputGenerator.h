@@ -9,6 +9,7 @@
 
 #include <libunicode/convert.h>
 
+#include <algorithm>
 #include <format>
 #include <optional>
 #include <set>
@@ -261,6 +262,13 @@ enum class MouseButton : uint8_t
 
 std::string to_string(MouseButton button);
 
+/// @return true if @p button is a wheel direction (vertical or horizontal) rather than a physical button.
+[[nodiscard]] constexpr bool isMouseWheel(MouseButton button) noexcept
+{
+    return button == MouseButton::WheelUp || button == MouseButton::WheelDown
+           || button == MouseButton::WheelLeft || button == MouseButton::WheelRight;
+}
+
 enum class MouseTransport : uint8_t
 {
     // CSI M Cb Cx Cy, with Cb, Cx, Cy incremented by 0x20
@@ -500,6 +508,16 @@ class InputGenerator
     void setMouseWheelMode(MouseWheelMode mode) noexcept;
     [[nodiscard]] MouseWheelMode mouseWheelMode() const noexcept { return _mouseWheelMode; }
 
+    /// Sets how many cursor-key presses one wheel notch emits during alternate-scroll.
+    /// @param count Presses per notch (values below 1 are treated as 1).
+    void setMouseWheelScrollMultiplier(unsigned count) noexcept { _mouseWheelScrollMultiplier = count; }
+
+    /// @return the number of cursor-key presses emitted per wheel notch (at least 1).
+    [[nodiscard]] unsigned mouseWheelScrollMultiplier() const noexcept
+    {
+        return std::max(1u, _mouseWheelScrollMultiplier);
+    }
+
     void setGenerateFocusEvents(bool enable) noexcept { _generateFocusEvents = enable; }
     [[nodiscard]] bool generateFocusEvents() const noexcept { return _generateFocusEvents; }
 
@@ -637,6 +655,7 @@ class InputGenerator
     bool _passiveMouseTracking = false;
     MouseTransport _mouseTransport = MouseTransport::Default;
     MouseWheelMode _mouseWheelMode = MouseWheelMode::Default;
+    unsigned _mouseWheelScrollMultiplier = 1;
     int _modifyOtherKeys = 0;
     Sequence _pendingSequence {};
     int _consumedBytes {};

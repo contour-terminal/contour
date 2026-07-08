@@ -1528,4 +1528,116 @@ TEST_CASE("InputGenerator.Win32InputMode.media_stop_vk", "[terminal,input]")
 
 // }}}
 
+// {{{ mouse wheel (alternate-scroll)
+
+namespace
+{
+// A representative on-screen cursor position for wheel events (the exact position is
+// irrelevant for cursor-key translation, which ignores coordinates).
+constexpr auto WheelPos = CellLocation { LineOffset(5), ColumnOffset(10) };
+constexpr auto NoPixel = PixelCoordinate {};
+} // namespace
+
+TEST_CASE("InputGenerator.Wheel.NormalCursorKeys.emits_cursor_keys", "[terminal,input]")
+{
+    // Core of #1951: no mouse protocol (as in plain `less`/`most`), yet the wheel must
+    // translate into cursor-up/down. Previously emitted nothing because of the protocol gate.
+    auto input = InputGenerator {};
+    input.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+
+    CHECK(input.generateMousePress(Modifiers {}, MouseButton::WheelDown, WheelPos, NoPixel, false));
+    CHECK(escape(input.peek()) == "\\e[B");
+    input.consume(static_cast<int>(input.peek().size()));
+
+    CHECK(input.generateMousePress(Modifiers {}, MouseButton::WheelUp, WheelPos, NoPixel, false));
+    CHECK(escape(input.peek()) == "\\e[A");
+}
+
+TEST_CASE("InputGenerator.Wheel.ApplicationCursorKeys.emits_SS3", "[terminal,input]")
+{
+    // DECCKM / ?1007 on the alternate screen selects application cursor keys (SS3 form).
+    auto input = InputGenerator {};
+    input.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+
+    CHECK(input.generateMousePress(Modifiers {}, MouseButton::WheelDown, WheelPos, NoPixel, false));
+    CHECK(escape(input.peek()) == "\\eOB");
+    input.consume(static_cast<int>(input.peek().size()));
+
+    CHECK(input.generateMousePress(Modifiers {}, MouseButton::WheelUp, WheelPos, NoPixel, false));
+    CHECK(escape(input.peek()) == "\\eOA");
+}
+
+TEST_CASE("InputGenerator.Wheel.Default.no_protocol_emits_nothing", "[terminal,input]")
+{
+    // Primary-screen default: wheel mode Default and no protocol -> nothing is generated,
+    // so the frontend falls back to local scrollback scrolling.
+    auto input = InputGenerator {};
+
+    CHECK_FALSE(input.generateMousePress(Modifiers {}, MouseButton::WheelDown, WheelPos, NoPixel, false));
+    CHECK(input.peek().empty());
+}
+
+TEST_CASE("InputGenerator.Wheel.PassiveTracking.no_cursor_keys", "[terminal,input]")
+{
+    // Passive mouse tracking must not be shadowed by the cursor-key translation.
+    auto input = InputGenerator {};
+    input.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+    input.setPassiveMouseTracking(true);
+
+    // No protocol + passive tracking: the wheel branch is skipped and the protocol gate stops
+    // generation, so nothing is emitted (and certainly no cursor keys).
+    CHECK_FALSE(input.generateMousePress(Modifiers {}, MouseButton::WheelDown, WheelPos, NoPixel, false));
+    CHECK(input.peek().empty());
+}
+
+TEST_CASE("InputGenerator.Wheel.Horizontal.no_cursor_keys", "[terminal,input]")
+{
+    // Horizontal wheel has no cursor-key equivalent; with no protocol it emits nothing.
+    auto input = InputGenerator {};
+    input.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+
+    CHECK_FALSE(input.generateMousePress(Modifiers {}, MouseButton::WheelLeft, WheelPos, NoPixel, false));
+    CHECK(input.peek().empty());
+    CHECK_FALSE(input.generateMousePress(Modifiers {}, MouseButton::WheelRight, WheelPos, NoPixel, false));
+    CHECK(input.peek().empty());
+}
+
+TEST_CASE("InputGenerator.Wheel.ProtocolActive.passes_through_as_SGR", "[terminal,input]")
+{
+    // With a protocol active (`less --mouse`, `ov`), setMouseProtocol resets the wheel mode to
+    // Default, so the wheel is reported to the app (SGR) instead of translated. Passthrough guard.
+    auto input = InputGenerator {};
+    input.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+    input.setMouseTransport(MouseTransport::SGR);
+    input.setMouseProtocol(MouseProtocol::NormalTracking, true); // resets wheel mode to Default
+
+    CHECK(input.generateMousePress(Modifiers {}, MouseButton::WheelDown, WheelPos, NoPixel, false));
+    // SGR mouse report, not a cursor key.
+    CHECK(escape(input.peek()).starts_with("\\e[<"));
+}
+
+TEST_CASE("InputGenerator.Wheel.ScrollMultiplier.repeats_cursor_keys", "[terminal,input]")
+{
+    // The scroll multiplier makes one wheel notch emit N cursor keys, matching the
+    // primary-screen scrollback feel (default 3).
+    auto input = InputGenerator {};
+    input.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+
+    SECTION("multiplier 3")
+    {
+        input.setMouseWheelScrollMultiplier(3);
+        CHECK(input.generateMousePress(Modifiers {}, MouseButton::WheelUp, WheelPos, NoPixel, false));
+        CHECK(escape(input.peek()) == "\\e[A\\e[A\\e[A");
+    }
+
+    SECTION("multiplier 0 is clamped to 1")
+    {
+        input.setMouseWheelScrollMultiplier(0);
+        CHECK(input.generateMousePress(Modifiers {}, MouseButton::WheelUp, WheelPos, NoPixel, false));
+        CHECK(escape(input.peek()) == "\\e[A");
+    }
+}
+
+// }}}
+
 // }}}
