@@ -2551,4 +2551,166 @@ TEST_CASE("Terminal.TopAnchoredRegion.ScrollCountMatchesScrolledLines", "[termin
 }
 // }}}
 
+// {{{ Normal-mode cursorline & yank-highlight on trivial vs inflated lines
+//
+// Regression coverage for the AoS→SoA grid migration: a plain-text line with uniform SGR stays
+// "trivial" even when the vi/normal-mode cursor is on it, so it takes RenderBufferBuilder's
+// trivial fast path. That path used to hard-code the cursorline off (the old invariant "a line
+// with a cursor is always inflated"), dropping the current-line highlight on plain-text lines.
+// The same fast path also skipped the vi yank/motion highlight. These tests pin both down.
+namespace
+{
+
+/// Background color of screen @p line at a column away from column 0, in a freshly built render
+/// buffer. Sampling off column 0 avoids the block-cursor cell (which inverts fg/bg) when the
+/// cursor sits at the line start. A line is emitted either as per-cell RenderCells (the
+/// per-cell/fallback path) or as one batched RenderLine (the trivial simple path); check both.
+vtbackend::RGBColor screenLineBackground(vtbackend::RenderBufferRef const& buf,
+                                         vtbackend::LineOffset line) noexcept
+{
+    for (auto const& cell: buf.get().cells)
+        if (cell.position.line == line && cell.position.column >= vtbackend::ColumnOffset(2))
+            return cell.attributes.backgroundColor;
+    for (auto const& renderLine: buf.get().lines)
+        if (renderLine.lineOffset == line)
+            // The batched RenderLine covers text (0..usedColumns) and fill (usedColumns..end)
+            // with one attribute set each; the cursorline tint is applied uniformly to both, so
+            // either represents the line background — prefer the fill (always present).
+            return renderLine.fillAttributes.backgroundColor;
+    return vtbackend::RGBColor {};
+}
+
+/// Screen line the cursor is rendered on, per the render buffer itself — the single source of
+/// truth for which line should carry the cursorline highlight (the render loop and the highlight
+/// decision share this coordinate). Returns nullopt when the buffer carries no cursor.
+std::optional<vtbackend::LineOffset> renderedCursorLine(vtbackend::RenderBufferRef const& buf) noexcept
+{
+    if (!buf.get().cursor.has_value())
+        return std::nullopt;
+    return buf.get().cursor->position.line;
+}
+
+} // namespace
+
+TEST_CASE("Terminal.Cursorline.trivialLineUnderCursorIsHighlighted", "[terminal][vi]")
+{
+    // Regression: a plain-text (trivial) line under the vi cursor must be highlighted.
+    // A tall page keeps all four content lines visible above the bottom status line that
+    // normal mode pushes in.
+    auto mc = MockTerm { PageSize { LineCount(8), ColumnCount(10) }, LineCount(0) };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+
+    // grid line 0: plain text (trivial), 1: colorized (inflated), 2: empty (trivial),
+    // 3: plain text (trivial).
+    mc.writeToScreen("plain0\r\n");
+    mc.writeToScreen("\033[38;2;255;0;0m"); // red foreground
+    mc.writeToScreen("tinted1");
+    mc.writeToScreen("\033[m\r\n"); // reset SGR
+    mc.writeToScreen("\r\n");
+    mc.writeToScreen("plain3");
+
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    auto const defaultBg = terminal.colorPalette().defaultBackground;
+
+    // Every line type (plain trivial, colorized inflated, empty trivial) must highlight when the
+    // cursor lands on it. Assert the tint appears on exactly the cursor's screen line.
+    auto seconds = 2;
+    for (auto const gridLine: { 0, 1, 2, 3 })
+    {
+        terminal.moveNormalModeCursorTo(
+            vtbackend::CellLocation { .line = LineOffset(gridLine), .column = ColumnOffset(0) });
+        terminal.tick(ClockBase + chrono::seconds(seconds++));
+        terminal.refreshRenderBuffer();
+        auto const buf = terminal.renderBuffer();
+
+        auto const cursorLine = renderedCursorLine(buf);
+        REQUIRE(cursorLine.has_value());
+        auto const bgOnCursorLine = screenLineBackground(buf, *cursorLine);
+        INFO(std::format("gridLine={} renderedCursorLine={} bgOnCursorLine={}",
+                         gridLine,
+                         cursorLine->value,
+                         bgOnCursorLine));
+        // The cursor line's background must be tinted away from the default background.
+        CHECK(bgOnCursorLine != defaultBg);
+    }
+}
+
+TEST_CASE("Terminal.Cursorline.notShownInInsertMode", "[terminal][vi]")
+{
+    // The cursorline is a normal-mode affordance; insert mode must not tint any content line.
+    auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(10) }, LineCount(0) };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+    mc.writeToScreen("plainA\r\n");
+    mc.writeToScreen("plainB\r\n");
+    mc.writeToScreen("plainC");
+
+    // Stays in the default insert mode (no status line, no cursorline).
+    terminal.tick(ClockBase + chrono::seconds(1));
+    terminal.refreshRenderBuffer();
+    auto const buf = terminal.renderBuffer();
+    auto const defaultBg = terminal.colorPalette().defaultBackground;
+
+    for (auto const line: { 0, 1, 2 })
+        CHECK(screenLineBackground(buf, LineOffset(line)) == defaultBg);
+}
+
+TEST_CASE("Terminal.Cursorline.nonCursorTrivialLineNotHighlighted", "[terminal][vi]")
+{
+    // Only the cursor's line is tinted; a sibling plain-text trivial line keeps the default bg.
+    // Use a tall page so content lines stay clear of the bottom indicator status line.
+    auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(10) }, LineCount(0) };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+    mc.writeToScreen("plainA\r\n");
+    mc.writeToScreen("plainB");
+
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    terminal.moveNormalModeCursorTo(
+        vtbackend::CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    terminal.tick(ClockBase + chrono::seconds(1));
+    terminal.refreshRenderBuffer();
+    auto const buf = terminal.renderBuffer();
+    auto const defaultBg = terminal.colorPalette().defaultBackground;
+
+    auto const cursorLine = renderedCursorLine(buf);
+    REQUIRE(cursorLine.has_value());
+    CHECK(screenLineBackground(buf, *cursorLine) != defaultBg);
+    // The immediately following content line (not the cursor line, well above the status line)
+    // must keep the default background.
+    CHECK(screenLineBackground(buf, LineOffset(cursorLine->value + 1)) == defaultBg);
+}
+
+TEST_CASE("Terminal.YankHighlight.trivialLineIsHighlighted", "[terminal][vi]")
+{
+    // Regression: a vi yank/motion highlight over a plain-text (trivial) line must recolor it.
+    // Tall page so content lines stay clear of the bottom indicator status line.
+    auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(10) }, LineCount(0) };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase);
+    mc.writeToScreen("plainA\r\n");
+    mc.writeToScreen("plainB\r\n");
+    mc.writeToScreen("plainC");
+
+    // Highlight grid line 1 (a plain-text trivial line) while still in insert mode so no
+    // status-line resize shifts coordinates; the highlight alone must recolor the trivial line.
+    terminal.setHighlightRange(vtbackend::LinearHighlight {
+        .from = vtbackend::CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) },
+        .to = vtbackend::CellLocation { .line = LineOffset(1), .column = ColumnOffset(5) } });
+    terminal.tick(ClockBase + chrono::seconds(1));
+    terminal.refreshRenderBuffer();
+    auto const buf = terminal.renderBuffer();
+    auto const defaultBg = terminal.colorPalette().defaultBackground;
+
+    CHECK(screenLineBackground(buf, LineOffset(1)) != defaultBg);
+    // A non-highlighted plain-text line keeps the default background.
+    CHECK(screenLineBackground(buf, LineOffset(2)) == defaultBg);
+}
+// }}}
+
 // NOLINTEND(misc-const-correctness)

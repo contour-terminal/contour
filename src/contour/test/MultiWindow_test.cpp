@@ -27,6 +27,7 @@
 
 #include <algorithm>
 
+#include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 #include <vtmux/Pane.h>
 #include <vtmux/SessionModel.h>
@@ -141,6 +142,47 @@ TEST_CASE("REGRESSION: tab operations from a second window target that window, n
         CHECK(windowB->count() == 1);
         CHECK(windowA->count() == 2);
     }
+}
+
+TEST_CASE("beginActiveTabTitleEdit requests the active tab's inline editor, per window",
+          "[contour][multiwindow]")
+{
+    // The SetTabTitle action asks the acting window's WindowController to open the inline title
+    // editor for its ACTIVE tab; the controller signals tabTitleEditRequested(activeTabIndex) so
+    // the matching QML TabItem starts editing. Verify the signal fires with the active tab's row,
+    // and only on the window whose controller was asked (no cross-window leakage).
+    TestApp app;
+    auto& manager = app.manager();
+    ScopedController windowA { manager };
+    ScopedController windowB { manager };
+    createTabs(manager, *windowA, 2);
+    createTabs(manager, *windowB, 3);
+
+    windowB->activateTab(2);
+    REQUIRE(windowB->activeTabIndex() == 2);
+
+    auto spyB = QSignalSpy(windowB.controller, &contour::WindowController::tabTitleEditRequested);
+    auto spyA = QSignalSpy(windowA.controller, &contour::WindowController::tabTitleEditRequested);
+
+    windowB->beginActiveTabTitleEdit();
+
+    REQUIRE(spyB.count() == 1);
+    CHECK(spyB.takeFirst().at(0).toInt() == 2); // window B's active tab row
+    CHECK(spyA.count() == 0);                   // window A's controller was not asked
+}
+
+TEST_CASE("beginActiveTabTitleEdit is a no-op when the window has no tabs", "[contour][multiwindow]")
+{
+    // Guard: with no active tab (activeTabIndex() < 0) the controller must not emit, so the QML
+    // editor is never asked to open on a nonexistent tab.
+    TestApp app;
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    REQUIRE(window->activeTabIndex() < 0);
+
+    auto spy = QSignalSpy(window.controller, &contour::WindowController::tabTitleEditRequested);
+    window->beginActiveTabTitleEdit();
+    CHECK(spy.count() == 0);
 }
 
 TEST_CASE("REGRESSION: pane-proxy writes (ratio, activate) target their own window's tab",
@@ -259,6 +301,57 @@ TEST_CASE("WindowController projects real-session tabs and routes rename/color t
     CHECK(window->activeTabIndex() == 0);
 
     // Clean up the backing sessions.
+    for (int row = window->count() - 1; row >= 0; --row)
+        window->closeTabAtIndex(row);
+}
+
+TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour][multiwindow][model]")
+{
+    // Regression: a program-driven title change on a tab that is NOT the active tab (so its session
+    // has no display attached) must still refresh that tab's strip label immediately — not only once
+    // the tab is next focused. The refresh is posted to the session QObject (GUI thread), so it works
+    // without a display; pump the event loop to deliver the queued post.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+
+    window->createNewTab();
+    window->createNewTab();
+    REQUIRE(window->count() == 2);
+
+    // Make row 0 the active tab, so row 1 is the background (display-less) tab under test.
+    window->activateTab(0);
+    REQUIRE(window->activeTabIndex() == 0);
+
+    auto* backgroundTab = manager.model().window(window.id)->tabAt(1);
+    REQUIRE(backgroundTab != nullptr);
+    auto* backgroundSession = manager.sessionForId(backgroundTab->activePane()->session());
+    REQUIRE(backgroundSession != nullptr);
+
+    // Watch the tab strip for a TitleRole change on row 1.
+    auto spy = QSignalSpy(window.controller, &contour::WindowController::dataChanged);
+
+    // Program-driven title change on the BACKGROUND session (as an OSC title sequence would do).
+    backgroundSession->setTitle(QStringLiteral("background-build-running"));
+
+    // The refresh is queued onto the session (GUI thread); deliver it.
+    QCoreApplication::processEvents();
+
+    // The background tab's resolved title now reflects the change...
+    CHECK(window->data(window->index(1), contour::WindowController::TitleRole).toString()
+          == QStringLiteral("background-build-running"));
+    // ...and a dataChanged carrying TitleRole was emitted for row 1 (not row 0, the active tab).
+    auto sawRow1TitleChange = false;
+    for (auto const& emission: spy)
+    {
+        auto const topLeft = emission.at(0).toModelIndex();
+        auto const roles = emission.at(2).value<QList<int>>();
+        if (topLeft.row() == 1 && roles.contains(contour::WindowController::TitleRole))
+            sawRow1TitleChange = true;
+    }
+    CHECK(sawRow1TitleChange);
+
     for (int row = window->count() - 1; row >= 0; --row)
         window->closeTabAtIndex(row);
 }

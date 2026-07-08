@@ -1157,18 +1157,17 @@ void TerminalSession::refreshGuiTabInfoForStatusLine()
     // session and would re-lock that non-recursive mutex (the deadlock scheduleRedraw() was changed to
     // avoid). Post the refresh to the GUI thread instead, where it runs free of the parser-thread lock.
     //
-    // The lambda is keyed to the display QObject, so Qt only cancels it if the *display* dies — not if
-    // this *session* is destroyed first (e.g. closing a tab while its shell still emits an OSC title
-    // change). Capture a QPointer to the session (auto-nulls on destruction) and bail out if the session
-    // is gone, avoiding a use-after-free on _manager.
-    if (_display)
-        _display->post([self = QPointer<TerminalSession> { this }]() {
-            if (self)
-            {
-                self->_manager->update();                                     // indicator status line
-                self->_manager->refreshTabForSession(self->modelSessionId()); // GUI tab strip label
-            }
-        });
+    // Post through THIS session (a QObject on the GUI thread), NOT through _display: a background
+    // (unfocused) tab's session has no display attached — the display follows the active tab — so
+    // gating on _display would skip the tab-strip label refresh for every unfocused tab, freezing its
+    // title until it was next focused. The tab-strip update is a pure model change and does not need a
+    // display. postToObject targets `this`, so Qt auto-cancels the queued call if the session is
+    // destroyed first (e.g. closing a tab while its shell still emits an OSC title change), avoiding a
+    // use-after-free on _manager.
+    postToObject(this, [this]() {
+        _manager->update();                               // indicator status line
+        _manager->refreshTabForSession(modelSessionId()); // GUI tab strip label
+    });
 }
 
 void TerminalSession::setWindowTitle(string_view title)
@@ -2052,9 +2051,11 @@ bool TerminalSession::operator()(actions::SwitchToTabRight)
     return true;
 }
 
-bool TerminalSession::operator()(actions::SetTabName)
+bool TerminalSession::operator()(actions::SetTabTitle)
 {
-    terminal().requestTabName();
+    // Open the GUI-native inline tab-title editor for the active tab. Routed through the manager
+    // like every other tab op so it targets this session's window.
+    _manager->beginTabTitleEdit(/*acting*/ this);
     return true;
 }
 

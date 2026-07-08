@@ -100,6 +100,10 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     void moveTabTo(int position, TerminalSession* acting);
     void moveTabToLeft(TerminalSession* session);
     void moveTabToRight(TerminalSession* session);
+    /// Opens the inline title editor for the active tab of the window hosting @p acting (the
+    /// SetTabTitle keybinding), routed like the other tab ops via the acting session's window.
+    /// @param acting The session that received the keybinding; its hosting window is the target.
+    void beginTabTitleEdit(TerminalSession* acting);
 
     void removeSession(TerminalSession&);
     void currentSessionIsTerminated();

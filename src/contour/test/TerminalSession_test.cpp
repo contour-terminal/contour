@@ -302,7 +302,7 @@ TEST_CASE("TerminalSession: tab actions from an unregistered session are guarded
     CHECK_NOTHROW((*session)(contour::actions::FocusPaneDown {}));
     CHECK_NOTHROW((*session)(contour::actions::MoveTabTo { .position = 1 }));
     CHECK_NOTHROW((*session)(contour::actions::SwitchToTab { .position = 1 }));
-    CHECK_NOTHROW((*session)(contour::actions::SetTabName {}));
+    CHECK_NOTHROW((*session)(contour::actions::SetTabTitle {}));
 }
 
 TEST_CASE("TerminalSession: opener, paste and reload actions run without a display",
@@ -1011,8 +1011,10 @@ TEST_CASE("TerminalSession: display-coupled event overrides are safe no-ops with
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
 
-    // setTabName refreshes the (display-less) status-line tab info; setTerminalProfile early-returns
-    // when no display is attached. Neither must crash.
+    // setTabName posts a tab-strip/status-line refresh to the session (a GUI-thread QObject) even
+    // with no display attached — a background tab must still refresh its title (see the dedicated
+    // real-time-title test in MultiWindow_test). setTerminalProfile early-returns when no display is
+    // attached. Neither must crash.
     CHECK_NOTHROW(session->setTabName("my-tab"));
     CHECK_NOTHROW(session->setTerminalProfile("main"));
 }

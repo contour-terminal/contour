@@ -142,6 +142,7 @@ class MockMainController: public QAbstractListModel
     Q_INVOKABLE void tearOffTab(int) {}
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
     Q_INVOKABLE void resetTabTitle(int) {}
+    Q_INVOKABLE void beginActiveTabTitleEdit() { emit tabTitleEditRequested(0); }
     Q_INVOKABLE void setTabColor(int, QColor const&) {}
     Q_INVOKABLE void resetTabColor(int) {}
     Q_INVOKABLE void closeTabAtIndex(int) {}
@@ -182,6 +183,7 @@ class MockMainController: public QAbstractListModel
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
     void chromeHeightChanged();
+    void tabTitleEditRequested(int index);
 
   private:
     int _chromeHeight = 0;

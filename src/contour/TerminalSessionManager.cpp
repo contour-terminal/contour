@@ -298,6 +298,15 @@ void TerminalSessionManager::switchToTabRight(TerminalSession* acting)
     activateModelTabByRow(win->id(), target);
 }
 
+void TerminalSessionManager::beginTabTitleEdit(TerminalSession* acting)
+{
+    auto* win = windowHostingSession(acting);
+    if (win == nullptr)
+        return;
+    if (auto* controller = controllerFor(win->id()); controller != nullptr)
+        controller->beginActiveTabTitleEdit();
+}
+
 void TerminalSessionManager::switchToTab(int position, TerminalSession* acting)
 {
     auto* win = windowHostingSession(acting);

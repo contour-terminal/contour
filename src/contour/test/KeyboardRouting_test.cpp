@@ -267,6 +267,7 @@ class RoutingMockController: public QAbstractListModel
     Q_INVOKABLE void tearOffTab(int) {}
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
     Q_INVOKABLE void resetTabTitle(int) {}
+    Q_INVOKABLE void beginActiveTabTitleEdit() { emit tabTitleEditRequested(_activeTabIndex); }
     Q_INVOKABLE void setTabColor(int, QColor const&) {}
     Q_INVOKABLE void resetTabColor(int) {}
     Q_INVOKABLE void closeTabAtIndex(int) {}
@@ -305,6 +306,7 @@ class RoutingMockController: public QAbstractListModel
     void titleBarVisibleChanged();
     void chromeHeightChanged();
     void activeTabRootPaneChanged();
+    void tabTitleEditRequested(int index);
 
   private:
     int _chromeHeight = 0;

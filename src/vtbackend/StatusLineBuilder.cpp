@@ -428,9 +428,6 @@ struct VTSerializer
             return std::format("Search: {}█",
                                unicode::convert_to<char>(std::u32string_view(vt.search().pattern)));
 
-        if (vt.inputHandler().isEditingPrompt())
-            return std::format("{}{}█", vt.prompt().prompt, vt.prompt().text);
-
         return {};
     }
 

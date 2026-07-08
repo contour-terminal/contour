@@ -1182,3 +1182,7 @@ TEST_CASE("display: a Close event closes the PTY and emits terminated on the liv
 
     QObject::disconnect(conn);
 }
+
+// NOTE: The WindowController tab-title-edit seam (beginActiveTabTitleEdit → tabTitleEditRequested)
+// is tested headlessly with real tabs in MultiWindow_test.cpp, where activeTabIndex() is populated;
+// the DisplayHarness session is not registered as a model tab, so it cannot exercise that path.

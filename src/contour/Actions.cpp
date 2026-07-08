@@ -90,7 +90,7 @@ optional<Action> fromString(string const& name)
         mapAction<actions::SwitchToPreviousTab>("SwitchToPreviousTab"),
         mapAction<actions::SwitchToTabLeft>("SwitchToTabLeft"),
         mapAction<actions::SwitchToTabRight>("SwitchToTabRight"),
-        mapAction<actions::SetTabName>("SetTabName"),
+        mapAction<actions::SetTabTitle>("SetTabTitle"),
         mapAction<actions::SplitVertical>("SplitVertical"),
         mapAction<actions::SplitHorizontal>("SplitHorizontal"),
         mapAction<actions::ClosePane>("ClosePane"),
