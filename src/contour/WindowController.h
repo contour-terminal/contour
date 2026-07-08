@@ -55,6 +55,12 @@ class WindowController: public QAbstractListModel
     Q_PROPERTY(contour::PaneProxy* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
     Q_PROPERTY(contour::TerminalSession* activeSession READ activeSession NOTIFY activeSessionChanged)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
+    // Tab-strip (tab bar) placement + visibility, exposed to main.qml. `tabBarPosition` is an int
+    // (0 = Top, 1 = Bottom) matching the config::TabBarPosition enumerator order. `tabBarShouldShow`
+    // is the resolved gate (mode + live tab count) the QML binds its `visible` to.
+    Q_PROPERTY(int tabBarPosition READ tabBarPosition NOTIFY tabBarPositionChanged)
+    Q_PROPERTY(int tabBarVisibility READ tabBarVisibility NOTIFY tabBarVisibilityChanged)
+    Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
@@ -176,6 +182,33 @@ class WindowController: public QAbstractListModel
 
     /// Flips the window's title-bar visibility (the ToggleTitleBar action, routed here by the display).
     void toggleTitleBar();
+    // }}}
+
+    // {{{ Tab strip (tab bar) placement + visibility
+    // Like title-bar visibility, these are WINDOW state seeded once from the profile (first-write-wins),
+    // so later session rebinds (tab switch, split collapse) never clobber them.
+
+    /// The tab strip position as an int for QML (0 = Top, 1 = Bottom; see config::TabBarPosition).
+    [[nodiscard]] int tabBarPosition() const noexcept;
+
+    /// The tab strip visibility mode as an int for QML (see config::TabBarVisibility).
+    [[nodiscard]] int tabBarVisibility() const noexcept;
+
+    /// Whether the tab strip should currently be shown, resolving the visibility mode against the live
+    /// tab count: Always => true, Never => false, Multiple => count() > 1. main.qml binds the tab
+    /// strip's `visible` to this.
+    /// @return True if the tab strip should be shown.
+    [[nodiscard]] bool tabBarShouldShow() const noexcept;
+
+    /// Seeds this window's tab strip position from the profile's tab_bar_position setting.
+    /// First-write-wins (see seedTitleBarVisible).
+    /// @param position The profile's tab_bar_position value.
+    void seedTabBarPosition(config::TabBarPosition position);
+
+    /// Seeds this window's tab strip visibility mode from the profile's tab_bar_visibility setting.
+    /// First-write-wins (see seedTitleBarVisible).
+    /// @param visibility The profile's tab_bar_visibility value.
+    void seedTabBarVisibility(config::TabBarVisibility visibility);
     // }}}
 
     /// This window's currently focused display (for window services + status-line targeting).
@@ -333,6 +366,9 @@ class WindowController: public QAbstractListModel
     void multimediaReadyChanged();
     void activeTabRootPaneChanged();
     void titleBarVisibleChanged();
+    void tabBarPositionChanged();
+    void tabBarVisibilityChanged();
+    void tabBarShouldShowChanged();
     void activeSessionChanged();
     void chromeHeightChanged();
 
@@ -398,6 +434,14 @@ class WindowController: public QAbstractListModel
     bool _titleBarVisible = true;
     // First-write-wins latch for seedTitleBarVisible(): session rebinds must not reset a runtime toggle.
     bool _titleBarSeeded = false;
+
+    // Window-scoped tab strip placement + visibility (see the tab-strip block above). Seeded once from
+    // the profile's tab_bar_position / tab_bar_visibility (first display attach). Defaults mirror the
+    // ConfigEntry defaults so a window with no seed yet behaves like the historical Top/Always.
+    config::TabBarPosition _tabBarPosition = config::TabBarPosition::Top;
+    bool _tabBarPositionSeeded = false;
+    config::TabBarVisibility _tabBarVisibility = config::TabBarVisibility::Always;
+    bool _tabBarVisibilitySeeded = false;
 
     // Declared title-bar chrome height in logical px (written by main.qml's binding).
     int _chromeHeight = 0;

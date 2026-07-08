@@ -73,6 +73,23 @@ enum class ScrollBarPosition : uint8_t
     Right
 };
 
+/// Where the GUI tab strip (tab bar) is placed within the window.
+/// @note Exposed to QML as an @c int (0 = Top, 1 = Bottom); keep the enumerator order in sync
+///       with the literals in @c main.qml if this is ever extended or reordered.
+enum class TabBarPosition : uint8_t
+{
+    Top,    //!< The tab strip sits above the terminal content (default, historical behavior).
+    Bottom, //!< The tab strip sits below the terminal content.
+};
+
+/// When the GUI tab strip (tab bar) is shown.
+enum class TabBarVisibility : uint8_t
+{
+    Always,   //!< Always show the tab strip (default, historical behavior).
+    Never,    //!< Never show the tab strip.
+    Multiple, //!< Show the tab strip only when the window has more than one tab.
+};
+
 enum class Permission : uint8_t
 {
     Deny,
@@ -491,6 +508,10 @@ struct TerminalProfile
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
     ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{WindowTitle}" };
+    ConfigEntry<TabBarPosition, documentation::TabBarPosition> tabBarPosition { TabBarPosition::Top };
+    ConfigEntry<TabBarVisibility, documentation::TabBarVisibility> tabBarVisibility {
+        TabBarVisibility::Always
+    };
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 
@@ -1129,6 +1150,8 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, std::string& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::StatusDisplayPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarPosition& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarVisibility& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, text::render_mode& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::TextOutlineConfig& where);
@@ -1873,6 +1896,37 @@ struct std::formatter<contour::config::ScrollBarPosition>: formatter<std::string
             case contour::config::ScrollBarPosition::Hidden: name = "Hidden"; break;
             case contour::config::ScrollBarPosition::Left: name = "Left"; break;
             case contour::config::ScrollBarPosition::Right: name = "Right"; break;
+        }
+        return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::config::TabBarPosition>: formatter<std::string_view>
+{
+    auto format(contour::config::TabBarPosition value, auto& ctx) const
+    {
+        std::string_view name;
+        switch (value)
+        {
+            case contour::config::TabBarPosition::Top: name = "Top"; break;
+            case contour::config::TabBarPosition::Bottom: name = "Bottom"; break;
+        }
+        return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::config::TabBarVisibility>: formatter<std::string_view>
+{
+    auto format(contour::config::TabBarVisibility value, auto& ctx) const
+    {
+        std::string_view name;
+        switch (value)
+        {
+            case contour::config::TabBarVisibility::Always: name = "Always"; break;
+            case contour::config::TabBarVisibility::Never: name = "Never"; break;
+            case contour::config::TabBarVisibility::Multiple: name = "Multiple"; break;
         }
         return formatter<std::string_view>::format(name, ctx);
     }

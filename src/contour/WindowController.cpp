@@ -371,6 +371,56 @@ void WindowController::toggleTitleBar()
     setTitleBarVisible(!_titleBarVisible);
 }
 
+int WindowController::tabBarPosition() const noexcept
+{
+    return static_cast<int>(_tabBarPosition);
+}
+
+int WindowController::tabBarVisibility() const noexcept
+{
+    return static_cast<int>(_tabBarVisibility);
+}
+
+bool WindowController::tabBarShouldShow() const noexcept
+{
+    switch (_tabBarVisibility)
+    {
+        case config::TabBarVisibility::Always: return true;
+        case config::TabBarVisibility::Never: return false;
+        case config::TabBarVisibility::Multiple: return count() > 1;
+    }
+    return true;
+}
+
+void WindowController::seedTabBarPosition(config::TabBarPosition position)
+{
+    // First-write-wins, mirroring seedTitleBarVisible: the seed arrives on every session rebind, but
+    // only the first (the window's initial profile value) takes effect.
+    if (_tabBarPositionSeeded)
+        return;
+    _tabBarPositionSeeded = true;
+    if (_tabBarPosition == position)
+        return;
+    _tabBarPosition = position;
+    emit tabBarPositionChanged();
+}
+
+void WindowController::seedTabBarVisibility(config::TabBarVisibility visibility)
+{
+    // First-write-wins (see seedTabBarPosition).
+    if (_tabBarVisibilitySeeded)
+        return;
+    _tabBarVisibilitySeeded = true;
+    if (_tabBarVisibility == visibility)
+        return;
+    _tabBarVisibility = visibility;
+    emit tabBarVisibilityChanged();
+    // The visibility mode is one of the two inputs to the resolved gate; notify QML so a Never/Multiple
+    // seed re-evaluates the tab strip's `visible` binding immediately (Always is the default, so a
+    // window seeded to Always sees no change).
+    emit tabBarShouldShowChanged();
+}
+
 bool WindowController::isMultimediaReady() const noexcept
 {
     return _manager.isMultimediaReady();
@@ -825,6 +875,9 @@ void WindowController::onTabAdded(int)
 {
     endInsertRows();
     emit countChanged();
+    // The resolved tab-strip gate depends on the live tab count (Multiple mode): re-notify QML so the
+    // strip re-shows when the count crosses 1.
+    emit tabBarShouldShowChanged();
     refreshAllTabTitles();
 }
 
@@ -837,6 +890,8 @@ void WindowController::onTabClosed()
 {
     endRemoveRows();
     emit countChanged();
+    // See onTabAdded: re-notify so the strip re-hides in Multiple mode when the count falls back to 1.
+    emit tabBarShouldShowChanged();
     emit activeTabIndexChanged();
     refreshAllTabTitles();
 }

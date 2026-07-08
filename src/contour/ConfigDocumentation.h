@@ -175,6 +175,23 @@ constexpr StringLiteral TabLabelConfig {
     "{comment} Split tabs show \"Multiple panes\" instead.\n"
 };
 
+constexpr StringLiteral TabBarPositionConfig {
+    "{comment} Where the GUI tab strip (tab bar) is placed within the window (ignore-case):\n"
+    "{comment}   Top    = above the terminal content (default).\n"
+    "{comment}   Bottom = below the terminal content.\n"
+    "tab_bar_position: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral TabBarVisibilityConfig {
+    "{comment} When the GUI tab strip (tab bar) is shown (ignore-case):\n"
+    "{comment}   Always   = always show the tab strip (default).\n"
+    "{comment}   Never    = never show the tab strip.\n"
+    "{comment}   Multiple = show the tab strip only when the window has more than one tab.\n"
+    "tab_bar_visibility: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral MarginsConfig {
     "{comment} Window margins\n"
     "{comment}\n"
@@ -1435,6 +1452,26 @@ constexpr StringLiteral TabLabelWeb {
     "\n"
 };
 
+constexpr StringLiteral TabBarPositionWeb {
+    "\n"
+    "Selects where the GUI tab strip (tab bar) is placed within the window. Valid values (ignore-case):\n"
+    "\n"
+    "- `Top` — the tab strip is drawn above the terminal content. This is the default.\n"
+    "- `Bottom` — the tab strip is drawn below the terminal content.\n"
+    "\n"
+};
+
+constexpr StringLiteral TabBarVisibilityWeb {
+    "\n"
+    "Selects when the GUI tab strip (tab bar) is shown. Valid values (ignore-case):\n"
+    "\n"
+    "- `Always` — the tab strip is always shown. This is the default.\n"
+    "- `Never` — the tab strip is never shown.\n"
+    "- `Multiple` — the tab strip is shown only when the window has more than one tab, and hidden while a "
+    "single tab remains.\n"
+    "\n"
+};
+
 constexpr StringLiteral TerminalIdWeb {
     "\n"
     "configuration option allows you to specify the terminal type that will be advertised by the terminal "
@@ -1962,6 +1999,8 @@ using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYan
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
 using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
+using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
+using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
 using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;
 using TerminalSize = DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>;
 using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;

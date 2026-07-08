@@ -628,6 +628,14 @@ TEST_CASE("Config: generated default config round-trips through the loader", "[c
     CHECK(profile->terminalSize.value().columns == defaults.profile().terminalSize.value().columns);
     CHECK(profile->terminalSize.value().lines == defaults.profile().terminalSize.value().lines);
     CHECK(profile->showTitleBar.value() == defaults.profile().showTitleBar.value());
+    // Guards the tab_bar_* writer<->reader key match: the std::formatter emits "Top"/"Always" into the
+    // generated doc, and the loader must read the same key back. A typo in only one side would surface
+    // here as a default-valued mismatch (which, for these two, would still equal the default — so also
+    // assert the rendered document actually carries the keys below).
+    CHECK(profile->tabBarPosition.value() == defaults.profile().tabBarPosition.value());
+    CHECK(profile->tabBarVisibility.value() == defaults.profile().tabBarVisibility.value());
+    CHECK(rendered.find("tab_bar_position:") != std::string::npos);
+    CHECK(rendered.find("tab_bar_visibility:") != std::string::npos);
 }
 
 TEST_CASE("Config: dual color schemes, palette list forms, and infinite history load", "[config]")
@@ -853,6 +861,83 @@ profiles:
     CHECK(profile->modeInsert.value().cursor.cursorShape == vtbackend::CursorShape::Rectangle);
     CHECK(profile->blinkStyle.value() == vtbackend::BlinkStyle::Linger);
     CHECK(profile->screenTransitionStyle.value() == vtbackend::ScreenTransitionStyle::Classic);
+}
+
+TEST_CASE("Config: tab_bar_position and tab_bar_visibility parse each value (ignore-case)", "[config]")
+{
+    using contour::config::TabBarPosition;
+    using contour::config::TabBarVisibility;
+
+    SECTION("bottom + never")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        tab_bar_position: Bottom
+        tab_bar_visibility: Never
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->tabBarPosition.value() == TabBarPosition::Bottom);
+        CHECK(profile->tabBarVisibility.value() == TabBarVisibility::Never);
+    }
+
+    SECTION("top + multiple, lower-case tokens prove case-insensitivity")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        tab_bar_position: top
+        tab_bar_visibility: multiple
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->tabBarPosition.value() == TabBarPosition::Top);
+        CHECK(profile->tabBarVisibility.value() == TabBarVisibility::Multiple);
+    }
+
+    SECTION("always (the default) still parses explicitly")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        tab_bar_visibility: Always
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->tabBarVisibility.value() == TabBarVisibility::Always);
+    }
+}
+
+TEST_CASE("Config: invalid tab_bar_* values fall back to the defaults", "[config]")
+{
+    using contour::config::TabBarPosition;
+    using contour::config::TabBarVisibility;
+
+    QTemporaryDir dir;
+    // Unrecognized tokens must leave the fields at their ConfigEntry defaults (Top / Always), not throw
+    // or zero them out — the loadFromEntry overloads only write on a successful parse.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        tab_bar_position: Sideways
+        tab_bar_visibility: Sometimes
+)"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->tabBarPosition.value() == TabBarPosition::Top);
+    CHECK(profile->tabBarVisibility.value() == TabBarVisibility::Always);
 }
 
 TEST_CASE("Config: git-drawings, arc and braille styles parse from YAML", "[config]")

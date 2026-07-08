@@ -477,6 +477,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "bell", where.bell);
         loadFromEntry(child, "wm_class", where.wmClass);
         loadFromEntry(child, "tab_label", where.tabLabel);
+        loadFromEntry(child, "tab_bar_position", where.tabBarPosition);
+        loadFromEntry(child, "tab_bar_visibility", where.tabBarVisibility);
         loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
         loadFromEntry(child, "margins", where.margins);
         loadFromEntry(child, "terminal_id", where.terminalId);
@@ -1525,6 +1527,52 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     if (auto const child = node[entry])
     {
         auto opt = parseModifierKey(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where)
+{
+    // Case-insensitive; an unrecognized value leaves @p where at its (default) value.
+    auto parsePosition = [&](std::string const& key) -> std::optional<TabBarPosition> {
+        auto const literal = crispy::toLower(key);
+        logger()("Loading entry: {}, value {}", entry, literal);
+        if (literal == "top")
+            return TabBarPosition::Top;
+        if (literal == "bottom")
+            return TabBarPosition::Bottom;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parsePosition(child.as<std::string>());
+        if (opt.has_value())
+            where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     TabBarVisibility& where)
+{
+    // Case-insensitive; an unrecognized value leaves @p where at its (default) value.
+    auto parseVisibility = [&](std::string const& key) -> std::optional<TabBarVisibility> {
+        auto const literal = crispy::toLower(key);
+        logger()("Loading entry: {}, value {}", entry, literal);
+        if (literal == "always")
+            return TabBarVisibility::Always;
+        if (literal == "never")
+            return TabBarVisibility::Never;
+        if (literal == "multiple")
+            return TabBarVisibility::Multiple;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto opt = parseVisibility(child.as<std::string>());
         if (opt.has_value())
             where = opt.value();
     }
