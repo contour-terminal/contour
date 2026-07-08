@@ -39,7 +39,16 @@ ApplicationWindow
     // The custom tab strip is shown regardless of the decoration mode — only the window controls inside
     // it are dropped when the native frame provides them (see TitleBar.useCustomWindowControls). Tabs
     // remain reachable whether or not the native title bar is used.
-    property bool showCustomTitleBar: true
+    //
+    // Tab-strip placement + visibility come from the profile via the window controller (win). Both are
+    // aliased to window-level properties here so the `win`-null startup guard (and its default) lives in
+    // ONE place; the TitleBar/content bindings below read these, never `win` directly.
+    //   - tabBarPosition: 0 = Top (above the terminal content), 1 = Bottom (below it). Mirrors the
+    //     config::TabBarPosition enumerator order; defaults to Top before `win` resolves.
+    //   - tabBarShouldShow: the resolved Always / Never / Multiple gate (against the live tab count);
+    //     defaults to shown before `win` resolves.
+    property int tabBarPosition: win ? win.tabBarPosition : 0
+    property bool tabBarShouldShow: win ? win.tabBarShouldShow : true
 
     // Diagnostic lifecycle/notification traces below are routed through a category that is off by
     // default (Warning floor), so they stay silent during normal use (closing a window and firing a
@@ -88,10 +97,17 @@ ApplicationWindow
     // {{{ Custom title bar + terminal content
     TitleBar {
         id: titleBar
-        anchors.top: parent.top
+        objectName: "titleBar" // so offscreen layout tests can findChild() this item
+        // Pinned to the top OR the bottom edge depending on tabBarPosition (never both — assigning
+        // `undefined` detaches an anchor). left/right always span the window.
+        anchors.top: appWindow.tabBarPosition === 0 ? parent.top : undefined
+        anchors.bottom: appWindow.tabBarPosition === 1 ? parent.bottom : undefined
         anchors.left: parent.left
         anchors.right: parent.right
-        visible: appWindow.showCustomTitleBar
+        // Shown per the profile's tab_bar_visibility, resolved against the live tab count by the
+        // controller (Always / Never / Multiple). When hidden, height/effectiveHeight collapse to 0 so
+        // the content area (and the declared chrome height feeding the geometry authority) reclaim it.
+        visible: appWindow.tabBarShouldShow
         height: visible ? implicitHeight : 0
         property real effectiveHeight: visible ? implicitHeight : 0
         // Declared after the content area below, so a positive z keeps the bar above it. The terminal now
@@ -112,10 +128,15 @@ ApplicationWindow
     // startup session exists).
     Item {
         id: content
-        anchors.top: titleBar.bottom
+        objectName: "content" // so offscreen layout tests can findChild() this item
+        // Fills the window edge-to-edge on the axis the tab strip does NOT occupy: with the strip at
+        // the top, content runs from titleBar.bottom to the window bottom; with the strip at the bottom,
+        // content runs from the window top to titleBar.top. When the strip is hidden, titleBar's height
+        // is 0, so content reclaims the full window either way.
+        anchors.top: appWindow.tabBarPosition === 0 ? titleBar.bottom : parent.top
+        anchors.bottom: appWindow.tabBarPosition === 1 ? titleBar.top : parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
 
         Loader {
             id: paneContentLoader

@@ -87,6 +87,96 @@ TEST_CASE("two controllers adapt distinct model windows with independent tab row
     CHECK(windowB->count() == 3);
 }
 
+TEST_CASE("tab strip Multiple gate tracks the live tab count and re-notifies QML", "[contour][multiwindow]")
+{
+    using contour::config::TabBarVisibility;
+
+    // Model-only tabs (createTab / closeTabsToRight): they drive the same onTabAdded / onTabClosed
+    // hooks synchronously without needing a backing session (closeTabAtIndex on a session-less tab is
+    // an async session-teardown path, so it is not used here).
+    TestApp app;
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    REQUIRE(window.controller != nullptr);
+
+    window->seedTabBarVisibility(TabBarVisibility::Multiple);
+    // The seed itself emits the change once (mode is one input to the resolved gate). Spy AFTER seeding
+    // so the counts below reflect only the count-driven add/close notifications.
+    QSignalSpy shouldShowSpy(window.controller, &contour::WindowController::tabBarShouldShowChanged);
+
+    // One tab: Multiple hides the strip.
+    createTabs(manager, *window, 1);
+    CHECK(window->count() == 1);
+    CHECK_FALSE(window->tabBarShouldShow());
+
+    // Second tab: the strip shows, and the add fired the gate notification.
+    createTabs(manager, *window, 1);
+    CHECK(window->count() == 2);
+    CHECK(window->tabBarShouldShow());
+
+    // Back to one tab: the strip hides again, and the close fired the notification too.
+    window->closeTabsToRight(0);
+    CHECK(window->count() == 1);
+    CHECK_FALSE(window->tabBarShouldShow());
+
+    // Two adds + one close each drove tabBarShouldShowChanged (the onTabAdded / onTabClosed wiring);
+    // without those emits the QML `visible` binding would go stale.
+    CHECK(shouldShowSpy.count() == 3);
+}
+
+TEST_CASE("tab strip seeds are first-write-wins per window", "[contour][multiwindow]")
+{
+    using contour::config::TabBarPosition;
+    using contour::config::TabBarVisibility;
+
+    TestApp app;
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    REQUIRE(window.controller != nullptr);
+
+    // Defaults before any seed (mirror the ConfigEntry defaults: Top / Always).
+    CHECK(window->tabBarPosition() == static_cast<int>(TabBarPosition::Top));
+    CHECK(window->tabBarVisibility() == static_cast<int>(TabBarVisibility::Always));
+
+    // First seed takes effect...
+    window->seedTabBarPosition(TabBarPosition::Bottom);
+    window->seedTabBarVisibility(TabBarVisibility::Never);
+    CHECK(window->tabBarPosition() == static_cast<int>(TabBarPosition::Bottom));
+    CHECK(window->tabBarVisibility() == static_cast<int>(TabBarVisibility::Never));
+
+    // ...a later seed (arriving on every session rebind in production) is a no-op, so a runtime state
+    // is never reset by a tab switch or split collapse.
+    window->seedTabBarPosition(TabBarPosition::Top);
+    window->seedTabBarVisibility(TabBarVisibility::Always);
+    CHECK(window->tabBarPosition() == static_cast<int>(TabBarPosition::Bottom));
+    CHECK(window->tabBarVisibility() == static_cast<int>(TabBarVisibility::Never));
+}
+
+TEST_CASE("tab strip Always/Never gates ignore the tab count", "[contour][multiwindow]")
+{
+    using contour::config::TabBarVisibility;
+
+    TestApp app;
+    auto& manager = app.manager();
+
+    SECTION("Always -> shown even with zero or one tab")
+    {
+        ScopedController window { manager };
+        window->seedTabBarVisibility(TabBarVisibility::Always);
+        CHECK(window->tabBarShouldShow()); // no tabs yet
+        createTabs(manager, *window, 1);
+        CHECK(window->tabBarShouldShow()); // one tab
+    }
+
+    SECTION("Never -> hidden even with multiple tabs")
+    {
+        ScopedController window { manager };
+        window->seedTabBarVisibility(TabBarVisibility::Never);
+        createTabs(manager, *window, 3);
+        CHECK_FALSE(window->tabBarShouldShow());
+    }
+}
+
 TEST_CASE("REGRESSION: tab operations from a second window target that window, not the first",
           "[contour][multiwindow]")
 {

@@ -200,6 +200,10 @@ class RoutingMockController: public QAbstractListModel
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
     Q_PROPERTY(bool multimediaReady READ multimediaReady CONSTANT)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
+    // Tab-strip placement + visibility main.qml binds; defaults (Top, shown) keep this routing test's
+    // layout identical to production without needing to vary them.
+    Q_PROPERTY(int tabBarPosition READ tabBarPosition NOTIFY tabBarPositionChanged)
+    Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
     Q_PROPERTY(int splitHandleThickness READ splitHandleThickness CONSTANT)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QObject* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
@@ -219,6 +223,8 @@ class RoutingMockController: public QAbstractListModel
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
     [[nodiscard]] bool multimediaReady() const noexcept { return false; }
     [[nodiscard]] bool titleBarVisible() const noexcept { return false; }
+    [[nodiscard]] int tabBarPosition() const noexcept { return 0; }       // Top
+    [[nodiscard]] bool tabBarShouldShow() const noexcept { return true; } // shown
     [[nodiscard]] constexpr int splitHandleThickness() const noexcept
     {
         return vtmux::DefaultSplitHandleThickness;
@@ -304,6 +310,8 @@ class RoutingMockController: public QAbstractListModel
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
+    void tabBarPositionChanged();
+    void tabBarShouldShowChanged();
     void chromeHeightChanged();
     void activeTabRootPaneChanged();
     void tabTitleEditRequested(int index);

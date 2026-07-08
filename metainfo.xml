@@ -107,6 +107,7 @@
     <release version="0.7.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Adds profile options tab_bar_position (Top/Bottom) and tab_bar_visibility (Always/Never/Multiple) to place the GUI tab bar at the top or bottom of the window and to hide it entirely or only show it when more than one tab is open</li>
           <li>Adds Win32 Input Mode (DEC private mode 9001) for native ConPTY keyboard input encoding, fixing keyboard input for applications that request this mode on Windows</li>
           <li>Fixes Unicode characters sometimes being wrongly decoded during high-bandwidth output</li>
           <li>Fixes multi-second shell startup stall when the shell (e.g. fish) queries terminal capabilities before the display is attached — queued replies are now flushed on display attach instead of waiting for the next focus/input event</li>

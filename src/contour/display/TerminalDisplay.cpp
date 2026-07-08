@@ -257,7 +257,13 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     // titleBarVisible. Only SEED the window default here (first-write-wins): re-applying the profile
     // value on every session rebind silently reverted a runtime ToggleTitleBar on each tab switch.
     if (auto* controller = windowController())
+    {
         controller->seedTitleBarVisible(profile().showTitleBar.value());
+        // Tab-strip placement + visibility are window state seeded once from the profile, same
+        // first-write-wins contract as the title bar (so a runtime state is never reset on rebind).
+        controller->seedTabBarPosition(profile().tabBarPosition.value());
+        controller->seedTabBarVisibility(profile().tabBarVisibility.value());
+    }
 
     if (!_renderer)
     {

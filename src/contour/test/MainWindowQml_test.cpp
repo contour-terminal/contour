@@ -76,6 +76,11 @@ class MockMainController: public QAbstractListModel
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
     Q_PROPERTY(bool multimediaReady READ multimediaReady CONSTANT)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
+    // Tab-strip placement + resolved visibility, mirroring the production WindowController properties
+    // main.qml binds. Writable here so a test can flip them and re-load main.qml to assert the layout.
+    Q_PROPERTY(int tabBarPosition READ tabBarPosition WRITE setTabBarPosition NOTIFY tabBarPositionChanged)
+    Q_PROPERTY(
+        bool tabBarShouldShow READ tabBarShouldShow WRITE setTabBarShouldShow NOTIFY tabBarShouldShowChanged)
     Q_PROPERTY(int splitHandleThickness READ splitHandleThickness CONSTANT)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QObject* activeTabRootPane READ activeTabRootPane CONSTANT)
@@ -95,6 +100,25 @@ class MockMainController: public QAbstractListModel
     [[nodiscard]] int activeTabIndex() const noexcept { return 0; }
     [[nodiscard]] bool multimediaReady() const noexcept { return false; }
     [[nodiscard]] bool titleBarVisible() const noexcept { return false; } // frameless CSD (default)
+
+    [[nodiscard]] int tabBarPosition() const noexcept { return _tabBarPosition; }
+    void setTabBarPosition(int position)
+    {
+        if (_tabBarPosition != position)
+        {
+            _tabBarPosition = position;
+            emit tabBarPositionChanged();
+        }
+    }
+    [[nodiscard]] bool tabBarShouldShow() const noexcept { return _tabBarShouldShow; }
+    void setTabBarShouldShow(bool show)
+    {
+        if (_tabBarShouldShow != show)
+        {
+            _tabBarShouldShow = show;
+            emit tabBarShouldShowChanged();
+        }
+    }
     [[nodiscard]] constexpr int splitHandleThickness() const noexcept
     {
         return vtmux::DefaultSplitHandleThickness;
@@ -182,28 +206,36 @@ class MockMainController: public QAbstractListModel
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
+    void tabBarPositionChanged();
+    void tabBarShouldShowChanged();
     void chromeHeightChanged();
     void tabTitleEditRequested(int index);
 
   private:
     int _chromeHeight = 0;
+    int _tabBarPosition = 0;       // 0 = Top (default), 1 = Bottom
+    bool _tabBarShouldShow = true; // strip shown by default
 };
 
-} // namespace
-
-TEST_CASE("main.qml startup: sized-before-shown ordering and declared chrome (offscreen)",
-          "[contour][gui][qml][mainwindow]")
+/// Loads main.qml offscreen against @p controller and returns the created root object: registers the
+/// ContourTerminal stub type, pins the mock to C++ ownership, exposes it as `terminalSessions`, waits
+/// for the component to finish loading, and asserts a diagnostic-free load. Every main.qml load case
+/// (startup ordering + the tab-strip layout cases) goes through here so the load protocol lives in one
+/// place. Fails the enclosing test (via REQUIRE) if the component does not load cleanly.
+/// @param engine     The QML engine (kept alive by the caller for the root's lifetime).
+/// @param controller The mock manager + window controller to expose as `terminalSessions`.
+/// @param warnings   Captures QML diagnostics emitted during the load.
+/// @return The created root ApplicationWindow object.
+[[nodiscard]] std::unique_ptr<QObject> loadMainWindow(QQmlEngine& engine,
+                                                      MockMainController& controller,
+                                                      contour::test::QmlMessageCapture& warnings)
 {
-    QQmlEngine engine;
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
-    MockMainController controller;
-    // createWindowController() returns `this` through a Q_INVOKABLE, which defaults the returned
-    // object to JavaScript ownership — the engine's GC would delete the stack-allocated mock.
-    // Pin it, exactly as the production manager pins its controllers.
+    // createWindowController() returns `this` through a Q_INVOKABLE, which defaults the returned object
+    // to JavaScript ownership — the engine's GC would delete the stack-allocated mock. Pin it, exactly
+    // as the production manager pins its controllers.
     QQmlEngine::setObjectOwnership(&controller, QQmlEngine::CppOwnership);
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
-
-    contour::test::QmlMessageCapture warnings;
 
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/main.qml")));
     while (component.status() == QQmlComponent::Loading)
@@ -216,6 +248,22 @@ TEST_CASE("main.qml startup: sized-before-shown ordering and declared chrome (of
     std::unique_ptr<QObject> root(component.create());
     REQUIRE(root != nullptr);
     QCoreApplication::processEvents();
+
+    for (auto const& w: warnings.messages())
+        INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    return root;
+}
+
+} // namespace
+
+TEST_CASE("main.qml startup: sized-before-shown ordering and declared chrome (offscreen)",
+          "[contour][gui][qml][mainwindow]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
 
     // 1. Startup order: mint the controller, bind THIS window, check for a torn-off tab to adopt
     //    (none here -> returns false), create the first tab (so the window can be sized from real
@@ -235,12 +283,95 @@ TEST_CASE("main.qml startup: sized-before-shown ordering and declared chrome (of
     // 3. Declared chrome: with the custom title bar shown, win.chromeHeight tracks the TitleBar's
     //    effective height (34 logical px, its implicitHeight).
     CHECK(controller.chromeHeight() == 34);
+}
 
-    // 4. The whole load must be free of QML diagnostics (TypeErrors, binding loops, missing
-    //    properties) — the run-wide gate in test_main re-checks this over the entire suite.
-    for (auto const& w: warnings.messages())
-        INFO("QML warning: " << w.toStdString());
-    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+TEST_CASE("main.qml tab strip: visibility gate collapses the chrome when hidden (offscreen)",
+          "[contour][gui][qml][mainwindow]")
+{
+    // When win.tabBarShouldShow is false (tab_bar_visibility: Never, or Multiple with a single tab),
+    // the TitleBar collapses: its effectiveHeight -> 0 -> the declared chromeHeight -> 0, and the strip
+    // item is not visible. When true, the strip occupies its 34px implicitHeight (as the startup test
+    // already pins). Driving the mock property proves the real main.qml binding reacts.
+    SECTION("hidden -> zero chrome, strip invisible")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        controller.setTabBarShouldShow(false);
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+
+        CHECK(controller.chromeHeight() == 0);
+        auto* titleBar = root->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+        REQUIRE(titleBar != nullptr);
+        CHECK_FALSE(titleBar->isVisible());
+    }
+
+    SECTION("shown -> full chrome, strip visible")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        controller.setTabBarShouldShow(true);
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+
+        CHECK(controller.chromeHeight() == 34);
+        auto* titleBar = root->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+        REQUIRE(titleBar != nullptr);
+        CHECK(titleBar->isVisible());
+    }
+}
+
+TEST_CASE("main.qml tab strip: position flips the title-bar / content stacking (offscreen)",
+          "[contour][gui][qml][mainwindow]")
+{
+    // The strip is pinned to the top OR bottom edge via conditional anchors; the content area fills the
+    // opposite side. chromeHeight is position-invariant (34px either way). We read the laid-out y/height
+    // off the live items to prove the stacking flipped.
+    auto const readGeometry = [](QObject& root, qreal& titleBarY, qreal& titleBarH, qreal& contentY) {
+        auto* titleBar = root.findChild<QQuickItem*>(QStringLiteral("titleBar"));
+        auto* content = root.findChild<QQuickItem*>(QStringLiteral("content"));
+        REQUIRE(titleBar != nullptr);
+        REQUIRE(content != nullptr);
+        titleBarY = titleBar->y();
+        titleBarH = titleBar->height();
+        contentY = content->y();
+    };
+
+    SECTION("Top (default): title bar at y=0, content below it")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        controller.setTabBarPosition(0);
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+
+        qreal titleBarY = -1;
+        qreal titleBarH = -1;
+        qreal contentY = -1;
+        readGeometry(*root, titleBarY, titleBarH, contentY);
+        CHECK(titleBarY == 0.0);
+        CHECK(contentY == titleBarH); // content starts right below the strip
+        CHECK(controller.chromeHeight() == 34);
+    }
+
+    SECTION("Bottom: content at y=0, title bar below the content")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        controller.setTabBarPosition(1);
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+
+        qreal titleBarY = -1;
+        qreal titleBarH = -1;
+        qreal contentY = -1;
+        readGeometry(*root, titleBarY, titleBarH, contentY);
+        CHECK(contentY == 0.0);
+        auto* content = root->findChild<QQuickItem*>(QStringLiteral("content"));
+        REQUIRE(content != nullptr);
+        CHECK(titleBarY == content->height()); // strip sits just past the content's bottom edge
+        CHECK(controller.chromeHeight() == 34);
+    }
 }
 
 #include <MainWindowQml_test.moc>
