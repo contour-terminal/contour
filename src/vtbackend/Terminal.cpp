@@ -1820,7 +1820,7 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 
 void Terminal::verifyState()
 {
-#if !defined(NDEBUG)
+#if defined(CONTOUR_VERIFY_STATE)
     auto const thePageSize = _settings.pageSize;
     Require(*_currentMousePosition.column < *thePageSize.columns);
     Require(*_currentMousePosition.line < *thePageSize.lines);
