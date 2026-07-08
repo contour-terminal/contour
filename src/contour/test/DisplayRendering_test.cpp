@@ -248,6 +248,11 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
     CHECK(h.pty->stdinSnapshot().find("\033[M") != std::string::npos);
 
     // Wheel over the (alt-less) primary screen scrolls the viewport — no crash, event consumed.
+    // A phase-less notch now arms an inertial glide advanced by the render loop (nextRender +
+    // _updateTimer); give it scrollback so it has somewhere to go, then confirm the pump settles
+    // the glide and the viewport actually advanced into history.
+    for (auto i = 0; i < 40; ++i)
+        h.feedAndSettle("wheel history line\r\n"sv);
     QWheelEvent wheel(QPointF(100, 100),
                       QPointF(100, 100),
                       QPoint(),
@@ -257,7 +262,18 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
                       Qt::NoScrollPhase,
                       false);
     QCoreApplication::sendEvent(h.display, &wheel);
-    h.pump();
+    // The glide decays on real wall-clock time (tick() reads steady_clock), advanced by the
+    // _updateTimer. Bound the wait by elapsed time, not iteration count: a bare pump() loop can burn
+    // 60 iterations in well under the ~300ms the glide needs on a fast host, firing the timer too
+    // few times and leaving the glide active. qWait() lets real time pass so the timer runs; the
+    // generous ceiling keeps the test deterministic without being slow in the common case.
+    for (int waited = 0; waited < 1500 && h.session->terminal().isMomentumScrollActive(); waited += 16)
+    {
+        QTest::qWait(16);
+        h.pump();
+    }
+    CHECK_FALSE(h.session->terminal().isMomentumScrollActive());
+    CHECK(h.session->terminal().viewport().scrollOffset().value > 0);
 
     // A pixel-delta wheel with a scroll phase drives the smooth-scroll / phase-mapping branches
     // (ScrollBegin/Update/End) and the Alt-modifier axis-swap path in helper's wheel handling.
@@ -286,6 +302,48 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
     QTest::mouseMove(h.window.get(), QPoint(160, 200));
     QTest::mouseRelease(h.window.get(), Qt::LeftButton, Qt::NoModifier, QPoint(160, 200));
     h.pump();
+}
+
+TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls through to line scrolling",
+          "[display][input]")
+{
+    // Regression (finding #2): the NoPhase wheel path must only consume the notch when a glide was
+    // actually armed. When injectWheelMomentum cannot arm — here because the alternate screen keeps
+    // the legacy line-based wheel path — the helper must fall through to line-based scrolling instead
+    // of silently swallowing the event. With SGR mouse reporting on, that fall-through is observable
+    // as a wheel mouse report reaching the PTY.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+
+    h.display->forceActiveFocus();
+    QCoreApplication::processEvents();
+
+    // Enter the alternate screen and enable SGR mouse reporting, so a wheel notch that falls through
+    // to the line path is encoded as a mouse report (CSI < ... M) rather than scrolling local history.
+    h.feedAndSettle("\033[?1049h"sv); // alt screen
+    h.feedAndSettle("\033[?1000h"sv); // X10 mouse reporting
+    h.feedAndSettle("\033[?1006h"sv); // SGR extended mouse encoding
+    REQUIRE(h.session->terminal().isAlternateScreen());
+
+    auto const before = h.pty->stdinSnapshot().size();
+    QWheelEvent wheel(QPointF(100, 100),
+                      QPointF(100, 100),
+                      QPoint(),
+                      QPoint(0, 120),
+                      Qt::NoButton,
+                      Qt::NoModifier,
+                      Qt::NoScrollPhase,
+                      false);
+    QCoreApplication::sendEvent(h.display, &wheel);
+
+    // The notch did not arm a glide (alt screen) and must instead have produced a mouse report.
+    CHECK_FALSE(h.session->terminal().isMomentumScrollActive());
+    for (int i = 0; i < 50 && h.pty->stdinSnapshot().size() == before; ++i)
+        QTest::qWait(10);
+    auto const snapshot = h.pty->stdinSnapshot();
+    CHECK(snapshot.size() > before);
+    // SGR wheel-up report: CSI < 64 ; col ; row M  (button code 64 == wheel up).
+    CHECK(snapshot.find("\033[<64;") != std::string::npos);
 }
 
 TEST_CASE("display: window resize reflows the grid through the real render loop", "[display][resize]")

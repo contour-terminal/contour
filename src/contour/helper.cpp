@@ -276,10 +276,26 @@ namespace
 
             if (effectivePixelDelta != 0.0f)
             {
-                terminal.handleScrollPhase(scrollPhase, effectivePixelDelta, now);
-                if (terminal.applySmoothScrollPixelDelta(effectivePixelDelta)
-                    == vtbackend::SmoothScrollResult::Applied)
-                    return;
+                // Mouse wheels carry no gesture phase; route their discrete notches through a
+                // momentum impulse so they glide smoothly instead of snapping whole lines. Phased
+                // touchpad input keeps the existing velocity-tracking + immediate-apply path.
+                if (scrollPhase == vtbackend::ScrollPhase::NoPhase)
+                {
+                    // Only consume the notch when a glide was actually armed. If injectWheelMomentum
+                    // could not arm (cell size still unknown during startup/rebind, alt screen, or a
+                    // degenerate zero net velocity) fall through to the legacy line-based path below
+                    // instead of silently swallowing the event.
+                    if (terminal.injectWheelMomentum(effectivePixelDelta, now)
+                        == vtbackend::SmoothScrollResult::Applied)
+                        return;
+                }
+                else
+                {
+                    terminal.handleScrollPhase(scrollPhase, effectivePixelDelta, now);
+                    if (terminal.applySmoothScrollPixelDelta(effectivePixelDelta)
+                        == vtbackend::SmoothScrollResult::Applied)
+                        return;
+                }
             }
             else if (scrollPhase == vtbackend::ScrollPhase::End
                      || scrollPhase == vtbackend::ScrollPhase::Begin)
