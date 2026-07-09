@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -3724,6 +3725,100 @@ TEST_CASE("Terminal.numpad_digit_keeps_NumLock_for_the_input_generator", "[termi
     mock.sendKeyEvent(vtbackend::Key::Numpad_5, NumLockOnly);
 
     CHECK(e(mock.replyData()) == e("5"));
+}
+
+// The recurrence firewall.
+//
+// In the default configuration -- legacy keyboard protocol, no Win32 input mode, modifyOtherKeys
+// off, numeric keypad -- a latched lock key is invisible to the application. Nothing a user can
+// type may encode differently just because CapsLock or NumLock happens to be on.
+//
+// This sweep fails the moment any consumer, present or future and wherever it lives, lets a lock
+// bit reach chord logic. It would have caught every bug in the #1884 / #1901 / #1954 family.
+//
+// The three places where lock state legitimately *does* change the encoding are covered by their
+// own tests, so they are deliberately outside this invariant:
+//   - the numpad under application-keypad mode (see the test directly above, and InputGenerator.DECNKM)
+//   - the Kitty keyboard protocol (see the test directly below)
+//   - Win32 input mode (see buildWin32ControlKeyState)
+TEST_CASE("Terminal.no_key_encoding_depends_on_lock_modifiers", "[terminal][locks]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+    auto const encodeKey = [&](vtbackend::Key key, Modifiers modifiers) {
+        mock.resetReplyData();
+        mock.sendKeyEvent(key, modifiers);
+        return std::string { mock.replyData() };
+    };
+
+    auto const encodeChar = [&](char32_t ch, Modifiers modifiers) {
+        mock.resetReplyData();
+        mock.sendCharEvent(ch, modifiers);
+        return std::string { mock.replyData() };
+    };
+
+    SECTION("every key")
+    {
+        // The Key enumerators run contiguously from F1 to Numpad_9.
+        for (auto const rawKey: std::views::iota(static_cast<int>(vtbackend::Key::F1),
+                                                 static_cast<int>(vtbackend::Key::Numpad_9) + 1))
+        {
+            auto const key = static_cast<vtbackend::Key>(rawKey);
+            auto const baseline = encodeKey(key, Modifiers {});
+            for (auto const locks: LockCombinations)
+            {
+                INFO(std::format("key {} with lock modifiers {}", key, locks));
+                CHECK(e(encodeKey(key, locks)) == e(baseline));
+            }
+        }
+    }
+
+    SECTION("every printable character")
+    {
+        for (auto const codepoint: std::views::iota(0x20, 0x7F))
+        {
+            auto const ch = static_cast<char32_t>(codepoint);
+            auto const baseline = encodeChar(ch, Modifiers {});
+            for (auto const locks: LockCombinations)
+            {
+                INFO(std::format("character U+{:04X} with lock modifiers {}", codepoint, locks));
+                CHECK(e(encodeChar(ch, locks)) == e(baseline));
+            }
+        }
+    }
+
+    SECTION("every printable character under modifyOtherKeys mode 2")
+    {
+        mock.terminal.setModifyOtherKeys(2);
+        for (auto const codepoint: std::views::iota(0x20, 0x7F))
+        {
+            auto const ch = static_cast<char32_t>(codepoint);
+            auto const baseline = encodeChar(ch, Modifiers {});
+            for (auto const locks: LockCombinations)
+            {
+                INFO(std::format("character U+{:04X} with lock modifiers {}", codepoint, locks));
+                CHECK(e(encodeChar(ch, locks)) == e(baseline));
+            }
+        }
+    }
+}
+
+// The positive counterpart to the sweep above: under the Kitty keyboard protocol the lock state is
+// reported to the application on purpose, so it must survive all the way to the encoder.
+TEST_CASE("Terminal.kitty_keyboard_protocol_reports_lock_modifiers", "[terminal][locks]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+    // CSI > 9 u: DisambiguateEscapeCodes (1) | ReportAllKeysAsEscapeCodes (8).
+    mock.writeToScreen("\033[>9u");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+
+    // Key code 97 ('a'), modifier 65 == 1 + Modifier::CapsLock.
+    mock.terminal.sendCharEvent(
+        U'a', U'a', CapsLockOnly, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
+
+    CHECK(e(mock.replyData()) == e("\033[97;65u"));
 }
 
 // }}}
