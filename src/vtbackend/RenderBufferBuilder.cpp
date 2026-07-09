@@ -49,6 +49,7 @@ namespace
     }
 
     RGBColorPair makeColors(ColorPalette const& colorPalette,
+                            ColorLookupTable colorLookupTable,
                             CellFlags cellFlags,
                             bool reverseVideo,
                             Color foregroundColor,
@@ -60,8 +61,14 @@ namespace
                             float blink,
                             float rapidBlink) noexcept
     {
-        auto sgrColors = CellUtil::makeColors(
-            colorPalette, cellFlags, reverseVideo, foregroundColor, backgroundColor, blink, rapidBlink);
+        auto sgrColors = CellUtil::makeColors(colorPalette,
+                                              colorLookupTable,
+                                              cellFlags,
+                                              reverseVideo,
+                                              foregroundColor,
+                                              backgroundColor,
+                                              blink,
+                                              rapidBlink);
 
         if (isCursorLine)
             sgrColors = makeRGBColorPair(sgrColors, colorPalette.normalModeCursorline);
@@ -105,6 +112,7 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
                                          RenderBuffer& output,
                                          LineOffset base,
                                          bool theReverseVideo,
+                                         ColorLookupTable colorLookupTable,
                                          HighlightSearchMatches highlightSearchMatches,
                                          InputMethodData inputMethodData,
                                          optional<CellLocation> theCursorPosition,
@@ -114,6 +122,7 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
     _cursorPosition { theCursorPosition },
     _baseLine { base },
     _reverseVideo { theReverseVideo },
+    _colorLookupTable { colorLookupTable },
     _highlightSearchMatches { highlightSearchMatches },
     _inputMethodData { std::move(inputMethodData) },
     _includeSelection { includeSelection }
@@ -152,6 +161,7 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
         auto const cellFg = _terminal->currentScreen().cellForegroundColorAt(*_cursorPosition);
         auto const cellBg = _terminal->currentScreen().cellBackgroundColorAt(*_cursorPosition);
         auto const sgrColors = CellUtil::makeColors(colorPalette,
+                                                    _colorLookupTable,
                                                     cellFlags,
                                                     _reverseVideo,
                                                     cellFg,
@@ -294,6 +304,7 @@ RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
     auto const rapidBlink = _terminal->rapidBlinkState();
 
     return makeColors(_terminal->colorPalette(),
+                      _colorLookupTable,
                       cellFlags,
                       _reverseVideo,
                       foregroundColor,

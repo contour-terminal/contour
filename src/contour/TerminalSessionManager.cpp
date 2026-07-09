@@ -649,6 +649,21 @@ void TerminalSessionManager::refreshTabForSession(vtmux::SessionId session)
         if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
             c->notifyTabRowChanged(tab->id(), { WindowController::TitleRole });
 }
+
+void TerminalSessionManager::setTabColorForSession(vtmux::SessionId session, vtbackend::RGBColor color)
+{
+    // Reuse the authoritative tab-color path: SessionModel::setTabColor fires tabColorChanged, which
+    // this manager routes to the owning WindowController's ColorRole, repainting the tab strip. The
+    // Application source keeps this write off the user's own color slot, which outranks it.
+    if (auto* tab = findTabHostingSession(session))
+        _model->setTabColor(tab->id(), vtmux::TabColorSource::Application, color);
+}
+
+void TerminalSessionManager::resetTabColorForSession(vtmux::SessionId session)
+{
+    if (auto* tab = findTabHostingSession(session))
+        _model->resetTabColor(tab->id(), vtmux::TabColorSource::Application);
+}
 // }}}
 
 // {{{ Tab-strip operations (window-routed)

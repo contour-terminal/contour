@@ -211,6 +211,21 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param session The session whose hosting tab should refresh its label.
     void refreshTabForSession(vtmux::SessionId session);
 
+    /// Assigns @p color to the tab hosting @p session (DECAC item 2 "window frame"), routing through
+    /// the authoritative SessionModel so the existing tab-color pipeline repaints the tab strip. The
+    /// color is recorded under vtmux::TabColorSource::Application, so it stays hidden behind a color the
+    /// user picked themselves and surfaces once the user clears theirs. No-op if no tab hosts
+    /// @p session. MUST be called on the GUI thread (it mutates the GUI-facing model).
+    /// @param session The session (by model id) whose hosting tab should be colored.
+    /// @param color The color to assign.
+    void setTabColorForSession(vtmux::SessionId session, vtbackend::RGBColor color);
+
+    /// Resets the tab hosting @p session back to no application-assigned color (DECAC item 2 with no
+    /// colors, or a hard reset). A color the user picked is left alone. No-op if no tab hosts
+    /// @p session. MUST be called on the GUI thread.
+    /// @param session The session (by model id) whose hosting tab color should be cleared.
+    void resetTabColorForSession(vtmux::SessionId session);
+
     /// Clears the destroyed @p display from any controller that held it as its focused display, and from
     /// the manager's _activeDisplay. Called when the display's QML item / pane is torn down. Session->
     /// display ownership lives on the pane tree, so there is no per-display session map to scrub.

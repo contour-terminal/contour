@@ -182,8 +182,18 @@ class SessionModel
 
     void setTabTitle(TabId tab, std::string title);
     void resetTabTitle(TabId tab);
-    void setTabColor(TabId tab, vtbackend::RGBColor color);
-    void resetTabColor(TabId tab);
+
+    /// Assigns @p tab's color on behalf of @p source. Sources are independent and ranked, so a user's
+    /// choice and an application's DECAC color coexist; see TabColorSource.
+    /// @param tab The tab to color.
+    /// @param source The assigning source.
+    /// @param color The color to assign.
+    void setTabColor(TabId tab, TabColorSource source, vtbackend::RGBColor color);
+
+    /// Clears @p source's color for @p tab, falling back to the next-highest source that has one.
+    /// @param tab The tab to un-color.
+    /// @param source The source whose color to clear.
+    void resetTabColor(TabId tab, TabColorSource source);
 
     /// The session-title resolver the host installs so tabs can derive their title from the active
     /// pane's program title.

@@ -35,6 +35,13 @@ enum class CellFlag : uint32_t
 
 using CellFlags = crispy::flags<CellFlag>;
 
+/// All underline-variant flags. Grouped here, next to the flag definitions, so a new underline style
+/// is added in one place; consumers that treat "any underline" uniformly (e.g. DECATC color mapping)
+/// reference this instead of re-enumerating the variants.
+inline constexpr CellFlags UnderlineMask = CellFlags { CellFlag::Underline } | CellFlag::DoublyUnderlined
+                                           | CellFlag::CurlyUnderlined | CellFlag::DottedUnderline
+                                           | CellFlag::DashedUnderline;
+
 } // namespace vtbackend
 
 // {{{

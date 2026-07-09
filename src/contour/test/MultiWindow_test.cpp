@@ -446,6 +446,88 @@ TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour
         window->closeTabAtIndex(row);
 }
 
+TEST_CASE("setTabColorForSession routes a DECAC frame color to the session's tab",
+          "[contour][multiwindow][model]")
+{
+    // The backend DECAC item-2 path calls TerminalSessionManager::setTabColorForSession(sessionId, ...)
+    // (posted from TerminalSession::setWindowFrameColor). This is the direct unit test of that routing:
+    // a session's model id must resolve to its hosting tab and land the color on Tab::_color.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+
+    auto* tab = manager.model().window(window.id)->tabAt(0);
+    REQUIRE(tab != nullptr);
+    auto const sessionId = tab->activePane()->session();
+    REQUIRE_FALSE(tab->color().has_value());
+
+    auto const red = vtbackend::RGBColor { 0xFF, 0x00, 0x00 };
+    manager.setTabColorForSession(sessionId, red);
+    REQUIRE(tab->color().has_value());
+    CHECK(*tab->color() == red);
+
+    manager.resetTabColorForSession(sessionId);
+    CHECK_FALSE(tab->color().has_value());
+
+    // An unknown session id is a harmless no-op (the null-tab guard).
+    CHECK_NOTHROW(manager.setTabColorForSession(vtmux::SessionId { 999999 }, red));
+    CHECK_FALSE(tab->color().has_value());
+
+    for (int row = window->count() - 1; row >= 0; --row)
+        window->closeTabAtIndex(row);
+}
+
+TEST_CASE("a user's tab color outranks DECAC and survives a terminal reset", "[contour][multiwindow][model]")
+{
+    // The user's choice always wins, and no escape sequence can take it away: a DECAC reset — which is
+    // also what RIS ("reset", "Clear History And Reset") triggers via Terminal::hardReset — withdraws
+    // only the application's own color. Conversely, returning the tab to its default color un-picks the
+    // user's choice and reveals whatever the application assigned, rather than erasing it.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+
+    auto* tab = manager.model().window(window.id)->tabAt(0);
+    REQUIRE(tab != nullptr);
+    auto const sessionId = tab->activePane()->session();
+
+    auto const appColor = vtbackend::RGBColor { 0x11, 0x22, 0x33 };
+    auto const userColor = vtbackend::RGBColor { 0xAA, 0xBB, 0xCC };
+
+    // The application colors its tab; then the user overrides it from the tab's color flyout.
+    manager.setTabColorForSession(sessionId, appColor);
+    REQUIRE(tab->color() == appColor);
+    window->setTabColor(0, QColor(0xAA, 0xBB, 0xCC));
+    CHECK(tab->color() == userColor);
+
+    // A terminal reset withdraws the application's color. The user's choice stays on screen.
+    manager.resetTabColorForSession(sessionId);
+    CHECK(tab->color() == userColor);
+
+    // The application colors its tab again — still outranked, but remembered.
+    manager.setTabColorForSession(sessionId, appColor);
+    CHECK(tab->color() == userColor);
+
+    // "Default" for the user means: whatever I did not choose. Here, the application's color.
+    window->resetTabColor(0);
+    CHECK(tab->color() == appColor);
+
+    // With the application's color withdrawn too, the tab is finally uncolored.
+    manager.resetTabColorForSession(sessionId);
+    CHECK_FALSE(tab->color().has_value());
+
+    for (int row = window->count() - 1; row >= 0; --row)
+        window->closeTabAtIndex(row);
+}
+
 TEST_CASE("WindowController routes bulk-close and move-tab to its own window",
           "[contour][multiwindow][model]")
 {

@@ -167,13 +167,49 @@ TEST_CASE("Tab: color override can be set and reset", "[vtmux][tab][color]")
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
     CHECK_FALSE(tab.color().has_value());
 
-    tab.setColor(vtbackend::RGBColor { 0x12, 0x34, 0x56 });
+    tab.setColor(TabColorSource::User, vtbackend::RGBColor { 0x12, 0x34, 0x56 });
     REQUIRE(tab.color().has_value());
     CHECK(tab.color()->red == 0x12);
     CHECK(tab.color()->green == 0x34);
     CHECK(tab.color()->blue == 0x56);
 
-    tab.resetColor();
+    tab.resetColor(TabColorSource::User);
+    CHECK_FALSE(tab.color().has_value());
+}
+
+TEST_CASE("Tab: the user's color outranks the application's, and each survives the other's reset",
+          "[vtmux][tab][color]")
+{
+    // The two sources are independent slots, not one shared cell. This is what lets a terminal reset
+    // (RIS -> DECAC reset -> Application source) leave a color the user picked alone, and what makes
+    // "set the tab color back to default" fall back to the application's color rather than erase it.
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+
+    auto constexpr AppColor = vtbackend::RGBColor { 0x11, 0x22, 0x33 };
+    auto constexpr UserColor = vtbackend::RGBColor { 0xAA, 0xBB, 0xCC };
+
+    // With only an application color, that is what the tab shows.
+    tab.setColor(TabColorSource::Application, AppColor);
+    REQUIRE(tab.color() == AppColor);
+
+    // The user's choice outranks it, whichever order the two arrive in.
+    tab.setColor(TabColorSource::User, UserColor);
+    CHECK(tab.color() == UserColor);
+    CHECK(tab.color(TabColorSource::Application) == AppColor); // still there, merely outranked
+
+    // An application reset (DECAC bare form, or RIS) cannot take the user's color away.
+    tab.resetColor(TabColorSource::Application);
+    CHECK(tab.color() == UserColor);
+    CHECK_FALSE(tab.color(TabColorSource::Application).has_value());
+
+    // And the user returning the tab "to default" falls back to the application's color, if it has one.
+    tab.setColor(TabColorSource::Application, AppColor);
+    tab.resetColor(TabColorSource::User);
+    CHECK(tab.color() == AppColor);
+
+    // Only when no source has a color is the tab uncolored, and the host paints its default.
+    tab.resetColor(TabColorSource::Application);
     CHECK_FALSE(tab.color().has_value());
 }
 

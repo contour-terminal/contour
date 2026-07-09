@@ -536,21 +536,21 @@ void SessionModel::resetTabTitle(TabId tabId)
     _events.tabTitleChanged(tabId);
 }
 
-void SessionModel::setTabColor(TabId tabId, vtbackend::RGBColor color)
+void SessionModel::setTabColor(TabId tabId, TabColorSource source, vtbackend::RGBColor color)
 {
     auto* tab = findTab(tabId);
     if (tab == nullptr)
         return;
-    tab->setColor(color);
+    tab->setColor(source, color);
     _events.tabColorChanged(tabId);
 }
 
-void SessionModel::resetTabColor(TabId tabId)
+void SessionModel::resetTabColor(TabId tabId, TabColorSource source)
 {
     auto* tab = findTab(tabId);
     if (tab == nullptr)
         return;
-    tab->resetColor();
+    tab->resetColor(source);
     _events.tabColorChanged(tabId);
 }
 

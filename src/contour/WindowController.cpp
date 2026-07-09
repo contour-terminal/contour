@@ -83,10 +83,11 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         case TitleRole: return resolvedTabLabel(tab, session, row);
         case RawTitleRole:
             return tab != nullptr ? QString::fromStdString(tab->runtimeTitle().value_or("")) : QString {};
-        case ColorRole:
-            if (tab != nullptr && tab->color().has_value())
-                return toQColor(*tab->color());
-            return QColor(Qt::transparent);
+        case ColorRole: {
+            // color() resolves across the tab's color sources, so ask once.
+            auto const color = tab != nullptr ? tab->color() : std::nullopt;
+            return color.has_value() ? toQColor(*color) : QColor(Qt::transparent);
+        }
         case IsActiveRole: return row == activeTabIndex();
         case PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
         default: return {};
@@ -187,13 +188,15 @@ void WindowController::beginActiveTabTitleEdit()
 void WindowController::setTabColor(int index, QColor const& color)
 {
     if (auto* tab = tabAtRow(index); tab != nullptr)
-        _manager.model().setTabColor(tab->id(), toRGBColor(color));
+        _manager.model().setTabColor(tab->id(), vtmux::TabColorSource::User, toRGBColor(color));
 }
 
 void WindowController::resetTabColor(int index)
 {
+    // Clears only the user's own choice. If the application assigned a color via DECAC, the tab falls
+    // back to it; otherwise to the host default. "Default" therefore means "whatever I did not choose".
     if (auto* tab = tabAtRow(index); tab != nullptr)
-        _manager.model().resetTabColor(tab->id());
+        _manager.model().resetTabColor(tab->id(), vtmux::TabColorSource::User);
 }
 
 void WindowController::closeTabAtIndex(int index)

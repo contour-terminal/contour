@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/CellUtil.h>
 #include <vtbackend/MockTerm.h>
 #include <vtbackend/Terminal.h>
 #include <vtbackend/primitives.h>
@@ -686,6 +687,447 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
         REQUIRE(vt.savedColorPalettes().empty());
         REQUIRE(vt.colorPalette().palette == p1.palette);
     }
+}
+
+TEST_CASE("Terminal.DECAC", "[terminal]")
+{
+    using namespace vtbackend;
+
+    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    auto& vt = mc.terminal;
+
+    auto const originalPalette = vt.colorPalette();
+
+    SECTION("item 1: normal text sets default fg/bg from palette indices")
+    {
+        // CSI 1 ; 7 ; 4 , |  -> default fg = palette[7], default bg = palette[4].
+        mc.writeToScreen("\033[1;7;4,|");
+        REQUIRE(vt.colorPalette().defaultForeground == originalPalette.indexedColor(7));
+        REQUIRE(vt.colorPalette().defaultBackground == originalPalette.indexedColor(4));
+    }
+
+    SECTION("item 1: bare form resets default fg/bg")
+    {
+        mc.writeToScreen("\033[1;2;5,|"); // set something first
+        REQUIRE(vt.colorPalette().defaultForeground == originalPalette.indexedColor(2));
+        mc.writeToScreen("\033[1,|"); // bare item -> reset
+        REQUIRE(vt.colorPalette().defaultForeground == vt.defaultColorPalette().defaultForeground);
+        REQUIRE(vt.colorPalette().defaultBackground == vt.defaultColorPalette().defaultBackground);
+    }
+
+    SECTION("item 2: window frame fires setWindowFrameColor with the background index")
+    {
+        REQUIRE(mc.windowFrameColorChangeCount == 0);
+        REQUIRE(!mc.windowFrameColor.has_value());
+        // CSI 2 ; 15 ; 1 , |  -> frame/tab color = palette[1] (the background index).
+        mc.writeToScreen("\033[2;15;1,|");
+        REQUIRE(mc.windowFrameColorChangeCount == 1);
+        REQUIRE(mc.windowFrameColor == originalPalette.indexedColor(1));
+    }
+
+    SECTION("item 2: bare form resets the window frame color")
+    {
+        mc.writeToScreen("\033[2;15;1,|");
+        REQUIRE(mc.windowFrameColor.has_value());
+        mc.writeToScreen("\033[2,|"); // bare item -> reset
+        REQUIRE(mc.windowFrameColorChangeCount == 2);
+        REQUIRE(!mc.windowFrameColor.has_value());
+    }
+
+    SECTION("item 2: hard reset (RIS) clears the window frame color")
+    {
+        mc.writeToScreen("\033[2;15;1,|");
+        REQUIRE(mc.windowFrameColor.has_value());
+        mc.writeToScreen("\033c"); // RIS
+        REQUIRE(!mc.windowFrameColor.has_value());
+    }
+
+    SECTION("invalid item is rejected without touching state")
+    {
+        mc.writeToScreen("\033[3;7;4,|"); // item 3 does not exist
+        REQUIRE(vt.colorPalette().defaultForeground == originalPalette.defaultForeground);
+        REQUIRE(vt.colorPalette().defaultBackground == originalPalette.defaultBackground);
+        REQUIRE(mc.windowFrameColorChangeCount == 0);
+    }
+
+    SECTION("out-of-range palette index is rejected without touching state")
+    {
+        mc.writeToScreen("\033[1;300;4,|"); // fg index > 255
+        REQUIRE(vt.colorPalette().defaultForeground == originalPalette.defaultForeground);
+        mc.writeToScreen("\033[1;4;300,|"); // bg index > 255
+        REQUIRE(vt.colorPalette().defaultBackground == originalPalette.defaultBackground);
+    }
+
+    SECTION("item 2 validates the foreground index too, even though it consumes only the background")
+    {
+        // Deliberate strictness: the DEC window-frame item carries a foreground of its own (Windows
+        // Terminal keeps a FrameForeground alias for it), and Contour's tab strip simply derives its
+        // label color by contrast instead of using it. An out-of-range index is therefore a malformed
+        // sequence, not a parameter to quietly ignore.
+        mc.writeToScreen("\033[2;300;5,|");
+        REQUIRE(mc.windowFrameColorChangeCount == 0);
+        REQUIRE(!mc.windowFrameColor.has_value());
+    }
+
+    SECTION("a two-parameter form is malformed and neither sets nor resets")
+    {
+        // First set a frame color, then send the ambiguous 2-param form: it must be rejected, leaving
+        // the previously-set color intact (NOT reset).
+        mc.writeToScreen("\033[2;15;1,|");
+        REQUIRE(mc.windowFrameColor == originalPalette.indexedColor(1));
+        auto const changesBefore = mc.windowFrameColorChangeCount;
+        mc.writeToScreen("\033[2;5,|");                           // item + one color: malformed
+        REQUIRE(mc.windowFrameColorChangeCount == changesBefore); // no set, no reset
+        REQUIRE(mc.windowFrameColor == originalPalette.indexedColor(1));
+    }
+}
+
+TEST_CASE("Terminal.DECATC", "[terminal]")
+{
+    using namespace vtbackend;
+
+    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    auto& vt = mc.terminal;
+
+    // DECATC colors only take effect in DECSTGLT "Alternate color" mode; enter it so the resolver
+    // applies the overrides. (A dedicated section below verifies the default AnsiSgr mode ignores them.)
+    mc.writeToScreen("\033[1){"); // DECSTGLT 1 = alternate color
+    REQUIRE(vt.colorPalette().colorLookupTable == ColorLookupTable::Alternate);
+
+    // Resolve a cell's colors the way the renderer does, for a given attribute combination, optional
+    // screen-wide reverse-video (DECSCNM) state, and optional SGR colors on the cell itself.
+    auto resolve = [&](CellFlags flags,
+                       bool reverseVideo = false,
+                       Color foreground = DefaultColor(),
+                       Color background = DefaultColor()) {
+        return CellUtil::makeColors(vt.colorPalette(),
+                                    vt.colorPalette().colorLookupTable,
+                                    flags,
+                                    reverseVideo,
+                                    foreground,
+                                    background,
+                                    /*blinkingState*/ 1.0f,
+                                    /*rapidBlinkState*/ 1.0f);
+    };
+
+    SECTION("attribute 0 (normal text) overrides plain, unattributed cells")
+    {
+        // CSI 0 ; 2 ; 5 , }  -> plain text: fg = palette[2], bg = palette[5].
+        mc.writeToScreen("\033[0;2;5,}");
+        REQUIRE(vt.colorPalette().alternateTextColors[0].has_value());
+        auto const plain = resolve(CellFlags {});
+        REQUIRE(plain.foreground == vt.colorPalette().indexedColor(2));
+        REQUIRE(plain.background == vt.colorPalette().indexedColor(5));
+        // A cell WITH an attribute is a different combination, so the attribute-0 entry does not apply;
+        // having no entry of its own, it falls back to the default text colors.
+        auto const bold = resolve(CellFlags { CellFlag::Bold });
+        REQUIRE(bold.foreground == vt.colorPalette().defaultForeground);
+        REQUIRE(bold.background == vt.colorPalette().defaultBackground);
+    }
+
+    SECTION("reverse bit tracks visual state under DECSCNM (SGR 7 XOR screen reverse)")
+    {
+        mc.writeToScreen("\033[2;7;1,}"); // attribute 2 = reverse
+        // Under DECSCNM, a plain cell is visually reversed, so the reverse override fires.
+        auto const plainReversed = resolve(CellFlags {}, /*reverseVideo*/ true);
+        REQUIRE(plainReversed.foreground == vt.colorPalette().indexedColor(7));
+        REQUIRE(plainReversed.background == vt.colorPalette().indexedColor(1));
+        // A cell WITH SGR 7 under DECSCNM is visually NON-reversed, so the override does NOT fire.
+        auto const doublyReversed = resolve(CellFlags { CellFlag::Inverse }, /*reverseVideo*/ true);
+        REQUIRE(doublyReversed.foreground != vt.colorPalette().indexedColor(7));
+    }
+
+    SECTION("a two-parameter form is malformed and does not clear an existing entry")
+    {
+        mc.writeToScreen("\033[1;7;4,}");
+        REQUIRE(vt.colorPalette().alternateTextColors[1].has_value());
+        mc.writeToScreen("\033[1;5,}");                                // attribute + one color: malformed
+        REQUIRE(vt.colorPalette().alternateTextColors[1].has_value()); // still set
+        REQUIRE(vt.colorPalette().alternateTextColors[1]->foreground == vt.colorPalette().indexedColor(7));
+    }
+
+    SECTION("assigns colors to the bold attribute combination")
+    {
+        // CSI 1 ; 7 ; 4 , }  -> bold text: fg = palette[7], bg = palette[4].
+        mc.writeToScreen("\033[1;7;4,}");
+        auto const& stored = vt.colorPalette().alternateTextColors[1];
+        REQUIRE(stored.has_value());
+        REQUIRE(stored->foreground == vt.colorPalette().indexedColor(7));
+        REQUIRE(stored->background == vt.colorPalette().indexedColor(4));
+
+        // A bold cell renders with the DECATC colors...
+        auto const bold = resolve(CellFlags { CellFlag::Bold });
+        REQUIRE(bold.foreground == vt.colorPalette().indexedColor(7));
+        REQUIRE(bold.background == vt.colorPalette().indexedColor(4));
+
+        // ...but a plain (non-bold) cell is unaffected.
+        auto const plain = resolve(CellFlags {});
+        REQUIRE(plain.foreground != vt.colorPalette().indexedColor(7));
+    }
+
+    SECTION("underline matches all underline variants")
+    {
+        mc.writeToScreen("\033[3;2;1,}"); // attribute 3 = Underline (DEC enumerated index)
+        for (auto const flag: { CellFlag::Underline,
+                                CellFlag::DoublyUnderlined,
+                                CellFlag::CurlyUnderlined,
+                                CellFlag::DottedUnderline,
+                                CellFlag::DashedUnderline })
+        {
+            auto const c = resolve(CellFlags { flag });
+            REQUIRE(c.foreground == vt.colorPalette().indexedColor(2));
+            REQUIRE(c.background == vt.colorPalette().indexedColor(1));
+        }
+    }
+
+    SECTION("blink matches both blink speeds")
+    {
+        mc.writeToScreen("\033[4;3;5,}"); // attribute 4 = Blink (DEC enumerated index)
+        // blinkingState=1.0 so the mix returns the (overridden) full color.
+        auto const slow = resolve(CellFlags { CellFlag::Blinking });
+        REQUIRE(slow.foreground == vt.colorPalette().indexedColor(3));
+        auto const rapid = resolve(CellFlags { CellFlag::RapidBlinking });
+        REQUIRE(rapid.foreground == vt.colorPalette().indexedColor(3));
+    }
+
+    SECTION("reverse-video override is the final appearance (not swapped again)")
+    {
+        // attribute 2 = reverse. The override must be the final fg/bg of the reversed cell, i.e.
+        // applied AFTER the inverse swap, so fg stays palette[7] and bg stays palette[1].
+        mc.writeToScreen("\033[2;7;1,}");
+        auto const c = resolve(CellFlags { CellFlag::Inverse });
+        REQUIRE(c.foreground == vt.colorPalette().indexedColor(7));
+        REQUIRE(c.background == vt.colorPalette().indexedColor(1));
+    }
+
+    SECTION("attribute indices follow the DEC enumerated table, not a bitmask")
+    {
+        // Per VT525 §5-22 the Ps1 index is an enumerated combination, NOT an OR of bits:
+        // 3 = Underline (a bitmask would read 3 as Bold+Reverse), 6 = Bold underline (not 1|4=5).
+        mc.writeToScreen("\033[3;2;1,}"); // attribute 3 = Underline
+        auto const underline = resolve(CellFlags { CellFlag::Underline });
+        REQUIRE(underline.foreground == vt.colorPalette().indexedColor(2));
+
+        mc.writeToScreen("\033[6;10;11,}"); // attribute 6 = Bold underline
+        auto const boldUnderline = resolve(CellFlags { CellFlag::Bold } | CellFlag::Underline);
+        REQUIRE(boldUnderline.foreground == vt.colorPalette().indexedColor(10));
+        REQUIRE(boldUnderline.background == vt.colorPalette().indexedColor(11));
+
+        // Bold alone (index 1) is a different, here-unset entry, so it is NOT affected by either.
+        auto const boldOnly = resolve(CellFlags { CellFlag::Bold });
+        REQUIRE(boldOnly.foreground != vt.colorPalette().indexedColor(2));
+        REQUIRE(boldOnly.foreground != vt.colorPalette().indexedColor(10));
+    }
+
+    SECTION("in the default ANSI SGR mode DECATC overrides are ignored")
+    {
+        mc.writeToScreen("\033[3){");     // DECSTGLT 3 = ANSI SGR color (the power-up default)
+        mc.writeToScreen("\033[1;7;4,}"); // assign bold colors — stored, but must not render
+        REQUIRE(vt.colorPalette().alternateTextColors[1].has_value());
+        auto const bold = resolve(CellFlags { CellFlag::Bold });
+        REQUIRE(bold.foreground != vt.colorPalette().indexedColor(7));
+        REQUIRE(bold.background != vt.colorPalette().indexedColor(4));
+    }
+
+    SECTION("bare form resets an assigned combination")
+    {
+        mc.writeToScreen("\033[1;7;4,}");
+        REQUIRE(vt.colorPalette().alternateTextColors[1].has_value());
+        mc.writeToScreen("\033[1,}"); // bare attribute -> reset
+        REQUIRE_FALSE(vt.colorPalette().alternateTextColors[1].has_value());
+    }
+
+    SECTION("attribute 0 can be reset individually")
+    {
+        // Regression: a lone '0' parameter collapses to "no parameters" under the VT convention, so
+        // `CSI 0 , }` reaches the handler with an empty parameter list. Registering DECATC with a
+        // minimum of one parameter dropped the sequence entirely, leaving the normal-text entry the one
+        // combination that could be assigned but never individually cleared.
+        mc.writeToScreen("\033[0;2;5,}");
+        REQUIRE(vt.colorPalette().alternateTextColors[0].has_value());
+        mc.writeToScreen("\033[0,}"); // bare attribute 0 -> reset
+        REQUIRE_FALSE(vt.colorPalette().alternateTextColors[0].has_value());
+
+        // The wholly parameterless form defaults the attribute to 0 and means the same thing.
+        mc.writeToScreen("\033[0;2;5,}");
+        REQUIRE(vt.colorPalette().alternateTextColors[0].has_value());
+        mc.writeToScreen("\033[,}");
+        REQUIRE_FALSE(vt.colorPalette().alternateTextColors[0].has_value());
+
+        // Resetting entry 0 must not disturb any other entry.
+        mc.writeToScreen("\033[1;7;4,}");
+        mc.writeToScreen("\033[0;2;5,}");
+        mc.writeToScreen("\033[0,}");
+        REQUIRE_FALSE(vt.colorPalette().alternateTextColors[0].has_value());
+        REQUIRE(vt.colorPalette().alternateTextColors[1].has_value());
+    }
+
+    SECTION("an unassigned combination uses the default text colors, not the cell's SGR colors")
+    {
+        // In Alternate mode the ANSI SGR color parameters are ignored *entirely*: a combination the
+        // application never assigned renders in the default foreground/background, exactly as if the
+        // application had assigned those. (xterm expresses the same rule by seeding all sixteen entries
+        // from the default pair.) Anything else would let SGR colors leak into a mode whose whole point
+        // is that attribute combinations, and only those, choose the color.
+        auto const& palette = vt.colorPalette();
+        auto const red = IndexedColor::Red;
+        auto const blue = IndexedColor::Blue;
+
+        auto const unassigned = resolve(CellFlags { CellFlag::Bold }, false, red, blue);
+        REQUIRE(unassigned.foreground == palette.defaultForeground);
+        REQUIRE(unassigned.background == palette.defaultBackground);
+
+        // Assigning that combination makes it, and only it, follow the assignment.
+        mc.writeToScreen("\033[1;7;4,}"); // attribute 1 = bold
+        auto const assigned = resolve(CellFlags { CellFlag::Bold }, false, red, blue);
+        REQUIRE(assigned.foreground == palette.indexedColor(7));
+        REQUIRE(assigned.background == palette.indexedColor(4));
+
+        // Clearing it again returns the cell to the default colors, never to its SGR colors.
+        mc.writeToScreen("\033[1,}");
+        auto const cleared = resolve(CellFlags { CellFlag::Bold }, false, red, blue);
+        REQUIRE(cleared.foreground == palette.defaultForeground);
+        REQUIRE(cleared.background == palette.defaultBackground);
+    }
+
+    SECTION("out-of-range attribute is rejected")
+    {
+        mc.writeToScreen("\033[16;7;4,}"); // attribute 16 is out of the 0..15 range
+        for (auto const& entry: vt.colorPalette().alternateTextColors)
+            REQUIRE_FALSE(entry.has_value());
+    }
+
+    SECTION("out-of-range palette index is rejected without touching the entry")
+    {
+        mc.writeToScreen("\033[1;7;4,}"); // set something first
+        REQUIRE(vt.colorPalette().alternateTextColors[1].has_value());
+        mc.writeToScreen("\033[1;300;4,}"); // fg index > 255: rejected, entry NOT cleared
+        REQUIRE(vt.colorPalette().alternateTextColors[1]->foreground == vt.colorPalette().indexedColor(7));
+        mc.writeToScreen("\033[1;7;300,}"); // bg index > 255: likewise
+        REQUIRE(vt.colorPalette().alternateTextColors[1]->background == vt.colorPalette().indexedColor(4));
+    }
+
+    SECTION("hard reset (RIS) clears all assignments")
+    {
+        mc.writeToScreen("\033[1;7;4,}");
+        mc.writeToScreen("\033[8;3;5,}");
+        mc.writeToScreen("\033c"); // RIS
+        for (auto const& entry: vt.colorPalette().alternateTextColors)
+            REQUIRE_FALSE(entry.has_value());
+    }
+
+    SECTION("soft reset (DECSTR) also clears assignments")
+    {
+        mc.writeToScreen("\033[1;7;4,}");
+        mc.writeToScreen("\033[!p"); // DECSTR
+        for (auto const& entry: vt.colorPalette().alternateTextColors)
+            REQUIRE_FALSE(entry.has_value());
+    }
+}
+
+TEST_CASE("Terminal.DECSTGLT", "[terminal]")
+{
+    using namespace vtbackend;
+
+    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    auto& vt = mc.terminal;
+
+    // Power-up default is ANSI SGR color.
+    REQUIRE(vt.colorPalette().colorLookupTable == ColorLookupTable::AnsiSgr);
+
+    SECTION("parameters 1 and 2 select alternate color, 3 selects ANSI SGR")
+    {
+        mc.writeToScreen("\033[1){");
+        CHECK(vt.colorPalette().colorLookupTable == ColorLookupTable::Alternate);
+        mc.writeToScreen("\033[2){");
+        CHECK(vt.colorPalette().colorLookupTable == ColorLookupTable::Alternate);
+        mc.writeToScreen("\033[3){");
+        CHECK(vt.colorPalette().colorLookupTable == ColorLookupTable::AnsiSgr);
+    }
+
+    SECTION("an omitted or lone-zero parameter selects the default ANSI SGR color table")
+    {
+        // The parser collapses a lone 0 to "no parameters" (VT convention), so CSI 0 ) { and CSI ) {
+        // are identical and both mean the default. This is why the spec's monochrome table, numbered 0,
+        // is not modelled: it could never be selected.
+        mc.writeToScreen("\033[1){"); // move away from the default first
+        REQUIRE(vt.colorPalette().colorLookupTable == ColorLookupTable::Alternate);
+        mc.writeToScreen("\033[){"); // no parameter -> default
+        CHECK(vt.colorPalette().colorLookupTable == ColorLookupTable::AnsiSgr);
+        mc.writeToScreen("\033[1){");
+        mc.writeToScreen("\033[0){"); // lone zero -> also default
+        CHECK(vt.colorPalette().colorLookupTable == ColorLookupTable::AnsiSgr);
+    }
+
+    SECTION("an out-of-range parameter is rejected and leaves the mode untouched")
+    {
+        mc.writeToScreen("\033[1){"); // alternate
+        REQUIRE(vt.colorPalette().colorLookupTable == ColorLookupTable::Alternate);
+        mc.writeToScreen("\033[4){"); // no such table
+        CHECK(vt.colorPalette().colorLookupTable == ColorLookupTable::Alternate);
+    }
+
+    SECTION("hard reset (RIS) restores the default color look-up table")
+    {
+        mc.writeToScreen("\033[1){");
+        REQUIRE(vt.colorPalette().colorLookupTable == ColorLookupTable::Alternate);
+        mc.writeToScreen("\033c"); // RIS
+        CHECK(vt.colorPalette().colorLookupTable == ColorLookupTable::AnsiSgr);
+    }
+}
+
+TEST_CASE("Terminal.DECATC.doesNotRecolorTheStatusLine", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // The status line is host-owned chrome, painted from the colors the host configured for it. An
+    // application that selects DECSTGLT Alternate mode and assigns DECATC colors recolors its own text,
+    // never the terminal's furniture. Regression guard: colorLookupTable and the DECATC assignments live
+    // on the terminal-global palette, which the status-line screens share with the main screen, so the
+    // color mode has to be chosen per rendered screen rather than merely read off the palette.
+    auto mc = MockTerm { PageSize { .lines = LineCount(4), .columns = ColumnCount(20) }, LineCount(0) };
+    auto& vt = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    vt.tick(ClockBase);
+    vt.setStatusDisplay(StatusDisplayType::Indicator);
+
+    // The indicator status line renders below the main page, at the first line offset past it.
+    auto const statusLine = LineOffset::cast_from(unbox(vt.pageSize().lines));
+
+    // Every rendered (foreground, background) pair on @p line, covering both the per-cell and the
+    // batched trivial-line render paths.
+    auto sample = [&](LineOffset line) {
+        vt.refreshRenderBuffer();
+        auto const buf = vt.renderBuffer();
+        auto colors = std::vector<std::pair<RGBColor, RGBColor>> {};
+        for (auto const& cell: buf.get().cells)
+            if (cell.position.line == line)
+                colors.emplace_back(cell.attributes.foregroundColor, cell.attributes.backgroundColor);
+        for (auto const& renderLine: buf.get().lines)
+            if (renderLine.lineOffset == line)
+            {
+                colors.emplace_back(renderLine.textAttributes.foregroundColor,
+                                    renderLine.textAttributes.backgroundColor);
+                colors.emplace_back(renderLine.fillAttributes.foregroundColor,
+                                    renderLine.fillAttributes.backgroundColor);
+            }
+        return colors;
+    };
+
+    mc.writeToScreen("AB");
+    auto const statusBefore = sample(statusLine);
+    auto const pageBefore = sample(LineOffset(0));
+    REQUIRE_FALSE(statusBefore.empty()); // the status line must actually be rendered, or this proves nothing
+    REQUIRE_FALSE(pageBefore.empty());
+
+    mc.writeToScreen("\033[1){");     // DECSTGLT 1 = alternate color
+    mc.writeToScreen("\033[0;2;5,}"); // DECATC: normal text -> palette[2] on palette[5]
+
+    // The application's own text takes the assigned colors ...
+    CHECK(sample(LineOffset(0)) != pageBefore);
+
+    // ... while the status line keeps the colors the host configured for it.
+    CHECK(sample(statusLine) == statusBefore);
 }
 
 TEST_CASE("Terminal.UnderlineStyleClearing", "[terminal]")

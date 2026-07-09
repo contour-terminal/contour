@@ -560,6 +560,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             output,
                                                                             baseLine,
                                                                             mainDisplayReverseVideo,
+                                                                            _colorPalette.colorLookupTable,
                                                                             HighlightSearchMatches::Yes,
                                                                             _inputMethodData,
                                                                             effectiveCursorPosition,
@@ -572,6 +573,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             output,
                                                                             baseLine,
                                                                             mainDisplayReverseVideo,
+                                                                            _colorPalette.colorLookupTable,
                                                                             HighlightSearchMatches::Yes,
                                                                             _inputMethodData,
                                                                             effectiveCursorPosition,
@@ -740,6 +742,14 @@ void Terminal::applyScreenTransitionBlending(RenderBuffer& output)
 LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base)
 {
     auto const mainDisplayReverseVideo = isModeEnabled(vtbackend::DECMode::ReverseVideo);
+
+    // The status lines are host-owned chrome painted from the configured status-line colors, not part of
+    // the application's canvas. They therefore always render through the ANSI SGR color table: an
+    // application that selects DECSTGLT Alternate mode recolors its own text, never the terminal's
+    // furniture. (colorLookupTable lives on the terminal-global palette, which the status-line screens
+    // share, so the mode has to be overridden here rather than merely read.)
+    auto constexpr StatusLineColorLookupTable = ColorLookupTable::AnsiSgr;
+
     switch (_statusDisplayType)
     {
         case StatusDisplayType::None:
@@ -751,6 +761,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                 output,
                                                                 base,
                                                                 !mainDisplayReverseVideo,
+                                                                StatusLineColorLookupTable,
                                                                 HighlightSearchMatches::No,
                                                                 InputMethodData {},
                                                                 nullopt,
@@ -762,6 +773,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                        output,
                                                                        base,
                                                                        !mainDisplayReverseVideo,
+                                                                       StatusLineColorLookupTable,
                                                                        HighlightSearchMatches::No,
                                                                        InputMethodData {},
                                                                        nullopt,
@@ -2908,6 +2920,13 @@ void Terminal::hardReset()
     _tabs.clear();
 
     resetColorPalette();
+
+    // A hard reset (RIS) clears the application-assigned window-frame/tab color (DECAC item 2). The
+    // frame color is not part of the color palette, so it must be reset explicitly. (Soft reset
+    // deliberately leaves it untouched, matching how window decorations survive DECSTR.) This only
+    // withdraws what the application itself assigned: a color the user picked in the GUI is a separate,
+    // higher-precedence source that no escape sequence can clear.
+    resetWindowFrameColor();
 
     _hostWritableStatusLineScreen.margin() = Margin {
         .vertical =

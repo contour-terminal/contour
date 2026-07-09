@@ -3,9 +3,12 @@
 
 #include <vtbackend/Color.h>
 
+#include <array>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -17,6 +20,22 @@
 namespace vtmux
 {
 
+/// Who assigned a tab's color.
+///
+/// The enumerators are ordered by **ascending precedence**: when more than one source has assigned a
+/// color, the last one wins. That single rule is the whole resolution logic — Tab::color() is a reverse
+/// scan over this list — so a third source is introduced by adding an enumerator at the right position,
+/// not by editing precedence checks scattered across the model.
+enum class TabColorSource : uint8_t
+{
+    Application, //!< Assigned by the terminal application via DECAC item 2 (window frame).
+    User,        //!< Chosen by the user via the tab's color flyout. Overrides Application.
+};
+
+/// Number of tab-color sources, i.e. the extent of Tab's per-source color storage. Derived from the
+/// last enumerator so that adding a source does not require updating a hand-written count.
+inline constexpr size_t TabColorSourceCount = std::to_underlying(TabColorSource::User) + 1;
+
 /// A tab: a named, optionally colored container for a binary split tree of panes.
 ///
 /// The tab owns the root Pane, tracks which leaf is active (with an MRU list for focus
@@ -25,6 +44,9 @@ namespace vtmux
 /// network-connected client are pure views of this state. They read title()/color() and request
 /// mutations (setRuntimeTitle/setColor); they never hold their own authoritative copy. That is what
 /// lets every client agree on the same title and color.
+///
+/// The color is stored per @ref TabColorSource rather than as a single slot, so that a color the user
+/// picked and a color an application assigned coexist and neither destroys the other.
 class Tab
 {
   public:
@@ -131,12 +153,38 @@ class Tab
     // }}}
     // {{{ Color
 
-    /// The runtime color override, if the tab has been colored. No override means the host uses its
-    /// default tab color.
-    [[nodiscard]] std::optional<vtbackend::RGBColor> const& color() const noexcept { return _color; }
+    /// The tab's effective color: the one assigned by the highest-precedence source that has one (see
+    /// TabColorSource). No color from any source means the host paints its default tab color.
+    /// @return The effective color, or nullopt if the tab is uncolored.
+    [[nodiscard]] std::optional<vtbackend::RGBColor> color() const noexcept
+    {
+        for (auto const& color: _colors | std::views::reverse)
+            if (color.has_value())
+                return color;
+        return std::nullopt;
+    }
 
-    void setColor(vtbackend::RGBColor color) { _color = color; }
-    void resetColor() { _color.reset(); }
+    /// The color assigned by @p source alone, ignoring precedence.
+    /// @param source The assigning source.
+    /// @return That source's color, or nullopt if it has assigned none.
+    [[nodiscard]] std::optional<vtbackend::RGBColor> const& color(TabColorSource source) const noexcept
+    {
+        return _colors[std::to_underlying(source)];
+    }
+
+    /// Assigns @p color on behalf of @p source, leaving every other source's color untouched.
+    /// @param source The assigning source.
+    /// @param color The color to assign.
+    void setColor(TabColorSource source, vtbackend::RGBColor color)
+    {
+        _colors[std::to_underlying(source)] = color;
+    }
+
+    /// Clears @p source's color, so the tab falls back to the next-highest source that has one (and to
+    /// the host default if none does). This is what makes "set the tab color back to default" restore an
+    /// application's DECAC color rather than erase it.
+    /// @param source The source whose color to clear.
+    void resetColor(TabColorSource source) { _colors[std::to_underlying(source)].reset(); }
 
     // }}}
 
@@ -146,7 +194,7 @@ class Tab
     Pane* _activeLeaf;
     std::vector<PaneId> _mru; //!< Most-recently-used leaf ids, front = most recent.
     std::optional<std::string> _runtimeTitle;
-    std::optional<vtbackend::RGBColor> _color;
+    std::array<std::optional<vtbackend::RGBColor>, TabColorSourceCount> _colors {};
 
     void touchMru(PaneId id);
     void forgetFromMru(PaneId id);

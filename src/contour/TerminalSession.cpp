@@ -1191,6 +1191,25 @@ void TerminalSession::setTabName(string_view name)
     refreshGuiTabInfoForStatusLine();
 }
 
+void TerminalSession::setWindowFrameColor(vtbackend::RGBColor color)
+{
+    // DECAC item 2: the application assigned a window-frame color, which maps to this session's tab
+    // background. This is invoked on the parser thread while Terminal::_stateMutex is held, so it must
+    // NOT touch _manager->model() directly (SessionModel mutation drives the GUI model and
+    // updateStatusLine() would re-lock the non-recursive mutex — see refreshGuiTabInfoForStatusLine).
+    // Post the mutation to the GUI thread; postToObject targets `this`, so Qt auto-cancels the queued
+    // call if the session is destroyed first, avoiding a use-after-free on _manager.
+    postToObject(this,
+                 [this, color, id = modelSessionId()]() { _manager->setTabColorForSession(id, color); });
+}
+
+void TerminalSession::resetWindowFrameColor()
+{
+    // DECAC item 2 with no colors, or a hard reset (RIS): clear the tab color. Same threading
+    // constraint as setWindowFrameColor() above.
+    postToObject(this, [this, id = modelSessionId()]() { _manager->resetTabColorForSession(id); });
+}
+
 void TerminalSession::setTerminalProfile(string const& configProfileName)
 {
     if (!_display)
