@@ -67,6 +67,8 @@ constexpr inline auto DA1 = FunctionDocumentation { .mnemonic = "DA1", .comment 
 constexpr inline auto DA2 = FunctionDocumentation { .mnemonic = "DA2", .comment = "Secondary Device Attributes" };
 constexpr inline auto DA3 = FunctionDocumentation { .mnemonic = "DA3", .comment = "Tertiary Device Attributes" };
 constexpr inline auto DCH = FunctionDocumentation { .mnemonic = "DCH", .comment = "Delete characters" };
+constexpr inline auto DECAC = FunctionDocumentation { .mnemonic = "DECAC", .comment = "Assign Color", .parameters = "item ; foreground ; background", .description = "Assigns palette colors to a display item. Item 1 sets the normal-text default " "foreground/background (as OSC 10/11 do); item 2 sets the window-frame color, which " "Contour maps to the GUI tab background. The foreground/background parameters are " "palette indices (0..255). Omitting the color parameters resets the item to its host " "default.", .notes = "VT525. See also DECATC. Windows Terminal implements this to color a tab from an application.", };
+constexpr inline auto DECATC = FunctionDocumentation { .mnemonic = "DECATC", .comment = "Alternate Text Color", .parameters = "attribute ; foreground ; background", .description = "Assigns palette colors to a text-attribute combination, for use in the alternate color " "mode selected by DECSTGLT. The attribute selector enumerates the 16 combinations in the " "order given by the VT525 manual: 0 = normal, 1 = bold, 2 = reverse, 3 = underline, " "4 = blink, 5 = bold reverse, 6 = bold underline, 7 = bold blink, 8 = reverse underline, " "9 = reverse blink, 10 = underline blink, 11 = bold reverse underline, 12 = bold reverse " "blink, 13 = bold underline blink, 14 = reverse underline blink, 15 = all four. It is an " "enumeration, not a bitmask. The foreground/background parameters are palette indices " "(0..255). Omitting the color parameters resets that attribute combination to the default " "text colors.", .notes = "VT525. See also DECAC and DECSTGLT.", };
 constexpr inline auto DECCARA = FunctionDocumentation { .mnemonic = "DECCARA", .comment = "Change Attributes in Rectangular Area" };
 constexpr inline auto DECCRA = FunctionDocumentation { .mnemonic = "DECCRA", .comment = "Copy rectangular area" };
 constexpr inline auto DECDC = FunctionDocumentation { .mnemonic = "DECDC", .comment = "Delete column" };
@@ -99,6 +101,7 @@ constexpr inline auto DECSPP = FunctionDocumentation { .mnemonic = "DECSPP", .co
 constexpr inline auto DECSSCLS = FunctionDocumentation { .mnemonic = "DECSSCLS", .comment = "Set Scroll Speed." };
 constexpr inline auto DECSSDT = FunctionDocumentation { .mnemonic = "DECSSDT", .comment = "Select Status Display (Line) Type" };
 constexpr inline auto DECSTBM = FunctionDocumentation { .mnemonic = "DECSTBM", .comment = "Set top/bottom margin" };
+constexpr inline auto DECSTGLT = FunctionDocumentation { .mnemonic = "DECSTGLT", .comment = "Select Color Look-Up Table", .parameters = "table", .description = "Selects the color mode used to display text: 1 or 2 = alternate color (text color comes from the " "attribute combinations assigned via DECATC, and ANSI SGR color parameters are ignored entirely; a " "combination with no DECATC assignment uses the default text colors), 3 = ANSI SGR color (the " "power-up default, and what an omitted parameter selects). The monochrome table (0) of the original " "VT525 is not supported.", .notes = "VT525. See also DECATC and DECAC.", };
 constexpr inline auto DECSTR = FunctionDocumentation { .mnemonic = "DECSTR", .comment = "Soft terminal reset" };
 constexpr inline auto DECUDK = FunctionDocumentation { .mnemonic = "DECUDK", .comment = "User-Defined Keys" };
 constexpr inline auto DECXCPR = FunctionDocumentation { .mnemonic = "DECXCPR", .comment = "Report cursor position" };
@@ -601,6 +604,8 @@ constexpr inline auto DA1         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto DA2         = detail::CSI('>', 0, 1, std::nullopt, 'c', VTType::VT100, documentation::DA2);
 constexpr inline auto DA3         = detail::CSI('=', 0, 1, std::nullopt, 'c', VTType::VT100, documentation::DA3);
 constexpr inline auto DCH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'P', VTType::VT100, documentation::DCH);
+constexpr inline auto DECAC       = detail::CSI(std::nullopt, 1, 3, ',', '|', VTType::VT525, documentation::DECAC);
+constexpr inline auto DECATC      = detail::CSI(std::nullopt, 0, 3, ',', '}', VTType::VT525, documentation::DECATC);
 constexpr inline auto DECCARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 'r', VTType::VT420, documentation::DECCARA);
 constexpr inline auto DECCRA      = detail::CSI(std::nullopt, 0, 8, '$', 'v', VTType::VT420, documentation::DECCRA);
 constexpr inline auto DECDC       = detail::CSI(std::nullopt, 0, 1, '\'', '~', VTType::VT420, documentation::DECDC);
@@ -633,6 +638,7 @@ constexpr inline auto DECSNLS     = detail::CSI(std::nullopt, 0, 1, '*', '|', VT
 constexpr inline auto DECSSCLS    = detail::CSI(std::nullopt, 0, 1, ' ', 'p', VTType::VT510, documentation::DECSSCLS);
 constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VTType::VT320, documentation::DECSSDT);
 constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, documentation::DECSTBM);
+constexpr inline auto DECSTGLT    = detail::CSI(std::nullopt, 0, 1, ')', '{', VTType::VT525, documentation::DECSTGLT);
 constexpr inline auto DECSTR      = detail::CSI(std::nullopt, 0, 0, '!', 'p', VTType::VT100, documentation::DECSTR);
 constexpr inline auto DECXCPR     = detail::CSI(std::nullopt, 0, 0, std::nullopt, '6', VTType::VT100, documentation::DECXCPR);
 constexpr inline auto DL          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'M', VTType::VT100, documentation::DL);
@@ -816,6 +822,8 @@ constexpr static auto allFunctionsArray() noexcept
         DA2,
         DA3,
         DCH,
+        DECAC,
+        DECATC,
         DECCARA,
         DECCRA,
         DECDC,
@@ -856,6 +864,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECSNLS,
         DECSSDT,
         DECSTBM,
+        DECSTGLT,
         DECSTR,
         DECXCPR,
         DL,

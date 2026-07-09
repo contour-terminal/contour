@@ -107,3 +107,106 @@ TEST_CASE("Functions.EnableAndDisable", "[Functions]")
     REQUIRE(f);
     CHECK(*f == DECSLRM);
 }
+
+TEST_CASE("Functions.CSI_DECAC", "[Functions]")
+{
+    // DECAC is CSI with intermediate=',' and final='|' (item ; fg ; bg).
+    SupportedSequences const availableSequences;
+    auto const* f = vtbackend::select({ .category = FunctionCategory::CSI,
+                                        .leader = 0,
+                                        .argc = 3,
+                                        .intermediate = ',',
+                                        .finalSymbol = '|' },
+                                      availableSequences.activeSequences());
+    REQUIRE(f);
+    CHECK(*f == DECAC);
+}
+
+TEST_CASE("Functions.CSI_DECATC", "[Functions]")
+{
+    // DECATC is CSI with intermediate=',' and final='}' (attribute ; fg ; bg).
+    SupportedSequences const availableSequences;
+    auto const* f = vtbackend::select({ .category = FunctionCategory::CSI,
+                                        .leader = 0,
+                                        .argc = 3,
+                                        .intermediate = ',',
+                                        .finalSymbol = '}' },
+                                      availableSequences.activeSequences());
+    REQUIRE(f);
+    CHECK(*f == DECATC);
+}
+
+TEST_CASE("Functions.DECAC_VTLevelConstrain", "[Functions]")
+{
+    // DECAC/DECATC are VT525; they must not resolve below that conformance level.
+    SupportedSequences availableSequences;
+    auto const selector = FunctionSelector {
+        .category = FunctionCategory::CSI, .leader = 0, .argc = 3, .intermediate = ',', .finalSymbol = '|'
+    };
+    availableSequences.reset(VTType::VT510);
+    REQUIRE(!vtbackend::select(selector, availableSequences.activeSequences()));
+    availableSequences.reset(VTType::VT525);
+    auto const* f = vtbackend::select(selector, availableSequences.activeSequences());
+    REQUIRE(f);
+    CHECK(*f == DECAC);
+}
+
+TEST_CASE("Functions.DECATC_VTLevelConstrain", "[Functions]")
+{
+    // DECATC is VT525; it must not resolve below that conformance level.
+    SupportedSequences availableSequences;
+    auto const selector = FunctionSelector {
+        .category = FunctionCategory::CSI, .leader = 0, .argc = 3, .intermediate = ',', .finalSymbol = '}'
+    };
+    availableSequences.reset(VTType::VT510);
+    REQUIRE(!vtbackend::select(selector, availableSequences.activeSequences()));
+    availableSequences.reset(VTType::VT525);
+    auto const* f = vtbackend::select(selector, availableSequences.activeSequences());
+    REQUIRE(f);
+    CHECK(*f == DECATC);
+}
+
+TEST_CASE("Functions.CSI_DECATC_ZeroParameterForm", "[Functions]")
+{
+    // DECATC must resolve with no parameters at all: a lone '0' attribute collapses to zero parameters
+    // under the VT convention, and `CSI 0 , }` is the only spelling of "reset the normal-text entry".
+    // Registering DECATC with minArgs=1 would drop that sequence before it ever reaches the handler.
+    SupportedSequences const availableSequences;
+    auto const* f = vtbackend::select({ .category = FunctionCategory::CSI,
+                                        .leader = 0,
+                                        .argc = 0,
+                                        .intermediate = ',',
+                                        .finalSymbol = '}' },
+                                      availableSequences.activeSequences());
+    REQUIRE(f);
+    CHECK(*f == DECATC);
+}
+
+TEST_CASE("Functions.CSI_DECSTGLT", "[Functions]")
+{
+    // DECSTGLT is CSI with intermediate=')' and final='{' (VT525).
+    SupportedSequences const availableSequences;
+    auto const* f = vtbackend::select({ .category = FunctionCategory::CSI,
+                                        .leader = 0,
+                                        .argc = 1,
+                                        .intermediate = ')',
+                                        .finalSymbol = '{' },
+                                      availableSequences.activeSequences());
+    REQUIRE(f);
+    CHECK(*f == DECSTGLT);
+}
+
+TEST_CASE("Functions.DECSTGLT_VTLevelConstrain", "[Functions]")
+{
+    // DECSTGLT is VT525; it must not resolve below that conformance level.
+    SupportedSequences availableSequences;
+    auto const selector = FunctionSelector {
+        .category = FunctionCategory::CSI, .leader = 0, .argc = 1, .intermediate = ')', .finalSymbol = '{'
+    };
+    availableSequences.reset(VTType::VT510);
+    REQUIRE(!vtbackend::select(selector, availableSequences.activeSequences()));
+    availableSequences.reset(VTType::VT525);
+    auto const* f = vtbackend::select(selector, availableSequences.activeSequences());
+    REQUIRE(f);
+    CHECK(*f == DECSTGLT);
+}

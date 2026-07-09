@@ -279,6 +279,14 @@ class Terminal
         virtual void requestShowHostWritableStatusLine() {}
         virtual void setWindowTitle(std::string_view /*title*/) {}
         virtual void setTabName(std::string_view /*title*/) {}
+        /// The application assigned a window-frame color (DECAC item 2), which the GUI maps to the
+        /// tab background color. A color the user picked themselves outranks it and stays visible.
+        /// @param color The color to paint the frame/tab with.
+        virtual void setWindowFrameColor(RGBColor /*color*/) {}
+        /// The application withdrew its window-frame color (DECAC item 2 with no color parameters, or a
+        /// hard reset). The frontend falls back to a user-chosen color, if any, else its own default.
+        /// It never clears a color the user picked.
+        virtual void resetWindowFrameColor() {}
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
@@ -313,6 +321,8 @@ class Terminal
         void requestShowHostWritableStatusLine() override {}
         void setWindowTitle(std::string_view /*title*/) override {}
         void setTabName(std::string_view /*title*/) override {}
+        void setWindowFrameColor(RGBColor /*color*/) override {}
+        void resetWindowFrameColor() override {}
         void setTerminalProfile(std::string const& /*configProfileName*/) override {}
         void discardImage(Image const&) override {}
         void inputModeChanged(ViMode /*mode*/) override {}
@@ -655,6 +665,12 @@ class Terminal
     void inputModeChanged(ViMode mode) { _eventListener.inputModeChanged(mode); }
     void updateHighlights() { _eventListener.updateHighlights(); }
     void playSound(vtbackend::Sequence::Parameters const& params) { _eventListener.playSound(params); }
+
+    /// Notifies the frontend that the application assigned a window-frame (tab) color (DECAC item 2).
+    /// @param color The color to paint the frame/tab with.
+    void setWindowFrameColor(RGBColor color) { _eventListener.setWindowFrameColor(color); }
+    /// Notifies the frontend that the window-frame (tab) color was reset to the host default.
+    void resetWindowFrameColor() { _eventListener.resetWindowFrameColor(); }
 
     bool applicationCursorKeys() const noexcept { return _inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return _inputGenerator.applicationKeypad(); }

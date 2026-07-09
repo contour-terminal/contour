@@ -71,10 +71,28 @@ class MockTerm: public Terminal::NullEvents
 
     std::string clipboardData;
 
+    /// The most recent window-frame (tab) color assigned via DECAC item 2, or std::nullopt if the
+    /// frame color was reset (or never set). @see setWindowFrameColor, resetWindowFrameColor.
+    std::optional<RGBColor> windowFrameColor;
+    /// Number of setWindowFrameColor()/resetWindowFrameColor() notifications received.
+    int windowFrameColorChangeCount = 0;
+
     // Events overrides
     void setWindowTitle(std::string_view title) override { windowTitle = title; }
 
     void copyToClipboard(std::string_view data) override { clipboardData = data; }
+
+    void setWindowFrameColor(RGBColor color) override
+    {
+        windowFrameColor = color;
+        ++windowFrameColorChangeCount;
+    }
+
+    void resetWindowFrameColor() override
+    {
+        windowFrameColor = std::nullopt;
+        ++windowFrameColorChangeCount;
+    }
 
     static vtbackend::Settings createSettings(PageSize pageSize,
                                               LineCount maxHistoryLineCount,

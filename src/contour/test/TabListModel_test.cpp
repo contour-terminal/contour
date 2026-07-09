@@ -820,7 +820,7 @@ TEST_CASE("TabListModel: a tab rename republishes the indicator status line",
     SECTION("a color change refreshes the status line (the established contract this mirrors)")
     {
         auto const before = m.statusLineUpdateCount;
-        m.model().setTabColor(a->id(), vtbackend::RGBColor { 10, 20, 30 });
+        m.model().setTabColor(a->id(), vtmux::TabColorSource::User, vtbackend::RGBColor { 10, 20, 30 });
         CHECK(m.statusLineUpdateCount == before + 1);
     }
 

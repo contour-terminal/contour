@@ -714,12 +714,40 @@ TEST_CASE("SessionModel: tab title and color mutations notify", "[vtmux][model][
     CHECK(tab->runtimeTitle() == "build");
     CHECK(f.events.sawPrefix(std::format("title:{}", tab->id().value)));
 
-    f.model.setTabColor(tab->id(), vtbackend::RGBColor { 0x33, 0xCC, 0x33 });
+    f.model.setTabColor(tab->id(), TabColorSource::User, vtbackend::RGBColor { 0x33, 0xCC, 0x33 });
     REQUIRE(tab->color().has_value());
     CHECK(tab->color()->green == 0xCC);
     CHECK(f.events.sawPrefix(std::format("color:{}", tab->id().value)));
 
-    f.model.resetTabColor(tab->id());
+    f.model.resetTabColor(tab->id(), TabColorSource::User);
+    CHECK_FALSE(tab->color().has_value());
+}
+
+TEST_CASE("SessionModel: a tab color is tracked per source, and both changes are announced",
+          "[vtmux][model][color]")
+{
+    // Both sources reach the same tab and both fire tabColorChanged, but they write different slots, so
+    // an application's DECAC color and a color the user picked never overwrite one another.
+    Fixture f;
+    auto* win = f.model.createWindow();
+    auto* tab = f.model.createTab(win->id());
+
+    auto constexpr AppColor = vtbackend::RGBColor { 0x11, 0x22, 0x33 };
+    auto constexpr UserColor = vtbackend::RGBColor { 0xAA, 0xBB, 0xCC };
+
+    f.model.setTabColor(tab->id(), TabColorSource::Application, AppColor);
+    CHECK(tab->color() == AppColor);
+    CHECK(f.events.sawPrefix(std::format("color:{}", tab->id().value)));
+
+    f.model.setTabColor(tab->id(), TabColorSource::User, UserColor);
+    CHECK(tab->color() == UserColor);
+
+    f.events.log.clear();
+    f.model.resetTabColor(tab->id(), TabColorSource::Application);
+    CHECK(tab->color() == UserColor); // the user's choice survives an application reset
+    CHECK(f.events.sawPrefix(std::format("color:{}", tab->id().value)));
+
+    f.model.resetTabColor(tab->id(), TabColorSource::User);
     CHECK_FALSE(tab->color().has_value());
 }
 
@@ -1354,14 +1382,14 @@ TEST_CASE("SessionModel: title and color mutations on an unknown tab are safe no
     auto* win = f.model.createWindow();
     auto* tab = f.model.createTab(win->id());
     f.model.setTabTitle(tab->id(), "kept");
-    f.model.setTabColor(tab->id(), vtbackend::RGBColor { 0x11, 0x22, 0x33 });
+    f.model.setTabColor(tab->id(), TabColorSource::User, vtbackend::RGBColor { 0x11, 0x22, 0x33 });
     f.events.log.clear();
 
     auto const unknown = TabId { 999999 };
     f.model.setTabTitle(unknown, "ignored");
     f.model.resetTabTitle(unknown);
-    f.model.setTabColor(unknown, vtbackend::RGBColor { 0xAA, 0xBB, 0xCC });
-    f.model.resetTabColor(unknown);
+    f.model.setTabColor(unknown, TabColorSource::User, vtbackend::RGBColor { 0xAA, 0xBB, 0xCC });
+    f.model.resetTabColor(unknown, TabColorSource::User);
 
     CHECK(f.events.log.empty());
     // The real tab's overrides are untouched.
@@ -1425,7 +1453,7 @@ TEST_CASE("SessionModel: hosts observing only completed changes may inherit the 
     auto* newLeaf = model.splitActivePane(b->id(), SplitState::Vertical);
     REQUIRE(newLeaf != nullptr);
     model.setPaneRatio(b->id(), b->rootPane()->id(), 0.3);
-    model.setTabColor(b->id(), vtbackend::RGBColor { 0x33, 0xCC, 0x33 });
+    model.setTabColor(b->id(), TabColorSource::User, vtbackend::RGBColor { 0x33, 0xCC, 0x33 });
     model.closePane(win->id(), b->id(), newLeaf->id());
     CHECK(b->paneCount() == 1);
     CHECK(win->tabCount() == 1);

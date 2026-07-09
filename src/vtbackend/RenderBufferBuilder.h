@@ -19,10 +19,14 @@ namespace vtbackend
 class RenderBufferBuilder
 {
   public:
+    /// @param colorLookupTable The color mode (DECSTGLT) that applies to the screen being rendered.
+    ///                         Status-line screens are host-owned chrome and pass AnsiSgr, so an
+    ///                         application's DECATC assignments cannot repaint them.
     RenderBufferBuilder(Terminal const& terminal,
                         RenderBuffer& output,
                         LineOffset base,
                         bool reverseVideo,
+                        ColorLookupTable colorLookupTable,
                         HighlightSearchMatches highlightSearchMatches,
                         InputMethodData inputMethodData,
                         std::optional<CellLocation> theCursorPosition,
@@ -130,6 +134,7 @@ class RenderBufferBuilder
     std::optional<CellLocation> _cursorPosition;
     LineOffset _baseLine;
     bool _reverseVideo;
+    ColorLookupTable _colorLookupTable;
     HighlightSearchMatches _highlightSearchMatches;
     InputMethodData _inputMethodData;
     bool _includeSelection;

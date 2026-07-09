@@ -343,6 +343,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void requestWindowResize(vtbackend::Width, vtbackend::Height) override;
     void setWindowTitle(std::string_view title) override;
     void setTabName(std::string_view name) override;
+    void setWindowFrameColor(vtbackend::RGBColor color) override;
+    void resetWindowFrameColor() override;
     void setTerminalProfile(std::string const& configProfileName) override;
     void discardImage(vtbackend::Image const&) override;
     void inputModeChanged(vtbackend::ViMode mode) override;

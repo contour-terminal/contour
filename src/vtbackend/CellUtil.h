@@ -10,11 +10,70 @@
 #include <libunicode/width.h>
 
 #include <ranges>
+#include <utility>
 
 namespace vtbackend::CellUtil
 {
 
+/// Derives the DECATC attribute-combination index for a cell. This is the single definition of the
+/// flags-to-index mapping: "underline" matches all underline variants, "blink" matches slow and
+/// rapid, and "reverse" is the cell's *visual* reverse state — per-cell SGR 7 (CellFlag::Inverse) XOR
+/// the screen-wide reverse-video mode (DECSCNM), so the override matches how the cell actually looks.
+/// The active-attribute bit-set is mapped to the DEC-enumerated Ps1 index via
+/// alternateTextColorIndexFromMask (the manual's table is not a plain bitmask).
+/// @param cellFlags The cell's attribute flags.
+/// @param reverseVideo Whether screen-wide reverse video (DECSCNM) is active.
+/// @return An index into ColorPalette::alternateTextColors, in [0, AlternateTextColorCount).
+[[nodiscard]] inline size_t cellFlagsToAlternateTextColorIndex(CellFlags cellFlags,
+                                                               bool reverseVideo) noexcept
+{
+    auto constexpr AnyBlink = CellFlags { CellFlag::Blinking } | CellFlag::RapidBlinking;
+
+    using enum AlternateTextColorMask;
+    auto bitset = uint8_t { 0 };
+    if (cellFlags.contains(CellFlag::Bold))
+        bitset |= std::to_underlying(Bold);
+    if (cellFlags.contains(CellFlag::Inverse) != reverseVideo) // net visual reverse (SGR 7 XOR DECSCNM)
+        bitset |= std::to_underlying(Reverse);
+    if (cellFlags.any(UnderlineMask))
+        bitset |= std::to_underlying(Underline);
+    if (cellFlags.any(AnyBlink))
+        bitset |= std::to_underlying(Blink);
+    return alternateTextColorIndexFromMask(bitset);
+}
+
+/// Resolves a cell's color from its text-attribute combination, as DECSTGLT "Alternate color" mode
+/// prescribes. A combination the application never assigned via DECATC renders in the default
+/// foreground/background — SGR color parameters play no part in this mode at all. (xterm models the same
+/// rule by seeding all sixteen entries from the default pair on reset.)
+/// @param colorPalette The palette holding the DECATC assignments and the defaults to fall back to.
+/// @param cellFlags The cell's attribute flags.
+/// @param reverseVideo Whether screen-wide reverse video (DECSCNM) is active.
+/// @return The foreground/background to paint the cell with.
+[[nodiscard]] inline RGBColorPair alternateTextColors(ColorPalette const& colorPalette,
+                                                      CellFlags cellFlags,
+                                                      bool reverseVideo) noexcept
+{
+    auto const index = cellFlagsToAlternateTextColorIndex(cellFlags, reverseVideo);
+    return colorPalette.alternateTextColors[index].value_or(RGBColorPair {
+        .foreground = colorPalette.defaultForeground, .background = colorPalette.defaultBackground });
+}
+
+/// Resolves the foreground/background a cell is painted with, from its SGR attributes or — in DECSTGLT
+/// Alternate mode — from its attribute combination.
+/// @param colorPalette The active color palette.
+/// @param colorLookupTable The color mode that applies to the screen being rendered. Callers rendering
+///                         host-owned chrome (the status lines) pass AnsiSgr, because an application's
+///                         DECATC assignments must not repaint the terminal's own furniture.
+/// @param cellFlags The cell's attribute flags.
+/// @param reverseVideo Whether screen-wide reverse video (DECSCNM) is active.
+/// @param foregroundColor The cell's SGR foreground color.
+/// @param backgroundColor The cell's SGR background color.
+/// @param blinkingState Blink animation phase, in [0, 1].
+/// @param rapidBlinkState Rapid-blink animation phase, in [0, 1].
+/// @return The foreground/background to paint the cell with.
 [[nodiscard]] inline RGBColorPair makeColors(ColorPalette const& colorPalette,
+                                             ColorLookupTable colorLookupTable,
                                              CellFlags cellFlags,
                                              bool reverseVideo,
                                              Color foregroundColor,
@@ -22,26 +81,39 @@ namespace vtbackend::CellUtil
                                              float blinkingState,
                                              float rapidBlinkState) noexcept
 {
-    auto const fgMode = [](CellFlags flags, ColorPalette const& colorPalette) {
-        if (flags & CellFlag::Faint)
-            return ColorMode::Dimmed;
-        if ((flags & CellFlag::Bold) && colorPalette.useBrightColors)
-            return ColorMode::Bright;
-        return ColorMode::Normal;
-    }(cellFlags, colorPalette);
+    auto rgbColors = [&]() -> RGBColorPair {
+        // DECATC (Alternate Text Color): in DECSTGLT "Alternate color" mode a cell's color comes from its
+        // text-attribute combination instead of its SGR color parameters — the VT240-compat model for
+        // terminals without ANSI color. The reverse attribute is part of that combination index, so this
+        // supersedes the reverse-video handling below rather than composing with it. In the default
+        // AnsiSgr mode the whole feature is inert, so the overwhelmingly common path pays a single
+        // predictable branch and never touches the otherwise-cold override array.
+        if (colorLookupTable == ColorLookupTable::Alternate)
+            return alternateTextColors(colorPalette, cellFlags, reverseVideo);
 
-    auto constexpr BgMode = ColorMode::Normal;
+        auto const fgMode = [](CellFlags flags, ColorPalette const& colorPalette) {
+            if (flags & CellFlag::Faint)
+                return ColorMode::Dimmed;
+            if ((flags & CellFlag::Bold) && colorPalette.useBrightColors)
+                return ColorMode::Bright;
+            return ColorMode::Normal;
+        }(cellFlags, colorPalette);
 
-    auto const [fgColorTarget, bgColorTarget] =
-        reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
-                     : std::pair { ColorTarget::Foreground, ColorTarget::Background };
+        auto constexpr BgMode = ColorMode::Normal;
 
-    auto rgbColors =
-        RGBColorPair { .foreground = apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
-                       .background = apply(colorPalette, backgroundColor, bgColorTarget, BgMode) };
+        auto const [fgColorTarget, bgColorTarget] =
+            reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
+                         : std::pair { ColorTarget::Foreground, ColorTarget::Background };
 
-    if (cellFlags & CellFlag::Inverse)
-        rgbColors = rgbColors.swapped();
+        auto sgrColors =
+            RGBColorPair { .foreground = apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
+                           .background = apply(colorPalette, backgroundColor, bgColorTarget, BgMode) };
+
+        if (cellFlags & CellFlag::Inverse)
+            sgrColors = sgrColors.swapped();
+
+        return sgrColors;
+    }();
 
     if (cellFlags & CellFlag::Hidden)
         rgbColors = rgbColors.allBackground();

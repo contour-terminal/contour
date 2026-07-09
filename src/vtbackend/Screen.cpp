@@ -30,6 +30,7 @@
 #include <cstring>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <ranges>
 #include <sstream>
 #include <string_view>
@@ -3091,6 +3092,29 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        /// Reads the foreground/background palette indices a DEC color-assignment sequence carries in
+        /// parameters 1 and 2, and resolves them against @p palette. Shared by DECAC and DECATC, which
+        /// declare the same pair of indices (0..255, following Windows Terminal's extended range).
+        ///
+        /// Both indices are validated even when the caller consumes only one of them: DECAC's
+        /// window-frame item carries a foreground of its own in the DEC model (Windows Terminal keeps a
+        /// FrameForeground alias for it) though Contour's tab strip derives its label color by contrast.
+        /// An out-of-range index makes the whole sequence malformed, not a parameter to ignore.
+        ///
+        /// @param seq The sequence being applied.
+        /// @param palette The palette to resolve the indices against.
+        /// @return The resolved colors, or nullopt if either index is out of range.
+        [[nodiscard]] std::optional<RGBColorPair> readAssignedColorPair(Sequence const& seq,
+                                                                        ColorPalette const& palette) noexcept
+        {
+            auto const fg = seq.param<unsigned>(1);
+            auto const bg = seq.param<unsigned>(2);
+            if (fg > 255 || bg > 255)
+                return std::nullopt;
+            return RGBColorPair { .foreground = palette.indexedColor(fg),
+                                  .background = palette.indexedColor(bg) };
+        }
+
         ApplyResult ANSIDSR(Sequence const& seq, Screen& screen)
         {
             switch (seq.param(0))
@@ -4656,6 +4680,101 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case WINMANIP: return impl::WINDOWMANIP(seq, *_terminal);
         case XTRESTORE: return impl::restoreDECModes(seq, *_terminal);
         case XTSAVE: return impl::saveDECModes(seq, *_terminal);
+        case DECAC: {
+            // Assign Color (VT525): CSI item ; fg ; bg , |
+            // item 1 = normal text (default fg/bg), item 2 = window frame (GUI tab color).
+            // fg/bg are palette indices (0..255). Three forms: the item alone (1 param) resets the
+            // item to its host default; item + both colors (3 params) assigns them; any other arity
+            // (e.g. item + one color) is malformed and rejected rather than silently reset.
+            auto const item = seq.param_or<unsigned>(0, 0);
+            if (item != 1 && item != 2)
+                return ApplyResult::Invalid;
+            auto const paramCount = seq.parameterCount();
+            if (paramCount != 1 && paramCount != 3)
+                return ApplyResult::Invalid;
+            auto colors = std::optional<RGBColorPair> {};
+            if (paramCount == 3)
+            {
+                colors = impl::readAssignedColorPair(seq, _terminal->colorPalette());
+                if (!colors.has_value())
+                    return ApplyResult::Invalid;
+            }
+            switch (item)
+            {
+                case 1:
+                    if (colors.has_value())
+                    {
+                        setDynamicColor(DynamicColorName::DefaultForegroundColor, colors->foreground);
+                        setDynamicColor(DynamicColorName::DefaultBackgroundColor, colors->background);
+                    }
+                    else
+                    {
+                        resetDynamicColor(DynamicColorName::DefaultForegroundColor);
+                        resetDynamicColor(DynamicColorName::DefaultBackgroundColor);
+                    }
+                    break;
+                case 2:
+                    // The DEC frame carries fg+bg; Contour's tab strip is a single background swatch,
+                    // so the background index is used as the tab color.
+                    if (colors.has_value())
+                        _terminal->setWindowFrameColor(colors->background);
+                    else
+                        _terminal->resetWindowFrameColor();
+                    break;
+                default: break; // unreachable: item is validated to 1 or 2 above.
+            }
+            return ApplyResult::Ok;
+        }
+        case DECATC: {
+            // Alternate Text Color (VT525): CSI attribute ; fg ; bg , }
+            // attribute is the DEC-enumerated combination index from the manual's table (0=Normal,
+            // 1=Bold, 2=Reverse, 3=Underline, 4=Blink, 5=Bold reverse, ...), NOT a bitmask — see
+            // alternateTextColorIndexFromMask, which owns that ordering. fg/bg are palette indices
+            // (0..255). Like DECAC: the attribute alone resets that entry, attribute + both colors
+            // (3 params) assigns them, and any other arity is malformed and rejected rather than
+            // silently reset.
+            //
+            // Resetting entry 0 is why DECATC accepts a zero-parameter form: a lone `0` parameter
+            // collapses to "no parameter" under the VT convention (see SequenceParameterBuilder::count),
+            // so `CSI 0 , }` — the only way to spell "reset the normal-text entry" — arrives here with
+            // no parameters at all. Defaulting the attribute to 0 makes that form, and the equivalent
+            // `CSI , }`, reset entry 0 rather than be rejected as malformed.
+            auto const attribute = seq.param_or<unsigned>(0, 0);
+            if (attribute >= ColorPalette::AlternateTextColorCount)
+                return ApplyResult::Invalid;
+            auto const paramCount = seq.parameterCount();
+            if (paramCount > 1 && paramCount != 3)
+                return ApplyResult::Invalid;
+            auto& palette = _terminal->colorPalette();
+            if (paramCount == 3)
+            {
+                auto const colors = impl::readAssignedColorPair(seq, palette);
+                if (!colors.has_value())
+                    return ApplyResult::Invalid;
+                palette.setAlternateTextColor(attribute, *colors);
+            }
+            else
+            {
+                palette.resetAlternateTextColor(attribute);
+            }
+            return ApplyResult::Ok;
+        }
+        case DECSTGLT: {
+            // Select Color Look-Up Table (VT525): CSI Ps ) {
+            //   1/2 = alternate color (DECATC attribute colors; SGR colors ignored),
+            //   3 = ANSI SGR color (power-up default, and what an omitted parameter selects).
+            // The manual's monochrome table (Ps 0) is not supported: a lone 0 collapses to "no
+            // parameter" in the parser (VT convention), making it indistinguishable from the omitted
+            // form, so the table could not be selected even if there were one to select.
+            switch (seq.param_or<unsigned>(0, 3))
+            {
+                case 1:
+                case 2: _terminal->colorPalette().colorLookupTable = ColorLookupTable::Alternate; break;
+                case 3: _terminal->colorPalette().colorLookupTable = ColorLookupTable::AnsiSgr; break;
+                default: return ApplyResult::Invalid;
+            }
+            return ApplyResult::Ok;
+        }
         case XTPOPCOLORS:
             if (!seq.parameterCount())
                 _terminal->popColorPalette(0);

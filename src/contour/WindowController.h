@@ -124,7 +124,15 @@ class WindowController: public QAbstractListModel
     /// for the SetTabTitle action). No-op when this window has no active tab. Emits
     /// tabTitleEditRequested() with the active tab's row so exactly that TabItem starts editing.
     Q_INVOKABLE void beginActiveTabTitleEdit();
+    /// Colors the tab at @p index on the user's behalf. A user color outranks any color the application
+    /// assigned via DECAC, so this always takes visible effect.
+    /// @param index The tab's row in this window.
+    /// @param color The color the user picked.
     Q_INVOKABLE void setTabColor(int index, QColor const& color);
+    /// Returns the tab at @p index to its default color, meaning: the color the application assigned via
+    /// DECAC if it assigned one, otherwise the host's default tab color. It never discards an
+    /// application's color, only the user's own choice.
+    /// @param index The tab's row in this window.
     Q_INVOKABLE void resetTabColor(int index);
     Q_INVOKABLE void closeTabAtIndex(int index);
     Q_INVOKABLE void closeOtherTabs(int index);
