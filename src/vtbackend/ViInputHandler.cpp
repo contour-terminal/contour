@@ -30,20 +30,24 @@ namespace vtbackend
 
 namespace
 {
+    /// Number of low bits of Modifiers that carry chord modifiers (Shift, Alt, Control, Super,
+    /// Hyper, Meta). The lock modifiers live above these and are stripped before they ever reach
+    /// this handler, see Terminal::sendKeyEvent().
+    constexpr auto ChordModifierBits = 6u;
+    constexpr auto ChordModifierMask = (1u << ChordModifierBits) - 1u;
+
     struct InputMatch
     {
         // ViMode mode; // TODO: ideally we also would like to match on input Mode
         Modifiers modifiers;
         char32_t ch;
 
-        [[nodiscard]] constexpr uint32_t code() const noexcept
-        {
-            return uint32_t(ch << 5) | uint32_t(modifiers.value() & 0b1'1111);
-        }
-
+        /// Packs modifiers and character into a single value, so that chords can be switch()ed on.
+        /// Shift width and mask are derived from one another: a mask narrower than the shift would
+        /// silently drop the top chord modifiers and alias them onto the unmodified key.
         constexpr operator uint32_t() const noexcept
         {
-            return uint32_t(ch << 5) | uint32_t(modifiers.value() & 0b1'1111);
+            return (uint32_t(ch) << ChordModifierBits) | (uint32_t(modifiers.value()) & ChordModifierMask);
         }
     };
 

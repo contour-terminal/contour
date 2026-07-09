@@ -377,3 +377,28 @@ TEST_CASE("vi.locks: chord modifiers still gate the Vi input handler", "[vi][loc
 }
 
 // }}}
+
+// The search editor switches on a packed (modifiers, character) value. Meta sits in the highest
+// chord-modifier bit, so a mask narrower than the shift width aliased Meta+<key> onto the bare key.
+TEST_CASE("vi.search: Meta-modified keys do not alias onto the unmodified key", "[vi]")
+{
+    auto mock = setupEightLineTerminal();
+
+    mock.sendCharSequence("/");
+    REQUIRE(mock.terminal.inputHandler().isEditingSearch());
+    mock.sendCharSequence("ab");
+    REQUIRE(mock.terminal.search().pattern == U"ab");
+
+    // Alt+Backspace is not a registered search-editor chord, so it is ignored.
+    mock.sendKeyEvent(vtbackend::Key::Backspace, Modifiers { Modifier::Alt });
+    CHECK(mock.terminal.search().pattern == U"ab");
+
+    // Meta+Backspace must behave exactly the same. Before the fix the Meta bit was masked away and
+    // this matched the bare-Backspace case, deleting a character.
+    mock.sendKeyEvent(vtbackend::Key::Backspace, Modifiers { Modifier::Meta });
+    CHECK(mock.terminal.search().pattern == U"ab");
+
+    // An unmodified Backspace still deletes.
+    mock.sendKeyEvent(vtbackend::Key::Backspace);
+    CHECK(mock.terminal.search().pattern == U"a");
+}
