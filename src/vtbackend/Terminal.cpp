@@ -889,6 +889,15 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     if (eventType == KeyboardEventType::Repeat && !isModeEnabled(DECMode::AutoRepeat))
         return Handled { true };
 
+    // Lock modifiers (CapsLock/NumLock) are latched toggle state, never part of a key chord. Every
+    // consumer below — the hint-mode handler, the DECUDK gate and the Vi input handler — compares
+    // modifiers exactly, so a latched lock key would otherwise make them all miss. Reassign the
+    // by-value parameter to the chord, so that this is safe by default for any consumer added here
+    // later, and keep the raw set only for the input generator, which reports the lock state to the
+    // application on purpose (Kitty CSI u, Win32 dwControlKeyState, numpad CSI parameters).
+    auto const rawModifiers = modifiers;
+    modifiers = modifiers.without(LockModifiers);
+
     // Route Escape to hint mode handler if active (ignore key release events).
     if (_hintModeHandler.isActive() && key == Key::Escape && eventType != KeyboardEventType::Release)
     {
@@ -912,7 +921,7 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
         }
     }
 
-    bool const success = _inputGenerator.generate(key, modifiers, eventType);
+    bool const success = _inputGenerator.generate(key, rawModifiers, eventType);
     if (success)
     {
         flushInput();
@@ -936,6 +945,11 @@ Handled Terminal::sendCharEvent(
     if (eventType == KeyboardEventType::Repeat && !isModeEnabled(DECMode::AutoRepeat))
         return Handled { true };
 
+    // See sendKeyEvent(): the hint-mode handler and the Vi input handler match on the chord, the
+    // input generator reports the raw lock state to the application.
+    auto const rawModifiers = modifiers;
+    modifiers = modifiers.without(LockModifiers);
+
     // Route input to hint mode handler if active (no modifiers — just label chars).
     // Ignore key release events to prevent the activating key's release from being
     // processed as a label character (e.g. 'h' release after 'gh' triggered hint mode).
@@ -948,7 +962,7 @@ Handled Terminal::sendCharEvent(
     if (_inputHandler.sendCharPressEvent(ch, modifiers, eventType))
         return Handled { true };
 
-    auto const success = _inputGenerator.generate(ch, physicalKey, modifiers, eventType);
+    auto const success = _inputGenerator.generate(ch, physicalKey, rawModifiers, eventType);
     if (success)
     {
         flushInput();

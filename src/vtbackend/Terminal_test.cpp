@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/CellUtil.h>
+#include <vtbackend/HintModeHandler.h>
 #include <vtbackend/MockTerm.h>
 #include <vtbackend/Terminal.h>
 #include <vtbackend/primitives.h>
@@ -16,6 +17,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -3642,6 +3644,86 @@ TEST_CASE("Terminal.Wheel.AltScreen.ScrollMultiplier.repeats_cursor_keys", "[ter
     CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
           == Handled { true });
     CHECK(e(mock.replyData()) == e("\033[B\033[B\033[B"));
+}
+
+// }}}
+
+// {{{ #1954: lock modifiers must not reach the terminal's UI decisions
+
+namespace
+{
+
+using vtbackend::Modifiers;
+
+constexpr auto NumLockOnly = Modifiers { vtbackend::Modifier::NumLock };
+constexpr auto CapsLockOnly = Modifiers { vtbackend::Modifier::CapsLock };
+constexpr auto BothLocksOnly = Modifiers { vtbackend::Modifier::CapsLock } | vtbackend::Modifier::NumLock;
+
+constexpr auto LockCombinations = std::array { CapsLockOnly, NumLockOnly, BothLocksOnly };
+
+} // namespace
+
+// Hint-mode label characters were gated on `modifiers.none()`, so with a lock key latched they
+// fell through to the input generator and were typed into the running application instead.
+TEST_CASE("Terminal.hint_mode_accepts_labels_while_lock_keys_are_latched", "[terminal][locks]")
+{
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) } };
+        mock.writeToScreen("visit https://example.com now");
+
+        mock.terminal.activateHintMode(vtbackend::HintModeHandler::builtinPatterns(),
+                                       vtbackend::HintAction::Copy);
+        REQUIRE(mock.terminal.isHintModeActive());
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+
+        auto const label = mock.terminal.hintMatches().at(0).label;
+        REQUIRE(label.size() == 1);
+        mock.resetReplyData();
+
+        mock.sendCharEvent(static_cast<char32_t>(label[0]), locks);
+
+        // The label character is consumed by hint mode, never forwarded to the application.
+        CHECK(mock.replyData().empty());
+        CHECK(!mock.terminal.isHintModeActive());
+        CHECK(mock.clipboardData == "https://example.com");
+    }
+}
+
+// DECUDK lookup was gated on `modifiers.none()`, so a latched lock key silently disabled every
+// user-defined key.
+TEST_CASE("Terminal.DECUDK_fires_while_lock_keys_are_latched", "[terminal][locks]")
+{
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+        // Program F6 (UDK id 17) with "Hello" (hex: 48656C6C6F).
+        mock.writeToScreen("\033P0;1|17/48656C6C6F\033\\");
+        mock.terminal.flushInput();
+        REQUIRE(mock.terminal.udkString(17).has_value());
+        mock.resetReplyData();
+
+        mock.sendKeyEvent(vtbackend::Key::F6, locks);
+
+        CHECK(e(mock.replyData()) == e("Hello"));
+    }
+}
+
+// The load-bearing counterpart: lock state must still reach the input generator, which reports it
+// to the application on purpose. selectNumpad() emits the digit only when it can see NumLock;
+// without it, application-keypad mode would emit CSI E instead.
+TEST_CASE("Terminal.numpad_digit_keeps_NumLock_for_the_input_generator", "[terminal][locks]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.terminal.setApplicationkeypadMode(true);
+    mock.resetReplyData();
+
+    mock.sendKeyEvent(vtbackend::Key::Numpad_5, NumLockOnly);
+
+    CHECK(e(mock.replyData()) == e("5"));
 }
 
 // }}}

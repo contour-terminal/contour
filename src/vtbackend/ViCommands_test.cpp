@@ -7,6 +7,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <format>
+
 // Checklist
 // =========
 //
@@ -220,3 +223,157 @@ TEST_CASE("yank", "[vi]")
 
     CHECK(mock.clipboardData == "Hell");
 }
+
+// {{{ #1954: lock modifiers must never reach the Vi input handler
+
+namespace
+{
+
+using vtbackend::Modifier;
+using vtbackend::Modifiers;
+
+constexpr auto CapsLock = Modifiers { Modifier::CapsLock };
+constexpr auto NumLock = Modifiers { Modifier::NumLock };
+constexpr auto BothLocks = Modifiers { Modifier::CapsLock } | Modifier::NumLock;
+
+/// Every lock combination the Vi input handler must be blind to.
+constexpr auto LockCombinations = std::array { CapsLock, NumLock, BothLocks };
+
+/// Eight three-character lines, so that vertical motions and a [count] of 5 stay on-screen.
+auto setupEightLineTerminal()
+{
+    return setupMockTerminal("abc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc",
+                             vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
+}
+
+} // namespace
+
+TEST_CASE("vi.locks: navigation keys move the cursor while lock keys are latched", "[vi][locks]")
+{
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        auto mock = setupEightLineTerminal();
+
+        mock.sendKeyEvent(vtbackend::Key::DownArrow, locks);
+        CHECK(mock.terminal.normalModeCursorPosition() == 1_lineOffset + 0_columnOffset);
+
+        mock.sendKeyEvent(vtbackend::Key::RightArrow, locks);
+        CHECK(mock.terminal.normalModeCursorPosition() == 1_lineOffset + 1_columnOffset);
+
+        mock.sendKeyEvent(vtbackend::Key::End, locks);
+        CHECK(mock.terminal.normalModeCursorPosition() == 1_lineOffset + 2_columnOffset);
+
+        mock.sendKeyEvent(vtbackend::Key::Home, locks);
+        CHECK(mock.terminal.normalModeCursorPosition() == 1_lineOffset + 0_columnOffset);
+
+        mock.sendKeyEvent(vtbackend::Key::UpArrow, locks);
+        CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 0_columnOffset);
+
+        mock.sendKeyEvent(vtbackend::Key::PageDown, locks);
+        CHECK(mock.terminal.normalModeCursorPosition().line.value > 0);
+
+        mock.sendKeyEvent(vtbackend::Key::PageUp, locks);
+        CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 0_columnOffset);
+    }
+}
+
+TEST_CASE("vi.locks: Escape leaves visual mode while lock keys are latched", "[vi][locks]")
+{
+    SECTION("via Key::Escape")
+    {
+        for (auto const locks: LockCombinations)
+        {
+            INFO(std::format("lock modifiers {}", locks));
+            auto mock = setupEightLineTerminal();
+            mock.sendCharSequence("v");
+            REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Visual);
+
+            mock.sendKeyEvent(vtbackend::Key::Escape, locks);
+            CHECK(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
+        }
+    }
+
+    SECTION("via the ESC character")
+    {
+        for (auto const locks: LockCombinations)
+        {
+            INFO(std::format("lock modifiers {}", locks));
+            auto mock = setupEightLineTerminal();
+            mock.sendCharSequence("v");
+            REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Visual);
+
+            mock.sendCharEvent(U'\033', locks);
+            CHECK(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
+        }
+    }
+}
+
+TEST_CASE("vi.locks: search prompt accepts printable characters while lock keys are latched", "[vi][locks]")
+{
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        auto mock = setupEightLineTerminal();
+
+        mock.sendCharSequence("/");
+        REQUIRE(mock.terminal.inputHandler().isEditingSearch());
+
+        mock.sendCharEvent(U'b', locks);
+        CHECK(mock.terminal.search().pattern == U"b");
+    }
+}
+
+TEST_CASE("vi.locks: [count] prefix is parsed while lock keys are latched", "[vi][locks]")
+{
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        auto mock = setupEightLineTerminal();
+
+        mock.sendCharSequence("5j", locks);
+        CHECK(mock.terminal.normalModeCursorPosition() == 5_lineOffset + 0_columnOffset);
+    }
+}
+
+// The Qt frontend infers Modifier::NumLock for every keypad digit (Qt only reports Key_0..9 with
+// KeypadModifier while NumLock is on), so numpad digits could never serve as a [count] prefix.
+TEST_CASE("vi.locks: numpad digits serve as a [count] prefix", "[vi][locks]")
+{
+    auto mock = setupEightLineTerminal();
+
+    mock.sendKeyEvent(vtbackend::Key::Numpad_5, NumLock);
+    mock.sendCharSequence("j");
+
+    CHECK(mock.terminal.normalModeCursorPosition() == 5_lineOffset + 0_columnOffset);
+}
+
+// The negative half of the contract: only the lock bits are stripped, chord modifiers still gate.
+TEST_CASE("vi.locks: chord modifiers still gate the Vi input handler", "[vi][locks]")
+{
+    SECTION("Control+DownArrow is not a motion")
+    {
+        auto mock = setupEightLineTerminal();
+        mock.sendKeyEvent(vtbackend::Key::DownArrow, Modifiers { Modifier::Control });
+        CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 0_columnOffset);
+    }
+
+    SECTION("Control+b is not literal search input")
+    {
+        auto mock = setupEightLineTerminal();
+        mock.sendCharSequence("/");
+        REQUIRE(mock.terminal.inputHandler().isEditingSearch());
+
+        mock.sendCharEvent(U'b', Modifiers { Modifier::Control });
+        CHECK(mock.terminal.search().pattern.empty());
+    }
+
+    SECTION("Control+5 is not a [count] prefix")
+    {
+        auto mock = setupEightLineTerminal();
+        mock.sendCharSequence("5j", Modifiers { Modifier::Control });
+        CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 0_columnOffset);
+    }
+}
+
+// }}}

@@ -335,6 +335,8 @@ void ViInputHandler::setMode(ViMode theMode)
         clearSearch();
 }
 
+// Precondition: `modifiers` arrives as a pure chord, with the lock modifiers (CapsLock/NumLock)
+// already stripped by Terminal::sendKeyEvent(). The exact-match logic below relies on that.
 Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
     if (_searchEditMode != PromptMode::Disabled)
@@ -526,6 +528,8 @@ Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
     return Handled { true };
 }
 
+// Precondition: `modifiers` arrives as a pure chord, with the lock modifiers (CapsLock/NumLock)
+// already stripped by Terminal::sendCharEvent(). The exact-match logic below relies on that.
 Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers, KeyboardEventType eventType)
 {
     if (_searchEditMode != PromptMode::Disabled)

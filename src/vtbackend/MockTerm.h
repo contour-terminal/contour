@@ -35,25 +35,39 @@ class MockTerm: public Terminal::NullEvents
 
     void writeToStdin(std::string_view text) { mockPty().stdinBuffer() += text; }
 
-    bool sendCharEvent(char32_t ch, Modifier modifier, Terminal::Timestamp now)
+    bool sendCharEvent(char32_t ch,
+                       Modifiers modifiers = Modifiers {},
+                       Terminal::Timestamp now = std::chrono::steady_clock::now())
     {
         // Simulate physical key here, as we don't have a real keyboard.
         auto const physicalKey = static_cast<uint32_t>(ch);
 
-        if (!terminal.sendCharEvent(ch, physicalKey, modifier, KeyboardEventType::Press, now))
+        if (!terminal.sendCharEvent(ch, physicalKey, modifiers, KeyboardEventType::Press, now))
             return false;
-        terminal.sendCharEvent(ch, physicalKey, modifier, KeyboardEventType::Release, now);
+        terminal.sendCharEvent(ch, physicalKey, modifiers, KeyboardEventType::Release, now);
+        return true;
+    }
+
+    /// Sends a full press/release pair for @p key with @p modifiers held.
+    /// @return whether the press event was handled by the terminal.
+    bool sendKeyEvent(Key key,
+                      Modifiers modifiers = Modifiers {},
+                      Terminal::Timestamp now = std::chrono::steady_clock::now())
+    {
+        if (!terminal.sendKeyEvent(key, modifiers, KeyboardEventType::Press, now))
+            return false;
+        terminal.sendKeyEvent(key, modifiers, KeyboardEventType::Release, now);
         return true;
     }
 
     // Convenience method to type into stdin a sequence of characters.
     void sendCharSequence(std::string_view sequence,
-                          Modifier modifier = Modifier::None,
+                          Modifiers modifiers = Modifiers {},
                           Terminal::Timestamp now = std::chrono::steady_clock::now())
     {
         auto const codepoints = unicode::convert_to<char32_t>(sequence);
         for (auto const codepoint: codepoints)
-            sendCharEvent(codepoint, modifier, now);
+            sendCharEvent(codepoint, modifiers, now);
     }
 
     void writeToScreen(std::string_view text)
