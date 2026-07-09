@@ -164,17 +164,23 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
 std::string StandardKeyboardInputGenerator::selectNumpad(Modifiers modifiers,
                                                          FunctionKeyMapping mapping) const
 {
+    // NumLock is the one lock modifier a keypad key legitimately observes: it selects the digit
+    // (`.std`) over the navigation function, in every keypad mode.
     if (modifiers.contains(Modifier::NumLock))
         return select(modifiers, { .std = mapping.std, .mods = mapping.std, .appKeypad = mapping.std });
 
-    return select(modifiers.without(Modifier::NumLock), mapping);
+    return select(modifiers, mapping);
 }
 
 std::string StandardKeyboardInputGenerator::select(Modifiers modifiers, FunctionKeyMapping mapping) const
 {
-    if (modifiers.without(Modifier::NumLock) && !mapping.mods.empty())
-        return crispy::replace(
-            mapping.mods, "{}"sv, makeVirtualTerminalParam(modifiers.without(Modifier::NumLock)));
+    // Lock modifiers are latched toggle state, never part of a key chord: a key pressed with only
+    // CapsLock and/or NumLock active must encode exactly as the unmodified key. Feeding them into
+    // makeVirtualTerminalParam() would turn e.g. UpArrow+CapsLock into CSI 1;65 A.
+    auto const chord = modifiers.without(LockModifiers);
+
+    if (chord && !mapping.mods.empty())
+        return crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(chord));
 
     auto const prefix = modifiers.contains(Modifier::Alt) ? "\033" : ""s;
 

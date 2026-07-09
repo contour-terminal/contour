@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <string>
 
 using namespace std;
@@ -257,6 +258,89 @@ TEST_CASE("InputGenerator.Shift+Tab_with_NumLock", "[terminal,input]")
     auto input = InputGenerator {};
     input.generate(static_cast<char32_t>(0x09), ShiftNumLock, KeyboardEventType::Press);
     REQUIRE(escape(input.peek()) == escape("\033[Z"sv));
+}
+
+namespace
+{
+/// Every lock-modifier combination that must encode identically to no modifiers at all.
+constexpr auto LockCombinations = std::array {
+    Modifiers {},
+    Modifiers { Modifier::CapsLock },
+    Modifiers { Modifier::NumLock },
+    Modifiers { Modifier::CapsLock } | Modifier::NumLock,
+};
+
+/// A key and the byte sequence it must produce when no chord modifier is held.
+struct UnmodifiedKeyMapping
+{
+    Key key;
+    std::string_view expected;
+};
+} // namespace
+
+// A key pressed while only CapsLock and/or NumLock are latched must encode exactly as the
+// unmodified key. Before this was fixed, select() stripped only NumLock, so the lock bit reached
+// makeVirtualTerminalParam() and UpArrow+CapsLock encoded as CSI 1;65 A (65 == 1 + CapsLock).
+TEST_CASE("InputGenerator.function_keys_ignore_lock_modifiers", "[terminal,input]")
+{
+    auto constexpr Mappings = std::array {
+        UnmodifiedKeyMapping { .key = Key::UpArrow, .expected = "\033[A"sv },
+        UnmodifiedKeyMapping { .key = Key::DownArrow, .expected = "\033[B"sv },
+        UnmodifiedKeyMapping { .key = Key::RightArrow, .expected = "\033[C"sv },
+        UnmodifiedKeyMapping { .key = Key::LeftArrow, .expected = "\033[D"sv },
+        UnmodifiedKeyMapping { .key = Key::Home, .expected = "\033[H"sv },
+        UnmodifiedKeyMapping { .key = Key::End, .expected = "\033[F"sv },
+        UnmodifiedKeyMapping { .key = Key::PageUp, .expected = "\033[5~"sv },
+        UnmodifiedKeyMapping { .key = Key::PageDown, .expected = "\033[6~"sv },
+        UnmodifiedKeyMapping { .key = Key::Insert, .expected = "\033[2~"sv },
+        UnmodifiedKeyMapping { .key = Key::Delete, .expected = "\033[3~"sv },
+        UnmodifiedKeyMapping { .key = Key::F1, .expected = "\033OP"sv },
+        UnmodifiedKeyMapping { .key = Key::F5, .expected = "\033[15~"sv },
+    };
+
+    for (auto const& [key, expected]: Mappings)
+        for (auto const locks: LockCombinations)
+        {
+            INFO(std::format("key {} with lock modifiers {}", key, locks));
+            auto input = InputGenerator {};
+            input.generate(key, locks, KeyboardEventType::Press);
+            CHECK(escape(input.peek()) == escape(expected));
+        }
+}
+
+// The application-cursor-keys fallback must be reachable with locks latched. Pre-fix the lock bit
+// made select() take the .mods branch, so SS3 A was never emitted.
+TEST_CASE("InputGenerator.application_cursor_keys_ignore_lock_modifiers", "[terminal,input]")
+{
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        auto input = InputGenerator {};
+        input.setCursorKeysMode(KeyMode::Application);
+        input.generate(Key::UpArrow, locks, KeyboardEventType::Press);
+        CHECK(escape(input.peek()) == escape("\033OA"sv));
+    }
+}
+
+// Stripping locks must not swallow the chord modifiers that ride along with them.
+TEST_CASE("InputGenerator.function_keys_keep_chord_modifiers_across_locks", "[terminal,input]")
+{
+    auto constexpr Control = Modifiers { Modifier::Control };
+
+    // 5 == 1 + Modifier::Control, regardless of which locks are additionally latched.
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("Control with lock modifiers {}", locks));
+        auto input = InputGenerator {};
+        input.generate(Key::UpArrow, Control | locks, KeyboardEventType::Press);
+        CHECK(escape(input.peek()) == escape("\033[1;5A"sv));
+    }
+
+    // Shift stays a real modifier: 2 == 1 + Modifier::Shift.
+    auto input = InputGenerator {};
+    input.generate(
+        Key::UpArrow, Modifiers { Modifier::Shift } | Modifier::CapsLock, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[1;2A"sv));
 }
 
 // }}}
