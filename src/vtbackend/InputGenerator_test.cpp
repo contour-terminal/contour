@@ -343,6 +343,39 @@ TEST_CASE("InputGenerator.function_keys_keep_chord_modifiers_across_locks", "[te
     CHECK(escape(input.peek()) == escape("\033[1;2A"sv));
 }
 
+// XTerm's modifyOtherKeys mode 2 must treat lock modifiers as absent: a latched lock must neither
+// make an otherwise unmodified key look modified, nor contribute to the encoded modifier parameter.
+TEST_CASE("InputGenerator.modifyOtherKeys2_ignores_lock_modifiers", "[terminal,input]")
+{
+    auto const generateLowerA = [](Modifiers modifiers) {
+        auto input = InputGenerator {};
+        input.setModifyOtherKeys(2);
+        input.generate(U'a', modifiers, KeyboardEventType::Press);
+        return std::string { input.peek() };
+    };
+
+    // Locks alone leave a plain character alone (pre-fix: CSI 27;65;97~ for CapsLock).
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        CHECK(escape(generateLowerA(locks)) == escape("a"sv));
+    }
+
+    // 5 == 1 + Modifier::Control, whichever locks are latched (pre-fix: 69 with CapsLock).
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("Control with lock modifiers {}", locks));
+        CHECK(escape(generateLowerA(Modifiers { Modifier::Control } | locks)) == escape("\033[27;5;97~"sv));
+    }
+
+    // 6 == 1 + Modifier::Control + Modifier::Shift; chord modifiers survive lock stripping.
+    CHECK(escape(generateLowerA(Modifiers { Modifier::Control, Modifier::Shift } | Modifier::CapsLock))
+          == escape("\033[27;6;97~"sv));
+
+    // Shift alone never engages modifyOtherKeys, with or without locks.
+    CHECK(escape(generateLowerA(Modifiers { Modifier::Shift } | Modifier::NumLock)) == escape("a"sv));
+}
+
 // }}}
 
 // {{{ ExtendedKeyboardInputGenerator

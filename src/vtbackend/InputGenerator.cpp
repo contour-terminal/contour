@@ -969,14 +969,17 @@ bool InputGenerator::generate(char32_t characterEvent,
 
     // modifyOtherKeys mode 2: emit CSI 27 ; modifier ; codepoint ~ for modified keys.
     // This takes precedence over the CSI u keyboard protocol but only when no CSI u flags are active.
+    // Lock modifiers are latched toggle state, not part of the chord: they must neither make an
+    // otherwise unmodified key look modified, nor contribute to the encoded modifier parameter.
+    auto const chord = modifiers.without(LockModifiers);
     if (_modifyOtherKeys == 2 && !_keyboardInputGenerator.flags().any()
-        && eventType != KeyboardEventType::Release && modifiers.without(Modifier::Shift).any()
+        && eventType != KeyboardEventType::Release && chord.without(Modifier::Shift).any()
         && characterEvent < 0x110000)
     {
-        auto const mod = makeVirtualTerminalParam(modifiers);
+        auto const mod = makeVirtualTerminalParam(chord);
         append(std::format("\033[27;{};{}~", mod, static_cast<uint32_t>(characterEvent)));
         inputLog()("Sending modifyOtherKeys mode 2 {} \"{}\" {}.",
-                   modifiers,
+                   chord,
                    crispy::escape(unicode::convert_to<char>(characterEvent)),
                    eventType);
         return true;
