@@ -2298,7 +2298,17 @@ std::string TerminalSession::workingDirectory() const
     }
     if (!cwdUrl.empty())
         if (auto path = vtbackend::extractPathFromFileUrl(cwdUrl); !path.empty())
-            return path;
+        {
+            // The path is only usable to CreateProcess() if it exists on THIS machine. An SSH session
+            // advertises its *remote* cwd over OSC 7 (e.g. "file://remotehost/home/user" -> "/home/user"),
+            // which does not exist locally; handing it to a new local tab/split's CreateProcess() fails
+            // and Process::start() throws, and — being reached from a QML `session:` binding write inside
+            // a Qt event handler — that exception aborts the whole process. Only inherit a directory that
+            // actually exists locally; otherwise fall through to the "." sentinel (inherit our own cwd).
+            std::error_code ec;
+            if (std::filesystem::is_directory(fs::path(path), ec))
+                return path;
+        }
 #endif
     return "."s;
 }

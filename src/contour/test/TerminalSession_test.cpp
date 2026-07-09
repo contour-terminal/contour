@@ -111,6 +111,37 @@ TEST_CASE("TerminalSession::workingDirectory falls back to \".\" for a non-proce
     CHECK(session->workingDirectory() == ".");
 }
 
+TEST_CASE("TerminalSession::workingDirectory rejects a cwd that does not exist on the local machine",
+          "[contour][session][cwd]")
+{
+    // Regression: creating a new tab (or split) from an SSH session crashed on Windows. The remote
+    // shell reports its cwd via OSC 7 as a file:// URL carrying a *remote* path (e.g.
+    // "file://remotehost/home/user"). workingDirectory() extracted "/home/user" and handed it to the
+    // new local shell's CreateProcess() as lpCurrentDirectory; that directory does not exist on the
+    // local machine, so CreateProcess() failed and Process::start() threw — the exception then
+    // propagated through the QML `session:` binding write inside a Qt event handler and aborted the
+    // whole process. The accessor must only return a directory that exists locally, falling back to
+    // the "." sentinel otherwise (which CreateProcess treats as "inherit the parent's cwd").
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+
+    // A remote/nonexistent cwd advertised over OSC 7. Use a path that cannot exist locally on any
+    // platform so the check is uniform (the leading component is a bogus host+root).
+    session->terminal().setCurrentWorkingDirectory("file://remotehost/this/path/does/not/exist/anywhere");
+    CHECK(session->workingDirectory() == ".");
+
+    // A cwd that *does* exist locally is honoured — the inheritance must still work for a local shell.
+    auto const local = std::filesystem::temp_directory_path();
+    session->terminal().setCurrentWorkingDirectory(
+        std::format("file://localhost/{}", local.generic_string()));
+    auto const resolved = session->workingDirectory();
+    // On non-Windows the device is a MockPty (not a vtpty::Process), so the accessor returns "."
+    // regardless of OSC 7; the local-existence contract is the Windows behaviour under test. Either
+    // the local path was resolved, or the platform-uniform "." fallback was taken — never a
+    // nonexistent path.
+    CHECK((resolved == "." || std::filesystem::exists(resolved)));
+}
+
 // ============================================================================================
 // Headless input, action, and lifecycle coverage (MockPty-backed, no display, no event loop).
 // ============================================================================================
