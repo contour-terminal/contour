@@ -378,6 +378,37 @@ TEST_CASE("vi.locks: chord modifiers still gate the Vi input handler", "[vi][loc
 
 // }}}
 
+// Leaving visual mode is a terminal-side UI action; the Escape must be consumed, not forwarded to
+// the application. The ESC-character path has always done so, the Key::Escape path had not.
+TEST_CASE("vi.visual: Escape leaves visual mode without sending ESC to the application", "[vi]")
+{
+    SECTION("via Key::Escape")
+    {
+        auto mock = setupEightLineTerminal();
+        mock.sendCharSequence("v");
+        REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Visual);
+
+        mock.resetReplyData();
+        mock.sendKeyEvent(vtbackend::Key::Escape);
+
+        CHECK(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
+        CHECK(mock.replyData().empty());
+    }
+
+    SECTION("via the ESC character")
+    {
+        auto mock = setupEightLineTerminal();
+        mock.sendCharSequence("v");
+        REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Visual);
+
+        mock.resetReplyData();
+        mock.sendCharEvent(U'\033');
+
+        CHECK(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
+        CHECK(mock.replyData().empty());
+    }
+}
+
 // The search editor switches on a packed (modifiers, character) value. Meta sits in the highest
 // chord-modifier bit, so a mask narrower than the shift width aliased Meta+<key> onto the bare key.
 TEST_CASE("vi.search: Meta-modified keys do not alias onto the unmodified key", "[vi]")

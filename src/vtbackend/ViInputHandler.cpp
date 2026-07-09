@@ -380,7 +380,9 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
             {
                 clearPendingInput();
                 setMode(ViMode::Normal);
-                return Handled { false };
+                // Consume it: leaving visual mode is a terminal-side action, so the Escape must not
+                // also reach the application. Mirrors the ESC-character path in sendCharPressEvent().
+                return Handled { true };
             }
             [[fallthrough]];
         case ViMode::Normal:
