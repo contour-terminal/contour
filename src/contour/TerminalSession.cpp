@@ -1267,7 +1267,10 @@ void handleAction(auto const& actions, auto eventType, auto callback)
     }
 }
 
-void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
+void TerminalSession::sendKeyEvent(Key key,
+                                   KeyboardModifiers modifiers,
+                                   KeyboardEventType eventType,
+                                   Timestamp now)
 {
     inputLog()("Key {} event received: {} {}", eventType, modifiers, key);
 
@@ -1290,8 +1293,9 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
 
     if (eventType != KeyboardEventType::Release)
     {
-        if (auto const* actions =
-                config::apply(_config.inputMappings.value().keyMappings, key, modifiers, matchModeFlags()))
+        // Key bindings match on the chord: a latched lock key must not change which shortcut fires.
+        if (auto const* actions = config::apply(
+                _config.inputMappings.value().keyMappings, key, modifiers.chord, matchModeFlags()))
         {
             auto executionCount = 0;
             handleAction(actions, eventType, [&](auto const& actions) {
@@ -1304,8 +1308,11 @@ void TerminalSession::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventTy
     terminal().sendKeyEvent(key, modifiers, eventType, now);
 }
 
-void TerminalSession::sendCharEvent(
-    char32_t value, uint32_t physicalKey, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
+void TerminalSession::sendCharEvent(char32_t value,
+                                    uint32_t physicalKey,
+                                    KeyboardModifiers modifiers,
+                                    KeyboardEventType eventType,
+                                    Timestamp now)
 {
     inputLog()("Character {} event received: {} '{}'",
                eventType,
@@ -1332,8 +1339,8 @@ void TerminalSession::sendCharEvent(
     if (eventType != KeyboardEventType::Release)
     {
         // find if action exist for the given key, and ignore if editing search prompt
-        if (auto const* actions =
-                config::apply(_config.inputMappings.value().charMappings, value, modifiers, matchModeFlags());
+        if (auto const* actions = config::apply(
+                _config.inputMappings.value().charMappings, value, modifiers.chord, matchModeFlags());
             actions && !_terminal.inputHandler().isEditingSearch())
         {
             auto executionCount = 0;

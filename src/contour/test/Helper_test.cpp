@@ -45,10 +45,13 @@ TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[helper
     // not what this basic-mapping case is checking.
     auto const combined =
         makeModifiers(Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier, 0, /*stripAltGr=*/false);
-    CHECK(combined.contains(vtbackend::Modifier::Shift));
-    CHECK(combined.contains(vtbackend::Modifier::Control));
-    CHECK(combined.contains(vtbackend::Modifier::Alt));
-    CHECK_FALSE(combined.contains(vtbackend::Modifier::Super));
+    CHECK(combined.chord.contains(vtbackend::Modifier::Shift));
+    CHECK(combined.chord.contains(vtbackend::Modifier::Control));
+    CHECK(combined.chord.contains(vtbackend::Modifier::Alt));
+    CHECK_FALSE(combined.chord.contains(vtbackend::Modifier::Super));
+
+    // Qt's modifier mask never yields a lock key; those come from the native mask only.
+    CHECK(combined.locks.none());
 }
 
 #if !defined(_WIN32) && !defined(__APPLE__)
@@ -59,18 +62,20 @@ TEST_CASE("makeModifiers derives CapsLock/NumLock from the X11 native modifier m
     constexpr quint32 XcbCapsLockMask = 0x02;
     constexpr quint32 XcbNumLockMask = 0x10;
 
-    CHECK(makeModifiers(Qt::NoModifier, XcbCapsLockMask).contains(vtbackend::Modifier::CapsLock));
-    CHECK(makeModifiers(Qt::NoModifier, XcbNumLockMask).contains(vtbackend::Modifier::NumLock));
+    CHECK(makeModifiers(Qt::NoModifier, XcbCapsLockMask).locks.contains(vtbackend::LockKey::CapsLock));
+    CHECK(makeModifiers(Qt::NoModifier, XcbNumLockMask).locks.contains(vtbackend::LockKey::NumLock));
 
     auto const both = makeModifiers(Qt::ShiftModifier, XcbCapsLockMask | XcbNumLockMask);
-    CHECK(both.contains(vtbackend::Modifier::Shift));
-    CHECK(both.contains(vtbackend::Modifier::CapsLock));
-    CHECK(both.contains(vtbackend::Modifier::NumLock));
+    CHECK(both.chord.contains(vtbackend::Modifier::Shift));
+    CHECK(both.locks.contains(vtbackend::LockKey::CapsLock));
+    CHECK(both.locks.contains(vtbackend::LockKey::NumLock));
 
-    // No native bits set -> no lock modifiers.
+    // A lock key never lands in the chord, so key bindings and Vi mode cannot see it.
+    CHECK(both.chord == vtbackend::Modifiers { vtbackend::Modifier::Shift });
+
+    // No native bits set -> no lock keys.
     auto const none = makeModifiers(Qt::ControlModifier, 0);
-    CHECK_FALSE(none.contains(vtbackend::Modifier::CapsLock));
-    CHECK_FALSE(none.contains(vtbackend::Modifier::NumLock));
+    CHECK(none.locks.none());
 }
 #endif
 

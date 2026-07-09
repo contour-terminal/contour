@@ -17,7 +17,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -3651,19 +3650,6 @@ TEST_CASE("Terminal.Wheel.AltScreen.ScrollMultiplier.repeats_cursor_keys", "[ter
 
 // {{{ #1954: lock modifiers must not reach the terminal's UI decisions
 
-namespace
-{
-
-using vtbackend::Modifiers;
-
-constexpr auto NumLockOnly = Modifiers { vtbackend::Modifier::NumLock };
-constexpr auto CapsLockOnly = Modifiers { vtbackend::Modifier::CapsLock };
-constexpr auto BothLocksOnly = Modifiers { vtbackend::Modifier::CapsLock } | vtbackend::Modifier::NumLock;
-
-constexpr auto LockCombinations = std::array { CapsLockOnly, NumLockOnly, BothLocksOnly };
-
-} // namespace
-
 // Hint-mode label characters were gated on `modifiers.none()`, so with a lock key latched they
 // fell through to the input generator and were typed into the running application instead.
 TEST_CASE("Terminal.hint_mode_accepts_labels_while_lock_keys_are_latched", "[terminal][locks]")
@@ -3745,13 +3731,13 @@ TEST_CASE("Terminal.no_key_encoding_depends_on_lock_modifiers", "[terminal][lock
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
 
-    auto const encodeKey = [&](vtbackend::Key key, Modifiers modifiers) {
+    auto const encodeKey = [&](vtbackend::Key key, vtbackend::KeyboardModifiers modifiers) {
         mock.resetReplyData();
         mock.sendKeyEvent(key, modifiers);
         return std::string { mock.replyData() };
     };
 
-    auto const encodeChar = [&](char32_t ch, Modifiers modifiers) {
+    auto const encodeChar = [&](char32_t ch, vtbackend::KeyboardModifiers modifiers) {
         mock.resetReplyData();
         mock.sendCharEvent(ch, modifiers);
         return std::string { mock.replyData() };
@@ -3764,10 +3750,10 @@ TEST_CASE("Terminal.no_key_encoding_depends_on_lock_modifiers", "[terminal][lock
                                                  static_cast<int>(vtbackend::Key::Numpad_9) + 1))
         {
             auto const key = static_cast<vtbackend::Key>(rawKey);
-            auto const baseline = encodeKey(key, Modifiers {});
+            auto const baseline = encodeKey(key, {});
             for (auto const locks: LockCombinations)
             {
-                INFO(std::format("key {} with lock modifiers {}", key, locks));
+                INFO(std::format("key {} with lock keys {}", key, locks));
                 CHECK(e(encodeKey(key, locks)) == e(baseline));
             }
         }
@@ -3778,10 +3764,10 @@ TEST_CASE("Terminal.no_key_encoding_depends_on_lock_modifiers", "[terminal][lock
         for (auto const codepoint: std::views::iota(0x20, 0x7F))
         {
             auto const ch = static_cast<char32_t>(codepoint);
-            auto const baseline = encodeChar(ch, Modifiers {});
+            auto const baseline = encodeChar(ch, {});
             for (auto const locks: LockCombinations)
             {
-                INFO(std::format("character U+{:04X} with lock modifiers {}", codepoint, locks));
+                INFO(std::format("character U+{:04X} with lock keys {}", codepoint, locks));
                 CHECK(e(encodeChar(ch, locks)) == e(baseline));
             }
         }
@@ -3793,10 +3779,10 @@ TEST_CASE("Terminal.no_key_encoding_depends_on_lock_modifiers", "[terminal][lock
         for (auto const codepoint: std::views::iota(0x20, 0x7F))
         {
             auto const ch = static_cast<char32_t>(codepoint);
-            auto const baseline = encodeChar(ch, Modifiers {});
+            auto const baseline = encodeChar(ch, {});
             for (auto const locks: LockCombinations)
             {
-                INFO(std::format("character U+{:04X} with lock modifiers {}", codepoint, locks));
+                INFO(std::format("character U+{:04X} with lock keys {}", codepoint, locks));
                 CHECK(e(encodeChar(ch, locks)) == e(baseline));
             }
         }
@@ -3814,7 +3800,7 @@ TEST_CASE("Terminal.kitty_keyboard_protocol_reports_lock_modifiers", "[terminal]
     mock.terminal.flushInput();
     mock.resetReplyData();
 
-    // Key code 97 ('a'), modifier 65 == 1 + Modifier::CapsLock.
+    // Key code 97 (lowercase a), modifier 65 == 1 + LockKey::CapsLock.
     mock.terminal.sendCharEvent(
         U'a', U'a', CapsLockOnly, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
 

@@ -36,7 +36,7 @@ class MockTerm: public Terminal::NullEvents
     void writeToStdin(std::string_view text) { mockPty().stdinBuffer() += text; }
 
     bool sendCharEvent(char32_t ch,
-                       Modifiers modifiers = Modifiers {},
+                       KeyboardModifiers modifiers = KeyboardModifiers {},
                        Terminal::Timestamp now = std::chrono::steady_clock::now())
     {
         // Simulate physical key here, as we don't have a real keyboard.
@@ -51,7 +51,7 @@ class MockTerm: public Terminal::NullEvents
     /// Sends a full press/release pair for @p key with @p modifiers held.
     /// @return whether the press event was handled by the terminal.
     bool sendKeyEvent(Key key,
-                      Modifiers modifiers = Modifiers {},
+                      KeyboardModifiers modifiers = KeyboardModifiers {},
                       Terminal::Timestamp now = std::chrono::steady_clock::now())
     {
         if (!terminal.sendKeyEvent(key, modifiers, KeyboardEventType::Press, now))
@@ -62,7 +62,7 @@ class MockTerm: public Terminal::NullEvents
 
     // Convenience method to type into stdin a sequence of characters.
     void sendCharSequence(std::string_view sequence,
-                          Modifiers modifiers = Modifiers {},
+                          KeyboardModifiers modifiers = KeyboardModifiers {},
                           Terminal::Timestamp now = std::chrono::steady_clock::now())
     {
         auto const codepoints = unicode::convert_to<char32_t>(sequence);

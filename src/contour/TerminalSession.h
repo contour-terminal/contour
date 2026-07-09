@@ -358,12 +358,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
     void sendKeyEvent(vtbackend::Key key,
-                      vtbackend::Modifiers modifiers,
+                      vtbackend::KeyboardModifiers modifiers,
                       vtbackend::KeyboardEventType eventType,
                       Timestamp now);
     void sendCharEvent(char32_t value,
                        uint32_t physicalKey,
-                       vtbackend::Modifiers modifiers,
+                       vtbackend::KeyboardModifiers modifiers,
                        vtbackend::KeyboardEventType eventType,
                        Timestamp now);
 

@@ -11,6 +11,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -18,6 +19,17 @@
 
 namespace vtbackend::test
 {
+
+constexpr auto CapsLockOnly = LockKeys { LockKey::CapsLock };
+constexpr auto NumLockOnly = LockKeys { LockKey::NumLock };
+constexpr auto BothLocks = LockKeys { LockKey::CapsLock } | LockKey::NumLock;
+
+/// Every combination of latched lock keys, including none at all.
+///
+/// Keyboard input must encode identically across all of these, except in the three places that
+/// report the lock state on purpose: the Kitty keyboard protocol, Win32 input mode, and the numpad
+/// under application-keypad mode.
+constexpr auto LockCombinations = std::array { LockKeys {}, CapsLockOnly, NumLockOnly, BothLocks };
 
 constexpr LineOffset operator""_lineOffset(unsigned long long value) noexcept
 {

@@ -9,6 +9,7 @@
 
 #include <libunicode/convert.h>
 
+#include <cassert>
 #include <variant>
 
 using std::pair;
@@ -30,12 +31,6 @@ namespace vtbackend
 
 namespace
 {
-    /// Number of low bits of Modifiers that carry chord modifiers (Shift, Alt, Control, Super,
-    /// Hyper, Meta). The lock modifiers live above these and are stripped before they ever reach
-    /// this handler, see Terminal::sendKeyEvent().
-    constexpr auto ChordModifierBits = 6u;
-    constexpr auto ChordModifierMask = (1u << ChordModifierBits) - 1u;
-
     struct InputMatch
     {
         // ViMode mode; // TODO: ideally we also would like to match on input Mode
@@ -43,11 +38,15 @@ namespace
         char32_t ch;
 
         /// Packs modifiers and character into a single value, so that chords can be switch()ed on.
-        /// Shift width and mask are derived from one another: a mask narrower than the shift would
-        /// silently drop the top chord modifiers and alias them onto the unmodified key.
+        /// No masking is needed: Modifiers is chord-only, ChordModifierBitWidth is derived from the
+        /// chord-modifier table, and lock keys are a distinct type that cannot reach this handler. A
+        /// modifier packed above the shift would alias onto the unmodified key -- that is how Meta
+        /// silently matched a bare Backspace before, so assert the packing is lossless rather than
+        /// trust that every Modifier enumerator made it into the table.
         constexpr operator uint32_t() const noexcept
         {
-            return (uint32_t(ch) << ChordModifierBits) | (uint32_t(modifiers.value()) & ChordModifierMask);
+            assert(AllChordModifiers.contains(modifiers));
+            return (uint32_t(ch) << ChordModifierBitWidth) | uint32_t(modifiers.value());
         }
     };
 

@@ -7,7 +7,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
 #include <format>
 
 // Checklist
@@ -232,17 +231,17 @@ namespace
 using vtbackend::Modifier;
 using vtbackend::Modifiers;
 
-constexpr auto CapsLock = Modifiers { Modifier::CapsLock };
-constexpr auto NumLock = Modifiers { Modifier::NumLock };
-constexpr auto BothLocks = Modifiers { Modifier::CapsLock } | Modifier::NumLock;
-
-/// Every lock combination the Vi input handler must be blind to.
-constexpr auto LockCombinations = std::array { CapsLock, NumLock, BothLocks };
-
 /// Eight three-character lines, so that vertical motions and a [count] of 5 stay on-screen.
 auto setupEightLineTerminal()
 {
-    return setupMockTerminal("abc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc",
+    return setupMockTerminal("abc\r\n"
+                             "abc\r\n"
+                             "abc\r\n"
+                             "abc\r\n"
+                             "abc\r\n"
+                             "abc\r\n"
+                             "abc\r\n"
+                             "abc",
                              vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
 }
 
@@ -336,13 +335,13 @@ TEST_CASE("vi.locks: [count] prefix is parsed while lock keys are latched", "[vi
     }
 }
 
-// The Qt frontend infers Modifier::NumLock for every keypad digit (Qt only reports Key_0..9 with
+// The Qt frontend infers LockKey::NumLock for every keypad digit (Qt only reports Key_0..9 with
 // KeypadModifier while NumLock is on), so numpad digits could never serve as a [count] prefix.
 TEST_CASE("vi.locks: numpad digits serve as a [count] prefix", "[vi][locks]")
 {
     auto mock = setupEightLineTerminal();
 
-    mock.sendKeyEvent(vtbackend::Key::Numpad_5, NumLock);
+    mock.sendKeyEvent(vtbackend::Key::Numpad_5, NumLockOnly);
     mock.sendCharSequence("j");
 
     CHECK(mock.terminal.normalModeCursorPosition() == 5_lineOffset + 0_columnOffset);
