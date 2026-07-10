@@ -293,20 +293,21 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
 
     auto const anyModifiers = vtbackend::Modifiers { vtbackend::Modifier::None };
 
-    SECTION("keypress honors autoScrollOnUpdate=false")
+    SECTION("keypress always scrolls to bottom, even when autoScrollOnUpdate=false")
     {
+        // User input must reveal the cursor regardless of the output-scroll setting: sending a key
+        // snaps the viewport back to the bottom even though autoScrollOnUpdate (which governs
+        // output-driven scrolling only) is disabled.
         terminal.settings().autoScrollOnUpdate = false;
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
-        auto const offsetBefore = terminal.viewport().scrollOffset();
 
         terminal.sendKeyEvent(vtbackend::Key::Enter,
                               anyModifiers,
                               vtbackend::KeyboardEventType::Press,
                               std::chrono::steady_clock::now());
 
-        CHECK(terminal.viewport().scrolled());
-        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+        CHECK(!terminal.viewport().scrolled());
     }
 
     SECTION("keypress honors autoScrollOnUpdate=true (default)")
@@ -323,18 +324,17 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         CHECK(!terminal.viewport().scrolled());
     }
 
-    SECTION("char input honors autoScrollOnUpdate=false")
+    SECTION("char input always scrolls to bottom, even when autoScrollOnUpdate=false")
     {
+        // Same input-independence as the keypress case above, exercised through the char path.
         terminal.settings().autoScrollOnUpdate = false;
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
-        auto const offsetBefore = terminal.viewport().scrollOffset();
 
         terminal.sendCharEvent(
             U'a', 0, anyModifiers, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
 
-        CHECK(terminal.viewport().scrolled());
-        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+        CHECK(!terminal.viewport().scrolled());
     }
 
     SECTION("char input honors autoScrollOnUpdate=true")

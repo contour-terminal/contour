@@ -1500,6 +1500,13 @@ class Terminal
     /// target buffer but pixel/offset state still needs to be reset).
     void forceAutoScrollToBottomIfEnabled();
 
+    /// Scrolls the viewport to the bottom in response to *user input* (a key or character
+    /// forwarded to the application). Intentionally independent of
+    /// `settings().autoScrollOnUpdate`, which gates only *output*-driven scrolling: typing must
+    /// always reveal the cursor and the resulting output regardless of that setting. Honors the
+    /// viewport's own alt-screen guard (`scrollToBottom()` no-ops when scrolling is disabled).
+    void scrollToBottomOnInput();
+
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
