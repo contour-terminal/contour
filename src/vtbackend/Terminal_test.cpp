@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/CellUtil.h>
+#include <vtbackend/HintModeHandler.h>
 #include <vtbackend/MockTerm.h>
 #include <vtbackend/Terminal.h>
 #include <vtbackend/primitives.h>
@@ -19,6 +20,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -3642,6 +3644,200 @@ TEST_CASE("Terminal.Wheel.AltScreen.ScrollMultiplier.repeats_cursor_keys", "[ter
     CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
           == Handled { true });
     CHECK(e(mock.replyData()) == e("\033[B\033[B\033[B"));
+}
+
+// }}}
+
+// {{{ #1954: lock modifiers must not reach the terminal's UI decisions
+
+// Hint-mode label characters were gated on `modifiers.none()`, so with a lock key latched they
+// fell through to the input generator and were typed into the running application instead.
+TEST_CASE("Terminal.hint_mode_accepts_labels_while_lock_keys_are_latched", "[terminal][locks]")
+{
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) } };
+        mock.writeToScreen("visit https://example.com now");
+
+        mock.terminal.activateHintMode(vtbackend::HintModeHandler::builtinPatterns(),
+                                       vtbackend::HintAction::Copy);
+        REQUIRE(mock.terminal.isHintModeActive());
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+
+        auto const label = mock.terminal.hintMatches().at(0).label;
+        REQUIRE(label.size() == 1);
+        mock.resetReplyData();
+
+        mock.sendCharEvent(static_cast<char32_t>(label[0]), locks);
+
+        // The label character is consumed by hint mode, never forwarded to the application.
+        CHECK(mock.replyData().empty());
+        CHECK(!mock.terminal.isHintModeActive());
+        CHECK(mock.clipboardData == "https://example.com");
+    }
+}
+
+// DECUDK lookup was gated on `modifiers.none()`, so a latched lock key silently disabled every
+// user-defined key.
+TEST_CASE("Terminal.DECUDK_fires_while_lock_keys_are_latched", "[terminal][locks]")
+{
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+        // Program F6 (UDK id 17) with "Hello" (hex: 48656C6C6F).
+        mock.writeToScreen("\033P0;1|17/48656C6C6F\033\\");
+        mock.terminal.flushInput();
+        REQUIRE(mock.terminal.udkString(17).has_value());
+        mock.resetReplyData();
+
+        mock.sendKeyEvent(vtbackend::Key::F6, locks);
+
+        CHECK(e(mock.replyData()) == e("Hello"));
+    }
+}
+
+// The load-bearing counterpart: lock state must still reach the input generator, which reports it
+// to the application on purpose. selectNumpad() emits the digit only when it can see NumLock;
+// without it, application-keypad mode would emit CSI E instead.
+TEST_CASE("Terminal.numpad_digit_keeps_NumLock_for_the_input_generator", "[terminal][locks]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.terminal.setApplicationkeypadMode(true);
+    mock.resetReplyData();
+
+    mock.sendKeyEvent(vtbackend::Key::Numpad_5, NumLockOnly);
+
+    CHECK(e(mock.replyData()) == e("5"));
+}
+
+// The recurrence firewall.
+//
+// In the default configuration -- legacy keyboard protocol, no Win32 input mode, modifyOtherKeys
+// off, numeric keypad -- a latched lock key is invisible to the application. Nothing a user can
+// type may encode differently just because CapsLock or NumLock happens to be on.
+//
+// This sweep fails the moment any consumer, present or future and wherever it lives, lets a lock
+// bit reach chord logic. It would have caught every bug in the #1884 / #1901 / #1954 family.
+//
+// The three places where lock state legitimately *does* change the encoding are covered by their
+// own tests, so they are deliberately outside this invariant:
+//   - the numpad under application-keypad mode (see the test directly above, and InputGenerator.DECNKM)
+//   - the Kitty keyboard protocol (see the test directly below)
+//   - Win32 input mode (see buildWin32ControlKeyState)
+TEST_CASE("Terminal.no_key_encoding_depends_on_lock_modifiers", "[terminal][locks]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+    auto const encodeKey = [&](vtbackend::Key key, vtbackend::KeyboardModifiers modifiers) {
+        mock.resetReplyData();
+        mock.sendKeyEvent(key, modifiers);
+        return std::string { mock.replyData() };
+    };
+
+    auto const encodeChar = [&](char32_t ch, vtbackend::KeyboardModifiers modifiers) {
+        mock.resetReplyData();
+        mock.sendCharEvent(ch, modifiers);
+        return std::string { mock.replyData() };
+    };
+
+    SECTION("every key")
+    {
+        // The Key enumerators run contiguously from F1 to Numpad_9.
+        for (auto const rawKey: std::views::iota(static_cast<int>(vtbackend::Key::F1),
+                                                 static_cast<int>(vtbackend::Key::Numpad_9) + 1))
+        {
+            auto const key = static_cast<vtbackend::Key>(rawKey);
+            auto const baseline = encodeKey(key, {});
+            for (auto const locks: LockCombinations)
+            {
+                INFO(std::format("key {} with lock keys {}", key, locks));
+                CHECK(e(encodeKey(key, locks)) == e(baseline));
+            }
+        }
+    }
+
+    SECTION("every printable character")
+    {
+        for (auto const codepoint: std::views::iota(0x20, 0x7F))
+        {
+            auto const ch = static_cast<char32_t>(codepoint);
+            auto const baseline = encodeChar(ch, {});
+            for (auto const locks: LockCombinations)
+            {
+                INFO(std::format("character U+{:04X} with lock keys {}", codepoint, locks));
+                CHECK(e(encodeChar(ch, locks)) == e(baseline));
+            }
+        }
+    }
+
+    SECTION("every printable character under modifyOtherKeys mode 2")
+    {
+        mock.terminal.setModifyOtherKeys(2);
+        for (auto const codepoint: std::views::iota(0x20, 0x7F))
+        {
+            auto const ch = static_cast<char32_t>(codepoint);
+            auto const baseline = encodeChar(ch, {});
+            for (auto const locks: LockCombinations)
+            {
+                INFO(std::format("character U+{:04X} with lock keys {}", codepoint, locks));
+                CHECK(e(encodeChar(ch, locks)) == e(baseline));
+            }
+        }
+    }
+}
+
+// The positive counterpart to the sweep above: under the Kitty keyboard protocol the lock state is
+// reported to the application on purpose, so it must survive all the way to the encoder.
+TEST_CASE("Terminal.kitty_keyboard_protocol_reports_lock_modifiers", "[terminal][locks]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+    // CSI > 9 u: DisambiguateEscapeCodes (1) | ReportAllKeysAsEscapeCodes (8).
+    mock.writeToScreen("\033[>9u");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+
+    // Key code 97 (lowercase a), modifier 65 == 1 + LockKey::CapsLock.
+    mock.terminal.sendCharEvent(
+        U'a', U'a', CapsLockOnly, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
+
+    CHECK(e(mock.replyData()) == e("\033[97;65u"));
+}
+
+// The positive counterpart for Win32 input mode (DEC private mode 9001, which ConPTY enables on
+// Windows). ConPTY forwards the record's Unicode-char field verbatim and cannot reconstruct it from
+// the virtual-key code, so character-bearing keys that lack a receiver-side VK fallback -- Escape
+// and the numpad keys -- must carry their character or applications such as neovim never see them.
+// Regression test for "Escape and numpad keys dead in neovim on Windows".
+TEST_CASE("Terminal.win32_input_mode_reports_unicode_for_escape_and_numpad", "[terminal][locks]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+    // CSI ? 9001 h enables Win32 input mode, exactly as ConPTY does on Windows.
+    mock.writeToScreen("\033[?9001h");
+    mock.terminal.flushInput();
+
+    auto const now = std::chrono::steady_clock::now();
+
+    SECTION("Escape carries its Unicode char 0x1B")
+    {
+        mock.resetReplyData();
+        mock.terminal.sendKeyEvent(vtbackend::Key::Escape, {}, vtbackend::KeyboardEventType::Press, now);
+        // CSI Vk ; Sc ; Uc ; Kd ; Cs ; Rc _  -- VK_ESCAPE=27, Uc=ESC=27.
+        CHECK(e(mock.replyData()) == e("\033[27;0;27;1;0;1_"));
+    }
+
+    SECTION("numpad digit carries its Unicode char while NumLock is latched")
+    {
+        mock.resetReplyData();
+        mock.terminal.sendKeyEvent(
+            vtbackend::Key::Numpad_5, NumLockOnly, vtbackend::KeyboardEventType::Press, now);
+        // VK_NUMPAD5=101, Uc='5'=53, CS=NUMLOCK_ON=32.
+        CHECK(e(mock.replyData()) == e("\033[101;0;53;1;32;1_"));
+    }
 }
 
 // }}}

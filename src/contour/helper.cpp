@@ -90,24 +90,27 @@ namespace
     }
 } // namespace
 
-vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
-                                   quint32 nativeModifiers,
-                                   [[maybe_unused]] bool stripAltGr)
+vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
+                                           quint32 nativeModifiers,
+                                           [[maybe_unused]] bool stripAltGr)
 {
+    using vtbackend::LockKey;
     using vtbackend::Modifier;
     using vtbackend::Modifiers;
 
-    Modifiers modifiers {};
+    Modifiers chord {};
 
     // Standard modifiers from Qt
     if (qtModifiers & Qt::AltModifier)
-        modifiers |= Modifier::Alt;
+        chord |= Modifier::Alt;
     if (qtModifiers & Qt::ShiftModifier)
-        modifiers |= Modifier::Shift;
+        chord |= Modifier::Shift;
     if (qtModifiers & Qt::ControlModifier)
-        modifiers |= Modifier::Control;
+        chord |= Modifier::Control;
     if (qtModifiers & Qt::MetaModifier)
-        modifiers |= Modifier::Super;
+        chord |= Modifier::Super;
+
+    vtbackend::LockKeys locks {};
 
 #if defined(_WIN32)
     // Windows: Handle AltGr (Ctrl+Alt combination).
@@ -116,8 +119,8 @@ vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
     if (stripAltGr)
     {
         auto constexpr AltGrEquivalent = Modifiers { Modifier::Alt, Modifier::Control };
-        if (modifiers.contains(AltGrEquivalent))
-            modifiers = modifiers.without(AltGrEquivalent);
+        if (chord.contains(AltGrEquivalent))
+            chord = chord.without(AltGrEquivalent);
     }
 
     // Windows: CapsLock/NumLock are not part of Qt's native modifier mask, so the Qt event boundary
@@ -126,15 +129,15 @@ vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
     // mapping pure and testable, matching the X11/macOS branches which also read lock state from
     // nativeModifiers.
     if ((nativeModifiers & Win32CapsLockBit) != 0)
-        modifiers |= Modifier::CapsLock;
+        locks |= LockKey::CapsLock;
     if ((nativeModifiers & Win32NumLockBit) != 0)
-        modifiers |= Modifier::NumLock;
+        locks |= LockKey::NumLock;
 
 #elif defined(__APPLE__)
     // macOS: NSEventModifierFlagCapsLock = 0x00010000
     constexpr quint32 MacCapsLock = 0x00010000;
     if (nativeModifiers & MacCapsLock)
-        modifiers |= Modifier::CapsLock;
+        locks |= LockKey::CapsLock;
     // NumLock doesn't exist on standard macOS keyboards
 
 #else
@@ -145,12 +148,12 @@ vtbackend::Modifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
     constexpr quint32 XcbNumLock = 0x10;
 
     if (nativeModifiers & XcbCapsLock)
-        modifiers |= Modifier::CapsLock;
+        locks |= LockKey::CapsLock;
     if (nativeModifiers & XcbNumLock)
-        modifiers |= Modifier::NumLock;
+        locks |= LockKey::NumLock;
 #endif
 
-    return modifiers;
+    return { chord, locks };
 }
 
 namespace
@@ -528,7 +531,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
             case Qt::Key_8:
             case Qt::Key_9:
                 mappedKey = static_cast<Key>(static_cast<int>(Key::Numpad_0) + (key - Qt::Key_0));
-                inferredModifiers |= Modifier::NumLock;
+                inferredModifiers.locks |= vtbackend::LockKey::NumLock;
                 break;
             // Operator and Enter keys have the same Qt key code regardless of NumLock state,
             // but produce text when NumLock is active.
@@ -544,7 +547,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         {
             // For operator/Enter keys, infer NumLock from non-empty text
             if (!event->text().isEmpty())
-                inferredModifiers |= Modifier::NumLock;
+                inferredModifiers.locks |= vtbackend::LockKey::NumLock;
             session.sendKeyEvent(*mappedKey, inferredModifiers, eventType, now);
             return true;
         }
@@ -583,9 +586,12 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
 #if defined(__APPLE__)
     if (0x20 <= key && key < 0x80
-        && (modifiers.test(Modifier::Alt) && session.profile().optionKeyAsAlt.value()))
+        && (modifiers.chord.test(Modifier::Alt) && session.profile().optionKeyAsAlt.value()))
     {
-        bool const shiftPressed = modifiers.test(Modifier::Shift) ^ modifiers.test(Modifier::CapsLock);
+        // CapsLock inverts the effect of Shift on letter case, which is the one thing a lock key
+        // legitimately decides here.
+        bool const shiftPressed =
+            modifiers.chord.test(Modifier::Shift) ^ modifiers.locks.test(vtbackend::LockKey::CapsLock);
         auto const ch = static_cast<char32_t>(shiftPressed ? std::toupper(key) : std::tolower(key));
         session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
         event->accept();
@@ -593,7 +599,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     }
 #endif
 
-    if (0x20 <= key && key < 0x80 && (modifiers & Modifier::Control))
+    if (0x20 <= key && key < 0x80 && modifiers.chord.test(Modifier::Control))
     {
         session.sendCharEvent(static_cast<char32_t>(key), physicalKey, modifiers, eventType, now);
         event->accept();
@@ -636,7 +642,9 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 
     using vtbackend::Modifier;
 
-    auto const modifiers = makeModifiers(event->modifiers());
+    // Mouse events carry no lock state: makeModifiers() derives it from the native modifier mask,
+    // which Qt only populates for key events. Take the chord and be explicit about it.
+    auto const modifiers = makeModifiers(event->modifiers()).chord;
 
     auto const pixelPosition =
         makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale());
@@ -681,7 +689,7 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
     if (session.display() == nullptr)
         return;
     session.sendMousePressEvent(
-        makeModifiers(event->modifiers()),
+        makeModifiers(event->modifiers()).chord,
         makeMouseButton(event->button()),
         makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
     event->accept();
@@ -695,7 +703,7 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
     if (session.display() == nullptr)
         return;
     session.sendMouseReleaseEvent(
-        makeModifiers(event->modifiers()),
+        makeModifiers(event->modifiers()).chord,
         makeMouseButton(event->button()),
         makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
     event->accept();
@@ -709,7 +717,7 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
     if (session.display() == nullptr)
         return;
     session.sendMouseMoveEvent(
-        makeModifiers(event->modifiers()),
+        makeModifiers(event->modifiers()).chord,
         makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
         makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
     event->accept();
@@ -724,7 +732,7 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
         return;
     auto const position = event->position().toPoint();
     session.sendMouseMoveEvent(
-        makeModifiers(event->modifiers()),
+        makeModifiers(event->modifiers()).chord,
         makeMouseCellLocation(position.x(), position.y(), session),
         makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
     event->accept();

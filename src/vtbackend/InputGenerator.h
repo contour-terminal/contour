@@ -10,6 +10,8 @@
 #include <libunicode/convert.h>
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <format>
 #include <optional>
 #include <set>
@@ -36,6 +38,11 @@ enum class MouseProtocol : uint16_t
 };
 
 // {{{ Modifier
+/// Chord modifiers — the keys the user is physically holding down while another key is pressed.
+///
+/// These, and only these, take part in key-chord matching. The latched lock toggles live in
+/// LockKey, which is deliberately a distinct type: conflating the two is what repeatedly broke
+/// keyboard input (see #1884, #1901, #1954).
 enum Modifier : uint8_t
 {
     // NB: These values MUST match the values of the corresponding
@@ -47,15 +54,109 @@ enum Modifier : uint8_t
     Super = 8,
     Hyper = 16,
     Meta = 32,
-    CapsLock = 64,
-    NumLock = 128,
 };
 
 using Modifiers = crispy::flags<Modifier>;
 
-/// Lock modifiers (CapsLock, NumLock) — stripped when matching key bindings and during legacy input
-/// generation.
-constexpr auto LockModifiers = Modifiers { Modifier::CapsLock } | Modifiers { Modifier::NumLock };
+namespace detail
+{
+    /// One row of ChordModifierTable.
+    struct ChordModifierRow
+    {
+        /// The chord modifier this row describes.
+        Modifier modifier;
+        /// The name std::formatter<Modifier> prints for it.
+        std::string_view name;
+    };
+} // namespace detail
+
+/// The chord modifiers, in ascending bit order, each with its display name.
+///
+/// This table is the single source of truth for the chord-modifier set: AllChordModifiers,
+/// ChordModifierBitWidth and std::formatter<Modifier> are all derived from it rather than
+/// restating it. The Modifier enumerators themselves are not derived, because their values are
+/// dictated by the CSI u modifier mask, which closes the set at six bits -- 64 and 128 are the
+/// lock keys below.
+constexpr auto ChordModifierTable = std::array {
+    detail::ChordModifierRow { .modifier = Modifier::Shift, .name = "Shift" },
+    detail::ChordModifierRow { .modifier = Modifier::Alt, .name = "Alt" },
+    detail::ChordModifierRow { .modifier = Modifier::Control, .name = "Control" },
+    detail::ChordModifierRow { .modifier = Modifier::Super, .name = "Super" },
+    detail::ChordModifierRow { .modifier = Modifier::Hyper, .name = "Hyper" },
+    detail::ChordModifierRow { .modifier = Modifier::Meta, .name = "Meta" },
+};
+
+/// Every chord modifier, folded from ChordModifierTable.
+constexpr auto AllChordModifiers = [] {
+    auto result = Modifiers {};
+    for (auto const& row: ChordModifierTable)
+        result.enable(row.modifier);
+    return result;
+}();
+
+/// Number of low bits the chord modifiers occupy, derived from ChordModifierTable. Consumers that
+/// pack a chord next to other data shift by this width, see ViInputHandler's InputMatch.
+constexpr auto ChordModifierBitWidth = static_cast<unsigned>(std::bit_width(AllChordModifiers.value()));
+
+static_assert(static_cast<unsigned>(AllChordModifiers.value()) == (1u << ChordModifierBitWidth) - 1u,
+              "the chord modifiers must occupy a contiguous run of low bits, so that a chord packs "
+              "losslessly into the low ChordModifierBitWidth bits of a larger value");
+
+/// Latched keyboard lock toggles.
+///
+/// A lock is state, not a chord: it says something about the keyboard, not about the key being
+/// pressed. Only the input generator may observe it, in order to report it to the application
+/// (Kitty CSI u, Win32 dwControlKeyState) or to select the numpad's digit function.
+///
+/// The values continue the CSIu modifier bit positions of Modifier, so that the Kitty encoder can
+/// simply add the two together.
+enum LockKey : uint8_t
+{
+    CapsLock = 64,
+    NumLock = 128,
+};
+
+using LockKeys = crispy::flags<LockKey>;
+
+static_assert(static_cast<unsigned>(LockKey::CapsLock) == (1u << ChordModifierBitWidth)
+                  && static_cast<unsigned>(LockKey::NumLock) == (2u << ChordModifierBitWidth),
+              "the lock keys must begin immediately above the chord modifiers, so that the Kitty "
+              "encoder may add the chord and lock values rather than OR them");
+
+/// The complete modifier state of a keyboard event: the chord being held, plus the latched locks.
+///
+/// The conversion from Modifiers is implicit and one-way. A chord widens to a full keyboard
+/// modifier state (with no locks latched) wherever one is expected, but reaching the chord back out
+/// requires naming @c chord explicitly. Lock bits therefore cannot reach chord logic by accident.
+struct KeyboardModifiers
+{
+    Modifiers chord {}; ///< Modifiers held down (Shift, Alt, Control, Super, Hyper, Meta).
+    LockKeys locks {};  ///< Latched lock toggles (CapsLock, NumLock).
+
+    constexpr KeyboardModifiers() noexcept = default;
+    constexpr KeyboardModifiers(Modifier modifier) noexcept: chord { modifier } {}
+    constexpr KeyboardModifiers(Modifiers chordModifiers) noexcept: chord { chordModifiers } {}
+    constexpr KeyboardModifiers(LockKey lockKey) noexcept: locks { lockKey } {}
+    constexpr KeyboardModifiers(LockKeys lockKeys) noexcept: locks { lockKeys } {}
+    constexpr KeyboardModifiers(Modifiers chordModifiers, LockKeys lockKeys) noexcept:
+        chord { chordModifiers }, locks { lockKeys }
+    {
+    }
+
+    /// @returns a copy with @p modifier added to the chord; the lock state is carried over.
+    [[nodiscard]] constexpr KeyboardModifiers with(Modifier modifier) const noexcept
+    {
+        return { chord.with(modifier), locks };
+    }
+
+    /// @returns a copy with @p modifier removed from the chord; the lock state is carried over.
+    [[nodiscard]] constexpr KeyboardModifiers without(Modifier modifier) const noexcept
+    {
+        return { chord.without(modifier), locks };
+    }
+
+    [[nodiscard]] constexpr bool operator==(KeyboardModifiers const&) const noexcept = default;
+};
 
 /// @returns CSI parameter for given function key modifier
 constexpr size_t makeVirtualTerminalParam(Modifiers modifier) noexcept
@@ -299,9 +400,9 @@ class KeyboardInputGenerator
 
     virtual bool generateChar(char32_t characterEvent,
                               uint32_t physicalKey,
-                              Modifiers modifier,
+                              KeyboardModifiers modifiers,
                               KeyboardEventType eventType) = 0;
-    virtual bool generateKey(Key key, Modifiers modifier, KeyboardEventType eventType) = 0;
+    virtual bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) = 0;
 };
 
 class StandardKeyboardInputGenerator: public KeyboardInputGenerator
@@ -309,9 +410,9 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
   public:
     bool generateChar(char32_t characterEvent,
                       uint32_t physicalKey,
-                      Modifiers modifier,
+                      KeyboardModifiers modifiers,
                       KeyboardEventType eventType) override;
-    bool generateKey(Key key, Modifiers modifier, KeyboardEventType eventType) override;
+    bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) override;
 
     [[nodiscard]] bool normalCursorKeys() const noexcept { return _cursorKeysMode == KeyMode::Normal; }
     [[nodiscard]] bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
@@ -362,8 +463,12 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
         std::string_view appKeypad {};
     };
 
-    [[nodiscard]] std::string selectNumpad(Modifiers modifier, FunctionKeyMapping mapping) const;
-    [[nodiscard]] std::string select(Modifiers modifier, FunctionKeyMapping mapping) const;
+    /// Selects the encoding of a keypad key. This is the only place the lock state is consulted:
+    /// NumLock selects the digit over the navigation function.
+    [[nodiscard]] std::string selectNumpad(KeyboardModifiers modifiers, FunctionKeyMapping mapping) const;
+
+    /// Selects the encoding of a function or navigation key from its chord modifiers alone.
+    [[nodiscard]] std::string select(Modifiers chord, FunctionKeyMapping mapping) const;
     void append(char ch) { _pendingSequence += ch; }
     void append(std::string_view sequence) { _pendingSequence += sequence; }
 
@@ -441,15 +546,15 @@ class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerato
 
     bool generateChar(char32_t characterEvent,
                       uint32_t physicalKey,
-                      Modifiers modifier,
+                      KeyboardModifiers modifiers,
                       KeyboardEventType eventType) override;
-    bool generateKey(Key key, Modifiers modifier, KeyboardEventType eventType) override;
+    bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) override;
 
     // }}}
 
   private:
-    [[nodiscard]] std::string encodeCharacter(char32_t ch, uint32_t physicalKey, Modifiers modifier) const;
-    [[nodiscard]] std::string encodeModifiers(Modifiers modifier, KeyboardEventType eventType) const;
+    [[nodiscard]] std::string encodeCharacter(char32_t ch, uint32_t physicalKey, Modifiers chord) const;
+    [[nodiscard]] std::string encodeModifiers(KeyboardModifiers modifiers, KeyboardEventType eventType) const;
 
     std::array<KeyboardEventFlags, MaxStackDepth> _flags = { KeyboardEventFlag::None };
     size_t _currentStackTop = 0;
@@ -540,15 +645,15 @@ class InputGenerator
 
     bool generate(char32_t characterEvent,
                   uint32_t physicalKey,
-                  Modifiers modifier,
+                  KeyboardModifiers modifiers,
                   KeyboardEventType eventType);
-    bool generate(char32_t characterEvent, Modifiers modifier, KeyboardEventType eventType)
+    bool generate(char32_t characterEvent, KeyboardModifiers modifiers, KeyboardEventType eventType)
     {
         // Simulate physical key here.
         auto const physicalKey = static_cast<uint32_t>(characterEvent);
-        return generate(characterEvent, physicalKey, modifier, eventType);
+        return generate(characterEvent, physicalKey, modifiers, eventType);
     }
-    bool generate(Key key, Modifiers modifier, KeyboardEventType eventType);
+    bool generate(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType);
     void generatePaste(std::string_view const& text);
     bool generateMousePress(Modifiers modifier,
                             MouseButton button,
@@ -635,11 +740,25 @@ class InputGenerator
 
     bool generateWin32KeyInput(uint32_t virtualKeyCode,
                                char32_t unicodeChar,
-                               Modifiers modifiers,
+                               KeyboardModifiers modifiers,
                                KeyboardEventType eventType,
                                Win32ControlKeyState extraControlKeyState = {});
-    static constexpr Win32ControlKeyState buildWin32ControlKeyState(Modifiers modifiers);
+    static constexpr Win32ControlKeyState buildWin32ControlKeyState(KeyboardModifiers modifiers);
     static constexpr uint32_t keyToVirtualKeyCode(Key key);
+
+    /// Returns the Unicode character a key carries in a Windows @c KEY_EVENT_RECORD, or 0 for keys
+    /// that have no associated character (navigation, function and modifier keys).
+    ///
+    /// win32 input mode (DEC private mode 9001) transports the OS key record verbatim; ConPTY
+    /// forwards the Unicode-char field as-is and never reconstructs it from the virtual-key code. A
+    /// character-bearing key (Escape, the numpad keys) must therefore report its character here, or
+    /// applications reading the record (e.g. neovim) receive nothing for that key.
+    ///
+    /// @param key       The key that was pressed.
+    /// @param modifiers The active keyboard modifiers; @c LockKey::NumLock selects the numpad's
+    ///                  digit/decimal character function, mirroring the OS @c ToUnicodeEx behaviour.
+    /// @return The associated Unicode character, or 0 when the key carries none.
+    [[nodiscard]] static constexpr char32_t keyToUnicodeChar(Key key, KeyboardModifiers modifiers) noexcept;
 
     inline bool append(std::string_view sequence);
     inline bool append(char asciiChar);
@@ -740,20 +859,50 @@ struct std::formatter<vtbackend::Modifier>: formatter<std::string_view>
 {
     auto format(vtbackend::Modifier value, auto& ctx) const
     {
+        if (value == vtbackend::Modifier::None)
+            return formatter<std::string_view>::format("None", ctx);
+
+        auto const row = std::ranges::find(
+            vtbackend::ChordModifierTable, value, &vtbackend::detail::ChordModifierRow::modifier);
+
+        // A value that names no chord modifier formats empty on purpose: crispy::flags's formatter
+        // walks every bit position and skips the ones that yield an empty string.
+        auto const name = row != vtbackend::ChordModifierTable.end() ? row->name : std::string_view {};
+
+        return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::LockKey>: formatter<std::string_view>
+{
+    auto format(vtbackend::LockKey value, auto& ctx) const
+    {
         std::string_view name;
         switch (value)
         {
-            case vtbackend::Modifier::None: name = "None"; break;
-            case vtbackend::Modifier::Shift: name = "Shift"; break;
-            case vtbackend::Modifier::Alt: name = "Alt"; break;
-            case vtbackend::Modifier::Control: name = "Control"; break;
-            case vtbackend::Modifier::Super: name = "Super"; break;
-            case vtbackend::Modifier::Hyper: name = "Hyper"; break;
-            case vtbackend::Modifier::Meta: name = "Meta"; break;
-            case vtbackend::Modifier::CapsLock: name = "CapsLock"; break;
-            case vtbackend::Modifier::NumLock: name = "NumLock"; break;
+            case vtbackend::LockKey::CapsLock: name = "CapsLock"; break;
+            case vtbackend::LockKey::NumLock: name = "NumLock"; break;
         }
         return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::KeyboardModifiers>: formatter<std::string>
+{
+    auto format(vtbackend::KeyboardModifiers value, auto& ctx) const
+    {
+        // Delegates to the base formatter so that fill/width/align specs are honored, as they are
+        // for the Modifier and LockKey formatters above. Both halves format to "" when empty.
+        auto text = std::format("{}", value.chord);
+        if (value.locks.any())
+        {
+            if (!text.empty())
+                text += '|';
+            text += std::format("{}", value.locks);
+        }
+        return formatter<std::string>::format(text, ctx);
     }
 };
 

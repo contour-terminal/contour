@@ -877,7 +877,10 @@ void Terminal::forceAutoScrollToBottomIfEnabled()
         _viewport.forceScrollToBottom();
 }
 
-Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
+Handled Terminal::sendKeyEvent(Key key,
+                               KeyboardModifiers modifiers,
+                               KeyboardEventType eventType,
+                               Timestamp now)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
@@ -889,6 +892,12 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     if (eventType == KeyboardEventType::Repeat && !isModeEnabled(DECMode::AutoRepeat))
         return Handled { true };
 
+    // Every consumer below — the hint-mode handler, the DECUDK gate and the Vi input handler — makes
+    // a UI decision, and therefore sees the chord only. The latched lock state goes to the input
+    // generator alone, which reports it to the application on purpose (Kitty CSI u, Win32
+    // dwControlKeyState, numpad CSI parameters).
+    auto const chord = modifiers.chord;
+
     // Route Escape to hint mode handler if active (ignore key release events).
     if (_hintModeHandler.isActive() && key == Key::Escape && eventType != KeyboardEventType::Release)
     {
@@ -896,12 +905,12 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
         return Handled { true };
     }
 
-    if (_inputHandler.sendKeyPressEvent(key, modifiers, eventType))
+    if (_inputHandler.sendKeyPressEvent(key, chord, eventType))
         return Handled { true };
 
     // Check for User-Defined Keys (DECUDK) — override function keys F6-F20
     // when no modifiers are pressed and the key is being pressed (not released).
-    if (modifiers.none() && eventType == KeyboardEventType::Press)
+    if (chord.none() && eventType == KeyboardEventType::Press)
     {
         if (auto const udkStr = udkStringForKey(key); udkStr.has_value())
         {
@@ -922,8 +931,11 @@ Handled Terminal::sendKeyEvent(Key key, Modifiers modifiers, KeyboardEventType e
     return Handled { success };
 }
 
-Handled Terminal::sendCharEvent(
-    char32_t ch, uint32_t physicalKey, Modifiers modifiers, KeyboardEventType eventType, Timestamp now)
+Handled Terminal::sendCharEvent(char32_t ch,
+                                uint32_t physicalKey,
+                                KeyboardModifiers modifiers,
+                                KeyboardEventType eventType,
+                                Timestamp now)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
@@ -936,16 +948,20 @@ Handled Terminal::sendCharEvent(
     if (eventType == KeyboardEventType::Repeat && !isModeEnabled(DECMode::AutoRepeat))
         return Handled { true };
 
+    // See sendKeyEvent(): the hint-mode handler and the Vi input handler match on the chord, the
+    // input generator reports the latched lock state to the application.
+    auto const chord = modifiers.chord;
+
     // Route input to hint mode handler if active (no modifiers — just label chars).
     // Ignore key release events to prevent the activating key's release from being
     // processed as a label character (e.g. 'h' release after 'gh' triggered hint mode).
-    if (_hintModeHandler.isActive() && modifiers.none() && eventType != KeyboardEventType::Release)
+    if (_hintModeHandler.isActive() && chord.none() && eventType != KeyboardEventType::Release)
     {
         if (_hintModeHandler.processInput(ch))
             return Handled { true };
     }
 
-    if (_inputHandler.sendCharPressEvent(ch, modifiers, eventType))
+    if (_inputHandler.sendCharPressEvent(ch, chord, eventType))
         return Handled { true };
 
     auto const success = _inputGenerator.generate(ch, physicalKey, modifiers, eventType);

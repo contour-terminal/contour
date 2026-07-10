@@ -9,6 +9,7 @@
 
 #include <libunicode/convert.h>
 
+#include <cassert>
 #include <variant>
 
 using std::pair;
@@ -36,14 +37,16 @@ namespace
         Modifiers modifiers;
         char32_t ch;
 
-        [[nodiscard]] constexpr uint32_t code() const noexcept
-        {
-            return uint32_t(ch << 5) | uint32_t(modifiers.value() & 0b1'1111);
-        }
-
+        /// Packs modifiers and character into a single value, so that chords can be switch()ed on.
+        /// No masking is needed: Modifiers is chord-only, ChordModifierBitWidth is derived from the
+        /// chord-modifier table, and lock keys are a distinct type that cannot reach this handler. A
+        /// modifier packed above the shift would alias onto the unmodified key -- that is how Meta
+        /// silently matched a bare Backspace before, so assert the packing is lossless rather than
+        /// trust that every Modifier enumerator made it into the table.
         constexpr operator uint32_t() const noexcept
         {
-            return uint32_t(ch << 5) | uint32_t(modifiers.value() & 0b1'1111);
+            assert(AllChordModifiers.contains(modifiers));
+            return (uint32_t(ch) << ChordModifierBitWidth) | uint32_t(modifiers.value());
         }
     };
 
@@ -335,6 +338,8 @@ void ViInputHandler::setMode(ViMode theMode)
         clearSearch();
 }
 
+// Precondition: `modifiers` arrives as a pure chord, with the lock modifiers (CapsLock/NumLock)
+// already stripped by Terminal::sendKeyEvent(). The exact-match logic below relies on that.
 Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
     if (_searchEditMode != PromptMode::Disabled)
@@ -374,7 +379,9 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
             {
                 clearPendingInput();
                 setMode(ViMode::Normal);
-                return Handled { false };
+                // Consume it: leaving visual mode is a terminal-side action, so the Escape must not
+                // also reach the application. Mirrors the ESC-character path in sendCharPressEvent().
+                return Handled { true };
             }
             [[fallthrough]];
         case ViMode::Normal:
@@ -526,6 +533,8 @@ Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
     return Handled { true };
 }
 
+// Precondition: `modifiers` arrives as a pure chord, with the lock modifiers (CapsLock/NumLock)
+// already stripped by Terminal::sendCharEvent(). The exact-match logic below relies on that.
 Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers, KeyboardEventType eventType)
 {
     if (_searchEditMode != PromptMode::Disabled)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/InputBinding.h>
 #include <vtbackend/InputGenerator.h>
+#include <vtbackend/test_helpers.h>
 
 #include <crispy/escape.h>
 
@@ -8,10 +9,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <format>
 #include <string>
+#include <type_traits>
 
 using namespace std;
 using namespace vtbackend;
+using namespace vtbackend::test;
 using Buffer = vtbackend::InputGenerator::Sequence;
 using crispy::escape;
 
@@ -40,6 +45,50 @@ TEST_CASE("InputGenerator.Modifier.encodings")
     CHECK((1 + (Super | Control | Shift).value()) == 14);
     CHECK((1 + (Super | Control | Alt).value()) == 15);
     CHECK((1 + (Super | Control | Alt | Shift).value()) == 16);
+}
+
+TEST_CASE("InputGenerator.Modifier.chordModifierTable")
+{
+    SECTION("the derived constants follow the table")
+    {
+        STATIC_REQUIRE(ChordModifierTable.size() == 6);
+        STATIC_REQUIRE(AllChordModifiers.value() == 0b11'1111);
+        STATIC_REQUIRE(ChordModifierBitWidth == 6u);
+
+        // The property ViInputHandler's InputMatch packs on: a full chord never reaches above the
+        // shift, so it cannot alias onto the character it is packed next to.
+        STATIC_REQUIRE((AllChordModifiers.value() >> ChordModifierBitWidth) == 0);
+    }
+
+    SECTION("every row names exactly one bit, ascending and without gaps")
+    {
+        auto expectedBit = 1u;
+        for (auto const& row: ChordModifierTable)
+        {
+            CHECK(static_cast<unsigned>(row.modifier) == expectedBit);
+            CHECK(AllChordModifiers.test(row.modifier));
+            CHECK_FALSE(row.name.empty());
+            expectedBit <<= 1u;
+        }
+    }
+
+    SECTION("formatting a modifier reads its name from the table")
+    {
+        CHECK(std::format("{}", Modifier::None) == "None");
+        for (auto const& row: ChordModifierTable)
+            CHECK(std::format("{}", row.modifier) == row.name);
+    }
+
+    SECTION("a value naming no chord modifier formats empty")
+    {
+        // crispy::flags's formatter walks every bit position of the underlying type and skips the
+        // ones that format empty. Were a lock bit to name itself here, it would leak into the
+        // rendering of a Modifiers set.
+        CHECK(std::format("{}", static_cast<Modifier>(LockKey::CapsLock)).empty());
+        CHECK(std::format("{}", static_cast<Modifier>(LockKey::NumLock)).empty());
+
+        CHECK(std::format("{}", Modifiers { Modifier::Shift, Modifier::Meta }) == "Shift|Meta");
+    }
 }
 
 TEST_CASE("InputGenerator.consume")
@@ -193,9 +242,16 @@ TEST_CASE("InputGenerator.all(Ctrl + A..Z)", "[terminal,input]")
 
 // {{{ Lock modifier tests (NumLock / CapsLock must not break standard input)
 
+namespace
+{
+constexpr auto CtrlNumLock = KeyboardModifiers { Modifier::Control, NumLockOnly };
+constexpr auto CtrlCapsLock = KeyboardModifiers { Modifier::Control, CapsLockOnly };
+constexpr auto CtrlBothLocks = KeyboardModifiers { Modifier::Control, BothLocks };
+constexpr auto ShiftNumLock = KeyboardModifiers { Modifier::Shift, NumLockOnly };
+} // namespace
+
 TEST_CASE("InputGenerator.Ctrl+D_with_NumLock", "[terminal,input]")
 {
-    auto constexpr CtrlNumLock = Modifiers { Modifier::Control } | Modifier::NumLock;
     auto input = InputGenerator {};
     input.generate('D', CtrlNumLock, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x04));
@@ -204,7 +260,6 @@ TEST_CASE("InputGenerator.Ctrl+D_with_NumLock", "[terminal,input]")
 
 TEST_CASE("InputGenerator.Ctrl+A_with_NumLock", "[terminal,input]")
 {
-    auto constexpr CtrlNumLock = Modifiers { Modifier::Control } | Modifier::NumLock;
     auto input = InputGenerator {};
     input.generate('A', CtrlNumLock, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x01));
@@ -213,7 +268,6 @@ TEST_CASE("InputGenerator.Ctrl+A_with_NumLock", "[terminal,input]")
 
 TEST_CASE("InputGenerator.Ctrl+C_with_NumLock", "[terminal,input]")
 {
-    auto constexpr CtrlNumLock = Modifiers { Modifier::Control } | Modifier::NumLock;
     auto input = InputGenerator {};
     input.generate('C', CtrlNumLock, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x03));
@@ -222,7 +276,6 @@ TEST_CASE("InputGenerator.Ctrl+C_with_NumLock", "[terminal,input]")
 
 TEST_CASE("InputGenerator.all_Ctrl_A_to_Z_with_NumLock", "[terminal,input]")
 {
-    auto constexpr CtrlNumLock = Modifiers { Modifier::Control } | Modifier::NumLock;
     for (char ch = 'A'; ch <= 'Z'; ++ch)
     {
         INFO(std::format("Testing Ctrl+{} with NumLock", ch));
@@ -235,7 +288,6 @@ TEST_CASE("InputGenerator.all_Ctrl_A_to_Z_with_NumLock", "[terminal,input]")
 
 TEST_CASE("InputGenerator.Ctrl+D_with_CapsLock", "[terminal,input]")
 {
-    auto constexpr CtrlCapsLock = Modifiers { Modifier::Control } | Modifier::CapsLock;
     auto input = InputGenerator {};
     input.generate('D', CtrlCapsLock, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x04));
@@ -244,7 +296,6 @@ TEST_CASE("InputGenerator.Ctrl+D_with_CapsLock", "[terminal,input]")
 
 TEST_CASE("InputGenerator.Ctrl+D_with_NumLock_and_CapsLock", "[terminal,input]")
 {
-    auto constexpr CtrlBothLocks = Modifiers { Modifier::Control } | Modifier::NumLock | Modifier::CapsLock;
     auto input = InputGenerator {};
     input.generate('D', CtrlBothLocks, KeyboardEventType::Press);
     auto const c0 = string(1, static_cast<char>(0x04));
@@ -253,10 +304,119 @@ TEST_CASE("InputGenerator.Ctrl+D_with_NumLock_and_CapsLock", "[terminal,input]")
 
 TEST_CASE("InputGenerator.Shift+Tab_with_NumLock", "[terminal,input]")
 {
-    auto constexpr ShiftNumLock = Modifiers { Modifier::Shift } | Modifier::NumLock;
     auto input = InputGenerator {};
     input.generate(static_cast<char32_t>(0x09), ShiftNumLock, KeyboardEventType::Press);
     REQUIRE(escape(input.peek()) == escape("\033[Z"sv));
+}
+
+namespace
+{
+/// A key and the byte sequence it must produce when no chord modifier is held.
+struct UnmodifiedKeyMapping
+{
+    Key key;
+    std::string_view expected;
+};
+} // namespace
+
+// A key pressed while only CapsLock and/or NumLock are latched must encode exactly as the
+// unmodified key. Before this was fixed, select() stripped only NumLock, so the lock bit reached
+// makeVirtualTerminalParam() and UpArrow+CapsLock encoded as CSI 1;65 A (65 == 1 + CapsLock).
+TEST_CASE("InputGenerator.function_keys_ignore_lock_modifiers", "[terminal,input]")
+{
+    auto constexpr Mappings = std::array {
+        UnmodifiedKeyMapping { .key = Key::UpArrow, .expected = "\033[A"sv },
+        UnmodifiedKeyMapping { .key = Key::DownArrow, .expected = "\033[B"sv },
+        UnmodifiedKeyMapping { .key = Key::RightArrow, .expected = "\033[C"sv },
+        UnmodifiedKeyMapping { .key = Key::LeftArrow, .expected = "\033[D"sv },
+        UnmodifiedKeyMapping { .key = Key::Home, .expected = "\033[H"sv },
+        UnmodifiedKeyMapping { .key = Key::End, .expected = "\033[F"sv },
+        UnmodifiedKeyMapping { .key = Key::PageUp, .expected = "\033[5~"sv },
+        UnmodifiedKeyMapping { .key = Key::PageDown, .expected = "\033[6~"sv },
+        UnmodifiedKeyMapping { .key = Key::Insert, .expected = "\033[2~"sv },
+        UnmodifiedKeyMapping { .key = Key::Delete, .expected = "\033[3~"sv },
+        UnmodifiedKeyMapping { .key = Key::F1, .expected = "\033OP"sv },
+        UnmodifiedKeyMapping { .key = Key::F5, .expected = "\033[15~"sv },
+    };
+
+    for (auto const& [key, expected]: Mappings)
+        for (auto const locks: LockCombinations)
+        {
+            INFO(std::format("key {} with lock modifiers {}", key, locks));
+            auto input = InputGenerator {};
+            input.generate(key, locks, KeyboardEventType::Press);
+            CHECK(escape(input.peek()) == escape(expected));
+        }
+}
+
+// The application-cursor-keys fallback must be reachable with locks latched. Pre-fix the lock bit
+// made select() take the .mods branch, so SS3 A was never emitted.
+TEST_CASE("InputGenerator.application_cursor_keys_ignore_lock_modifiers", "[terminal,input]")
+{
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        auto input = InputGenerator {};
+        input.setCursorKeysMode(KeyMode::Application);
+        input.generate(Key::UpArrow, locks, KeyboardEventType::Press);
+        CHECK(escape(input.peek()) == escape("\033OA"sv));
+    }
+}
+
+// Stripping locks must not swallow the chord modifiers that ride along with them.
+TEST_CASE("InputGenerator.function_keys_keep_chord_modifiers_across_locks", "[terminal,input]")
+{
+    auto constexpr Control = Modifiers { Modifier::Control };
+
+    // 5 == 1 + Modifier::Control, regardless of which locks are additionally latched.
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("Control with lock modifiers {}", locks));
+        auto input = InputGenerator {};
+        input.generate(Key::UpArrow, KeyboardModifiers { Control, locks }, KeyboardEventType::Press);
+        CHECK(escape(input.peek()) == escape("\033[1;5A"sv));
+    }
+
+    // Shift stays a real modifier: 2 == 1 + Modifier::Shift.
+    auto input = InputGenerator {};
+    input.generate(
+        Key::UpArrow, KeyboardModifiers { Modifier::Shift, LockKey::CapsLock }, KeyboardEventType::Press);
+    CHECK(escape(input.peek()) == escape("\033[1;2A"sv));
+}
+
+// XTerm's modifyOtherKeys mode 2 must treat lock modifiers as absent: a latched lock must neither
+// make an otherwise unmodified key look modified, nor contribute to the encoded modifier parameter.
+TEST_CASE("InputGenerator.modifyOtherKeys2_ignores_lock_modifiers", "[terminal,input]")
+{
+    auto const generateLowerA = [](KeyboardModifiers modifiers) {
+        auto input = InputGenerator {};
+        input.setModifyOtherKeys(2);
+        input.generate(U'a', modifiers, KeyboardEventType::Press);
+        return std::string { input.peek() };
+    };
+
+    // Locks alone leave a plain character alone (pre-fix: CSI 27;65;97~ for CapsLock).
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock modifiers {}", locks));
+        CHECK(escape(generateLowerA(locks)) == escape("a"sv));
+    }
+
+    // 5 == 1 + Modifier::Control, whichever locks are latched (pre-fix: 69 with CapsLock).
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("Control with lock modifiers {}", locks));
+        CHECK(escape(generateLowerA(KeyboardModifiers { Modifier::Control, locks }))
+              == escape("\033[27;5;97~"sv));
+    }
+
+    // 6 == 1 + Modifier::Control + Modifier::Shift; chord modifiers survive lock stripping.
+    CHECK(escape(generateLowerA(
+              KeyboardModifiers { Modifiers { Modifier::Control, Modifier::Shift }, LockKey::CapsLock }))
+          == escape("\033[27;6;97~"sv));
+
+    // Shift alone never engages modifyOtherKeys, with or without locks.
+    CHECK(escape(generateLowerA(KeyboardModifiers { Modifier::Shift, LockKey::NumLock })) == escape("a"sv));
 }
 
 // }}}
@@ -364,7 +524,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.CapsLock", "[terminal,input]")
     // modifier is CapsLock (64), encoded = 1 + 64 = 65
     // (CapsLock alone with only DisambiguateEscapeCodes would go to legacy,
     //  because lock modifiers don't trigger CSI u on their own)
-    input.generateChar('A', 'a', Modifier::CapsLock, KeyboardEventType::Press);
+    input.generateChar('A', 'a', LockKey::CapsLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[97;65u"sv));
 }
 
@@ -375,7 +535,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.NumLock", "[terminal,input]")
     input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
 
     // '5' with NumLock (128) + ReportAllKeys, encoded = 1 + 128 = 129
-    input.generateChar('5', '5', Modifier::NumLock, KeyboardEventType::Press);
+    input.generateChar('5', '5', LockKey::NumLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[53;129u"sv));
 }
 
@@ -388,12 +548,12 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.CapsLock.ReportEventTypes", "[ter
     // 'A' with CapsLock, Press event
     // CapsLock is a lock modifier — Press event doesn't need action encoding,
     // so this goes to legacy (no real mods, no action, no report-all-keys)
-    input.generateChar('A', 'a', Modifier::CapsLock, KeyboardEventType::Press);
+    input.generateChar('A', 'a', LockKey::CapsLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("A"sv));
 
     // 'A' with CapsLock, Release event — needs action encoding, so CSI u kicks in
     // modifier = CapsLock (64), encoded = 1 + 64 = 65, event type = 3 (Release)
-    input.generateChar('A', 'a', Modifier::CapsLock, KeyboardEventType::Release);
+    input.generateChar('A', 'a', LockKey::CapsLock, KeyboardEventType::Release);
     REQUIRE(escape(input.take()) == escape("\033[97;65:3u"sv));
 }
 
@@ -589,11 +749,11 @@ TEST_CASE("ExtendedKeyboardInputGenerator.LockModifier_handling", "[terminal,inp
     input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
 
     // CapsLock+Enter: legacy (\r) because only lock modifiers
-    input.generateKey(Key::Enter, Modifier::CapsLock, KeyboardEventType::Press);
+    input.generateKey(Key::Enter, LockKey::CapsLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\r"sv));
 
     // NumLock+Tab: legacy (\t) because only lock modifiers
-    input.generateKey(Key::Tab, Modifier::NumLock, KeyboardEventType::Press);
+    input.generateKey(Key::Tab, LockKey::NumLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\t"sv));
 }
 
@@ -604,7 +764,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.LockModifier_with_ReportAllKeys", "[te
     input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
 
     // CapsLock+Enter with ReportAllKeys: CSI 13;65 u
-    input.generateKey(Key::Enter, Modifier::CapsLock, KeyboardEventType::Press);
+    input.generateKey(Key::Enter, LockKey::CapsLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[13;65u"sv));
 }
 
@@ -743,8 +903,6 @@ TEST_CASE("InputGenerator.Numpad_with_NumLock_overrides_DECKPAM", "[terminal,inp
     input.setApplicationKeypadMode(true);
     REQUIRE(input.applicationKeypad());
 
-    auto constexpr NumLock = Modifiers { Modifier::NumLock };
-
     struct Mapping
     {
         Key key;
@@ -774,7 +932,7 @@ TEST_CASE("InputGenerator.Numpad_with_NumLock_overrides_DECKPAM", "[terminal,inp
     for (auto const& mapping: Mappings)
     {
         INFO(std::format("Testing {}+NumLock in DECKPAM => {}", mapping.key, escape(mapping.expected)));
-        input.generate(mapping.key, NumLock, KeyboardEventType::Press);
+        input.generate(mapping.key, NumLockOnly, KeyboardEventType::Press);
         CHECK(escape(input.peek()) == escape(mapping.expected));
         input.consume(static_cast<int>(input.peek().size()));
     }
@@ -799,7 +957,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Numpad5_with_NumLock", "[terminal
     auto input = ExtendedKeyboardInputGenerator {};
     input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
 
-    input.generateKey(Key::Numpad_5, Modifier::NumLock, KeyboardEventType::Press);
+    input.generateKey(Key::Numpad_5, LockKey::NumLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[57404;129u"sv));
 }
 
@@ -811,7 +969,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Numpad5_AssociatedText", "[termin
     input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
     input.flags().enable(KeyboardEventFlag::ReportAssociatedText);
 
-    input.generateKey(Key::Numpad_5, Modifier::NumLock, KeyboardEventType::Press);
+    input.generateKey(Key::Numpad_5, LockKey::NumLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[57404;129;53u"sv));
 }
 
@@ -829,12 +987,22 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Numpad_AssociatedText_no_mods", "
 
 // }}}
 
-// {{{ InputBinding lock modifier tests
-// These tests verify that lock modifiers (NumLock/CapsLock) cause matching failures
-// when not stripped, and that stripping them via without(LockModifiers) restores correct
-// matching — the same pattern used by config::apply().
+// {{{ InputBinding chord matching
+// Lock modifiers used to break key-binding matching (#1901) because they shared a bitset with the
+// chord modifiers, and InputBinding compares modifier sets exactly. They are now a distinct type
+// and simply cannot appear in a binding's modifier set, so the failure mode is gone by
+// construction. These assertions pin that construction.
 
-TEST_CASE("InputBinding.match_with_NumLock_stripped", "[terminal,input]")
+static_assert(!std::is_constructible_v<Modifiers, LockKey>,
+              "a lock key must not be representable as a chord modifier");
+static_assert(!std::is_constructible_v<Modifiers, LockKeys>,
+              "a set of lock keys must not be representable as a set of chord modifiers");
+static_assert(std::is_convertible_v<Modifiers, KeyboardModifiers>,
+              "a chord must widen implicitly to a full keyboard modifier state");
+static_assert(!std::is_convertible_v<KeyboardModifiers, Modifiers>,
+              "extracting the chord from a keyboard modifier state must be explicit");
+
+TEST_CASE("InputBinding.match_ignores_lock_state", "[terminal,input]")
 {
     auto const binding = InputBinding<Key, int> {
         .modes = MatchModes {},
@@ -842,45 +1010,17 @@ TEST_CASE("InputBinding.match_with_NumLock_stripped", "[terminal,input]")
         .input = Key::Enter,
         .binding = 42,
     };
-    auto const modsWithNumLock = Modifiers { Modifier::Shift } | Modifier::Control | Modifier::NumLock;
-    // NumLock causes a false negative — the binding should match but doesn't without stripping
-    CHECK_FALSE(match(binding, MatchModes {}, modsWithNumLock, Key::Enter));
-    // After stripping lock modifiers, the binding matches correctly
-    CHECK(match(binding, MatchModes {}, modsWithNumLock.without(LockModifiers), Key::Enter));
+
+    // However the locks are latched, config::apply() matches on the chord alone.
+    for (auto const locks: LockCombinations)
+    {
+        INFO(std::format("lock keys {}", locks));
+        auto const modifiers = KeyboardModifiers { Modifiers { Modifier::Shift } | Modifier::Control, locks };
+        CHECK(match(binding, MatchModes {}, modifiers.chord, Key::Enter));
+    }
 }
 
-TEST_CASE("InputBinding.match_with_CapsLock_stripped", "[terminal,input]")
-{
-    auto const binding = InputBinding<Key, int> {
-        .modes = MatchModes {},
-        .modifiers = Modifiers { Modifier::Control },
-        .input = Key::F5,
-        .binding = 1,
-    };
-    auto const modsWithCapsLock = Modifiers { Modifier::Control } | Modifier::CapsLock;
-    // CapsLock causes a false negative
-    CHECK_FALSE(match(binding, MatchModes {}, modsWithCapsLock, Key::F5));
-    // After stripping lock modifiers, the binding matches correctly
-    CHECK(match(binding, MatchModes {}, modsWithCapsLock.without(LockModifiers), Key::F5));
-}
-
-TEST_CASE("InputBinding.match_with_NumLock_and_CapsLock_stripped", "[terminal,input]")
-{
-    auto const binding = InputBinding<char32_t, int> {
-        .modes = MatchModes {},
-        .modifiers = Modifiers { Modifier::Shift } | Modifier::Control,
-        .input = U'N',
-        .binding = 0,
-    };
-    auto const modsWithBothLocks =
-        Modifiers { Modifier::Shift } | Modifier::Control | Modifier::NumLock | Modifier::CapsLock;
-    // Both lock modifiers cause a false negative
-    CHECK_FALSE(match(binding, MatchModes {}, modsWithBothLocks, U'N'));
-    // After stripping lock modifiers, the binding matches correctly
-    CHECK(match(binding, MatchModes {}, modsWithBothLocks.without(LockModifiers), U'N'));
-}
-
-TEST_CASE("InputBinding.match_still_requires_real_modifiers", "[terminal,input]")
+TEST_CASE("InputBinding.match_still_requires_chord_modifiers", "[terminal,input]")
 {
     auto const binding = InputBinding<Key, int> {
         .modes = MatchModes {},
@@ -888,9 +1028,8 @@ TEST_CASE("InputBinding.match_still_requires_real_modifiers", "[terminal,input]"
         .input = Key::Enter,
         .binding = 42,
     };
-    // NumLock alone, after stripping locks, leaves no modifiers — should NOT match Shift+Control
-    CHECK_FALSE(
-        match(binding, MatchModes {}, Modifiers { Modifier::NumLock }.without(LockModifiers), Key::Enter));
+    // A latched lock leaves an empty chord, which must not match Shift+Control.
+    CHECK_FALSE(match(binding, MatchModes {}, KeyboardModifiers { LockKey::NumLock }.chord, Key::Enter));
     // No modifiers should NOT match
     CHECK_FALSE(match(binding, MatchModes {}, Modifiers {}, Key::Enter));
 }
@@ -1034,10 +1173,11 @@ TEST_CASE("InputGenerator.Win32InputMode.escape_key", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Escape: VK_ESCAPE=0x1B=27
+    // Escape: VK_ESCAPE=0x1B=27, unicode=ESC=0x1B=27. ConPTY has no VK fallback for Escape, so the
+    // Unicode-char field must carry 0x1B or applications (e.g. neovim) never see the Escape.
     input.generate(Key::Escape, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[27;0;0;1;0;1_");
+    CHECK(seq == "\033[27;0;27;1;0;1_");
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1223,7 +1363,22 @@ TEST_CASE("InputGenerator.Win32InputMode.numpad_0", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Numpad 0: VK_NUMPAD0=0x60=96, NOT enhanced
+    // Numpad 0 with NumLock latched (the state in which Qt reports a keypad digit): VK_NUMPAD0=
+    // 0x60=96, unicode='0'=48, CS=NUMLOCK_ON(0x20)=32. The digit must ride in the Unicode-char
+    // field because ConPTY cannot reconstruct it from the virtual-key code in numeric keypad mode.
+    input.generate(Key::Numpad_0, LockKey::NumLock, KeyboardEventType::Press);
+    auto const seq = input.peek();
+    CHECK(seq == "\033[96;0;48;1;32;1_");
+    input.consume(static_cast<int>(seq.size()));
+}
+
+TEST_CASE("InputGenerator.Win32InputMode.numpad_0_without_numlock", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+
+    // Without NumLock the numpad key is a navigation key and carries no character (Uc=0), matching
+    // a real KEY_EVENT_RECORD and ToUnicodeEx.
     input.generate(Key::Numpad_0, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[96;0;0;1;0;1_");
@@ -1235,10 +1390,10 @@ TEST_CASE("InputGenerator.Win32InputMode.numpad_5", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Numpad 5: VK_NUMPAD5=0x65=101, NOT enhanced
-    input.generate(Key::Numpad_5, Modifier::None, KeyboardEventType::Press);
+    // Numpad 5 with NumLock latched: VK_NUMPAD5=0x65=101, unicode='5'=53, CS=NUMLOCK_ON(0x20)=32.
+    input.generate(Key::Numpad_5, LockKey::NumLock, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[101;0;0;1;0;1_");
+    CHECK(seq == "\033[101;0;53;1;32;1_");
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1247,10 +1402,11 @@ TEST_CASE("InputGenerator.Win32InputMode.numpad_add", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Numpad +: VK_ADD=0x6B=107, NOT enhanced
+    // Numpad +: VK_ADD=0x6B=107, unicode='+'=43. Operators carry their character regardless of
+    // NumLock (they are not a navigation key), so the char rides even without a NumLock latch.
     input.generate(Key::Numpad_Add, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[107;0;0;1;0;1_");
+    CHECK(seq == "\033[107;0;43;1;0;1_");
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1259,10 +1415,10 @@ TEST_CASE("InputGenerator.Win32InputMode.numpad_enter", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Numpad Enter: VK_RETURN=0x0D=13, IS enhanced (E0 scan code prefix)
+    // Numpad Enter: VK_RETURN=0x0D=13, unicode=CR=0x0D=13, IS enhanced (E0 scan code prefix).
     input.generate(Key::Numpad_Enter, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[13;0;0;1;256;1_"); // CS=ENHANCED_KEY
+    CHECK(seq == "\033[13;0;13;1;256;1_"); // Uc=CR, CS=ENHANCED_KEY
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1271,10 +1427,10 @@ TEST_CASE("InputGenerator.Win32InputMode.numpad_divide", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Numpad /: VK_DIVIDE=0x6F=111, IS enhanced (E0 scan code prefix)
+    // Numpad /: VK_DIVIDE=0x6F=111, unicode='/'=47, IS enhanced (E0 scan code prefix).
     input.generate(Key::Numpad_Divide, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[111;0;0;1;256;1_"); // CS=ENHANCED_KEY
+    CHECK(seq == "\033[111;0;47;1;256;1_"); // Uc='/', CS=ENHANCED_KEY
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1287,7 +1443,7 @@ TEST_CASE("InputGenerator.Win32InputMode.capslock_in_cs", "[terminal,input]")
     input.setWin32InputMode(true);
 
     // Typing 'a' with CapsLock on: CS=CAPSLOCK_ON(0x0080)=128
-    input.generate(U'a', 0x41, Modifier::CapsLock, KeyboardEventType::Press);
+    input.generate(U'a', 0x41, LockKey::CapsLock, KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;1;128;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1299,7 +1455,7 @@ TEST_CASE("InputGenerator.Win32InputMode.numlock_in_cs", "[terminal,input]")
     input.setWin32InputMode(true);
 
     // Typing 'a' with NumLock on: CS=NUMLOCK_ON(0x0020)=32
-    input.generate(U'a', 0x41, Modifier::NumLock, KeyboardEventType::Press);
+    input.generate(U'a', 0x41, LockKey::NumLock, KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;1;32;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1311,7 +1467,7 @@ TEST_CASE("InputGenerator.Win32InputMode.capslock_and_numlock_in_cs", "[terminal
     input.setWin32InputMode(true);
 
     // Both locks: CS=CAPSLOCK_ON|NUMLOCK_ON = 0x0080|0x0020 = 0x00A0 = 160
-    auto const locks = Modifiers { Modifier::CapsLock } | Modifiers { Modifier::NumLock };
+    auto const locks = LockKeys { LockKey::CapsLock } | LockKey::NumLock;
     input.generate(U'a', 0x41, locks, KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;1;160;1_");

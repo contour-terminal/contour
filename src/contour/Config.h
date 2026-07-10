@@ -152,6 +152,10 @@ namespace helper
 
 } // namespace helper
 
+/// Finds the binding matching @p input under the chord @p modifiers, or nullptr.
+///
+/// @p modifiers is a chord: lock keys cannot appear in it by construction, so bindings match
+/// regardless of the CapsLock/NumLock state.
 template <typename Input>
 std::vector<actions::Action> const* apply(
     std::vector<vtbackend::InputBinding<Input, ActionList>> const& mappings,
@@ -159,10 +163,9 @@ std::vector<actions::Action> const* apply(
     vtbackend::Modifiers modifiers,
     uint8_t actualModeFlags)
 {
-    auto const effectiveModifiers = modifiers.without(vtbackend::LockModifiers);
     for (vtbackend::InputBinding<Input, ActionList> const& mapping: mappings)
     {
-        if (mapping.modifiers == effectiveModifiers && mapping.input == input
+        if (mapping.modifiers == modifiers && mapping.input == input
             && helper::testMatchMode(actualModeFlags, mapping.modes))
         {
             return &mapping.binding;

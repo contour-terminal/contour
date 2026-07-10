@@ -40,12 +40,6 @@ string to_string(MouseButton button)
     return std::format("{}", button);
 }
 
-/// Returns true if the given modifiers consist only of lock modifiers (CapsLock/NumLock) or no modifiers.
-constexpr bool hasOnlyLockModifiers(Modifiers modifiers) noexcept
-{
-    return modifiers.without(LockModifiers).none();
-}
-
 /// Maps a character to its Ctrl-modified equivalent, following Kitty's ctrled_key algorithm.
 /// @param ch The character to map (e.g., 'a' for Ctrl+A).
 /// @returns The Ctrl-mapped byte, or std::nullopt if no legacy Ctrl mapping exists.
@@ -75,7 +69,7 @@ constexpr std::optional<char> ctrlMappedKey(char32_t ch) noexcept
 // {{{ StandardKeyboardInputGenerator
 bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
                                                   uint32_t physicalKey,
-                                                  Modifiers modifiers,
+                                                  KeyboardModifiers keyboardModifiers,
                                                   KeyboardEventType eventType)
 {
     crispy::ignore_unused(physicalKey);
@@ -83,8 +77,8 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     if (eventType == KeyboardEventType::Release)
         return false;
 
-    // Strip lock modifiers (NumLock, CapsLock) as they are irrelevant for legacy character generation.
-    modifiers = modifiers.without(LockModifiers);
+    // Legacy character generation never observes the lock state.
+    auto const modifiers = keyboardModifiers.chord;
 
     // Well accepted hack to distinguish between Backspace and Ctrl+Backspace.
     // DECBKM (Backarrow Key Mode) swaps the default byte:
@@ -161,22 +155,23 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     return true;
 }
 
-std::string StandardKeyboardInputGenerator::selectNumpad(Modifiers modifiers,
+std::string StandardKeyboardInputGenerator::selectNumpad(KeyboardModifiers modifiers,
                                                          FunctionKeyMapping mapping) const
 {
-    if (modifiers.contains(Modifier::NumLock))
-        return select(modifiers, { .std = mapping.std, .mods = mapping.std, .appKeypad = mapping.std });
+    // NumLock is the one lock a keypad key legitimately observes: it selects the literal digit over
+    // the navigation function, in every keypad mode and whatever the chord.
+    if (modifiers.locks.contains(LockKey::NumLock))
+        return std::string(mapping.std);
 
-    return select(modifiers.without(Modifier::NumLock), mapping);
+    return select(modifiers.chord, mapping);
 }
 
-std::string StandardKeyboardInputGenerator::select(Modifiers modifiers, FunctionKeyMapping mapping) const
+std::string StandardKeyboardInputGenerator::select(Modifiers chord, FunctionKeyMapping mapping) const
 {
-    if (modifiers.without(Modifier::NumLock) && !mapping.mods.empty())
-        return crispy::replace(
-            mapping.mods, "{}"sv, makeVirtualTerminalParam(modifiers.without(Modifier::NumLock)));
+    if (chord && !mapping.mods.empty())
+        return crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(chord));
 
-    auto const prefix = modifiers.contains(Modifier::Alt) ? "\033" : ""s;
+    auto const prefix = chord.contains(Modifier::Alt) ? "\033" : ""s;
 
     if (applicationCursorKeys() && !mapping.appCursor.empty())
         return prefix + std::string(mapping.appCursor);
@@ -187,68 +182,74 @@ std::string StandardKeyboardInputGenerator::select(Modifiers modifiers, Function
     return prefix + std::string(mapping.std);
 }
 
-bool StandardKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, KeyboardEventType eventType)
+bool StandardKeyboardInputGenerator::generateKey(Key key,
+                                                 KeyboardModifiers modifiers,
+                                                 KeyboardEventType eventType)
 {
     if (eventType == KeyboardEventType::Release)
         return false;
 
+    // Only the keypad keys observe the lock state (see selectNumpad); everything else is
+    // encoded from the chord alone.
+    auto const chord = modifiers.chord;
+
     // clang-format off
     switch (key)
     {
-        case Key::F1: append(select(modifiers, { .std = ESC "OP", .mods = CSI "1;{}P" })); break;
-        case Key::F2: append(select(modifiers, { .std = ESC "OQ", .mods = CSI "1;{}Q" })); break;
-        case Key::F3: append(select(modifiers, { .std = ESC "OR", .mods = CSI "13;{}~" })); break;
-        case Key::F4: append(select(modifiers, { .std = ESC "OS", .mods = CSI "1;{}S" })); break;
-        case Key::F5: append(select(modifiers, { .std = CSI "15~", .mods = CSI "15;{}~" })); break;
-        case Key::F6: append(select(modifiers, { .std = CSI "17~", .mods = CSI "17;{}~" })); break;
-        case Key::F7: append(select(modifiers, { .std = CSI "18~", .mods = CSI "18;{}~" })); break;
-        case Key::F8: append(select(modifiers, { .std = CSI "19~", .mods = CSI "19;{}~" })); break;
-        case Key::F9: append(select(modifiers, { .std = CSI "20~", .mods = CSI "20;{}~" })); break;
-        case Key::F10: append(select(modifiers, { .std = CSI "21~", .mods = CSI "21;{}~" })); break;
-        case Key::F11: append(select(modifiers, { .std = CSI "23~", .mods = CSI "23;{}~" })); break;
-        case Key::F12: append(select(modifiers, { .std = CSI "24~", .mods = CSI "24;{}~" })); break;
-        case Key::F13: append(select(modifiers, { .std = CSI "25~", .mods = CSI "25;{}~" })); break;
-        case Key::F14: append(select(modifiers, { .std = CSI "26~", .mods = CSI "26;{}~" })); break;
-        case Key::F15: append(select(modifiers, { .std = CSI "28~", .mods = CSI "28;{}~" })); break;
-        case Key::F16: append(select(modifiers, { .std = CSI "29~", .mods = CSI "29;{}~" })); break;
-        case Key::F17: append(select(modifiers, { .std = CSI "31~", .mods = CSI "31;{}~" })); break;
-        case Key::F18: append(select(modifiers, { .std = CSI "32~", .mods = CSI "32;{}~" })); break;
-        case Key::F19: append(select(modifiers, { .std = CSI "33~", .mods = CSI "33;{}~" })); break;
-        case Key::F20: append(select(modifiers, { .std = CSI "34~", .mods = CSI "34;{}~" })); break;
-        case Key::F21: append(select(modifiers, { .std = CSI "35~", .mods = CSI "35;{}~" })); break;
-        case Key::F22: append(select(modifiers, { .std = CSI "36~", .mods = CSI "36;{}~" })); break;
-        case Key::F23: append(select(modifiers, { .std = CSI "37~", .mods = CSI "37;{}~" })); break;
-        case Key::F24: append(select(modifiers, { .std = CSI "38~", .mods = CSI "38;{}~" })); break;
-        case Key::F25: append(select(modifiers, { .std = CSI "39~", .mods = CSI "39;{}~" })); break;
-        case Key::F26: append(select(modifiers, { .std = CSI "40~", .mods = CSI "40;{}~" })); break;
-        case Key::F27: append(select(modifiers, { .std = CSI "41~", .mods = CSI "41;{}~" })); break;
-        case Key::F28: append(select(modifiers, { .std = CSI "42~", .mods = CSI "42;{}~" })); break;
-        case Key::F29: append(select(modifiers, { .std = CSI "43~", .mods = CSI "43;{}~" })); break;
-        case Key::F30: append(select(modifiers, { .std = CSI "44~", .mods = CSI "44;{}~" })); break;
-        case Key::F31: append(select(modifiers, { .std = CSI "45~", .mods = CSI "45;{}~" })); break;
-        case Key::F32: append(select(modifiers, { .std = CSI "46~", .mods = CSI "46;{}~" })); break;
-        case Key::F33: append(select(modifiers, { .std = CSI "47~", .mods = CSI "47;{}~" })); break;
-        case Key::F34: append(select(modifiers, { .std = CSI "48~", .mods = CSI "48;{}~" })); break;
-        case Key::F35: append(select(modifiers, { .std = CSI "49~", .mods = CSI "49;{}~" })); break;
+        case Key::F1: append(select(chord, { .std = ESC "OP", .mods = CSI "1;{}P" })); break;
+        case Key::F2: append(select(chord, { .std = ESC "OQ", .mods = CSI "1;{}Q" })); break;
+        case Key::F3: append(select(chord, { .std = ESC "OR", .mods = CSI "13;{}~" })); break;
+        case Key::F4: append(select(chord, { .std = ESC "OS", .mods = CSI "1;{}S" })); break;
+        case Key::F5: append(select(chord, { .std = CSI "15~", .mods = CSI "15;{}~" })); break;
+        case Key::F6: append(select(chord, { .std = CSI "17~", .mods = CSI "17;{}~" })); break;
+        case Key::F7: append(select(chord, { .std = CSI "18~", .mods = CSI "18;{}~" })); break;
+        case Key::F8: append(select(chord, { .std = CSI "19~", .mods = CSI "19;{}~" })); break;
+        case Key::F9: append(select(chord, { .std = CSI "20~", .mods = CSI "20;{}~" })); break;
+        case Key::F10: append(select(chord, { .std = CSI "21~", .mods = CSI "21;{}~" })); break;
+        case Key::F11: append(select(chord, { .std = CSI "23~", .mods = CSI "23;{}~" })); break;
+        case Key::F12: append(select(chord, { .std = CSI "24~", .mods = CSI "24;{}~" })); break;
+        case Key::F13: append(select(chord, { .std = CSI "25~", .mods = CSI "25;{}~" })); break;
+        case Key::F14: append(select(chord, { .std = CSI "26~", .mods = CSI "26;{}~" })); break;
+        case Key::F15: append(select(chord, { .std = CSI "28~", .mods = CSI "28;{}~" })); break;
+        case Key::F16: append(select(chord, { .std = CSI "29~", .mods = CSI "29;{}~" })); break;
+        case Key::F17: append(select(chord, { .std = CSI "31~", .mods = CSI "31;{}~" })); break;
+        case Key::F18: append(select(chord, { .std = CSI "32~", .mods = CSI "32;{}~" })); break;
+        case Key::F19: append(select(chord, { .std = CSI "33~", .mods = CSI "33;{}~" })); break;
+        case Key::F20: append(select(chord, { .std = CSI "34~", .mods = CSI "34;{}~" })); break;
+        case Key::F21: append(select(chord, { .std = CSI "35~", .mods = CSI "35;{}~" })); break;
+        case Key::F22: append(select(chord, { .std = CSI "36~", .mods = CSI "36;{}~" })); break;
+        case Key::F23: append(select(chord, { .std = CSI "37~", .mods = CSI "37;{}~" })); break;
+        case Key::F24: append(select(chord, { .std = CSI "38~", .mods = CSI "38;{}~" })); break;
+        case Key::F25: append(select(chord, { .std = CSI "39~", .mods = CSI "39;{}~" })); break;
+        case Key::F26: append(select(chord, { .std = CSI "40~", .mods = CSI "40;{}~" })); break;
+        case Key::F27: append(select(chord, { .std = CSI "41~", .mods = CSI "41;{}~" })); break;
+        case Key::F28: append(select(chord, { .std = CSI "42~", .mods = CSI "42;{}~" })); break;
+        case Key::F29: append(select(chord, { .std = CSI "43~", .mods = CSI "43;{}~" })); break;
+        case Key::F30: append(select(chord, { .std = CSI "44~", .mods = CSI "44;{}~" })); break;
+        case Key::F31: append(select(chord, { .std = CSI "45~", .mods = CSI "45;{}~" })); break;
+        case Key::F32: append(select(chord, { .std = CSI "46~", .mods = CSI "46;{}~" })); break;
+        case Key::F33: append(select(chord, { .std = CSI "47~", .mods = CSI "47;{}~" })); break;
+        case Key::F34: append(select(chord, { .std = CSI "48~", .mods = CSI "48;{}~" })); break;
+        case Key::F35: append(select(chord, { .std = CSI "49~", .mods = CSI "49;{}~" })); break;
         case Key::Escape:
         {
             // Alt+Escape sends ESC ESC (Kitty: prefix = mods & ALT ? "\x1b" : "").
-            auto const hasAlt = modifiers.contains(Modifier::Alt);
+            auto const hasAlt = chord.contains(Modifier::Alt);
             append(hasAlt ? "\033\033" : "\033");
             break;
         }
-        case Key::Enter: append(select(modifiers, { .std = "\r" })); break;
+        case Key::Enter: append(select(chord, { .std = "\r" })); break;
         case Key::Tab:
         {
             // Explicit Tab/Backtab handling with Alt prefix support.
-            if (modifiers.contains(Modifier::Shift))
+            if (chord.contains(Modifier::Shift))
             {
-                auto const hasAlt = modifiers.contains(Modifier::Alt);
+                auto const hasAlt = chord.contains(Modifier::Alt);
                 append(hasAlt ? "\x1b\x1b[Z" : "\x1b[Z");
             }
             else
             {
-                auto const hasAlt = modifiers.contains(Modifier::Alt);
+                auto const hasAlt = chord.contains(Modifier::Alt);
                 append(hasAlt ? "\x1b\t" : "\t");
             }
             break;
@@ -256,21 +257,21 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
         case Key::Backspace:
         {
             // DECBKM swaps the default byte sent by Backspace (see generateChar for details).
-            auto const hasCtrl = static_cast<bool>(modifiers & Modifier::Control);
+            auto const hasCtrl = static_cast<bool>(chord & Modifier::Control);
             auto const sendBS = _backarrowKey ? !hasCtrl : hasCtrl;
-            append(select(modifiers, { .std = sendBS ? "\x08" : "\x7F" }));
+            append(select(chord, { .std = sendBS ? "\x08" : "\x7F" }));
             break;
         }
-        case Key::UpArrow: append(select(modifiers, { .std = CSI "A", .mods = CSI "1;{}A", .appCursor = SS3 "A" })); break;
-        case Key::DownArrow: append(select(modifiers, { .std = CSI "B", .mods = CSI "1;{}B", .appCursor = SS3 "B" })); break;
-        case Key::RightArrow: append(select(modifiers, { .std = CSI "C", .mods = CSI "1;{}C", .appCursor = SS3 "C" })); break;
-        case Key::LeftArrow: append(select(modifiers, { .std = CSI "D", .mods = CSI "1;{}D", .appCursor = SS3 "D" })); break;
-        case Key::Home: append(select(modifiers, { .std = CSI "H", .mods = CSI "1;{}H", .appCursor = SS3 "H" })); break;
-        case Key::End: append(select(modifiers, { .std = CSI "F", .mods = CSI "1;{}F", .appCursor = SS3 "F" })); break;
-        case Key::PageUp: append(select(modifiers, { .std = CSI "5~", .mods = CSI "5;{}~", .appKeypad = CSI "5~" })); break;
-        case Key::PageDown: append(select(modifiers, { .std = CSI "6~", .mods = CSI "6;{}~", .appKeypad = CSI "6~" })); break;
-        case Key::Insert: append(select(modifiers, { .std = CSI "2~", .mods = CSI "2;{}~" })); break;
-        case Key::Delete: append(select(modifiers, { .std = CSI "3~", .mods = CSI "3;{}~" })); break;
+        case Key::UpArrow: append(select(chord, { .std = CSI "A", .mods = CSI "1;{}A", .appCursor = SS3 "A" })); break;
+        case Key::DownArrow: append(select(chord, { .std = CSI "B", .mods = CSI "1;{}B", .appCursor = SS3 "B" })); break;
+        case Key::RightArrow: append(select(chord, { .std = CSI "C", .mods = CSI "1;{}C", .appCursor = SS3 "C" })); break;
+        case Key::LeftArrow: append(select(chord, { .std = CSI "D", .mods = CSI "1;{}D", .appCursor = SS3 "D" })); break;
+        case Key::Home: append(select(chord, { .std = CSI "H", .mods = CSI "1;{}H", .appCursor = SS3 "H" })); break;
+        case Key::End: append(select(chord, { .std = CSI "F", .mods = CSI "1;{}F", .appCursor = SS3 "F" })); break;
+        case Key::PageUp: append(select(chord, { .std = CSI "5~", .mods = CSI "5;{}~", .appKeypad = CSI "5~" })); break;
+        case Key::PageDown: append(select(chord, { .std = CSI "6~", .mods = CSI "6;{}~", .appKeypad = CSI "6~" })); break;
+        case Key::Insert: append(select(chord, { .std = CSI "2~", .mods = CSI "2;{}~" })); break;
+        case Key::Delete: append(select(chord, { .std = CSI "3~", .mods = CSI "3;{}~" })); break;
         case Key::Numpad_Enter:    append(selectNumpad(modifiers, { .std = "\r", .appKeypad = SS3 "M" })); break;
         case Key::Numpad_Multiply: append(selectNumpad(modifiers, { .std = "*",  .appKeypad = SS3 "j" })); break;
         case Key::Numpad_Add:      append(selectNumpad(modifiers, { .std = "+",  .appKeypad = SS3 "k" })); break;
@@ -331,7 +332,7 @@ bool StandardKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
 
 bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
                                                   uint32_t physicalKey,
-                                                  Modifiers modifiers,
+                                                  KeyboardModifiers modifiers,
                                                   KeyboardEventType eventType)
 {
     if (!enabled(eventType))
@@ -341,7 +342,7 @@ bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
         return StandardKeyboardInputGenerator::generateChar(
             characterEvent, physicalKey, modifiers, eventType);
 
-    auto const hasRealMods = !hasOnlyLockModifiers(modifiers);
+    auto const hasRealMods = modifiers.chord.any();
     auto const needsAction =
         enabled(KeyboardEventFlag::ReportEventTypes) && eventType != KeyboardEventType::Press;
     auto const reportAllKeys = enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
@@ -354,8 +355,8 @@ bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
 
     // Printable chars with only Shift modifier are unambiguous: stay in legacy mode.
     // CSI u is only needed when mods other than Shift are present (or reportAllKeys is set).
-    auto const hasOnlyShiftOrLocks = modifiers.without(LockModifiers).without(Modifier::Shift).none();
-    auto const canUseLegacyEncoding = hasOnlyShiftOrLocks || !disambiguate;
+    auto const hasOnlyShift = modifiers.chord.without(Modifier::Shift).none();
+    auto const canUseLegacyEncoding = hasOnlyShift || !disambiguate;
     if (!needsAction && !reportAllKeys && canUseLegacyEncoding)
         return StandardKeyboardInputGenerator::generateChar(
             characterEvent, physicalKey, modifiers, eventType);
@@ -363,7 +364,7 @@ bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
     // CSI u encoding (conditionally include semicolon only when modifiers non-empty)
     auto const encodedMods = encodeModifiers(modifiers, eventType);
     auto const modsPart = encodedMods.empty() ? std::string {} : std::format(";{}", encodedMods);
-    append("\033[{}{}u", encodeCharacter(characterEvent, physicalKey, modifiers), modsPart);
+    append("\033[{}{}u", encodeCharacter(characterEvent, physicalKey, modifiers.chord), modsPart);
     return true;
 }
 
@@ -372,22 +373,27 @@ constexpr unsigned encodeEventType(KeyboardEventType eventType) noexcept
     return static_cast<unsigned>(eventType);
 }
 
-std::string ExtendedKeyboardInputGenerator::encodeModifiers(Modifiers modifiers,
+std::string ExtendedKeyboardInputGenerator::encodeModifiers(KeyboardModifiers modifiers,
                                                             KeyboardEventType eventType) const
 {
+    // The Kitty protocol reports the lock state to the application, so this is one of the few places
+    // where the chord and the locks are merged again. Their bit positions are disjoint by
+    // construction (see LockKey), matching the spec's modifier mask.
+    auto const encoded = 1u + modifiers.chord.value() + modifiers.locks.value();
+
     // Per Kitty spec: action is omitted for Press (the default), only encoded for Repeat/Release.
     if (enabled(KeyboardEventFlag::ReportEventTypes) && eventType != KeyboardEventType::Press)
-        return std::format("{}:{}", 1 + modifiers.value(), encodeEventType(eventType));
+        return std::format("{}:{}", encoded, encodeEventType(eventType));
 
-    if (modifiers.value() != 0)
-        return std::to_string(1 + modifiers.value());
+    if (encoded != 1u)
+        return std::to_string(encoded);
 
     return "";
 }
 
 std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
                                                             uint32_t physicalKey,
-                                                            Modifiers modifiers) const
+                                                            Modifiers chord) const
 {
     // Per Kitty spec: unicode-key-code is always the un-shifted base key.
     // For letters, simple_lowercase normalizes both ch and physicalKey (A→a).
@@ -406,7 +412,7 @@ std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
         // Shifted key = the character actually produced when Shift is active.
         // For Shift+3→'#': shiftedKey=35. For Shift+A→'A': shiftedKey=65.
         uint32_t shiftedKey = 0;
-        if (modifiers.contains(Modifier::Shift))
+        if (chord.contains(Modifier::Shift))
         {
             auto const producedKey = static_cast<uint32_t>(ch);
             if (producedKey != baseKey)
@@ -576,7 +582,9 @@ constexpr char32_t numpadAssociatedText(Key key) noexcept
     }
 }
 
-bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, KeyboardEventType eventType)
+bool ExtendedKeyboardInputGenerator::generateKey(Key key,
+                                                 KeyboardModifiers modifiers,
+                                                 KeyboardEventType eventType)
 {
     if (!enabled(eventType))
         return false;
@@ -584,8 +592,8 @@ bool ExtendedKeyboardInputGenerator::generateKey(Key key, Modifiers modifiers, K
     if (!isNonLegacyMode())
         return StandardKeyboardInputGenerator::generateKey(key, modifiers, eventType);
 
-    // Enter/Tab/Backspace: legacy when only lock mods and not report-all-keys
-    if (hasOnlyLockModifiers(modifiers) && !enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes))
+    // Enter/Tab/Backspace: legacy when no chord modifier is held and not report-all-keys
+    if (modifiers.chord.none() && !enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes))
     {
         switch (key)
         {
@@ -856,25 +864,68 @@ constexpr uint32_t InputGenerator::keyToVirtualKeyCode(Key key)
     return 0;
 }
 
-constexpr Win32ControlKeyState InputGenerator::buildWin32ControlKeyState(Modifiers modifiers)
+constexpr char32_t InputGenerator::keyToUnicodeChar(Key key, KeyboardModifiers modifiers) noexcept
 {
+    // ConPTY forwards the Unicode-char field of a win32 key record verbatim and never derives it
+    // from the virtual-key code, so every key that has a character must report it here. Keys with
+    // no character (arrows, function keys, bare modifiers) fall through to 0, matching a real
+    // Windows KEY_EVENT_RECORD.
+    // clang-format off
+    switch (key)
+    {
+        case Key::Escape: return 0x1B;
+
+        case Key::Numpad_Enter:    return 0x0D;
+        case Key::Numpad_Multiply: return U'*';
+        case Key::Numpad_Add:      return U'+';
+        case Key::Numpad_Subtract: return U'-';
+        case Key::Numpad_Divide:   return U'/';
+        case Key::Numpad_Equal:    return U'=';
+
+        // The digit and decimal keys select their character function only while NumLock is latched,
+        // exactly as ToUnicodeEx would; without it they are navigation keys and carry no character.
+        case Key::Numpad_Decimal:
+            return modifiers.locks.contains(LockKey::NumLock) ? U'.' : char32_t { 0 };
+        case Key::Numpad_0:
+        case Key::Numpad_1:
+        case Key::Numpad_2:
+        case Key::Numpad_3:
+        case Key::Numpad_4:
+        case Key::Numpad_5:
+        case Key::Numpad_6:
+        case Key::Numpad_7:
+        case Key::Numpad_8:
+        case Key::Numpad_9:
+            return modifiers.locks.contains(LockKey::NumLock)
+                       ? static_cast<char32_t>(U'0' + (static_cast<int>(key) - static_cast<int>(Key::Numpad_0)))
+                       : char32_t { 0 };
+
+        default: return 0;
+    }
+    // clang-format on
+}
+
+constexpr Win32ControlKeyState InputGenerator::buildWin32ControlKeyState(KeyboardModifiers modifiers)
+{
+    // ConPTY's dwControlKeyState reports the lock state to the application deliberately, so this is
+    // one of the few places that reads the locks alongside the chord.
     auto state = Win32ControlKeyState {};
-    if (modifiers.test(Modifier::Shift))
+    if (modifiers.chord.test(Modifier::Shift))
         state.enable(Win32ControlKeyFlag::ShiftPressed);
-    if (modifiers.test(Modifier::Alt))
+    if (modifiers.chord.test(Modifier::Alt))
         state.enable(Win32ControlKeyFlag::LeftAltPressed);
-    if (modifiers.test(Modifier::Control))
+    if (modifiers.chord.test(Modifier::Control))
         state.enable(Win32ControlKeyFlag::LeftCtrlPressed);
-    if (modifiers.test(Modifier::CapsLock))
+    if (modifiers.locks.test(LockKey::CapsLock))
         state.enable(Win32ControlKeyFlag::CapsLockOn);
-    if (modifiers.test(Modifier::NumLock))
+    if (modifiers.locks.test(LockKey::NumLock))
         state.enable(Win32ControlKeyFlag::NumLockOn);
     return state;
 }
 
 bool InputGenerator::generateWin32KeyInput(uint32_t virtualKeyCode,
                                            char32_t unicodeChar,
-                                           Modifiers modifiers,
+                                           KeyboardModifiers modifiers,
                                            KeyboardEventType eventType,
                                            Win32ControlKeyState extraControlKeyState)
 {
@@ -886,7 +937,7 @@ bool InputGenerator::generateWin32KeyInput(uint32_t virtualKeyCode,
     // When Ctrl is held, Windows reports the control character (e.g., Ctrl+R → 0x12),
     // not the raw letter. Without this, ConPTY/PSReadLine may not recognize Ctrl+key combos.
     auto uc = static_cast<uint32_t>(unicodeChar);
-    if (modifiers.test(Modifier::Control))
+    if (modifiers.chord.test(Modifier::Control))
     {
         if (auto const mapped = ctrlMappedKey(unicodeChar); mapped.has_value())
             uc = static_cast<uint32_t>(static_cast<unsigned char>(*mapped));
@@ -952,7 +1003,7 @@ void InputGenerator::setBackarrowKeyMode(bool enable)
 
 bool InputGenerator::generate(char32_t characterEvent,
                               uint32_t physicalKey,
-                              Modifiers modifiers,
+                              KeyboardModifiers modifiers,
                               KeyboardEventType eventType)
 {
     // Win32 Input Mode supersedes all other keyboard protocols when active.
@@ -963,14 +1014,15 @@ bool InputGenerator::generate(char32_t characterEvent,
 
     // modifyOtherKeys mode 2: emit CSI 27 ; modifier ; codepoint ~ for modified keys.
     // This takes precedence over the CSI u keyboard protocol but only when no CSI u flags are active.
+    auto const chord = modifiers.chord;
     if (_modifyOtherKeys == 2 && !_keyboardInputGenerator.flags().any()
-        && eventType != KeyboardEventType::Release && modifiers.without(Modifier::Shift).any()
+        && eventType != KeyboardEventType::Release && chord.without(Modifier::Shift).any()
         && characterEvent < 0x110000)
     {
-        auto const mod = makeVirtualTerminalParam(modifiers);
+        auto const mod = makeVirtualTerminalParam(chord);
         append(std::format("\033[27;{};{}~", mod, static_cast<uint32_t>(characterEvent)));
         inputLog()("Sending modifyOtherKeys mode 2 {} \"{}\" {}.",
-                   modifiers,
+                   chord,
                    crispy::escape(unicode::convert_to<char>(characterEvent)),
                    eventType);
         return true;
@@ -1010,16 +1062,20 @@ constexpr Modifiers stripSelfModifier(Key key, Modifiers modifiers) noexcept
     // clang-format on
 }
 
-bool InputGenerator::generate(Key key, Modifiers modifiers, KeyboardEventType eventType)
+bool InputGenerator::generate(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType)
 {
     if (_win32InputMode)
     {
         auto effectiveModifiers = modifiers;
         if (eventType == KeyboardEventType::Release)
-            effectiveModifiers = stripSelfModifier(key, effectiveModifiers);
+            effectiveModifiers.chord = stripSelfModifier(key, effectiveModifiers.chord);
         auto const extra = isEnhancedKey(key) ? Win32ControlKeyState { Win32ControlKeyFlag::EnhancedKey }
                                               : Win32ControlKeyState {};
-        return generateWin32KeyInput(keyToVirtualKeyCode(key), 0, effectiveModifiers, eventType, extra);
+        return generateWin32KeyInput(keyToVirtualKeyCode(key),
+                                     keyToUnicodeChar(key, effectiveModifiers),
+                                     effectiveModifiers,
+                                     eventType,
+                                     extra);
     }
 
     bool const success = _keyboardInputGenerator.generateKey(key, modifiers, eventType);

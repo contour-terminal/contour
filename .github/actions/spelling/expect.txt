@@ -91,6 +91,7 @@ libva
 LMENU
 LMS
 lossily
+losslessly
 LUT
 LWin
 mainwindow
