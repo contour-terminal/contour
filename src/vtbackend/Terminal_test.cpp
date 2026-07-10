@@ -3807,6 +3807,39 @@ TEST_CASE("Terminal.kitty_keyboard_protocol_reports_lock_modifiers", "[terminal]
     CHECK(e(mock.replyData()) == e("\033[97;65u"));
 }
 
+// The positive counterpart for Win32 input mode (DEC private mode 9001, which ConPTY enables on
+// Windows). ConPTY forwards the record's Unicode-char field verbatim and cannot reconstruct it from
+// the virtual-key code, so character-bearing keys that lack a receiver-side VK fallback -- Escape
+// and the numpad keys -- must carry their character or applications such as neovim never see them.
+// Regression test for "Escape and numpad keys dead in neovim on Windows".
+TEST_CASE("Terminal.win32_input_mode_reports_unicode_for_escape_and_numpad", "[terminal][locks]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+    // CSI ? 9001 h enables Win32 input mode, exactly as ConPTY does on Windows.
+    mock.writeToScreen("\033[?9001h");
+    mock.terminal.flushInput();
+
+    auto const now = std::chrono::steady_clock::now();
+
+    SECTION("Escape carries its Unicode char 0x1B")
+    {
+        mock.resetReplyData();
+        mock.terminal.sendKeyEvent(vtbackend::Key::Escape, {}, vtbackend::KeyboardEventType::Press, now);
+        // CSI Vk ; Sc ; Uc ; Kd ; Cs ; Rc _  -- VK_ESCAPE=27, Uc=ESC=27.
+        CHECK(e(mock.replyData()) == e("\033[27;0;27;1;0;1_"));
+    }
+
+    SECTION("numpad digit carries its Unicode char while NumLock is latched")
+    {
+        mock.resetReplyData();
+        mock.terminal.sendKeyEvent(
+            vtbackend::Key::Numpad_5, NumLockOnly, vtbackend::KeyboardEventType::Press, now);
+        // VK_NUMPAD5=101, Uc='5'=53, CS=NUMLOCK_ON=32.
+        CHECK(e(mock.replyData()) == e("\033[101;0;53;1;32;1_"));
+    }
+}
+
 // }}}
 
 // NOLINTEND(misc-const-correctness)

@@ -746,6 +746,20 @@ class InputGenerator
     static constexpr Win32ControlKeyState buildWin32ControlKeyState(KeyboardModifiers modifiers);
     static constexpr uint32_t keyToVirtualKeyCode(Key key);
 
+    /// Returns the Unicode character a key carries in a Windows @c KEY_EVENT_RECORD, or 0 for keys
+    /// that have no associated character (navigation, function and modifier keys).
+    ///
+    /// win32 input mode (DEC private mode 9001) transports the OS key record verbatim; ConPTY
+    /// forwards the Unicode-char field as-is and never reconstructs it from the virtual-key code. A
+    /// character-bearing key (Escape, the numpad keys) must therefore report its character here, or
+    /// applications reading the record (e.g. neovim) receive nothing for that key.
+    ///
+    /// @param key       The key that was pressed.
+    /// @param modifiers The active keyboard modifiers; @c LockKey::NumLock selects the numpad's
+    ///                  digit/decimal character function, mirroring the OS @c ToUnicodeEx behaviour.
+    /// @return The associated Unicode character, or 0 when the key carries none.
+    [[nodiscard]] static constexpr char32_t keyToUnicodeChar(Key key, KeyboardModifiers modifiers) noexcept;
+
     inline bool append(std::string_view sequence);
     inline bool append(char asciiChar);
     inline bool append(uint8_t byte);

@@ -1173,10 +1173,11 @@ TEST_CASE("InputGenerator.Win32InputMode.escape_key", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Escape: VK_ESCAPE=0x1B=27
+    // Escape: VK_ESCAPE=0x1B=27, unicode=ESC=0x1B=27. ConPTY has no VK fallback for Escape, so the
+    // Unicode-char field must carry 0x1B or applications (e.g. neovim) never see the Escape.
     input.generate(Key::Escape, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[27;0;0;1;0;1_");
+    CHECK(seq == "\033[27;0;27;1;0;1_");
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1362,7 +1363,22 @@ TEST_CASE("InputGenerator.Win32InputMode.numpad_0", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Numpad 0: VK_NUMPAD0=0x60=96, NOT enhanced
+    // Numpad 0 with NumLock latched (the state in which Qt reports a keypad digit): VK_NUMPAD0=
+    // 0x60=96, unicode='0'=48, CS=NUMLOCK_ON(0x20)=32. The digit must ride in the Unicode-char
+    // field because ConPTY cannot reconstruct it from the virtual-key code in numeric keypad mode.
+    input.generate(Key::Numpad_0, LockKey::NumLock, KeyboardEventType::Press);
+    auto const seq = input.peek();
+    CHECK(seq == "\033[96;0;48;1;32;1_");
+    input.consume(static_cast<int>(seq.size()));
+}
+
+TEST_CASE("InputGenerator.Win32InputMode.numpad_0_without_numlock", "[terminal,input]")
+{
+    auto input = InputGenerator {};
+    input.setWin32InputMode(true);
+
+    // Without NumLock the numpad key is a navigation key and carries no character (Uc=0), matching
+    // a real KEY_EVENT_RECORD and ToUnicodeEx.
     input.generate(Key::Numpad_0, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[96;0;0;1;0;1_");
@@ -1374,10 +1390,10 @@ TEST_CASE("InputGenerator.Win32InputMode.numpad_5", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Numpad 5: VK_NUMPAD5=0x65=101, NOT enhanced
-    input.generate(Key::Numpad_5, Modifier::None, KeyboardEventType::Press);
+    // Numpad 5 with NumLock latched: VK_NUMPAD5=0x65=101, unicode='5'=53, CS=NUMLOCK_ON(0x20)=32.
+    input.generate(Key::Numpad_5, LockKey::NumLock, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[101;0;0;1;0;1_");
+    CHECK(seq == "\033[101;0;53;1;32;1_");
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1386,10 +1402,11 @@ TEST_CASE("InputGenerator.Win32InputMode.numpad_add", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Numpad +: VK_ADD=0x6B=107, NOT enhanced
+    // Numpad +: VK_ADD=0x6B=107, unicode='+'=43. Operators carry their character regardless of
+    // NumLock (they are not a navigation key), so the char rides even without a NumLock latch.
     input.generate(Key::Numpad_Add, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[107;0;0;1;0;1_");
+    CHECK(seq == "\033[107;0;43;1;0;1_");
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1398,10 +1415,10 @@ TEST_CASE("InputGenerator.Win32InputMode.numpad_enter", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Numpad Enter: VK_RETURN=0x0D=13, IS enhanced (E0 scan code prefix)
+    // Numpad Enter: VK_RETURN=0x0D=13, unicode=CR=0x0D=13, IS enhanced (E0 scan code prefix).
     input.generate(Key::Numpad_Enter, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[13;0;0;1;256;1_"); // CS=ENHANCED_KEY
+    CHECK(seq == "\033[13;0;13;1;256;1_"); // Uc=CR, CS=ENHANCED_KEY
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1410,10 +1427,10 @@ TEST_CASE("InputGenerator.Win32InputMode.numpad_divide", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Numpad /: VK_DIVIDE=0x6F=111, IS enhanced (E0 scan code prefix)
+    // Numpad /: VK_DIVIDE=0x6F=111, unicode='/'=47, IS enhanced (E0 scan code prefix).
     input.generate(Key::Numpad_Divide, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[111;0;0;1;256;1_"); // CS=ENHANCED_KEY
+    CHECK(seq == "\033[111;0;47;1;256;1_"); // Uc='/', CS=ENHANCED_KEY
     input.consume(static_cast<int>(seq.size()));
 }
 

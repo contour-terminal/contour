@@ -864,6 +864,47 @@ constexpr uint32_t InputGenerator::keyToVirtualKeyCode(Key key)
     return 0;
 }
 
+constexpr char32_t InputGenerator::keyToUnicodeChar(Key key, KeyboardModifiers modifiers) noexcept
+{
+    // ConPTY forwards the Unicode-char field of a win32 key record verbatim and never derives it
+    // from the virtual-key code, so every key that has a character must report it here. Keys with
+    // no character (arrows, function keys, bare modifiers) fall through to 0, matching a real
+    // Windows KEY_EVENT_RECORD.
+    // clang-format off
+    switch (key)
+    {
+        case Key::Escape: return 0x1B;
+
+        case Key::Numpad_Enter:    return 0x0D;
+        case Key::Numpad_Multiply: return U'*';
+        case Key::Numpad_Add:      return U'+';
+        case Key::Numpad_Subtract: return U'-';
+        case Key::Numpad_Divide:   return U'/';
+        case Key::Numpad_Equal:    return U'=';
+
+        // The digit and decimal keys select their character function only while NumLock is latched,
+        // exactly as ToUnicodeEx would; without it they are navigation keys and carry no character.
+        case Key::Numpad_Decimal:
+            return modifiers.locks.contains(LockKey::NumLock) ? U'.' : char32_t { 0 };
+        case Key::Numpad_0:
+        case Key::Numpad_1:
+        case Key::Numpad_2:
+        case Key::Numpad_3:
+        case Key::Numpad_4:
+        case Key::Numpad_5:
+        case Key::Numpad_6:
+        case Key::Numpad_7:
+        case Key::Numpad_8:
+        case Key::Numpad_9:
+            return modifiers.locks.contains(LockKey::NumLock)
+                       ? static_cast<char32_t>(U'0' + (static_cast<int>(key) - static_cast<int>(Key::Numpad_0)))
+                       : char32_t { 0 };
+
+        default: return 0;
+    }
+    // clang-format on
+}
+
 constexpr Win32ControlKeyState InputGenerator::buildWin32ControlKeyState(KeyboardModifiers modifiers)
 {
     // ConPTY's dwControlKeyState reports the lock state to the application deliberately, so this is
@@ -1030,7 +1071,11 @@ bool InputGenerator::generate(Key key, KeyboardModifiers modifiers, KeyboardEven
             effectiveModifiers.chord = stripSelfModifier(key, effectiveModifiers.chord);
         auto const extra = isEnhancedKey(key) ? Win32ControlKeyState { Win32ControlKeyFlag::EnhancedKey }
                                               : Win32ControlKeyState {};
-        return generateWin32KeyInput(keyToVirtualKeyCode(key), 0, effectiveModifiers, eventType, extra);
+        return generateWin32KeyInput(keyToVirtualKeyCode(key),
+                                     keyToUnicodeChar(key, effectiveModifiers),
+                                     effectiveModifiers,
+                                     eventType,
+                                     extra);
     }
 
     bool const success = _keyboardInputGenerator.generateKey(key, modifiers, eventType);
