@@ -166,6 +166,7 @@ rbong
 readback
 redefinable
 relayout
+remotehost
 repeatables
 repointed
 repointing
