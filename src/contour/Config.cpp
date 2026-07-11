@@ -428,6 +428,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("on_mouse_select", c.onMouseSelection);
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
+        loadFromEntry("layouts", c.layouts);
         loadFromEntry("git_drawings", c.gitDrawings);
 #if defined(CONTOUR_FRONTEND_GUI)
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
@@ -547,6 +548,64 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
         loadFromEntry(child, "hyperlink_decoration", where.hyperlinkDecoration);
         loadFromEntry(child, "hint_patterns", where.hintPatterns);
+    }
+}
+
+// Parses a single pane node. A node is a LEAF unless it carries a `split:` mapping.
+void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPane& where)
+{
+    if (auto const split = node["split"]; split && split.IsMap())
+    {
+        // Split node (implemented in Task 3). Left as leaf here; Task 3 fills it in.
+        return;
+    }
+
+    if (auto const command = node["command"]; command && command.IsScalar())
+        where.command = resolveVariables(command.as<std::string>());
+    if (auto const args = node["arguments"]; args && args.IsSequence())
+        for (auto const& argNode: args)
+            where.arguments.emplace_back(resolveVariables(argNode.as<std::string>()));
+    if (auto const directory = node["directory"]; directory && directory.IsScalar())
+        where.directory = homeResolvedPath(directory.as<std::string>(), vtpty::Process::homeDirectory());
+    if (auto const profile = node["profile"]; profile && profile.IsScalar())
+        where.profile = profile.as<std::string>();
+    if (auto const ratio = node["ratio"]; ratio && ratio.IsScalar())
+        where.ratio = ratio.as<double>();
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, config::Layout& where)
+{
+    auto const child = node[entry];
+    if (!child || !child.IsMap())
+        return;
+    auto const tabs = child["tabs"];
+    if (!tabs || !tabs.IsSequence())
+        return;
+    for (auto const& tabNode: tabs)
+    {
+        config::LayoutTab tab;
+        if (auto const title = tabNode["title"]; title && title.IsScalar())
+            tab.title = title.as<std::string>();
+        if (auto const color = tabNode["color"]; color && color.IsScalar())
+            tab.color = vtbackend::RGBColor { color.as<std::string>() };
+        if (auto const profile = tabNode["profile"]; profile && profile.IsScalar())
+            tab.profile = profile.as<std::string>();
+        parseLayoutPane(tabNode, tab.root);
+        where.tabs.push_back(std::move(tab));
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::unordered_map<std::string, config::Layout>& where)
+{
+    if (auto const child = node[entry]; child && child.IsMap())
+    {
+        for (auto layoutEntry: child)
+        {
+            auto const name = layoutEntry.first.as<std::string>();
+            loadFromEntry(child, name, where[name]);
+        }
     }
 }
 

@@ -1069,6 +1069,9 @@ struct YAMLConfigReader
     /// Expands `${VAR}` tokens then resolves `~` to the home directory.
     [[nodiscard]] std::filesystem::path resolvedPath(std::string const& input) const;
 
+    /// Parses a single pane node. A node is a LEAF unless it carries a `split:` mapping.
+    void parseLayoutPane(YAML::Node const& node, LayoutPane& where);
+
     template <typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
     void loadFromEntry(YAML::Node const& node,
                        std::string const& entry,
@@ -1134,6 +1137,12 @@ struct YAMLConfigReader
             }
         }
     }
+
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       std::unordered_map<std::string, Layout>& where);
+
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, Layout& where);
 
     // Used for color scheme loading
     template <typename T>

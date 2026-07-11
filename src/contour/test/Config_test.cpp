@@ -115,6 +115,46 @@ profiles:
     CHECK(profile->bell.value().alert == false);
 }
 
+TEST_CASE("Config: a layout with plain leaf tabs parses", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - title: "editor"
+              color: "#d75f00"
+              directory: "/tmp"
+              command: "nvim"
+              arguments: ["."]
+            - title: "claude"
+              command: "claude"
+)"sv);
+
+    auto const& layouts = config.layouts.value();
+    REQUIRE(layouts.contains("work"));
+    auto const& work = layouts.at("work");
+    REQUIRE(work.tabs.size() == 2);
+
+    auto const& t0 = work.tabs[0];
+    CHECK(t0.title == "editor");
+    REQUIRE(t0.color.has_value());
+    CHECK(*t0.color == vtbackend::RGBColor { "#d75f00" });
+    CHECK(t0.root.isLeaf());
+    REQUIRE(t0.root.command.has_value());
+    CHECK(*t0.root.command == "nvim");
+    REQUIRE(t0.root.arguments.size() == 1);
+    CHECK(t0.root.arguments[0] == ".");
+    REQUIRE(t0.root.directory.has_value());
+    CHECK(t0.root.directory->generic_string() == "/tmp");
+
+    auto const& t1 = work.tabs[1];
+    CHECK(t1.title == "claude");
+    CHECK(t1.root.isLeaf());
+    CHECK(*t1.root.command == "claude");
+    CHECK_FALSE(t1.root.directory.has_value());
+}
+
 TEST_CASE("Config: color scheme with background image loads from YAML", "[config]")
 {
     QTemporaryDir dir;
