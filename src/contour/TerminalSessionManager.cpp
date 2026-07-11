@@ -329,6 +329,11 @@ void TerminalSessionManager::launchLayout(std::string const& name, TerminalSessi
     applyLayoutToWindow(win->id(), *layout);
 }
 
+void TerminalSessionManager::saveLayout(std::string const&, TerminalSession*)
+{
+    // implemented in Task 14
+}
+
 void TerminalSessionManager::switchToPreviousTab(TerminalSession* acting)
 {
     // The "previous tab" memory lives on the acting session's window.

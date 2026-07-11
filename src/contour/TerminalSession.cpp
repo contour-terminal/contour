@@ -2218,6 +2218,18 @@ bool TerminalSession::operator()(actions::ResizePane const& action)
     return true;
 }
 
+bool TerminalSession::operator()(actions::LaunchLayout const& event)
+{
+    _manager->launchLayout(event.name, this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SaveLayout const& event)
+{
+    _manager->saveLayout(event.name, this); // implemented in Task 14
+    return true;
+}
+
 // }}}
 // {{{ implementation helpers
 void TerminalSession::setDefaultCursor()

@@ -2338,6 +2338,20 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 return std::nullopt;
         }
 
+        if (holds_alternative<actions::LaunchLayout>(action))
+        {
+            if (auto name = node["name"]; name && name.IsScalar())
+                return actions::LaunchLayout { name.as<std::string>() };
+            return std::nullopt;
+        }
+
+        if (holds_alternative<actions::SaveLayout>(action))
+        {
+            if (auto name = node["name"]; name && name.IsScalar())
+                return actions::SaveLayout { name.as<std::string>() };
+            return std::nullopt;
+        }
+
         if (holds_alternative<actions::CreateSelection>(action))
         {
             if (auto delimiters = node["delimiters"]; delimiters && delimiters.IsScalar())

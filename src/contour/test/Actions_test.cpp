@@ -104,3 +104,17 @@ TEST_CASE("actions::filterRepeatableActions on an all-repeatable list is identit
     std::vector<actions::Action> const held { actions::ScrollUp {}, actions::ScrollUp {} };
     CHECK(actions::filterRepeatableActions(held).size() == 2);
 }
+
+TEST_CASE("Actions: LaunchLayout maps by name", "[actions][layout]")
+{
+    auto const action = contour::actions::fromString("LaunchLayout");
+    REQUIRE(action.has_value());
+    CHECK(std::holds_alternative<contour::actions::LaunchLayout>(*action));
+}
+
+TEST_CASE("Actions: SaveLayout maps by name", "[actions][layout]")
+{
+    auto const action = contour::actions::fromString("SaveLayout");
+    REQUIRE(action.has_value());
+    CHECK(std::holds_alternative<contour::actions::SaveLayout>(*action));
+}

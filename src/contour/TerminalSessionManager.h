@@ -97,6 +97,10 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param acting The session that triggered the action; its hosting window is the target.
     void launchLayout(std::string const& name, TerminalSession* acting);
 
+    /// Saves the current window's tabs as a named layout in layouts.yml.
+    /// Stub for now; implemented in Task 14.
+    void saveLayout(std::string const& name, TerminalSession* acting);
+
     /// Appends every tab of @p layout to @p window, building a real PTY-backed session for each leaf
     /// pane (via createBackingSession) before handing the pane tree to realizeLayoutTab. Used by both
     /// launchLayout and startup (--layout / default_layout).
