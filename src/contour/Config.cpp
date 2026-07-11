@@ -556,7 +556,19 @@ void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPan
 {
     if (auto const split = node["split"]; split && split.IsMap())
     {
-        // Split node (implemented in Task 3). Left as leaf here; Task 3 fills it in.
+        if (auto const orientation = split["orientation"]; orientation && orientation.IsScalar())
+        {
+            auto const value = orientation.as<std::string>();
+            where.orientation =
+                value == "horizontal" ? vtmux::SplitState::Horizontal : vtmux::SplitState::Vertical;
+        }
+        if (auto const panes = split["panes"]; panes && panes.IsSequence())
+            for (auto const& paneNode: panes)
+            {
+                config::LayoutPane child;
+                parseLayoutPane(paneNode, child);
+                where.children.push_back(std::move(child));
+            }
         return;
     }
 

@@ -155,6 +155,44 @@ layouts:
     CHECK_FALSE(t1.root.directory.has_value());
 }
 
+TEST_CASE("Config: a layout tab with recursive splits parses", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    dev:
+        tabs:
+            - title: "servers"
+              split:
+                orientation: vertical
+                panes:
+                    - command: "npm run dev"
+                      ratio: 0.6
+                    - split:
+                        orientation: horizontal
+                        panes:
+                            - command: "htop"
+                            - command: "journalctl -f"
+)"sv);
+
+    auto const& tab = config.layouts.value().at("dev").tabs.at(0);
+    auto const& root = tab.root;
+    REQUIRE_FALSE(root.isLeaf());
+    CHECK(root.orientation == vtmux::SplitState::Vertical);
+    REQUIRE(root.children.size() == 2);
+
+    CHECK(root.children[0].isLeaf());
+    CHECK(*root.children[0].command == "npm run dev");
+    CHECK(root.children[0].ratio == Catch::Approx(0.6));
+
+    auto const& nested = root.children[1];
+    REQUIRE_FALSE(nested.isLeaf());
+    CHECK(nested.orientation == vtmux::SplitState::Horizontal);
+    REQUIRE(nested.children.size() == 2);
+    CHECK(*nested.children[0].command == "htop");
+    CHECK(*nested.children[1].command == "journalctl -f");
+}
+
 TEST_CASE("Config: color scheme with background image loads from YAML", "[config]")
 {
     QTemporaryDir dir;
