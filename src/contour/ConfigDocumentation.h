@@ -691,6 +691,19 @@ constexpr StringLiteral ProfilesConfig {
     "\n"
 };
 
+constexpr StringLiteral LayoutsConfig {
+    "\n"
+    "{comment} Layouts\n"
+    "{comment} -------\n"
+    "{comment}\n"
+    "{comment} Named sets of tabs opened together. Each tab may set a title, color, working\n"
+    "{comment} directory, a command to run (replacing the shell), a profile override, and split\n"
+    "{comment} panes. See the documentation for the full schema.\n"
+    "layouts:\n"
+    "\n"
+};
+constexpr StringLiteral LayoutsWeb { "Named sets of tabs opened together." };
+
 constexpr StringLiteral WordDelimitersConfig { "{comment} Word delimiters when selecting word-wise.\n"
                                                "word_delimiters: \"{}\"\n"
                                                "\n" };
@@ -2142,6 +2155,8 @@ using ReflowOnResize = DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWe
 using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
 using Profiles = DocumentationEntry<ProfilesConfig, ProfilesWeb>;
 using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;
+using Layouts = DocumentationEntry<LayoutsConfig, LayoutsWeb>;
+using DefaultLayout = DocumentationEntry<StringLiteral { "default_layout: {}\n" }, LayoutsWeb>;
 using WordDelimiters = DocumentationEntry<WordDelimitersConfig, WordDelimitersWeb>;
 using ExtendedWordDelimiters = DocumentationEntry<ExtendedWordDelimitersConfig, ExtendedWordDelimitersWeb>;
 using BypassMouseProtocolModifiers =

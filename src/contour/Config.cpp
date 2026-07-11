@@ -2516,6 +2516,9 @@ std::string createForGlobal(Config const& c)
         [&]([[maybe_unused]] auto name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, TerminalProfile>,
                                          documentation::Profiles> const& v) {},
+        [&]([[maybe_unused]] auto name,
+            [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, config::Layout>,
+                                         documentation::Layouts> const& v) {},
         [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
     };
 

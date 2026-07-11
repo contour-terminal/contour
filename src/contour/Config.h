@@ -27,6 +27,8 @@
 #include <vtrasterizer/Decorator.h>
 #include <vtrasterizer/FontDescriptions.h>
 
+#include <vtmux/Primitives.h> // vtmux::SplitState for layout panes
+
 #include <text_shaper/font.h>
 #include <text_shaper/mock_font_locator.h>
 
@@ -424,6 +426,39 @@ const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDesc
     .builtinBoxDrawing = true,
     .maxFallbackCount = vtrasterizer::DefaultMaxFallbackCount,
     .textOutline = {},
+};
+
+// A node in a layout tab's pane tree. It is EITHER a leaf (carries a command to run) OR a split
+// (carries an orientation + two-or-more children). `children` empty => leaf.
+struct LayoutPane
+{
+    // Leaf fields (used when `children` is empty):
+    std::optional<std::string> command;           // program; replaces the profile shell
+    std::vector<std::string> arguments;           // arguments for `command`
+    std::optional<std::filesystem::path> directory; // initial working directory
+    std::optional<std::string> profile;           // per-pane profile override (terminal-level only)
+    double ratio = 0.5;                           // size weight within the parent split
+
+    // Split fields (used when `children` is non-empty):
+    vtmux::SplitState orientation = vtmux::SplitState::Vertical;
+    std::vector<LayoutPane> children;
+
+    [[nodiscard]] bool isLeaf() const noexcept { return children.empty(); }
+};
+
+// One tab in a layout: a name/color and a pane tree (a single leaf for a plain tab).
+struct LayoutTab
+{
+    std::optional<std::string> title;             // seeds the tab name
+    std::optional<vtbackend::RGBColor> color;     // sets the User tab color
+    std::optional<std::string> profile;           // tab-level default profile
+    LayoutPane root;                              // leaf for single-pane, split node otherwise
+};
+
+// A named layout: an ordered list of tabs.
+struct Layout
+{
+    std::vector<LayoutTab> tabs;
 };
 
 struct TerminalProfile
@@ -944,6 +979,8 @@ struct Config
     ConfigEntry<std::unordered_map<std::string, TerminalProfile>, documentation::Profiles> profiles {
         { { "main", TerminalProfile {} } }
     };
+    ConfigEntry<std::unordered_map<std::string, Layout>, documentation::Layouts> layouts {};
+    ConfigEntry<std::string, documentation::DefaultLayout> defaultLayoutName { "" };
     ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>, documentation::ColorSchemes>
         colorschemes { { { "default", vtbackend::ColorPalette {} } } };
 
