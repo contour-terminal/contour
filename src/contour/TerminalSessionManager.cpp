@@ -380,13 +380,16 @@ bool TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId, std::str
         if (auto* tab = window->tabAt(i))
             layout.tabs.push_back(serializeTab(*tab, resolve));
 
-    // Update the in-memory config so a subsequent LaunchLayout in this run sees the save immediately.
-    auto& layouts = _app.config().layouts.value();
-    layouts[name] = layout;
+    // Build the YAML from a local merged copy so the live config is only touched once the write
+    // to disk has fully succeeded (create_directories + write temp + rename).
+    auto layoutsCopy = _app.config().layouts.value();
+    layoutsCopy[name] = layout;
 
-    auto const yaml = emitLayoutsYaml(layouts);
+    auto const yaml = emitLayoutsYaml(layoutsCopy);
 
     auto const path = config::configHome() / "layouts.yml";
+    auto const tmp = path.string() + ".tmp";
+
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     if (ec)
@@ -395,13 +398,14 @@ bool TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId, std::str
         return false;
     }
 
-    auto const tmp = path.string() + ".tmp";
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         out << yaml;
         if (!out)
         {
             managerLog()("Failed to write {}", tmp);
+            std::error_code rmec;
+            std::filesystem::remove(tmp, rmec);
             return false;
         }
     }
@@ -409,8 +413,16 @@ bool TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId, std::str
     if (ec)
     {
         managerLog()("Failed to write layouts.yml: {}", ec.message());
+        std::error_code rmec;
+        std::filesystem::remove(tmp, rmec);
         return false;
     }
+
+    // Only now that the file is safely on disk do we update the in-memory config, so a
+    // subsequent LaunchLayout in this run sees the save, and runtime state never diverges
+    // from what's actually persisted.
+    _app.config().layouts.value() = std::move(layoutsCopy);
+
     managerLog()("Saved layout '{}' to {}", name, path.string());
     return true;
 }
