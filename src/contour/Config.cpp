@@ -314,6 +314,27 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
 
     auto yamlVisitor = YAMLConfigReader(config.configFile.string(), logger);
     yamlVisitor.load(config);
+
+    // Merge a machine-managed sibling layouts.yml (written by SaveLayout). Its entries override
+    // same-named inline layouts, since the file is the freshest SaveLayout output.
+    auto const siblingPath = config.configFile.parent_path() / "layouts.yml";
+    std::error_code ec;
+    if (std::filesystem::exists(siblingPath, ec) && !ec)
+    {
+        try
+        {
+            auto siblingReader = YAMLConfigReader(siblingPath.string(), logger);
+            std::unordered_map<std::string, Layout> fileLayouts;
+            siblingReader.loadLayoutsInto(fileLayouts);
+            for (auto& [name, layout]: fileLayouts)
+                config.layouts.value()[name] = std::move(layout);
+        }
+        catch (std::exception const& e)
+        {
+            logger()("Failed to load layouts.yml: {}", e.what());
+        }
+    }
+
     compareEntries(config, logger);
 }
 

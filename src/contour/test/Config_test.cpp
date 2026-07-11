@@ -206,6 +206,39 @@ layouts:
     CHECK(config.defaultLayoutName.value() == "work");
 }
 
+TEST_CASE("Config: a sibling layouts.yml merges and overrides inline layouts", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const configPath = writeConfig(dir, R"(
+layouts:
+    work:
+        tabs:
+            - command: "inline-shell"
+)"sv);
+    {
+        auto const siblingPath = std::filesystem::path(dir.path().toStdString()) / "layouts.yml";
+        std::ofstream(siblingPath) << R"(
+layouts:
+    work:
+        tabs:
+            - command: "file-shell"
+    extra:
+        tabs:
+            - command: "zsh"
+)";
+    }
+
+    auto config = contour::config::Config {};
+    contour::config::loadConfigFromFile(config, configPath);
+
+    auto const& layouts = config.layouts.value();
+    REQUIRE(layouts.contains("work"));
+    REQUIRE(layouts.contains("extra"));
+    // Sibling file wins the collision.
+    CHECK(*layouts.at("work").tabs.at(0).root.command == "file-shell");
+    CHECK(*layouts.at("extra").tabs.at(0).root.command == "zsh");
+}
+
 TEST_CASE("Config: color scheme with background image loads from YAML", "[config]")
 {
     QTemporaryDir dir;

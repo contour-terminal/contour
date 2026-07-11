@@ -1264,6 +1264,13 @@ struct YAMLConfigReader
 
     void load(Config& c);
 
+    /// Loads the `layouts:` entry of this reader's own document into @p where.
+    /// Used to merge a sibling layouts.yml on top of the already-loaded Config.
+    void loadLayoutsInto(std::unordered_map<std::string, Layout>& where)
+    {
+        loadFromEntry(doc, "layouts", where);
+    }
+
     std::optional<actions::Action> parseAction(YAML::Node const& node);
     std::optional<vtbackend::Modifiers> parseModifierKey(std::string const& key);
     std::optional<vtbackend::Modifiers> parseModifier(YAML::Node const& nodeYAML);
