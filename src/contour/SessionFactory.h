@@ -3,6 +3,7 @@
 
 #include <vtbackend/primitives.h>
 
+#include <vtpty/Process.h>
 #include <vtpty/Pty.h>
 #if defined(VTPTY_LIBSSH2)
     #include <vtpty/SshSession.h>
@@ -42,7 +43,10 @@ class SessionFactory
     ///                 size rather than the profile default; a brand-new window passes @c std::nullopt.
     /// @return The PTY device backing the new session.
     [[nodiscard]] virtual std::unique_ptr<vtpty::Pty> createPty(
-        std::optional<std::string> cwd, std::optional<vtbackend::PageSize> pageSize = std::nullopt) = 0;
+        std::optional<std::string> cwd,
+        std::optional<vtbackend::PageSize> pageSize = std::nullopt,
+        std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
+        std::optional<std::string> profileName = std::nullopt) = 0;
 };
 
 /// The production SessionFactory: consults the app's active profile and produces either a local
@@ -54,7 +58,10 @@ class AppSessionFactory final: public SessionFactory
     explicit AppSessionFactory(ContourGuiApp& app): _app { app } {}
 
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
-        std::optional<std::string> cwd, std::optional<vtbackend::PageSize> pageSize = std::nullopt) override;
+        std::optional<std::string> cwd,
+        std::optional<vtbackend::PageSize> pageSize = std::nullopt,
+        std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
+        std::optional<std::string> profileName = std::nullopt) override;
 
   private:
 #if defined(VTPTY_LIBSSH2)

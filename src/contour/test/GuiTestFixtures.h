@@ -8,6 +8,7 @@
 #include <contour/WindowController.h>
 
 #include <vtpty/MockPty.h>
+#include <vtpty/Process.h>
 #include <vtpty/Pty.h>
 
 #include <QtCore/QCoreApplication>
@@ -43,12 +44,17 @@ class MockPtySessionFactory final: public contour::SessionFactory
         vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) };
 
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
-        std::optional<std::string> cwd, std::optional<vtbackend::PageSize> pageSize = std::nullopt) override
+        std::optional<std::string> cwd,
+        std::optional<vtbackend::PageSize> pageSize = std::nullopt,
+        std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
+        std::optional<std::string> profileName = std::nullopt) override
     {
         requestedCwds.push_back(std::move(cwd));
         // Record the size the manager asked for (nullopt == "use the profile default"), so a test can
         // assert that a new tab/split inherited the running window size instead of the default.
         requestedPageSizes.push_back(pageSize);
+        requestedCommandOverrides.push_back(std::move(commandOverride));
+        requestedProfileNames.push_back(std::move(profileName));
         auto const initialSize = pageSize.value_or(DefaultPageSize);
         auto pty = std::make_unique<vtpty::MockPty>(initialSize);
         createdPtys.push_back(pty.get());
@@ -58,6 +64,10 @@ class MockPtySessionFactory final: public contour::SessionFactory
     std::vector<std::optional<std::string>> requestedCwds;
     /// The @c pageSize argument of each createPty() call (nullopt when the caller requested the default).
     std::vector<std::optional<vtbackend::PageSize>> requestedPageSizes;
+    /// The @c commandOverride argument of each createPty() call.
+    std::vector<std::optional<vtpty::Process::ExecInfo>> requestedCommandOverrides;
+    /// The @c profileName argument of each createPty() call.
+    std::vector<std::optional<std::string>> requestedProfileNames;
     /// Non-owning observation pointers; valid while the owning session lives.
     std::vector<vtpty::MockPty*> createdPtys;
 };

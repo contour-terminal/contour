@@ -16,12 +16,17 @@ using std::nullopt;
 namespace contour
 {
 
-std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(std::optional<std::string> cwd,
-                                                         std::optional<vtbackend::PageSize> pageSize)
+std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
+    std::optional<std::string> cwd,
+    std::optional<vtbackend::PageSize> pageSize,
+    std::optional<vtpty::Process::ExecInfo> commandOverride,
+    std::optional<std::string> profileName)
 {
-    auto const& profile = _app.config().profile(_app.profileName());
+    auto const& profile = _app.config().profile(profileName.value_or(_app.profileName()));
 #if defined(VTPTY_LIBSSH2)
-    if (!profile->ssh.value().hostname.empty())
+    // A layout pane's command overrides the profile's shell and should run locally, not open the
+    // SSH session the profile would otherwise use.
+    if (!commandOverride && !profile->ssh.value().hostname.empty())
         return make_unique<vtpty::SshSession>(profile->ssh.value(),
                                               std::bind(&AppSessionFactory::requestSshHostkeyVerification,
                                                         this,
@@ -33,6 +38,15 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(std::optional<std::stri
     // one pane/tab's cwd into every later session created with no explicit cwd. The copy keeps the
     // override session-local.
     auto shell = profile->shell.value();
+    if (commandOverride)
+    {
+        // Replace the shell program/args with the layout pane's command; keep env from the profile.
+        if (!commandOverride->program.empty())
+            shell.program = commandOverride->program;
+        shell.arguments = commandOverride->arguments;
+        if (!commandOverride->workingDirectory.empty())
+            shell.workingDirectory = commandOverride->workingDirectory;
+    }
     if (cwd)
         shell.workingDirectory = std::filesystem::path(cwd.value());
     // Spawn the child at the caller's requested grid size when given (a new tab/split inherits the live
