@@ -298,6 +298,7 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window, config:
         };
 
         auto* modelTab = realizeLayoutTab(*_model, window, tabSpec, seeder);
+        _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
         if (modelTab != nullptr)
         {
             // Map every leaf session in the new tab to this tab id (mirrors createSessionInBackground).

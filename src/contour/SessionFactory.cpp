@@ -41,9 +41,13 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     if (commandOverride)
     {
         // Replace the shell program/args with the layout pane's command; keep env from the profile.
+        // Only overlay when a program was actually given: a directory-only pane override has an empty
+        // program, and must not wipe the profile shell's default arguments.
         if (!commandOverride->program.empty())
+        {
             shell.program = commandOverride->program;
-        shell.arguments = commandOverride->arguments;
+            shell.arguments = commandOverride->arguments;
+        }
         if (!commandOverride->workingDirectory.empty())
             shell.workingDirectory = commandOverride->workingDirectory;
     }
