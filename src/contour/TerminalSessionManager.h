@@ -90,6 +90,21 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// Creates and activates a new tab in the window hosting @p acting (the CreateNewTab keybinding).
     void createNewTab(TerminalSession* acting);
 
+    /// Looks up @p name in the app's configured layouts and appends its tabs to the window hosting
+    /// @p acting (the LaunchLayout action). Logs and no-ops if the layout is unknown or @p acting has
+    /// no hosting window.
+    /// @param name   The layout's key in config::Config::layouts.
+    /// @param acting The session that triggered the action; its hosting window is the target.
+    void launchLayout(std::string const& name, TerminalSession* acting);
+
+    /// Appends every tab of @p layout to @p window, building a real PTY-backed session for each leaf
+    /// pane (via createBackingSession) before handing the pane tree to realizeLayoutTab. Used by both
+    /// launchLayout and startup (--layout / default_layout).
+    /// @param window The target window.
+    /// @param layout The layout to realize (must have at least one tab).
+    /// @return false if @p layout has no tabs (nothing to apply); true otherwise.
+    bool applyLayoutToWindow(vtmux::WindowId window, config::Layout const& layout);
+
     // Keyboard tab navigation/reordering. Every entry point takes the ACTING session (the one that
     // received the keybinding) and targets that session's hosting window, so a keybinding in any
     // OS window operates on that window's tabs.

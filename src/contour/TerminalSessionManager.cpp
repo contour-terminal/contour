@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ColorConversion.h>
 #include <contour/ContourGuiApp.h>
+#include <contour/LayoutBuilder.h>
 #include <contour/PaneProxy.h>
 #include <contour/TabLabel.h>
 #include <contour/TerminalSession.h>
@@ -261,6 +262,70 @@ void TerminalSessionManager::createNewTab(TerminalSession* acting)
     // The CreateNewTab keybinding: the new tab belongs to the window the user typed in.
     if (auto* win = windowHostingSession(acting))
         createSession(win->id());
+}
+
+bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window, config::Layout const& layout)
+{
+    if (layout.tabs.empty())
+    {
+        managerLog()("Layout has no tabs; nothing to apply.");
+        return false;
+    }
+    for (auto const& tabSpec: layout.tabs)
+    {
+        // The seeder stages a backing session for each pane right before the model allocates it,
+        // exactly like createBackingSession's use in splitActivePane/createSessionInBackground.
+        auto seeder = [&](config::LayoutPane const& leaf) {
+            auto const sessionId = vtmux::SessionId { _nextSessionId++ };
+            std::optional<vtpty::Process::ExecInfo> command;
+            if (leaf.command || !leaf.arguments.empty() || leaf.directory)
+            {
+                command = vtpty::Process::ExecInfo {};
+                command->program = leaf.command.value_or(std::string {});
+                command->arguments = leaf.arguments;
+                if (leaf.directory)
+                    command->workingDirectory = *leaf.directory;
+            }
+            std::optional<std::string> profileName = leaf.profile ? leaf.profile : tabSpec.profile;
+            if (profileName && _app.config().findProfile(*profileName) == nullptr)
+            {
+                managerLog()("Layout references unknown profile '{}'; using window profile.", *profileName);
+                profileName.reset();
+            }
+            std::optional<std::string> cwd =
+                leaf.directory ? std::optional { leaf.directory->string() } : std::nullopt;
+            createBackingSession(sessionId, cwd, std::nullopt, command, profileName);
+        };
+
+        auto* modelTab = realizeLayoutTab(*_model, window, tabSpec, seeder);
+        if (modelTab != nullptr)
+        {
+            // Map every leaf session in the new tab to this tab id (mirrors createSessionInBackground).
+            modelTab->rootPane()->walkTree([&](vtmux::Pane& p) {
+                if (p.isLeaf())
+                    _tabBySession[p.session().value] = modelTab->id();
+            });
+        }
+    }
+    return true;
+}
+
+void TerminalSessionManager::launchLayout(std::string const& name, TerminalSession* acting)
+{
+    auto const* layout = [&]() -> config::Layout const* {
+        auto const& map = _app.config().layouts.value();
+        auto const it = map.find(name);
+        return it != map.end() ? &it->second : nullptr;
+    }();
+    if (layout == nullptr)
+    {
+        managerLog()("LaunchLayout: no layout named '{}'.", name);
+        return;
+    }
+    auto* win = windowHostingSession(acting);
+    if (win == nullptr)
+        return;
+    applyLayoutToWindow(win->id(), *layout);
 }
 
 void TerminalSessionManager::switchToPreviousTab(TerminalSession* acting)

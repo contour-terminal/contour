@@ -9,10 +9,19 @@
 // set, so the testable invariant — window count as windows are created and removed — is exercised here
 // against the Qt-free model. (Per-window tab/pane isolation is covered in SessionModel_test.cpp.)
 
+#include <contour/Config.h>
+#include <contour/TerminalSessionManager.h>
+#include <contour/test/GuiTestFixtures.h>
+
+#include <vtbackend/primitives.h>
+
 #include <catch2/catch_test_macros.hpp>
+
+#include <memory>
 
 #include <vtmux/ModelEvents.h>
 #include <vtmux/SessionModel.h>
+#include <vtmux/Tab.h>
 
 using namespace vtmux;
 
@@ -100,4 +109,54 @@ TEST_CASE("SessionModel: removing a window with tabs closes only that window's t
     REQUIRE(model.window(b->id()) == b);
     CHECK(b->tabCount() == 1); // B's tab survived A's teardown
     CHECK(model.findTab(bTab->id()) == bTab);
+}
+
+// Manager-level coverage for applyLayoutToWindow, exercised directly (rather than through
+// launchLayout) so the test needs no config injection or acting-session setup: it builds a
+// contour::config::Layout by hand and asserts the resulting real, PTY-backed tabs/colors on the
+// manager's authoritative vtmux::SessionModel.
+TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors", "[manager][layout]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    contour::test::ScopedController win { app.manager() };
+
+    // Build a 3-tab layout in C++ (no config needed). Panes set NO profile, so no config lookup
+    // happens. t2 is a vertical split of two leaves, covering the multi-pane realization path.
+    contour::config::Layout layout;
+    contour::config::LayoutTab t0;
+    t0.root.command = "echo a";
+    contour::config::LayoutTab t1;
+    t1.root.command = "echo b";
+    t1.color = vtbackend::RGBColor { "#112233" };
+    contour::config::LayoutTab t2;
+    t2.root.orientation = vtmux::SplitState::Vertical;
+    contour::config::LayoutPane left;
+    left.command = "echo left";
+    contour::config::LayoutPane right;
+    right.command = "echo right";
+    t2.root.children = { left, right };
+    layout.tabs = { t0, t1, t2 };
+
+    REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
+
+    auto* window = app.manager().model().window(win.id);
+    REQUIRE(window != nullptr);
+    CHECK(window->tabCount() == 3); // three tabs created from the layout
+    auto* colored = window->tabAt(1);
+    REQUIRE(colored != nullptr);
+    CHECK(colored->color(vtmux::TabColorSource::User).has_value()); // second tab got its color
+    auto* split = window->tabAt(2);
+    REQUIRE(split != nullptr);
+    CHECK(split->paneCount() == 2); // the split tab realized both leaves
+
+    // Every leaf pane is backed by a REAL session created through the mock PTY factory (not just a
+    // model tab with no backing session): the factory recorded one createPty() call per leaf, in
+    // order, carrying that leaf's command.
+    REQUIRE(factory->requestedCommandOverrides.size() == 4);
+    CHECK(factory->requestedCommandOverrides[0]->program == "echo a");
+    CHECK(factory->requestedCommandOverrides[1]->program == "echo b");
+    CHECK(factory->requestedCommandOverrides[2]->program == "echo left");
+    CHECK(factory->requestedCommandOverrides[3]->program == "echo right");
 }
