@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/LayoutBuilder.h>
 
+#include <format>
 #include <numeric>
 
 #include <vtmux/Pane.h>
@@ -89,6 +90,131 @@ vtmux::Tab* realizeLayoutTab(vtmux::SessionModel& model,
 
     realizePane(model, modelTab->id(), tab.root, seed);
     return modelTab;
+}
+
+namespace
+{
+    std::string indentCols(int columns)
+    {
+        return std::string(static_cast<size_t>(columns), ' ');
+    }
+
+    std::string quoted(std::string const& value)
+    {
+        return "\"" + value + "\"";
+    }
+
+    // The parser reconstructs a color via `RGBColor{std::string}`, which only accepts the exact
+    // 7-character "#RRGGBB" form (see vtbackend::RGBColor::operator=(std::string const&)). That is
+    // NOT what `std::format("{}", color)` yields (it delegates to `to_string(RGBColor)`, which
+    // wraps the hex in literal single quotes: `'#RRGGBB'`), so format the hex ourselves here.
+    std::string colorHex(vtbackend::RGBColor color)
+    {
+        return std::format("#{:02X}{:02X}{:02X}", color.red, color.green, color.blue);
+    }
+
+    void emitChildPane(std::string& out, config::LayoutPane const& pane, int dashCol);
+
+    // Emits the body of `pane` (its command/arguments/directory/profile, or its `split:` block)
+    // as the tail of a list item whose dash sits at column `dashCol`. `wrote` is true if a
+    // sibling key (title/color/profile, or an earlier pane field) has already claimed the dash
+    // line; in that case every subsequent key — including this pane's first — starts its own
+    // line at `dashCol + 2`. If `wrote` is still false, this pane's first key is placed right
+    // after the dash itself.
+    void emitPaneBody(std::string& out, config::LayoutPane const& pane, int dashCol, bool& wrote)
+    {
+        int const contentCol = dashCol + 2;
+        auto emitKV = [&](std::string const& line) {
+            if (!wrote)
+            {
+                out += " " + line + "\n";
+                wrote = true;
+            }
+            else
+                out += indentCols(contentCol) + line + "\n";
+        };
+
+        if (pane.isLeaf())
+        {
+            if (pane.command)
+                emitKV("command: " + quoted(*pane.command));
+            if (!pane.arguments.empty())
+            {
+                std::string args = "arguments: [";
+                for (size_t i = 0; i < pane.arguments.size(); ++i)
+                    args += (i ? ", " : "") + quoted(pane.arguments[i]);
+                args += "]";
+                emitKV(args);
+            }
+            if (pane.directory)
+                emitKV("directory: " + quoted(pane.directory->string()));
+            if (pane.profile)
+                emitKV("profile: " + quoted(*pane.profile));
+            return;
+        }
+
+        // Split node: `orientation:`/`panes:` always land two columns past wherever the
+        // `split:` key itself started — whether that was on the dash line (bare pane) or on
+        // its own line (tab already wrote title/color/profile), sibling keys always align to
+        // `dashCol + 2`, so the body is always at `dashCol + 4`.
+        emitKV("split:");
+        int const bodyCol = dashCol + 4;
+        out += indentCols(bodyCol) + "orientation: "
+               + (pane.orientation == vtmux::SplitState::Horizontal ? "horizontal" : "vertical") + "\n";
+        out += indentCols(bodyCol) + "panes:\n";
+        int const childDashCol = bodyCol + 2;
+        for (auto const& child: pane.children)
+            emitChildPane(out, child, childDashCol);
+    }
+
+    void emitChildPane(std::string& out, config::LayoutPane const& pane, int dashCol)
+    {
+        out += indentCols(dashCol) + "-";
+        bool wrote = false;
+        emitPaneBody(out, pane, dashCol, wrote);
+    }
+
+    // Emits one tab as a `tabs:` list item. The dash's tail carries title/color/profile (only
+    // those that are set), immediately followed by the root pane's own keys as further siblings
+    // in the same mapping (a leaf tab's `command`/`arguments`/`directory`/`profile` live at the
+    // same YAML level as `title`/`color`, matching how the parser reads them off the tab node).
+    void emitTab(std::string& out, config::LayoutTab const& tab, int dashCol)
+    {
+        out += indentCols(dashCol) + "-";
+        bool wrote = false;
+        int const contentCol = dashCol + 2;
+        auto emitKV = [&](std::string const& line) {
+            if (!wrote)
+            {
+                out += " " + line + "\n";
+                wrote = true;
+            }
+            else
+                out += indentCols(contentCol) + line + "\n";
+        };
+
+        if (tab.title)
+            emitKV("title: " + quoted(*tab.title));
+        if (tab.color)
+            emitKV("color: " + quoted(colorHex(*tab.color)));
+        if (tab.profile)
+            emitKV("profile: " + quoted(*tab.profile));
+
+        emitPaneBody(out, tab.root, dashCol, wrote);
+    }
+} // namespace
+
+std::string emitLayoutsYaml(std::unordered_map<std::string, config::Layout> const& layouts)
+{
+    std::string out = "layouts:\n";
+    for (auto const& [name, layout]: layouts)
+    {
+        out += indentCols(2) + name + ":\n";
+        out += indentCols(4) + "tabs:\n";
+        for (auto const& tab: layout.tabs)
+            emitTab(out, tab, 6);
+    }
+    return out;
 }
 
 } // namespace contour

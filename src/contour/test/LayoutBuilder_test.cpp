@@ -1,22 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/Config.h>
 #include <contour/LayoutBuilder.h>
+
+#include <QtCore/QTemporaryDir>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 
 #include <vtmux/ModelEvents.h>
 #include <vtmux/SessionModel.h>
 
 using namespace contour;
 using contour::config::LayoutPane;
+using namespace std::string_view_literals;
 
 namespace
 {
+
+/// Writes @p yaml to a fresh `contour.yml` inside a QTemporaryDir and loads it through the
+/// production config file loader. Mirrors Config_test.cpp's `loadFromYaml` helper.
+[[nodiscard]] contour::config::Config loadFromYamlString(std::string_view yaml)
+{
+    QTemporaryDir dir;
+    auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
+    {
+        auto out = std::ofstream(path);
+        out << yaml;
+    }
+    auto config = contour::config::Config {};
+    contour::config::loadConfigFromFile(config, path);
+    return config;
+}
+
 LayoutPane leaf(std::string cmd, double ratio = 1.0)
 {
     LayoutPane p;
@@ -177,4 +201,80 @@ TEST_CASE("LayoutBuilder: tailGroup drops the first child", "[layout][builder]")
     auto tail2 = tailGroup(two);
     CHECK(tail2.isLeaf()); // single remaining child collapses to that leaf
     CHECK(*tail2.command == "b");
+}
+
+TEST_CASE("emitLayoutsYaml: round-trips a leaf + bare + split layout through the parser",
+          "[layout][save][builder]")
+{
+    auto mk = [](std::string c) {
+        config::LayoutPane p;
+        p.command = std::move(c);
+        return p;
+    };
+
+    config::Layout work;
+
+    // t0: a leaf tab with title + color + command + arguments + directory.
+    config::LayoutTab t0;
+    t0.title = "editor";
+    t0.color = vtbackend::RGBColor { "#D75F00" };
+    t0.root = mk("nvim");
+    t0.root.arguments = { "-u", "NONE" };
+    t0.root.directory = std::filesystem::path { "/tmp" };
+
+    // t1: a bare leaf tab (command only, no tab-level keys at all).
+    config::LayoutTab t1;
+    t1.root = mk("claude");
+
+    // t2: a tab with a nested split: vertical { leaf, horizontal { leaf, leaf } }.
+    config::LayoutTab t2;
+    t2.title = "servers";
+    config::LayoutPane nested;
+    nested.orientation = vtmux::SplitState::Horizontal;
+    nested.children = { mk("htop"), mk("journalctl -f") };
+    t2.root.orientation = vtmux::SplitState::Vertical;
+    t2.root.children = { mk("npm run dev"), nested };
+
+    work.tabs = { t0, t1, t2 };
+
+    std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
+    auto const yaml = emitLayoutsYaml(layouts);
+
+    auto const cfg = loadFromYamlString(yaml);
+    REQUIRE(cfg.layouts.value().contains("work"));
+    auto const& parsed = cfg.layouts.value().at("work");
+    REQUIRE(parsed.tabs.size() == 3);
+
+    auto const& p0 = parsed.tabs[0];
+    CHECK(p0.title == "editor");
+    REQUIRE(p0.color.has_value());
+    CHECK(*p0.color == vtbackend::RGBColor { "#D75F00" });
+    CHECK(p0.root.isLeaf());
+    REQUIRE(p0.root.command.has_value());
+    CHECK(*p0.root.command == "nvim");
+    REQUIRE(p0.root.arguments.size() == 2);
+    CHECK(p0.root.arguments[0] == "-u");
+    CHECK(p0.root.arguments[1] == "NONE");
+    REQUIRE(p0.root.directory.has_value());
+    CHECK(p0.root.directory->generic_string() == "/tmp");
+
+    auto const& p1 = parsed.tabs[1];
+    CHECK_FALSE(p1.title.has_value());
+    CHECK_FALSE(p1.color.has_value());
+    CHECK(p1.root.isLeaf());
+    REQUIRE(p1.root.command.has_value());
+    CHECK(*p1.root.command == "claude");
+
+    auto const& p2 = parsed.tabs[2];
+    CHECK(p2.title == "servers");
+    REQUIRE_FALSE(p2.root.isLeaf());
+    CHECK(p2.root.orientation == vtmux::SplitState::Vertical);
+    REQUIRE(p2.root.children.size() == 2);
+    CHECK(*p2.root.children[0].command == "npm run dev");
+    auto const& nestedParsed = p2.root.children[1];
+    REQUIRE_FALSE(nestedParsed.isLeaf());
+    CHECK(nestedParsed.orientation == vtmux::SplitState::Horizontal);
+    REQUIRE(nestedParsed.children.size() == 2);
+    CHECK(*nestedParsed.children[0].command == "htop");
+    CHECK(*nestedParsed.children[1].command == "journalctl -f");
 }

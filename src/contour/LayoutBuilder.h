@@ -4,6 +4,8 @@
 #include <contour/Config.h>
 
 #include <functional>
+#include <string>
+#include <unordered_map>
 
 #include <vtmux/SessionModel.h>
 
@@ -31,5 +33,10 @@ vtmux::Tab* realizeLayoutTab(vtmux::SessionModel& model,
                              vtmux::WindowId window,
                              config::LayoutTab const& tab,
                              PaneSeeder const& seed);
+
+/// Renders a full `layouts:` YAML document (the exact text later written to `layouts.yml`) from
+/// @p layouts. The output is hand-built text (there is no YAML::Emitter in this codebase) and is
+/// meant to be parsed back by the same config reader that reads `layouts:` from `contour.yml`.
+[[nodiscard]] std::string emitLayoutsYaml(std::unordered_map<std::string, config::Layout> const& layouts);
 
 } // namespace contour
