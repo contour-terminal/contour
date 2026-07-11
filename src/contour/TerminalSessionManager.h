@@ -348,10 +348,15 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param pageSize  Initial grid size for the child PTY, if the caller inherits the live window's
     ///                  page size (a new tab/split); @c std::nullopt lets the factory use the profile
     ///                  default (a brand-new window).
+    /// @param commandOverride Command to launch instead of the profile's configured shell, if any.
+    /// @param profileName Profile to run this session under, if any; @c std::nullopt (the default)
+    ///                    selects the application's default profile.
     contour::TerminalSession* createBackingSession(
         vtmux::SessionId sessionId,
         std::optional<std::string> cwd,
-        std::optional<vtbackend::PageSize> pageSize = std::nullopt);
+        std::optional<vtbackend::PageSize> pageSize = std::nullopt,
+        std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
+        std::optional<std::string> profileName = std::nullopt);
 
     /// The 0-based row of @p tab within its OWNING window, or -1. Window-agnostic: the owning
     /// window is resolved through the model (windowOfTab), so this is correct for any tab of any

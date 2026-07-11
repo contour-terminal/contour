@@ -240,15 +240,27 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
      *        page size here so the terminal grid — not just the child PTY — is born at the current
      *        window size instead of the profile default (see
      *        TerminalSessionManager::createSessionInBackground).
+     * @param launchedCommand the command override this session's PTY was actually launched with, if
+     *        any. Empty (the default) means the session launched the profile's configured shell.
+     *        Recorded verbatim for later introspection (e.g. by layout tooling); does not affect the
+     *        PTY itself, which is already spawned by the caller.
      */
     TerminalSession(TerminalSessionManager* manager,
                     std::unique_ptr<vtpty::Pty> pty,
                     ContourGuiApp& app,
                     std::string profileName = {},
-                    std::optional<vtbackend::PageSize> initialPageSize = std::nullopt);
+                    std::optional<vtbackend::PageSize> initialPageSize = std::nullopt,
+                    std::optional<vtpty::Process::ExecInfo> launchedCommand = std::nullopt);
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
+
+    /// The command override this session was created with, if any (nullopt when it launched the
+    /// profile's configured shell instead of an explicit command).
+    [[nodiscard]] std::optional<vtpty::Process::ExecInfo> const& launchedCommand() const noexcept
+    {
+        return _launchedCommand;
+    }
 
     /// The id by which the vtmux layout model refers to this session. Set when the manager mirrors
     /// the session into the model. Identifies the leaf pane that hosts this session.
@@ -584,6 +596,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::chrono::steady_clock::time_point _startTime;
     config::Config _config;
     std::string _profileName;
+    std::optional<vtpty::Process::ExecInfo> _launchedCommand;
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;

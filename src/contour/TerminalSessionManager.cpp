@@ -146,16 +146,24 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(vtmux::Window
     return session;
 }
 
-TerminalSession* TerminalSessionManager::createBackingSession(vtmux::SessionId sessionId,
-                                                              std::optional<std::string> cwd,
-                                                              std::optional<vtbackend::PageSize> pageSize)
+TerminalSession* TerminalSessionManager::createBackingSession(
+    vtmux::SessionId sessionId,
+    std::optional<std::string> cwd,
+    std::optional<vtbackend::PageSize> pageSize,
+    std::optional<vtpty::Process::ExecInfo> commandOverride,
+    std::optional<std::string> profileName)
 {
     // Seed the terminal grid AND the child PTY with the inherited page size: the PTY via the factory
     // (its initial winsize), the Terminal via the constructor (its birth page size). Both matter — the
     // PTY winsize for a shell that reads it immediately, the grid so a background tab that never attaches
     // a display still holds the right size.
-    auto* session = new TerminalSession(
-        this, _sessionFactory.createPty(std::move(cwd), pageSize), _app, /*profileName*/ {}, pageSize);
+    auto* session =
+        new TerminalSession(this,
+                            _sessionFactory.createPty(std::move(cwd), pageSize, commandOverride, profileName),
+                            _app,
+                            profileName.value_or(std::string {}),
+                            pageSize,
+                            commandOverride);
     managerLog()("Create backing session with ID {}({}); {} sessions before it.",
                  session->id(),
                  (void*) session,
