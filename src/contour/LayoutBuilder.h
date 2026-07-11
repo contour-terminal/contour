@@ -3,6 +3,10 @@
 
 #include <contour/Config.h>
 
+#include <functional>
+
+#include <vtmux/SessionModel.h>
+
 namespace contour
 {
 
@@ -15,5 +19,17 @@ namespace contour
 /// A node holding children[1..] under the same orientation. If exactly one child remains, that child
 /// is returned directly (so a binary split collapses cleanly).
 [[nodiscard]] config::LayoutPane tailGroup(config::LayoutPane const& splitNode);
+
+/// Invoked immediately before each model allocation to stage the backing session for that leaf's
+/// command/profile/dir. It must arrange for the model's SessionAllocator to return the id it created.
+using PaneSeeder = std::function<void(config::LayoutPane const& leaf)>;
+
+/// Creates a tab in @p window from @p tab: seeds+creates the first pane, applies title/color, then
+/// builds the pane tree. @p seed is invoked immediately before each model allocation to stage that
+/// pane's backing session (it must make the model's allocator return the id it created).
+vtmux::Tab* realizeLayoutTab(vtmux::SessionModel& model,
+                             vtmux::WindowId window,
+                             config::LayoutTab const& tab,
+                             PaneSeeder const& seed);
 
 } // namespace contour
