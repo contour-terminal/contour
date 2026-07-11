@@ -39,7 +39,8 @@ inline constexpr size_t TabColorSourceCount = std::to_underlying(TabColorSource:
 /// A tab: a named, optionally colored container for a binary split tree of panes.
 ///
 /// The tab owns the root Pane, tracks which leaf is active (with an MRU list for focus
-/// navigation), and — importantly — owns the authoritative **runtime title** and **runtime color**.
+/// navigation), whether that active leaf is **zoomed**, and — importantly — owns the authoritative
+/// **runtime title** and **runtime color**.
 /// These live here, in Qt-free vtmux, deliberately *below* the GUI: the Contour GUI and any future
 /// network-connected client are pure views of this state. They read title()/color() and request
 /// mutations (setRuntimeTitle/setColor); they never hold their own authoritative copy. That is what
@@ -81,6 +82,51 @@ class Tab
     /// this tab's tree.
     void setActivePane(Pane* leaf);
 
+    // {{{ Zoom
+    //
+    // Zoom hides every pane but one, giving the whole tab area to it.
+    //
+    // The invariant is that **zoom always applies to the ACTIVE pane** — there is no such thing as a
+    // zoomed pane that is not the one you are typing in. That single rule is why the state below is a
+    // plain bool rather than a PaneId, and it buys two things outright:
+    //
+    //  - "zoom follows focus" (moving focus while zoomed shows the newly focused pane) needs no code
+    //    at all: layoutRoot() reads _activeLeaf, so a focus move carries the zoom with it;
+    //  - there is no pointer or id to repair when the tree is reshaped, so zoom cannot dangle the way
+    //    a cached Pane* would (see the hazard closePane() documents).
+    //
+    // Every operation that reshapes the tree (split, close, orientation flip, swap, move) clears the
+    // zoom: the panes it creates or moves must be visible for the user to make sense of the result.
+
+    /// Whether the active pane is zoomed, i.e. it alone fills the tab area and its siblings are hidden.
+    [[nodiscard]] bool isZoomed() const noexcept { return _zoomed; }
+
+    /// The id of the zoomed leaf, or nullopt while the tab shows its tiled layout.
+    ///
+    /// This — not the raw flag — is what a host observes (see ModelEvents::paneZoomChanged): because
+    /// zoom follows focus, "which leaf is zoomed" can change while the flag stays true.
+    [[nodiscard]] std::optional<PaneId> zoomedLeafId() const noexcept
+    {
+        return _zoomed ? std::optional { _activeLeaf->id() } : std::nullopt;
+    }
+
+    /// The subtree the host renders as the tab's ENTIRE content area: the zoomed leaf while zoomed,
+    /// otherwise the whole tree.
+    ///
+    /// This is the one place zoom changes what is displayed. A host renders the tree hanging off this
+    /// node and needs to know nothing else about zoom: handed a leaf, its recursive renderer already
+    /// gives that leaf the full area, so hiding the siblings falls out of re-rooting alone.
+    [[nodiscard]] Pane* layoutRoot() const noexcept { return _zoomed ? _activeLeaf : _root.get(); }
+
+    /// Toggles zoom on the active pane.
+    ///
+    /// No-op on a single-pane tab: there are no siblings to hide, so zooming would be a state change
+    /// with no observable effect (and would leave the tab claiming a zoom the user cannot undo by eye).
+    /// @return true if the zoom state changed.
+    bool toggleZoom() noexcept;
+
+    // }}}
+
     /// Splits the active pane along @p direction, creating a new leaf for @p newSession.
     ///
     /// @param direction    Horizontal or Vertical.
@@ -112,6 +158,19 @@ class Tab
     ///         only pane (no parent split to flip).
     Pane* toggleActivePaneOrientation();
 
+    /// Grows or shrinks the active pane along @p direction by nudging the ratio of the nearest ancestor
+    /// split on the matching axis.
+    ///
+    /// Lives on Tab (rather than the caller nudging Pane::setRatio directly) because it is a zoom-
+    /// clearing mutation like every other one here: the divider being moved is not on screen while
+    /// zoomed, so an unzoom is what turns the keypress into something the user can see — without it,
+    /// each press would silently rewrite a hidden ratio and the layout would lurch on the next unzoom.
+    /// @param direction The side the active pane grows toward.
+    /// @param fraction  The ratio delta magnitude in (0, 1); the sign is derived from @p direction.
+    /// @return The split node whose ratio changed, or nullptr if the active pane has no ancestor split
+    ///         on that axis (a single pane, or only cross-axis splits above it).
+    Pane* resizeActivePane(FocusDirection direction, double fraction);
+
     /// Swaps the active pane with its neighbor in @p direction (the two terminals trade slots),
     /// keeping the active session focused in its new slot.
     ///
@@ -139,9 +198,19 @@ class Tab
 
     // {{{ Title
 
+    /// Whether the tab is labeled with the MultiplePanesLabel placeholder rather than named after a
+    /// session: it holds more than one pane AND is not zoomed, since a zoomed tab shows exactly one
+    /// pane and naming that pane beats the placeholder.
+    ///
+    /// The rule lives here, not in each consumer, because there is more than one: title() below, and
+    /// hosts that template their own label from the same precedence (the Qt tab strip does — it needs
+    /// the raw template, not the resolved string, so it cannot just call title()). Duplicating the rule
+    /// is how the tab strip and the status line came to disagree about what a zoomed tab is called.
+    [[nodiscard]] bool usesMultiplePanesLabel() const noexcept { return hasMultiplePanes() && !_zoomed; }
+
     /// The resolved title, in precedence order:
     ///   1. the runtime title override (rename), if set;
-    ///   2. "Multiple panes" if the tab has more than one pane;
+    ///   2. "Multiple panes" if usesMultiplePanesLabel();
     ///   3. the active leaf session's own title, via @p resolver.
     [[nodiscard]] std::string title(SessionTitleResolver const& resolver) const;
 
@@ -192,6 +261,7 @@ class Tab
     TabId _id;
     std::unique_ptr<Pane> _root;
     Pane* _activeLeaf;
+    bool _zoomed = false;     //!< Whether _activeLeaf alone fills the tab area (see the Zoom block).
     std::vector<PaneId> _mru; //!< Most-recently-used leaf ids, front = most recent.
     std::optional<std::string> _runtimeTitle;
     std::array<std::optional<vtbackend::RGBColor>, TabColorSourceCount> _colors {};

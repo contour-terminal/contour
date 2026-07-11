@@ -4,6 +4,7 @@
 #include <vtbackend/Color.h>
 
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -177,6 +178,10 @@ class SessionModel
     /// (see Tab::moveActivePane). No-op if there is no neighbor.
     void moveActivePane(TabId tab, FocusDirection direction);
 
+    /// Toggles zoom on @p tab's active pane: zoomed, that pane alone fills the tab area (see Tab's
+    /// zoom block). No-op on a single-pane tab.
+    void toggleActivePaneZoom(TabId tab);
+
     // }}}
     // {{{ Title & color (authoritative state lives here, below the GUI)
 
@@ -226,6 +231,27 @@ class SessionModel
     [[nodiscard]] std::pair<Window*, int> locateTab(TabId tab) const noexcept;
 
     void closeTabAt(Window& window, int index);
+
+    /// Announces everything that follows from @p tab's zoom having changed during a mutation, given
+    /// the zoomed leaf captured @p zoomedLeafBefore it ran. Every pane mutator ends with this call.
+    ///
+    /// This is the ONE place the zoom contract turns into events, so no mutator has to re-derive it.
+    /// Comparing Tab::zoomedLeafId() rather than the raw flag is what collapses three cases into one
+    /// comparison: it changes when zoom is entered, when it is cleared, and when it follows focus to
+    /// another leaf — and it is stable, so this emits nothing, whenever an unzoomed tab is mutated.
+    ///
+    /// The retitle rides along here because Tab::title() reads the zoom: a tab is named after the
+    /// pane on screen while zoomed and "Multiple panes" once it is not. Deriving that per mutator is
+    /// how the three restructuring paths (orientation flip, swap, move) came to silently omit it.
+    ///
+    /// @pre @p tab must still exist — never call this where the mutation could have closed the tab
+    ///      (closePane's last-pane branch), for which tabClosed already tells the host everything.
+    /// @param tab               The tab that was mutated.
+    /// @param zoomedLeafBefore  Tab::zoomedLeafId() sampled before the mutation.
+    /// @return true if a zoom change — and with it a retitle — was announced. A caller that would emit
+    ///         its own tabTitleChanged for an unrelated reason checks this so the tab is not retitled
+    ///         twice, which would run the host's whole status-line fan-out for one keystroke.
+    bool announceZoomChange(Tab& tab, std::optional<PaneId> zoomedLeafBefore);
 
     ModelEvents& _events;
     SessionAllocator _allocateSession;

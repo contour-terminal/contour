@@ -74,6 +74,7 @@ Row {
                 required property color accentColor
                 required property bool isActive
                 required property int paneCount
+                required property bool zoomed
 
                 height: list.height
                 controller: root.controller
@@ -84,6 +85,7 @@ Row {
                 tabColor: accentColor
                 tabActive: isActive
                 tabPaneCount: paneCount
+                tabZoomed: zoomed
             }
 
             // Animate reordering when a tab is moved.

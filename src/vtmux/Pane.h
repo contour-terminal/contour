@@ -152,6 +152,14 @@ class Pane
         }
     }
 
+    /// Whether @p node lies in this subtree, counting this node as its own ancestor.
+    ///
+    /// Walks up from @p node rather than down from here, so it costs the node's depth, not the
+    /// subtree's size. Answers "is this pane on screen?" for a host that renders only one subtree of
+    /// the tree (see Tab::layoutRoot).
+    /// @param node The pane to test; nullptr is not contained.
+    [[nodiscard]] bool contains(Pane const* node) const noexcept;
+
     /// Returns the pane with id @p id in this subtree, or nullptr.
     [[nodiscard]] Pane* findPane(PaneId id);
 

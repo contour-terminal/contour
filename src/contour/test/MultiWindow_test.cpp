@@ -663,6 +663,136 @@ TEST_CASE("TerminalSessionManager swap/move/toggle/resize route through the acti
     CHECK_NOTHROW(manager.movePane(vtmux::FocusDirection::Left, nullptr));
     CHECK_NOTHROW(manager.toggleActivePaneOrientation(nullptr));
     CHECK_NOTHROW(manager.resizeActivePane(vtmux::FocusDirection::Left, 0.05, nullptr));
+    CHECK_NOTHROW(manager.toggleActivePaneZoom(nullptr));
+
+    window->closeTabAtIndex(0);
+}
+
+TEST_CASE("TerminalSessionManager zooming re-roots the rendered pane tree at the active leaf",
+          "[contour][multiwindow][split][zoom]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* factory = factoryOwned.get();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+
+    auto* tab = manager.model().window(window.id)->activeTab();
+    REQUIRE(tab != nullptr);
+
+    manager.splitActivePane(/*vertical*/ true, window->activeSession());
+    REQUIRE(tab->paneCount() == 2);
+    auto const ptyCount = factory->createdPtys.size();
+
+    // Unzoomed, QML renders the whole tree: the root proxy is the split node.
+    auto* splitRootProxy = window->activeTabRootPane();
+    REQUIRE(splitRootProxy != nullptr);
+    REQUIRE_FALSE(splitRootProxy->isLeaf());
+    auto const splitRootId = splitRootProxy->paneId();
+
+    auto const activeLeafId = static_cast<int>(tab->activePane()->id().value);
+    auto* activeSession = window->activeSession();
+
+    // Zoom: the rendered root becomes the ACTIVE LEAF itself. That re-rooting is the whole feature —
+    // PaneNode.qml gives a leaf the full area it is handed, so the sibling simply leaves the scene.
+    manager.toggleActivePaneZoom(window->activeSession());
+    CHECK(tab->isZoomed());
+
+    auto* zoomedProxy = window->activeTabRootPane();
+    REQUIRE(zoomedProxy != nullptr);
+    CHECK(zoomedProxy->isLeaf());
+    CHECK(zoomedProxy->paneId() == activeLeafId);
+    CHECK(zoomedProxy->session() == activeSession);
+
+    // The hidden pane is HIDDEN, not closed: the tree keeps both panes and no PTY was torn down.
+    CHECK(tab->paneCount() == 2);
+    CHECK(factory->createdPtys.size() == ptyCount);
+
+    // Unzoom: the split root comes back — and it is the very SAME proxy object, which is the proof
+    // that the rebuild did not prune the panes hidden behind the zoom (proxies are cached per PaneId,
+    // so a pruned-and-recreated one would be a different object, and its terminal a new one).
+    manager.toggleActivePaneZoom(window->activeSession());
+    CHECK_FALSE(tab->isZoomed());
+    CHECK(window->activeTabRootPane() == splitRootProxy);
+    CHECK(window->activeTabRootPane()->paneId() == splitRootId);
+    CHECK(tab->paneCount() == 2);
+
+    window->closeTabAtIndex(0);
+}
+
+TEST_CASE("TerminalSessionManager zoom follows focus and is cleared by restructuring",
+          "[contour][multiwindow][split][zoom]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+
+    auto* tab = manager.model().window(window.id)->activeTab();
+    REQUIRE(tab != nullptr);
+    manager.splitActivePane(/*vertical*/ true, window->activeSession());
+    REQUIRE(tab->paneCount() == 2);
+
+    manager.toggleActivePaneZoom(window->activeSession());
+    REQUIRE(tab->isZoomed());
+    auto const zoomedLeafId = window->activeTabRootPane()->paneId();
+
+    // Moving focus while zoomed keeps the zoom and shows the newly focused pane, so the rendered root
+    // must move with it.
+    manager.focusPane(vtmux::FocusDirection::Left, window->activeSession());
+    CHECK(tab->isZoomed());
+    auto* nowRendered = window->activeTabRootPane();
+    REQUIRE(nowRendered != nullptr);
+    CHECK(nowRendered->isLeaf());
+    CHECK(nowRendered->paneId() != zoomedLeafId);
+    CHECK(nowRendered->paneId() == static_cast<int>(tab->activePane()->id().value));
+
+    // Splitting must surface the pane it creates, so it cancels the zoom and the whole tree renders.
+    manager.splitActivePane(/*vertical*/ false, window->activeSession());
+    CHECK_FALSE(tab->isZoomed());
+    CHECK(tab->paneCount() == 3);
+    CHECK_FALSE(window->activeTabRootPane()->isLeaf());
+
+    window->closeTabAtIndex(0);
+}
+
+TEST_CASE("WindowController: the tab strip stops saying \"Multiple panes\" while zoomed",
+          "[contour][multiwindow][split][zoom]")
+{
+    // Regression: the strip's label (resolvedTabLabel) re-derived Tab::title()'s precedence in order to
+    // template it, and was never taught the zoom rule. So a zoomed tab kept reading "Multiple panes" in
+    // the strip while the indicator status line — which does go through Tab::title() — simultaneously
+    // renamed the very same tab after the pane on screen. Two names for one tab. Both now read the one
+    // rule (Tab::usesMultiplePanesLabel), so they cannot drift apart again.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+
+    auto* tab = manager.model().window(window.id)->activeTab();
+    REQUIRE(tab != nullptr);
+
+    auto const label = [&] {
+        return window->data(window->index(0), contour::WindowController::TitleRole).toString().toStdString();
+    };
+    auto const multiplePanes = std::string { vtmux::Tab::MultiplePanesLabel };
+
+    manager.splitActivePane(/*vertical*/ true, window->activeSession());
+    REQUIRE(tab->paneCount() == 2);
+    CHECK(label() == multiplePanes);
+
+    // Zoomed: exactly one pane is on screen, so the tab is named after it — never the placeholder.
+    manager.toggleActivePaneZoom(window->activeSession());
+    REQUIRE(tab->isZoomed());
+    CHECK(label() != multiplePanes);
+
+    // ...and back, because the siblings are visible again.
+    manager.toggleActivePaneZoom(window->activeSession());
+    REQUIRE_FALSE(tab->isZoomed());
+    CHECK(label() == multiplePanes);
 
     window->closeTabAtIndex(0);
 }

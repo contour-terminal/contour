@@ -218,6 +218,7 @@ class RoutingMockController: public QAbstractListModel
         PaneCountRole,
         SessionIdRole,
         RawTitleRole,
+        ZoomedRole,
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
@@ -294,6 +295,7 @@ class RoutingMockController: public QAbstractListModel
             case IsActiveRole: return index.row() == _activeTabIndex;
             case PaneCountRole: return 1;
             case SessionIdRole: return index.row();
+            case ZoomedRole: return false;
             default: return {};
         }
     }
@@ -302,7 +304,7 @@ class RoutingMockController: public QAbstractListModel
         return {
             { Qt::DisplayRole, "display" }, { TitleRole, "title" },         { ColorRole, "accentColor" },
             { IsActiveRole, "isActive" },   { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
-            { RawTitleRole, "rawTitle" },
+            { RawTitleRole, "rawTitle" },   { ZoomedRole, "zoomed" },
         };
     }
     // }}}

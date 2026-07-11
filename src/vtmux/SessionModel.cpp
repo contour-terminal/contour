@@ -375,10 +375,14 @@ Pane* SessionModel::splitActivePane(TabId tabId, SplitState direction, double ra
     auto const newLeafId = _nextPaneId++;
     auto const newSession = _allocateSession();
 
+    auto const zoomBefore = tab->zoomedLeafId();
     auto* newLeaf = tab->splitActivePane(direction, splitNodeId, newLeafId, newSession, ratio);
     _events.paneSplit(tabId, splitNodeId, newLeafId);
     _events.activePaneChanged(tabId, newLeaf->id());
-    _events.tabTitleChanged(tabId); // single-pane -> "Multiple panes" possibly
+    // The split may retitle the tab (single-pane -> "Multiple panes"); so does the zoom it cleared.
+    // Either way the tab is retitled exactly once.
+    if (!announceZoomChange(*tab, zoomBefore))
+        _events.tabTitleChanged(tabId);
     return newLeaf;
 }
 
@@ -402,11 +406,17 @@ void SessionModel::closePane(WindowId windowId, TabId tabId, PaneId leafId)
     auto* survivor = (parent->first() == leaf) ? parent->second() : parent->first();
     auto const survivorId = survivor->id();
 
+    // Safe to announce zoom below: the last-pane branch above already returned, so the tab survives
+    // closePane() and can still be asked for its zoom state afterwards.
+    auto const zoomBefore = tab->zoomedLeafId();
     tab->closePane(leaf);
 
     _events.paneClosed(tabId, leafId, survivorId);
     _events.activePaneChanged(tabId, tab->activePane()->id());
-    _events.tabTitleChanged(tabId);
+    // The close may retitle the tab (down to one pane -> that pane's name); so does the zoom it
+    // cleared. Either way the tab is retitled exactly once.
+    if (!announceZoomChange(*tab, zoomBefore))
+        _events.tabTitleChanged(tabId);
 }
 
 void SessionModel::setActivePane(TabId tabId, PaneId leafId)
@@ -417,12 +427,14 @@ void SessionModel::setActivePane(TabId tabId, PaneId leafId)
     auto* leaf = tab->rootPane()->findPane(leafId);
     if (leaf == nullptr || !leaf->isLeaf() || leaf == tab->activePane())
         return;
+    // NB: no unconditional tabTitleChanged here. Unzoomed, the resolved title does not depend on which
+    // pane is active (precedence: runtime > "Multiple panes" > active session), and a single-pane tab's
+    // active pane cannot change — the early-return above fires. Zoomed, it does: the tab is named after
+    // the pane on screen, and announceZoomChange() emits the retitle when the zoom carries to this leaf.
+    auto const zoomBefore = tab->zoomedLeafId();
     tab->setActivePane(leaf);
     _events.activePaneChanged(tabId, leafId);
-    // NB: no tabTitleChanged here. The resolved title depends on the active pane only for a
-    // single-pane tab (Tab::title precedence: runtime > "Multiple panes" > active session), and a
-    // single-pane tab's active pane cannot change — the root leaf is already active, so the
-    // early-return above fires. A conditional emit for that case was provably dead code.
+    announceZoomChange(*tab, zoomBefore);
 }
 
 void SessionModel::focusDirection(TabId tabId, FocusDirection direction)
@@ -430,8 +442,13 @@ void SessionModel::focusDirection(TabId tabId, FocusDirection direction)
     auto* tab = findTab(tabId);
     if (tab == nullptr)
         return;
-    if (auto* target = tab->focusDirection(direction); target != nullptr)
-        _events.activePaneChanged(tabId, target->id());
+
+    auto const zoomBefore = tab->zoomedLeafId();
+    auto* target = tab->focusDirection(direction);
+    if (target == nullptr)
+        return; // no neighbor: nothing moved, so the zoom did not either
+    _events.activePaneChanged(tabId, target->id());
+    announceZoomChange(*tab, zoomBefore);
 }
 
 void SessionModel::setPaneRatio(TabId tabId, PaneId splitNodeId, double ratio)
@@ -454,19 +471,14 @@ void SessionModel::resizeActivePane(TabId tabId, FocusDirection direction, doubl
     auto* tab = findTab(tabId);
     if (tab == nullptr)
         return;
-    auto const axis = crossingSplitFor(direction);
-    auto* split = Pane::ancestorSplitOnAxis(tab->activePane(), axis);
+    auto const zoomBefore = tab->zoomedLeafId();
+    auto* split = tab->resizeActivePane(direction, fraction);
     if (split == nullptr)
-        return; // single pane, or only cross-axis splits above the active pane
+        return; // no ancestor split on that axis: nothing moved, so the zoom did not either
 
-    // `_ratio` is the FIRST child's share of the split. The user presses a direction to move the shared
-    // divider that way: pressing toward the second child (Right/Down) enlarges the first child's share
-    // (+fraction); pressing toward the first child (Left/Up) shrinks it (-fraction). This "move the
-    // boundary in this direction" model matches Windows Terminal and is independent of which side the
-    // active pane sits on. setRatio() clamps; emit the value actually stored.
-    double const delta = pointsTowardSecondChild(direction) ? fraction : -fraction;
-    split->setRatio(split->ratio() + delta);
+    // Emit the CLAMPED value the node actually stored (Pane::setRatio clamps), not the raw request.
     _events.paneRatioChanged(tabId, split->id(), split->ratio());
+    announceZoomChange(*tab, zoomBefore);
 }
 
 void SessionModel::toggleActivePaneOrientation(TabId tabId)
@@ -474,8 +486,12 @@ void SessionModel::toggleActivePaneOrientation(TabId tabId)
     auto* tab = findTab(tabId);
     if (tab == nullptr)
         return;
-    if (auto* split = tab->toggleActivePaneOrientation(); split != nullptr)
-        _events.paneOrientationChanged(tabId, split->id(), split->splitState());
+    auto const zoomBefore = tab->zoomedLeafId();
+    auto* split = tab->toggleActivePaneOrientation();
+    if (split == nullptr)
+        return; // single-pane tab: no split to flip, so nothing (zoom included) changed
+    _events.paneOrientationChanged(tabId, split->id(), split->splitState());
+    announceZoomChange(*tab, zoomBefore);
 }
 
 void SessionModel::swapActivePane(TabId tabId, FocusDirection direction)
@@ -483,11 +499,14 @@ void SessionModel::swapActivePane(TabId tabId, FocusDirection direction)
     auto* tab = findTab(tabId);
     if (tab == nullptr)
         return;
+
+    auto const zoomBefore = tab->zoomedLeafId();
     auto const [a, b] = tab->swapActivePane(direction);
     if (a == nullptr)
         return; // no neighbor
     _events.paneSwapped(tabId, a->id(), b->id());
     _events.activePaneChanged(tabId, tab->activePane()->id());
+    announceZoomChange(*tab, zoomBefore);
 }
 
 void SessionModel::moveActivePane(TabId tabId, FocusDirection direction)
@@ -495,14 +514,40 @@ void SessionModel::moveActivePane(TabId tabId, FocusDirection direction)
     auto* tab = findTab(tabId);
     if (tab == nullptr)
         return;
-    if (tab->moveActivePane(direction, _nextPaneId))
-    {
-        // The re-parent path consumes a fresh split id; the swap-degenerate path does not, but always
-        // advancing keeps ids monotonic and unique whichever branch ran.
-        ++_nextPaneId;
-        _events.paneTreeRestructured(tabId);
-        _events.activePaneChanged(tabId, tab->activePane()->id());
-    }
+
+    auto const zoomBefore = tab->zoomedLeafId();
+    if (!tab->moveActivePane(direction, _nextPaneId))
+        return; // no neighbor
+    // The re-parent path consumes a fresh split id; the swap-degenerate path does not, but always
+    // advancing keeps ids monotonic and unique whichever branch ran.
+    ++_nextPaneId;
+    _events.paneTreeRestructured(tabId);
+    _events.activePaneChanged(tabId, tab->activePane()->id());
+    announceZoomChange(*tab, zoomBefore);
+}
+
+void SessionModel::toggleActivePaneZoom(TabId tabId)
+{
+    auto* tab = findTab(tabId);
+    if (tab == nullptr)
+        return;
+
+    auto const zoomBefore = tab->zoomedLeafId();
+    tab->toggleZoom();
+    announceZoomChange(*tab, zoomBefore);
+}
+
+bool SessionModel::announceZoomChange(Tab& tab, std::optional<PaneId> zoomedLeafBefore)
+{
+    auto const after = tab.zoomedLeafId();
+    if (after == zoomedLeafBefore)
+        return false;
+
+    _events.paneZoomChanged(tab.id(), after);
+    // Tab::title() reads the zoom, so a zoom change is always a retitle: the tab is named after the
+    // pane on screen while zoomed, and falls back to "Multiple panes" once it is not.
+    _events.tabTitleChanged(tab.id());
+    return true;
 }
 
 // }}}

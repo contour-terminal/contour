@@ -212,6 +212,9 @@ unregisters
 unscroll
 unstartable
 unsyncs
+unzoom
+unzoomed
+unzooms
 upstat
 URval
 VCenter

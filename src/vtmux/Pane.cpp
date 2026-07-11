@@ -92,6 +92,14 @@ Pane* Pane::ancestorSplitOnAxis(Pane* fromLeaf, SplitState axis) noexcept
     return nullptr;
 }
 
+bool Pane::contains(Pane const* node) const noexcept
+{
+    for (auto const* p = node; p != nullptr; p = p->parent())
+        if (p == this)
+            return true;
+    return false;
+}
+
 Pane* Pane::findPane(PaneId id)
 {
     return walkTree([id](Pane& p) { return p.id() == id; });

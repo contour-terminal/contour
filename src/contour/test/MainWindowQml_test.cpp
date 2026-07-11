@@ -95,6 +95,7 @@ class MockMainController: public QAbstractListModel
         PaneCountRole,
         SessionIdRole,
         RawTitleRole,
+        ZoomedRole,
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return 0; }
@@ -187,6 +188,7 @@ class MockMainController: public QAbstractListModel
             case IsActiveRole: return index.row() == 0;
             case PaneCountRole: return 1;
             case SessionIdRole: return index.row();
+            case ZoomedRole: return false;
             default: return {};
         }
     }
@@ -195,7 +197,7 @@ class MockMainController: public QAbstractListModel
         return {
             { Qt::DisplayRole, "display" }, { TitleRole, "title" },         { ColorRole, "accentColor" },
             { IsActiveRole, "isActive" },   { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
-            { RawTitleRole, "rawTitle" },
+            { RawTitleRole, "rawTitle" },   { ZoomedRole, "zoomed" },
         };
     }
     // }}}

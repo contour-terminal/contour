@@ -606,6 +606,22 @@ void TerminalSessionManager::paneSwapped(vtmux::TabId tab, vtmux::PaneId, vtmux:
         c->rebuildActiveTabPaneProxies();
 }
 
+void TerminalSessionManager::paneZoomChanged(vtmux::TabId tab, std::optional<vtmux::PaneId>)
+{
+    // Zoom moves the tab's layout ROOT without reshaping its TREE, so this re-points the rendered root
+    // rather than rebuilding the proxy tree: the panes (and their terminals) are all still there, just
+    // hidden behind the zoomed one. That also keeps this cheap when a zoom clear rides along with a
+    // restructuring event, which has already rebuilt.
+    //
+    // Only the badge is republished here: the retitle a zoom implies is announced by the model itself
+    // (SessionModel::announceZoomChange -> tabTitleChanged), so every host gets it, not just this one.
+    if (auto* c = controllerFor(_model->windowOfTab(tab)))
+    {
+        c->notifyTabRowChanged(tab, { WindowController::ZoomedRole });
+        c->refreshActiveTabLayoutRoot();
+    }
+}
+
 void TerminalSessionManager::paneTreeRestructured(vtmux::TabId tab)
 {
     // A move re-parents nodes and re-homes ids unpredictably, so re-read the whole tab's tree.
@@ -953,6 +969,12 @@ void TerminalSessionManager::resizeActivePane(vtmux::FocusDirection direction,
 {
     if (auto* tab = paneActionTargetTab(acting))
         _model->resizeActivePane(tab->id(), direction, fraction);
+}
+
+void TerminalSessionManager::toggleActivePaneZoom(TerminalSession* acting)
+{
+    if (auto* tab = paneActionTargetTab(acting))
+        _model->toggleActivePaneZoom(tab->id());
 }
 // }}}
 

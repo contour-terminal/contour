@@ -81,6 +81,14 @@ struct RecordingEvents: ModelEvents
     {
         log.push_back(std::format("swapped:{}:{}:{}", t.value, a.value, b.value));
     }
+    void paneZoomChanged(TabId t, std::optional<PaneId> zoomedLeaf) override
+    {
+        // Log the leaf, not just "on/off": zoom follows focus, so it can move between leaves while
+        // staying on, and a host has to re-read WHICH pane is on screen.
+        log.push_back(std::format(
+            "zoom:{}:{}", t.value, zoomedLeaf.has_value() ? std::to_string(zoomedLeaf->value) : "-"));
+        lastZoomedLeaf = zoomedLeaf;
+    }
     void paneTreeRestructured(TabId t) override { log.push_back(std::format("restructured:{}", t.value)); }
     void tabAboutToBeMovedToWindow(WindowId from, int fromIdx, WindowId to, int toIdx) override
     {
@@ -99,6 +107,7 @@ struct RecordingEvents: ModelEvents
     std::optional<PaneId> lastActivePane;
     std::optional<double> lastRatio;
     std::optional<SplitState> lastOrientation;
+    std::optional<PaneId> lastZoomedLeaf;
 
     /// Count how many log entries start with @p prefix (for exact-once assertions).
     [[nodiscard]] long countPrefix(std::string const& prefix) const
@@ -1641,3 +1650,333 @@ TEST_CASE("SessionModel: moveTabToWindow transplants a tab between windows, sess
     }
 }
 // }}}
+
+// {{{ Zoom
+//
+// The event contract: paneZoomChanged fires exactly when the ZOOMED LEAF changes — on entering and
+// leaving zoom, and when zoom follows focus to a different leaf — and never for an unzoomed tab.
+
+TEST_CASE("SessionModel: toggling pane zoom announces the zoomed leaf, then its clearing",
+          "[vtmux][model][zoom]")
+{
+    Fixture f;
+    auto* win = f.model.createWindow();
+    auto* tab = f.model.createTab(win->id());
+    auto* newLeaf = f.model.splitActivePane(tab->id(), SplitState::Vertical);
+    REQUIRE(newLeaf != nullptr);
+    auto const leafId = newLeaf->id();
+    f.events.log.clear();
+
+    f.model.toggleActivePaneZoom(tab->id());
+    CHECK(f.events.countPrefix("zoom:") == 1);
+    CHECK(f.events.lastZoomedLeaf == leafId);
+    CHECK(tab->isZoomed());
+    // The tab is now titled after the pane on screen rather than "Multiple panes".
+    CHECK(f.events.countPrefix("title:") == 1);
+
+    f.model.toggleActivePaneZoom(tab->id());
+    CHECK(f.events.countPrefix("zoom:") == 2);
+    CHECK_FALSE(f.events.lastZoomedLeaf.has_value());
+    CHECK_FALSE(tab->isZoomed());
+}
+
+TEST_CASE("SessionModel: zooming a single-pane tab announces nothing", "[vtmux][model][zoom]")
+{
+    Fixture f;
+    auto* win = f.model.createWindow();
+    auto* tab = f.model.createTab(win->id());
+    f.events.log.clear();
+
+    // Nothing to hide, so nothing changed, so nothing is announced — a host must not be told to
+    // re-lay-out a tab that did not move.
+    f.model.toggleActivePaneZoom(tab->id());
+    CHECK(f.events.countPrefix("zoom:") == 0);
+    CHECK(f.events.log.empty());
+    CHECK_FALSE(tab->isZoomed());
+}
+
+TEST_CASE("SessionModel: a focus move while zoomed re-announces the new leaf", "[vtmux][model][zoom]")
+{
+    Fixture f;
+    auto* win = f.model.createWindow();
+    auto* tab = f.model.createTab(win->id());
+    auto* right = f.model.splitActivePane(tab->id(), SplitState::Vertical);
+    REQUIRE(right != nullptr);
+    auto const leftId = tab->rootPane()->first()->id();
+
+    f.model.toggleActivePaneZoom(tab->id());
+    REQUIRE(tab->isZoomed());
+    f.events.log.clear();
+
+    // Zoom follows focus: the tab STAYS zoomed but a different pane is now on screen. Without an
+    // event carrying the new leaf, the host would keep rendering the old one.
+    f.model.focusDirection(tab->id(), FocusDirection::Left);
+    CHECK(tab->isZoomed());
+    CHECK(f.events.countPrefix("zoom:") == 1);
+    CHECK(f.events.lastZoomedLeaf == leftId);
+    CHECK(tab->layoutRoot()->id() == leftId);
+    // The pane on screen changed, so the tab's title did too.
+    CHECK(f.events.countPrefix("title:") == 1);
+}
+
+TEST_CASE("SessionModel: a focus move on an unzoomed tab announces no zoom change", "[vtmux][model][zoom]")
+{
+    Fixture f;
+    auto* win = f.model.createWindow();
+    auto* tab = f.model.createTab(win->id());
+    REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
+    f.events.log.clear();
+
+    f.model.focusDirection(tab->id(), FocusDirection::Left);
+    CHECK(f.events.countPrefix("activePane:") == 1);
+    // The layout root did not move (it is still the tree root), so there is nothing to re-root.
+    CHECK(f.events.countPrefix("zoom:") == 0);
+    // ...and an unzoomed multi-pane tab is titled "Multiple panes" regardless of which pane is active.
+    CHECK(f.events.countPrefix("title:") == 0);
+}
+
+TEST_CASE("SessionModel: restructuring a zoomed tab announces the zoom clearing exactly once",
+          "[vtmux][model][zoom]")
+{
+    auto const zoomedTab = [](Fixture& f) {
+        auto* win = f.model.createWindow();
+        auto* tab = f.model.createTab(win->id());
+        REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
+        REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Horizontal) != nullptr);
+        f.model.toggleActivePaneZoom(tab->id());
+        REQUIRE(tab->isZoomed());
+        f.events.log.clear();
+        return tab;
+    };
+
+    SECTION("splitting")
+    {
+        Fixture f;
+        auto* tab = zoomedTab(f);
+        f.model.splitActivePane(tab->id(), SplitState::Vertical);
+        CHECK_FALSE(tab->isZoomed());
+        CHECK(f.events.countPrefix("zoom:") == 1);
+        CHECK_FALSE(f.events.lastZoomedLeaf.has_value());
+    }
+
+    SECTION("closing a pane")
+    {
+        Fixture f;
+        auto* tab = zoomedTab(f);
+        auto const win = f.model.windowOfTab(tab->id());
+        f.model.closePane(win, tab->id(), tab->activePane()->id());
+        CHECK_FALSE(tab->isZoomed());
+        CHECK(f.events.countPrefix("zoom:") == 1);
+        CHECK_FALSE(f.events.lastZoomedLeaf.has_value());
+    }
+
+    // Unlike split/close, the three below emit no tabTitleChanged of their own — so they are exactly the
+    // paths where a hand-written "retitle if zoomed" gets forgotten. Clearing the zoom renames the tab
+    // from the zoomed pane's own title back to "Multiple panes", and a host that is never told keeps
+    // showing a stale name. announceZoomChange() emits the retitle WITH the zoom change; these pin it.
+    SECTION("flipping the split orientation")
+    {
+        Fixture f;
+        auto* tab = zoomedTab(f);
+        f.model.toggleActivePaneOrientation(tab->id());
+        CHECK_FALSE(tab->isZoomed());
+        CHECK(f.events.countPrefix("zoom:") == 1);
+        CHECK(f.events.countPrefix("title:") == 1);
+    }
+
+    SECTION("swapping panes")
+    {
+        Fixture f;
+        auto* tab = zoomedTab(f);
+        f.model.swapActivePane(tab->id(), FocusDirection::Up);
+        CHECK_FALSE(tab->isZoomed());
+        CHECK(f.events.countPrefix("zoom:") == 1);
+        CHECK(f.events.countPrefix("title:") == 1);
+    }
+
+    SECTION("moving a pane")
+    {
+        Fixture f;
+        auto* tab = zoomedTab(f);
+        f.model.moveActivePane(tab->id(), FocusDirection::Left);
+        CHECK_FALSE(tab->isZoomed());
+        CHECK(f.events.countPrefix("zoom:") == 1);
+        CHECK(f.events.countPrefix("title:") == 1);
+    }
+}
+
+TEST_CASE("SessionModel: an unzoomed restructure does not retitle a multi-pane tab", "[vtmux][model][zoom]")
+{
+    // The mirror of the sections above: with no zoom to clear, orientation/swap/move leave the resolved
+    // title ("Multiple panes") untouched, so they must stay silent. This keeps announceZoomChange()'s
+    // retitle honest — tied to the zoom actually changing, not a blanket emit on every mutation.
+    Fixture f;
+    auto* win = f.model.createWindow();
+    auto* tab = f.model.createTab(win->id());
+    REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
+    REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Horizontal) != nullptr);
+    f.events.log.clear();
+
+    f.model.toggleActivePaneOrientation(tab->id());
+    f.model.swapActivePane(tab->id(), FocusDirection::Up);
+    f.model.moveActivePane(tab->id(), FocusDirection::Left);
+
+    CHECK(f.events.countPrefix("zoom:") == 0);
+    CHECK(f.events.countPrefix("title:") == 0);
+}
+
+TEST_CASE("SessionModel: mutating an unzoomed tab announces no zoom change at all", "[vtmux][model][zoom]")
+{
+    Fixture f;
+    auto* win = f.model.createWindow();
+    auto* tab = f.model.createTab(win->id());
+    REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
+    REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Horizontal) != nullptr);
+
+    // Every pane mutator is funneled through the same zoom-announcing helper, so guard against it
+    // becoming chatty: an unzoomed tab must never emit a zoom event, whatever is done to it.
+    f.events.log.clear();
+    f.model.toggleActivePaneOrientation(tab->id());
+    f.model.swapActivePane(tab->id(), FocusDirection::Up);
+    f.model.focusDirection(tab->id(), FocusDirection::Down);
+    f.model.moveActivePane(tab->id(), FocusDirection::Left);
+    f.model.resizeActivePane(tab->id(), FocusDirection::Left, 0.1);
+    f.model.closePane(win->id(), tab->id(), tab->activePane()->id());
+
+    CHECK(f.events.countPrefix("zoom:") == 0);
+}
+
+TEST_CASE("SessionModel: closing the last pane of a zoomed tab closes the tab", "[vtmux][model][zoom]")
+{
+    Fixture f;
+    auto* win = f.model.createWindow();
+    auto* tab = f.model.createTab(win->id());
+    auto const tabId = tab->id();
+    REQUIRE(f.model.splitActivePane(tabId, SplitState::Vertical) != nullptr);
+    f.model.toggleActivePaneZoom(tabId);
+    REQUIRE(tab->isZoomed());
+
+    // Close down to one pane (which clears the zoom), then close that one: the tab goes away. The
+    // zoom-announcing helper must not touch the tab after this last close destroyed it.
+    f.model.closePane(win->id(), tabId, tab->activePane()->id());
+    REQUIRE(f.model.findTab(tabId) != nullptr);
+    f.events.log.clear();
+
+    f.model.closePane(win->id(), tabId, tab->activePane()->id());
+    CHECK(f.model.findTab(tabId) == nullptr);
+    CHECK(f.events.sawPrefix("tabClosed:"));
+    CHECK(f.events.countPrefix("zoom:") == 0);
+}
+// }}}
+
+TEST_CASE("SessionModel: resizing a zoomed pane announces the zoom clearing", "[vtmux][model][zoom]")
+{
+    Fixture f;
+    auto* win = f.model.createWindow();
+    auto* tab = f.model.createTab(win->id());
+    REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
+    f.model.toggleActivePaneZoom(tab->id());
+    REQUIRE(tab->isZoomed());
+    f.events.log.clear();
+
+    // Regression: resizeActivePane was the one pane mutator outside the zoom contract, so this used to
+    // nudge an off-screen ratio and announce only paneRatioChanged.
+    f.model.resizeActivePane(tab->id(), FocusDirection::Left, 0.05);
+    CHECK_FALSE(tab->isZoomed());
+    CHECK(f.events.countPrefix("zoom:") == 1);
+    CHECK(f.events.countPrefix("ratio:") == 1);
+}
+
+TEST_CASE("SessionModel: splitting or closing a zoomed tab retitles it exactly once",
+          "[vtmux][model][zoom][title]")
+{
+    // Both mutators retitle for their OWN reason (the pane count crossing 1<->many) and would retitle
+    // again for the zoom they cleared. The host's tabTitleChanged fan-out rebuilds and republishes the
+    // status line to every session in the window, so a double emit runs that whole sweep twice per key.
+    SECTION("splitting")
+    {
+        Fixture f;
+        auto* win = f.model.createWindow();
+        auto* tab = f.model.createTab(win->id());
+        REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
+        f.model.toggleActivePaneZoom(tab->id());
+        REQUIRE(tab->isZoomed());
+        f.events.log.clear();
+
+        f.model.splitActivePane(tab->id(), SplitState::Horizontal);
+        CHECK(f.events.countPrefix("zoom:") == 1);
+        CHECK(f.events.countPrefix("title:") == 1);
+    }
+
+    SECTION("closing a pane")
+    {
+        Fixture f;
+        auto* win = f.model.createWindow();
+        auto* tab = f.model.createTab(win->id());
+        REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
+        REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Horizontal) != nullptr);
+        f.model.toggleActivePaneZoom(tab->id());
+        REQUIRE(tab->isZoomed());
+        f.events.log.clear();
+
+        f.model.closePane(win->id(), tab->id(), tab->activePane()->id());
+        CHECK(f.events.countPrefix("zoom:") == 1);
+        CHECK(f.events.countPrefix("title:") == 1);
+    }
+
+    SECTION("an unzoomed split still retitles once")
+    {
+        Fixture f;
+        auto* win = f.model.createWindow();
+        auto* tab = f.model.createTab(win->id());
+        f.events.log.clear();
+
+        // No zoom to clear, so the split's own retitle (single-pane -> "Multiple panes") must still fire.
+        f.model.splitActivePane(tab->id(), SplitState::Vertical);
+        CHECK(f.events.countPrefix("zoom:") == 0);
+        CHECK(f.events.countPrefix("title:") == 1);
+    }
+}
+
+TEST_CASE("SessionModel: zoom is per-tab state that survives switching away and back", "[vtmux][model][zoom]")
+{
+    Fixture f;
+    auto* win = f.model.createWindow();
+    auto* zoomed = f.model.createTab(win->id());
+    REQUIRE(f.model.splitActivePane(zoomed->id(), SplitState::Vertical) != nullptr);
+    f.model.toggleActivePaneZoom(zoomed->id());
+    auto const zoomedLeaf = zoomed->zoomedLeafId();
+    REQUIRE(zoomedLeaf.has_value());
+
+    auto* other = f.model.createTab(win->id());
+    REQUIRE(win->activeTab() == other);
+    CHECK_FALSE(other->isZoomed()); // a fresh tab is not zoomed just because its neighbor is
+
+    // Zoom lives on the Tab, so switching away cannot disturb it: come back and the same leaf is still
+    // the one filling the tab.
+    f.model.activateTab(win->id(), zoomed->id());
+    CHECK(zoomed->isZoomed());
+    CHECK(zoomed->zoomedLeafId() == zoomedLeaf);
+    CHECK(zoomed->layoutRoot() == zoomed->activePane());
+}
+
+TEST_CASE("SessionModel: zoom travels with a tab moved to another window", "[vtmux][model][zoom]")
+{
+    Fixture f;
+    auto* a = f.model.createWindow();
+    auto* b = f.model.createWindow();
+    auto* tab = f.model.createTab(a->id());
+    REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
+    f.model.toggleActivePaneZoom(tab->id());
+    auto const zoomedLeaf = tab->zoomedLeafId();
+    REQUIRE(zoomedLeaf.has_value());
+
+    // moveTabToWindow transplants the Tab object intact, and the zoom is Tab state — so it rides along
+    // rather than being silently dropped on the destination window's first rebuild.
+    f.model.moveTabToWindow(a->id(), tab->id(), b->id(), 0);
+
+    REQUIRE(f.model.windowOfTab(tab->id()) == b->id());
+    CHECK(tab->isZoomed());
+    CHECK(tab->zoomedLeafId() == zoomedLeaf);
+    CHECK(tab->layoutRoot() == tab->activePane());
+}

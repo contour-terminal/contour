@@ -466,6 +466,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::MovePaneUp);
     bool operator()(actions::MovePaneDown);
     bool operator()(actions::ToggleSplitOrientation);
+    bool operator()(actions::TogglePaneZoom);
     bool operator()(actions::ResizePane const& action);
 
     void scheduleRedraw();

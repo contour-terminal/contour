@@ -2202,6 +2202,12 @@ bool TerminalSession::operator()(actions::ToggleSplitOrientation)
     return true;
 }
 
+bool TerminalSession::operator()(actions::TogglePaneZoom)
+{
+    _manager->toggleActivePaneZoom(/*acting*/ this);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::ResizePane const& action)
 {
     // percent is a whole-number step; convert to the (0, 1) ratio fraction the model nudges by.
