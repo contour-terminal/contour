@@ -35,6 +35,9 @@ TEST_CASE("actions::isNonRepeatable flags the structural actions", "[actions][re
     CHECK(actions::isNonRepeatable(actions::Action { actions::MovePaneRight {} }));
     CHECK(actions::isNonRepeatable(actions::Action { actions::MovePaneUp {} }));
     CHECK(actions::isNonRepeatable(actions::Action { actions::ToggleSplitOrientation {} }));
+    // A held toggle would flip zoom once per repeat, leaving the final state up to the repeat count
+    // rather than the user.
+    CHECK(actions::isNonRepeatable(actions::Action { actions::TogglePaneZoom {} }));
 
     // Repeatable: holding the key should keep firing these.
     CHECK_FALSE(actions::isNonRepeatable(actions::Action { actions::ScrollUp {} }));
@@ -54,6 +57,8 @@ TEST_CASE("actions::fromString round-trips the new pane actions", "[actions][par
     CHECK(std::holds_alternative<actions::MovePaneDown>(*actions::fromString("movePaneDown")));
     CHECK(std::holds_alternative<actions::ToggleSplitOrientation>(
         *actions::fromString("ToggleSplitOrientation")));
+    CHECK(std::holds_alternative<actions::TogglePaneZoom>(*actions::fromString("TogglePaneZoom")));
+    CHECK(std::holds_alternative<actions::TogglePaneZoom>(*actions::fromString("togglePaneZoom")));
     // ResizePane parses to a default-constructed alternative here (its parameters are filled by the
     // YAML parseAction step, not fromString).
     CHECK(std::holds_alternative<actions::ResizePane>(*actions::fromString("ResizePane")));

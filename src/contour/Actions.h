@@ -126,6 +126,7 @@ struct MovePaneRight{};     // re-parent the active pane past its right neighbor
 struct MovePaneUp{};        // re-parent the active pane past its upper neighbor
 struct MovePaneDown{};      // re-parent the active pane past its lower neighbor
 struct ToggleSplitOrientation{}; // flip the active pane's split axis (H<->V)
+struct TogglePaneZoom{};    // give the active pane the whole tab area (hiding its siblings), and back
 struct ResizePane{ Direction direction; int percent = 5; }; // grow/shrink the active pane
 // clang-format on
 
@@ -208,6 +209,7 @@ using Action = std::variant<CancelSelection,
                             MovePaneUp,
                             MovePaneDown,
                             ToggleSplitOrientation,
+                            TogglePaneZoom,
                             ResizePane>;
 
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
@@ -216,6 +218,8 @@ using Action = std::variant<CancelSelection,
 /// creating or closing a tab, closing a pane, and splitting a pane. Splitting is included because
 /// each fire forks a new shell process and shrinks the layout, so a held split key would spawn a
 /// burst of panes until they collapse — the same amplification the tab/pane actions guard against.
+/// The toggles belong here for the mirror-image reason: a held key would flip them back and forth
+/// once per repeat, so where the key lands would be decided by the repeat count rather than the user.
 /// The keyboard dispatch (handleAction) consults this concept to filter such actions out of
 /// KeyboardEventType::Repeat events.
 template <typename T>
@@ -233,7 +237,8 @@ concept NonRepeatableActionConcept = crispy::one_of<T,
                                                     MovePaneRight,
                                                     MovePaneUp,
                                                     MovePaneDown,
-                                                    ToggleSplitOrientation>;
+                                                    ToggleSplitOrientation,
+                                                    TogglePaneZoom>;
 
 /// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
 /// member), false otherwise.
@@ -421,6 +426,10 @@ namespace documentation
     constexpr inline std::string_view ToggleSplitOrientation {
         "Flips the orientation of the active pane's split (horizontal <-> vertical)."
     };
+    constexpr inline std::string_view TogglePaneZoom {
+        "Zooms the active pane so it alone fills the tab, hiding its siblings; toggles back to the "
+        "tiled layout. While zoomed, moving pane focus keeps the zoom and shows the newly focused pane."
+    };
     constexpr inline std::string_view ResizePane {
         "Grows or shrinks the active pane in the given direction (by an optional percent)."
     };
@@ -508,6 +517,7 @@ constexpr inline auto getDocumentation()
         std::tuple { Action { MovePaneUp {} }, documentation::MovePaneUp },
         std::tuple { Action { MovePaneDown {} }, documentation::MovePaneDown },
         std::tuple { Action { ToggleSplitOrientation {} }, documentation::ToggleSplitOrientation },
+        std::tuple { Action { TogglePaneZoom {} }, documentation::TogglePaneZoom },
         std::tuple { Action { ResizePane { Direction::Right } }, documentation::ResizePane },
     };
 }
@@ -607,6 +617,7 @@ DECLARE_ACTION_FMT(MovePaneRight)
 DECLARE_ACTION_FMT(MovePaneUp)
 DECLARE_ACTION_FMT(MovePaneDown)
 DECLARE_ACTION_FMT(ToggleSplitOrientation)
+DECLARE_ACTION_FMT(TogglePaneZoom)
 // }}}
 #undef DECLARE_ACTION_FMT
 
@@ -747,6 +758,7 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
         HANDLE_ACTION(MovePaneUp);
         HANDLE_ACTION(MovePaneDown);
         HANDLE_ACTION(ToggleSplitOrientation);
+        HANDLE_ACTION(TogglePaneZoom);
         if (std::holds_alternative<contour::actions::ResizePane>(_action))
         {
             // Flat sibling-key form (like MoveTabTo/SwitchToTab below), so a serialized binding is a

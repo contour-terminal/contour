@@ -439,3 +439,243 @@ TEST_CASE("Tab: moveActivePane re-parents the active pane across a non-sibling n
         CHECK(tab.paneCount() == 3);
     }
 }
+
+// {{{ Zoom
+//
+// The contract under test: zoom always applies to the ACTIVE pane. That single rule is what gives
+// "zoom follows focus" for free and what every restructuring operation cancels.
+
+TEST_CASE("Tab: zooming a single-pane tab is a no-op", "[vtmux][tab][zoom]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+
+    // There are no siblings to hide, so there is nothing to zoom into: refuse rather than record a
+    // zoom the user could not see (and so could not toggle back off by eye).
+    CHECK_FALSE(tab.toggleZoom());
+    CHECK_FALSE(tab.isZoomed());
+    CHECK_FALSE(tab.zoomedLeafId().has_value());
+    CHECK(tab.layoutRoot() == tab.rootPane());
+}
+
+TEST_CASE("Tab: zoom re-roots the layout at the active pane and back", "[vtmux][tab][zoom]")
+{
+    Ids ids;
+    auto const rootId = ids.pane();
+    Tab tab { TabId { 1 }, rootId, ids.session() };
+    auto* second = tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+
+    // Unzoomed, the host renders the whole tree.
+    CHECK(tab.layoutRoot() == tab.rootPane());
+
+    REQUIRE(tab.toggleZoom());
+    CHECK(tab.isZoomed());
+    // Zoomed, the host renders ONLY the active leaf — that re-rooting is the entire feature.
+    CHECK(tab.layoutRoot() == second);
+    CHECK(tab.zoomedLeafId() == second->id());
+    // The tree itself is untouched: zoom hides panes, it does not close them.
+    CHECK(tab.paneCount() == 2);
+
+    REQUIRE(tab.toggleZoom());
+    CHECK_FALSE(tab.isZoomed());
+    CHECK(tab.layoutRoot() == tab.rootPane());
+    CHECK_FALSE(tab.zoomedLeafId().has_value());
+}
+
+TEST_CASE("Tab: zoom follows focus", "[vtmux][tab][zoom]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    auto* right = tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    auto* left = tab.rootPane()->first();
+
+    REQUIRE(tab.activePane() == right);
+    REQUIRE(tab.toggleZoom());
+
+    // Moving focus while zoomed stays zoomed and shows the newly focused pane (Windows Terminal
+    // semantics). No code implements this: layoutRoot() reads the active leaf, so focus carries it.
+    auto* target = tab.focusDirection(FocusDirection::Left);
+    REQUIRE(target == left);
+    CHECK(tab.isZoomed());
+    CHECK(tab.layoutRoot() == left);
+    CHECK(tab.zoomedLeafId() == left->id());
+
+    // ...and back.
+    REQUIRE(tab.focusDirection(FocusDirection::Right) == right);
+    CHECK(tab.isZoomed());
+    CHECK(tab.layoutRoot() == right);
+}
+
+TEST_CASE("Tab: a focus move with no neighbor leaves the zoom where it was", "[vtmux][tab][zoom]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    auto* right = tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    REQUIRE(tab.toggleZoom());
+
+    // Nothing to the right of `right`: focus does not move, so neither does the zoom.
+    CHECK(tab.focusDirection(FocusDirection::Right) == nullptr);
+    CHECK(tab.isZoomed());
+    CHECK(tab.layoutRoot() == right);
+}
+
+TEST_CASE("Tab: splitting while zoomed unzooms", "[vtmux][tab][zoom]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    REQUIRE(tab.toggleZoom());
+    REQUIRE(tab.isZoomed());
+
+    // The pane a split creates has to be visible, or the user just watched a keypress do nothing.
+    tab.splitActivePane(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session());
+    CHECK_FALSE(tab.isZoomed());
+    CHECK(tab.layoutRoot() == tab.rootPane());
+    CHECK(tab.paneCount() == 3);
+}
+
+TEST_CASE("Tab: closing a pane while zoomed unzooms without dangling", "[vtmux][tab][zoom]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    auto* right = tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    REQUIRE(tab.toggleZoom());
+
+    // closePane() absorbs the sibling into the parent, DESTROYING Pane objects. Zoom is a bool tied
+    // to the active leaf precisely so there is no pane pointer/id of its own left dangling here.
+    tab.closePane(right);
+
+    CHECK_FALSE(tab.isZoomed());
+    CHECK(tab.paneCount() == 1);
+    CHECK(tab.layoutRoot() == tab.rootPane());
+    CHECK(tab.layoutRoot() == tab.activePane());
+}
+
+TEST_CASE("Tab: restructuring the tree while zoomed unzooms", "[vtmux][tab][zoom]")
+{
+    auto const zoomedThreePaneTab = [](Ids& ids, Tab& tab) {
+        tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+        tab.splitActivePane(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session());
+        REQUIRE(tab.toggleZoom());
+        REQUIRE(tab.isZoomed());
+    };
+
+    SECTION("flipping the split orientation")
+    {
+        Ids ids;
+        Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+        zoomedThreePaneTab(ids, tab);
+
+        // Flipping an axis that is not on screen would be an invisible keypress.
+        CHECK(tab.toggleActivePaneOrientation() != nullptr);
+        CHECK_FALSE(tab.isZoomed());
+    }
+
+    SECTION("swapping with a neighbor")
+    {
+        Ids ids;
+        Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+        zoomedThreePaneTab(ids, tab);
+
+        auto const [a, b] = tab.swapActivePane(FocusDirection::Up);
+        REQUIRE(a != nullptr);
+        CHECK_FALSE(tab.isZoomed());
+    }
+
+    SECTION("moving across a neighbor")
+    {
+        Ids ids;
+        Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+        zoomedThreePaneTab(ids, tab);
+
+        REQUIRE(tab.moveActivePane(FocusDirection::Left, ids.pane()));
+        CHECK_FALSE(tab.isZoomed());
+    }
+}
+
+TEST_CASE("Tab: an operation that does nothing leaves the zoom alone", "[vtmux][tab][zoom]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    auto* right = tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    REQUIRE(tab.toggleZoom());
+
+    // Only operations that actually reshape the tree cancel the zoom. A swap/move that finds no
+    // neighbor changes nothing, so cancelling would be a state change the user never asked for.
+    CHECK(tab.swapActivePane(FocusDirection::Right).first == nullptr);
+    CHECK(tab.isZoomed());
+
+    CHECK_FALSE(tab.moveActivePane(FocusDirection::Right, ids.pane()));
+    CHECK(tab.isZoomed());
+    CHECK(tab.layoutRoot() == right);
+}
+
+TEST_CASE("Tab: a zoomed tab is titled after the pane on screen", "[vtmux][tab][zoom][title]")
+{
+    Ids ids;
+    auto const resolver = makeResolver();
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    auto const rightSession = ids.session();
+    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), rightSession);
+
+    // Tiled, the tab cannot name one pane, so it says so.
+    CHECK(tab.title(resolver) == std::string { Tab::MultiplePanesLabel });
+
+    // Zoomed, exactly one pane is on screen — naming it beats the placeholder.
+    REQUIRE(tab.toggleZoom());
+    CHECK(tab.title(resolver) == std::format("session-{}", rightSession.value));
+
+    // A rename still wins over both (it is the highest-precedence source).
+    tab.setRuntimeTitle("pinned");
+    CHECK(tab.title(resolver) == "pinned");
+}
+// }}}
+
+TEST_CASE("Tab: resizing while zoomed unzooms rather than moving an invisible divider", "[vtmux][tab][zoom]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    REQUIRE(tab.toggleZoom());
+    auto const ratioBefore = tab.rootPane()->ratio();
+
+    // Regression: resize used to be the one mutator outside the zoom contract. While zoomed there is
+    // no divider on screen, so each press silently rewrote a hidden ratio (clamping it at the extreme
+    // after a few presses) and the tiled layout lurched on the next unzoom. It must surface instead.
+    auto* split = tab.resizeActivePane(FocusDirection::Left, 0.05);
+    REQUIRE(split != nullptr);
+    CHECK_FALSE(tab.isZoomed());
+    CHECK(tab.layoutRoot() == tab.rootPane());
+    CHECK(split->ratio() < ratioBefore); // ...and the resize itself still happened, now visibly
+}
+
+TEST_CASE("Tab: resizing with no ancestor split on the axis leaves the zoom alone", "[vtmux][tab][zoom]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    // A single Vertical split: there is no Horizontal ancestor, so an Up/Down resize finds nothing.
+    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    REQUIRE(tab.toggleZoom());
+
+    CHECK(tab.resizeActivePane(FocusDirection::Up, 0.05) == nullptr);
+    CHECK(tab.isZoomed()); // nothing moved, so nothing was surfaced
+}
+
+TEST_CASE("Tab: usesMultiplePanesLabel is the one rule behind every consumer's tab label",
+          "[vtmux][tab][zoom][title]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    CHECK_FALSE(tab.usesMultiplePanesLabel()); // one pane: named after its session
+
+    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    CHECK(tab.usesMultiplePanesLabel()); // tiled and multi-pane: no single pane to name it after
+
+    // Zoomed, exactly one pane is on screen, so the tab is named after THAT pane. Both title() and the
+    // host's own label templating read this, so they cannot disagree about what a zoomed tab is called.
+    REQUIRE(tab.toggleZoom());
+    CHECK_FALSE(tab.usesMultiplePanesLabel());
+
+    REQUIRE(tab.toggleZoom());
+    CHECK(tab.usesMultiplePanesLabel());
+}

@@ -331,6 +331,7 @@ TEST_CASE("TerminalSession: tab actions from an unregistered session are guarded
     CHECK_NOTHROW((*session)(contour::actions::FocusPaneRight {}));
     CHECK_NOTHROW((*session)(contour::actions::FocusPaneUp {}));
     CHECK_NOTHROW((*session)(contour::actions::FocusPaneDown {}));
+    CHECK_NOTHROW((*session)(contour::actions::TogglePaneZoom {}));
     CHECK_NOTHROW((*session)(contour::actions::MoveTabTo { .position = 1 }));
     CHECK_NOTHROW((*session)(contour::actions::SwitchToTab { .position = 1 }));
     CHECK_NOTHROW((*session)(contour::actions::SetTabTitle {}));

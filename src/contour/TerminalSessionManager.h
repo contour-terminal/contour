@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <unordered_map>
@@ -165,6 +166,9 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param fraction The ratio delta magnitude in (0, 1).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     void resizeActivePane(vtmux::FocusDirection direction, double fraction, TerminalSession* acting);
+    /// Toggles zoom on the acting session's active pane (see vtmux::SessionModel::toggleActivePaneZoom).
+    /// @param acting The session that received the keybinding; its hosting tab is the target.
+    void toggleActivePaneZoom(TerminalSession* acting);
     // }}}
 
     // {{{ Model service used by PaneProxy + WindowController
@@ -314,6 +318,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
                                 vtmux::PaneId splitNode,
                                 vtmux::SplitState newState) override;
     void paneSwapped(vtmux::TabId tab, vtmux::PaneId a, vtmux::PaneId b) override;
+    void paneZoomChanged(vtmux::TabId tab, std::optional<vtmux::PaneId> zoomedLeaf) override;
     void paneTreeRestructured(vtmux::TabId tab) override;
     void tabTitleChanged(vtmux::TabId tab) override;
     void tabColorChanged(vtmux::TabId tab) override;

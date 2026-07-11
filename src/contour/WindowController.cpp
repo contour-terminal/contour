@@ -63,7 +63,7 @@ QHash<int, QByteArray> WindowController::roleNames() const
     return {
         { Qt::DisplayRole, "display" }, { TitleRole, "title" },         { ColorRole, "accentColor" },
         { IsActiveRole, "isActive" },   { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
-        { RawTitleRole, "rawTitle" },
+        { RawTitleRole, "rawTitle" },   { ZoomedRole, "zoomed" },
     };
 }
 
@@ -90,6 +90,7 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         }
         case IsActiveRole: return row == activeTabIndex();
         case PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
+        case ZoomedRole: return tab != nullptr && tab->isZoomed();
         default: return {};
     }
 }
@@ -121,10 +122,14 @@ QString WindowController::resolvedTabLabel(vtmux::Tab* tab, TerminalSession* ses
 
     auto const windowTitle = session != nullptr ? session->resolvedWindowTitle() : std::string {};
 
+    // Same precedence as vtmux::Tab::title(), templated rather than resolved (the strip expands
+    // {index}/{title} placeholders, so it needs the raw template). The "is this tab named after one of
+    // its panes?" decision is Tab's — read it, do not restate it, or the strip and the status line end
+    // up disagreeing about what a zoomed tab is called.
     auto templ = std::string_view {};
     if (auto const& renamed = tab->runtimeTitle(); renamed.has_value())
         templ = *renamed;
-    else if (tab->hasMultiplePanes())
+    else if (tab->usesMultiplePanesLabel())
         templ = vtmux::Tab::MultiplePanesLabel;
     else if (session != nullptr)
         templ = session->profile().tabLabel.value();
@@ -741,12 +746,26 @@ bool WindowController::applyContentDrivenResize(display::TerminalDisplay& reques
         return false;
     }
 
+    // Only the layout root's subtree is on screen (it is the zoomed leaf while zoomed, the whole tree
+    // otherwise). A pane outside it has no geometry, so it must not size the window: honoring it would
+    // resize the window to fit a grid nobody can see. Stated over the layout root rather than over zoom
+    // so it stays true for any future reason the host renders a subtree.
+    auto* const layoutRoot = tab->layoutRoot();
+    if (!layoutRoot->contains(leaf))
+    {
+        displayLog()("Refusing content-driven window resize: requesting pane is not on screen.");
+        return false;
+    }
+
     // PaneNode.qml's explicit `handle:` binds its thickness to the same constant (via the session
-    // manager's splitHandleThickness property), so solver and rendered handle cannot diverge.
+    // manager's splitHandleThickness property), so solver and rendered handle cannot diverge. The
+    // layout root bounds the ratio walk: while zoomed it IS the leaf, so the leaf owns the whole
+    // content area and no split ratio above it applies.
     auto const content = vtmux::contentSizeForLeaf(
         *leaf,
         vtmux::LayoutSize { .width = leafContentLogical.width, .height = leafContentLogical.height },
-        vtmux::DefaultSplitHandleThickness);
+        vtmux::DefaultSplitHandleThickness,
+        *layoutRoot);
 
     displayLog()("Content-driven window resize: leaf {}x{} -> content {}x{} + {} chrome.",
                  leafContentLogical.width,
@@ -816,6 +835,9 @@ void WindowController::rebuildActiveTabPaneProxies()
 {
     vtmux::Tab* tab = activeModelTab();
 
+    // Walk from rootPane(), NOT layoutRoot(): the liveness set below decides which proxies survive, and
+    // every pane of the tab stays live even while a zoom hides all but one. Walking the layout root
+    // instead would prune the hidden panes' proxies and tear their terminals down on every zoom.
     std::unordered_map<uint64_t, vtmux::Pane*> live;
     if (tab != nullptr)
         tab->rootPane()->walkTree([&](vtmux::Pane& p) { live[p.id().value] = &p; });
@@ -846,7 +868,20 @@ void WindowController::rebuildActiveTabPaneProxies()
             ++it;
     }
 
-    auto* newRoot = tab != nullptr ? getProxy(tab->rootPane()->id()) : nullptr;
+    refreshActiveTabLayoutRoot();
+}
+
+void WindowController::refreshActiveTabLayoutRoot()
+{
+    // Render the tab's LAYOUT root, which is the tree root normally and the zoomed leaf while zoomed.
+    // This one substitution is the whole of pane zoom on the view side: PaneNode.qml already gives a
+    // leaf the entire area it is handed, so re-rooting the tree at that leaf full-screens it and drops
+    // its siblings out of the scene — no visibility flag, no geometry override, no zoom-aware QML.
+    //
+    // Split out from the rebuild above because zoom moves the ROOT without touching the TREE: the
+    // proxies are all still valid, so a zoom toggle costs one pointer swap rather than a full walk.
+    auto* tab = activeModelTab();
+    auto* newRoot = tab != nullptr ? getProxy(tab->layoutRoot()->id()) : nullptr;
     if (newRoot != _activeTabRootProxy)
     {
         _activeTabRootProxy = newRoot;

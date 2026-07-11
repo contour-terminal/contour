@@ -24,10 +24,23 @@ void Tab::setActivePane(Pane* leaf)
     touchMru(leaf->id());
 }
 
+bool Tab::toggleZoom() noexcept
+{
+    // Nothing to hide in a single-pane tab, so there is no zoom to enter (and none to leave: the
+    // restructuring operations below already cleared it on the way down to one pane).
+    if (!hasMultiplePanes())
+        return false;
+
+    _zoomed = !_zoomed;
+    return true;
+}
+
 Pane* Tab::splitActivePane(
     SplitState direction, PaneId splitNodeId, PaneId newLeafId, SessionId newSession, double ratio)
 {
     assert(_activeLeaf != nullptr && _activeLeaf->isLeaf());
+
+    _zoomed = false; // the new pane must be visible (see Tab.h's zoom block)
 
     auto const [firstChild, secondChild] =
         _activeLeaf->split(direction, splitNodeId, newLeafId, newSession, ratio);
@@ -42,6 +55,10 @@ SessionId Tab::closePane(Pane* leaf)
 {
     assert(leaf != nullptr && leaf->isLeaf());
     assert(!isLastPane(leaf) && "closing the last pane must close the tab instead");
+
+    // Drop the zoom: the survivors are re-laid out, and the closed pane may well have been the zoomed
+    // one. Unconditional, so no zoomed-pane bookkeeping has to survive the absorption below.
+    _zoomed = false;
 
     auto* parent = leaf->parent();
     assert(parent != nullptr);
@@ -101,8 +118,30 @@ Pane* Tab::toggleActivePaneOrientation()
     auto* parent = _activeLeaf->parent();
     if (parent == nullptr)
         return nullptr; // single-pane tab: no split to flip
+
+    _zoomed = false; // the flipped axis must be visible (see Tab.h's zoom block)
     parent->toggleOrientation();
     return parent;
+}
+
+Pane* Tab::resizeActivePane(FocusDirection direction, double fraction)
+{
+    assert(_activeLeaf != nullptr && _activeLeaf->isLeaf());
+
+    auto* split = Pane::ancestorSplitOnAxis(_activeLeaf, crossingSplitFor(direction));
+    if (split == nullptr)
+        return nullptr; // single pane, or only cross-axis splits above the active pane
+
+    _zoomed = false; // the divider being moved must be visible (see Tab.h's zoom block)
+
+    // `ratio` is the FIRST child's share of the split. The user presses a direction to move the shared
+    // divider that way: pressing toward the second child (Right/Down) enlarges the first child's share
+    // (+fraction); pressing toward the first child (Left/Up) shrinks it (-fraction). This "move the
+    // boundary in this direction" model matches Windows Terminal and is independent of which side the
+    // active pane sits on. setRatio() clamps.
+    auto const delta = pointsTowardSecondChild(direction) ? fraction : -fraction;
+    split->setRatio(split->ratio() + delta);
+    return split;
 }
 
 std::pair<Pane*, Pane*> Tab::swapActivePane(FocusDirection direction)
@@ -111,6 +150,8 @@ std::pair<Pane*, Pane*> Tab::swapActivePane(FocusDirection direction)
     auto* neighbor = _root->neighbor(_activeLeaf, direction);
     if (neighbor == nullptr)
         return { nullptr, nullptr };
+
+    _zoomed = false; // the swapped panes must be visible (see Tab.h's zoom block)
 
     auto* previouslyActive = _activeLeaf;
     previouslyActive->swapLeafPayload(neighbor);
@@ -125,6 +166,8 @@ bool Tab::moveActivePane(FocusDirection direction, PaneId newSplitId)
     auto* neighbor = _root->neighbor(_activeLeaf, direction);
     if (neighbor == nullptr)
         return false;
+
+    _zoomed = false; // the moved pane must be visible (see Tab.h's zoom block)
 
     // Degenerate case: the active leaf and its neighbor are the two children of one split. "Moving
     // across" then has no distinct destination — it is an in-place session swap, which preserves the
@@ -179,7 +222,7 @@ std::string Tab::title(SessionTitleResolver const& resolver) const
 {
     if (_runtimeTitle.has_value())
         return *_runtimeTitle;
-    if (hasMultiplePanes())
+    if (usesMultiplePanesLabel())
         return std::string { MultiplePanesLabel };
     return resolver(_activeLeaf->session());
 }

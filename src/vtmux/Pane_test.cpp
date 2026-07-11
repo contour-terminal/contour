@@ -502,3 +502,32 @@ TEST_CASE("Pane: ancestorSplitOnAxis finds the nearest split on the given axis",
     CHECK(Pane::ancestorSplitOnAxis(left, SplitState::Vertical) == &root);
     CHECK(Pane::ancestorSplitOnAxis(left, SplitState::Horizontal) == nullptr);
 }
+
+TEST_CASE("Pane: contains() reports subtree membership, counting a node as its own ancestor", "[vtmux][pane]")
+{
+    Ids ids;
+    auto root = Pane { ids.pane(), ids.session() };
+    auto* right = root.split(SplitState::Vertical, ids.pane(), ids.pane(), ids.session()).second;
+    auto* left = root.first();
+    auto* rightBottom = right->split(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session()).second;
+    auto* rightTop = right->first();
+
+    // The tree root contains everything, itself included.
+    CHECK(root.contains(&root));
+    CHECK(root.contains(left));
+    CHECK(root.contains(right));
+    CHECK(root.contains(rightBottom));
+
+    // A subtree contains its own descendants and itself, but not its siblings or its ancestors.
+    CHECK(right->contains(right));
+    CHECK(right->contains(rightTop));
+    CHECK(right->contains(rightBottom));
+    CHECK_FALSE(right->contains(left));
+    CHECK_FALSE(right->contains(&root));
+
+    // A leaf contains only itself — which is what makes a zoomed pane its own layout root.
+    CHECK(rightBottom->contains(rightBottom));
+    CHECK_FALSE(rightBottom->contains(rightTop));
+
+    CHECK_FALSE(root.contains(nullptr));
+}

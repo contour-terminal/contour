@@ -107,6 +107,7 @@ optional<Action> fromString(string const& name)
         mapAction<actions::MovePaneUp>("MovePaneUp"),
         mapAction<actions::MovePaneDown>("MovePaneDown"),
         mapAction<actions::ToggleSplitOrientation>("ToggleSplitOrientation"),
+        mapAction<actions::TogglePaneZoom>("TogglePaneZoom"),
         mapAction<actions::ResizePane>("ResizePane"),
     };
 

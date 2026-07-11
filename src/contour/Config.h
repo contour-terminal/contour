@@ -711,6 +711,13 @@ const InputMappings defaultInputMappings {
                            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                            .input = '\\',
                            .binding = { { actions::ToggleSplitOrientation {} } } },
+        // Ctrl+Shift+Z: zoom the active pane to fill the tab, and back. Deliberately NOT Alt+F (which
+        // issue #91 floated): Alt+F is readline/emacs forward-word, and a default binding here would
+        // swallow it before it ever reached the shell.
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'Z',
+                           .binding = { { actions::TogglePaneZoom {} } } },
         CharInputMapping { .modes { vtbackend::MatchModes {} },
                            .modifiers { vtbackend::Modifier::Alt },
                            .input = '1',

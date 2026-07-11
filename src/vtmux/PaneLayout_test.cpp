@@ -50,7 +50,7 @@ LayoutSize simulateAllocation(Pane& root, Pane const& leaf, LayoutSize content)
 TEST_CASE("PaneLayout: unsplit leaf passes the requirement through", "[vtmux][layout]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
-    CHECK(contentSizeForLeaf(root, { .width = 640, .height = 480 }, Handle)
+    CHECK(contentSizeForLeaf(root, { .width = 640, .height = 480 }, Handle, root)
           == LayoutSize { .width = 640, .height = 480 });
 }
 
@@ -61,11 +61,11 @@ TEST_CASE("PaneLayout: side-by-side split solves the width axis only", "[vtmux][
         root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);
 
     // First child: exactly parent * ratio, no handle involvement.
-    CHECK(contentSizeForLeaf(*first, { .width = 400, .height = 300 }, Handle)
+    CHECK(contentSizeForLeaf(*first, { .width = 400, .height = 300 }, Handle, root)
           == LayoutSize { .width = 800, .height = 300 });
 
     // Second child: parent * (1-ratio) - handle => parent = ceil((400 + 6) / 0.5).
-    CHECK(contentSizeForLeaf(*second, { .width = 400, .height = 300 }, Handle)
+    CHECK(contentSizeForLeaf(*second, { .width = 400, .height = 300 }, Handle, root)
           == LayoutSize { .width = 812, .height = 300 });
 }
 
@@ -75,11 +75,11 @@ TEST_CASE("PaneLayout: stacked split solves the height axis only", "[vtmux][layo
     auto const [first, second] =
         root.split(SplitState::Horizontal, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.25);
 
-    CHECK(contentSizeForLeaf(*first, { .width = 640, .height = 100 }, Handle)
+    CHECK(contentSizeForLeaf(*first, { .width = 640, .height = 100 }, Handle, root)
           == LayoutSize { .width = 640, .height = 400 });
 
     // share = 0.75: ceil((100 + 6) / 0.75) = ceil(141.33) = 142.
-    CHECK(contentSizeForLeaf(*second, { .width = 640, .height = 100 }, Handle)
+    CHECK(contentSizeForLeaf(*second, { .width = 640, .height = 100 }, Handle, root)
           == LayoutSize { .width = 640, .height = 142 });
 }
 
@@ -95,7 +95,7 @@ TEST_CASE("PaneLayout: nested splits compose per traversed level", "[vtmux][layo
 
     // bottom: height share 0.7 with handle -> ceil((140+6)/0.7) = 209; then width as the RIGHT child of
     // the vertical root (share 0.5, handle) -> ceil((200+6)/0.5) = 412.
-    CHECK(contentSizeForLeaf(*bottom, { .width = 200, .height = 140 }, Handle)
+    CHECK(contentSizeForLeaf(*bottom, { .width = 200, .height = 140 }, Handle, root)
           == LayoutSize { .width = 412, .height = 209 });
 }
 
@@ -115,10 +115,49 @@ TEST_CASE("PaneLayout: solved content never allocates the leaf below its require
     auto const required = LayoutSize { .width = 331, .height = 173 };
     for (auto const* leaf: { l3a, l3b })
     {
-        auto const content = contentSizeForLeaf(*leaf, required, Handle);
+        auto const content = contentSizeForLeaf(*leaf, required, Handle, root);
         auto const got = simulateAllocation(root, *leaf, content);
         CAPTURE(leaf->id().value, content.width, content.height, got.width, got.height);
         CHECK(got.width >= required.width);
         CHECK(got.height >= required.height);
+    }
+}
+
+TEST_CASE("PaneLayout: the layout root bounds the ratio walk", "[vtmux][layout][zoom]")
+{
+    // A three-leaf tree: root splits side-by-side, its second child splits top/bottom.
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    auto* right = root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }).second;
+    auto* rightBottom =
+        right->split(SplitState::Horizontal, PaneId { 4 }, PaneId { 5 }, SessionId { 3 }).second;
+
+    auto const required = LayoutSize { .width = 640, .height = 480 };
+
+    SECTION("rooting at the tree root solves the whole parent chain")
+    {
+        // Both splits shrink the leaf, so the content area must be bigger than the leaf on both axes.
+        auto const content = contentSizeForLeaf(*rightBottom, required, Handle, root);
+        CHECK(content.width > required.width);
+        CHECK(content.height > required.height);
+        // ...and the host allocation gives the leaf at least what was asked for (never undershoot).
+        auto const got = simulateAllocation(root, *rightBottom, content);
+        CHECK(got.width >= required.width);
+        CHECK(got.height >= required.height);
+    }
+
+    SECTION("a zoomed leaf is its own layout root, so it owns the content area outright")
+    {
+        // This is what makes a content-driven resize correct while zoomed: the leaf fills the tab, so
+        // no split ratio above it applies and the answer is the identity.
+        CHECK(contentSizeForLeaf(*rightBottom, required, Handle, /*layoutRoot*/ *rightBottom) == required);
+    }
+
+    SECTION("an intermediate layout root stops the walk there")
+    {
+        // Solving only up to `right` accounts for the top/bottom split but NOT the outer side-by-side
+        // one, so the height grows while the width passes through untouched.
+        auto const content = contentSizeForLeaf(*rightBottom, required, Handle, /*layoutRoot*/ *right);
+        CHECK(content.width == required.width);
+        CHECK(content.height > required.height);
     }
 }

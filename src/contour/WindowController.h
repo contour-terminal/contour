@@ -77,6 +77,7 @@ class WindowController: public QAbstractListModel
         PaneCountRole,                //!< Number of panes in this tab.
         SessionIdRole,                //!< The session id of the tab's active leaf.
         RawTitleRole,                 //!< Un-expanded runtime rename template (empty if never renamed).
+        ZoomedRole,                   //!< Whether this tab's active pane is zoomed (see vtmux::Tab).
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
@@ -354,6 +355,9 @@ class WindowController: public QAbstractListModel
     void refreshAllTabTitles();
     void refreshActiveTabHighlight();
     void rebuildActiveTabPaneProxies();
+    /// Re-points activeTabRootPane at the active tab's layout root (vtmux::Tab::layoutRoot), which zoom
+    /// moves without reshaping the tree. O(1): the proxies stay valid, so no walk or rebuild is needed.
+    void refreshActiveTabLayoutRoot();
     /// Notifies every proxy's active state changed (active-pane focus moved, no tree rebuild).
     void notifyActivePaneChanged();
     /// Notifies the split node proxy @p splitNode that its ratio changed.

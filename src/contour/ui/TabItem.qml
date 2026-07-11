@@ -18,8 +18,10 @@ Item {
     required property color tabColor
     required property bool tabActive
     required property int tabPaneCount
+    required property bool tabZoomed     // active pane is zoomed: only it is on screen (see vtmux::Tab)
 
-    implicitWidth: Math.min(240, Math.max(120, label.implicitWidth + 56))
+    implicitWidth: Math.min(240, Math.max(120,
+        label.implicitWidth + 56 + zoomBadge.width + zoomBadge.anchors.rightMargin))
     implicitHeight: 32
 
     // Live OS palette handle so the tab adapts to dark/light in realtime (see TabContextMenu).
@@ -134,9 +136,10 @@ Item {
 
     Text {
         id: label
+        objectName: "tabLabel"   // findChild() handle for the GUI test
         anchors.left: parent.left
         anchors.leftMargin: 10
-        anchors.right: closeButton.left
+        anchors.right: zoomBadge.left
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
         text: root.tabTitle
@@ -145,13 +148,42 @@ Item {
         visible: !renameLoader.active
     }
 
+    // Zoom badge. A zoomed tab shows only one of its panes, which makes it look exactly like a
+    // genuinely single-pane tab — this is the cue that the siblings are hidden rather than gone.
+    // tmux marks the same state with a "Z", so the glyph should read as familiar rather than novel.
+    Rectangle {
+        id: zoomBadge
+        objectName: "zoomBadge"   // findChild() handle for the GUI test
+        anchors.right: closeButton.left
+        // Collapse to nothing — width AND margin — when not zoomed. The label anchors to this item's
+        // left edge, so anything it still occupies is stolen from every tab's title, zoomed or not:
+        // a fixed margin here would elide the title 4px early on tabs that have no badge at all.
+        anchors.rightMargin: root.tabZoomed ? 4 : 0
+        anchors.verticalCenter: parent.verticalCenter
+        width: root.tabZoomed ? height : 0
+        height: 16
+        radius: 3
+        visible: root.tabZoomed
+        // Tinted from the tab's own foreground, so the badge tracks the active/inactive and
+        // colored/uncolored variants instead of hardcoding a color per theme.
+        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
+
+        Text {
+            anchors.centerIn: parent
+            text: "Z"
+            font.pixelSize: 10
+            font.bold: true
+            color: root.foreground
+        }
+    }
+
     // Inline rename field, shown on double-click.
     Loader {
         id: renameLoader
         active: false
         anchors.left: parent.left
         anchors.leftMargin: 8
-        anchors.right: closeButton.left
+        anchors.right: zoomBadge.left
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
         function start() { active = true }

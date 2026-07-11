@@ -82,6 +82,7 @@ class MockTabController: public QAbstractListModel
         PaneCountRole,
         SessionIdRole,
         RawTitleRole, //!< Must mirror TerminalSessionManager; TabStrip's delegate requires it.
+        ZoomedRole,   //!< Ditto: TabStrip's delegate requires it (drives TabItem's zoom badge).
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
@@ -99,6 +100,7 @@ class MockTabController: public QAbstractListModel
             case IsActiveRole: return index.row() == _activeTabIndex;
             case PaneCountRole: return 1;
             case RawTitleRole: return QString {}; // never-renamed tab: empty raw template (editor blank)
+            case ZoomedRole: return false;
             default: return index.row();
         }
     }
@@ -110,7 +112,7 @@ class MockTabController: public QAbstractListModel
         return { { Qt::DisplayRole, "display" }, { TitleRole, "title" },
                  { ColorRole, "accentColor" },   { IsActiveRole, "isActive" },
                  { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
-                 { RawTitleRole, "rawTitle" } };
+                 { RawTitleRole, "rawTitle" },   { ZoomedRole, "zoomed" } };
     }
 
     Q_INVOKABLE [[nodiscard]] QObject* createSession() { return nullptr; }
@@ -526,6 +528,7 @@ TEST_CASE("A colored TabItem fills with the user color and picks contrasting tex
     initial.insert("tabColor", red);
     initial.insert("tabActive", true);
     initial.insert("tabPaneCount", 1);
+    initial.insert("tabZoomed", false);
     std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
     REQUIRE(tab != nullptr);
 
@@ -540,6 +543,60 @@ TEST_CASE("A colored TabItem fills with the user color and picks contrasting tex
     tab->setProperty("tabActive", false);
     auto const inactiveFill = tab->property("effectiveBackground").value<QColor>();
     CHECK(inactiveFill != red);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("A zoomed TabItem shows the zoom badge and gives it back its width when unzoomed",
+          "[contour][gui][qml][zoom]")
+{
+    // A zoomed tab renders only one of its panes, so it looks exactly like a genuinely single-pane
+    // tab. The badge is the only thing telling the two apart, so assert it appears — and that it
+    // costs the label nothing when absent (an invisible item still has geometry to anchors, so a
+    // fixed-width badge would silently shrink every tab's title).
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TabItem.qml")));
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    initial.insert("tabIndex", 0);
+    initial.insert("tabTitle", QStringLiteral("vim"));
+    initial.insert("tabRawTitle", QString {});
+    initial.insert("tabColor", QColor(Qt::transparent));
+    initial.insert("tabActive", true);
+    initial.insert("tabPaneCount", 2);
+    initial.insert("tabZoomed", false);
+    std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+    REQUIRE(tab != nullptr);
+
+    auto* badge = tab->findChild<QQuickItem*>(QStringLiteral("zoomBadge"));
+    REQUIRE(badge != nullptr);
+    auto* label = tab->findChild<QQuickItem*>(QStringLiteral("tabLabel"));
+    REQUIRE(label != nullptr);
+
+    // Not zoomed: hidden, zero-width, and — the part a width check alone misses — costing the label
+    // NOTHING. The label anchors to the badge's left edge, so a leftover margin would elide the title
+    // early on every tab in the strip, badge or no badge. Pin the label's right edge as the oracle.
+    CHECK_FALSE(badge->isVisible());
+    CHECK(badge->width() == 0.0);
+    auto const unzoomedLabelRight = label->x() + label->width();
+
+    tab->setProperty("tabZoomed", true);
+    CHECK(badge->isVisible());
+    CHECK(badge->width() > 0.0);
+    // Zoomed, the badge does take its room from the label — that is the point of it.
+    CHECK(label->x() + label->width() < unzoomedLabelRight);
+
+    tab->setProperty("tabZoomed", false);
+    CHECK_FALSE(badge->isVisible());
+    CHECK(badge->width() == 0.0);
+    CHECK(label->x() + label->width() == unzoomedLabelRight);
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }

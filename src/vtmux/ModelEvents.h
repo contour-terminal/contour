@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <optional>
+
 #include <vtmux/Primitives.h>
 
 namespace vtmux
@@ -125,6 +127,20 @@ class ModelEvents
     /// Defaulted to a no-op (see paneOrientationChanged). The Qt GUI overrides it to re-bind the two
     /// affected panes to their new sessions.
     virtual void paneSwapped(TabId tab, PaneId a, PaneId b) { (void) tab, (void) a, (void) b; }
+
+    /// The zoom state of @p tab changed: @p zoomedLeaf names the leaf that now fills the whole tab
+    /// area, or is nullopt if the tab returned to its tiled layout.
+    ///
+    /// Carries the leaf rather than a bare flag because zoom follows focus (see Tab's zoom block): a
+    /// focus move while zoomed leaves the tab zoomed but changes *which* leaf is on screen, and that
+    /// is a change the host must re-read. The host re-reads Tab::layoutRoot() and renders that.
+    ///
+    /// Defaulted to a no-op (see paneOrientationChanged). The Qt GUI overrides it to re-root the
+    /// tab's proxy tree; a daemon that only replays topology can ignore a pure re-layout.
+    virtual void paneZoomChanged(TabId tab, std::optional<PaneId> zoomedLeaf)
+    {
+        (void) tab, (void) zoomedLeaf;
+    }
 
     /// The pane tree of @p tab was restructured in a way that reshapes topology unpredictably (a pane
     /// was moved/re-parented). Unlike the targeted events above, the host should re-read the whole
