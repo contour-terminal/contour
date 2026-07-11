@@ -90,6 +90,7 @@ nav:
   - Configuration:
     - configuration/index.md
     - configuration/profiles.md
+    - configuration/layouts.md
     - configuration/colors.md
     - configuration/indicator-statusline.md
     - configuration/paths.md
