@@ -48,11 +48,12 @@ Item {
     // so they exist exactly once regardless of how often the session rebinds.
     ScrollBar {
         id: vbar
+        objectName: "verticalScrollBar"
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: (chrome.session && chrome.session.isScrollbarRight) ? parent.right : undefined
         anchors.left: (chrome.session && chrome.session.isScrollbarRight) ? undefined : parent.left
-        visible: chrome.session ? chrome.session.isScrollbarVisible : false
+        visible: (chrome.session ? chrome.session.isScrollbarVisible : false) && vbar.hasScrollback
         orientation: Qt.Vertical
         policy: visible ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
         minimumSize: 0.1
@@ -64,6 +65,50 @@ Item {
             : 0.0
         onPositionChanged: chrome.onScrollBarPositionChanged()
         onSizeChanged: chrome.updateScrollBarPosition()
+
+        // Comfortable hit target that floats just off the terminal edge. Overlay only — no gutter is
+        // reserved, so the grid/window geometry is untouched.
+        implicitWidth: 12
+        padding: 2
+
+        // A stock ScrollBar inherits the app-pinned Fusion style's thin, low-contrast, hover-only handle
+        // (see ContourGuiApp's QQuickStyle::setStyle("Fusion")), nearly invisible over a terminal's
+        // per-profile background. An explicit contentItem/background — the same remedy WindowControls.qml
+        // uses for Fusion's illegible defaults — makes the handle style-independent: clearly visible at
+        // rest, emphasized on hover/drag.
+
+        // Auto-contrast handle color derived from the profile background (QColor r/g/b are 0..1), so it
+        // reads on any theme without plumbing a foreground color to QML: light handle over dark
+        // backgrounds, dark handle over light ones. Null-guarded during split-teardown rebinds.
+        readonly property color handleColor: {
+            let bg = chrome.session ? chrome.session.backgroundColor : Qt.rgba(0, 0, 0, 1);
+            let luminance = 0.2126 * bg.r + 0.7152 * bg.g + 0.0722 * bg.b;
+            return luminance < 0.5 ? Qt.rgba(1, 1, 1, 1) : Qt.rgba(0, 0, 0, 1);
+        }
+
+        // True only while there is scrollback to move through. Because we supply our own contentItem, the
+        // style's "hide when content fits" no longer applies, so we gate the whole bar's visibility on
+        // size (< 1.0 means history exists) ourselves — this also keeps the overlay from swallowing edge
+        // clicks/selections when there is nothing to scroll (an invisible-but-present bar would still
+        // capture mouse events in its strip).
+        readonly property bool hasScrollback: vbar.size < 1.0
+
+        contentItem: Rectangle {
+            implicitWidth: 8
+            radius: width / 2
+            color: vbar.handleColor
+            // Visible at rest, brighter on hover, brightest while dragging. Opacity is ours (not the
+            // style's active-driven fade), so the handle never vanishes when merely idle.
+            opacity: vbar.pressed ? 0.55 : vbar.hovered ? 0.45 : 0.28
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+        }
+
+        background: Rectangle {
+            color: vbar.handleColor
+            // A faint track that only surfaces while the user interacts, keeping the resting look clean.
+            opacity: (vbar.hovered || vbar.pressed) ? 0.10 : 0.0
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+        }
     }
 
     // Bell sound, loaded once multimedia is ready.

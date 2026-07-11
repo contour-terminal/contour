@@ -877,6 +877,14 @@ void Terminal::forceAutoScrollToBottomIfEnabled()
         _viewport.forceScrollToBottom();
 }
 
+void Terminal::scrollToBottomOnInput()
+{
+    // Unconditional on purpose: user input must always jump the viewport back to the bottom, even
+    // when `autoScrollOnUpdate` (which governs output-driven scrolling only) is turned off. The
+    // alt-screen guard still applies via `scrollToBottom()`'s own `scrollingDisabled()` check.
+    _viewport.scrollToBottom();
+}
+
 Handled Terminal::sendKeyEvent(Key key,
                                KeyboardModifiers modifiers,
                                KeyboardEventType eventType,
@@ -916,7 +924,7 @@ Handled Terminal::sendKeyEvent(Key key,
         {
             _inputGenerator.generateRaw(*udkStr);
             flushInput();
-            autoScrollToBottomIfEnabled();
+            scrollToBottomOnInput();
             return Handled { true };
         }
     }
@@ -926,7 +934,7 @@ Handled Terminal::sendKeyEvent(Key key,
     {
         flushInput();
         if (!isModifierKey(key))
-            autoScrollToBottomIfEnabled();
+            scrollToBottomOnInput();
     }
     return Handled { success };
 }
@@ -968,7 +976,7 @@ Handled Terminal::sendCharEvent(char32_t ch,
     if (success)
     {
         flushInput();
-        autoScrollToBottomIfEnabled();
+        scrollToBottomOnInput();
     }
     return Handled { success };
 }

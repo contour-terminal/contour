@@ -637,6 +637,72 @@ TEST_CASE("SessionChrome instantiates and wires a (null) session without errors 
     CHECK(chrome != nullptr);
 }
 
+TEST_CASE("SessionChrome scrollbar renders as a styled grabbable overlay (offscreen)", "[contour][gui][qml]")
+{
+    // Regression guard for the "barely visible / hard to grab" scrollbar. After the app-wide Fusion
+    // style was pinned (for the tab strip/menus), the stock ScrollBar inherited Fusion's thin,
+    // low-contrast, hover-only handle. SessionChrome now supplies an explicit contentItem/background and
+    // a comfortable hit target, so the styling must survive: the bar is findable, wider than the thin
+    // default, and owns its handle + track items rather than deferring to the style.
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/SessionChrome.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    REQUIRE(component.isReady());
+
+    MockSession session;
+    QVariantMap initial;
+    initial.insert("session", QVariant::fromValue(static_cast<QObject*>(&session)));
+    std::unique_ptr<QObject> chrome(component.createWithInitialProperties(initial));
+    REQUIRE(chrome != nullptr);
+    QCoreApplication::processEvents();
+
+    auto* bar = chrome->findChild<QQuickItem*>(QStringLiteral("verticalScrollBar"));
+    REQUIRE(bar != nullptr);
+
+    // A comfortable, easy-to-grab hit target rather than the thin Fusion default.
+    CHECK(bar->property("implicitWidth").toReal() >= 12.0);
+
+    // Explicit, style-independent handle + track items (the fix), not the inherited defaults.
+    CHECK(bar->property("contentItem").value<QQuickItem*>() != nullptr);
+    CHECK(bar->property("background").value<QQuickItem*>() != nullptr);
+}
+
+TEST_CASE("Tab color flyout offers a dependency-free arbitrary-color entry (offscreen)",
+          "[contour][gui][qml]")
+{
+    // Guards the arbitrary-RGB tab-color feature AND its robustness: the flyout must carry no hard
+    // QtQuick.Dialogs dependency (a missing such module used to cascade up and break the whole main.qml
+    // where it is not installed), yet still expose a hex input field for entering any color. Loading the
+    // component without error already proves the absent-module hazard is gone; finding the field proves
+    // the entry point is there.
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TabColorFlyout.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("tabIndex", 0);
+    std::unique_ptr<QObject> flyout(component.createWithInitialProperties(initial));
+    REQUIRE(flyout != nullptr);
+
+    // A Popup defers building its contentItem until shown; reading the property forces that deferred
+    // execution, instantiating the statically-declared hex field (unlike the swatch Repeater delegates,
+    // a plain child materializes here without hosting/opening the popup).
+    REQUIRE(flyout->property("contentItem").value<QQuickItem*>() != nullptr);
+    QCoreApplication::processEvents();
+
+    CHECK(flyout->findChild<QObject*>(QStringLiteral("customColorField")) != nullptr);
+}
+
 TEST_CASE("PaneNode renders a split tree without recursive-instantiation errors (offscreen)",
           "[contour][gui][qml][split]")
 {

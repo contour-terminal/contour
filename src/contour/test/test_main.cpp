@@ -13,6 +13,8 @@
 
 #include <iostream>
 
+#include <QtQuickControls2/QQuickStyle>
+
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
 
@@ -45,6 +47,13 @@ int main(int argc, char* argv[])
 #endif
 
     QGuiApplication app(argc, argv);
+
+    // Pin the same Qt Quick Controls style the app itself pins (ContourGuiApp: QQuickStyle::setStyle).
+    // The tests instantiate real Controls (SessionChrome's customized ScrollBar, the tab flyout, ...),
+    // and the platform-native style (notably on Windows) refuses contentItem/background customization,
+    // emitting a QML diagnostic that the gate below then fails on. Fusion supports customization on
+    // every platform, so pinning it here makes the test environment match production.
+    QQuickStyle::setStyle(QStringLiteral("Fusion"));
 
     // Run-wide gate: capture every warning/critical for the whole session. Per-test QmlMessageCapture guards
     // chain to this one (see QmlMessageCapture.h), so a per-test guard never blinds the gate.
