@@ -349,6 +349,56 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         CHECK(!terminal.viewport().scrolled());
     }
 
+    // A key/char *release* is never typed content. When the active keyboard protocol reports
+    // releases to the application (win32-input-mode here, or the Kitty keyboard protocol) the release
+    // still produces PTY input, but it must NOT snap the viewport back to the bottom -- otherwise
+    // releasing a viewport-scroll shortcut such as Shift+Up (whose press the GUI already consumed as
+    // a ScrollOneUp action) would immediately undo the scroll. See Terminal::scrollToBottomOnInput().
+    SECTION("key release does not scroll to bottom even when it generates input")
+    {
+        // Win32 input mode reports both presses and releases to the application, so the release below
+        // actually reaches the input generator (in legacy mode releases generate nothing at all).
+        terminal.setMode(vtbackend::DECMode::Win32InputMode, true);
+
+        // Sanity check: a *press* in this mode really does generate input and snap to the bottom, so
+        // the release assertion below is not vacuous.
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+        terminal.sendKeyEvent(vtbackend::Key::UpArrow,
+                              anyModifiers,
+                              vtbackend::KeyboardEventType::Press,
+                              std::chrono::steady_clock::now());
+        REQUIRE(!terminal.viewport().scrolled());
+
+        // The release generates input too, but must leave the viewport parked where the user put it.
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+        auto const offsetBefore = terminal.viewport().scrollOffset();
+
+        terminal.sendKeyEvent(vtbackend::Key::UpArrow,
+                              anyModifiers,
+                              vtbackend::KeyboardEventType::Release,
+                              std::chrono::steady_clock::now());
+
+        CHECK(terminal.viewport().scrolled());
+        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+    }
+
+    SECTION("char release does not scroll to bottom even when it generates input")
+    {
+        terminal.setMode(vtbackend::DECMode::Win32InputMode, true);
+
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+        auto const offsetBefore = terminal.viewport().scrollOffset();
+
+        terminal.sendCharEvent(
+            U'a', 0, anyModifiers, vtbackend::KeyboardEventType::Release, std::chrono::steady_clock::now());
+
+        CHECK(terminal.viewport().scrolled());
+        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+    }
+
     SECTION("scrollbackBufferCleared (CSI 3 J) honors autoScrollOnUpdate=false")
     {
         terminal.settings().autoScrollOnUpdate = false;

@@ -933,7 +933,11 @@ Handled Terminal::sendKeyEvent(Key key,
     if (success)
     {
         flushInput();
-        if (!isModifierKey(key))
+        // A key release is never "typed content": under win32-input-mode / the Kitty keyboard
+        // protocol the release of a viewport-scroll shortcut (e.g. the Up in Shift+Up) still
+        // generates PTY input, and snapping to the bottom here would undo the scroll the press just
+        // performed. Only press/repeat reveal the cursor.
+        if (!isModifierKey(key) && eventType != KeyboardEventType::Release)
             scrollToBottomOnInput();
     }
     return Handled { success };
@@ -976,7 +980,10 @@ Handled Terminal::sendCharEvent(char32_t ch,
     if (success)
     {
         flushInput();
-        scrollToBottomOnInput();
+        // See sendKeyEvent(): key releases are not typed content, so they must not snap the viewport
+        // back to the bottom even when the protocol reports them to the application.
+        if (eventType != KeyboardEventType::Release)
+            scrollToBottomOnInput();
     }
     return Handled { success };
 }

@@ -1501,10 +1501,14 @@ class Terminal
     void forceAutoScrollToBottomIfEnabled();
 
     /// Scrolls the viewport to the bottom in response to *user input* (a key or character
-    /// forwarded to the application). Intentionally independent of
-    /// `settings().autoScrollOnUpdate`, which gates only *output*-driven scrolling: typing must
-    /// always reveal the cursor and the resulting output regardless of that setting. Honors the
-    /// viewport's own alt-screen guard (`scrollToBottom()` no-ops when scrolling is disabled).
+    /// forwarded to the application). Called only for key/char *press and repeat* events, never for
+    /// releases: a release is not typed content, and snapping on it would undo a viewport-scroll
+    /// shortcut whose press was consumed by the GUI (e.g. Shift+Up) once the protocol reports key
+    /// releases to the application (win32-input-mode, Kitty keyboard protocol). Intentionally
+    /// independent of `settings().autoScrollOnUpdate`, which gates only *output*-driven scrolling:
+    /// typing must always reveal the cursor and the resulting output regardless of that setting.
+    /// Honors the viewport's own alt-screen guard (`scrollToBottom()` no-ops when scrolling is
+    /// disabled).
     void scrollToBottomOnInput();
 
     void mainLoop();
