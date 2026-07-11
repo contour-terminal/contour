@@ -1829,6 +1829,19 @@ void compareEntries(Config& config, auto const& output);
 /// so the file is never overwritten with the merged (inline + file) in-memory view.
 std::unordered_map<std::string, Layout> loadLayoutsFile(std::filesystem::path const& path);
 
+/// Splits a command line into tokens the way a shell would: whitespace separates tokens; single quotes
+/// ('...') quote a run literally; double quotes ("...") quote a run allowing \" and \\ escapes; a
+/// backslash outside quotes escapes the next character. Used so a layout `command:` may be written as a
+/// full command line ("emacs -nw") rather than requiring a separate `arguments:` list. Returns an empty
+/// vector for an empty/whitespace-only input.
+[[nodiscard]] std::vector<std::string> shellSplit(std::string_view commandLine);
+
+/// The inverse of shellSplit for a single token: returns @p token single-quoted when it contains
+/// whitespace or a shell-significant character (or is empty), so that shellSplit() reconstructs it as
+/// one token; embedded single quotes use the '\'' idiom. Used when serializing a layout's `command`
+/// program so a program path containing spaces survives the save/reload round-trip.
+[[nodiscard]] std::string shellQuote(std::string_view token);
+
 std::string defaultConfigString();
 std::error_code createDefaultConfig(std::filesystem::path const& path);
 std::string defaultConfigFilePath();

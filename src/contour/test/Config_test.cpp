@@ -155,6 +155,51 @@ layouts:
     CHECK_FALSE(t1.root.directory.has_value());
 }
 
+TEST_CASE("Config: shellSplit tokenizes a command line respecting quotes", "[config][layout]")
+{
+    using contour::config::shellSplit;
+    using V = std::vector<std::string>;
+    CHECK(shellSplit("emacs -nw") == V { "emacs", "-nw" });
+    CHECK(shellSplit("  git   log --oneline ") == V { "git", "log", "--oneline" });
+    CHECK(shellSplit("nvim") == V { "nvim" });
+    CHECK(shellSplit("") == V {});
+    CHECK(shellSplit("   ") == V {});
+    // Double quotes group spaces into one token; the quotes themselves are stripped.
+    CHECK(shellSplit(R"("/opt/my app/emacs" -nw)") == V { "/opt/my app/emacs", "-nw" });
+    // Single quotes are literal (no inner processing).
+    CHECK(shellSplit(R"(sh -c 'echo hi there')") == V { "sh", "-c", "echo hi there" });
+    // A backslash escapes the next character outside quotes.
+    CHECK(shellSplit(R"(a\ b c)") == V { "a b", "c" });
+}
+
+TEST_CASE("Config: a layout command is shell-split into program and arguments", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - command: "/usr/bin/emacs -nw"
+            - command: "git log --oneline"
+              arguments: ["--graph"]
+)"sv);
+    auto const& work = config.layouts.value().at("work");
+    REQUIRE(work.tabs.size() == 2);
+
+    // The command string is split: the first word is the program, the rest are arguments.
+    REQUIRE(work.tabs[0].root.command.has_value());
+    CHECK(*work.tabs[0].root.command == "/usr/bin/emacs");
+    REQUIRE(work.tabs[0].root.arguments.size() == 1);
+    CHECK(work.tabs[0].root.arguments[0] == "-nw");
+
+    // Words from `command` come first, then any explicit `arguments:` entries are appended.
+    CHECK(*work.tabs[1].root.command == "git");
+    REQUIRE(work.tabs[1].root.arguments.size() == 3);
+    CHECK(work.tabs[1].root.arguments[0] == "log");
+    CHECK(work.tabs[1].root.arguments[1] == "--oneline");
+    CHECK(work.tabs[1].root.arguments[2] == "--graph");
+}
+
 TEST_CASE("Config: a layout tab with recursive splits parses", "[config][layout]")
 {
     QTemporaryDir dir;
@@ -182,7 +227,11 @@ layouts:
     REQUIRE(root.children.size() == 2);
 
     CHECK(root.children[0].isLeaf());
-    CHECK(*root.children[0].command == "npm run dev");
+    // `command` is shell-split into the program and its arguments.
+    CHECK(*root.children[0].command == "npm");
+    REQUIRE(root.children[0].arguments.size() == 2);
+    CHECK(root.children[0].arguments[0] == "run");
+    CHECK(root.children[0].arguments[1] == "dev");
     CHECK(root.children[0].ratio == Catch::Approx(0.6));
 
     auto const& nested = root.children[1];
@@ -190,7 +239,10 @@ layouts:
     CHECK(nested.orientation == vtmux::SplitState::Horizontal);
     REQUIRE(nested.children.size() == 2);
     CHECK(*nested.children[0].command == "htop");
-    CHECK(*nested.children[1].command == "journalctl -f");
+    CHECK(nested.children[0].arguments.empty());
+    CHECK(*nested.children[1].command == "journalctl");
+    REQUIRE(nested.children[1].arguments.size() == 1);
+    CHECK(nested.children[1].arguments[0] == "-f");
 }
 
 TEST_CASE("Config: a split with a single child collapses into a plain leaf", "[config][layout]")

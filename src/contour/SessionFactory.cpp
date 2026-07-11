@@ -16,6 +16,19 @@ using std::nullopt;
 namespace contour
 {
 
+vtbackend::PageSize childPtyPageSize(vtbackend::PageSize total,
+                                     vtbackend::StatusDisplayType statusLine) noexcept
+{
+    // The terminal reserves the bottom row(s) for the status line (height 1 for Indicator/HostWritable,
+    // 0 for None), so the child's usable area — and the winsize it must be born with — is the total page
+    // size minus the status line. Clamp so a degenerate 1-line total never underflows to 0.
+    auto const rows =
+        statusLine != vtbackend::StatusDisplayType::None ? vtbackend::LineCount(1) : vtbackend::LineCount(0);
+    if (total.lines > rows)
+        total.lines = total.lines - rows;
+    return total;
+}
+
 std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     std::optional<std::string> cwd,
     std::optional<vtbackend::PageSize> pageSize,
@@ -54,8 +67,12 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     if (cwd)
         shell.workingDirectory = std::filesystem::path(cwd.value());
     // Spawn the child at the caller's requested grid size when given (a new tab/split inherits the live
-    // window's page size), otherwise at the profile's configured terminalSize (a brand-new window).
-    auto const initialSize = pageSize.value_or(profile->terminalSize.value());
+    // window's page size), otherwise at the profile's configured terminalSize (a brand-new window). Both
+    // are TOTAL page sizes; childPtyPageSize() subtracts the status-line row(s) so the child is born at
+    // the terminal's MAIN-display size (see that function for why a background layout pane aborts without
+    // this).
+    auto const initialSize = childPtyPageSize(pageSize.value_or(profile->terminalSize.value()),
+                                              profile->statusLine.value().initialType);
     return make_unique<vtpty::Process>(
         shell, vtpty::createPty(initialSize, nullopt), profile->escapeSandbox.value());
 }

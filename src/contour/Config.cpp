@@ -595,6 +595,75 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 }
 
 // Parses a single pane node. A node is a LEAF unless it carries a `split:` mapping.
+std::vector<std::string> shellSplit(std::string_view commandLine)
+{
+    std::vector<std::string> tokens;
+    std::string current;
+    bool inToken = false;
+    for (size_t i = 0; i < commandLine.size(); ++i)
+    {
+        char const c = commandLine[i];
+        if (c == '\'')
+        {
+            inToken = true;
+            for (++i; i < commandLine.size() && commandLine[i] != '\''; ++i)
+                current.push_back(commandLine[i]);
+        }
+        else if (c == '"')
+        {
+            inToken = true;
+            for (++i; i < commandLine.size() && commandLine[i] != '"'; ++i)
+            {
+                if (commandLine[i] == '\\' && i + 1 < commandLine.size()
+                    && (commandLine[i + 1] == '"' || commandLine[i + 1] == '\\'))
+                    ++i;
+                current.push_back(commandLine[i]);
+            }
+        }
+        else if (c == '\\' && i + 1 < commandLine.size())
+        {
+            inToken = true;
+            current.push_back(commandLine[++i]);
+        }
+        else if (c == ' ' || c == '\t')
+        {
+            if (inToken)
+            {
+                tokens.push_back(std::move(current));
+                current.clear();
+                inToken = false;
+            }
+        }
+        else
+        {
+            inToken = true;
+            current.push_back(c);
+        }
+    }
+    if (inToken)
+        tokens.push_back(std::move(current));
+    return tokens;
+}
+
+std::string shellQuote(std::string_view token)
+{
+    auto const needsQuoting = token.empty() || std::ranges::any_of(token, [](char c) {
+                                  return c == ' ' || c == '\t' || c == '\'' || c == '"' || c == '\\';
+                              });
+    if (!needsQuoting)
+        return std::string { token };
+    std::string out = "'";
+    for (char const c: token)
+    {
+        if (c == '\'')
+            out += "'\\''"; // close quote, escaped literal ', reopen quote
+        else
+            out.push_back(c);
+    }
+    out += '\'';
+    return out;
+}
+
 void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPane& where)
 {
     if (auto const split = node["split"]; split && split.IsMap())
@@ -623,7 +692,17 @@ void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPan
     }
 
     if (auto const command = node["command"]; command && command.IsScalar())
-        where.command = resolveVariables(command.as<std::string>());
+    {
+        // A command may be written as a full command line ("emacs -nw"): shell-split it into the program
+        // (the first token) and its arguments. Any explicit `arguments:` entries are appended after these.
+        auto tokens = shellSplit(resolveVariables(command.as<std::string>()));
+        if (!tokens.empty())
+        {
+            where.command = std::move(tokens.front());
+            for (size_t i = 1; i < tokens.size(); ++i)
+                where.arguments.push_back(std::move(tokens[i]));
+        }
+    }
     if (auto const args = node["arguments"]; args && args.IsSequence())
         for (auto const& argNode: args)
             where.arguments.emplace_back(resolveVariables(argNode.as<std::string>()));

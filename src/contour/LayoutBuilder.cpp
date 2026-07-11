@@ -168,7 +168,8 @@ namespace
         if (pane.isLeaf())
         {
             if (pane.command)
-                emitKV("command: " + quoted(*pane.command));
+                // shellQuote so a program path containing spaces is not re-split by shellSplit() on reload.
+                emitKV("command: " + quoted(config::shellQuote(*pane.command)));
             if (!pane.arguments.empty())
             {
                 std::string args = "arguments: [";

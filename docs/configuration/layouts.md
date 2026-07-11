@@ -57,10 +57,30 @@ Option        | Description
 `title`       | Optional. Seeds the tab's name.
 `color`       | Optional. Hex (e.g. `'#d75f00'`) or a named color; sets the tab's user color.
 `directory`   | Optional working directory for the tab. Falls back to the profile's configured directory when omitted.
-`command`     | Optional. Replaces the shell — becomes the spawned process's program. When omitted, the effective profile's `shell` is used.
-`arguments`   | Optional list of arguments passed to `command`.
+`command`     | Optional. Replaces the shell — the program to run in the pane. May be a full command line (see [Command lines](#command-lines) below). When omitted, the effective profile's `shell` is used.
+`arguments`   | Optional list of extra arguments, appended after any arguments already given in `command`.
 `profile`     | Optional per-tab profile override (see [Per-tab profile](#per-tab-profile) below).
 `split`       | Optional. Turns the tab into a split node instead of a single pane; see [Split panes](#split-panes).
+
+### Command lines
+
+`command` may be written as a full command line — it is split into the program and its arguments the way a shell would, so both of these are equivalent:
+
+```yaml
+- command: "emacs -nw"
+# is the same as
+- command: "emacs"
+  arguments: ["-nw"]
+```
+
+Splitting rules:
+
+- Whitespace separates the program from its arguments (and arguments from each other).
+- Quote a run to keep spaces inside one token: double quotes (`"..."`, allowing `\"` and `\\`) or single quotes (`'...'`, literal). A backslash outside quotes escapes the next character.
+- If the **program's own path** contains spaces, quote it so it is not split — e.g. `command: '"/opt/My App/bin/foo" --flag'`.
+- Any entries in a separate `arguments:` list are appended **after** the arguments parsed from `command`.
+
+`SaveLayout` (below) writes the program and its arguments back out in the split form (`command:` for the program, `arguments:` for the rest), quoting a space-containing program path so it round-trips.
 
 ### Split panes
 

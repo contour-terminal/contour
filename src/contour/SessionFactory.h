@@ -18,6 +18,13 @@ namespace contour
 
 class ContourGuiApp;
 
+/// The winsize a session's child PTY must be born with, given the terminal's TOTAL page size and its
+/// status-line type: the status line reserves the bottom row(s), so the child's usable area is the total
+/// minus the status line (clamped to at least one line). Birthing the child at the full total leaves a
+/// display-less pane (e.g. a background layout tab) reading one row too many — see SessionFactory.cpp.
+[[nodiscard]] vtbackend::PageSize childPtyPageSize(vtbackend::PageSize total,
+                                                   vtbackend::StatusDisplayType statusLine) noexcept;
+
 /// Creates the PTY backing a terminal session.
 ///
 /// This is the part of session creation that is independent of how sessions are organized into
