@@ -89,7 +89,8 @@ ApplicationWindow
         // keeps running, no placeholder flash. Otherwise create the usual first tab. Either path
         // synchronously instantiates the pane tree -> TerminalDisplay -> renderer (headless cell
         // metrics), so showInitial() below can size the window from REAL metrics before the first map.
-        if (!terminalSessions.consumePendingTransplant(win))
+        if (!terminalSessions.consumePendingTransplant(win)
+            && !terminalSessions.consumeDefaultLayout(win))
             win.createNewTab()
         win.showInitial()
     }

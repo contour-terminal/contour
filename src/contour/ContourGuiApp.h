@@ -74,6 +74,10 @@ class ContourGuiApp: public QObject, public ContourApp
 
     [[nodiscard]] std::string profileName() const;
 
+    /// The layout to open at startup: `--layout NAME` if given, else config's `default_layout`.
+    /// Empty when neither is set (no startup layout).
+    [[nodiscard]] std::string layoutName() const;
+
     /// The session exit status (Process/SSH exit variant, or nullopt). Single source of truth in
     /// ExitCode.h, shared with the pure exitCodeFor() mapping used by run().
     using ExitStatus = SessionExitStatus;

@@ -272,6 +272,15 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @return true if a torn-off tab was adopted; false if the window should create its own first tab.
     Q_INVOKABLE bool consumePendingTransplant(contour::WindowController* newController);
 
+    /// Looks up the app's startup layout (ContourGuiApp::layoutName(), from `--layout` or the config's
+    /// `default_layout`) and, if found, applies it to @p controller's window. Called by main.qml right
+    /// after consumePendingTransplant() when no tab was transplanted, so a freshly-spawned window can
+    /// open pre-populated instead of falling back to a single blank tab.
+    /// @param controller The freshly-created controller of the just-spawned window.
+    /// @return true if a startup layout was found and applied; false if there is none configured, it is
+    ///         unknown, or it has no tabs, in which case the window should create its usual first tab.
+    Q_INVOKABLE bool consumeDefaultLayout(contour::WindowController* controller);
+
     /// The controller adapting @p window, or nullptr. Used by the ModelEvents router to forward each Qt
     /// row/signal emission to the owning window's controller.
     [[nodiscard]] WindowController* controllerFor(vtmux::WindowId window) const noexcept;

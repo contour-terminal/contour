@@ -329,6 +329,21 @@ void TerminalSessionManager::launchLayout(std::string const& name, TerminalSessi
     applyLayoutToWindow(win->id(), *layout);
 }
 
+bool TerminalSessionManager::consumeDefaultLayout(contour::WindowController* controller)
+{
+    auto const name = _app.layoutName();
+    if (name.empty())
+        return false;
+    auto const& map = _app.config().layouts.value();
+    auto const it = map.find(name);
+    if (it == map.end())
+    {
+        managerLog()("Startup layout '{}' not found; using a default tab.", name);
+        return false;
+    }
+    return applyLayoutToWindow(controller->windowId(), it->second);
+}
+
 void TerminalSessionManager::saveLayout(std::string const&, TerminalSession*)
 {
     // implemented in Task 14

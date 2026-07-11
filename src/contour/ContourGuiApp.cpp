@@ -138,6 +138,7 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
                               CLI::value { ""s },
                               "Sets initial working directory (overriding config).",
                               "DIRECTORY" },
+                CLI::option { "layout", CLI::value { ""s }, "Opens the named layout at startup.", "NAME" },
                 CLI::option {
                     "class",
                     CLI::value { ""s },
@@ -197,6 +198,13 @@ string ContourGuiApp::profileName() const
         return _config.profiles.value().begin()->first;
 
     return ""s;
+}
+
+std::string ContourGuiApp::layoutName() const
+{
+    if (auto name = parameters().get<std::string>("contour.terminal.layout"); !name.empty())
+        return name;
+    return config().defaultLayoutName.value();
 }
 
 std::optional<fs::path> ContourGuiApp::dumpStateAtExit() const
