@@ -47,6 +47,7 @@ struct PaneLeafData
     std::optional<std::string> command;
     std::vector<std::string> arguments;
     std::optional<std::string> directory;
+    std::optional<std::string> profile;
 };
 
 /// Resolves a leaf pane's backing session id to its runtime command/arguments/directory, for

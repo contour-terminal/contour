@@ -338,6 +338,27 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     compareEntries(config, logger);
 }
 
+std::unordered_map<std::string, Layout> loadLayoutsFile(fs::path const& path)
+{
+    std::unordered_map<std::string, Layout> layouts;
+
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec)
+        return layouts;
+
+    try
+    {
+        auto reader = YAMLConfigReader(path.string(), configLog);
+        reader.loadLayoutsInto(layouts);
+    }
+    catch (std::exception const& e)
+    {
+        configLog()("Failed to load layouts file {}: {}", path.string(), e.what());
+    }
+
+    return layouts;
+}
+
 optional<std::string> readConfigFile(std::string const& filename)
 {
     for (fs::path const& prefix: configHomes("contour"))
@@ -591,6 +612,13 @@ void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPan
                 parseLayoutPane(paneNode, child);
                 where.children.push_back(std::move(child));
             }
+        // A single-child split has nothing to split against; collapse it into that one child so
+        // it behaves as a plain leaf instead of spawning a bogus uncommanded second pane.
+        if (where.children.size() == 1)
+        {
+            auto only = std::move(where.children.front());
+            where = std::move(only);
+        }
         return;
     }
 

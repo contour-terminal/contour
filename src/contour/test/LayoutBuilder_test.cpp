@@ -279,6 +279,62 @@ TEST_CASE("emitLayoutsYaml: round-trips a leaf + bare + split layout through the
     CHECK(*nestedParsed.children[1].command == "journalctl -f");
 }
 
+TEST_CASE("emitLayoutsYaml: escapes embedded double-quotes in a command so it round-trips", "[layout][save]")
+{
+    // A command containing an embedded double-quote (e.g. `echo "hi"`) must survive byte-for-byte
+    // through emit -> parse: unescaped, it would either be misinterpreted mid-scalar or terminate
+    // the YAML string early, producing invalid or silently-truncated YAML.
+    config::LayoutTab tab;
+    tab.root.command = std::string { "echo \"hi\"" };
+    tab.root.directory = std::filesystem::path { "/tmp/some dir" };
+    tab.root.profile = std::string { "dev-profile" };
+
+    config::Layout work;
+    work.tabs = { tab };
+    std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
+    auto const yaml = emitLayoutsYaml(layouts);
+
+    auto const cfg = loadFromYamlString(yaml);
+    REQUIRE(cfg.layouts.value().contains("work"));
+    auto const& parsed = cfg.layouts.value().at("work");
+    REQUIRE(parsed.tabs.size() == 1);
+    REQUIRE(parsed.tabs[0].root.command.has_value());
+    CHECK(*parsed.tabs[0].root.command == "echo \"hi\"");
+    REQUIRE(parsed.tabs[0].root.directory.has_value());
+    CHECK(parsed.tabs[0].root.directory->generic_string() == "/tmp/some dir");
+    REQUIRE(parsed.tabs[0].root.profile.has_value());
+    CHECK(*parsed.tabs[0].root.profile == "dev-profile");
+}
+
+TEST_CASE("emitLayoutsYaml: round-trips an asymmetric split ratio through save", "[layout][save]")
+{
+    // serializePane sets children[0].ratio / children[1].ratio from the live split position, but
+    // the emitter used to drop them entirely, so an asymmetric split silently reset to 50/50 on
+    // every SaveLayout. Assert the ratio survives emit -> parse -> ratioForFirst reconstruction.
+    auto mk = [](std::string c, double ratio) {
+        config::LayoutPane p;
+        p.command = std::move(c);
+        p.ratio = ratio;
+        return p;
+    };
+
+    config::LayoutTab tab;
+    tab.root.orientation = vtmux::SplitState::Vertical;
+    tab.root.children = { mk("left", 0.7), mk("right", 0.3) };
+
+    config::Layout work;
+    work.tabs = { tab };
+    std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
+    auto const yaml = emitLayoutsYaml(layouts);
+
+    auto const cfg = loadFromYamlString(yaml);
+    REQUIRE(cfg.layouts.value().contains("work"));
+    auto const& parsedRoot = cfg.layouts.value().at("work").tabs.at(0).root;
+    REQUIRE_FALSE(parsedRoot.isLeaf());
+    REQUIRE(parsedRoot.children.size() == 2);
+    CHECK(ratioForFirst(parsedRoot) == Catch::Approx(0.7));
+}
+
 TEST_CASE("serializeTab: reproduces the pane tree with resolved commands", "[layout][save]")
 {
     RealizeHarness h;
@@ -295,10 +351,16 @@ TEST_CASE("serializeTab: reproduces the pane tree with resolved commands", "[lay
     auto* tab = realizeLayoutTab(h.model, win->id(), spec, h.seeder());
     REQUIRE(tab != nullptr);
 
+    // Only the "dev" leaf carries a profile override, so serializePane must capture it there and
+    // leave the "logs" leaf's profile unset — a fake stand-in for
+    // TerminalSession::profileName() ONLY being non-empty for a real per-pane override.
     auto resolve = [&](vtmux::SessionId id) {
-        return PaneLeafData { .command = h.commandBySession.at(id.value),
+        auto const command = h.commandBySession.at(id.value);
+        return PaneLeafData { .command = command,
                               .arguments = {},
-                              .directory = std::string { "/work" } };
+                              .directory = std::string { "/work" },
+                              .profile = command == "dev" ? std::optional<std::string> { "dev-profile" }
+                                                          : std::nullopt };
     };
     auto const out = serializeTab(*tab, resolve);
     CHECK(out.title == "srv");
@@ -307,5 +369,8 @@ TEST_CASE("serializeTab: reproduces the pane tree with resolved commands", "[lay
     REQUIRE(out.root.children.size() == 2);
     CHECK(*out.root.children[0].command == "dev");
     CHECK(out.root.children[0].directory->string() == "/work");
+    REQUIRE(out.root.children[0].profile.has_value());
+    CHECK(*out.root.children[0].profile == "dev-profile");
     CHECK(*out.root.children[1].command == "logs");
+    CHECK_FALSE(out.root.children[1].profile.has_value());
 }

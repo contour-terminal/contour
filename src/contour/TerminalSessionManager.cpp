@@ -371,6 +371,10 @@ bool TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId, std::str
                 data.command = launched->program;
                 data.arguments = launched->arguments;
             }
+            // Sessions launched without an explicit override resolve to an empty profile name;
+            // only capture a REAL per-pane profile override here, not the app's implicit default.
+            if (auto const& profileName = session->profileName(); !profileName.empty())
+                data.profile = profileName;
         }
         return data;
     };
@@ -380,14 +384,16 @@ bool TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId, std::str
         if (auto* tab = window->tabAt(i))
             layout.tabs.push_back(serializeTab(*tab, resolve));
 
-    // Build the YAML from a local merged copy so the live config is only touched once the write
-    // to disk has fully succeeded (create_directories + write temp + rename).
-    auto layoutsCopy = _app.config().layouts.value();
-    layoutsCopy[name] = layout;
-
-    auto const yaml = emitLayoutsYaml(layoutsCopy);
-
+    // Build the YAML from layouts.yml's OWN prior contents (not the merged inline+file view held
+    // in memory): layouts.yml wins name collisions on load, so writing the merged view back out
+    // would permanently freeze any inline contour.yml layouts into the file. Only file-origin
+    // layouts (plus this new one) get persisted here; the live config still gets the merged
+    // update below so a later launch in this run sees it.
     auto const path = config::configHome() / "layouts.yml";
+    auto fileLayouts = config::loadLayoutsFile(path);
+    fileLayouts[name] = layout;
+
+    auto const yaml = emitLayoutsYaml(fileLayouts);
     auto const tmp = path.string() + ".tmp";
 
     std::error_code ec;
@@ -420,8 +426,10 @@ bool TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId, std::str
 
     // Only now that the file is safely on disk do we update the in-memory config, so a
     // subsequent LaunchLayout in this run sees the save, and runtime state never diverges
-    // from what's actually persisted.
-    _app.config().layouts.value() = std::move(layoutsCopy);
+    // from what's actually persisted. This merges the new entry into the existing in-memory
+    // (inline + file) view rather than replacing it wholesale, so inline layouts stay visible
+    // in this run even though they were deliberately excluded from the file just written.
+    _app.config().layouts.value()[name] = std::move(layout);
 
     managerLog()("Saved layout '{}' to {}", name, path.string());
     return true;

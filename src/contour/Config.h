@@ -1823,6 +1823,12 @@ Config loadConfigFromFile(std::filesystem::path const& fileName);
 Config loadConfig();
 void compareEntries(Config& config, auto const& output);
 
+/// Loads ONLY the `layouts:` map contained in the single file at @p path (no sibling-merge, no
+/// inline-config layouts). Returns an empty map if @p path does not exist or fails to parse.
+/// Used by SaveLayout to read back layouts.yml's own prior contents before appending the new one,
+/// so the file is never overwritten with the merged (inline + file) in-memory view.
+std::unordered_map<std::string, Layout> loadLayoutsFile(std::filesystem::path const& path);
+
 std::string defaultConfigString();
 std::error_code createDefaultConfig(std::filesystem::path const& path);
 std::string defaultConfigFilePath();

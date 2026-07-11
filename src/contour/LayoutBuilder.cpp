@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/LayoutBuilder.h>
 
+#include <algorithm>
+#include <cmath>
 #include <format>
 #include <numeric>
 
@@ -99,9 +101,30 @@ namespace
         return std::string(static_cast<size_t>(columns), ' ');
     }
 
+    // Escapes @p value for embedding inside a double-quoted YAML scalar: a literal backslash or
+    // double-quote in the value (e.g. a Windows path or a command containing embedded quotes)
+    // would otherwise either be misinterpreted as an escape sequence or terminate the scalar
+    // early, producing invalid or silently-wrong YAML. Backslash MUST be escaped first so the
+    // backslashes just inserted by the quote-escaping step aren't themselves re-escaped.
+    std::string escapeYamlDoubleQuoted(std::string const& value)
+    {
+        std::string out;
+        out.reserve(value.size());
+        for (char const c: value)
+        {
+            if (c == '\\')
+                out += "\\\\";
+            else if (c == '"')
+                out += "\\\"";
+            else
+                out += c;
+        }
+        return out;
+    }
+
     std::string quoted(std::string const& value)
     {
-        return "\"" + value + "\"";
+        return "\"" + escapeYamlDoubleQuoted(value) + "\"";
     }
 
     // The parser reconstructs a color via `RGBColor{std::string}`, which only accepts the exact
@@ -120,8 +143,11 @@ namespace
     // sibling key (title/color/profile, or an earlier pane field) has already claimed the dash
     // line; in that case every subsequent key — including this pane's first — starts its own
     // line at `dashCol + 2`. If `wrote` is still false, this pane's first key is placed right
-    // after the dash itself.
-    void emitPaneBody(std::string& out, config::LayoutPane const& pane, int dashCol, bool& wrote)
+    // after the dash itself. `emitRatio` is true only when `pane` is a CHILD of a split (its
+    // `ratio` field is then the share of space it was given within that split); the tab's root
+    // pane has no governing parent split, so it never carries a ratio line.
+    void emitPaneBody(
+        std::string& out, config::LayoutPane const& pane, int dashCol, bool& wrote, bool emitRatio = false)
     {
         int const contentCol = dashCol + 2;
         auto emitKV = [&](std::string const& line) {
@@ -133,6 +159,11 @@ namespace
             else
                 out += indentCols(contentCol) + line + "\n";
         };
+
+        // Keep a clean 50/50 split unadorned (no ratio line); only an asymmetric split pays the
+        // extra key, so the common case's YAML stays uncluttered and diff-friendly.
+        if (emitRatio && std::abs(pane.ratio - 0.5) > 1e-9)
+            emitKV(std::format("ratio: {}", pane.ratio));
 
         if (pane.isLeaf())
         {
@@ -147,7 +178,9 @@ namespace
                 emitKV(args);
             }
             if (pane.directory)
-                emitKV("directory: " + quoted(pane.directory->string()));
+                // generic_string() (forward slashes) so a Windows path never carries a literal
+                // backslash into the emitted YAML in the first place.
+                emitKV("directory: " + quoted(pane.directory->generic_string()));
             if (pane.profile)
                 emitKV("profile: " + quoted(*pane.profile));
             return;
@@ -171,7 +204,7 @@ namespace
     {
         out += indentCols(dashCol) + "-";
         bool wrote = false;
-        emitPaneBody(out, pane, dashCol, wrote);
+        emitPaneBody(out, pane, dashCol, wrote, /* emitRatio */ true);
     }
 
     // Emits one tab as a `tabs:` list item. The dash's tail carries title/color/profile (only
@@ -214,6 +247,7 @@ config::LayoutPane serializePane(vtmux::Pane const& pane, LeafResolver const& re
         out.arguments = data.arguments;
         if (data.directory)
             out.directory = std::filesystem::path { *data.directory };
+        out.profile = data.profile;
         return out;
     }
     out.orientation = pane.splitState();
@@ -238,9 +272,19 @@ config::LayoutTab serializeTab(vtmux::Tab const& tab, LeafResolver const& resolv
 
 std::string emitLayoutsYaml(std::unordered_map<std::string, config::Layout> const& layouts)
 {
-    std::string out = "layouts:\n";
+    // Iterate layout names in SORTED order rather than the unordered_map's hash order, so
+    // SaveLayout produces stable, diff-friendly output run to run regardless of insertion/hash
+    // order. (Within a layout, `tabs` is already an ordered vector.)
+    std::vector<std::string> names;
+    names.reserve(layouts.size());
     for (auto const& [name, layout]: layouts)
+        names.push_back(name);
+    std::sort(names.begin(), names.end());
+
+    std::string out = "layouts:\n";
+    for (auto const& name: names)
     {
+        auto const& layout = layouts.at(name);
         out += indentCols(2) + name + ":\n";
         out += indentCols(4) + "tabs:\n";
         for (auto const& tab: layout.tabs)

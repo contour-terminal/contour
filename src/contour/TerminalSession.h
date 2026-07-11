@@ -262,6 +262,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return _launchedCommand;
     }
 
+    /// The name of the profile this session was resolved against (e.g. for SaveLayout to capture
+    /// a per-pane profile override).
+    [[nodiscard]] std::string const& profileName() const noexcept { return _profileName; }
+
     /// The id by which the vtmux layout model refers to this session. Set when the manager mirrors
     /// the session into the model. Identifies the leaf pane that hosts this session.
     [[nodiscard]] vtmux::SessionId modelSessionId() const noexcept { return _modelSessionId; }

@@ -193,6 +193,29 @@ layouts:
     CHECK(*nested.children[1].command == "journalctl -f");
 }
 
+TEST_CASE("Config: a split with a single child collapses into a plain leaf", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    solo:
+        tabs:
+            - split:
+                orientation: vertical
+                panes:
+                    - command: "solo"
+)"sv);
+
+    auto const& tab = config.layouts.value().at("solo").tabs.at(0);
+    auto const& root = tab.root;
+    // A single-child split has nothing to split against: it must behave as a plain leaf, not
+    // spawn a bogus second (uncommanded) pane.
+    REQUIRE(root.isLeaf());
+    REQUIRE(root.command.has_value());
+    CHECK(*root.command == "solo");
+    CHECK(root.children.empty());
+}
+
 TEST_CASE("Config: default_layout scalar loads", "[config][layout]")
 {
     QTemporaryDir dir;

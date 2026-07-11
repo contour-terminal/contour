@@ -182,6 +182,16 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
     contour::test::TestApp app { std::move(factoryOwned) };
     contour::test::ScopedController win { app.manager() };
 
+    // Inject an inline layout (as if hand-written in contour.yml) BEFORE saving a DIFFERENT
+    // layout. SaveLayout must not freeze this inline-only layout into layouts.yml: since
+    // layouts.yml wins name collisions on load, writing it there would permanently shadow the
+    // user's hand-written layout on every future load.
+    contour::config::Layout inlineOnly;
+    contour::config::LayoutTab inlineTab;
+    inlineTab.root.command = "inline-only-shell";
+    inlineOnly.tabs = { inlineTab };
+    app.app().config().layouts.value()["inline_only"] = inlineOnly;
+
     // Build a 2-leaf-tab layout and realize it into real mock-backed sessions.
     contour::config::Layout layout;
     contour::config::LayoutTab t0;
@@ -218,6 +228,10 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
     CHECK(*savedLayout.tabs[0].root.command == "echo a");
     REQUIRE(savedLayout.tabs[1].root.command.has_value());
     CHECK(*savedLayout.tabs[1].root.command == "echo b");
+
+    // The inline-only layout must NOT have been frozen into layouts.yml: it never came from that
+    // file, so it must not be written there even though it was present in the merged in-memory view.
+    CHECK_FALSE(parsed.layouts.value().contains("inline_only"));
 
     qunsetenv("XDG_CONFIG_HOME");
 }

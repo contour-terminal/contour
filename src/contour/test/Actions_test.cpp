@@ -39,6 +39,11 @@ TEST_CASE("actions::isNonRepeatable flags the structural actions", "[actions][re
     // rather than the user.
     CHECK(actions::isNonRepeatable(actions::Action { actions::TogglePaneZoom {} }));
 
+    // LaunchLayout spawns a whole window's worth of tabs/panes per fire, and SaveLayout writes a
+    // file per fire; a held key must not amplify either into a burst.
+    CHECK(actions::isNonRepeatable(actions::Action { actions::LaunchLayout { .name = "work" } }));
+    CHECK(actions::isNonRepeatable(actions::Action { actions::SaveLayout { .name = "work" } }));
+
     // Repeatable: holding the key should keep firing these.
     CHECK_FALSE(actions::isNonRepeatable(actions::Action { actions::ScrollUp {} }));
     CHECK_FALSE(actions::isNonRepeatable(actions::Action { actions::MoveTabToLeft {} }));

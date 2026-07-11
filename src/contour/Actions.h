@@ -242,7 +242,9 @@ concept NonRepeatableActionConcept = crispy::one_of<T,
                                                     MovePaneUp,
                                                     MovePaneDown,
                                                     ToggleSplitOrientation,
-                                                    TogglePaneZoom>;
+                                                    TogglePaneZoom,
+                                                    LaunchLayout,
+                                                    SaveLayout>;
 
 /// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
 /// member), false otherwise.
