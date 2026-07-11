@@ -18,6 +18,8 @@
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickWindow>
 
+#include <filesystem>
+#include <fstream>
 #include <ranges>
 #include <string>
 
@@ -344,9 +346,73 @@ bool TerminalSessionManager::consumeDefaultLayout(contour::WindowController* con
     return applyLayoutToWindow(controller->windowId(), it->second);
 }
 
-void TerminalSessionManager::saveLayout(std::string const&, TerminalSession*)
+void TerminalSessionManager::saveLayout(std::string const& name, TerminalSession* acting)
 {
-    // implemented in Task 14
+    auto* win = windowHostingSession(acting);
+    if (win == nullptr)
+        return;
+    saveWindowLayout(win->id(), name);
+}
+
+bool TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId, std::string const& name)
+{
+    auto* window = _model->window(windowId);
+    if (window == nullptr)
+        return false;
+
+    auto const resolve = [this](vtmux::SessionId id) {
+        PaneLeafData data;
+        if (auto* session = sessionForId(id))
+        {
+            if (auto const dir = session->workingDirectory(); !dir.empty())
+                data.directory = dir;
+            if (auto const& launched = session->launchedCommand())
+            {
+                data.command = launched->program;
+                data.arguments = launched->arguments;
+            }
+        }
+        return data;
+    };
+
+    config::Layout layout;
+    for (int i = 0; i < window->tabCount(); ++i)
+        if (auto* tab = window->tabAt(i))
+            layout.tabs.push_back(serializeTab(*tab, resolve));
+
+    // Update the in-memory config so a subsequent LaunchLayout in this run sees the save immediately.
+    auto& layouts = _app.config().layouts.value();
+    layouts[name] = layout;
+
+    auto const yaml = emitLayoutsYaml(layouts);
+
+    auto const path = config::configHome() / "layouts.yml";
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec)
+    {
+        managerLog()("Failed to create {}: {}", path.parent_path().string(), ec.message());
+        return false;
+    }
+
+    auto const tmp = path.string() + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out << yaml;
+        if (!out)
+        {
+            managerLog()("Failed to write {}", tmp);
+            return false;
+        }
+    }
+    std::filesystem::rename(tmp, path, ec);
+    if (ec)
+    {
+        managerLog()("Failed to write layouts.yml: {}", ec.message());
+        return false;
+    }
+    managerLog()("Saved layout '{}' to {}", name, path.string());
+    return true;
 }
 
 void TerminalSessionManager::switchToPreviousTab(TerminalSession* acting)

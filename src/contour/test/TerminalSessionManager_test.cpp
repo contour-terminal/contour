@@ -15,9 +15,14 @@
 
 #include <vtbackend/primitives.h>
 
+#include <QtCore/QTemporaryDir>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <sstream>
 
 #include <vtmux/ModelEvents.h>
 #include <vtmux/SessionModel.h>
@@ -159,4 +164,60 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
     CHECK(factory->requestedCommandOverrides[1]->program == "echo b");
     CHECK(factory->requestedCommandOverrides[2]->program == "echo left");
     CHECK(factory->requestedCommandOverrides[3]->program == "echo right");
+}
+
+// Manager-level coverage for saveWindowLayout: builds a real, PTY-backed 2-tab window via
+// applyLayoutToWindow (so each leaf session has a genuine launchedCommand()), saves it under a name,
+// and asserts BOTH that layouts.yml was written to the redirected config home AND that re-parsing it
+// through the production config loader reproduces the saved tabs' commands.
+TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manager][layout]")
+{
+    // Redirect config home to an isolated temp dir BEFORE constructing anything that reads
+    // XDG_CONFIG_HOME, so the save never touches the real user config.
+    QTemporaryDir configDir;
+    REQUIRE(configDir.isValid());
+    qputenv("XDG_CONFIG_HOME", configDir.path().toUtf8());
+
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    contour::test::ScopedController win { app.manager() };
+
+    // Build a 2-leaf-tab layout and realize it into real mock-backed sessions.
+    contour::config::Layout layout;
+    contour::config::LayoutTab t0;
+    t0.root.command = "echo a";
+    contour::config::LayoutTab t1;
+    t1.root.command = "echo b";
+    layout.tabs = { t0, t1 };
+    REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
+
+    REQUIRE(app.manager().saveWindowLayout(win.id, "saved"));
+
+    auto const path = contour::config::configHome() / "layouts.yml";
+    REQUIRE(std::filesystem::exists(path));
+
+    // Sanity: the written file textually contains the saved layout's name.
+    {
+        std::ifstream in(path, std::ios::binary);
+        std::ostringstream contents;
+        contents << in.rdbuf();
+        CHECK(contents.str().find("saved:") != std::string::npos);
+    }
+
+    // Re-parse the written file through the production config loader to confirm it is valid,
+    // round-trippable `layouts:` YAML, not just text that happens to contain "saved:".
+    auto parsed = contour::config::Config {};
+    contour::config::loadConfigFromFile(parsed, path);
+    REQUIRE(parsed.layouts.value().contains("saved"));
+    auto const& savedLayout = parsed.layouts.value().at("saved");
+    REQUIRE(savedLayout.tabs.size() == 2);
+    // Commands come from TerminalSession::launchedCommand(), which the mock PTY factory does set;
+    // workingDirectory() may be empty for a BlockingMockPty-less MockPty session, so we don't assert
+    // on directory here.
+    REQUIRE(savedLayout.tabs[0].root.command.has_value());
+    CHECK(*savedLayout.tabs[0].root.command == "echo a");
+    REQUIRE(savedLayout.tabs[1].root.command.has_value());
+    CHECK(*savedLayout.tabs[1].root.command == "echo b");
+
+    qunsetenv("XDG_CONFIG_HOME");
 }

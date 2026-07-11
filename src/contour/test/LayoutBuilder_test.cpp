@@ -278,3 +278,34 @@ TEST_CASE("emitLayoutsYaml: round-trips a leaf + bare + split layout through the
     CHECK(*nestedParsed.children[0].command == "htop");
     CHECK(*nestedParsed.children[1].command == "journalctl -f");
 }
+
+TEST_CASE("serializeTab: reproduces the pane tree with resolved commands", "[layout][save]")
+{
+    RealizeHarness h;
+    auto* win = h.model.createWindow();
+    auto mk = [](std::string c) {
+        config::LayoutPane p;
+        p.command = std::move(c);
+        return p;
+    };
+    config::LayoutTab spec;
+    spec.title = "srv";
+    spec.root.orientation = vtmux::SplitState::Vertical;
+    spec.root.children = { mk("dev"), mk("logs") };
+    auto* tab = realizeLayoutTab(h.model, win->id(), spec, h.seeder());
+    REQUIRE(tab != nullptr);
+
+    auto resolve = [&](vtmux::SessionId id) {
+        return PaneLeafData { .command = h.commandBySession.at(id.value),
+                              .arguments = {},
+                              .directory = std::string { "/work" } };
+    };
+    auto const out = serializeTab(*tab, resolve);
+    CHECK(out.title == "srv");
+    REQUIRE_FALSE(out.root.isLeaf());
+    CHECK(out.root.orientation == vtmux::SplitState::Vertical);
+    REQUIRE(out.root.children.size() == 2);
+    CHECK(*out.root.children[0].command == "dev");
+    CHECK(out.root.children[0].directory->string() == "/work");
+    CHECK(*out.root.children[1].command == "logs");
+}

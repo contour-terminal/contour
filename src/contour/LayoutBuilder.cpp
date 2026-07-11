@@ -204,6 +204,38 @@ namespace
     }
 } // namespace
 
+config::LayoutPane serializePane(vtmux::Pane const& pane, LeafResolver const& resolve)
+{
+    config::LayoutPane out;
+    if (pane.isLeaf())
+    {
+        auto const data = resolve(pane.session());
+        out.command = data.command;
+        out.arguments = data.arguments;
+        if (data.directory)
+            out.directory = std::filesystem::path { *data.directory };
+        return out;
+    }
+    out.orientation = pane.splitState();
+    out.children.push_back(serializePane(*pane.first(), resolve));
+    out.children.push_back(serializePane(*pane.second(), resolve));
+    // Preserve the split position as the first child's weight (and its complement for the second).
+    out.children.front().ratio = pane.ratio();
+    out.children.back().ratio = 1.0 - pane.ratio();
+    return out;
+}
+
+config::LayoutTab serializeTab(vtmux::Tab const& tab, LeafResolver const& resolve)
+{
+    config::LayoutTab out;
+    if (tab.runtimeTitle())
+        out.title = *tab.runtimeTitle();
+    if (auto const color = tab.color(vtmux::TabColorSource::User))
+        out.color = *color;
+    out.root = serializePane(*tab.rootPane(), resolve);
+    return out;
+}
+
 std::string emitLayoutsYaml(std::unordered_map<std::string, config::Layout> const& layouts)
 {
     std::string out = "layouts:\n";
