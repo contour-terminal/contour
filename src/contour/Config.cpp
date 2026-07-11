@@ -413,6 +413,7 @@ void YAMLConfigReader::load(Config& c)
             c.platformPlugin = "";
         }
         loadFromEntry("default_profile", c.defaultProfileName);
+        loadFromEntry("default_layout", c.defaultLayoutName);
         loadFromEntry("renderer", c.renderer);
         loadFromEntry("word_delimiters", c.wordDelimiters);
         loadFromEntry("extended_word_delimiters", c.extendedWordDelimiters);

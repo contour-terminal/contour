@@ -193,6 +193,19 @@ layouts:
     CHECK(*nested.children[1].command == "journalctl -f");
 }
 
+TEST_CASE("Config: default_layout scalar loads", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_layout: work
+layouts:
+    work:
+        tabs:
+            - command: "bash"
+)"sv);
+    CHECK(config.defaultLayoutName.value() == "work");
+}
+
 TEST_CASE("Config: color scheme with background image loads from YAML", "[config]")
 {
     QTemporaryDir dir;
