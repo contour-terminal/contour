@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <text_shaper/cluster_spans.h>
 #include <text_shaper/font.h>
 #include <text_shaper/font_locator.h>
 #include <text_shaper/open_shaper.h>
@@ -35,6 +36,7 @@
 #include <limits>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -463,24 +465,27 @@ namespace
         return optional<ft_face_ptr> { ft_face_ptr(ftFace, [](FT_Face p) { FT_Done_Face(p); }) };
     }
 
-    void replaceMissingGlyphs(FT_Face ftFace, shape_result& result)
+    /// Substitutes the replacement character for every glyph that no font in the fallback chain could
+    /// render.
+    ///
+    /// @param ftFace The primary font's face, which supplies the replacement glyph.
+    /// @param glyphs The glyphs of a single shaped run. Unresolved glyphs are expected to carry the
+    ///               primary font's key, so that index and face agree.
+    void replaceMissingGlyphs(FT_Face ftFace, std::span<glyph_position> glyphs)
     {
         auto const missingGlyph = FT_Get_Char_Index(ftFace, MissingGlyphId);
 
         if (!missingGlyph)
             return;
 
-        for (size_t i = 0; i < result.size(); ++i)
-        {
-            auto& gpos = result[i];
+        for (auto& gpos: glyphs)
             if (glyphMissing(gpos))
                 gpos.glyph.index = glyph_index { missingGlyph };
-        }
     }
 
     void prepareBuffer(hb_buffer_t* hbBuf,
                        u32string_view codepoints,
-                       gsl::span<unsigned> clusters,
+                       std::span<unsigned const> clusters,
                        unicode::Script script)
     {
         hb_buffer_clear_contents(hbBuf);
@@ -494,18 +499,64 @@ namespace
         hb_buffer_guess_segment_properties(hbBuf);
     }
 
-    bool tryShape(font_key font,
-                  HbFontInfo& fontInfo,
-                  hb_buffer_t* hbBuf,
-                  hb_font_t* hbFont,
-                  unicode::Script script,
-                  unicode::PresentationStyle presentation,
-                  u32string_view codepoints,
-                  gsl::span<unsigned> clusters,
-                  shape_result& result)
+    /// A run as shaped by exactly one font.
+    struct shaped_run
+    {
+        shape_result glyphs;           ///< The shaped glyphs, in visual (left-to-right) order.
+        vector<shaped_glyph_ref> refs; ///< Parallel to @c glyphs: cluster value and .notdef flag.
+    };
+
+    /// Which spacing class a fallback pass accepts.
+    ///
+    /// The fallback chain is walked twice, so that a font matching the primary's spacing is always tried
+    /// before one that does not. A terminal wants a monospaced fallback where one exists, because a
+    /// proportional face's advances do not line up with the cell grid -- but a proportional face still beats
+    /// a replacement box, so it is accepted once nothing better has answered.
+    enum class fallback_pass : uint8_t
+    {
+        Preferred, ///< Fonts whose spacing matches the primary font description's.
+        Alternate  ///< The remainder. Skipped entirely under strict spacing.
+    };
+
+    /// A position in the two-pass walk over a font's fallback chain.
+    struct fallback_cursor
+    {
+        fallback_pass pass = fallback_pass::Preferred;
+        size_t index = 0;
+    };
+
+    /// Shapes @p codepoints with @p hbFont alone, applying no fallback.
+    ///
+    /// Deliberately inspects nothing beyond its own output: glyphs an earlier call left unresolved must not
+    /// make this one look like it failed.
+    ///
+    /// @param font        The key to stamp onto every glyph produced here.
+    /// @param fontInfo    Font info of @p font, supplying size and font features.
+    /// @param hbBuf       Scratch buffer. Its contents are copied out before returning, so the caller may
+    ///                    reuse it immediately -- including for a nested fallback shaping.
+    /// @param hbFont      The font to shape with.
+    /// @param script      The run's script.
+    /// @param presentation The run's presentation style.
+    /// @param codepoints  The codepoints to shape.
+    /// @param clusters    Per-codepoint cluster values.
+    /// @return The shaped glyphs, each paired with its cluster and whether the font had a glyph for it.
+    [[nodiscard]] shaped_run shapeWithFont(font_key font,
+                                           HbFontInfo const& fontInfo,
+                                           hb_buffer_t* hbBuf,
+                                           hb_font_t* hbFont,
+                                           unicode::Script script,
+                                           unicode::PresentationStyle presentation,
+                                           u32string_view codepoints,
+                                           std::span<unsigned const> clusters)
     {
         assert(hbFont != nullptr);
         assert(hbBuf != nullptr);
+
+        // hb_shape() returns on an empty buffer before it ever allocates positions, which leaves
+        // hb_buffer_normalize_glyphs() below asserting on the buffer it is handed. An empty run shapes to
+        // nothing anyway, so keep it away from HarfBuzz entirely.
+        if (codepoints.empty())
+            return {};
 
         prepareBuffer(hbBuf, codepoints, clusters, script);
 
@@ -527,6 +578,10 @@ namespace
         hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(hbBuf, nullptr);
         hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(hbBuf, nullptr);
 
+        auto output = shaped_run {};
+        output.glyphs.reserve(glyphCount);
+        output.refs.reserve(glyphCount);
+
         for (auto const i: iota(0u, glyphCount))
         {
             glyph_position gpos {};
@@ -540,16 +595,44 @@ namespace
                         gpos.glyph.text += codepoints[k];
             }
 #endif
-            gpos.offset.x =
-                static_cast<int>(static_cast<double>(pos[i].x_offset) / 64.0); // gpos.offset.(x,y) ?
-            gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
-            gpos.advance.x = static_cast<int>(static_cast<double>(pos[i].x_advance) / 64.0f);
-            gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0f);
+            gpos.offset.x = static_cast<int>(static_cast<double>(pos[i].x_offset) / 64.0);
+            gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0);
+            gpos.advance.x = static_cast<int>(static_cast<double>(pos[i].x_advance) / 64.0);
+            gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0);
             gpos.presentation = presentation;
-            result.emplace_back(gpos);
+
+            output.glyphs.emplace_back(gpos);
+            output.refs.emplace_back(
+                shaped_glyph_ref { .cluster = info[i].cluster, .missing = info[i].codepoint == 0 });
         }
 
-        return crispy::none_of(result, glyphMissing);
+        return output;
+    }
+
+    /// Appends the segment's glyphs unchanged.
+    void appendGlyphs(shape_result& result, shaped_run const& shaped, cluster_group const& segment)
+    {
+        result.insert(result.end(),
+                      shaped.glyphs.begin() + static_cast<ptrdiff_t>(segment.glyphBegin),
+                      shaped.glyphs.begin() + static_cast<ptrdiff_t>(segment.glyphEnd));
+    }
+
+    /// Appends the segment's glyphs, re-homing the unresolved ones onto @p primaryFont.
+    ///
+    /// Without this, replaceMissingGlyphs() would stamp the primary face's replacement glyph index onto a key
+    /// still naming whichever fallback font was tried last -- an index that means nothing in that font.
+    void appendUnresolvedGlyphs(shape_result& result,
+                                shaped_run const& shaped,
+                                cluster_group const& segment,
+                                font_key primaryFont)
+    {
+        for (auto const i: iota(segment.glyphBegin, segment.glyphEnd))
+        {
+            auto gpos = shaped.glyphs[i];
+            if (glyphMissing(gpos))
+                gpos.glyph.font = primaryFont;
+            result.emplace_back(gpos);
+        }
     }
 } // namespace
 
@@ -725,78 +808,153 @@ struct open_shaper::private_open_shaper // {{{
         fontInfo.metrics.reset();
     }
 
-    bool tryShapeWithFallback(font_key font,
-                              HbFontInfo& fontInfo,
-                              hb_buffer_t* hbBuf,
-                              hb_font_t* hbFont,
-                              unicode::Script script,
-                              unicode::PresentationStyle presentation,
-                              u32string_view codepoints,
-                              gsl::span<unsigned> clusters,
-                              shape_result& result)
+    /// @return Whether @p fontInfo's face is fixed-width (monospaced).
+    [[nodiscard]] static bool isMonospace(HbFontInfo const& fontInfo) noexcept
     {
-        auto const initialResultOffset = result.size();
+        return (fontInfo.ftFace->face_flags & FT_FACE_FLAG_FIXED_WIDTH) != 0;
+    }
 
-        if (tryShape(font, fontInfo, hbBuf, hbFont, script, presentation, codepoints, clusters, result))
-            return true;
+    /// @return Whether a fallback font of the given spacing is admissible in @p cursor's pass.
+    [[nodiscard]] static bool admissibleInPass(HbFontInfo const& primaryFontInfo,
+                                               fallback_cursor const& cursor,
+                                               HbFontInfo const& fallbackFontInfo) noexcept
+    {
+        auto const prefersMonospace = primaryFontInfo.description.spacing == font_spacing::mono;
+        auto const wantsMonospace = prefersMonospace == (cursor.pass == fallback_pass::Preferred);
+        return isMonospace(fallbackFontInfo) == wantsMonospace;
+    }
 
-        // Try fallbacks, extending the list on demand from allFallbacks when exhausted.
-        // NB: We use an index-based while loop because extendFallbacks() may grow
-        // fontInfo.fallbacks during iteration; range-based loops would miss new entries.
-        auto fallbackIndex = size_t { 0 };
-        while (fallbackIndex < fontInfo.fallbacks.size())
+    /// Resolves the next usable fallback font, advancing @p cursor past it.
+    ///
+    /// The chain is walked once per spacing class: fonts matching the primary's spacing first, then --
+    /// unless the font description demands strict spacing -- the rest. Between them the two passes visit
+    /// every font exactly once, so no font is ever shaped against twice. Fonts that fail to load are
+    /// skipped, and the chain is extended on demand as the walk runs off its end.
+    ///
+    /// @param fontInfo The primary font, which owns the fallback chain.
+    /// @param cursor   Where to resume the walk. Advanced past the returned font.
+    /// @return The next font to try, or nullopt once both passes are exhausted.
+    [[nodiscard]] optional<font_key> nextFallbackFont(HbFontInfo& fontInfo, fallback_cursor& cursor)
+    {
+        for (;;)
         {
-            result.resize(initialResultOffset); // rollback to initial size
-
-            auto const& fallbackFont = fontInfo.fallbacks[fallbackIndex];
-            auto fallbackKeyOpt =
-                getOrCreateKeyForFont(fallbackFont, fontInfo.size, fontInfo.description.weight);
-            if (!fallbackKeyOpt.has_value())
+            if (cursor.index >= fontInfo.fallbacks.size() && !extendFallbacks(fontInfo))
             {
-                ++fallbackIndex;
+                // This pass has run out of fonts. Strict spacing forbids the alternate pass outright.
+                if (cursor.pass == fallback_pass::Alternate || fontInfo.description.strictSpacing)
+                    return nullopt;
+
+                cursor = fallback_cursor { .pass = fallback_pass::Alternate, .index = 0 };
                 continue;
             }
 
-            // Skip if main font is monospace but fallbacks font is not.
-            if (fontInfo.description.strictSpacing
-                && fontInfo.description.spacing != font_spacing::proportional)
+            auto const& fallbackSource = fontInfo.fallbacks[cursor.index];
+            ++cursor.index;
+
+            auto const fallbackKeyOpt =
+                getOrCreateKeyForFont(fallbackSource, fontInfo.size, fontInfo.description.weight);
+            if (!fallbackKeyOpt.has_value())
+                continue;
+
+            Require(fontKeyToHbFontInfoMapping.count(*fallbackKeyOpt) == 1);
+            auto const& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(*fallbackKeyOpt);
+
+            if (!admissibleInPass(fontInfo, cursor, fallbackFontInfo))
+                continue;
+
+            textShapingLog()(
+                "Trying fallback font key:{}, source: {}", *fallbackKeyOpt, fallbackFontInfo.primary);
+            return fallbackKeyOpt;
+        }
+    }
+
+    /// Shapes @p codepoints with @p shapingFont, then resolves each span that font cannot render against
+    /// the rest of @p primaryFontInfo's fallback chain, appending the spliced glyphs to @p result.
+    ///
+    /// Glyphs the shaping font covers keep its key; only the maximal cluster-aligned spans that came out
+    /// .notdef are re-shaped, and their glyphs are spliced back where they belong, so left-to-right order
+    /// survives. The run may therefore end up spanning several fonts, which is fine: every glyph_key
+    /// carries its own font key and the rasterizer honours it.
+    ///
+    /// @param primaryFont     The font the run was requested with. Owns the fallback chain, and takes
+    ///                        ownership of any glyph no font in that chain could render.
+    /// @param primaryFontInfo Font info of @p primaryFont.
+    /// @param shapingFont     The font to shape with here; equal to @p primaryFont at the top level.
+    /// @param cursor          Where to resume the fallback walk for spans this font cannot render.
+    /// @param script          The run's script.
+    /// @param presentation    The run's presentation style.
+    /// @param codepoints      The codepoints to shape.
+    /// @param clusters        Per-codepoint cluster values.
+    /// @param result          Receives the shaped glyphs, appended.
+    /// @return Whether every glyph appended was resolved by some font.
+    bool shapeRunWithFallback(font_key primaryFont,
+                              HbFontInfo& primaryFontInfo,
+                              font_key shapingFont,
+                              fallback_cursor cursor,
+                              unicode::Script script,
+                              unicode::PresentationStyle presentation,
+                              u32string_view codepoints,
+                              std::span<unsigned const> clusters,
+                              shape_result& result)
+    {
+        Require(fontKeyToHbFontInfoMapping.count(shapingFont) == 1);
+        auto const& shapingFontInfo = fontKeyToHbFontInfoMapping.at(shapingFont);
+
+        auto const shaped = shapeWithFont(shapingFont,
+                                          shapingFontInfo,
+                                          hbBuf.get(),
+                                          shapingFontInfo.hbFont.get(),
+                                          script,
+                                          presentation,
+                                          codepoints,
+                                          clusters);
+        if (shaped.glyphs.empty())
+            return true;
+
+        // Without a trustworthy mapping from glyphs back to codepoints the run may not be split, so it is
+        // offered to a fallback font whole -- the conservative answer, and what every run used to get.
+        auto const groups = clusterGroups(shaped.refs, clusters);
+        auto const segments = groups.has_value()
+                                  ? mergeAdjacentMissing(*groups)
+                                  : vector<cluster_group> { indivisibleGroup(shaped.refs, clusters.size()) };
+
+        auto allResolved = true;
+
+        for (cluster_group const& segment: segments)
+        {
+            if (!segment.missing)
             {
-                Require(fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
-                auto const& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
-                auto const fontIsMonospace = fallbackFontInfo.ftFace->face_flags & FT_FACE_FLAG_FIXED_WIDTH;
-                if (!fontIsMonospace)
-                {
-                    ++fallbackIndex;
-                    continue;
-                }
+                appendGlyphs(result, shaped, segment);
+                continue;
             }
 
-            Require(fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
-            auto& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
-            // clang-format off
-            textShapingLog()("Try fallbacks font key:{}, source: {}",
-                             fallbackKeyOpt.value(),
-                             fallbackFontInfo.primary);
-            // clang-format on
-            if (tryShape(fallbackKeyOpt.value(),
-                         fallbackFontInfo,
-                         hbBuf,
-                         fallbackFontInfo.hbFont.get(),
-                         script,
-                         presentation,
-                         codepoints,
-                         clusters,
-                         result))
-                return true;
+            // A span mapping to no codepoints has nothing to re-shape; recursing on it would not
+            // terminate.
+            auto spanCursor = cursor;
+            auto const fallbackOpt =
+                segment.empty() ? nullopt : nextFallbackFont(primaryFontInfo, spanCursor);
 
-            ++fallbackIndex;
+            if (!fallbackOpt.has_value())
+            {
+                appendUnresolvedGlyphs(result, shaped, segment, primaryFont);
+                allResolved = false;
+                continue;
+            }
 
-            // If we've exhausted the current fallback list, try extending it.
-            if (fallbackIndex == fontInfo.fallbacks.size())
-                extendFallbacks(fontInfo);
+            auto const count = segment.codepointEnd - segment.codepointBegin;
+            if (!shapeRunWithFallback(primaryFont,
+                                      primaryFontInfo,
+                                      *fallbackOpt,
+                                      spanCursor,
+                                      script,
+                                      presentation,
+                                      codepoints.substr(segment.codepointBegin, count),
+                                      clusters.subspan(segment.codepointBegin, count),
+                                      result))
+                allResolved = false;
         }
 
-        return false;
+        return allResolved;
     }
 }; // }}}
 
@@ -960,8 +1118,6 @@ void open_shaper::shape(font_key font,
 
     Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
     HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
-    hb_font_t* hbFont = fontInfo.hbFont.get();
-    hb_buffer_t* hbBuf = _d->hbBuf.get();
 
     if (textShapingLog)
     {
@@ -981,49 +1137,23 @@ void open_shaper::shape(font_key font,
         logMessage.append("Using font: key={}, path=\"{}\"\n", font, identifierOf(fontInfo.primary));
     }
 
-    if (_d->tryShapeWithFallback(
-            font, fontInfo, hbBuf, hbFont, script, presentation, codepoints, clusters, result))
+    auto const resultOffset = result.size();
+    auto const inputClusters = std::span<unsigned const> { clusters.data(), clusters.size() };
+
+    if (_d->shapeRunWithFallback(font,
+                                 fontInfo,
+                                 font,
+                                 fallback_cursor {},
+                                 script,
+                                 presentation,
+                                 codepoints,
+                                 inputClusters,
+                                 result))
         return;
 
-    textShapingLog()("Shaping failed.");
+    textShapingLog()("Shaping incomplete; substituting the replacement character.");
 
-    // Reshape each cluster individually.
-    result.clear();
-    auto cluster = clusters[0];
-    size_t start = 0;
-    for (size_t i = 1; i < clusters.size(); ++i)
-    {
-        if (cluster != clusters[i])
-        {
-            size_t const count = i - start;
-            _d->tryShapeWithFallback(font,
-                                     fontInfo,
-                                     hbBuf,
-                                     hbFont,
-                                     script,
-                                     presentation,
-                                     codepoints.substr(start, count),
-                                     clusters.subspan(start, count),
-                                     result);
-            start = i;
-            cluster = clusters[i];
-        }
-    }
-
-    // shape last cluster
-    auto const end = clusters.size();
-    _d->tryShapeWithFallback(font,
-                             fontInfo,
-                             hbBuf,
-                             hbFont,
-                             script,
-                             presentation,
-                             codepoints.substr(start, end - start),
-                             clusters.subspan(start, end - start),
-                             result);
-
-    // last resort
-    replaceMissingGlyphs(fontInfo.ftFace.get(), result);
+    replaceMissingGlyphs(fontInfo.ftFace.get(), std::span<glyph_position> { result }.subspan(resultOffset));
 }
 
 /// Rasterizes a glyph with a pre-computed FT_Stroker outline into a two-channel RGBA bitmap.
