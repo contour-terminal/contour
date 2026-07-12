@@ -111,6 +111,7 @@ Making use of reserved glyph slots
 #include <vtbackend/primitives.h>
 
 #include <vtrasterizer/BoxDrawingRenderer.h>
+#include <vtrasterizer/GlyphAdvance.h>
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/TextRenderer.h>
 #include <vtrasterizer/shared_defines.h>
@@ -614,7 +615,8 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                          pen1);
 
             renderRasterizedGlyph(pen1, color, attributesCopy);
-            pen.x += static_cast<decltype(pen.x)>(unbox(_gridMetrics.cellSize.width) * advanceScale);
+            auto const cellWidth = unbox<int>(_gridMetrics.cellSize.width);
+            pen.x += advanceToCells(glyphPosition.advance.x, cellWidth) * cellWidth * advanceScale;
             continue;
         }
 
@@ -673,13 +675,8 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
             }
         }
 
-        if (glyphPosition.advance.x)
-        {
-            auto numberOfCellsToAdvance =
-                std::rint(glyphPosition.advance.x / unbox<double>(_gridMetrics.cellSize.width));
-            pen.x += static_cast<decltype(pen.x)>(numberOfCellsToAdvance
-                                                  * (unbox(_gridMetrics.cellSize.width)) * advanceScale);
-        }
+        auto const cellWidth = unbox<int>(_gridMetrics.cellSize.width);
+        pen.x += advanceToCells(glyphPosition.advance.x, cellWidth) * cellWidth * advanceScale;
     }
 }
 
