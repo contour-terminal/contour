@@ -1,6 +1,8 @@
 ARG VERSION=24.04
 ARG ARCH=x86_64
-ARG QT_VERSION=6.8.3
+# Qt >= 6.9 is required: separate CMake packages for private modules
+# (Qt6GuiPrivate, needed by contour for RHI) only exist since Qt 6.9.
+ARG QT_VERSION=6.11.1
 
 FROM ubuntu:${VERSION} AS qt-builder
 
@@ -32,7 +34,7 @@ RUN wget -q https://apt.llvm.org/llvm.sh \
 
 WORKDIR /build
 
-RUN wget -q https://download.qt.io/official_releases/qt/6.8/${QT_VERSION}/single/qt-everywhere-src-${QT_VERSION}.tar.xz \
+RUN wget -q https://download.qt.io/official_releases/qt/${QT_VERSION%.*}/${QT_VERSION}/single/qt-everywhere-src-${QT_VERSION}.tar.xz \
  && tar xf qt-everywhere-src-${QT_VERSION}.tar.xz \
  && rm qt-everywhere-src-${QT_VERSION}.tar.xz
 

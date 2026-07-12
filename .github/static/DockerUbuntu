@@ -1,4 +1,5 @@
-ARG VERSION="24.04"
+# Tag scheme: <ubuntu version>-qt<qt version>, built from .github/static/DockerQt (see readme)
+ARG VERSION="24.04-qt6.11.1"
 FROM yaraslaut/static_qt:$VERSION
 #FROM qt_static:$VERSION
 ARG ARCH="x86_64"
