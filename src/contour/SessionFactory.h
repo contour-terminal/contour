@@ -33,6 +33,19 @@ class ContourGuiApp;
 /// spawning. It is an interface (per the project's dependency-injection principle: PTY creation is
 /// process/network I/O), so tests inject an in-memory PTY factory and drive the manager's
 /// session-creation paths headlessly.
+/// Whether @p commandOverride overrides the shell PROGRAM a session runs. A directory-only layout
+/// pane engages the override with an EMPTY program (only the working directory is set), which must
+/// keep every program-dependent profile behavior — most critically the "an SSH-configured profile
+/// opens an SshSession" invariant (see AppSessionFactory::createPty). Pure and dependency-free so
+/// the SSH gate is testable without libssh2.
+/// @param commandOverride A session's command override, if any.
+/// @return true only when an override carries a non-empty program.
+[[nodiscard]] inline bool overridesShellProgram(
+    std::optional<vtpty::Process::ExecInfo> const& commandOverride) noexcept
+{
+    return commandOverride.has_value() && !commandOverride->program.empty();
+}
+
 class SessionFactory
 {
   public:

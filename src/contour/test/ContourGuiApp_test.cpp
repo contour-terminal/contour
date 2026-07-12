@@ -98,3 +98,24 @@ TEST_CASE("childPtyPageSize reserves the status-line row(s) from the total page 
     CHECK(contour::childPtyPageSize(PageSize { LineCount(1), ColumnCount(80) }, StatusDisplayType::Indicator)
           == PageSize { LineCount(1), ColumnCount(80) });
 }
+
+// Regression (SSH profile silently opening a LOCAL shell): AppSessionFactory::createPty skips the
+// profile's SshSession only when the session genuinely overrides the shell PROGRAM. A layout
+// pane that sets only `directory:` engages the command override with an EMPTY program — it still
+// runs the profile's shell and must keep the SSH invariant, or the user ends up typing on the
+// wrong host. The gate is the pure overridesShellProgram() so it is testable without libssh2.
+TEST_CASE("overridesShellProgram only counts a real program override", "[contour][session]")
+{
+    using vtpty::Process;
+
+    CHECK_FALSE(contour::overridesShellProgram(std::nullopt));
+
+    // Directory-only layout pane: engaged override, empty program -> NOT a program override.
+    auto directoryOnly = Process::ExecInfo {};
+    directoryOnly.workingDirectory = "/tmp";
+    CHECK_FALSE(contour::overridesShellProgram(directoryOnly));
+
+    auto command = Process::ExecInfo {};
+    command.program = "htop";
+    CHECK(contour::overridesShellProgram(command));
+}

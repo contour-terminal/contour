@@ -79,6 +79,7 @@ if(CONTOUR_FRONTEND_GUI)
         ExitCode.h
         ExternalLauncher.h
         FreeDesktopNotifier.h
+        LayoutStore.h
         NotificationRouter.h
         PaneProxy.h
         QtExternalLauncher.h
@@ -95,6 +96,7 @@ if(CONTOUR_FRONTEND_GUI)
         PaneProxy.cpp
         QtExternalLauncher.cpp
         LayoutBuilder.cpp
+        LayoutStore.cpp
         SessionFactory.cpp
         TerminalSession.cpp
         TerminalSessionManager.cpp

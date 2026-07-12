@@ -19,7 +19,6 @@
 #include <QtQuick/QQuickWindow>
 
 #include <filesystem>
-#include <fstream>
 #include <ranges>
 #include <string>
 
@@ -31,8 +30,10 @@ using std::nullopt;
 namespace contour
 {
 
-TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app, SessionFactory& factory):
-    _app { app }, _sessionFactory { factory }, _earlyExitThreshold {}
+TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
+                                               SessionFactory& factory,
+                                               LayoutStore& layouts):
+    _app { app }, _sessionFactory { factory }, _layoutStore { layouts }, _earlyExitThreshold {}
 {
     // The model allocates a fresh vtmux session id whenever it needs one (a new tab or a new split
     // pane). For tabs we pre-mint the id in createSessionInBackground() and hand it back here; for
@@ -153,9 +154,16 @@ TerminalSession* TerminalSessionManager::createBackingSession(
     vtmux::SessionId sessionId,
     std::optional<std::string> cwd,
     std::optional<vtbackend::PageSize> pageSize,
-    std::optional<vtpty::Process::ExecInfo> commandOverride,
-    std::optional<std::string> profileName)
+    std::optional<vtpty::Process::ExecInfo> const& commandOverride,
+    std::optional<std::string> const& profileName)
 {
+    // The command this session ACTUALLY runs: an explicit override wins; otherwise, a session on
+    // the app-default profile inherits the CLI-verbatim command (`contour terminal PROGRAM ...`),
+    // which mutated that profile's shell for the whole process — so SaveLayout can capture it.
+    auto launchedCommand = commandOverride;
+    if (!launchedCommand && (!profileName || profileName->empty()))
+        launchedCommand = _app.cliCommand();
+
     // Seed the terminal grid AND the child PTY with the inherited page size: the PTY via the factory
     // (its initial winsize), the Terminal via the constructor (its birth page size). Both matter — the
     // PTY winsize for a shell that reads it immediately, the grid so a background tab that never attaches
@@ -166,7 +174,7 @@ TerminalSession* TerminalSessionManager::createBackingSession(
                             _app,
                             profileName.value_or(std::string {}),
                             pageSize,
-                            commandOverride);
+                            std::move(launchedCommand));
     managerLog()("Create backing session with ID {}({}); {} sessions before it.",
                  session->id(),
                  (void*) session,
@@ -266,7 +274,9 @@ void TerminalSessionManager::createNewTab(TerminalSession* acting)
         createSession(win->id());
 }
 
-bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window, config::Layout const& layout)
+bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
+                                                 config::Layout const& layout,
+                                                 std::optional<vtbackend::PageSize> pageSize)
 {
     if (layout.tabs.empty())
     {
@@ -279,14 +289,17 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window, config:
         // exactly like createBackingSession's use in splitActivePane/createSessionInBackground.
         auto seeder = [&](config::LayoutPane const& leaf) {
             auto const sessionId = vtmux::SessionId { _nextSessionId++ };
+            // A command override ONLY when the pane actually names a program to run. A pane that
+            // just picks a directory still runs the profile's shell — it travels through `cwd`,
+            // the same channel every other new tab/split uses. Engaging an override with an empty
+            // program here would tell the factory "this session overrides the shell", which (among
+            // other things) would skip an SSH profile's SshSession and open a LOCAL shell instead.
             std::optional<vtpty::Process::ExecInfo> command;
-            if (leaf.command || !leaf.arguments.empty() || leaf.directory)
+            if (leaf.command || !leaf.arguments.empty())
             {
                 command = vtpty::Process::ExecInfo {};
                 command->program = leaf.command.value_or(std::string {});
                 command->arguments = leaf.arguments;
-                if (leaf.directory)
-                    command->workingDirectory = *leaf.directory;
             }
             std::optional<std::string> profileName = leaf.profile ? leaf.profile : tabSpec.profile;
             if (profileName && _app.config().findProfile(*profileName) == nullptr)
@@ -296,7 +309,7 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window, config:
             }
             std::optional<std::string> cwd =
                 leaf.directory ? std::optional { leaf.directory->string() } : std::nullopt;
-            createBackingSession(sessionId, cwd, std::nullopt, command, profileName);
+            createBackingSession(sessionId, cwd, pageSize, command, profileName);
         };
 
         auto* modelTab = realizeLayoutTab(*_model, window, tabSpec, seeder);
@@ -313,37 +326,48 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window, config:
     return true;
 }
 
-void TerminalSessionManager::launchLayout(std::string const& name, TerminalSession* acting)
+config::Layout const* TerminalSessionManager::findLayout(std::string const& name,
+                                                         std::string_view context) const
 {
-    auto const* layout = [&]() -> config::Layout const* {
-        auto const& map = _app.config().layouts.value();
-        auto const it = map.find(name);
-        return it != map.end() ? &it->second : nullptr;
-    }();
-    if (layout == nullptr)
-    {
-        managerLog()("LaunchLayout: no layout named '{}'.", name);
-        return;
-    }
-    auto* win = windowHostingSession(acting);
-    if (win == nullptr)
-        return;
-    applyLayoutToWindow(win->id(), *layout);
-}
-
-bool TerminalSessionManager::consumeDefaultLayout(contour::WindowController* controller)
-{
-    auto const name = _app.layoutName();
-    if (name.empty())
-        return false;
     auto const& map = _app.config().layouts.value();
     auto const it = map.find(name);
     if (it == map.end())
     {
-        managerLog()("Startup layout '{}' not found; using a default tab.", name);
-        return false;
+        managerLog()("{}: no layout named '{}'.", context, name);
+        return nullptr;
     }
-    return applyLayoutToWindow(controller->windowId(), it->second);
+    return &it->second;
+}
+
+void TerminalSessionManager::launchLayout(std::string const& name, TerminalSession* acting)
+{
+    auto const* layout = findLayout(name, "LaunchLayout");
+    if (layout == nullptr)
+        return;
+    auto* win = windowHostingSession(acting);
+    if (win == nullptr)
+        return;
+    // The new tabs join a LIVE window: birth their grids and PTYs at its running page size (like
+    // CreateNewTab/splits do), not at the profile's configured default — a maximized window would
+    // otherwise spawn every layout command into an 80x25 terminal.
+    applyLayoutToWindow(win->id(), *layout, acting->terminal().totalPageSize());
+}
+
+bool TerminalSessionManager::consumeDefaultLayout(contour::WindowController* controller)
+{
+    // One-shot: main.qml calls this for EVERY window it loads, but the startup layout belongs to
+    // the first window only — a later NewTerminalWindow must not re-run all the layout's commands.
+    if (_startupLayoutConsumed)
+        return false;
+    auto const name = _app.layoutName();
+    if (name.empty())
+        return false;
+    _startupLayoutConsumed = true;
+
+    auto const* layout = findLayout(name, "Startup layout");
+    if (layout == nullptr)
+        return false; // the window falls back to its usual single default tab
+    return applyLayoutToWindow(controller->windowId(), *layout);
 }
 
 void TerminalSessionManager::saveLayout(std::string const& name, TerminalSession* acting)
@@ -351,14 +375,29 @@ void TerminalSessionManager::saveLayout(std::string const& name, TerminalSession
     auto* win = windowHostingSession(acting);
     if (win == nullptr)
         return;
-    saveWindowLayout(win->id(), name);
+    if (auto const saved = saveWindowLayout(win->id(), name); !saved)
+        managerLog()("SaveLayout '{}' failed ({}).", name, describe(saved.error()));
 }
 
-bool TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId, std::string const& name)
+std::filesystem::path TerminalSessionManager::layoutsFilePath() const
 {
+    // Next to the loaded config file — which is exactly where loadConfigFromFile() merges it back
+    // from, so a custom `--config` path moves the store with it instead of stranding saves in the
+    // default config home. An empty configFile (a default-constructed config, e.g. in tests) means
+    // no file was loaded: fall back to the config home the loader would have used.
+    auto const& configFile = _app.config().configFile;
+    return (configFile.empty() ? config::configHome() : configFile.parent_path()) / "layouts.yml";
+}
+
+std::expected<void, LayoutSaveError> TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId,
+                                                                              std::string const& name)
+{
+    if (name.empty())
+        return std::unexpected(LayoutSaveError::EmptyName);
+
     auto* window = _model->window(windowId);
     if (window == nullptr)
-        return false;
+        return std::unexpected(LayoutSaveError::UnknownWindow);
 
     auto const resolve = [this](vtmux::SessionId id) {
         PaneLeafData data;
@@ -366,73 +405,58 @@ bool TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId, std::str
         {
             if (auto const dir = session->workingDirectory(); !dir.empty())
                 data.directory = dir;
-            if (auto const& launched = session->launchedCommand())
+            // An engaged override with an EMPTY program runs the profile's default shell, so there
+            // is no command worth persisting for it.
+            if (auto const& launched = session->launchedCommand(); launched && !launched->program.empty())
             {
                 data.command = launched->program;
                 data.arguments = launched->arguments;
             }
-            // Sessions launched without an explicit override resolve to an empty profile name;
-            // only capture a REAL per-pane profile override here, not the app's implicit default.
-            if (auto const& profileName = session->profileName(); !profileName.empty())
-                data.profile = profileName;
+            // Only capture a REAL per-pane profile override: profileName() always resolves to a
+            // concrete profile (the app default when none was given), which must NOT be pinned
+            // into the store — the saved layout should keep following the user's default profile.
+            data.profile = session->profileOverride();
         }
         return data;
     };
 
     config::Layout layout;
-    for (int i = 0; i < window->tabCount(); ++i)
+    for (auto const i: std::views::iota(0, window->tabCount()))
         if (auto* tab = window->tabAt(i))
             layout.tabs.push_back(serializeTab(*tab, resolve));
 
-    // Build the YAML from layouts.yml's OWN prior contents (not the merged inline+file view held
-    // in memory): layouts.yml wins name collisions on load, so writing the merged view back out
-    // would permanently freeze any inline contour.yml layouts into the file. Only file-origin
-    // layouts (plus this new one) get persisted here; the live config still gets the merged
-    // update below so a later launch in this run sees it.
-    auto const path = config::configHome() / "layouts.yml";
-    auto fileLayouts = config::loadLayoutsFile(path);
-    fileLayouts[name] = layout;
-
-    auto const yaml = emitLayoutsYaml(fileLayouts);
-    auto const tmp = path.string() + ".tmp";
-
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-    if (ec)
+    // Persist the store's OWN prior contents plus this layout — not the merged inline+file view
+    // held in memory: the store wins name collisions on load, so writing the merged view back out
+    // would permanently freeze any inline contour.yml layouts into it.
+    auto const path = layoutsFilePath();
+    auto storedLayouts = _layoutStore.load(path);
+    if (!storedLayouts)
     {
-        managerLog()("Failed to create {}: {}", path.parent_path().string(), ec.message());
-        return false;
+        // Refusing beats destroying: treating an unreadable store as empty and rewriting it would
+        // permanently delete every layout it still holds.
+        managerLog()("Refusing to save layout '{}': {} is unreadable ({}); fix or remove the file.",
+                     name,
+                     path.string(),
+                     storedLayouts.error());
+        return std::unexpected(LayoutSaveError::StoreUnreadable);
+    }
+    (*storedLayouts)[name] = layout;
+
+    if (auto const written = _layoutStore.save(path, *storedLayouts); !written)
+    {
+        managerLog()("Failed to save layout '{}': {}", name, written.error());
+        return std::unexpected(LayoutSaveError::WriteFailed);
     }
 
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        out << yaml;
-        if (!out)
-        {
-            managerLog()("Failed to write {}", tmp);
-            std::error_code rmec;
-            std::filesystem::remove(tmp, rmec);
-            return false;
-        }
-    }
-    std::filesystem::rename(tmp, path, ec);
-    if (ec)
-    {
-        managerLog()("Failed to write layouts.yml: {}", ec.message());
-        std::error_code rmec;
-        std::filesystem::remove(tmp, rmec);
-        return false;
-    }
-
-    // Only now that the file is safely on disk do we update the in-memory config, so a
-    // subsequent LaunchLayout in this run sees the save, and runtime state never diverges
-    // from what's actually persisted. This merges the new entry into the existing in-memory
-    // (inline + file) view rather than replacing it wholesale, so inline layouts stay visible
-    // in this run even though they were deliberately excluded from the file just written.
+    // Only now that the store has accepted the layout do we update the in-memory config, so a
+    // subsequent LaunchLayout in this run sees the save, and runtime state never diverges from
+    // what is actually persisted. This merges the new entry into the existing in-memory (inline +
+    // file) view rather than replacing it wholesale, so inline layouts stay visible in this run
+    // even though they were deliberately excluded from the store just written.
     _app.config().layouts.value()[name] = std::move(layout);
 
     managerLog()("Saved layout '{}' to {}", name, path.string());
-    return true;
+    return {};
 }
 
 void TerminalSessionManager::switchToPreviousTab(TerminalSession* acting)

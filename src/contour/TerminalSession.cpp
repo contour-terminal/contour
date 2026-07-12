@@ -263,6 +263,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _startTime { steady_clock::now() },
     _config { app.config() },
     _profileName { resolveProfileName(_config, profileName, app.profileName()) },
+    _profileOverride { profileName.empty() ? std::optional<std::string> {} : std::optional { profileName } },
     _launchedCommand { std::move(launchedCommand) },
     _profile { *_config.profile(_profileName) },
     _app { app },
@@ -2226,7 +2227,7 @@ bool TerminalSession::operator()(actions::LaunchLayout const& event)
 
 bool TerminalSession::operator()(actions::SaveLayout const& event)
 {
-    _manager->saveLayout(event.name, this); // implemented in Task 14
+    _manager->saveLayout(event.name, this);
     return true;
 }
 

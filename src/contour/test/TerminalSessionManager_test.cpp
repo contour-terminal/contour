@@ -168,18 +168,19 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
 
 // Manager-level coverage for saveWindowLayout: builds a real, PTY-backed 2-tab window via
 // applyLayoutToWindow (so each leaf session has a genuine launchedCommand()), saves it under a name,
-// and asserts BOTH that layouts.yml was written to the redirected config home AND that re-parsing it
-// through the production config loader reproduces the saved tabs' commands.
+// and asserts BOTH that layouts.yml was written next to the loaded config file AND that re-parsing
+// it through the production config loader reproduces the saved tabs' commands.
 TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manager][layout]")
 {
-    // Redirect config home to an isolated temp dir BEFORE constructing anything that reads
-    // XDG_CONFIG_HOME, so the save never touches the real user config.
+    // The save writes NEXT TO the loaded config file (where loadConfigFromFile merges it back
+    // from); pointing configFile into an isolated temp dir keeps the test off the real user
+    // config without mutating process-global environment (XDG_CONFIG_HOME).
     QTemporaryDir configDir;
     REQUIRE(configDir.isValid());
-    qputenv("XDG_CONFIG_HOME", configDir.path().toUtf8());
 
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned) };
+    app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
     contour::test::ScopedController win { app.manager() };
 
     // Inject an inline layout (as if hand-written in contour.yml) BEFORE saving a DIFFERENT
@@ -203,7 +204,7 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
 
     REQUIRE(app.manager().saveWindowLayout(win.id, "saved"));
 
-    auto const path = contour::config::configHome() / "layouts.yml";
+    auto const path = std::filesystem::path(configDir.path().toStdString()) / "layouts.yml";
     REQUIRE(std::filesystem::exists(path));
 
     // Sanity: the written file textually contains the saved layout's name.
@@ -214,8 +215,8 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
         CHECK(contents.str().find("saved:") != std::string::npos);
     }
 
-    // Re-parse the written file through the production config loader to confirm it is valid,
-    // round-trippable `layouts:` YAML, not just text that happens to contain "saved:".
+    // Re-parse the written file through the production config loader to confirm it is valid
+    // `layouts:` YAML that survives a round trip, not just text that happens to contain "saved:".
     auto parsed = contour::config::Config {};
     contour::config::loadConfigFromFile(parsed, path);
     REQUIRE(parsed.layouts.value().contains("saved"));
@@ -233,5 +234,194 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
     // file, so it must not be written there even though it was present in the merged in-memory view.
     CHECK_FALSE(parsed.layouts.value().contains("inline_only"));
 
-    qunsetenv("XDG_CONFIG_HOME");
+    // No pane carries an explicit profile override, so none may be pinned into the file: the
+    // saved layout must keep following the user's default profile, not freeze today's default.
+    CHECK_FALSE(savedLayout.tabs[0].root.profile.has_value());
+    CHECK_FALSE(savedLayout.tabs[1].root.profile.has_value());
+}
+
+TEST_CASE("TerminalSessionManager: saveWindowLayout refuses to overwrite an unreadable layouts.yml",
+          "[manager][layout]")
+{
+    // The save is a read-modify-write of layouts.yml. If the read fails to PARSE, treating the
+    // file as empty and rewriting it would permanently destroy every layout it still contains —
+    // refusing (and telling the user) is the only safe move.
+    QTemporaryDir configDir;
+    REQUIRE(configDir.isValid());
+
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
+    contour::test::ScopedController win { app.manager() };
+
+    auto const layoutsPath = std::filesystem::path(configDir.path().toStdString()) / "layouts.yml";
+    auto const garbage = std::string { "layouts:\n  broken: [unterminated\n" };
+    std::ofstream(layoutsPath) << garbage;
+
+    contour::config::Layout layout;
+    contour::config::LayoutTab tab;
+    tab.root.command = "echo a";
+    layout.tabs = { tab };
+    REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
+
+    CHECK_FALSE(app.manager().saveWindowLayout(win.id, "saved"));
+
+    // The unreadable file is left byte-for-byte untouched for the user to fix or remove.
+    std::ifstream in(layoutsPath, std::ios::binary);
+    std::ostringstream contents;
+    contents << in.rdbuf();
+    CHECK(contents.str() == garbage);
+}
+
+TEST_CASE("TerminalSessionManager: SaveLayout persists through the injected LayoutStore", "[manager][layout]")
+{
+    // The manager owns no filesystem knowledge: it serializes the window and hands the result to
+    // the injected store. Driving that seam with an in-memory store exercises SaveLayout end to end
+    // (including the read-modify-write against what the store already holds) without any disk I/O.
+    QTemporaryDir configDir;
+    REQUIRE(configDir.isValid());
+
+    auto storeOwned = std::make_unique<contour::test::InMemoryLayoutStore>();
+    auto* store = storeOwned.get();
+
+    // The store already holds an unrelated layout: SaveLayout must PRESERVE it, not replace the
+    // store's contents with just the new entry.
+    contour::config::Layout existing;
+    contour::config::LayoutTab existingTab;
+    existingTab.root.command = "already-here";
+    existing.tabs = { existingTab };
+    store->layouts["existing"] = existing;
+
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned), std::move(storeOwned) };
+    app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
+    contour::test::ScopedController win { app.manager() };
+
+    contour::config::Layout layout;
+    contour::config::LayoutTab tab;
+    tab.root.command = "echo a";
+    layout.tabs = { tab };
+    REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
+
+    REQUIRE(app.manager().saveWindowLayout(win.id, "saved"));
+
+    // Persisted next to the LOADED CONFIG FILE — the very path loadConfigFromFile merges back from,
+    // so a custom `--config` can never strand saves somewhere the loader will not look.
+    REQUIRE(store->savedPaths.size() == 1);
+    CHECK(store->savedPaths.front() == std::filesystem::path(configDir.path().toStdString()) / "layouts.yml");
+
+    REQUIRE(store->layouts.contains("saved"));
+    REQUIRE(store->layouts.at("saved").tabs.size() == 1);
+    CHECK(*store->layouts.at("saved").tabs[0].root.command == "echo a");
+    CHECK(store->layouts.contains("existing")); // the pre-existing layout survived
+
+    // The live config sees the save too, so a LaunchLayout later in this run finds it.
+    CHECK(app.app().config().layouts.value().contains("saved"));
+}
+
+TEST_CASE("TerminalSessionManager: SaveLayout reports why a save failed", "[manager][layout]")
+{
+    auto storeOwned = std::make_unique<contour::test::InMemoryLayoutStore>();
+    auto* store = storeOwned.get();
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned), std::move(storeOwned) };
+    contour::test::ScopedController win { app.manager() };
+
+    // Each failure is a distinct, reportable cause — not a bare "false".
+    CHECK(app.manager().saveWindowLayout(win.id, "").error() == contour::LayoutSaveError::EmptyName);
+    CHECK(app.manager().saveWindowLayout(vtmux::WindowId { 4711 }, "x").error()
+          == contour::LayoutSaveError::UnknownWindow);
+
+    store->loadError = "corrupt";
+    CHECK(app.manager().saveWindowLayout(win.id, "x").error() == contour::LayoutSaveError::StoreUnreadable);
+    CHECK(store->savedPaths.empty()); // an unreadable store is never written over
+
+    store->loadError.reset();
+    store->saveError = "disk full";
+    CHECK(app.manager().saveWindowLayout(win.id, "x").error() == contour::LayoutSaveError::WriteFailed);
+    // A failed write must NOT leave the in-memory config claiming a layout that was never saved.
+    CHECK_FALSE(app.app().config().layouts.value().contains("x"));
+}
+
+TEST_CASE("TerminalSessionManager: a directory-only layout pane does not override the shell",
+          "[manager][layout]")
+{
+    // A pane that only picks a directory still runs the profile's shell: it must NOT engage a
+    // command override (an override with an empty program would tell the factory "this session
+    // replaces the shell", which skips an SSH profile's SshSession and opens a LOCAL shell).
+    // The directory travels through `cwd`, the same channel every other new tab/split uses.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    contour::test::ScopedController win { app.manager() };
+
+    contour::config::Layout layout;
+    contour::config::LayoutTab tab;
+    tab.root.directory = std::filesystem::path { "/tmp" };
+    layout.tabs = { tab };
+    REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
+
+    REQUIRE(factory->requestedCommandOverrides.size() == 1);
+    CHECK_FALSE(factory->requestedCommandOverrides[0].has_value()); // shell NOT overridden
+    REQUIRE(factory->requestedCwds.size() == 1);
+    REQUIRE(factory->requestedCwds[0].has_value());
+    CHECK(*factory->requestedCwds[0] == "/tmp"); // ...but the directory still applies
+}
+
+TEST_CASE("TerminalSessionManager: consumeDefaultLayout applies the startup layout exactly once",
+          "[manager][layout]")
+{
+    // main.qml calls consumeDefaultLayout for EVERY window it loads; only the process's first
+    // window may consume the startup layout, or NewTerminalWindow would re-run all its commands.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned) };
+
+    contour::config::Layout layout;
+    contour::config::LayoutTab tab;
+    tab.root.command = "echo startup";
+    layout.tabs = { tab };
+    app.app().config().layouts.value()["auto"] = layout;
+    app.app().config().defaultLayoutName.value() = "auto";
+
+    contour::test::ScopedController first { app.manager() };
+    CHECK(app.manager().consumeDefaultLayout(first.controller));
+    auto* firstWindow = app.manager().model().window(first.id);
+    REQUIRE(firstWindow != nullptr);
+    CHECK(firstWindow->tabCount() == 1);
+
+    // A later window must NOT re-apply the layout (it gets its usual single default tab instead).
+    contour::test::ScopedController second { app.manager() };
+    CHECK_FALSE(app.manager().consumeDefaultLayout(second.controller));
+    auto* secondWindow = app.manager().model().window(second.id);
+    REQUIRE(secondWindow != nullptr);
+    CHECK(secondWindow->tabCount() == 0);
+}
+
+TEST_CASE("TerminalSessionManager: launchLayout births panes at the live window page size",
+          "[manager][layout]")
+{
+    // LaunchLayout appends tabs to a LIVE window: their grids/PTYs must be born at its running
+    // page size (like CreateNewTab/splits), not at the profile's configured default — or layout
+    // commands that read the terminal size at startup would see 80x25 in a maximized window.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    contour::test::ScopedController win { app.manager() };
+
+    auto* acting = app.manager().createSession(win.id);
+    REQUIRE(acting != nullptr);
+    auto const liveSize = acting->terminal().totalPageSize();
+
+    contour::config::Layout layout;
+    contour::config::LayoutTab tab;
+    tab.root.command = "echo a";
+    layout.tabs = { tab };
+    app.app().config().layouts.value()["work"] = layout;
+
+    auto const callsBefore = factory->requestedPageSizes.size();
+    app.manager().launchLayout("work", acting);
+
+    REQUIRE(factory->requestedPageSizes.size() == callsBefore + 1);
+    REQUIRE(factory->requestedPageSizes.back().has_value());
+    CHECK(*factory->requestedPageSizes.back() == liveSize);
 }

@@ -38,8 +38,11 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     auto const& profile = _app.config().profile(profileName.value_or(_app.profileName()));
 #if defined(VTPTY_LIBSSH2)
     // A layout pane's command overrides the profile's shell and should run locally, not open the
-    // SSH session the profile would otherwise use.
-    if (!commandOverride && !profile->ssh.value().hostname.empty())
+    // SSH session the profile would otherwise use. Only a REAL program override counts: a
+    // directory-only pane (engaged override, empty program) still runs the profile's shell and
+    // must honor its SSH configuration — silently opening a local shell instead would have the
+    // user typing on the wrong host.
+    if (!overridesShellProgram(commandOverride) && !profile->ssh.value().hostname.empty())
         return make_unique<vtpty::SshSession>(profile->ssh.value(),
                                               std::bind(&AppSessionFactory::requestSshHostkeyVerification,
                                                         this,
