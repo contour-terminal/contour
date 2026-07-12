@@ -423,9 +423,9 @@ TEST_CASE("emitLayoutsYaml: a fully-default tab terminates its line", "[layout][
 TEST_CASE("emitLayoutsYaml: control characters in a title round-trip", "[layout][save]")
 {
     // YAML folds a raw newline inside a double-quoted scalar into a plain space; the emitter must
-    // escape it so the title survives byte-for-byte. (The control characters are concatenated in
-    // rather than spelled inline, so no escape sequence abuts a word — check-spelling scans the
-    // SOURCE text, where "first\nsecond" reads as the token "nsecond".)
+    // escape it so the title survives byte-for-byte. The control characters are concatenated in
+    // rather than written inside a word-bearing literal, because the repository's spell check
+    // scans source text and would read an escape sequence and the word after it as one token.
     auto const title = std::string { "first" } + "\n" + "second" + "\t" + "third";
     config::LayoutTab tab;
     tab.title = title;
