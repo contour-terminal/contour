@@ -134,6 +134,12 @@ TEST_CASE("replaceVariables")
     CHECK("(Hello) World"sv == crispy::replaceVariables("${Hello} World", variable_collector()));
     CHECK("Hello, (World)!"sv == crispy::replaceVariables("Hello, ${World}!", variable_collector()));
     CHECK("(one), (two), (three)"sv == crispy::replaceVariables("${one}, ${two}, ${three}", variable_collector()));
+
+    // "$${" escapes expansion to a literal "${...}" (SaveLayout round-trip of literal ${...} text).
+    CHECK("${Hello}"sv == crispy::replaceVariables("$${Hello}", variable_collector()));
+    CHECK("${a} (b)"sv == crispy::replaceVariables("$${a} ${b}", variable_collector()));
+    CHECK("s/${VERSION}/1.0/"sv == crispy::replaceVariables("s/$${VERSION}/1.0/", variable_collector()));
+    CHECK("a $ b"sv == crispy::replaceVariables("a $ b", variable_collector())); // lone '$' untouched
     // clang-format on
 }
 
