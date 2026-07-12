@@ -4,7 +4,6 @@
 #include <text_shaper/font_locator.h>
 #include <text_shaper/open_shaper.h>
 
-#include <crispy/algorithm.h>
 #include <crispy/assert.h>
 #include <crispy/times.h>
 
@@ -504,6 +503,7 @@ namespace
     {
         shape_result glyphs;           ///< The shaped glyphs, in visual (left-to-right) order.
         vector<shaped_glyph_ref> refs; ///< Parallel to @c glyphs: cluster value and .notdef flag.
+        bool anyMissing = false;       ///< Whether the font came up short on any glyph at all.
     };
 
     /// Which spacing class a fallback pass accepts.
@@ -601,9 +601,11 @@ namespace
             gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0);
             gpos.presentation = presentation;
 
+            auto const missing = glyphMissing(gpos);
+            output.anyMissing = output.anyMissing || missing;
+
             output.glyphs.emplace_back(gpos);
-            output.refs.emplace_back(
-                shaped_glyph_ref { .cluster = info[i].cluster, .missing = info[i].codepoint == 0 });
+            output.refs.emplace_back(shaped_glyph_ref { .cluster = info[i].cluster, .missing = missing });
         }
 
         return output;
@@ -814,14 +816,15 @@ struct open_shaper::private_open_shaper // {{{
         return (fontInfo.ftFace->face_flags & FT_FACE_FLAG_FIXED_WIDTH) != 0;
     }
 
-    /// @return Whether a fallback font of the given spacing is admissible in @p cursor's pass.
+    /// @return Whether @p fallbackFontInfo is a font that @p pass accepts.
     [[nodiscard]] static bool admissibleInPass(HbFontInfo const& primaryFontInfo,
-                                               fallback_cursor const& cursor,
+                                               fallback_pass pass,
                                                HbFontInfo const& fallbackFontInfo) noexcept
     {
-        auto const prefersMonospace = primaryFontInfo.description.spacing == font_spacing::mono;
-        auto const wantsMonospace = prefersMonospace == (cursor.pass == fallback_pass::Preferred);
-        return isMonospace(fallbackFontInfo) == wantsMonospace;
+        auto const spacingMatchesPrimary =
+            isMonospace(fallbackFontInfo) == (primaryFontInfo.description.spacing == font_spacing::mono);
+
+        return spacingMatchesPrimary == (pass == fallback_pass::Preferred);
     }
 
     /// Resolves the next usable fallback font, advancing @p cursor past it.
@@ -848,6 +851,7 @@ struct open_shaper::private_open_shaper // {{{
                 continue;
             }
 
+            auto const pass = cursor.pass;
             auto const& fallbackSource = fontInfo.fallbacks[cursor.index];
             ++cursor.index;
 
@@ -856,10 +860,11 @@ struct open_shaper::private_open_shaper // {{{
             if (!fallbackKeyOpt.has_value())
                 continue;
 
-            Require(fontKeyToHbFontInfoMapping.count(*fallbackKeyOpt) == 1);
-            auto const& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(*fallbackKeyOpt);
+            auto const fallbackIterator = fontKeyToHbFontInfoMapping.find(*fallbackKeyOpt);
+            Require(fallbackIterator != fontKeyToHbFontInfoMapping.end());
+            auto const& fallbackFontInfo = fallbackIterator->second;
 
-            if (!admissibleInPass(fontInfo, cursor, fallbackFontInfo))
+            if (!admissibleInPass(fontInfo, pass, fallbackFontInfo))
                 continue;
 
             textShapingLog()(
@@ -897,8 +902,9 @@ struct open_shaper::private_open_shaper // {{{
                               std::span<unsigned const> clusters,
                               shape_result& result)
     {
-        Require(fontKeyToHbFontInfoMapping.count(shapingFont) == 1);
-        auto const& shapingFontInfo = fontKeyToHbFontInfoMapping.at(shapingFont);
+        auto const fontInfoIterator = fontKeyToHbFontInfoMapping.find(shapingFont);
+        Require(fontInfoIterator != fontKeyToHbFontInfoMapping.end());
+        auto const& shapingFontInfo = fontInfoIterator->second;
 
         auto const shaped = shapeWithFont(shapingFont,
                                           shapingFontInfo,
@@ -911,13 +917,15 @@ struct open_shaper::private_open_shaper // {{{
         if (shaped.glyphs.empty())
             return true;
 
-        // Without a trustworthy mapping from glyphs back to codepoints the run may not be split, so it is
-        // offered to a fallback font whole -- the conservative answer, and what every run used to get.
-        auto const groups = clusterGroups(shaped.refs, clusters);
-        auto const segments = groups.has_value()
-                                  ? mergeAdjacentMissing(*groups)
-                                  : vector<cluster_group> { indivisibleGroup(shaped.refs, clusters.size()) };
+        // The overwhelmingly common case: this font renders the whole run. Take the glyphs as they are and
+        // do not pay for the segmentation at all.
+        if (!shaped.anyMissing)
+        {
+            result.insert(result.end(), shaped.glyphs.begin(), shaped.glyphs.end());
+            return true;
+        }
 
+        auto const segments = fallbackSegments(shaped.refs, clusters);
         auto allResolved = true;
 
         for (cluster_group const& segment: segments)
@@ -1058,43 +1066,31 @@ font_metrics open_shaper::metrics(font_key key) const
 
 optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
 {
-    Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
-    auto& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
+    auto const fontInfoIterator = _d->fontKeyToHbFontInfoMapping.find(font);
+    Require(fontInfoIterator != _d->fontKeyToHbFontInfoMapping.end());
+    auto& fontInfo = fontInfoIterator->second;
 
-    glyph_index glyphIndex { FT_Get_Char_Index(fontInfo.ftFace.get(), codepoint) };
-    if (!glyphIndex.value)
+    // The font the glyph is finally found in, which need not be the one that was asked for.
+    auto resolvedFont = font;
+    auto glyphIndex = glyph_index { FT_Get_Char_Index(fontInfo.ftFace.get(), codepoint) };
+
+    auto cursor = fallback_cursor {};
+    while (!glyphIndex.value)
     {
-        // Try fallbacks with on-demand extension from allFallbacks.
-        // NB: while loop because extendFallbacks() may grow the list during iteration.
-        auto fallbackIndex = size_t { 0 };
-        while (fallbackIndex < fontInfo.fallbacks.size())
-        {
-            auto const& fallbackFont = fontInfo.fallbacks[fallbackIndex];
-            auto fallbackKeyOpt =
-                _d->getOrCreateKeyForFont(fallbackFont, fontInfo.size, fontInfo.description.weight);
-            if (!fallbackKeyOpt.has_value())
-            {
-                ++fallbackIndex;
-                continue;
-            }
-            Require(_d->fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
-            auto const& fallbackFontInfo = _d->fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
-            glyphIndex = glyph_index { FT_Get_Char_Index(fallbackFontInfo.ftFace.get(), codepoint) };
-            if (glyphIndex.value)
-                break;
+        auto const fallbackKeyOpt = _d->nextFallbackFont(fontInfo, cursor);
+        if (!fallbackKeyOpt.has_value())
+            return nullopt;
 
-            ++fallbackIndex;
-
-            // Extend fallbacks on demand when we've exhausted the current list.
-            if (fallbackIndex == fontInfo.fallbacks.size())
-                private_open_shaper::extendFallbacks(fontInfo);
-        }
+        auto const& fallbackFontInfo = _d->fontKeyToHbFontInfoMapping.at(*fallbackKeyOpt);
+        glyphIndex = glyph_index { FT_Get_Char_Index(fallbackFontInfo.ftFace.get(), codepoint) };
+        resolvedFont = *fallbackKeyOpt;
     }
-    if (!glyphIndex.value)
-        return nullopt;
 
     glyph_position gpos {};
-    gpos.glyph = glyph_key { .size = fontInfo.size, .font = font, .index = glyphIndex };
+
+    // A glyph index means nothing outside the face it came from, so the key has to name that face rather
+    // than the font that was asked for.
+    gpos.glyph = glyph_key { .size = fontInfo.size, .font = resolvedFont, .index = glyphIndex };
 #if defined(GLYPH_KEY_DEBUG)
     gpos.glyph.text = std::u32string(1, codepoint);
 #endif

@@ -29,13 +29,9 @@ struct cluster_group
 
     /// @return Whether this group maps to no input codepoints at all.
     [[nodiscard]] constexpr bool empty() const noexcept { return codepointBegin >= codepointEnd; }
-};
 
-constexpr bool operator==(cluster_group const& a, cluster_group const& b) noexcept
-{
-    return a.glyphBegin == b.glyphBegin && a.glyphEnd == b.glyphEnd && a.codepointBegin == b.codepointBegin
-           && a.codepointEnd == b.codepointEnd && a.missing == b.missing;
-}
+    [[nodiscard]] constexpr bool operator==(cluster_group const&) const noexcept = default;
+};
 
 /// Segments a shaped run into cluster groups, mapping each group back to the input codepoints that
 /// produced it.
@@ -67,13 +63,16 @@ constexpr bool operator==(cluster_group const& a, cluster_group const& b) noexce
     if (glyphs.empty())
         return groups;
 
-    // inputClusters is non-decreasing, so a cluster's first codepoint is a binary search away.
-    auto const codepointIndexOf = [inputClusters](unsigned cluster) noexcept -> std::size_t {
-        auto const it = std::ranges::lower_bound(inputClusters, cluster);
-        return static_cast<std::size_t>(std::ranges::distance(inputClusters.begin(), it));
-    };
-
     groups.reserve(glyphs.size());
+
+    // Both sequences are non-decreasing, so one forward walk over the codepoints serves every group: the
+    // codepoints a group owns end exactly where the next group's cluster begins.
+    auto codepointCursor = std::size_t { 0 };
+    auto const advanceTo = [&codepointCursor, inputClusters](unsigned cluster) noexcept {
+        while (codepointCursor < inputClusters.size() && inputClusters[codepointCursor] < cluster)
+            ++codepointCursor;
+        return codepointCursor;
+    };
 
     for (auto glyphIndex = std::size_t { 0 }; glyphIndex < glyphs.size();)
     {
@@ -92,12 +91,13 @@ constexpr bool operator==(cluster_group const& a, cluster_group const& b) noexce
             ++glyphEnd;
         }
 
+        auto const codepointBegin = advanceTo(cluster);
         auto const codepointEnd =
-            glyphEnd < glyphs.size() ? codepointIndexOf(glyphs[glyphEnd].cluster) : inputClusters.size();
+            glyphEnd < glyphs.size() ? advanceTo(glyphs[glyphEnd].cluster) : inputClusters.size();
 
         groups.emplace_back(cluster_group { .glyphBegin = glyphIndex,
                                             .glyphEnd = glyphEnd,
-                                            .codepointBegin = codepointIndexOf(cluster),
+                                            .codepointBegin = codepointBegin,
                                             .codepointEnd = codepointEnd,
                                             .missing = missing });
         glyphIndex = glyphEnd;
@@ -166,6 +166,25 @@ constexpr bool operator==(cluster_group const& a, cluster_group const& b) noexce
     }
 
     return segments;
+}
+
+/// Divides a shaped run into the segments font fallback works on.
+///
+/// Covered segments are kept as they are; each maximal stretch the shaping font could not render becomes
+/// one segment, to be offered to a fallback font whole. A run whose clusters cannot be trusted to be
+/// monotone yields a single indivisible segment -- the conservative answer, and what every run used to
+/// get before fallback learned to split them.
+///
+/// @param glyphs   The shaped glyphs of the run, in visual (left-to-right) order.
+/// @param clusters The per-codepoint cluster values the run was shaped with.
+/// @return The segments, in order, covering the run end to end.
+[[nodiscard]] inline std::vector<cluster_group> fallbackSegments(std::span<shaped_glyph_ref const> glyphs,
+                                                                 std::span<unsigned const> clusters)
+{
+    if (auto const groups = clusterGroups(glyphs, clusters))
+        return mergeAdjacentMissing(*groups);
+
+    return { indivisibleGroup(glyphs, clusters.size()) };
 }
 
 } // namespace text

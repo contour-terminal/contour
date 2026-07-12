@@ -601,6 +601,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     using vtbackend::LineFlag;
 
     auto const advanceScale = lineFlags.test(LineFlag::DoubleWidth) ? 2 : 1;
+    auto const cellWidth = unbox<int>(_gridMetrics.cellSize.width);
 
     for (auto const& glyphPosition: glyphPositions)
     {
@@ -615,8 +616,10 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                          pen1);
 
             renderRasterizedGlyph(pen1, color, attributesCopy);
-            auto const cellWidth = unbox<int>(_gridMetrics.cellSize.width);
-            pen.x += advanceToCells(glyphPosition.advance.x, cellWidth) * cellWidth * advanceScale;
+
+            // Direct mapping only ever covers printable US-ASCII of the primary font, which occupies
+            // exactly one cell. The advance is known, so the font is not consulted for it.
+            pen.x += cellWidth * advanceScale;
             continue;
         }
 
@@ -675,7 +678,11 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
             }
         }
 
-        auto const cellWidth = unbox<int>(_gridMetrics.cellSize.width);
+        // TODO: The font's advance is a stand-in for the datum the pipeline actually has and then drops:
+        // the glyph's cluster, i.e. which cell it belongs to. Carrying the cluster on glyph_position would
+        // let the pen step by the exact cell delta -- zero for a combining mark, N for a ligature spanning
+        // N cells -- with no rounding at all. That awaits TextClusterGrouper's east-asian-width fixme,
+        // since clusters presently count cells appended rather than columns occupied.
         pen.x += advanceToCells(glyphPosition.advance.x, cellWidth) * cellWidth * advanceScale;
     }
 }

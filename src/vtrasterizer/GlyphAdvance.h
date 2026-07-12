@@ -23,6 +23,8 @@ namespace vtrasterizer
     if (advanceX == 0 || cellWidth <= 0)
         return 0;
 
+    // Not std::abs: it is not constexpr on every toolchain we build with, and this must fold at compile
+    // time.
     auto const magnitude = advanceX < 0 ? -advanceX : advanceX;
     auto const cells = std::max(1, (magnitude + (cellWidth / 2)) / cellWidth);
 
