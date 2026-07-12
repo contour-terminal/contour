@@ -256,7 +256,9 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout refuses to overwrite an unre
 
     auto const layoutsPath = std::filesystem::path(configDir.path().toStdString()) / "layouts.yml";
     auto const garbage = std::string { "layouts:\n  broken: [unterminated\n" };
-    std::ofstream(layoutsPath) << garbage;
+    // Binary mode on BOTH sides: a text-mode write translates '\n' to "\r\n" on Windows, which the
+    // binary read below would then report as a byte-for-byte difference the save never made.
+    std::ofstream(layoutsPath, std::ios::binary) << garbage;
 
     contour::config::Layout layout;
     contour::config::LayoutTab tab;
