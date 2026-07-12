@@ -3,6 +3,7 @@ set(_header_files
     BoxDrawingRenderer.h
     CursorRenderer.h
     DecorationRenderer.h
+    GlyphAdvance.h
     GridMetrics.h
     ImageRenderer.h
     Pixmap.h
@@ -31,6 +32,7 @@ set(_source_files
 set(_test_files
     TextClusterGrouper_test.cpp
     BoxDrawingRenderer_test.cpp
+    GlyphAdvance_test.cpp
     TextRenderer_test.cpp
 )
 
