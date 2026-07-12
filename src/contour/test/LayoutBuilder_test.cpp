@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Config.h>
 #include <contour/LayoutBuilder.h>
-
-#include <QtCore/QTemporaryDir>
+#include <contour/test/GuiTestFixtures.h>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -21,25 +20,11 @@
 
 using namespace contour;
 using contour::config::LayoutPane;
+using contour::test::loadConfigFromYaml;
 using namespace std::string_view_literals;
 
 namespace
 {
-
-/// Writes @p yaml to a fresh `contour.yml` inside a QTemporaryDir and loads it through the
-/// production config file loader. Mirrors Config_test.cpp's `loadFromYaml` helper.
-[[nodiscard]] contour::config::Config loadFromYamlString(std::string_view yaml)
-{
-    QTemporaryDir dir;
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
-    {
-        auto out = std::ofstream(path);
-        out << yaml;
-    }
-    auto config = contour::config::Config {};
-    contour::config::loadConfigFromFile(config, path);
-    return config;
-}
 
 LayoutPane leaf(std::string cmd, double ratio = 1.0)
 {
@@ -172,6 +157,21 @@ TEST_CASE("realizeLayoutTab: nested split produces the right tree and commands",
     CHECK(h.commandBySession.at(tail->second()->session().value) == "logs");
 }
 
+TEST_CASE("realizeLayoutTab: an unknown window is refused before any session is seeded", "[layout][realize]")
+{
+    // Seeding spawns a REAL backing session, so the window must be validated first: seeding and
+    // then failing to create the tab would orphan that session (it would outlive every reference
+    // to it, still holding its PTY).
+    RealizeHarness h;
+
+    config::LayoutTab tab;
+    tab.root.command = "nvim";
+
+    auto* modelTab = realizeLayoutTab(h.model, vtmux::WindowId { 4711 }, tab, h.seeder());
+    CHECK(modelTab == nullptr);
+    CHECK(h.commandBySession.empty()); // nothing was seeded
+}
+
 TEST_CASE("LayoutBuilder: leftmostLeaf descends first children", "[layout][builder]")
 {
     auto tree = split(vtmux::SplitState::Vertical,
@@ -189,18 +189,17 @@ TEST_CASE("LayoutBuilder: ratioForFirst splits weight of child0 vs the rest", "[
     CHECK(ratioForFirst(weighted) == Catch::Approx(0.6));
 }
 
-TEST_CASE("LayoutBuilder: tailGroup drops the first child", "[layout][builder]")
+TEST_CASE("LayoutBuilder: ratioForFirst weighs a tail group of siblings", "[layout][builder]")
 {
-    auto three = split(vtmux::SplitState::Vertical, { leaf("a"), leaf("b"), leaf("c") });
-    auto tail = tailGroup(three);
-    REQUIRE_FALSE(tail.isLeaf());
-    REQUIRE(tail.children.size() == 2);
-    CHECK(*tail.children[0].command == "b");
+    // Realization splits child0 off, then recurses on the REST of the same children (a subspan).
+    // Each step's ratio must be the first child's share of the siblings still to be placed.
+    auto three = split(vtmux::SplitState::Vertical, { leaf("a", 0.5), leaf("b", 0.3), leaf("c", 0.2) });
+    auto const children = std::span<config::LayoutPane const> { three.children };
 
-    auto two = split(vtmux::SplitState::Vertical, { leaf("a"), leaf("b") });
-    auto tail2 = tailGroup(two);
-    CHECK(tail2.isLeaf()); // single remaining child collapses to that leaf
-    CHECK(*tail2.command == "b");
+    CHECK(ratioForFirst(children) == Catch::Approx(0.5));            // a | (b, c)
+    CHECK(ratioForFirst(children.subspan(1)) == Catch::Approx(0.6)); // b | c, within the 0.5 left
+    CHECK(ratioForFirst(children.subspan(2)) == Catch::Approx(1.0)); // c alone
+    CHECK(ratioForFirst(std::span<config::LayoutPane const> {}) == Catch::Approx(0.5)); // no children
 }
 
 TEST_CASE("emitLayoutsYaml: round-trips a leaf + bare + split layout through the parser",
@@ -240,7 +239,7 @@ TEST_CASE("emitLayoutsYaml: round-trips a leaf + bare + split layout through the
     std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
     auto const yaml = emitLayoutsYaml(layouts);
 
-    auto const cfg = loadFromYamlString(yaml);
+    auto const cfg = loadConfigFromYaml(yaml);
     REQUIRE(cfg.layouts.value().contains("work"));
     auto const& parsed = cfg.layouts.value().at("work");
     REQUIRE(parsed.tabs.size() == 3);
@@ -294,7 +293,7 @@ TEST_CASE("emitLayoutsYaml: escapes embedded double-quotes in a command so it ro
     std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
     auto const yaml = emitLayoutsYaml(layouts);
 
-    auto const cfg = loadFromYamlString(yaml);
+    auto const cfg = loadConfigFromYaml(yaml);
     REQUIRE(cfg.layouts.value().contains("work"));
     auto const& parsed = cfg.layouts.value().at("work");
     REQUIRE(parsed.tabs.size() == 1);
@@ -327,12 +326,151 @@ TEST_CASE("emitLayoutsYaml: round-trips an asymmetric split ratio through save",
     std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
     auto const yaml = emitLayoutsYaml(layouts);
 
-    auto const cfg = loadFromYamlString(yaml);
+    auto const cfg = loadConfigFromYaml(yaml);
     REQUIRE(cfg.layouts.value().contains("work"));
     auto const& parsedRoot = cfg.layouts.value().at("work").tabs.at(0).root;
     REQUIRE_FALSE(parsedRoot.isLeaf());
     REQUIRE(parsedRoot.children.size() == 2);
     CHECK(ratioForFirst(parsedRoot) == Catch::Approx(0.7));
+}
+
+TEST_CASE("LayoutBuilder: an explicit ratio is a fraction; unspecified siblings share the rest",
+          "[layout][builder]")
+{
+    // The documented example: `ratio: 0.6` next to an unspecified sibling means a 60/40 split —
+    // not 0.6 weighted against an implicit default weight.
+    auto const documented = split(vtmux::SplitState::Vertical, { leaf("dev", 0.6), leaf("htop", 0.0) });
+    auto asUnset = documented;
+    asUnset.children[1].ratio.reset();
+    CHECK(ratioForFirst(asUnset) == Catch::Approx(0.6));
+
+    // All-unspecified children share equally.
+    auto equal = split(vtmux::SplitState::Vertical, { leaf("a"), leaf("b") });
+    for (auto& child: equal.children)
+        child.ratio.reset();
+    CHECK(ratioForFirst(equal) == Catch::Approx(0.5));
+
+    // Degenerate: the specified fractions over-commit the space; the unspecified sibling still
+    // gets a minimal share instead of collapsing to zero (and no division blows up).
+    auto overCommitted = split(vtmux::SplitState::Vertical, { leaf("a", 1.0), leaf("b", 0.0) });
+    overCommitted.children[1].ratio.reset();
+    CHECK(ratioForFirst(overCommitted) > 0.9);
+    CHECK(ratioForFirst(overCommitted) < 1.0);
+}
+
+TEST_CASE("emitLayoutsYaml: a YAML-significant layout name is quoted and round-trips", "[layout][save]")
+{
+    // The layout name is free-form user input (the SaveLayout action's `name:`). Emitted raw as
+    // a map key, "foo: bar" would corrupt the whole document and destroy every OTHER saved
+    // layout on the next load.
+    config::LayoutTab tab;
+    tab.root.command = std::string { "top" };
+    config::Layout work;
+    work.tabs = { tab };
+
+    config::LayoutTab otherTab;
+    otherTab.root.command = std::string { "bash" };
+    config::Layout other;
+    other.tabs = { otherTab };
+
+    std::unordered_map<std::string, config::Layout> layouts { { "foo: bar", work }, { "plain", other } };
+    auto const yaml = emitLayoutsYaml(layouts);
+
+    auto const cfg = loadConfigFromYaml(yaml);
+    REQUIRE(cfg.layouts.value().contains("foo: bar"));
+    CHECK(*cfg.layouts.value().at("foo: bar").tabs.at(0).root.command == "top");
+    // The innocent sibling survives.
+    REQUIRE(cfg.layouts.value().contains("plain"));
+    CHECK(*cfg.layouts.value().at("plain").tabs.at(0).root.command == "bash");
+}
+
+TEST_CASE("emitLayoutsYaml: a fully-default tab terminates its line", "[layout][save]")
+{
+    // A tab with nothing to say (default shell, no title/color/profile) emits a bare dash; that
+    // dash must not swallow the FOLLOWING tab (or the next layout) onto its own line.
+    config::Layout work;
+    work.tabs.emplace_back(); // fully-default tab
+    config::LayoutTab second;
+    second.title = "real";
+    second.root.command = std::string { "top" };
+    work.tabs.push_back(second);
+
+    std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
+    auto const yaml = emitLayoutsYaml(layouts);
+
+    auto const cfg = loadConfigFromYaml(yaml);
+    REQUIRE(cfg.layouts.value().contains("work"));
+    auto const& parsed = cfg.layouts.value().at("work");
+    REQUIRE(parsed.tabs.size() == 2);
+    CHECK_FALSE(parsed.tabs[0].root.command.has_value());
+    CHECK(parsed.tabs[1].title == "real");
+    CHECK(*parsed.tabs[1].root.command == "top");
+
+    // Same for a default child pane inside a split.
+    config::LayoutTab splitTab;
+    splitTab.root.orientation = vtmux::SplitState::Vertical;
+    splitTab.root.children = { config::LayoutPane {}, config::LayoutPane {} };
+    splitTab.root.children[1].command = std::string { "htop" };
+    config::Layout dev;
+    dev.tabs = { splitTab };
+    auto const cfg2 = loadConfigFromYaml(emitLayoutsYaml({ { "dev", dev } }));
+    auto const& parsedRoot = cfg2.layouts.value().at("dev").tabs.at(0).root;
+    REQUIRE_FALSE(parsedRoot.isLeaf());
+    REQUIRE(parsedRoot.children.size() == 2);
+    CHECK(*parsedRoot.children[1].command == "htop");
+}
+
+TEST_CASE("emitLayoutsYaml: control characters in a title round-trip", "[layout][save]")
+{
+    // YAML folds a raw newline inside a double-quoted scalar into a plain space; the emitter must
+    // escape it so the title survives byte-for-byte.
+    config::LayoutTab tab;
+    tab.title = std::string { "line1\nline2\ttabbed" };
+    tab.root.command = std::string { "top" };
+    config::Layout work;
+    work.tabs = { tab };
+
+    auto const cfg = loadConfigFromYaml(emitLayoutsYaml({ { "work", work } }));
+    REQUIRE(cfg.layouts.value().contains("work"));
+    CHECK(*cfg.layouts.value().at("work").tabs.at(0).title == "line1\nline2\ttabbed");
+}
+
+TEST_CASE("emitLayoutsYaml: literal ${...} text survives the save/load round trip", "[layout][save]")
+{
+    // The parser expands ${NAME} from the environment; a saved command containing literal ${...}
+    // (sed or template tooling) must be escaped on emit so it is NOT re-expanded on load.
+    config::LayoutTab tab;
+    tab.root.command = std::string { "sed" };
+    tab.root.arguments = { "s/${VERSION}/1.0/" };
+    config::Layout work;
+    work.tabs = { tab };
+
+    auto const cfg = loadConfigFromYaml(emitLayoutsYaml({ { "work", work } }));
+    auto const& parsed = cfg.layouts.value().at("work").tabs.at(0).root;
+    REQUIRE(parsed.command.has_value());
+    CHECK(*parsed.command == "sed");
+    REQUIRE(parsed.arguments.size() == 1);
+    CHECK(parsed.arguments[0] == "s/${VERSION}/1.0/");
+}
+
+TEST_CASE("emitLayoutsYaml: an engaged-but-empty command is not emitted", "[layout][save]")
+{
+    // A directory-only pane records a launched command with an EMPTY program (it runs the
+    // profile's default shell); emitting it would produce a junk `command: "''"` entry.
+    config::LayoutTab tab;
+    tab.root.command = std::string {};
+    tab.root.directory = std::filesystem::path { "/tmp" };
+    config::Layout work;
+    work.tabs = { tab };
+
+    auto const yaml = emitLayoutsYaml({ { "work", work } });
+    CHECK(yaml.find("command:") == std::string::npos);
+
+    auto const cfg = loadConfigFromYaml(yaml);
+    auto const& parsed = cfg.layouts.value().at("work").tabs.at(0).root;
+    CHECK_FALSE(parsed.command.has_value());
+    REQUIRE(parsed.directory.has_value());
+    CHECK(parsed.directory->generic_string() == "/tmp");
 }
 
 TEST_CASE("serializeTab: reproduces the pane tree with resolved commands", "[layout][save]")
@@ -345,7 +483,7 @@ TEST_CASE("serializeTab: reproduces the pane tree with resolved commands", "[lay
         return p;
     };
     config::LayoutTab spec;
-    spec.title = "srv";
+    spec.title = "server";
     spec.root.orientation = vtmux::SplitState::Vertical;
     spec.root.children = { mk("dev"), mk("logs") };
     auto* tab = realizeLayoutTab(h.model, win->id(), spec, h.seeder());
@@ -363,7 +501,7 @@ TEST_CASE("serializeTab: reproduces the pane tree with resolved commands", "[lay
                                                           : std::nullopt };
     };
     auto const out = serializeTab(*tab, resolve);
-    CHECK(out.title == "srv");
+    CHECK(out.title == "server");
     REQUIRE_FALSE(out.root.isLeaf());
     CHECK(out.root.orientation == vtmux::SplitState::Vertical);
     REQUIRE(out.root.children.size() == 2);

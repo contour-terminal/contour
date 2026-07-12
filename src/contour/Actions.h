@@ -128,8 +128,8 @@ struct MovePaneDown{};      // re-parent the active pane past its lower neighbor
 struct ToggleSplitOrientation{}; // flip the active pane's split axis (H<->V)
 struct TogglePaneZoom{};    // give the active pane the whole tab area (hiding its siblings), and back
 struct ResizePane{ Direction direction; int percent = 5; }; // grow/shrink the active pane
-struct LaunchLayout{ std::string name; };
-struct SaveLayout{ std::string name; };
+struct LaunchLayout{ std::string name; }; // open the named layout's tabs in the current window
+struct SaveLayout{ std::string name; };   // save the current window's tabs/panes as the named layout
 // clang-format on
 
 using Action = std::variant<CancelSelection,

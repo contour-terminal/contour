@@ -703,6 +703,9 @@ constexpr StringLiteral LayoutsConfig {
     "\n"
 };
 constexpr StringLiteral LayoutsWeb { "Named sets of tabs opened together." };
+constexpr StringLiteral DefaultLayoutWeb {
+    "Name of the layout to open at startup, instead of a single default tab."
+};
 
 constexpr StringLiteral WordDelimitersConfig { "{comment} Word delimiters when selecting word-wise.\n"
                                                "word_delimiters: \"{}\"\n"
@@ -2156,7 +2159,7 @@ using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
 using Profiles = DocumentationEntry<ProfilesConfig, ProfilesWeb>;
 using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;
 using Layouts = DocumentationEntry<LayoutsConfig, LayoutsWeb>;
-using DefaultLayout = DocumentationEntry<StringLiteral { "default_layout: {}\n" }, LayoutsWeb>;
+using DefaultLayout = DocumentationEntry<StringLiteral { "default_layout: {}\n" }, DefaultLayoutWeb>;
 using WordDelimiters = DocumentationEntry<WordDelimitersConfig, WordDelimitersWeb>;
 using ExtendedWordDelimiters = DocumentationEntry<ExtendedWordDelimitersConfig, ExtendedWordDelimitersWeb>;
 using BypassMouseProtocolModifiers =

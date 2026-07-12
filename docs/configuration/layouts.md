@@ -24,7 +24,7 @@ layouts:
         profile: "dark-big"
 
       - title: "claude"
-        color: "green"
+        color: "#00af5f"
         directory: "~/proj/foo"
         command: "claude"
 
@@ -55,7 +55,7 @@ tab (a `split` node). A tab uses leaf fields *or* `split`, not both.
 Option        | Description
 --------------|--------------------------------------------------------------------
 `title`       | Optional. Seeds the tab's name.
-`color`       | Optional. Hex (e.g. `'#d75f00'`) or a named color; sets the tab's user color.
+`color`       | Optional. Hex in `'#RRGGBB'` form (e.g. `'#d75f00'`); sets the tab's user color.
 `directory`   | Optional working directory for the tab. Falls back to the profile's configured directory when omitted.
 `command`     | Optional. Replaces the shell — the program to run in the pane. May be a full command line (see [Command lines](#command-lines) below). When omitted, the effective profile's `shell` is used.
 `arguments`   | Optional list of extra arguments, appended after any arguments already given in `command`.
@@ -79,8 +79,9 @@ Splitting rules:
 - Quote a run to keep spaces inside one token: double quotes (`"..."`, allowing `\"` and `\\`) or single quotes (`'...'`, literal). A backslash outside quotes escapes the next character.
 - If the **program's own path** contains spaces, quote it so it is not split — e.g. `command: '"/opt/My App/bin/foo" --flag'`.
 - Any entries in a separate `arguments:` list are appended **after** the arguments parsed from `command`.
+- `${NAME}` inside `command` or `arguments` expands to the environment variable `NAME`. To pass a literal `${...}` through to the program (e.g. for template tooling), escape it as `$${...}`.
 
-`SaveLayout` (below) writes the program and its arguments back out in the split form (`command:` for the program, `arguments:` for the rest), quoting a space-containing program path so it round-trips.
+`SaveLayout` (below) writes the program and its arguments back out in the split form (`command:` for the program, `arguments:` for the rest), quoting a space-containing program path — and escaping any literal `${` — so everything round-trips.
 
 ### Split panes
 
@@ -88,9 +89,9 @@ A `split` node replaces the leaf fields (`command`, `directory`, ...) with:
 
 Option         | Description
 ---------------|--------------------------------------------------------------------
-`orientation`  | `vertical` or `horizontal`. `vertical` arranges panes side by side; `horizontal` stacks them.
+`orientation`  | `vertical` or `horizontal` (case-insensitive). `vertical` arranges panes side by side; `horizontal` stacks them.
 `panes`        | A list of child panes. Each child is either a leaf (with `command`, `directory`, `arguments`, `profile`, `ratio`) or another `split` node, nested recursively.
-`ratio`        | Optional, set on a child pane/split. The relative size weight of that child within its parent split.
+`ratio`        | Optional, set on a child pane/split. The fraction of the parent split's space (between 0 and 1) that child occupies; children without a `ratio` share the remaining space equally. In the example above, `ratio: 0.6` gives the first pane 60% and leaves 40% for its unspecified sibling.
 
 Splits can be nested arbitrarily deep, as shown in the `servers` tab of the example
 above: a vertical split whose second pane is itself a horizontal split.

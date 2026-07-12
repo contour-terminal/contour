@@ -232,7 +232,10 @@ layouts:
     REQUIRE(root.children[0].arguments.size() == 2);
     CHECK(root.children[0].arguments[0] == "run");
     CHECK(root.children[0].arguments[1] == "dev");
-    CHECK(root.children[0].ratio == Catch::Approx(0.6));
+    REQUIRE(root.children[0].ratio.has_value());
+    CHECK(*root.children[0].ratio == Catch::Approx(0.6));
+    // The unspecified sibling stays unset (it shares the remaining space at realization time).
+    CHECK_FALSE(root.children[1].ratio.has_value());
 
     auto const& nested = root.children[1];
     REQUIRE_FALSE(nested.isLeaf());
@@ -312,6 +315,178 @@ layouts:
     // Sibling file wins the collision.
     CHECK(*layouts.at("work").tabs.at(0).root.command == "file-shell");
     CHECK(*layouts.at("extra").tabs.at(0).root.command == "zsh");
+}
+
+TEST_CASE("Config: a malformed layout field is skipped, not fatal to the rest of the config",
+          "[config][layout]")
+{
+    // A single typo in a layout must not unwind the whole config load: entries parsed AFTER
+    // `layouts` (most importantly input_mapping) and sibling layouts must still land.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    broken:
+        tabs:
+            - command: "top"
+              ratio: half
+    fine:
+        tabs:
+            - command: "bash"
+input_mapping:
+    - { mods: [Control], key: F5, action: LaunchLayout, name: fine }
+)"sv);
+
+    auto const& layouts = config.layouts.value();
+    // The broken layout still parses; only its malformed ratio is dropped.
+    REQUIRE(layouts.contains("broken"));
+    REQUIRE(layouts.at("broken").tabs.size() == 1);
+    CHECK(*layouts.at("broken").tabs.at(0).root.command == "top");
+    CHECK_FALSE(layouts.at("broken").tabs.at(0).root.ratio.has_value());
+    REQUIRE(layouts.contains("fine"));
+
+    // input_mapping (loaded after layouts) must not have been skipped: the custom binding is
+    // present in the key mappings.
+    auto const& bindings = config.inputMappings.value().keyMappings;
+    auto const hasLaunchLayoutBinding = std::ranges::any_of(bindings, [](auto const& mapping) {
+        auto const* launch = std::get_if<contour::actions::LaunchLayout>(&mapping.binding.at(0));
+        return launch != nullptr && launch->name == "fine";
+    });
+    CHECK(hasLaunchLayoutBinding);
+}
+
+TEST_CASE("Config: an out-of-range or non-numeric ratio is ignored", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - split:
+                orientation: vertical
+                panes:
+                    - { command: "a", ratio: 1.5 }
+                    - { command: "b", ratio: 0.4 }
+)"sv);
+    auto const& root = config.layouts.value().at("work").tabs.at(0).root;
+    REQUIRE(root.children.size() == 2);
+    CHECK_FALSE(root.children[0].ratio.has_value()); // 1.5 is not a fraction of the split
+    REQUIRE(root.children[1].ratio.has_value());
+    CHECK(*root.children[1].ratio == Catch::Approx(0.4));
+}
+
+TEST_CASE("Config: duplicate layout names resolve to the later definition", "[config][layout]")
+{
+    // yaml-cpp yields duplicate map keys once each; a naive by-name re-lookup would parse the
+    // FIRST definition twice, silently doubling its tabs.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - command: "first"
+            - command: "second"
+    work:
+        tabs:
+            - command: "winner"
+)"sv);
+    auto const& layouts = config.layouts.value();
+    REQUIRE(layouts.contains("work"));
+    REQUIRE(layouts.at("work").tabs.size() == 1);
+    CHECK(*layouts.at("work").tabs.at(0).root.command == "winner");
+}
+
+TEST_CASE("Config: split orientation parses case-insensitively", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - split:
+                orientation: Horizontal
+                panes:
+                    - command: "a"
+                    - command: "b"
+            - split:
+                orientation: bogus
+                panes:
+                    - command: "c"
+                    - command: "d"
+)"sv);
+    auto const& tabs = config.layouts.value().at("work").tabs;
+    REQUIRE(tabs.size() == 2);
+    // Natural capitalization must work like every other enum-ish config value.
+    CHECK(tabs.at(0).root.orientation == vtmux::SplitState::Horizontal);
+    // An unknown value falls back to the vertical default (with a log line, not silently).
+    CHECK(tabs.at(1).root.orientation == vtmux::SplitState::Vertical);
+}
+
+TEST_CASE("Config: an invalid tab color is ignored instead of turning black", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - title: "named"
+              color: "green"
+              command: "a"
+            - title: "hex"
+              color: "#00ff00"
+              command: "b"
+)"sv);
+    auto const& tabs = config.layouts.value().at("work").tabs;
+    REQUIRE(tabs.size() == 2);
+    // RGBColor's string form only understands '#RRGGBB'; "green" would silently parse as black.
+    CHECK_FALSE(tabs.at(0).color.has_value());
+    REQUIRE(tabs.at(1).color.has_value());
+    CHECK(*tabs.at(1).color == vtbackend::RGBColor { "#00ff00" });
+}
+
+TEST_CASE("Config: $${ escapes environment-variable expansion in layout commands", "[config][layout]")
+{
+    // A saved command containing literal ${...} text (sed or template tooling) is emitted
+    // as $${...} by SaveLayout and must parse back to the literal text, not expand.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - command: "sed"
+              arguments: ["s/$${VERSION}/1.0/"]
+)"sv);
+    auto const& pane = config.layouts.value().at("work").tabs.at(0).root;
+    REQUIRE(pane.arguments.size() == 1);
+    CHECK(pane.arguments[0] == "s/${VERSION}/1.0/");
+}
+
+TEST_CASE("Config: a ratio on a nested split node parses", "[config][layout]")
+{
+    // The emitter writes `ratio:` on split children too (a nested split is itself a child of its
+    // parent split); the parser must read it back rather than silently dropping it.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - split:
+                orientation: vertical
+                panes:
+                    - { command: "left", ratio: 0.7 }
+                    - ratio: 0.3
+                      split:
+                        orientation: horizontal
+                        panes:
+                            - command: "top"
+                            - command: "bottom"
+)"sv);
+    auto const& root = config.layouts.value().at("work").tabs.at(0).root;
+    REQUIRE(root.children.size() == 2);
+    REQUIRE(root.children[0].ratio.has_value());
+    CHECK(*root.children[0].ratio == Catch::Approx(0.7));
+    REQUIRE_FALSE(root.children[1].isLeaf());
+    REQUIRE(root.children[1].ratio.has_value());
+    CHECK(*root.children[1].ratio == Catch::Approx(0.3));
 }
 
 TEST_CASE("Config: color scheme with background image loads from YAML", "[config]")

@@ -7,6 +7,7 @@ ABCXZEFGHI
 ACluster
 actionlint
 affordance
+agentic
 argless
 AWriter
 axb
@@ -27,6 +28,7 @@ CCCCC
 CCCCCC
 CDEFGH
 circleval
+claude
 COLSx
 contentscale
 copydoc
@@ -74,6 +76,7 @@ fcitx
 FDiag
 FFFFF
 FFFFFFC
+fiddliest
 FRENCHCANADIAN
 GGGGG
 gitbranch
@@ -86,6 +89,7 @@ HTP
 imagesize
 invokables
 isakbm
+journalctl
 libcuda
 libva
 LMENU
@@ -115,10 +119,12 @@ nosuchshell
 nprofiles
 NRCS
 oklab
+oneline
 osx
 Ottosson
 overpainted
 pandoc
+passthroughs
 Pcmh
 Pcmw
 Pcn
@@ -191,6 +197,7 @@ sourced
 srb
 srgb
 Subresource
+subspan
 supersampled
 swapchain
 Sxbp

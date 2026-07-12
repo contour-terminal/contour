@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/LayoutBuilder.h>
 
+#include <yaml-cpp/yaml.h>
+
 #include <algorithm>
-#include <cmath>
 #include <format>
 #include <numeric>
+#include <ranges>
 
 #include <vtmux/Pane.h>
 #include <vtmux/Tab.h>
@@ -20,33 +22,82 @@ config::LayoutPane const& leftmostLeaf(config::LayoutPane const& node)
     return *current;
 }
 
-double ratioForFirst(config::LayoutPane const& splitNode)
+double ratioForFirst(std::span<config::LayoutPane const> children)
 {
-    if (splitNode.isLeaf() || splitNode.children.empty())
+    if (children.empty())
         return 0.5;
-    double const total = std::accumulate(
-        splitNode.children.begin(), splitNode.children.end(), 0.0, [](double acc, auto const& child) {
-            return acc + (child.ratio > 0.0 ? child.ratio : 1.0);
+
+    // A specified `ratio` is that child's fraction of the whole split; children without one share
+    // the remaining space equally (so `ratio: 0.6` next to an unspecified sibling means 60/40).
+    // MinimumShare keeps degenerate inputs (over-committed or non-positive fractions) from
+    // collapsing a pane to zero; the final division re-normalizes whatever the shares add up to.
+    auto constexpr MinimumShare = 0.01;
+    auto const specifiedTotal =
+        std::accumulate(children.begin(), children.end(), 0.0, [](double acc, auto const& child) {
+            return acc + child.ratio.value_or(0.0);
         });
-    double const first = splitNode.children.front().ratio > 0.0 ? splitNode.children.front().ratio : 1.0;
-    if (total <= 0.0)
-        return 0.5;
-    return first / total;
+    auto const unspecifiedCount =
+        std::ranges::count_if(children, [](auto const& child) { return !child.ratio.has_value(); });
+    auto const defaultShare =
+        unspecifiedCount > 0
+            ? std::max((1.0 - specifiedTotal) / static_cast<double>(unspecifiedCount), MinimumShare)
+            : MinimumShare;
+    auto const share = [&](config::LayoutPane const& child) {
+        return std::max(child.ratio.value_or(defaultShare), MinimumShare);
+    };
+    auto const total =
+        std::accumulate(children.begin(), children.end(), 0.0, [&](double acc, auto const& child) {
+            return acc + share(child);
+        });
+    return share(children.front()) / total;
 }
 
-config::LayoutPane tailGroup(config::LayoutPane const& splitNode)
+double ratioForFirst(config::LayoutPane const& splitNode)
 {
-    // children[1..] as a group. With exactly one remaining child, return it directly.
-    if (splitNode.children.size() == 2)
-        return splitNode.children[1];
-    config::LayoutPane group;
-    group.orientation = splitNode.orientation;
-    group.children.assign(splitNode.children.begin() + 1, splitNode.children.end());
-    return group;
+    return ratioForFirst(std::span<config::LayoutPane const> { splitNode.children });
 }
 
 namespace
 {
+    void realizePane(vtmux::SessionModel& model,
+                     vtmux::TabId tab,
+                     config::LayoutPane const& node,
+                     PaneSeeder const& seed);
+
+    /// Realizes @p children as the siblings of one split, splitting the model's active leaf once
+    /// per child. Walks a span rather than materializing a "tail group" node at each level: the
+    /// tail is the rest of the SAME children vector, so no subtree is ever copied.
+    /// Precondition: the model's active leaf is a freshly created leaf seeded with
+    /// leftmostLeaf(children.front()).
+    void realizeSiblings(vtmux::SessionModel& model,
+                         vtmux::TabId tab,
+                         vtmux::SplitState orientation,
+                         std::span<config::LayoutPane const> children,
+                         PaneSeeder const& seed)
+    {
+        if (children.size() == 1)
+        {
+            // No sibling left to split against: the active leaf hosts this child's subtree.
+            realizePane(model, tab, children.front(), seed);
+            return;
+        }
+
+        // The current active leaf will host children[0]'s subtree; remember its id to return to it.
+        auto const firstLeafId = model.findTab(tab)->activePane()->id();
+
+        auto const tail = children.subspan(1);
+        // Stage the backing session for the NEW pane = leftmost leaf of the tail group.
+        seed(leftmostLeaf(tail.front()));
+        model.splitActivePane(tab, orientation, ratioForFirst(children));
+
+        // Active is now the tail's leftmost leaf: build the remaining siblings in place.
+        realizeSiblings(model, tab, orientation, tail, seed);
+
+        // Return to the first child's slot and build it.
+        model.setActivePane(tab, firstLeafId);
+        realizePane(model, tab, children.front(), seed);
+    }
+
     // Precondition: model's active leaf is a freshly created leaf seeded with leftmostLeaf(node).
     void realizePane(vtmux::SessionModel& model,
                      vtmux::TabId tab,
@@ -56,21 +107,7 @@ namespace
         if (node.isLeaf())
             return; // active leaf already carries this command
 
-        // The current active leaf will host children[0]'s subtree; remember its id to return to it.
-        auto* active = model.findTab(tab)->activePane();
-        auto const firstLeafId = active->id();
-
-        auto const tail = tailGroup(node);
-        // Stage the backing session for the NEW pane = leftmost leaf of the tail group.
-        seed(leftmostLeaf(tail));
-        model.splitActivePane(tab, node.orientation, ratioForFirst(node));
-
-        // Active is now the tail's leftmost leaf: build the tail subtree in place.
-        realizePane(model, tab, tail, seed);
-
-        // Return to the first child's slot and build it.
-        model.setActivePane(tab, firstLeafId);
-        realizePane(model, tab, node.children.front(), seed);
+        realizeSiblings(model, tab, node.orientation, node.children, seed);
     }
 } // namespace
 
@@ -79,6 +116,12 @@ vtmux::Tab* realizeLayoutTab(vtmux::SessionModel& model,
                              config::LayoutTab const& tab,
                              PaneSeeder const& seed)
 {
+    // Refuse before creating: seeding spawns a real backing session, so an unknown window must be
+    // rejected BEFORE the first seed() runs — otherwise that session is orphaned when createTab
+    // fails (mirrors createSessionInBackground's refuse-before-create guard).
+    if (model.window(window) == nullptr)
+        return nullptr;
+
     // Seed + create the tab's first pane (the root's leftmost leaf).
     seed(leftmostLeaf(tab.root));
     auto* modelTab = model.createTab(window);
@@ -96,145 +139,110 @@ vtmux::Tab* realizeLayoutTab(vtmux::SessionModel& model,
 
 namespace
 {
-    std::string indentCols(int columns)
-    {
-        return std::string(static_cast<size_t>(columns), ' ');
-    }
-
-    // Escapes @p value for embedding inside a double-quoted YAML scalar: a literal backslash or
-    // double-quote in the value (e.g. a Windows path or a command containing embedded quotes)
-    // would otherwise either be misinterpreted as an escape sequence or terminate the scalar
-    // early, producing invalid or silently-wrong YAML. Backslash MUST be escaped first so the
-    // backslashes just inserted by the quote-escaping step aren't themselves re-escaped.
-    std::string escapeYamlDoubleQuoted(std::string const& value)
+    /// Escapes each `${` as `$${` so the loader's environment-variable expansion (see
+    /// YAMLConfigReader::resolveVariables and crispy::replaceVariables' `$${` escape) reproduces
+    /// the literal text instead of substituting it: a saved command like `s/${VERSION}/1.0/` must
+    /// survive the save/load round trip verbatim. Only the fields the parser expands (command and
+    /// arguments) need this; YAML quoting itself is the emitter's job.
+    /// @param value The value about to be emitted.
+    /// @return @p value with every variable marker escaped.
+    [[nodiscard]] std::string escapeVariableMarkers(std::string const& value)
     {
         std::string out;
         out.reserve(value.size());
-        for (char const c: value)
+        auto position = std::string::size_type { 0 };
+        while (true)
         {
-            if (c == '\\')
-                out += "\\\\";
-            else if (c == '"')
-                out += "\\\"";
-            else
-                out += c;
+            auto const marker = value.find("${", position);
+            if (marker == std::string::npos)
+                break;
+            out.append(value, position, marker - position);
+            out += "$${";
+            position = marker + 2;
         }
+        out += value.substr(position);
         return out;
     }
 
-    std::string quoted(std::string const& value)
-    {
-        return "\"" + escapeYamlDoubleQuoted(value) + "\"";
-    }
-
-    // The parser reconstructs a color via `RGBColor{std::string}`, which only accepts the exact
-    // 7-character "#RRGGBB" form (see vtbackend::RGBColor::operator=(std::string const&)). That is
-    // NOT what `std::format("{}", color)` yields (it delegates to `to_string(RGBColor)`, which
-    // wraps the hex in literal single quotes: `'#RRGGBB'`), so format the hex ourselves here.
-    std::string colorHex(vtbackend::RGBColor color)
+    /// Formats @p color as the exact "#RRGGBB" form the parser accepts. `std::format("{}", color)`
+    /// would instead yield `'#RRGGBB'` (to_string(RGBColor) wraps the hex in literal single
+    /// quotes), which RGBColor's string assignment does not understand.
+    /// @param color The color to format.
+    /// @return The color as "#RRGGBB".
+    [[nodiscard]] std::string colorHex(vtbackend::RGBColor color)
     {
         return std::format("#{:02X}{:02X}{:02X}", color.red, color.green, color.blue);
     }
 
-    void emitChildPane(std::string& out, config::LayoutPane const& pane, int dashCol);
+    void emitPane(YAML::Emitter& out, config::LayoutPane const& pane, bool emitRatio);
 
-    // Emits the body of `pane` (its command/arguments/directory/profile, or its `split:` block)
-    // as the tail of a list item whose dash sits at column `dashCol`. `wrote` is true if a
-    // sibling key (title/color/profile, or an earlier pane field) has already claimed the dash
-    // line; in that case every subsequent key — including this pane's first — starts its own
-    // line at `dashCol + 2`. If `wrote` is still false, this pane's first key is placed right
-    // after the dash itself. `emitRatio` is true only when `pane` is a CHILD of a split (its
-    // `ratio` field is then the share of space it was given within that split); the tab's root
-    // pane has no governing parent split, so it never carries a ratio line.
-    void emitPaneBody(
-        std::string& out, config::LayoutPane const& pane, int dashCol, bool& wrote, bool emitRatio = false)
+    /// Emits @p pane's keys into the mapping the caller has already opened. A tab's root pane and a
+    /// split's child pane share this body: the parser reads a leaf's fields off the same node that
+    /// carries `title`/`color`, so both live at one YAML level.
+    /// @param out       The emitter, positioned inside an open mapping.
+    /// @param pane      The pane (leaf or split) to emit.
+    /// @param emitRatio Whether @p pane is a child of a split, and so carries a size within it. A
+    ///                  tab's root pane has no governing parent split and never does.
+    void emitPaneBody(YAML::Emitter& out, config::LayoutPane const& pane, bool emitRatio)
     {
-        int const contentCol = dashCol + 2;
-        auto emitKV = [&](std::string const& line) {
-            if (!wrote)
-            {
-                out += " " + line + "\n";
-                wrote = true;
-            }
-            else
-                out += indentCols(contentCol) + line + "\n";
-        };
-
-        // Keep a clean 50/50 split unadorned (no ratio line); only an asymmetric split pays the
-        // extra key, so the common case's YAML stays uncluttered and diff-friendly.
-        if (emitRatio && std::abs(pane.ratio - 0.5) > 1e-9)
-            emitKV(std::format("ratio: {}", pane.ratio));
+        // Only an explicitly-sized pane pays the extra key, so an even split's YAML stays clean.
+        if (emitRatio && pane.ratio)
+            out << YAML::Key << "ratio" << YAML::Value << *pane.ratio;
 
         if (pane.isLeaf())
         {
-            if (pane.command)
+            // An engaged-but-empty command means "the profile's default shell" — nothing to persist.
+            if (pane.command && !pane.command->empty())
                 // shellQuote so a program path containing spaces is not re-split by shellSplit() on reload.
-                emitKV("command: " + quoted(config::shellQuote(*pane.command)));
+                out << YAML::Key << "command" << YAML::Value
+                    << escapeVariableMarkers(config::shellQuote(*pane.command));
             if (!pane.arguments.empty())
             {
-                std::string args = "arguments: [";
-                for (size_t i = 0; i < pane.arguments.size(); ++i)
-                    args += (i ? ", " : "") + quoted(pane.arguments[i]);
-                args += "]";
-                emitKV(args);
+                out << YAML::Key << "arguments" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+                for (auto const& argument: pane.arguments)
+                    out << escapeVariableMarkers(argument);
+                out << YAML::EndSeq;
             }
             if (pane.directory)
                 // generic_string() (forward slashes) so a Windows path never carries a literal
                 // backslash into the emitted YAML in the first place.
-                emitKV("directory: " + quoted(pane.directory->generic_string()));
+                out << YAML::Key << "directory" << YAML::Value << pane.directory->generic_string();
             if (pane.profile)
-                emitKV("profile: " + quoted(*pane.profile));
+                out << YAML::Key << "profile" << YAML::Value << *pane.profile;
             return;
         }
 
-        // Split node: `orientation:`/`panes:` always land two columns past wherever the
-        // `split:` key itself started — whether that was on the dash line (bare pane) or on
-        // its own line (tab already wrote title/color/profile), sibling keys always align to
-        // `dashCol + 2`, so the body is always at `dashCol + 4`.
-        emitKV("split:");
-        int const bodyCol = dashCol + 4;
-        out += indentCols(bodyCol) + "orientation: "
-               + (pane.orientation == vtmux::SplitState::Horizontal ? "horizontal" : "vertical") + "\n";
-        out += indentCols(bodyCol) + "panes:\n";
-        int const childDashCol = bodyCol + 2;
+        out << YAML::Key << "split" << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "orientation" << YAML::Value
+            << (pane.orientation == vtmux::SplitState::Horizontal ? "horizontal" : "vertical");
+        out << YAML::Key << "panes" << YAML::Value << YAML::BeginSeq;
         for (auto const& child: pane.children)
-            emitChildPane(out, child, childDashCol);
+            emitPane(out, child, /* emitRatio */ true);
+        out << YAML::EndSeq;
+        out << YAML::EndMap;
     }
 
-    void emitChildPane(std::string& out, config::LayoutPane const& pane, int dashCol)
+    /// Emits @p pane as one item of a `panes:` sequence (its own mapping).
+    void emitPane(YAML::Emitter& out, config::LayoutPane const& pane, bool emitRatio)
     {
-        out += indentCols(dashCol) + "-";
-        bool wrote = false;
-        emitPaneBody(out, pane, dashCol, wrote, /* emitRatio */ true);
+        out << YAML::BeginMap;
+        emitPaneBody(out, pane, emitRatio);
+        out << YAML::EndMap;
     }
 
-    // Emits one tab as a `tabs:` list item. The dash's tail carries title/color/profile (only
-    // those that are set), immediately followed by the root pane's own keys as further siblings
-    // in the same mapping (a leaf tab's `command`/`arguments`/`directory`/`profile` live at the
-    // same YAML level as `title`/`color`, matching how the parser reads them off the tab node).
-    void emitTab(std::string& out, config::LayoutTab const& tab, int dashCol)
+    /// Emits @p tab as one item of a `tabs:` sequence: title/color/profile plus its root pane's own
+    /// keys, all siblings in one mapping (matching how the parser reads them off the tab node).
+    void emitTab(YAML::Emitter& out, config::LayoutTab const& tab)
     {
-        out += indentCols(dashCol) + "-";
-        bool wrote = false;
-        int const contentCol = dashCol + 2;
-        auto emitKV = [&](std::string const& line) {
-            if (!wrote)
-            {
-                out += " " + line + "\n";
-                wrote = true;
-            }
-            else
-                out += indentCols(contentCol) + line + "\n";
-        };
-
+        out << YAML::BeginMap;
         if (tab.title)
-            emitKV("title: " + quoted(*tab.title));
+            out << YAML::Key << "title" << YAML::Value << *tab.title;
         if (tab.color)
-            emitKV("color: " + quoted(colorHex(*tab.color)));
+            out << YAML::Key << "color" << YAML::Value << colorHex(*tab.color);
         if (tab.profile)
-            emitKV("profile: " + quoted(*tab.profile));
-
-        emitPaneBody(out, tab.root, dashCol, wrote);
+            out << YAML::Key << "profile" << YAML::Value << *tab.profile;
+        emitPaneBody(out, tab.root, /* emitRatio */ false);
+        out << YAML::EndMap;
     }
 } // namespace
 
@@ -254,7 +262,7 @@ config::LayoutPane serializePane(vtmux::Pane const& pane, LeafResolver const& re
     out.orientation = pane.splitState();
     out.children.push_back(serializePane(*pane.first(), resolve));
     out.children.push_back(serializePane(*pane.second(), resolve));
-    // Preserve the split position as the first child's weight (and its complement for the second).
+    // Preserve the split position as the first child's fraction (and its complement for the second).
     out.children.front().ratio = pane.ratio();
     out.children.back().ratio = 1.0 - pane.ratio();
     return out;
@@ -276,22 +284,28 @@ std::string emitLayoutsYaml(std::unordered_map<std::string, config::Layout> cons
     // Iterate layout names in SORTED order rather than the unordered_map's hash order, so
     // SaveLayout produces stable, diff-friendly output run to run regardless of insertion/hash
     // order. (Within a layout, `tabs` is already an ordered vector.)
-    std::vector<std::string> names;
+    auto names = std::vector<std::string> {};
     names.reserve(layouts.size());
-    for (auto const& [name, layout]: layouts)
+    for (auto const& name: layouts | std::views::keys)
         names.push_back(name);
-    std::sort(names.begin(), names.end());
+    std::ranges::sort(names);
 
-    std::string out = "layouts:\n";
+    YAML::Emitter out;
+    out << YAML::BeginMap;
+    out << YAML::Key << "layouts" << YAML::Value << YAML::BeginMap;
     for (auto const& name: names)
     {
-        auto const& layout = layouts.at(name);
-        out += indentCols(2) + name + ":\n";
-        out += indentCols(4) + "tabs:\n";
-        for (auto const& tab: layout.tabs)
-            emitTab(out, tab, 6);
+        out << YAML::Key << name << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "tabs" << YAML::Value << YAML::BeginSeq;
+        for (auto const& tab: layouts.at(name).tabs)
+            emitTab(out, tab);
+        out << YAML::EndSeq;
+        out << YAML::EndMap;
     }
-    return out;
+    out << YAML::EndMap;
+    out << YAML::EndMap;
+
+    return std::string { out.c_str() } + "\n";
 }
 
 } // namespace contour

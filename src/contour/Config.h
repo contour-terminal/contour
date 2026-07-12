@@ -27,8 +27,6 @@
 #include <vtrasterizer/Decorator.h>
 #include <vtrasterizer/FontDescriptions.h>
 
-#include <vtmux/Primitives.h> // vtmux::SplitState for layout panes
-
 #include <text_shaper/font.h>
 #include <text_shaper/mock_font_locator.h>
 
@@ -47,6 +45,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <functional>
@@ -64,6 +63,7 @@
 #include <variant>
 
 #include <reflection-cpp/reflection.hpp>
+#include <vtmux/Primitives.h> // vtmux::SplitState for layout panes
 
 namespace contour::config
 {
@@ -428,36 +428,48 @@ const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDesc
     .textOutline = {},
 };
 
-// A node in a layout tab's pane tree. It is EITHER a leaf (carries a command to run) OR a split
-// (carries an orientation + two-or-more children). `children` empty => leaf.
+/// A node in a layout tab's pane tree. It is EITHER a leaf (a terminal to open) OR a split (an
+/// orientation plus two or more children): an empty @c children means leaf.
 struct LayoutPane
 {
-    // Leaf fields (used when `children` is empty):
-    std::optional<std::string> command;           // program; replaces the profile shell
-    std::vector<std::string> arguments;           // arguments for `command`
-    std::optional<std::filesystem::path> directory; // initial working directory
-    std::optional<std::string> profile;           // per-pane profile override (terminal-level only)
-    double ratio = 0.5;                           // size weight within the parent split
+    /// Program to run in this pane, replacing the profile's shell. Unset runs that shell.
+    std::optional<std::string> command;
+    /// Arguments passed to @c command.
+    std::vector<std::string> arguments;
+    /// Working directory the pane's shell starts in. Unset uses the profile's.
+    std::optional<std::filesystem::path> directory;
+    /// Per-pane profile override (terminal-level settings only — not window ones).
+    std::optional<std::string> profile;
+    /// Fraction (0, 1] of the parent split this pane occupies. Unset means "share whatever the
+    /// explicitly-sized siblings leave over, equally" (see contour::ratioForFirst).
+    std::optional<double> ratio;
 
-    // Split fields (used when `children` is non-empty):
+    /// How this pane's children are arranged (splits only).
     vtmux::SplitState orientation = vtmux::SplitState::Vertical;
+    /// The child panes of a split, in layout order. Empty for a leaf.
     std::vector<LayoutPane> children;
 
+    /// @return true when this node is a terminal pane rather than a split.
     [[nodiscard]] bool isLeaf() const noexcept { return children.empty(); }
 };
 
-// One tab in a layout: a name/color and a pane tree (a single leaf for a plain tab).
+/// One tab of a layout: its name and color, plus the pane tree it opens with.
 struct LayoutTab
 {
-    std::optional<std::string> title;             // seeds the tab name
-    std::optional<vtbackend::RGBColor> color;     // sets the User tab color
-    std::optional<std::string> profile;           // tab-level default profile
-    LayoutPane root;                              // leaf for single-pane, split node otherwise
+    /// Seeds the tab's name.
+    std::optional<std::string> title;
+    /// Sets the tab's User color.
+    std::optional<vtbackend::RGBColor> color;
+    /// Default profile for this tab's panes; a pane's own @c profile still wins.
+    std::optional<std::string> profile;
+    /// The tab's pane tree: a leaf for a plain single-pane tab, a split node otherwise.
+    LayoutPane root;
 };
 
-// A named layout: an ordered list of tabs.
+/// A named layout: the ordered tabs that LaunchLayout opens together.
 struct Layout
 {
+    /// The tabs to open, in order.
     std::vector<LayoutTab> tabs;
 };
 
@@ -1144,6 +1156,11 @@ struct YAMLConfigReader
 
     void loadFromEntry(YAML::Node const& node, std::string const& entry, Layout& where);
 
+    /// Parses one layout's node (its `tabs:` sequence) into @p where. Never throws: malformed
+    /// scalars are logged and skipped, so one broken layout cannot unwind the whole config load
+    /// (which would silently drop every entry loaded after it, e.g. the user's input_mapping).
+    void parseLayoutNode(YAML::Node const& layoutNode, Layout& where);
+
     // Used for color scheme loading
     template <typename T>
     void loadFromEntry(YAML::Node const& node,
@@ -1824,10 +1841,13 @@ Config loadConfig();
 void compareEntries(Config& config, auto const& output);
 
 /// Loads ONLY the `layouts:` map contained in the single file at @p path (no sibling-merge, no
-/// inline-config layouts). Returns an empty map if @p path does not exist or fails to parse.
+/// inline-config layouts). A missing file yields an empty map (nothing saved yet is not an
+/// error); an unparseable file yields the parse error instead, so SaveLayout can REFUSE to
+/// rewrite — and thereby destroy — layouts it could not read back.
 /// Used by SaveLayout to read back layouts.yml's own prior contents before appending the new one,
 /// so the file is never overwritten with the merged (inline + file) in-memory view.
-std::unordered_map<std::string, Layout> loadLayoutsFile(std::filesystem::path const& path);
+std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsFile(
+    std::filesystem::path const& path);
 
 /// Splits a command line into tokens the way a shell would: whitespace separates tokens; single quotes
 /// ('...') quote a run literally; double quotes ("...") quote a run allowing \" and \\ escapes; a
