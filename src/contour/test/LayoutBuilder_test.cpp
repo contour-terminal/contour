@@ -423,16 +423,19 @@ TEST_CASE("emitLayoutsYaml: a fully-default tab terminates its line", "[layout][
 TEST_CASE("emitLayoutsYaml: control characters in a title round-trip", "[layout][save]")
 {
     // YAML folds a raw newline inside a double-quoted scalar into a plain space; the emitter must
-    // escape it so the title survives byte-for-byte.
+    // escape it so the title survives byte-for-byte. (The control characters are concatenated in
+    // rather than spelled inline, so no escape sequence abuts a word — check-spelling scans the
+    // SOURCE text, where "first\nsecond" reads as the token "nsecond".)
+    auto const title = std::string { "first" } + "\n" + "second" + "\t" + "third";
     config::LayoutTab tab;
-    tab.title = std::string { "line1\nline2\ttabbed" };
+    tab.title = title;
     tab.root.command = std::string { "top" };
     config::Layout work;
     work.tabs = { tab };
 
     auto const cfg = loadConfigFromYaml(emitLayoutsYaml({ { "work", work } }));
     REQUIRE(cfg.layouts.value().contains("work"));
-    CHECK(*cfg.layouts.value().at("work").tabs.at(0).title == "line1\nline2\ttabbed");
+    CHECK(*cfg.layouts.value().at("work").tabs.at(0).title == title);
 }
 
 TEST_CASE("emitLayoutsYaml: literal ${...} text survives the save/load round trip", "[layout][save]")

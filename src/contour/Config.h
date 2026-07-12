@@ -1842,7 +1842,7 @@ void compareEntries(Config& config, auto const& output);
 
 /// Loads ONLY the `layouts:` map contained in the single file at @p path (no sibling-merge, no
 /// inline-config layouts). A missing file yields an empty map (nothing saved yet is not an
-/// error); an unparseable file yields the parse error instead, so SaveLayout can REFUSE to
+/// error); a file that fails to parse yields the parse error instead, so SaveLayout can REFUSE to
 /// rewrite — and thereby destroy — layouts it could not read back.
 /// Used by SaveLayout to read back layouts.yml's own prior contents before appending the new one,
 /// so the file is never overwritten with the merged (inline + file) in-memory view.
