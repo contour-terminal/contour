@@ -9,6 +9,11 @@
 // having to boot a full terminal session.
 
 #include <contour/ColorConversion.h>
+#include <contour/CommandCatalog.h>
+#include <contour/CommandHistory.h>
+#include <contour/CommandPaletteModel.h>
+#include <contour/Config.h>
+#include <contour/Shortcut.h>
 #include <contour/TabColorScheme.h>
 #include <contour/test/QmlMessageCapture.h>
 
@@ -438,6 +443,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/contour/ui/ResizeBorder.qml"),
         QStringLiteral("qrc:/contour/ui/TitleBar.qml"),
         QStringLiteral("qrc:/contour/ui/SessionChrome.qml"),
+        QStringLiteral("qrc:/contour/ui/CommandPalette.qml"),
     };
 
     for (auto const& url: components)
@@ -1614,6 +1620,269 @@ TEST_CASE("TerminalPane dim overlay follows the session's dimUnfocused live (off
         INFO("QML warning: " << w.toStdString());
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
           == 0);
+}
+
+// ============================================================================================
+// Command palette (Ctrl+Shift+P). The popup is driven against a REAL CommandPaletteModel rather than a
+// stub, so the delegate's roles (title / shortcut / description / section) are the ones production
+// actually publishes — a role renamed on one side and not the other would otherwise pass here and
+// render a row of blanks in the app.
+// ============================================================================================
+
+namespace
+{
+
+/// A stand-in for WindowController exposing exactly the command-palette surface CommandPalette.qml
+/// binds: the model, and the runCommand() the popup calls when a row is picked.
+class MockPaletteController: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QObject* commandPalette READ commandPalette CONSTANT)
+
+  public:
+    MockPaletteController():
+        _history { 5 }, _model { std::make_unique<contour::CommandPaletteModel>(_history) }
+    {
+        _history.record("TogglePaneZoom");
+        _model->setSources({ &_actionCommands });
+        _model->setShortcuts(contour::shortcutIndex(contour::config::defaultInputMappings));
+        _model->refresh();
+    }
+
+    [[nodiscard]] QObject* commandPalette() const noexcept { return _model.get(); }
+    [[nodiscard]] contour::CommandPaletteModel& model() noexcept { return *_model; }
+
+    /// Records what the popup asked to run, so a test can assert the pick actually routed.
+    Q_INVOKABLE void runCommand(QString const& id) { ran << id; }
+    QStringList ran;
+
+  private:
+    contour::CommandHistory _history;
+    contour::ActionCommandSource _actionCommands;
+    std::unique_ptr<contour::CommandPaletteModel> _model;
+};
+
+/// Hosts CommandPalette.qml in a Window that mirrors main.qml's ApplicationWindow — in particular it
+/// declares restoreTerminalFocus(), which the popup calls on close to hand the keyboard back to the
+/// terminal, and counts the calls so a test can assert it actually happened.
+///
+/// Deliberately a real QML host rather than a bare QQuickWindow: the popup's contract with its window
+/// IS that function, and a stub without it would make the call a no-op that no test could see.
+struct PaletteHost
+{
+    std::unique_ptr<QObject> window; //!< The wrapper Window.
+    QObject* palette = nullptr;      //!< The CommandPalette inside it (owned by the window).
+
+    [[nodiscard]] int focusRestores() const { return window->property("focusRestores").toInt(); }
+};
+
+/// Builds the host, opens the palette, and pumps the event loop so the Popup materializes its content.
+[[nodiscard]] PaletteHost openPalette(QQmlEngine& engine, MockPaletteController& controller)
+{
+    engine.rootContext()->setContextProperty("paletteController", &controller);
+
+    QQmlComponent component(&engine);
+    component.setData(QByteArrayLiteral("import QtQuick\n"
+                                        "import QtQuick.Window\n"
+                                        "import \"qrc:/contour/ui\"\n"
+                                        "Window {\n"
+                                        "  id: host\n"
+                                        "  width: 800; height: 600; visible: true\n"
+                                        "  property int focusRestores: 0\n"
+                                        // NOT `palette`: a Window already has one (the Controls color
+                                        // group), and shadowing it is a QML warning — which the
+                                        // run-wide gate turns into a failure of the whole suite.
+                                        "  property alias commandPaletteItem: paletteItem\n"
+                                        "  function restoreTerminalFocus() { host.focusRestores++; }\n"
+                                        "  CommandPalette {\n"
+                                        "    id: paletteItem\n"
+                                        "    controller: paletteController\n"
+                                        "    window: host\n"
+                                        "  }\n"
+                                        "}\n"),
+                      QUrl(QStringLiteral("qrc:/contour/ui/PaletteTestHost.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+
+    auto host = PaletteHost {};
+    {
+        INFO("PaletteTestHost errors: " << component.errorString().toStdString());
+        if (!component.isReady())
+            return host;
+    }
+
+    host.window.reset(component.create());
+    if (host.window == nullptr)
+        return host;
+
+    host.palette = host.window->property("commandPaletteItem").value<QObject*>();
+    if (host.palette == nullptr)
+        return host;
+
+    // A Popup builds its contentItem lazily; opening it is what materializes the filter field and the
+    // list, which is the state every assertion below is about.
+    QMetaObject::invokeMethod(host.palette, "open");
+    QCoreApplication::processEvents();
+    return host;
+}
+
+} // namespace
+
+TEST_CASE("The command palette lists commands with their shortcut and documentation (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+
+    auto* filter = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+    auto* list = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteList"));
+    REQUIRE(list != nullptr);
+
+    SECTION("the list is populated and sectioned before the user types")
+    {
+        CHECK(list->property("count").toInt() == controller.model().rowCount());
+        CHECK(list->property("count").toInt() > 0);
+        CHECK(controller.model().sectioned());
+    }
+
+    SECTION("a row carries a title, a description and — when bound — a shortcut")
+    {
+        // The three things the palette promises to show. Read them off the MODEL through the same roles
+        // the delegate binds, so a renamed role fails here.
+        controller.model().setFilter(QStringLiteral("SplitVertical"));
+        QCoreApplication::processEvents();
+        REQUIRE(controller.model().rowCount() > 0);
+
+        auto const index = controller.model().index(0, 0);
+        CHECK(controller.model().data(index, contour::CommandPaletteModel::TitleRole).toString()
+              == QStringLiteral("Split Vertical"));
+        CHECK(controller.model().data(index, contour::CommandPaletteModel::ShortcutRole).toString()
+              == QStringLiteral("Ctrl+Shift+E"));
+        CHECK_FALSE(controller.model()
+                        .data(index, contour::CommandPaletteModel::DescriptionRole)
+                        .toString()
+                        .isEmpty());
+    }
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("Typing in the palette filters the list through the model (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    // The filter field is wired to the model's `filter` property, so typing must actually narrow the
+    // list — a TextField that looks right but is not connected would pass a load-only test.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+
+    auto* filter = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+    auto* list = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteList"));
+    REQUIRE(list != nullptr);
+
+    auto const unfiltered = list->property("count").toInt();
+    REQUIRE(unfiltered > 0);
+
+    filter->setProperty("text", QStringLiteral("spl"));
+    QCoreApplication::processEvents();
+
+    CHECK(controller.model().filter() == QStringLiteral("spl"));
+    CHECK(list->property("count").toInt() < unfiltered);
+    CHECK(list->property("count").toInt() > 0);
+    // Sections collapse once there is a query; the delegate's header binds to this.
+    CHECK_FALSE(controller.model().sectioned());
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("Accepting a palette row runs that command and gives the keyboard back (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    // The pick has to route all the way back to the controller with the right id — the popup is mere
+    // decoration otherwise — and the terminal has to get the keyboard back, or the user is left typing
+    // into a dismissed popup.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+
+    auto* filter = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+
+    filter->setProperty("text", QStringLiteral("SplitVertical"));
+    QCoreApplication::processEvents();
+    REQUIRE(controller.model().rowCount() > 0);
+
+    QMetaObject::invokeMethod(host.palette, "acceptCurrent");
+    QCoreApplication::processEvents();
+
+    REQUIRE(controller.ran.size() == 1);
+    CHECK(controller.ran.front() == QStringLiteral("SplitVertical"));
+    // Picking a command dismisses the popup and hands the keyboard back to the terminal.
+    CHECK_FALSE(host.palette->property("visible").toBool());
+    CHECK(host.focusRestores() == 1);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("Dismissing the palette runs nothing and gives the keyboard back (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    // Escape must be a clean exit: no command runs, and the terminal is typeable again immediately.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    REQUIRE(host.palette->property("visible").toBool());
+
+    QMetaObject::invokeMethod(host.palette, "close");
+    QCoreApplication::processEvents();
+
+    CHECK(controller.ran.isEmpty());
+    CHECK_FALSE(host.palette->property("visible").toBool());
+    CHECK(host.focusRestores() == 1);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("The palette survives controller destruction without QML errors (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    // Same teardown hazard TabStrip guards against: the C++ controller is destroyed before the QML tree
+    // on window close, and QML re-evaluates every dependent binding against null on the way out. An
+    // unguarded `controller.` in the popup would raise a TypeError — which the run-wide gate turns into
+    // a failure of the entire suite, not just this test.
+    contour::test::QmlMessageCapture capture;
+    QQmlEngine engine;
+    auto controller = std::make_unique<MockPaletteController>();
+
+    auto host = openPalette(engine, *controller);
+    REQUIRE(host.palette != nullptr);
+
+    host.palette->setProperty("controller", QVariant::fromValue<QObject*>(nullptr));
+    QCoreApplication::processEvents();
+    engine.rootContext()->setContextProperty("paletteController", nullptr);
+    controller.reset();
+    QCoreApplication::processEvents();
+
+    CHECK(capture.count([](QString const& m) { return m.contains(QStringLiteral("TypeError")); }) == 0);
+
+    host.window.reset();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCoreApplication::processEvents();
 }
 
 #include <QmlComponents_test.moc>

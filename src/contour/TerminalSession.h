@@ -429,6 +429,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::IncreaseOpacity);
     bool operator()(actions::NewTerminal const&);
     bool operator()(actions::NoSearchHighlight);
+    bool operator()(actions::OpenCommandPalette);
     bool operator()(actions::OpenConfiguration);
     bool operator()(actions::OpenFileManager);
     bool operator()(actions::OpenSelection);
@@ -496,6 +497,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::LaunchLayout const& event);
     bool operator()(actions::SaveLayout const& event);
 
+    /// Runs @p action against this session — the same dispatch a key binding takes.
+    ///
+    /// Public because a key chord is no longer the only way an action is asked for: the command
+    /// palette runs one the user PICKED. This widens the surface only nominally — the per-action
+    /// `operator()` overloads above have always been public, so any caller could already reach every
+    /// one of them; this only spares them re-implementing the visit.
+    ///
+    /// @param action The action to run.
+    /// @return Whether the action applied. An action may decline — FollowHyperlink with no link under
+    ///         the cursor returns false, which is what lets a key binding fall through to the terminal.
+    bool executeAction(actions::Action const& action);
+
     void scheduleRedraw();
 
     ContourGuiApp& app() noexcept { return _app; }
@@ -557,7 +570,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // helpers
     bool reloadConfig(config::Config newConfig, std::string const& profileName);
     int executeAllActions(std::vector<actions::Action> const& actions);
-    bool executeAction(actions::Action const& action);
     void spawnNewTerminal(std::string const& profileName);
 
     /// Whether activating a profile should also resize the window to the profile's configured

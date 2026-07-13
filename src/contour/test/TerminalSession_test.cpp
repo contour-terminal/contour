@@ -1392,3 +1392,45 @@ TEST_CASE("TerminalSessionManager::setFocusedSession moves terminal focus symmet
     CHECK_FALSE(a->terminal().focused());
     CHECK_FALSE(b->terminal().focused());
 }
+
+TEST_CASE("TerminalSession: Ctrl+Shift+P opens the palette instead of reaching the shell",
+          "[contour][session][input][palette]")
+{
+    // Ctrl+Shift+P must be CONSUMED by its binding. If the action did not fire (or reported that it had
+    // not applied), the chord would fall through to the terminal and the shell would receive a stray
+    // control byte — the failure mode of every mis-wired keybinding.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto const now = std::chrono::steady_clock::now();
+
+    auto const ctrlShift = Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
+
+    // Ctrl+printable arrives as a CHARACTER (Qt::Key_P is not in helper.cpp's KeyMappings table), which
+    // is why the default binding is a CharInputMapping on 'P' rather than a KeyInputMapping.
+    session->sendCharEvent(U'P', 0, ctrlShift, KeyboardEventType::Press, now);
+    CHECK(mockPtyOf(*session).stdinBuffer().empty());
+
+    // The session is not registered with a window here, so the palette has nowhere to open — the point
+    // is that the action still consumed the key rather than letting it through. A chord with no binding,
+    // by contrast, is encoded and written to the PTY.
+    session->sendCharEvent(U'Y', 0, ctrlShift, KeyboardEventType::Press, now);
+    CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
+}
+
+TEST_CASE("TerminalSession: executeAction runs a palette-picked command", "[contour][session][palette]")
+{
+    // The palette does not synthesize key events — it hands the chosen action straight to the session
+    // through executeAction(), the same visit a key binding takes. This is that path, and it is the one
+    // that had to be made public for the palette to exist.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+
+    // SendChars writes to the PTY, so a successful dispatch is directly observable.
+    CHECK(
+        session->executeAction(contour::actions::Action { contour::actions::SendChars { .chars = "xyz" } }));
+    CHECK(mockPtyOf(*session).stdinBuffer() == "xyz");
+
+    // An action may decline (FollowHyperlink with no link under the cursor), and executeAction reports
+    // that faithfully — which is exactly what lets a key binding fall through to the terminal.
+    CHECK_FALSE(session->executeAction(contour::actions::Action { contour::actions::FollowHyperlink {} }));
+}

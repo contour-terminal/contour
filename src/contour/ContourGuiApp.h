@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/CommandHistoryStore.h>
 #include <contour/Config.h>
 #include <contour/ContourApp.h>
 #include <contour/ExitCode.h>
@@ -53,9 +54,14 @@ class ContourGuiApp: public QObject, public ContourApp
     /// @param layoutStore    Persistence for named layouts (SaveLayout). Null (the default) wires the
     ///                       production FileLayoutStore (an atomically-replaced `layouts.yml`); tests
     ///                       pass an in-memory store to drive SaveLayout without touching the disk.
+    /// @param commandHistoryStore Persistence for the command palette's most-recently-used list. Null
+    ///                       (the default) wires the production FileCommandHistoryStore (an atomically-
+    ///                       replaced `command-history.yml`); tests pass an in-memory store to drive the
+    ///                       record -> persist -> reload cycle without touching the disk.
     explicit ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<ExternalLauncher> externalLauncher = nullptr,
-                           std::unique_ptr<LayoutStore> layoutStore = nullptr);
+                           std::unique_ptr<LayoutStore> layoutStore = nullptr,
+                           std::unique_ptr<CommandHistoryStore> commandHistoryStore = nullptr);
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
 
@@ -150,6 +156,8 @@ class ContourGuiApp: public QObject, public ContourApp
     std::unique_ptr<ExternalLauncher> _externalLauncher;
     // Declared before _sessionManager: the manager holds a reference to the store.
     std::unique_ptr<LayoutStore> _layoutStore;
+    // Likewise: the manager holds a reference to the command-history store.
+    std::unique_ptr<CommandHistoryStore> _commandHistoryStore;
     TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Spawn context: the screen the next window should open on (QPointer: screens can be unplugged

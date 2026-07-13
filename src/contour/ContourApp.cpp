@@ -238,17 +238,19 @@ int ContourApp::documentationKeyMapping()
 
     std::format_to(back, "| Action | Description |\n");
     std::format_to(back, "|--------|-------------|\n");
-    for (auto const& [action, description]: contour::actions::getDocumentation())
+    for (auto const& entry: contour::actions::actionCatalog())
     {
-        std::format_to(back, "| `{:<20}` | {:} |\n", action, description);
+        // The Action column names the action; the example block below shows the full binding form
+        // (which for an argument-carrying action includes its arguments).
+        std::format_to(back, "| `{:<20}` | {:} |\n", entry.name, entry.documentation);
     }
 
     std::format_to(back, "\n");
     std::format_to(back, "Example of entries inside config file\n");
     std::format_to(back, "``` yaml\n");
-    for (auto const& [action, description]: contour::actions::getDocumentation())
+    for (auto const& entry: contour::actions::actionCatalog())
     {
-        std::format_to(back, " - {{ mods: [Control], key: Enter, action: {:} }}\n", action);
+        std::format_to(back, " - {{ mods: [Control], key: Enter, action: {:} }}\n", entry.prototype);
     }
     std::format_to(back, "```\n");
     std::format_to(back, "\n");

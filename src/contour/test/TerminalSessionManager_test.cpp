@@ -427,3 +427,115 @@ TEST_CASE("TerminalSessionManager: launchLayout births panes at the live window 
     REQUIRE(factory->requestedPageSizes.back().has_value());
     CHECK(*factory->requestedPageSizes.back() == liveSize);
 }
+
+// ============================================================================================
+// Command palette: the full round trip a user actually performs — press Ctrl+Shift+P, pick a command,
+// see it run, and find it under "recently used" on the next start.
+// ============================================================================================
+
+TEST_CASE("TerminalSessionManager: running a palette command records and persists it", "[manager][palette]")
+{
+    // The DI seam again: the manager owns no filesystem knowledge, it hands the MRU to the injected
+    // store. Driving that with an in-memory store exercises record -> persist end to end, with no disk.
+    QTemporaryDir configDir;
+    REQUIRE(configDir.isValid());
+
+    auto historyOwned = std::make_unique<contour::test::InMemoryCommandHistoryStore>();
+    auto* history = historyOwned.get();
+
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned), nullptr, std::move(historyOwned) };
+    app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
+    contour::test::ScopedController win { app.manager() };
+
+    app.manager().recordCommand("SplitVertical");
+    app.manager().recordCommand("CreateNewTab");
+
+    // Persisted next to the LOADED CONFIG FILE, exactly like layouts.yml — so a custom `--config` moves
+    // the history with it instead of stranding it in the default home.
+    REQUIRE_FALSE(history->savedPaths.empty());
+    CHECK(history->savedPaths.back()
+          == std::filesystem::path(configDir.path().toStdString()) / "command-history.yml");
+
+    // Newest first.
+    CHECK(history->ids == std::vector<std::string> { "CreateNewTab", "SplitVertical" });
+
+    // And the live history agrees, so a palette opened right now already shows them.
+    auto const recent = app.manager().commandHistory().recent();
+    REQUIRE(recent.size() == 2);
+    CHECK(recent[0] == "CreateNewTab");
+}
+
+TEST_CASE("TerminalSessionManager: the recent-command list survives a restart", "[manager][palette]")
+{
+    // The whole point of persisting it. A store seeded as if by a previous run must surface in the
+    // palette of a fresh one.
+    auto historyOwned = std::make_unique<contour::test::InMemoryCommandHistoryStore>();
+    auto* history = historyOwned.get();
+    history->ids = { "TogglePaneZoom", "SplitVertical" }; // what "last time" left behind
+
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned), nullptr, std::move(historyOwned) };
+    contour::test::ScopedController win { app.manager() };
+
+    // The history is loaded lazily, on the first palette open — the configured capacity is not known at
+    // construction time, and seeding early would truncate a longer stored list to the DEFAULT capacity.
+    app.manager().openCommandPalette(nullptr); // no acting session: exercises the guard, loads nothing
+    CHECK(app.manager().commandHistory().recent().empty());
+
+    auto* session = app.manager().createSession(win.id);
+    REQUIRE(session != nullptr);
+    app.manager().openCommandPalette(session);
+
+    auto const recent = app.manager().commandHistory().recent();
+    REQUIRE(recent.size() == 2);
+    CHECK(recent[0] == "TogglePaneZoom");
+    CHECK(recent[1] == "SplitVertical");
+}
+
+TEST_CASE("TerminalSessionManager: an unreadable command history leaves the palette usable",
+          "[manager][palette]")
+{
+    // A corrupt file must degrade to "no recent commands", never to a failed open: the MRU is a
+    // convenience, and losing it is not worth refusing to show the palette.
+    auto historyOwned = std::make_unique<contour::test::InMemoryCommandHistoryStore>();
+    auto* history = historyOwned.get();
+    history->loadError = "command-history.yml is not valid YAML";
+
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned), nullptr, std::move(historyOwned) };
+    contour::test::ScopedController win { app.manager() };
+
+    auto* session = app.manager().createSession(win.id);
+    REQUIRE(session != nullptr);
+    app.manager().openCommandPalette(session);
+
+    CHECK(app.manager().commandHistory().recent().empty());
+
+    // And it still records going forward, rather than staying wedged on the read failure.
+    app.manager().recordCommand("SplitVertical");
+    CHECK(app.manager().commandHistory().recent().size() == 1);
+}
+
+TEST_CASE("TerminalSessionManager: recent_count bounds what is remembered", "[manager][palette]")
+{
+    auto historyOwned = std::make_unique<contour::test::InMemoryCommandHistoryStore>();
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned), nullptr, std::move(historyOwned) };
+    contour::test::ScopedController win { app.manager() };
+
+    app.app().config().commandPaletteRecentCount.value() = 2;
+
+    auto* session = app.manager().createSession(win.id);
+    REQUIRE(session != nullptr);
+    app.manager().openCommandPalette(session); // applies the configured capacity
+
+    app.manager().recordCommand("A");
+    app.manager().recordCommand("B");
+    app.manager().recordCommand("C");
+
+    auto const recent = app.manager().commandHistory().recent();
+    REQUIRE(recent.size() == 2);
+    CHECK(recent[0] == "C");
+    CHECK(recent[1] == "B");
+}

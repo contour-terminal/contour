@@ -149,6 +149,21 @@ ApplicationWindow
         }
     }
 
+    // The command palette (Ctrl+Shift+P). Opened by the OpenCommandPalette action, which routes
+    // through the session manager to THIS window's controller — so the popup appears over the window
+    // the chord was pressed in, not over every open window. It is a Popup, so it lives in the window's
+    // overlay layer and sits above the terminal content and the resize border without needing a z.
+    CommandPalette {
+        id: commandPalette
+        controller: appWindow.win
+        window: appWindow
+    }
+
+    Connections {
+        target: appWindow.win
+        function onCommandPaletteRequested() { commandPalette.open(); }
+    }
+
     // Frameless windows need their own edge/corner resize handles. With the native frame
     // (titleBarVisible), the WM already draws an edge resize border, so ours would duplicate it
     // and — being invisible z:1000 hit zones around every edge — would steal edge clicks (scrollbar

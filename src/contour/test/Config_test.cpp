@@ -1677,3 +1677,49 @@ input_mapping:
     };
     CHECK(countIn(mappings.keyMappings) + countIn(mappings.charMappings) == 1);
 }
+
+TEST_CASE("Config: the command palette is bound to Ctrl+Shift+P by default", "[config][palette]")
+{
+    // Ctrl+Shift+P arrives as a CHARACTER, not a named key: Qt::Key_P is not in helper.cpp's
+    // KeyMappings table, so any Ctrl+printable is routed through sendCharEvent. A KeyInputMapping here
+    // would therefore never match, and the chord would do nothing.
+    auto const& mappings = contour::config::defaultInputMappings;
+
+    auto const bound = std::ranges::find_if(mappings.charMappings, [](auto const& mapping) {
+        return !mapping.binding.empty()
+               && std::holds_alternative<contour::actions::OpenCommandPalette>(mapping.binding.at(0));
+    });
+
+    REQUIRE(bound != mappings.charMappings.end());
+    CHECK(bound->input == U'P');
+    CHECK(bound->modifiers
+          == vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift });
+}
+
+TEST_CASE("Config: command_palette_recent_count", "[config][palette]")
+{
+    auto tempDir = QTemporaryDir {};
+    REQUIRE(tempDir.isValid());
+
+    SECTION("defaults to 5 when unset")
+    {
+        auto const config = loadFromYaml(tempDir, "profiles:\n  main:\n    shell: \"/bin/bash\"\n");
+        CHECK(config.commandPaletteRecentCount.value() == 5);
+    }
+
+    SECTION("is read from the config file")
+    {
+        auto const config = loadFromYaml(tempDir,
+                                         "command_palette_recent_count: 12\n"
+                                         "profiles:\n  main:\n    shell: \"/bin/bash\"\n");
+        CHECK(config.commandPaletteRecentCount.value() == 12);
+    }
+
+    SECTION("zero is honored — it turns the recently-used section off")
+    {
+        auto const config = loadFromYaml(tempDir,
+                                         "command_palette_recent_count: 0\n"
+                                         "profiles:\n  main:\n    shell: \"/bin/bash\"\n");
+        CHECK(config.commandPaletteRecentCount.value() == 0);
+    }
+}

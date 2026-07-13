@@ -123,3 +123,77 @@ TEST_CASE("Actions: SaveLayout maps by name", "[actions][layout]")
     REQUIRE(action.has_value());
     CHECK(std::holds_alternative<contour::actions::SaveLayout>(*action));
 }
+
+// ============================================================================================
+// The action catalog: the single table that names every action, hands out an instance of it, and
+// documents it. fromString() (the `input_mapping:` parse path), the generated key-mapping docs and
+// the command palette all read from it, so a hole in the table breaks a user's key bindings.
+// ============================================================================================
+
+TEST_CASE("actions: every action in the catalog round-trips through its name", "[actions][catalog]")
+{
+    // The guard on the fromString() rewrite. A row whose name no longer parses back to its own
+    // alternative would silently break every binding that uses it — the config would still load, the
+    // key would just quietly stop working.
+    for (auto const& entry: contour::actions::actionCatalog())
+    {
+        INFO("action: " << entry.name);
+
+        auto const parsed = contour::actions::fromString(std::string(entry.name));
+        REQUIRE(parsed.has_value());
+        CHECK(parsed->index() == entry.prototype.index());
+
+        // And back again: the catalog's own name lookup agrees with the row it came from.
+        CHECK(contour::actions::name(entry.prototype) == entry.name);
+        CHECK(contour::actions::describe(entry.prototype) == entry.documentation);
+        CHECK_FALSE(entry.documentation.empty());
+    }
+}
+
+TEST_CASE("actions::fromString is case-insensitive, as the config has always allowed", "[actions][catalog]")
+{
+    auto const lower = contour::actions::fromString("splitvertical");
+    REQUIRE(lower.has_value());
+    CHECK(std::holds_alternative<contour::actions::SplitVertical>(*lower));
+
+    auto const upper = contour::actions::fromString("SPLITVERTICAL");
+    REQUIRE(upper.has_value());
+    CHECK(std::holds_alternative<contour::actions::SplitVertical>(*upper));
+}
+
+TEST_CASE("actions::fromString rejects a name no action has", "[actions][catalog]")
+{
+    CHECK_FALSE(contour::actions::fromString("NotAnAction").has_value());
+    CHECK_FALSE(contour::actions::fromString("").has_value());
+}
+
+TEST_CASE("actions::isParameterized marks the actions the palette cannot run bare", "[actions][catalog]")
+{
+    using namespace contour::actions;
+
+    // These carry a REQUIRED argument: a default-constructed instance names no profile / no tab / no
+    // characters, so running one would do nothing (or something arbitrary).
+    CHECK(isParameterized(Action { ChangeProfile {} }));
+    CHECK(isParameterized(Action { SwitchToTab {} }));
+    CHECK(isParameterized(Action { SendChars {} }));
+    CHECK(isParameterized(Action { LaunchLayout {} }));
+    CHECK(isParameterized(Action { ResizePane {} }));
+
+    // These have a MEANINGFUL default (copy as text, paste unstripped, current profile), so they run
+    // as-is and the palette offers them.
+    CHECK_FALSE(isParameterized(Action { CopySelection {} }));
+    CHECK_FALSE(isParameterized(Action { PasteClipboard {} }));
+    CHECK_FALSE(isParameterized(Action { NewTerminal {} }));
+
+    // And the plain empty-struct actions, of course.
+    CHECK_FALSE(isParameterized(Action { SplitVertical {} }));
+    CHECK_FALSE(isParameterized(Action { OpenCommandPalette {} }));
+}
+
+TEST_CASE("actions: opening the command palette is not repeated by a held key", "[actions][repeat]")
+{
+    // The popup is up (and holding the terminal's keyboard focus) by the second repeat, so re-firing
+    // could only ever re-open what is already open.
+    CHECK(contour::actions::isNonRepeatable(
+        contour::actions::Action { contour::actions::OpenCommandPalette {} }));
+}

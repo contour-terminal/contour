@@ -44,9 +44,17 @@ endif()
 
 set(_header_files
     Actions.h
+    AsciiText.h
+    AtomicFileWrite.h
     CaptureScreen.h
+    Command.h
+    CommandCatalog.h
+    CommandHistory.h
+    CommandHistoryStore.h
     Config.h
     ContourApp.h
+    FuzzyFilter.h
+    Shortcut.h
     TabLabel.h
 )
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
@@ -58,9 +66,16 @@ set(_header_files
 # registration objects whose symbols are only referenced reflectively at runtime.
 set(_core_source_files
     Actions.cpp
+    AtomicFileWrite.cpp
     CaptureScreen.cpp
+    Command.cpp
+    CommandCatalog.cpp
+    CommandHistory.cpp
+    CommandHistoryStore.cpp
     Config.cpp
     ContourApp.cpp
+    FuzzyFilter.cpp
+    Shortcut.cpp
     TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
@@ -75,6 +90,7 @@ if(CONTOUR_FRONTEND_GUI)
         AudioNote.h
         BlurBehind.h
         CatImageArgs.h
+        CommandPaletteModel.h
         ContourGuiApp.h
         ExitCode.h
         ExternalLauncher.h
@@ -91,6 +107,7 @@ if(CONTOUR_FRONTEND_GUI)
     list(APPEND _core_source_files
         Audio.cpp
         BlurBehind.cpp
+        CommandPaletteModel.cpp
         ContourGuiApp.cpp
         FreeDesktopNotifier.cpp
         PaneProxy.cpp
@@ -286,7 +303,12 @@ if(CONTOUR_FRONTEND_GUI)
             test/BenignQtMessages_test.cpp
             test/CaptureScreen_test.cpp
             test/CatImageArgs_test.cpp
+            test/CommandCatalog_test.cpp
+            test/CommandHistory_test.cpp
+            test/CommandPaletteModel_test.cpp
             test/Config_test.cpp
+            test/FuzzyFilter_test.cpp
+            test/Shortcut_test.cpp
             test/LayoutBuilder_test.cpp
             test/ContourGuiApp_test.cpp
             test/DisplayRendering_test.cpp

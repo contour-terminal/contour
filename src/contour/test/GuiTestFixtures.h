@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/CommandCatalog.h>
+#include <contour/CommandHistoryStore.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/ExternalLauncher.h>
 #include <contour/LayoutStore.h>
@@ -133,6 +135,59 @@ class InMemoryLayoutStore final: public contour::LayoutStore
     /// The path each load()/save() was asked for, so a test can assert WHERE layouts persist.
     mutable std::vector<std::filesystem::path> loadedPaths;
     std::vector<std::filesystem::path> savedPaths;
+};
+
+/// An in-memory CommandHistoryStore: the command palette's record -> persist -> reload cycle runs end
+/// to end with no filesystem at all. Mirrors InMemoryLayoutStore, including the injectable failures,
+/// so a test can drive the "the history file is corrupt" path without corrupting a real one.
+class InMemoryCommandHistoryStore final: public contour::CommandHistoryStore
+{
+  public:
+    [[nodiscard]] std::expected<std::vector<std::string>, std::string> load(
+        std::filesystem::path const& path) const override
+    {
+        loadedPaths.push_back(path);
+        if (loadError)
+            return std::unexpected(*loadError);
+        return ids;
+    }
+
+    [[nodiscard]] std::expected<void, std::string> save(std::filesystem::path const& path,
+                                                        std::span<std::string const> newIds) override
+    {
+        savedPaths.push_back(path);
+        if (saveError)
+            return std::unexpected(*saveError);
+        ids.assign(newIds.begin(), newIds.end());
+        return {};
+    }
+
+    /// The store's contents, newest first (seed it to model a pre-existing command-history.yml; read
+    /// it back to assert what the palette persisted).
+    std::vector<std::string> ids;
+    /// When set, load() fails with this message (an unreadable/corrupt backing file).
+    std::optional<std::string> loadError;
+    /// When set, save() fails with this message (permissions, disk full, ...).
+    std::optional<std::string> saveError;
+    /// The path each load()/save() was asked for, so a test can assert WHERE the history persists.
+    mutable std::vector<std::filesystem::path> loadedPaths;
+    std::vector<std::filesystem::path> savedPaths;
+};
+
+/// A TabTitleProvider over a fixed list of titles, so the command palette's tab source can be driven —
+/// and its rows asserted — without a window, an event loop, or a live session behind it.
+class StubTabs final: public contour::TabTitleProvider
+{
+  public:
+    explicit StubTabs(std::vector<std::string> titles): _titles { std::move(titles) } {}
+
+    [[nodiscard]] std::vector<std::string> tabTitles() const override { return _titles; }
+
+    /// Models tabs opening and closing under a palette that is already showing them.
+    void setTitles(std::vector<std::string> titles) { _titles = std::move(titles); }
+
+  private:
+    std::vector<std::string> _titles;
 };
 
 /// Records every URL-open / process-spawn request instead of launching it, so tests can assert the
@@ -320,9 +375,16 @@ class TestApp
     ///                observation pointer first) to run session-creation paths headlessly.
     /// @param layoutStore Optional layout-persistence override; pass an InMemoryLayoutStore (keep a
     ///                raw observation pointer first) to drive SaveLayout without touching the disk.
+    /// @param commandHistoryStore Optional command-history override; pass an
+    ///                InMemoryCommandHistoryStore (keep a raw observation pointer first) to drive the
+    ///                command palette's MRU persistence without touching the disk.
     explicit TestApp(std::unique_ptr<contour::SessionFactory> factory = nullptr,
-                     std::unique_ptr<contour::LayoutStore> layoutStore = nullptr):
-        _app(std::move(factory), makeRecordingLauncher(), std::move(layoutStore))
+                     std::unique_ptr<contour::LayoutStore> layoutStore = nullptr,
+                     std::unique_ptr<contour::CommandHistoryStore> commandHistoryStore = nullptr):
+        _app(std::move(factory),
+             makeRecordingLauncher(),
+             std::move(layoutStore),
+             std::move(commandHistoryStore))
     {
         char const* argv[] = { "contour", "terminal" };
         // Parse the "terminal" subcommand so parameters() carries every contour.terminal.* default

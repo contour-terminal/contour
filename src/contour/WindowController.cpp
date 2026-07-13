@@ -2,6 +2,7 @@
 #include <contour/ColorConversion.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/PaneProxy.h>
+#include <contour/Shortcut.h>
 #include <contour/TabColorScheme.h>
 #include <contour/TabLabel.h>
 #include <contour/TerminalSession.h>
@@ -24,12 +25,75 @@
 namespace contour
 {
 
-WindowController::WindowController(TerminalSessionManager& manager, vtmux::WindowId windowId) noexcept:
-    _manager { manager }, _windowId { windowId }
+WindowController::WindowController(TerminalSessionManager& manager, vtmux::WindowId windowId):
+    _manager { manager },
+    _windowId { windowId },
+    // The palette's sources. They hold references into the app's Config, which outlives every window
+    // and survives a config reload in place (the loaded values are assigned into it, the object is not
+    // replaced), so these references stay valid for this controller's whole life.
+    _tabCommands { *this },
+    _profileCommands { manager.app().config() },
+    _layoutCommands { manager.app().config() },
+    _boundCommands { manager.app().config().inputMappings.value() },
+    _commandPalette { std::make_unique<CommandPaletteModel>(manager.commandHistory(), this) }
 {
+    _commandPalette->setSources(
+        { &_tabCommands, &_profileCommands, &_layoutCommands, &_boundCommands, &_actionCommands });
 }
 
 WindowController::~WindowController() = default;
+
+void WindowController::openCommandPalette()
+{
+    // Re-read the bindings on every open, not once at construction: a ReloadConfig can have rebound a
+    // key since, and a shortcut column that advertises the OLD chord is worse than none at all.
+    _commandPalette->setShortcuts(shortcutIndex(_manager.app().config().inputMappings.value()));
+
+    // Re-queries the sources (so the tab rows track the tabs that exist now) and clears any filter the
+    // last open left behind.
+    _commandPalette->refresh();
+
+    emit commandPaletteRequested();
+}
+
+void WindowController::runCommand(QString const& id)
+{
+    auto* session = activeSession();
+    if (session == nullptr)
+        return;
+
+    // Resolve against what the model currently offers. A command can vanish between the refresh that
+    // drew the list and the click that picks it (a tab closes from under the palette), so a stale id
+    // must be a no-op rather than a lookup into a dangling row.
+    auto const* target = _commandPalette->commandById(id.toStdString());
+    if (target == nullptr)
+        return;
+
+    // Copy the action out before running it. Several actions (CloseTab, ClosePane, ChangeProfile) reach
+    // back through the manager and can rebuild this window — which refreshes the palette and frees the
+    // very row `target` points into. Executing through the copy keeps this safe whatever the action does.
+    auto const action = target->action;
+
+    // Record BEFORE running, for the same reason: the action may close this pane, this tab, or the whole
+    // application (Quit), and a command that quits must still be remembered as the last one used.
+    _manager.recordCommand(target->id);
+    session->executeAction(action);
+}
+
+std::vector<std::string> WindowController::tabTitles() const
+{
+    auto titles = std::vector<std::string> {};
+    auto const tabCount = count();
+    titles.reserve(static_cast<std::size_t>(tabCount));
+
+    // Read the titles back through the model's own TitleRole rather than re-deriving them: the strip's
+    // label precedence (runtime rename > pane title > ...) lives in resolvedTabLabel(), and a second
+    // implementation here would eventually disagree with what the user sees on the tab.
+    for (auto const row: std::views::iota(0, tabCount))
+        titles.push_back(data(index(row, 0), TitleRole).toString().toStdString());
+
+    return titles;
+}
 
 vtmux::Window* WindowController::window() const noexcept
 {

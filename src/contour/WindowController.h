@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/CommandCatalog.h>
+#include <contour/CommandPaletteModel.h>
 #include <contour/display/TerminalDisplay.h>
 
 #include <QtCore/QAbstractListModel>
@@ -8,7 +10,10 @@
 #include <QtQml/QtQml>
 
 #include <cstdint>
+#include <memory>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <vtmux/Primitives.h>
 
@@ -46,10 +51,14 @@ class PaneProxy;
 ///
 /// Created only by TerminalSessionManager::createWindowController() (which mints the backing
 /// vtmux::Window) and owned via QQmlEngine CppOwnership; destroyed when its ApplicationWindow closes.
-class WindowController: public QAbstractListModel
+class WindowController: public QAbstractListModel, public TabTitleProvider
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    /// This window's command palette list. Per-window (not per-app) because the filter text and the
+    /// selection are things the user is doing IN this window; the recently-used list behind it is
+    /// app-wide and lives on the manager.
+    Q_PROPERTY(contour::CommandPaletteModel* commandPalette READ commandPalette CONSTANT)
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
     Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
     Q_PROPERTY(contour::PaneProxy* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
@@ -82,7 +91,7 @@ class WindowController: public QAbstractListModel
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
     /// @param windowId The backing vtmux::Window this controller adapts.
-    WindowController(TerminalSessionManager& manager, vtmux::WindowId windowId) noexcept;
+    WindowController(TerminalSessionManager& manager, vtmux::WindowId windowId);
     ~WindowController() override;
 
     WindowController(WindowController const&) = delete;
@@ -163,6 +172,26 @@ class WindowController: public QAbstractListModel
     /// Whether this window may close now (its last pane exited). TerminalPane.onTerminated.
     Q_INVOKABLE [[nodiscard]] bool canCloseWindow() const noexcept;
     // }}}
+
+    // {{{ Command palette
+    /// This window's palette list model (never null; owned by this controller).
+    [[nodiscard]] CommandPaletteModel* commandPalette() const noexcept { return _commandPalette.get(); }
+
+    /// Rebuilds the palette against the CURRENT state — live tabs, the configured profiles/layouts and
+    /// the key bindings as they stand after any reload — and asks the QML to show it.
+    ///
+    /// Called by the manager for the OpenCommandPalette action. The refresh happens here, on open,
+    /// rather than being cached: the tab list is the whole reason the palette's rows can go stale.
+    void openCommandPalette();
+
+    /// Runs the command with id @p id against this window's active session, and records it as recently
+    /// used. Unknown ids are ignored (a row can go stale between a refresh and a click).
+    /// @param id The command id (CommandPaletteModel's `commandId` role).
+    Q_INVOKABLE void runCommand(QString const& id);
+    // }}}
+
+    /// The titles of this window's tabs, in tab order (TabTitleProvider, for TabCommandSource).
+    [[nodiscard]] std::vector<std::string> tabTitles() const override;
 
     // {{{ PaneProxy tree + window-service reads
     [[nodiscard]] PaneProxy* activeTabRootPane() const noexcept { return _activeTabRootProxy; }
@@ -375,6 +404,9 @@ class WindowController: public QAbstractListModel
     /// is the tab-strip model), so it only reaches this window's TabItems; the delegate whose row
     /// matches @p index starts editing.
     void tabTitleEditRequested(int index);
+    /// Requests that this window show its command palette. Per-window (like tabTitleEditRequested), so
+    /// the popup opens over the window the user pressed the chord in — not over every open window.
+    void commandPaletteRequested();
     void multimediaReadyChanged();
     void activeTabRootPaneChanged();
     void titleBarVisibleChanged();
@@ -423,6 +455,21 @@ class WindowController: public QAbstractListModel
 
     TerminalSessionManager& _manager;
     vtmux::WindowId _windowId;
+
+    // {{{ Command palette
+    // The sources this window's palette draws from, held by value and in PRECEDENCE order (see
+    // collectCommands(): first source wins a duplicate id). The live-state sources come first so their
+    // richer rows beat the generic ones — "Switch To Tab 2: vim" from the tab source outranks the bare
+    // "Switch To Tab 2" a key binding would contribute. The action catalog comes last: it is the floor
+    // that guarantees an unbound action is still reachable.
+    TabCommandSource _tabCommands;
+    ProfileCommandSource _profileCommands;
+    LayoutCommandSource _layoutCommands;
+    BoundCommandSource _boundCommands;
+    ActionCommandSource _actionCommands;
+    std::unique_ptr<CommandPaletteModel> _commandPalette;
+    // }}}
+
     display::TerminalDisplay* _activeDisplay = nullptr;
     // The OS window (QQuickWindow) this controller adapts, adopted from the first display that focuses in.
     // Lets the manager route a focus/close to the controller that owns a given display's window.

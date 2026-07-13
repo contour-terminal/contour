@@ -2083,6 +2083,14 @@ bool TerminalSession::operator()(actions::SwitchToTabRight)
     return true;
 }
 
+bool TerminalSession::operator()(actions::OpenCommandPalette)
+{
+    // Open the GUI-native command palette over this session's window. Routed through the manager like
+    // every other window-scoped op so it targets the window this session is actually in.
+    _manager->openCommandPalette(/*acting*/ this);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::SetTabTitle)
 {
     // Open the GUI-native inline tab-title editor for the active tab. Routed through the manager

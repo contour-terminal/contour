@@ -208,6 +208,10 @@ class RoutingMockController: public QAbstractListModel
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QObject* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
     Q_PROPERTY(QObject* activeSession READ activeSession CONSTANT)
+    // Mirrors WindowController's command-palette surface: main.qml instantiates CommandPalette.qml
+    // against this controller and Connections-targets its commandPaletteRequested signal, so the mock
+    // must carry both or the run-wide QML message gate fails the suite.
+    Q_PROPERTY(QObject* commandPalette READ commandPalette CONSTANT)
 
   public:
     enum Roles : std::uint16_t
@@ -255,6 +259,12 @@ class RoutingMockController: public QAbstractListModel
         _activeTabIndex = index;
         emit activeTabIndexChanged();
     }
+
+    [[nodiscard]] QObject* commandPalette() const noexcept { return nullptr; }
+    Q_INVOKABLE void runCommand(QString const&) {}
+    /// Mirrors WindowController::openCommandPalette(): what the manager calls for the
+    /// OpenCommandPalette action, and what makes main.qml's popup appear.
+    Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }
 
     Q_INVOKABLE QObject* createWindowController() { return this; }
     Q_INVOKABLE void bindWindow(QObject*) {}
@@ -313,6 +323,7 @@ class RoutingMockController: public QAbstractListModel
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
+    void commandPaletteRequested();
     void tabBarPositionChanged();
     void tabBarShouldShowChanged();
     void chromeHeightChanged();
