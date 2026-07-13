@@ -112,10 +112,16 @@ class RenderTarget
     /// Fills a rectangular area with the given solid color.
     virtual void renderRectangle(int x, int y, Width, Height, RGBAColor color) = 0;
 
+    /// Receives a captured screenshot as tightly-packed RGBA8 pixels of exactly width*height*4 bytes, in
+    /// TOP-LEFT origin row order (row 0 is the top of the image) — the render target normalizes whatever
+    /// orientation its graphics backend reads back in, so consumers never flip. Note this is the opposite
+    /// convention to setScissorRect() below, which is bottom-left by the graphics APIs' own contract.
     using ScreenshotCallback =
         std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, ImageSize /*_pixelSize*/)>;
 
     /// Schedules taking a screenshot of the current scene and forwards it to the given callback.
+    /// The capture may complete asynchronously (a deferred GPU readback), so the callback can run on a
+    /// later frame rather than before this returns.
     virtual void scheduleScreenshot(ScreenshotCallback callback) = 0;
 
     /// Enables scissor testing and restricts rendering to the given rectangle.

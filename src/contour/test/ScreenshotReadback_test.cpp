@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for the pure, GPU-free screenshot-readback helpers (ScreenshotReadback.h): the buffer-size
-// arithmetic, the vertical-flip policy (offscreen-texture readback is top-left origin; only a Y-up
-// swapchain backbuffer needs flipping), and the normalization of a raw RHI readback buffer into a
-// deterministic, correctly-sized, correctly-oriented RGBA8 image buffer.
+// arithmetic and the normalization of a raw RHI readback buffer into a deterministic, correctly-sized,
+// correctly-oriented RGBA8 image buffer (including the row reversal a Y-up framebuffer capture needs).
 //
 // These govern how RhiRenderer's deferred offscreen screenshot readback is turned into a QImage without a
-// GPU/RHI context, so they are pinned here.
+// GPU/RHI context, so they are pinned here. Which of the two orientations a real capture actually needs is
+// a property of the live RHI backend, so it is pinned end-to-end in ScreenshotRhiReadback_test instead.
 
 #include <contour/display/ScreenshotReadback.h>
 
@@ -33,24 +33,6 @@ TEST_CASE("screenshotBufferSize: non-positive dimensions yield zero", "[screensh
     CHECK(screenshotBufferSize(100, 0) == 0);
     CHECK(screenshotBufferSize(-1, 10) == 0);
     CHECK(screenshotBufferSize(10, -1) == 0);
-}
-// }}}
-
-// {{{ screenshotNeedsVerticalFlip
-TEST_CASE("screenshotNeedsVerticalFlip: offscreen texture capture never flips", "[screenshot]")
-{
-    // Texture readback is normalized to a top-left origin on every backend, so no flip regardless of the
-    // backend framebuffer orientation.
-    CHECK_FALSE(screenshotNeedsVerticalFlip(/*capturedFromTexture*/ true, /*framebufferIsYUp*/ true));
-    CHECK_FALSE(screenshotNeedsVerticalFlip(/*capturedFromTexture*/ true, /*framebufferIsYUp*/ false));
-}
-
-TEST_CASE("screenshotNeedsVerticalFlip: only a Y-up backbuffer capture flips", "[screenshot]")
-{
-    // A swapchain backbuffer follows the backend origin: OpenGL (Y-up) needs a flip; a top-left backend
-    // does not.
-    CHECK(screenshotNeedsVerticalFlip(/*capturedFromTexture*/ false, /*framebufferIsYUp*/ true));
-    CHECK_FALSE(screenshotNeedsVerticalFlip(/*capturedFromTexture*/ false, /*framebufferIsYUp*/ false));
 }
 // }}}
 

@@ -552,6 +552,11 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     ImageSize _screenshotSize {};            ///< Device-pixel size the pending/last capture was taken at.
     bool _screenshotReadbackPending = false; ///< A readback is scheduled and awaiting completion delivery.
 
+    /// Whether the pending capture's readback rows arrive bottom-up and must be reversed to yield a
+    /// top-left-origin image. Recorded with the capture it describes (recordScreenshotPass, from
+    /// QRhi::isYUpInFramebuffer()), since the row order is a property of the frame that produced it.
+    bool _screenshotFlipRows = false;
+
     QRhiResourcePtr<QRhiTexture> _screenshotTexture; ///< Owned RGBA8 color target (readback source).
     QRhiResourcePtr<QRhiRenderBuffer> _screenshotDepthStencil; ///< Depth-stencil for the offscreen pass.
     QRhiResourcePtr<QRhiTextureRenderTarget> _screenshotRenderTarget; ///< The offscreen render target.

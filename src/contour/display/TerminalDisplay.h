@@ -311,8 +311,8 @@ class TerminalDisplay: public QQuickItem
     /// @param onReady Receives the captured QImage once the readback completes.
     void requestScreenshot(std::function<void(QImage)> onReady);
 
-    /// Wraps a raw RGBA8 readback buffer (top-left origin, as the offscreen-texture readback delivers) into a
-    /// QImage that owns a copy of the pixels.
+    /// Wraps a raw RGBA8 readback buffer (tightly packed, top-left origin — as RenderTarget's
+    /// ScreenshotCallback guarantees) into a QImage that owns a copy of the pixels.
     /// @param rgbaBuffer Tightly-packed RGBA8 pixels, width*height*4 bytes.
     /// @param pixelSize  The image size in pixels.
     /// @return A QImage owning a deep copy of the pixels (safe after @p rgbaBuffer is freed).
