@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -447,229 +448,195 @@ namespace documentation
     };
 } // namespace documentation
 
-constexpr inline auto getDocumentation()
+/// One row of the action catalog: everything that is generically known about an action.
+///
+/// This is the single source of truth tying an action's three facets together — the name it is
+/// written as in `input_mapping:`, an instance to construct from that name, and what it does.
+/// Deriving all three from one table is what keeps them from drifting apart: adding an action is
+/// adding a row here, not editing three lists that a reader has to diff by eye.
+struct ActionCatalogEntry
 {
-    return std::array {
-        std::tuple { Action { CancelSelection {} }, documentation::CancelSelection },
-        std::tuple { Action { ChangeProfile {} }, documentation::ChangeProfile },
-        std::tuple { Action { ClearHistoryAndReset {} }, documentation::ClearHistoryAndReset },
-        std::tuple { Action { CopyPreviousMarkRange {} }, documentation::CopyPreviousMarkRange },
-        std::tuple { Action { CopySelection {} }, documentation::CopySelection },
-        std::tuple { Action { CreateDebugDump {} }, documentation::CreateDebugDump },
-        std::tuple { Action { CreateSelection {} }, documentation::CreateSelection },
-        std::tuple { Action { DecreaseFontSize {} }, documentation::DecreaseFontSize },
-        std::tuple { Action { DecreaseOpacity {} }, documentation::DecreaseOpacity },
-        std::tuple { Action { FocusNextSearchMatch {} }, documentation::FocusNextSearchMatch },
-        std::tuple { Action { FocusPreviousSearchMatch {} }, documentation::FocusPreviousSearchMatch },
-        std::tuple { Action { FollowHyperlink {} }, documentation::FollowHyperlink },
-        std::tuple { Action { HintMode {} }, documentation::HintMode },
-        std::tuple { Action { IncreaseFontSize {} }, documentation::IncreaseFontSize },
-        std::tuple { Action { IncreaseOpacity {} }, documentation::IncreaseOpacity },
-        std::tuple { Action { NewTerminal {} }, documentation::NewTerminal },
-        std::tuple { Action { NoSearchHighlight {} }, documentation::NoSearchHighlight },
-        std::tuple { Action { OpenConfiguration {} }, documentation::OpenConfiguration },
-        std::tuple { Action { OpenFileManager {} }, documentation::OpenFileManager },
-        std::tuple { Action { OpenSelection {} }, documentation::OpenSelection },
-        std::tuple { Action { PasteClipboard {} }, documentation::PasteClipboard },
-        std::tuple { Action { PasteSelection {} }, documentation::PasteSelection },
-        std::tuple { Action { Quit {} }, documentation::Quit },
-        std::tuple { Action { ReloadConfig {} }, documentation::ReloadConfig },
-        std::tuple { Action { ResetConfig {} }, documentation::ResetConfig },
-        std::tuple { Action { ResetFontSize {} }, documentation::ResetFontSize },
-        std::tuple { Action { ScreenshotVT {} }, documentation::ScreenshotVT },
-        std::tuple { Action { SaveScreenshot {} }, documentation::SaveScreenshot },
-        std::tuple { Action { CopyScreenshot {} }, documentation::CopyScreenshot },
-        std::tuple { Action { ScrollDown {} }, documentation::ScrollDown },
-        std::tuple { Action { ScrollMarkDown {} }, documentation::ScrollMarkDown },
-        std::tuple { Action { ScrollMarkUp {} }, documentation::ScrollMarkUp },
-        std::tuple { Action { ScrollOneDown {} }, documentation::ScrollOneDown },
-        std::tuple { Action { ScrollOneUp {} }, documentation::ScrollOneUp },
-        std::tuple { Action { ScrollPageDown {} }, documentation::ScrollPageDown },
-        std::tuple { Action { ScrollPageUp {} }, documentation::ScrollPageUp },
-        std::tuple { Action { ScrollToBottom {} }, documentation::ScrollToBottom },
-        std::tuple { Action { ScrollToTop {} }, documentation::ScrollToTop },
-        std::tuple { Action { ScrollUp {} }, documentation::ScrollUp },
-        std::tuple { Action { SearchReverse {} }, documentation::SearchReverse },
-        std::tuple { Action { SendChars {} }, documentation::SendChars },
-        std::tuple { Action { ToggleAllKeyMaps {} }, documentation::ToggleAllKeyMaps },
-        std::tuple { Action { ToggleFullscreen {} }, documentation::ToggleFullscreen },
-        std::tuple { Action { ToggleInputMethodHandling {} }, documentation::ToggleInputMethodHandling },
-        std::tuple { Action { ToggleInputProtection {} }, documentation::ToggleInputProtection },
-        std::tuple { Action { ToggleStatusLine {} }, documentation::ToggleStatusLine },
-        std::tuple { Action { ToggleTitleBar {} }, documentation::ToggleTitleBar },
-        std::tuple { Action { TraceBreakAtEmptyQueue {} }, documentation::TraceBreakAtEmptyQueue },
-        std::tuple { Action { TraceEnter {} }, documentation::TraceEnter },
-        std::tuple { Action { TraceLeave {} }, documentation::TraceLeave },
-        std::tuple { Action { TraceStep {} }, documentation::TraceStep },
-        std::tuple { Action { ViNormalMode {} }, documentation::ViNormalMode },
-        std::tuple { Action { WriteScreen {} }, documentation::WriteScreen },
-        std::tuple { Action { CreateNewTab {} }, documentation::CreateNewTab },
-        std::tuple { Action { CloseTab {} }, documentation::CloseTab },
-        std::tuple { Action { MoveTabTo {} }, documentation::MoveTabTo },
-        std::tuple { Action { MoveTabToLeft {} }, documentation::MoveTabToLeft },
-        std::tuple { Action { MoveTabToRight {} }, documentation::MoveTabToRight },
-        std::tuple { Action { SwitchToTab {} }, documentation::SwitchToTab },
-        std::tuple { Action { SwitchToPreviousTab {} }, documentation::SwitchToPreviousTab },
-        std::tuple { Action { SwitchToTabLeft {} }, documentation::SwitchToTabLeft },
-        std::tuple { Action { SwitchToTabRight {} }, documentation::SwitchToTabRight },
-        std::tuple { Action { SetTabTitle {} }, documentation::SetTabTitle },
-        std::tuple { Action { SplitVertical {} }, documentation::SplitVertical },
-        std::tuple { Action { SplitHorizontal {} }, documentation::SplitHorizontal },
-        std::tuple { Action { ClosePane {} }, documentation::ClosePane },
-        std::tuple { Action { FocusPaneLeft {} }, documentation::FocusPaneLeft },
-        std::tuple { Action { FocusPaneRight {} }, documentation::FocusPaneRight },
-        std::tuple { Action { FocusPaneUp {} }, documentation::FocusPaneUp },
-        std::tuple { Action { FocusPaneDown {} }, documentation::FocusPaneDown },
-        std::tuple { Action { SwapPaneLeft {} }, documentation::SwapPaneLeft },
-        std::tuple { Action { SwapPaneRight {} }, documentation::SwapPaneRight },
-        std::tuple { Action { SwapPaneUp {} }, documentation::SwapPaneUp },
-        std::tuple { Action { SwapPaneDown {} }, documentation::SwapPaneDown },
-        std::tuple { Action { MovePaneLeft {} }, documentation::MovePaneLeft },
-        std::tuple { Action { MovePaneRight {} }, documentation::MovePaneRight },
-        std::tuple { Action { MovePaneUp {} }, documentation::MovePaneUp },
-        std::tuple { Action { MovePaneDown {} }, documentation::MovePaneDown },
-        std::tuple { Action { ToggleSplitOrientation {} }, documentation::ToggleSplitOrientation },
-        std::tuple { Action { TogglePaneZoom {} }, documentation::TogglePaneZoom },
-        std::tuple { Action { ResizePane { Direction::Right } }, documentation::ResizePane },
-        std::tuple { Action { LaunchLayout {} }, documentation::LaunchLayout },
-        std::tuple { Action { SaveLayout {} }, documentation::SaveLayout },
+    std::string_view name; ///< Canonical, YAML-facing name, e.g. "SplitVertical".
+    Action prototype;      ///< An instance; one carrying arguments still needs them filled in.
+    std::string_view documentation; ///< Human-readable description, for the docs and the command palette.
+};
+
+/// Every action, in Action's own alternative order.
+///
+/// The static_assert below pins the table to the variant, so a new alternative cannot be added
+/// without a row (which would otherwise silently make the action unnameable in the config, absent
+/// from the generated docs, and invisible in the command palette).
+///
+/// A function over a build-once static, rather than a `constexpr` variable: several actions carry a
+/// std::string, and a string cannot survive constant evaluation into a constexpr object (MSVC rejects
+/// it outright — "points to memory which was heap allocated during constant evaluation"). Built on
+/// first use and handed out by reference, so a lookup costs a scan and never an allocation.
+[[nodiscard]] inline auto const& actionCatalog()
+{
+    static auto const catalog = std::array {
+        ActionCatalogEntry {
+            "CancelSelection", Action { CancelSelection {} }, documentation::CancelSelection },
+        ActionCatalogEntry { "ChangeProfile", Action { ChangeProfile {} }, documentation::ChangeProfile },
+        ActionCatalogEntry {
+            "ClearHistoryAndReset", Action { ClearHistoryAndReset {} }, documentation::ClearHistoryAndReset },
+        ActionCatalogEntry { "CopyPreviousMarkRange",
+                             Action { CopyPreviousMarkRange {} },
+                             documentation::CopyPreviousMarkRange },
+        ActionCatalogEntry { "CopySelection", Action { CopySelection {} }, documentation::CopySelection },
+        ActionCatalogEntry {
+            "CreateDebugDump", Action { CreateDebugDump {} }, documentation::CreateDebugDump },
+        ActionCatalogEntry {
+            "CreateSelection", Action { CreateSelection {} }, documentation::CreateSelection },
+        ActionCatalogEntry {
+            "DecreaseFontSize", Action { DecreaseFontSize {} }, documentation::DecreaseFontSize },
+        ActionCatalogEntry {
+            "DecreaseOpacity", Action { DecreaseOpacity {} }, documentation::DecreaseOpacity },
+        ActionCatalogEntry {
+            "FocusNextSearchMatch", Action { FocusNextSearchMatch {} }, documentation::FocusNextSearchMatch },
+        ActionCatalogEntry { "FocusPreviousSearchMatch",
+                             Action { FocusPreviousSearchMatch {} },
+                             documentation::FocusPreviousSearchMatch },
+        ActionCatalogEntry {
+            "FollowHyperlink", Action { FollowHyperlink {} }, documentation::FollowHyperlink },
+        ActionCatalogEntry { "HintMode", Action { HintMode {} }, documentation::HintMode },
+        ActionCatalogEntry {
+            "IncreaseFontSize", Action { IncreaseFontSize {} }, documentation::IncreaseFontSize },
+        ActionCatalogEntry {
+            "IncreaseOpacity", Action { IncreaseOpacity {} }, documentation::IncreaseOpacity },
+        ActionCatalogEntry { "NewTerminal", Action { NewTerminal {} }, documentation::NewTerminal },
+        ActionCatalogEntry {
+            "NoSearchHighlight", Action { NoSearchHighlight {} }, documentation::NoSearchHighlight },
+            ActionCatalogEntry {
+            "OpenConfiguration", Action { OpenConfiguration {} }, documentation::OpenConfiguration },
+        ActionCatalogEntry {
+            "OpenFileManager", Action { OpenFileManager {} }, documentation::OpenFileManager },
+        ActionCatalogEntry { "OpenSelection", Action { OpenSelection {} }, documentation::OpenSelection },
+        ActionCatalogEntry { "PasteClipboard", Action { PasteClipboard {} }, documentation::PasteClipboard },
+        ActionCatalogEntry { "PasteSelection", Action { PasteSelection {} }, documentation::PasteSelection },
+        ActionCatalogEntry { "Quit", Action { Quit {} }, documentation::Quit },
+        ActionCatalogEntry { "ReloadConfig", Action { ReloadConfig {} }, documentation::ReloadConfig },
+        ActionCatalogEntry { "ResetConfig", Action { ResetConfig {} }, documentation::ResetConfig },
+        ActionCatalogEntry { "ResetFontSize", Action { ResetFontSize {} }, documentation::ResetFontSize },
+        ActionCatalogEntry { "ScreenshotVT", Action { ScreenshotVT {} }, documentation::ScreenshotVT },
+        ActionCatalogEntry { "SaveScreenshot", Action { SaveScreenshot {} }, documentation::SaveScreenshot },
+        ActionCatalogEntry { "CopyScreenshot", Action { CopyScreenshot {} }, documentation::CopyScreenshot },
+        ActionCatalogEntry { "ScrollDown", Action { ScrollDown {} }, documentation::ScrollDown },
+        ActionCatalogEntry { "ScrollMarkDown", Action { ScrollMarkDown {} }, documentation::ScrollMarkDown },
+        ActionCatalogEntry { "ScrollMarkUp", Action { ScrollMarkUp {} }, documentation::ScrollMarkUp },
+        ActionCatalogEntry { "ScrollOneDown", Action { ScrollOneDown {} }, documentation::ScrollOneDown },
+        ActionCatalogEntry { "ScrollOneUp", Action { ScrollOneUp {} }, documentation::ScrollOneUp },
+        ActionCatalogEntry { "ScrollPageDown", Action { ScrollPageDown {} }, documentation::ScrollPageDown },
+        ActionCatalogEntry { "ScrollPageUp", Action { ScrollPageUp {} }, documentation::ScrollPageUp },
+        ActionCatalogEntry { "ScrollToBottom", Action { ScrollToBottom {} }, documentation::ScrollToBottom },
+        ActionCatalogEntry { "ScrollToTop", Action { ScrollToTop {} }, documentation::ScrollToTop },
+        ActionCatalogEntry { "ScrollUp", Action { ScrollUp {} }, documentation::ScrollUp },
+        ActionCatalogEntry { "SearchReverse", Action { SearchReverse {} }, documentation::SearchReverse },
+        ActionCatalogEntry { "SendChars", Action { SendChars {} }, documentation::SendChars },
+        ActionCatalogEntry {
+            "ToggleAllKeyMaps", Action { ToggleAllKeyMaps {} }, documentation::ToggleAllKeyMaps },
+        ActionCatalogEntry {
+            "ToggleFullscreen", Action { ToggleFullscreen {} }, documentation::ToggleFullscreen },
+        ActionCatalogEntry { "ToggleInputMethodHandling",
+                             Action { ToggleInputMethodHandling {} },
+                             documentation::ToggleInputMethodHandling },
+        ActionCatalogEntry { "ToggleInputProtection",
+                             Action { ToggleInputProtection {} },
+                             documentation::ToggleInputProtection },
+        ActionCatalogEntry {
+            "ToggleStatusLine", Action { ToggleStatusLine {} }, documentation::ToggleStatusLine },
+        ActionCatalogEntry { "ToggleTitleBar", Action { ToggleTitleBar {} }, documentation::ToggleTitleBar },
+        ActionCatalogEntry { "TraceBreakAtEmptyQueue",
+                             Action { TraceBreakAtEmptyQueue {} },
+                             documentation::TraceBreakAtEmptyQueue },
+        ActionCatalogEntry { "TraceEnter", Action { TraceEnter {} }, documentation::TraceEnter },
+        ActionCatalogEntry { "TraceLeave", Action { TraceLeave {} }, documentation::TraceLeave },
+        ActionCatalogEntry { "TraceStep", Action { TraceStep {} }, documentation::TraceStep },
+        ActionCatalogEntry { "ViNormalMode", Action { ViNormalMode {} }, documentation::ViNormalMode },
+        ActionCatalogEntry { "WriteScreen", Action { WriteScreen {} }, documentation::WriteScreen },
+        ActionCatalogEntry { "CreateNewTab", Action { CreateNewTab {} }, documentation::CreateNewTab },
+        ActionCatalogEntry { "CloseTab", Action { CloseTab {} }, documentation::CloseTab },
+        ActionCatalogEntry { "MoveTabTo", Action { MoveTabTo {} }, documentation::MoveTabTo },
+        ActionCatalogEntry { "MoveTabToLeft", Action { MoveTabToLeft {} }, documentation::MoveTabToLeft },
+        ActionCatalogEntry { "MoveTabToRight", Action { MoveTabToRight {} }, documentation::MoveTabToRight },
+        ActionCatalogEntry { "SwitchToTab", Action { SwitchToTab {} }, documentation::SwitchToTab },
+        ActionCatalogEntry {
+            "SwitchToPreviousTab", Action { SwitchToPreviousTab {} }, documentation::SwitchToPreviousTab },
+        ActionCatalogEntry {
+            "SwitchToTabLeft", Action { SwitchToTabLeft {} }, documentation::SwitchToTabLeft },
+        ActionCatalogEntry {
+            "SwitchToTabRight", Action { SwitchToTabRight {} }, documentation::SwitchToTabRight },
+        ActionCatalogEntry { "SetTabTitle", Action { SetTabTitle {} }, documentation::SetTabTitle },
+        ActionCatalogEntry { "SplitVertical", Action { SplitVertical {} }, documentation::SplitVertical },
+        ActionCatalogEntry {
+            "SplitHorizontal", Action { SplitHorizontal {} }, documentation::SplitHorizontal },
+        ActionCatalogEntry { "ClosePane", Action { ClosePane {} }, documentation::ClosePane },
+        ActionCatalogEntry { "FocusPaneLeft", Action { FocusPaneLeft {} }, documentation::FocusPaneLeft },
+        ActionCatalogEntry { "FocusPaneRight", Action { FocusPaneRight {} }, documentation::FocusPaneRight },
+        ActionCatalogEntry { "FocusPaneUp", Action { FocusPaneUp {} }, documentation::FocusPaneUp },
+        ActionCatalogEntry { "FocusPaneDown", Action { FocusPaneDown {} }, documentation::FocusPaneDown },
+        ActionCatalogEntry { "SwapPaneLeft", Action { SwapPaneLeft {} }, documentation::SwapPaneLeft },
+        ActionCatalogEntry { "SwapPaneRight", Action { SwapPaneRight {} }, documentation::SwapPaneRight },
+        ActionCatalogEntry { "SwapPaneUp", Action { SwapPaneUp {} }, documentation::SwapPaneUp },
+        ActionCatalogEntry { "SwapPaneDown", Action { SwapPaneDown {} }, documentation::SwapPaneDown },
+        ActionCatalogEntry { "MovePaneLeft", Action { MovePaneLeft {} }, documentation::MovePaneLeft },
+        ActionCatalogEntry { "MovePaneRight", Action { MovePaneRight {} }, documentation::MovePaneRight },
+        ActionCatalogEntry { "MovePaneUp", Action { MovePaneUp {} }, documentation::MovePaneUp },
+        ActionCatalogEntry { "MovePaneDown", Action { MovePaneDown {} }, documentation::MovePaneDown },
+        ActionCatalogEntry { "ToggleSplitOrientation",
+                             Action { ToggleSplitOrientation {} },
+                             documentation::ToggleSplitOrientation },
+        ActionCatalogEntry { "TogglePaneZoom", Action { TogglePaneZoom {} }, documentation::TogglePaneZoom },
+        ActionCatalogEntry {
+            "ResizePane", Action { ResizePane { Direction::Right } }, documentation::ResizePane },
+        ActionCatalogEntry { "LaunchLayout", Action { LaunchLayout {} }, documentation::LaunchLayout },
+        ActionCatalogEntry { "SaveLayout", Action { SaveLayout {} }, documentation::SaveLayout },
     };
+    return catalog;
 }
 
-#if defined(__clang__) && __clang_major__ >= 19
-static_assert(std::tuple_size_v<decltype(getDocumentation())> == std::variant_size_v<Action>);
-#endif
+static_assert(std::tuple_size_v<std::remove_cvref_t<decltype(actionCatalog())>>
+                  == std::variant_size_v<Action>,
+              "every Action alternative must have exactly one actionCatalog() row: without it the action "
+              "cannot be named in input_mapping, is missing from the generated docs, and never shows up "
+              "in the command palette");
+
+/// The canonical name of @p action, as written in `input_mapping:` — e.g. "SplitVertical".
+///
+/// Note this is the name of the action's KIND: any argument it carries is not part of it. Use it
+/// where the action must be identified rather than described (std::format("{}", action) renders the
+/// arguments too, which is what a debug log wants and an identity does not).
+/// @param action The action to name.
+/// @return Its catalog name; empty only if the catalog and the variant have drifted (which the
+///         static_assert above makes impossible).
+/// The catalog row describing @p action.
+///
+/// A direct index, not a search: the table is written in Action's own alternative order, so an
+/// action's variant index IS its row. The static_assert above pins the table's SIZE to the variant;
+/// Actions_test pins the ORDER (every row's prototype sits at its own index), which together make
+/// this lookup total.
+/// @param action The action to look up.
+/// @return Its row.
+[[nodiscard]] inline ActionCatalogEntry const& catalogEntry(Action const& action) noexcept
+{
+    return actionCatalog()[action.index()];
+}
+
+[[nodiscard]] inline std::string_view name(Action const& action) noexcept
+{
+    return catalogEntry(action).name;
+}
+
+/// The documentation of @p action: what it does, in one or two sentences.
+/// @param action The action to describe.
+/// @return Its catalog description.
+[[nodiscard]] inline std::string_view describe(Action const& action) noexcept
+{
+    return catalogEntry(action).documentation;
+}
 
 } // namespace contour::actions
 
 // {{{ fmtlib custom formatters
-#define DECLARE_ACTION_FMT(T)                                                    \
-    template <>                                                                  \
-    struct std::formatter<contour::actions::T>: std::formatter<std::string_view> \
-    {                                                                            \
-        auto format(contour::actions::T const&, auto& ctx) const                 \
-        {                                                                        \
-            return formatter<string_view>::format(#T, ctx);                      \
-        }                                                                        \
-    };
-
-// {{{ declare
-DECLARE_ACTION_FMT(CancelSelection)
-DECLARE_ACTION_FMT(ChangeProfile)
-DECLARE_ACTION_FMT(ClearHistoryAndReset)
-DECLARE_ACTION_FMT(CopyPreviousMarkRange)
-DECLARE_ACTION_FMT(CopySelection)
-DECLARE_ACTION_FMT(CreateDebugDump)
-DECLARE_ACTION_FMT(CreateSelection)
-DECLARE_ACTION_FMT(DecreaseFontSize)
-DECLARE_ACTION_FMT(DecreaseOpacity)
-DECLARE_ACTION_FMT(FocusNextSearchMatch)
-DECLARE_ACTION_FMT(FocusPreviousSearchMatch)
-DECLARE_ACTION_FMT(FollowHyperlink)
-DECLARE_ACTION_FMT(HintMode)
-DECLARE_ACTION_FMT(IncreaseFontSize)
-DECLARE_ACTION_FMT(IncreaseOpacity)
-DECLARE_ACTION_FMT(NewTerminal)
-DECLARE_ACTION_FMT(NoSearchHighlight)
-DECLARE_ACTION_FMT(OpenConfiguration)
-DECLARE_ACTION_FMT(OpenFileManager)
-DECLARE_ACTION_FMT(OpenSelection)
-DECLARE_ACTION_FMT(PasteClipboard)
-DECLARE_ACTION_FMT(PasteSelection)
-DECLARE_ACTION_FMT(Quit)
-DECLARE_ACTION_FMT(ReloadConfig)
-DECLARE_ACTION_FMT(ResetConfig)
-DECLARE_ACTION_FMT(ResetFontSize)
-DECLARE_ACTION_FMT(ScreenshotVT)
-DECLARE_ACTION_FMT(SaveScreenshot)
-DECLARE_ACTION_FMT(CopyScreenshot)
-DECLARE_ACTION_FMT(ScrollDown)
-DECLARE_ACTION_FMT(ScrollMarkDown)
-DECLARE_ACTION_FMT(ScrollMarkUp)
-DECLARE_ACTION_FMT(ScrollOneDown)
-DECLARE_ACTION_FMT(ScrollOneUp)
-DECLARE_ACTION_FMT(ScrollPageDown)
-DECLARE_ACTION_FMT(ScrollPageUp)
-DECLARE_ACTION_FMT(ScrollToBottom)
-DECLARE_ACTION_FMT(ScrollToTop)
-DECLARE_ACTION_FMT(ScrollUp)
-DECLARE_ACTION_FMT(SearchReverse)
-DECLARE_ACTION_FMT(SendChars)
-DECLARE_ACTION_FMT(ToggleAllKeyMaps)
-DECLARE_ACTION_FMT(ToggleFullscreen)
-DECLARE_ACTION_FMT(ToggleInputMethodHandling)
-DECLARE_ACTION_FMT(ToggleInputProtection)
-DECLARE_ACTION_FMT(ToggleStatusLine)
-DECLARE_ACTION_FMT(ToggleTitleBar)
-DECLARE_ACTION_FMT(TraceBreakAtEmptyQueue)
-DECLARE_ACTION_FMT(TraceEnter)
-DECLARE_ACTION_FMT(TraceLeave)
-DECLARE_ACTION_FMT(TraceStep)
-DECLARE_ACTION_FMT(ViNormalMode)
-DECLARE_ACTION_FMT(WriteScreen)
-DECLARE_ACTION_FMT(CreateNewTab)
-DECLARE_ACTION_FMT(CloseTab)
-DECLARE_ACTION_FMT(MoveTabToLeft)
-DECLARE_ACTION_FMT(MoveTabToRight)
-DECLARE_ACTION_FMT(SwitchToPreviousTab)
-DECLARE_ACTION_FMT(SwitchToTabLeft)
-DECLARE_ACTION_FMT(SwitchToTabRight)
-DECLARE_ACTION_FMT(SetTabTitle)
-DECLARE_ACTION_FMT(SplitVertical)
-DECLARE_ACTION_FMT(SplitHorizontal)
-DECLARE_ACTION_FMT(ClosePane)
-DECLARE_ACTION_FMT(FocusPaneLeft)
-DECLARE_ACTION_FMT(FocusPaneRight)
-DECLARE_ACTION_FMT(FocusPaneUp)
-DECLARE_ACTION_FMT(FocusPaneDown)
-DECLARE_ACTION_FMT(SwapPaneLeft)
-DECLARE_ACTION_FMT(SwapPaneRight)
-DECLARE_ACTION_FMT(SwapPaneUp)
-DECLARE_ACTION_FMT(SwapPaneDown)
-DECLARE_ACTION_FMT(MovePaneLeft)
-DECLARE_ACTION_FMT(MovePaneRight)
-DECLARE_ACTION_FMT(MovePaneUp)
-DECLARE_ACTION_FMT(MovePaneDown)
-DECLARE_ACTION_FMT(ToggleSplitOrientation)
-DECLARE_ACTION_FMT(TogglePaneZoom)
-// }}}
-#undef DECLARE_ACTION_FMT
-
-template <>
-struct std::formatter<contour::actions::MoveTabTo>: std::formatter<std::string>
-{
-    auto format(contour::actions::MoveTabTo const& value, auto& ctx) const
-    {
-        return formatter<string>::format(std::format("MoveTabTo {{ position: {} }}", value.position), ctx);
-    }
-};
-
-template <>
-struct std::formatter<contour::actions::SwitchToTab>: std::formatter<std::string>
-{
-    auto format(contour::actions::SwitchToTab const& value, auto& ctx) const
-    {
-        return formatter<string>::format(std::format("SwitchToTab {{ position: {} }}", value.position), ctx);
-    }
-};
-
-template <>
-struct std::formatter<contour::actions::LaunchLayout>: std::formatter<std::string>
-{
-    auto format(contour::actions::LaunchLayout const& value, auto& ctx) const
-    {
-        return formatter<string>::format(std::format("LaunchLayout {{ name: {} }}", value.name), ctx);
-    }
-};
-
-template <>
-struct std::formatter<contour::actions::SaveLayout>: std::formatter<std::string>
-{
-    auto format(contour::actions::SaveLayout const& value, auto& ctx) const
-    {
-        return formatter<string>::format(std::format("SaveLayout {{ name: {} }}", value.name), ctx);
-    }
-};
 
 template <>
 struct std::formatter<contour::actions::Direction>: std::formatter<std::string_view>
@@ -691,147 +658,46 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
     }
 };
 
-template <>
-struct std::formatter<contour::actions::ResizePane>: std::formatter<std::string>
+/// Renders the arguments @p action carries as YAML sibling keys, e.g. ", position: 3".
+///
+/// A FLAT sibling-key form, deliberately: a serialized binding must stay a valid YAML flow map
+/// (`{ mods: [...], key: 'T', action: ResizePane, direction: Left, percent: 5 }`), so a nested
+/// `{ ... }` here would break the enclosing map. Empty for the actions that carry no arguments.
+///
+/// @param action The action whose arguments to render.
+/// @return The arguments, ready to append to the action's name.
+[[nodiscard]] inline std::string formatActionArguments(contour::actions::Action const& action)
 {
-    auto format(contour::actions::ResizePane const& value, auto& ctx) const
-    {
-        return formatter<string>::format(
-            std::format("ResizePane {{ direction: {}, percent: {} }}", value.direction, value.percent), ctx);
-    }
-};
+    using namespace contour::actions;
+    return std::visit(
+        crispy::overloaded {
+            [](ResizePane const& a) {
+                return std::format(", direction: {}, percent: {}", a.direction, a.percent);
+            },
+            [](MoveTabTo const& a) { return std::format(", position: {}", a.position); },
+            [](SwitchToTab const& a) { return std::format(", position: {}", a.position); },
+            [](WriteScreen const& a) { return std::format(", chars: '{}'", a.chars); },
+            [](CreateSelection const& a) { return std::format(", delimiters: '{}'", a.delimiters); },
+            [](LaunchLayout const& a) { return std::format(", name: '{}'", a.name); },
+            [](SaveLayout const& a) { return std::format(", name: '{}'", a.name); },
+            [](auto const&) { return std::string {}; },
+        },
+        action);
+}
 
-#define HANDLE_ACTION(T)                                                  \
-    if (std::holds_alternative<contour::actions::T>(_action))             \
-    {                                                                     \
-        name = std::format("{}", std::get<contour::actions::T>(_action)); \
-    }
-
+/// Renders an action the way `input_mapping:` spells it: its name, plus its arguments as sibling keys.
+///
+/// The name comes from the SAME catalog row that fromString() parses with, so the config Contour
+/// writes is by construction the config Contour can read back. It used to come from a second,
+/// independently-maintained table (a `#T` stringification per action): the two could drift, and a
+/// drift would have silently emitted a binding that no longer parses.
 template <>
 struct std::formatter<contour::actions::Action>: std::formatter<std::string>
 {
-    // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-    auto format(contour::actions::Action const& _action, auto& ctx) const
+    auto format(contour::actions::Action const& action, auto& ctx) const
     {
-        std::string name = "Unknown action";
-        // {{{ handle
-        HANDLE_ACTION(CancelSelection);
-        HANDLE_ACTION(ChangeProfile);
-        HANDLE_ACTION(ClearHistoryAndReset);
-        HANDLE_ACTION(CopyPreviousMarkRange);
-        HANDLE_ACTION(CopySelection);
-        HANDLE_ACTION(CreateDebugDump);
-        HANDLE_ACTION(DecreaseFontSize);
-        HANDLE_ACTION(DecreaseOpacity);
-        HANDLE_ACTION(FocusNextSearchMatch);
-        HANDLE_ACTION(FocusPreviousSearchMatch);
-        HANDLE_ACTION(FollowHyperlink);
-        HANDLE_ACTION(HintMode);
-        HANDLE_ACTION(IncreaseFontSize);
-        HANDLE_ACTION(IncreaseOpacity);
-        HANDLE_ACTION(NewTerminal);
-        HANDLE_ACTION(NoSearchHighlight);
-        HANDLE_ACTION(OpenConfiguration);
-        HANDLE_ACTION(OpenFileManager);
-        HANDLE_ACTION(OpenSelection);
-        HANDLE_ACTION(PasteClipboard);
-        HANDLE_ACTION(PasteSelection);
-        HANDLE_ACTION(Quit);
-        HANDLE_ACTION(ReloadConfig);
-        HANDLE_ACTION(ResetConfig);
-        HANDLE_ACTION(ResetFontSize);
-        HANDLE_ACTION(ScreenshotVT);
-        HANDLE_ACTION(CopyScreenshot);
-        HANDLE_ACTION(SaveScreenshot);
-        HANDLE_ACTION(ScrollDown);
-        HANDLE_ACTION(ScrollMarkDown);
-        HANDLE_ACTION(ScrollMarkUp);
-        HANDLE_ACTION(ScrollOneDown);
-        HANDLE_ACTION(ScrollOneUp);
-        HANDLE_ACTION(ScrollPageDown);
-        HANDLE_ACTION(ScrollPageUp);
-        HANDLE_ACTION(ScrollToBottom);
-        HANDLE_ACTION(ScrollToTop);
-        HANDLE_ACTION(ScrollUp);
-        HANDLE_ACTION(SearchReverse);
-        HANDLE_ACTION(SendChars);
-        HANDLE_ACTION(ToggleAllKeyMaps);
-        HANDLE_ACTION(ToggleFullscreen);
-        HANDLE_ACTION(ToggleInputMethodHandling);
-        HANDLE_ACTION(ToggleInputProtection);
-        HANDLE_ACTION(ToggleStatusLine);
-        HANDLE_ACTION(ToggleTitleBar);
-        HANDLE_ACTION(TraceBreakAtEmptyQueue);
-        HANDLE_ACTION(TraceEnter);
-        HANDLE_ACTION(TraceLeave);
-        HANDLE_ACTION(TraceStep);
-        HANDLE_ACTION(ViNormalMode);
-        HANDLE_ACTION(CreateNewTab);
-        HANDLE_ACTION(CloseTab);
-        HANDLE_ACTION(MoveTabToLeft);
-        HANDLE_ACTION(MoveTabToRight);
-        HANDLE_ACTION(SwitchToPreviousTab);
-        HANDLE_ACTION(SwitchToTabLeft);
-        HANDLE_ACTION(SwitchToTabRight);
-        HANDLE_ACTION(SetTabTitle);
-        HANDLE_ACTION(SplitVertical);
-        HANDLE_ACTION(SplitHorizontal);
-        HANDLE_ACTION(ClosePane);
-        HANDLE_ACTION(FocusPaneLeft);
-        HANDLE_ACTION(FocusPaneRight);
-        HANDLE_ACTION(FocusPaneUp);
-        HANDLE_ACTION(FocusPaneDown);
-        HANDLE_ACTION(SwapPaneLeft);
-        HANDLE_ACTION(SwapPaneRight);
-        HANDLE_ACTION(SwapPaneUp);
-        HANDLE_ACTION(SwapPaneDown);
-        HANDLE_ACTION(MovePaneLeft);
-        HANDLE_ACTION(MovePaneRight);
-        HANDLE_ACTION(MovePaneUp);
-        HANDLE_ACTION(MovePaneDown);
-        HANDLE_ACTION(ToggleSplitOrientation);
-        HANDLE_ACTION(TogglePaneZoom);
-        if (std::holds_alternative<contour::actions::ResizePane>(_action))
-        {
-            // Flat sibling-key form (like MoveTabTo/SwitchToTab below), so a serialized binding is a
-            // valid YAML flow map: `action: ResizePane, direction: Left, percent: 5`. A nested `{ }`
-            // (the ResizePane debug formatter's form) would break the enclosing `{ ... }` map.
-            const auto action = std::get<contour::actions::ResizePane>(_action);
-            name = std::format("ResizePane, direction: {}, percent: {}", action.direction, action.percent);
-        }
-        if (std::holds_alternative<contour::actions::MoveTabTo>(_action))
-        {
-            const auto action = std::get<contour::actions::MoveTabTo>(_action);
-            name = std::format("MoveTabTo, position: {}", action.position);
-        }
-        if (std::holds_alternative<contour::actions::SwitchToTab>(_action))
-        {
-            const auto action = std::get<contour::actions::SwitchToTab>(_action);
-            name = std::format("SwitchToTab, position: {}", action.position);
-        }
-        if (std::holds_alternative<contour::actions::WriteScreen>(_action))
-        {
-            const auto writeScreenAction = std::get<contour::actions::WriteScreen>(_action);
-            name = std::format("{}, chars: '{}'", writeScreenAction, writeScreenAction.chars);
-        }
-        if (std::holds_alternative<contour::actions::CreateSelection>(_action))
-        {
-            const auto createSelectionAction = std::get<contour::actions::CreateSelection>(_action);
-            name =
-                std::format("{}, delimiters: '{}'", createSelectionAction, createSelectionAction.delimiters);
-        }
-        if (std::holds_alternative<contour::actions::LaunchLayout>(_action))
-        {
-            const auto action = std::get<contour::actions::LaunchLayout>(_action);
-            name = std::format("LaunchLayout, name: '{}'", action.name);
-        }
-        if (std::holds_alternative<contour::actions::SaveLayout>(_action))
-        {
-            const auto action = std::get<contour::actions::SaveLayout>(_action);
-            name = std::format("SaveLayout, name: '{}'", action.name);
-        }
-        // }}}
-        return formatter<string>::format(name, ctx);
+        return formatter<string>::format(
+            std::format("{}{}", contour::actions::name(action), formatActionArguments(action)), ctx);
     }
 };
 
@@ -870,5 +736,4 @@ struct std::formatter<vtbackend::HintAction>: std::formatter<std::string_view>
     }
 };
 
-#undef HANDLE_ACTION
-// ]}}
+// }}}

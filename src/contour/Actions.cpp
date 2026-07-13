@@ -3,9 +3,9 @@
 
 #include <crispy/utils.h>
 
-#include <array>
+#include <algorithm>
+#include <optional>
 #include <string>
-#include <string_view>
 
 using namespace std;
 
@@ -14,111 +14,20 @@ using crispy::toLower;
 namespace contour::actions
 {
 
-namespace
-{
-    template <typename T>
-    inline constexpr auto mapAction(string_view name) noexcept
-    {
-        return pair { name, Action { T {} } };
-    }
-} // namespace
-
 optional<Action> fromString(string const& name)
 {
-    // NB: If we change that variable declaration to `static`,
-    // then MSVC will not finish compiling. Yes. That's not a joke.
-    auto const mappings = array {
-        mapAction<actions::CancelSelection>("CancelSelection"),
-        mapAction<actions::ChangeProfile>("ChangeProfile"),
-        mapAction<actions::ClearHistoryAndReset>("ClearHistoryAndReset"),
-        mapAction<actions::CopyPreviousMarkRange>("CopyPreviousMarkRange"),
-        mapAction<actions::CopySelection>("CopySelection"),
-        mapAction<actions::CreateDebugDump>("CreateDebugDump"),
-        mapAction<actions::CreateSelection>("CreateSelection"),
-        mapAction<actions::DecreaseFontSize>("DecreaseFontSize"),
-        mapAction<actions::DecreaseOpacity>("DecreaseOpacity"),
-        mapAction<actions::FocusNextSearchMatch>("FocusNextSearchMatch"),
-        mapAction<actions::FocusPreviousSearchMatch>("FocusPreviousSearchMatch"),
-        mapAction<actions::FollowHyperlink>("FollowHyperlink"),
-        mapAction<actions::HintMode>("HintMode"),
-        mapAction<actions::IncreaseFontSize>("IncreaseFontSize"),
-        mapAction<actions::IncreaseOpacity>("IncreaseOpacity"),
-        mapAction<actions::NewTerminal>("NewTerminal"),
-        mapAction<actions::NoSearchHighlight>("NoSearchHighlight"),
-        mapAction<actions::OpenConfiguration>("OpenConfiguration"),
-        mapAction<actions::OpenFileManager>("OpenFileManager"),
-        mapAction<actions::OpenSelection>("OpenSelection"),
-        mapAction<actions::PasteClipboard>("PasteClipboard"),
-        mapAction<actions::PasteSelection>("PasteSelection"),
-        mapAction<actions::Quit>("Quit"),
-        mapAction<actions::ReloadConfig>("ReloadConfig"),
-        mapAction<actions::ResetConfig>("ResetConfig"),
-        mapAction<actions::ResetFontSize>("ResetFontSize"),
-        mapAction<actions::ScreenshotVT>("ScreenshotVT"),
-        mapAction<actions::SaveScreenshot>("SaveScreenshot"),
-        mapAction<actions::CopyScreenshot>("CopyScreenshot"),
-        mapAction<actions::ScrollDown>("ScrollDown"),
-        mapAction<actions::ScrollMarkDown>("ScrollMarkDown"),
-        mapAction<actions::ScrollMarkUp>("ScrollMarkUp"),
-        mapAction<actions::ScrollOneDown>("ScrollOneDown"),
-        mapAction<actions::ScrollOneUp>("ScrollOneUp"),
-        mapAction<actions::ScrollPageDown>("ScrollPageDown"),
-        mapAction<actions::ScrollPageUp>("ScrollPageUp"),
-        mapAction<actions::ScrollToBottom>("ScrollToBottom"),
-        mapAction<actions::ScrollToTop>("ScrollToTop"),
-        mapAction<actions::ScrollUp>("ScrollUp"),
-        mapAction<actions::SearchReverse>("SearchReverse"),
-        mapAction<actions::SendChars>("SendChars"),
-        mapAction<actions::ToggleAllKeyMaps>("ToggleAllKeyMaps"),
-        mapAction<actions::ToggleFullscreen>("ToggleFullscreen"),
-        mapAction<actions::ToggleInputMethodHandling>("ToggleInputMethodHandling"),
-        mapAction<actions::ToggleInputProtection>("ToggleInputProtection"),
-        mapAction<actions::ToggleStatusLine>("ToggleStatusLine"),
-        mapAction<actions::ToggleTitleBar>("ToggleTitleBar"),
-        mapAction<actions::TraceBreakAtEmptyQueue>("TraceBreakAtEmptyQueue"),
-        mapAction<actions::TraceEnter>("TraceEnter"),
-        mapAction<actions::TraceLeave>("TraceLeave"),
-        mapAction<actions::TraceStep>("TraceStep"),
-        mapAction<actions::ViNormalMode>("ViNormalMode"),
-        mapAction<actions::WriteScreen>("WriteScreen"),
-        mapAction<actions::CreateNewTab>("CreateNewTab"),
-        mapAction<actions::CloseTab>("CloseTab"),
-        mapAction<actions::MoveTabTo>("MoveTabTo"),
-        mapAction<actions::MoveTabToLeft>("MoveTabToLeft"),
-        mapAction<actions::MoveTabToRight>("MoveTabToRight"),
-        mapAction<actions::SwitchToTab>("SwitchToTab"),
-        mapAction<actions::SwitchToPreviousTab>("SwitchToPreviousTab"),
-        mapAction<actions::SwitchToTabLeft>("SwitchToTabLeft"),
-        mapAction<actions::SwitchToTabRight>("SwitchToTabRight"),
-        mapAction<actions::SetTabTitle>("SetTabTitle"),
-        mapAction<actions::SplitVertical>("SplitVertical"),
-        mapAction<actions::SplitHorizontal>("SplitHorizontal"),
-        mapAction<actions::ClosePane>("ClosePane"),
-        mapAction<actions::FocusPaneLeft>("FocusPaneLeft"),
-        mapAction<actions::FocusPaneRight>("FocusPaneRight"),
-        mapAction<actions::FocusPaneUp>("FocusPaneUp"),
-        mapAction<actions::FocusPaneDown>("FocusPaneDown"),
-        mapAction<actions::SwapPaneLeft>("SwapPaneLeft"),
-        mapAction<actions::SwapPaneRight>("SwapPaneRight"),
-        mapAction<actions::SwapPaneUp>("SwapPaneUp"),
-        mapAction<actions::SwapPaneDown>("SwapPaneDown"),
-        mapAction<actions::MovePaneLeft>("MovePaneLeft"),
-        mapAction<actions::MovePaneRight>("MovePaneRight"),
-        mapAction<actions::MovePaneUp>("MovePaneUp"),
-        mapAction<actions::MovePaneDown>("MovePaneDown"),
-        mapAction<actions::ToggleSplitOrientation>("ToggleSplitOrientation"),
-        mapAction<actions::TogglePaneZoom>("TogglePaneZoom"),
-        mapAction<actions::ResizePane>("ResizePane"),
-        mapAction<actions::LaunchLayout>("LaunchLayout"),
-        mapAction<actions::SaveLayout>("SaveLayout"),
-    };
-
+    // Case-insensitive, so `input_mapping:` may spell an action however it reads best.
     auto const lowerCaseName = toLower(name);
-    for (auto const& mapping: mappings)
-        if (lowerCaseName == toLower(mapping.first))
-            return { mapping.second };
+    auto const& catalog = actionCatalog();
+    auto const entry = std::ranges::find_if(
+        catalog, [&](auto const& candidate) { return toLower(candidate.name) == lowerCaseName; });
 
-    return nullopt;
+    if (entry == catalog.end())
+        return nullopt;
+
+    // The prototype: a ParameterizedActionConcept action still has its argument filled in by the
+    // caller (the YAML reader) from the sibling keys of the `action:` entry.
+    return entry->prototype;
 }
 
 } // namespace contour::actions
