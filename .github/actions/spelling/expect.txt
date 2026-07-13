@@ -155,6 +155,7 @@ qmljsdebugger
 qobject
 QPalette
 qputenv
+QRegular
 qrhi
 qrhigles
 qsb
@@ -164,6 +165,7 @@ QSignal
 qsizetype
 QTemporary
 QTest
+QText
 qtwaylandscanner
 qulonglong
 qunsetenv

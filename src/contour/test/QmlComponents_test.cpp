@@ -19,9 +19,13 @@
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDirIterator>
 #include <QtCore/QEvent>
+#include <QtCore/QFile>
 #include <QtCore/QObject>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
+#include <QtCore/QTextStream>
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
 #include <QtQml/QQmlComponent>
@@ -202,15 +206,17 @@ class MockSession: public QObject
     Q_OBJECT
     Q_PROPERTY(int pageLineCount READ pageLineCount NOTIFY lineCountChanged)
     Q_PROPERTY(int pageColumnsCount READ pageColumnsCount NOTIFY columnsCountChanged)
-    Q_PROPERTY(int historyLineCount READ historyLineCount CONSTANT)
+    Q_PROPERTY(int historyLineCount READ historyLineCount NOTIFY historyLineCountChanged)
     Q_PROPERTY(bool showResizeIndicator READ showResizeIndicator CONSTANT)
     Q_PROPERTY(int upTime READ upTime CONSTANT)
     Q_PROPERTY(float opacity READ opacity NOTIFY opacityChanged)
     Q_PROPERTY(float dimUnfocused READ dimUnfocused NOTIFY dimUnfocusedChanged)
     Q_PROPERTY(QColor backgroundColor READ backgroundColor CONSTANT)
     Q_PROPERTY(QString bellSource READ bellSource CONSTANT)
-    Q_PROPERTY(bool isScrollbarRight READ isScrollbarRight CONSTANT)
-    Q_PROPERTY(bool isScrollbarVisible READ isScrollbarVisible CONSTANT)
+    // Mirrors TerminalSession's profile-derived scrollbar properties: both are NOTIFY-driven (a config
+    // reload flips them live), so the mock must be able to drive that transition too.
+    Q_PROPERTY(bool isScrollbarRight READ isScrollbarRight NOTIFY isScrollbarRightChanged)
+    Q_PROPERTY(bool isScrollbarVisible READ isScrollbarVisible NOTIFY isScrollbarVisibleChanged)
     Q_PROPERTY(bool isImageBackground READ isImageBackground CONSTANT)
     Q_PROPERTY(bool isBlurBackground READ isBlurBackground CONSTANT)
     Q_PROPERTY(float opacityBackground READ opacityBackground CONSTANT)
@@ -219,7 +225,7 @@ class MockSession: public QObject
   public:
     [[nodiscard]] int pageLineCount() const { return _lines; }
     [[nodiscard]] int pageColumnsCount() const { return _columns; }
-    [[nodiscard]] int historyLineCount() const { return 0; }
+    [[nodiscard]] int historyLineCount() const { return _historyLineCount; }
     [[nodiscard]] bool showResizeIndicator() const { return true; }
     [[nodiscard]] int upTime() const { return 5; } // > 1.0 so the resize popup path is exercised
     [[nodiscard]] float opacity() const { return _opacity; }
@@ -230,8 +236,8 @@ class MockSession: public QObject
     [[nodiscard]] QString pathToBackground() const { return QString(); }
     [[nodiscard]] QColor backgroundColor() const { return QColor(Qt::black); }
     [[nodiscard]] QString bellSource() const { return QString(); }
-    [[nodiscard]] bool isScrollbarRight() const { return true; }
-    [[nodiscard]] bool isScrollbarVisible() const { return false; }
+    [[nodiscard]] bool isScrollbarRight() const { return _scrollbarRight; }
+    [[nodiscard]] bool isScrollbarVisible() const { return _scrollbarVisible; }
 
     // Drivers: mutate state and fire the NOTIFY the QML binds to, reproducing a live resize / opacity change.
     void setPageSize(int columns, int lines)
@@ -240,6 +246,26 @@ class MockSession: public QObject
         _lines = lines;
         emit columnsCountChanged();
         emit lineCountChanged();
+    }
+    /// Give the session scrollback, so SessionChrome's `hasScrollback` (thumb size < 1.0) turns true and
+    /// the scrollbar is actually shown.
+    void setHistoryLineCount(int lines)
+    {
+        _historyLineCount = lines;
+        emit historyLineCountChanged();
+    }
+    /// Move the bar to the other edge, as a profile reload / switch does (TerminalSession::activateProfile
+    /// emits isScrollbarRightChanged for exactly this).
+    void setScrollbarRight(bool right)
+    {
+        _scrollbarRight = right;
+        emit isScrollbarRightChanged();
+    }
+    /// Show or hide the bar, as scrollbar.position: Hidden — or hide_in_alt_screen on the alt screen — does.
+    void setScrollbarVisible(bool visible)
+    {
+        _scrollbarVisible = visible;
+        emit isScrollbarVisibleChanged();
     }
     void setOpacity(float o)
     {
@@ -261,6 +287,9 @@ class MockSession: public QObject
   signals:
     void lineCountChanged();
     void columnsCountChanged();
+    void historyLineCountChanged();
+    void isScrollbarRightChanged();
+    void isScrollbarVisibleChanged();
     void opacityChanged();
     void dimUnfocusedChanged();
     void onBell();
@@ -275,6 +304,9 @@ class MockSession: public QObject
   private:
     int _columns = 80;
     int _lines = 25;
+    int _historyLineCount = 0;
+    bool _scrollbarRight = true;
+    bool _scrollbarVisible = false;
     float _opacity = 1.0F;
     float _dimUnfocused = 0.0F;
 };
@@ -729,9 +761,205 @@ TEST_CASE("SessionChrome scrollbar renders as a styled grabbable overlay (offscr
     // A comfortable, easy-to-grab hit target rather than the thin Fusion default.
     CHECK(bar->property("implicitWidth").toReal() >= 12.0);
 
+    // The bar is sized by its implicitWidth and nothing else. Asserting only implicitWidth (as this case
+    // originally did) is blind to the real defect: an anchor pair can stretch the actual width while
+    // implicitWidth stays a truthful 12. The rebind case below drives that transition.
+    CHECK(bar->width() == Catch::Approx(bar->property("implicitWidth").toReal()));
+
     // Explicit, style-independent handle + track items (the fix), not the inherited defaults.
     CHECK(bar->property("contentItem").value<QQuickItem*>() != nullptr);
     CHECK(bar->property("background").value<QQuickItem*>() != nullptr);
+}
+
+namespace
+{
+/// A SessionChrome hosted in a sized, visible offscreen Window, with its scrollbar already resolved.
+struct ChromeHost
+{
+    std::unique_ptr<QObject> window;
+    QQuickItem* chrome {};
+    QQuickItem* bar {};
+    qreal paneWidth {};
+    /// The bar's natural (unstretched) width — the value an anchor pair used to latch away.
+    qreal thin {};
+};
+
+/// Hosts a bare SessionChrome, bound to a NULL session, in a sized Window — so the scrollbar's real
+/// geometry (x/width against a known parent width) is observable, and so the null->session rebind that
+/// every split / tab switch / teardown performs can be driven from the test. Passing the session as an
+/// initial property instead would defeat the purpose: a session that is non-null on the first binding
+/// pass never armed the anchor latch these cases guard.
+[[nodiscard]] ChromeHost createChromeInWindow(QQmlEngine& engine)
+{
+    QQmlComponent component(&engine);
+    component.setData(QByteArrayLiteral("import QtQuick\n"
+                                        "import QtQuick.Window\n"
+                                        "import \"qrc:/contour/ui\"\n"
+                                        "Window {\n"
+                                        "  width: 400; height: 300; visible: true\n"
+                                        "  property alias chrome: chromeItem\n"
+                                        "  SessionChrome { id: chromeItem; session: null }\n"
+                                        "}\n"),
+                      QUrl(QStringLiteral("qrc:/contour/ui/ScrollBarWrapper.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    INFO("wrapper errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+
+    auto host = ChromeHost { .window = std::unique_ptr<QObject>(component.create()) };
+    REQUIRE(host.window != nullptr);
+    QCoreApplication::processEvents();
+
+    host.chrome = host.window->property("chrome").value<QQuickItem*>();
+    REQUIRE(host.chrome != nullptr);
+    host.bar = host.chrome->findChild<QQuickItem*>(QStringLiteral("verticalScrollBar"));
+    REQUIRE(host.bar != nullptr);
+    host.paneWidth = host.chrome->width(); // SessionChrome fills the window
+    host.thin = host.bar->property("implicitWidth").toReal();
+    return host;
+}
+
+/// A Right-placed session with scrollback, so the bar is genuinely shown rather than merely laid out.
+[[nodiscard]] std::unique_ptr<MockSession> createScrollableSession()
+{
+    auto session = std::make_unique<MockSession>();
+    session->setScrollbarVisible(true);
+    session->setHistoryLineCount(1000);
+    return session;
+}
+} // namespace
+
+TEST_CASE("SessionChrome scrollbar stays a thin edge overlay, whatever the session does (offscreen)",
+          "[contour][gui][qml][scrollbar]")
+{
+    // THE regression guard: the bar used to span the WHOLE pane width.
+    //
+    // Placement was expressed as TWO conditional anchor bindings over one condition (anchors.right =
+    // atRightEdge ? parent.right : undefined, plus the mirrored anchors.left). QML re-evaluates them one
+    // at a time, and the null-session fallback anchored LEFT — so a null->Right rebind set `right` while
+    // `left` was still bound. QQuickAnchors answers a left+right pair by stretching the item:
+    // setItemWidth(parent.width) -> QQuickItem::setWidth() -> widthValid latches. Resetting `left` an
+    // instant later does NOT restore the width, so implicitWidth never re-applied and the bar stayed
+    // parent-wide at x == 0 forever. Placement is a single `x` binding now, so no anchor can size the bar
+    // horizontally — and every section below asserts the width, which is what the styling case above
+    // (implicitWidth only) was blind to: implicitWidth stayed a truthful 12 throughout the bug.
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::QmlMessageCapture warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto session = createScrollableSession();
+
+    SECTION("a null->session rebind (every split / tab switch) leaves it thin and right-aligned")
+    {
+        host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+        QCoreApplication::processEvents();
+
+        // Pre-fix this read width == 400 (the whole pane) and x == 0.
+        CHECK(host.bar->width() == Catch::Approx(host.thin));
+        CHECK(host.bar->x() == Catch::Approx(host.paneWidth - host.thin));
+        CHECK(host.bar->height() == Catch::Approx(host.chrome->height())); // vertical anchors still span
+        CHECK(host.bar->isVisible());
+
+        // Rebinding back to null (pane teardown) must not stretch it either.
+        host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(nullptr)));
+        QCoreApplication::processEvents();
+        CHECK(host.bar->width() == Catch::Approx(host.thin));
+    }
+
+    SECTION("the configured edge is honored, and a live profile flip only ever moves it")
+    {
+        // scrollbar.position is profile state, so a config reload can move the bar between edges at
+        // runtime (TerminalSession::activateProfile re-announces it; the signal used to be declared and
+        // never emitted, so the setting needed a restart). A flip is the second way into the old latch:
+        // whichever direction set an anchor before the opposite one was reset stretched the bar. So both
+        // directions are asserted, and each asserts the width, not just the position.
+        session->setScrollbarRight(false); // position: Left
+        host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+        QCoreApplication::processEvents();
+        CHECK(host.bar->x() == Catch::Approx(0.0));
+        CHECK(host.bar->width() == Catch::Approx(host.thin));
+
+        session->setScrollbarRight(true); // Left -> Right
+        QCoreApplication::processEvents();
+        CHECK(host.bar->x() == Catch::Approx(host.paneWidth - host.thin));
+        CHECK(host.bar->width() == Catch::Approx(host.thin));
+
+        session->setScrollbarRight(false); // Right -> Left
+        QCoreApplication::processEvents();
+        CHECK(host.bar->x() == Catch::Approx(0.0));
+        CHECK(host.bar->width() == Catch::Approx(host.thin));
+    }
+
+    SECTION("hiding it live (position: Hidden, or hide_in_alt_screen on the alt screen) is honored")
+    {
+        host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+        QCoreApplication::processEvents();
+        REQUIRE(host.bar->isVisible());
+
+        session->setScrollbarVisible(false);
+        QCoreApplication::processEvents();
+        CHECK_FALSE(host.bar->isVisible());
+    }
+
+    INFO("QML messages:\n" << warnings.messages().join(QStringLiteral("\n")).toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("No QML detaches an anchor conditionally (the full-pane-scrollbar trap)", "[contour][gui][qml]")
+{
+    // A source tripwire for the bug class the scrollbar shipped, because no runtime assertion can catch its
+    // reintroduction in a component no test happens to instantiate.
+    //
+    // `anchors.<edge>: cond ? parent.<edge> : undefined` is only ever written as one half of a pair that
+    // switches an item between two opposite edges. The two bindings re-evaluate ONE AT A TIME, so a flip
+    // transiently leaves both edges anchored; QQuickAnchors then stretches the item across its parent and
+    // latches that as an explicit width/height (QQuickItem::setWidth marks widthValid), which the implicit
+    // size can never undo. The item stays parent-sized for good. Bind `x`/`y` instead — see the vbar in
+    // SessionChrome.qml and the TitleBar in main.qml.
+    //
+    // Comment lines are skipped: the two fix sites document the trap using the very syntax it flags.
+    //
+    // The leading word boundary is spelled (?<!\w) rather than the usual backslash-b escape: identical
+    // zero-width meaning, but check-spelling tokenizes this pattern as prose and would glue that escape
+    // onto the word behind it, then demand the resulting nonsense token be added to the dictionary.
+    static auto const conditionalDetach = QRegularExpression(QStringLiteral(
+        R"(anchors\.(left|right|top|bottom|horizontalCenter|verticalCenter)\s*:.*(?<!\w)undefined\b)"));
+    REQUIRE(conditionalDetach.isValid()); // an invalid pattern matches nothing and guards nothing
+
+    auto offenders = QStringList {};
+    auto scanned = 0;
+    auto it = QDirIterator(QStringLiteral(":/contour/ui"),
+                           QStringList { QStringLiteral("*.qml") },
+                           QDir::Files,
+                           QDirIterator::Subdirectories);
+    while (it.hasNext())
+    {
+        auto file = QFile(it.next());
+        REQUIRE(file.open(QIODevice::ReadOnly | QIODevice::Text));
+        ++scanned;
+        auto lineNumber = 0;
+        auto stream = QTextStream(&file);
+        while (!stream.atEnd())
+        {
+            auto const line = stream.readLine();
+            ++lineNumber;
+            if (line.trimmed().startsWith(QStringLiteral("//")))
+                continue;
+            if (conditionalDetach.match(line).hasMatch())
+                offenders
+                    << QStringLiteral("%1:%2: %3").arg(file.fileName()).arg(lineNumber).arg(line.trimmed());
+        }
+    }
+
+    REQUIRE(scanned > 0); // a zero-file scan would pass vacuously
+
+    // ONE ScopedMessage covering the CHECK: an INFO raised inside a loop is destroyed on each iteration
+    // and never survives to the assertion, so a failure would name no file at all.
+    INFO("conditionally detached anchors (bind x/y instead):\n"
+         << offenders.join(QStringLiteral("\n")).toStdString());
+    CHECK(offenders.isEmpty());
 }
 
 TEST_CASE("Tab color flyout offers a dependency-free arbitrary-color entry (offscreen)",

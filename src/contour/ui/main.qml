@@ -99,12 +99,14 @@ ApplicationWindow
     TitleBar {
         id: titleBar
         objectName: "titleBar" // so offscreen layout tests can findChild() this item
-        // Pinned to the top OR the bottom edge depending on tabBarPosition (never both — assigning
-        // `undefined` detaches an anchor). left/right always span the window.
-        anchors.top: appWindow.tabBarPosition === 0 ? parent.top : undefined
-        anchors.bottom: appWindow.tabBarPosition === 1 ? parent.bottom : undefined
+        // Pinned to the top OR the bottom edge via a single `y` binding — never a pair of conditional
+        // top/bottom anchors, which a Bottom->Top flip would leave BOTH set for an instant, stretching the
+        // bar to the window's height and overriding the `height` binding below for good. See the scrollbar
+        // in SessionChrome.qml for the full mechanism; it shipped that bug as a full-pane-wide bar.
+        // left/right stay anchored: that pair is unconditional, so sizing the width is intended.
         anchors.left: parent.left
         anchors.right: parent.right
+        y: appWindow.tabBarPosition === 0 ? 0 : parent.height - titleBar.height
         // Shown per the profile's tab_bar_visibility, resolved against the live tab count by the
         // controller (Always / Never / Multiple). When hidden, height/effectiveHeight collapse to 0 so
         // the content area (and the declared chrome height feeding the geometry authority) reclaim it.

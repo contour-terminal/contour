@@ -49,10 +49,22 @@ Item {
     ScrollBar {
         id: vbar
         objectName: "verticalScrollBar"
+
+        // Which edge the bar floats against. ONE binding drives `x` — deliberately NOT a pair of
+        // conditional left/right anchors, which is what used to make the bar span the WHOLE pane:
+        //
+        // QML re-evaluates two such bindings one at a time, and the null-session fallback anchored left,
+        // so every null->Right rebind (a split, a tab switch, a teardown) transiently left BOTH edges
+        // anchored. QQuickAnchors answers a left+right pair by *stretching* the item — setItemWidth(),
+        // which routes through QQuickItem::setWidth() and latches widthValid. Resetting the other anchor
+        // an instant later does not undo that: implicitWidth could never re-apply, and a right-only anchor
+        // merely repositions a bar that is still parent-wide. Binding `x` leaves the width purely implicit,
+        // so no anchor can ever size this item horizontally.
+        readonly property bool atRightEdge: chrome.session ? chrome.session.isScrollbarRight : true
+
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.right: (chrome.session && chrome.session.isScrollbarRight) ? parent.right : undefined
-        anchors.left: (chrome.session && chrome.session.isScrollbarRight) ? undefined : parent.left
+        x: vbar.atRightEdge ? parent.width - vbar.width : 0
         visible: (chrome.session ? chrome.session.isScrollbarVisible : false) && vbar.hasScrollback
         orientation: Qt.Vertical
         policy: visible ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
