@@ -3898,7 +3898,9 @@ TEST_CASE("Terminal.selectAll", "[terminal]")
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(5) };
 
     // Push two lines into the scrollback, leaving three on the page.
-    mock.writeToScreen("hist1\r\nhist2\r\npage1\r\npage2\r\npage3");
+    for (auto const* text: { "hist1", "hist2", "page1", "page2" })
+        mock.writeToScreen(std::format("{}\r\n", text));
+    mock.writeToScreen("page3");
     REQUIRE(mock.terminal.currentScreen().historyLineCount() == LineCount(2));
 
     REQUIRE_FALSE(mock.terminal.selectionAvailable());

@@ -88,7 +88,7 @@ TEST_CASE("CommandBlocks.scan.commandEndWithoutMarkIsRealOutput", "[commandblock
     auto const lines = FakeLines { {
         { LineFlags { LineFlag::CommandEnd }, "foo" },
         { LineFlags { LineFlag::OutputStart }, "bar" },
-        { LineFlags { LineFlag::Marked }, "$ printf 'bar\\nfoo'" },
+        { LineFlags { LineFlag::Marked }, "$ printf two-lines" },
     } };
 
     auto const blocks = scanCommandBlocksBackward(lines, 1);

@@ -60,7 +60,7 @@ namespace
 
 } // namespace
 
-TEST_CASE("ContextMenu.copy.needsASelection", "[contextmenu]")
+TEST_CASE("ContextMenu.copy.requiresSelection", "[contextmenu]")
 {
     auto state = fullyEnabledState();
 
@@ -79,7 +79,7 @@ TEST_CASE("ContextMenu.copy.needsASelection", "[contextmenu]")
     CHECK_FALSE(withoutSelection->enabled);
 }
 
-TEST_CASE("ContextMenu.paste.needsAClipboard", "[contextmenu]")
+TEST_CASE("ContextMenu.paste.requiresClipboardText", "[contextmenu]")
 {
     auto state = fullyEnabledState();
 
@@ -136,7 +136,7 @@ TEST_CASE("ContextMenu.hyperlink.onlyUnderTheCursor", "[contextmenu]")
     CHECK(find(elsewhere, "Copy Link Address") == nullptr);
 }
 
-TEST_CASE("ContextMenu.openCurrentFolder.needsAWorkingDirectory", "[contextmenu]")
+TEST_CASE("ContextMenu.openCurrentFolder.requiresWorkingDirectory", "[contextmenu]")
 {
     auto state = fullyEnabledState();
 
