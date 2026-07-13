@@ -166,6 +166,7 @@
           <li>Adds the dim_unfocused profile option: dims a pane while it is not the focused one (an inactive pane of a split, or any pane of an unfocused window) by blending it toward its background color; 0.0 (default) disables dimming</li>
           <li>Fixes the input-method (IME) candidate window opening at the wrong position: the reported cursor rectangle now honors the configured window margin and the pane's position inside a split, and widens over double-width (CJK) characters</li>
           <li>Changes the window to use a custom client-side-decorated title bar (tab strip plus window controls) by default on all platforms; set show_title_bar: true to use the native server-side window decoration instead, in which case the tab strip is kept but its window controls defer to the OS frame</li>
+          <li>Fixes profile settings that only took effect after a restart: changing background_image, its blur or opacity, the background color, or the scrollbar position now applies as soon as the config is reloaded or the profile is switched</li>
         </ul>
       </description>
     </release>
