@@ -54,25 +54,33 @@ namespace detail
         int i = 0;
         size_t offset = 0;
 
+        // The flags of the chunk at index @p index. Only the very first chunk of a logical line is that
+        // line's head, and only when the caller says the split starts one (a shrink hands us the OVERFLOW
+        // of a head it already emitted, so every chunk it asks for is a continuation). The head keeps the
+        // logical line's flags; a continuation keeps only those that describe a physical line, and is
+        // marked as wrapped.
+        auto const flagsOfChunk = [&](int index) {
+            auto const isHeadLine = index == 0 && initialNoWrap;
+            return isHeadLine ? baseFlags : (baseFlags.without(HeadOnlyLineFlags) | LineFlag::Wrapped);
+        };
+
         while (offset + newCols <= usedColumns)
         {
-            auto const wrappedFlag = i == 0 && initialNoWrap ? LineFlag::None : LineFlag::Wrapped;
             LineSoA chunk;
             initializeLineSoA(chunk, newColumnCount);
             copyColumns(logicalLineBuffer, offset, chunk, 0, newCols);
-            targetLines.emplace_back(baseFlags | wrappedFlag, std::move(chunk), newColumnCount);
+            targetLines.emplace_back(flagsOfChunk(i), std::move(chunk), newColumnCount);
             offset += newCols;
             ++i;
         }
 
         if (offset < usedColumns)
         {
-            auto const wrappedFlag = i == 0 && initialNoWrap ? LineFlag::None : LineFlag::Wrapped;
             auto const remaining = usedColumns - offset;
             LineSoA chunk;
             initializeLineSoA(chunk, newColumnCount);
             copyColumns(logicalLineBuffer, offset, chunk, 0, remaining);
-            targetLines.emplace_back(baseFlags | wrappedFlag, std::move(chunk), newColumnCount);
+            targetLines.emplace_back(flagsOfChunk(i), std::move(chunk), newColumnCount);
             ++i;
         }
         return LineCount::cast_from(i);

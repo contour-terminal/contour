@@ -29,6 +29,16 @@ enum class LineFlag : uint8_t
 
 using LineFlags = crispy::flags<LineFlag>;
 
+/// Flags that describe the LOGICAL line, and therefore belong to its first physical line alone.
+///
+/// A logical line that reflow splits across several physical lines has exactly one head. The semantic
+/// marks a shell emits (OSC 133, and Contour's own SETMARK) point at that head — at the line the prompt
+/// starts on, at the line the output starts on — never at the chunks a wrap happens to produce. Copying
+/// them onto the continuations would turn one prompt into several the moment the window is widened, which
+/// is precisely what findMarkerUpwards() and the command-block scan would then walk into.
+constexpr inline auto HeadOnlyLineFlags =
+    LineFlags { LineFlag::Marked, LineFlag::OutputStart, LineFlag::CommandEnd };
+
 } // namespace vtbackend
 
 template <>

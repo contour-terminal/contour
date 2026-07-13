@@ -7,6 +7,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <format>
+#include <ranges>
+#include <vector>
 
 using namespace vtbackend;
 using namespace std::string_literals;
@@ -1238,6 +1240,76 @@ TEST_CASE("Grid.scrollUp.partialHorizontal.blankLinesMatchingFillAttrsStayBlank"
     grid.scrollUp(LineCount(1), GraphicsAttributes {}, margin);
 
     CHECK(grid.lineAt(LineOffset(1)).isBlank());
+}
+
+TEST_CASE("Grid.reflow.semanticMarksStayOnTheHeadLine", "[grid]")
+{
+    // A shell's semantic marks (OSC 133, and Contour's own SETMARK) name the line a prompt starts on and
+    // the line a command's output starts on. Reflow re-splits the logical line those marks sit on, and the
+    // marks must ride along with its HEAD alone: one prompt must not become several when the window is
+    // widened, and it must not evaporate when the window is narrowed. findMarkerUpwards() and the
+    // command-block scan both walk these flags, and to either of them a duplicate reads as a second prompt.
+    auto const linesWith = [](Grid const& grid, LineFlag flag) {
+        auto result = std::vector<LineOffset> {};
+        for (auto const i:
+             std::views::iota(-grid.historyLineCount().as<int>(), grid.pageSize().lines.as<int>()))
+            if (grid.lineAt(LineOffset::cast_from(i)).isFlagEnabled(flag))
+                result.push_back(LineOffset::cast_from(i));
+        return result;
+    };
+
+    auto const soleHeadLine = [&](Grid const& grid, LineFlag flag) {
+        auto const carriers = linesWith(grid, flag);
+        REQUIRE(carriers.size() == 1);
+        CHECK_FALSE(grid.lineAt(carriers.front()).wrapped());
+    };
+
+    auto const text = std::string(30, 'A');
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(30) }, true, LineCount(10));
+    grid.setLineText(LineOffset(0), text);
+    grid.lineAt(LineOffset(0))
+        .setFlag(LineFlags { LineFlag::Marked, LineFlag::OutputStart, LineFlag::CommandEnd }, true);
+
+    auto const reconstruct = [](Grid const& grid) {
+        auto result = std::string {};
+        for (auto const i:
+             std::views::iota(-grid.historyLineCount().as<int>(), grid.pageSize().lines.as<int>()))
+            result += grid.lineTextTrimmed(LineOffset::cast_from(i));
+        return result;
+    };
+
+    SECTION("shrink splits the line but not its marks")
+    {
+        // 30 columns of text into 10 => a head plus two continuations.
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, false);
+        CHECK(reconstruct(grid) == text);
+        soleHeadLine(grid, LineFlag::Marked);
+        soleHeadLine(grid, LineFlag::OutputStart);
+        soleHeadLine(grid, LineFlag::CommandEnd);
+    }
+
+    SECTION("grow re-splits the line but not its marks")
+    {
+        // Narrow first so the logical line really is wrapped, then widen to a width it still overflows:
+        // 30 columns of text into 20 => a head plus one continuation. This is the case that used to stamp
+        // the head's flags onto every chunk it produced.
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(20) }, CellLocation {}, false);
+        CHECK(reconstruct(grid) == text);
+        soleHeadLine(grid, LineFlag::Marked);
+        soleHeadLine(grid, LineFlag::OutputStart);
+        soleHeadLine(grid, LineFlag::CommandEnd);
+    }
+
+    SECTION("a full round-trip leaves the line whole again, marks and all")
+    {
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(30) }, CellLocation {}, false);
+        CHECK(reconstruct(grid) == text);
+        soleHeadLine(grid, LineFlag::Marked);
+        soleHeadLine(grid, LineFlag::OutputStart);
+        soleHeadLine(grid, LineFlag::CommandEnd);
+    }
 }
 
 // }}}

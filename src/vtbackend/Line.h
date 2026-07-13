@@ -255,9 +255,14 @@ class Line
         return marked() ? LineFlag::Marked : LineFlag::None;
     }
 
+    /// The flags a continuation line inherits from the logical line it belongs to.
+    ///
+    /// Only the ones that describe a PHYSICAL line. The semantic marks (HeadOnlyLineFlags) deliberately
+    /// stay behind on the head: they say where a prompt or a command's output begins, and a wrap does not
+    /// begin a second one.
     [[nodiscard]] LineFlags inheritableFlags() const noexcept
     {
-        auto constexpr Inheritables = LineFlags({ LineFlag::Wrappable, LineFlag::Marked });
+        auto constexpr Inheritables = LineFlags { LineFlag::Wrappable };
         return _flags & Inheritables;
     }
 
