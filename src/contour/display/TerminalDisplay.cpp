@@ -1451,9 +1451,10 @@ void TerminalDisplay::doDumpState()
 QImage TerminalDisplay::screenshotImageFromBuffer(std::vector<uint8_t> const& rgbaBuffer,
                                                   vtbackend::ImageSize pixelSize)
 {
-    // The offscreen-texture readback delivers a top-left-origin RGBA8 buffer, so — unlike the old
-    // glReadPixels backbuffer path — no vertical flip is applied here. copy() detaches from the (transient)
-    // source buffer so the returned image stays valid after it is freed.
+    // The buffer arrives already normalized to a top-left-origin, tightly-packed RGBA8 image (the renderer's
+    // deliverScreenshot() reverses the rows when the capture came off a Y-up framebuffer), so this wrapper
+    // only adopts it. copy() detaches from the (transient) source buffer so the returned image stays valid
+    // after it is freed.
     return QImage(rgbaBuffer.data(),
                   pixelSize.width.as<int>(),
                   pixelSize.height.as<int>(),

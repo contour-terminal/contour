@@ -26,27 +26,6 @@ inline constexpr std::size_t ScreenshotBytesPerPixel = 4;
     return static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * ScreenshotBytesPerPixel;
 }
 
-/// Decides whether a captured framebuffer buffer must be vertically flipped to land in a top-left-origin
-/// image (as QImage expects).
-///
-/// The RHI normalizes *texture* readback to a top-left origin on every backend, so an offscreen-texture
-/// capture needs no flip. A *swapchain backbuffer* readback, by contrast, follows the backend's framebuffer
-/// origin: bottom-left on OpenGL (QRhi::isYUpInFramebuffer() == true), which must be flipped. Expressing the
-/// policy as data (two booleans) keeps it unit-testable without a GL context and documents exactly when the
-/// flip applies.
-/// @param capturedFromTexture true if the pixels came from an offscreen QRhiTexture readback (top-left
-/// origin,
-///                            no flip); false if from the swapchain backbuffer.
-/// @param framebufferIsYUp    QRhi::isYUpInFramebuffer() for the active backend (only consulted for a
-///                            backbuffer capture).
-/// @return true if the buffer's rows must be reversed to obtain a top-left-origin image.
-[[nodiscard]] constexpr bool screenshotNeedsVerticalFlip(bool capturedFromTexture,
-                                                         bool framebufferIsYUp) noexcept
-{
-    // Offscreen texture readback is already top-left; only a Y-up backbuffer needs flipping.
-    return !capturedFromTexture && framebufferIsYUp;
-}
-
 /// Copies a readback buffer into a tightly-packed, top-left-origin RGBA8 image buffer of the expected size,
 /// optionally reversing rows (vertical flip) and defensively padding/truncating to the exact expected length.
 ///
@@ -57,7 +36,8 @@ inline constexpr std::size_t ScreenshotBytesPerPixel = 4;
 /// @param source     The raw readback bytes (may be shorter or longer than expected; may be empty).
 /// @param width      Target image width in pixels.
 /// @param height     Target image height in pixels.
-/// @param flip       Whether to reverse the row order (see screenshotNeedsVerticalFlip()).
+/// @param flip       Whether to reverse the row order. Whose call this is depends on how the captured
+///                   surface got its pixels; RhiRenderer::recordScreenshotPass() decides it.
 /// @return A buffer of exactly screenshotBufferSize(width, height) bytes. Rows beyond what @p source supplies
 ///         are left zero-filled.
 [[nodiscard]] inline std::vector<uint8_t> normalizeScreenshotBuffer(std::span<uint8_t const> source,

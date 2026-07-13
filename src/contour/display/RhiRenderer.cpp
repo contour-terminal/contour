@@ -1076,6 +1076,15 @@ void RhiRenderer::recordScreenshotPass(QRhi* rhi, QRhiCommandBuffer* cb)
     cb->resourceUpdate(batch);
     _screenshotReadbackPending = true;
     _screenshotSize = size;
+
+    // Readback hands back the texture's texel rows in index order. For a texture we RENDERED into, which row
+    // is texel row 0 follows the backend's framebuffer origin: bottom-left on OpenGL (isYUpInFramebuffer(),
+    // whose readBackTexture() is a plain glReadPixels off an FBO), so the image arrives bottom-up and its
+    // rows must be reversed; top-left on D3D/Vulkan/Metal, where it already matches. (The glyph atlas is
+    // UPLOADED rather than rendered into, so it round-trips in the row order we wrote it and readAtlas()
+    // rightly never flips.) The orientation is a property of THIS capture, so it is recorded with it —
+    // deliverScreenshot() then reverses the rows without re-deriving it.
+    _screenshotFlipRows = rhi->isYUpInFramebuffer();
     displayLog()("Screenshot: scheduled offscreen capture ({}).", size);
 }
 
@@ -1092,14 +1101,12 @@ void RhiRenderer::deliverScreenshot()
     auto const width = unbox<int>(_screenshotSize.width);
     auto const height = unbox<int>(_screenshotSize.height);
 
-    // Offscreen-texture readback is top-left origin on every backend, so no vertical flip is needed. (The
-    // capturedFromTexture=true short-circuit makes the backend framebuffer orientation irrelevant, so we
-    // don't consult _rhi here — keeping deliverScreenshot independent of a live per-frame RHI handle.)
-    auto const flip = screenshotNeedsVerticalFlip(/*capturedFromTexture*/ true, /*framebufferIsYUp*/ false);
+    // Normalize the raw readback into a tightly-packed, top-left-origin RGBA8 buffer, reversing the rows
+    // iff the capture came off a Y-up (bottom-left origin) framebuffer — recorded with the capture.
     auto const* bytes = reinterpret_cast<uint8_t const*>(_screenshotReadbackResult.data.constData());
     auto const source =
         std::span<uint8_t const>(bytes, static_cast<size_t>(_screenshotReadbackResult.data.size()));
-    auto buffer = normalizeScreenshotBuffer(source, width, height, flip);
+    auto buffer = normalizeScreenshotBuffer(source, width, height, _screenshotFlipRows);
 
     displayLog()("Screenshot: delivering captured frame ({}).", _screenshotSize);
     _pendingScreenshotCallback.value()(buffer, _screenshotSize);
