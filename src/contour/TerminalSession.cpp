@@ -40,6 +40,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <ranges>
 #include <regex>
 
 #if defined(__OpenBSD__)

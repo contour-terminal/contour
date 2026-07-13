@@ -18,6 +18,7 @@
 #include <QtQml/QQmlEngine>
 
 #include <ranges>
+#include <utility>
 
 #include <vtmux/Pane.h>
 #include <vtmux/PaneLayout.h>
