@@ -7,6 +7,7 @@
 #include <vtrasterizer/RendererTestHelpers.h>
 #include <vtrasterizer/TextRenderer.h>
 
+#include <text_shaper/bdf_test_font.h>
 #include <text_shaper/mock_font_locator.h>
 #include <text_shaper/open_shaper.h>
 
@@ -1327,6 +1328,140 @@ TEST_CASE("Renderer.reconfig.page_geometry_preserved_across_dpi_change", "[rende
     CHECK(live.pageMargin.top == newMargin.top);
     CHECK(live.pageMargin.bottom == newMargin.bottom);
 }
+
+// {{{ issue #1939: a run that falls back must stay on the cell grid
+
+namespace
+{
+
+constexpr auto Ornament = char32_t { 0x276F };     ///< The prompt ornament from issue #1939.
+constexpr auto NoBreakSpace = char32_t { 0x00A0 }; ///< Follows it, and does not break the run.
+constexpr auto CellWidth = 10;
+
+/// Renders each of @p cells as its own grid cell of one text group, and returns the X coordinate every
+/// glyph was drawn at.
+[[nodiscard]] std::vector<int> renderedGlyphPositions(TextRenderer& renderer,
+                                                      MockRenderTarget& renderTarget,
+                                                      std::vector<std::u32string> const& cells)
+{
+    renderTarget.getMockBackend().renderCommands.clear();
+    renderer.beginFrame();
+
+    for (auto const i: std::views::iota(size_t { 0 }, cells.size()))
+    {
+        auto cell = vtbackend::RenderCell {};
+        cell.groupStart = i == 0;
+        cell.position =
+            vtbackend::CellLocation { .line = LineOffset(0), .column = ColumnOffset(static_cast<int>(i)) };
+        cell.codepoints = cells[i];
+        cell.attributes.flags = vtbackend::CellFlags {};
+        cell.attributes.foregroundColor = vtbackend::RGBColor(0xFF, 0xFF, 0xFF);
+        renderer.renderCell(cell);
+    }
+
+    renderer.endFrame();
+
+    auto positions = std::vector<int> {};
+    for (auto const& command: renderTarget.getMockBackend().renderCommands)
+        positions.emplace_back(command.x.value);
+    return positions;
+}
+
+} // namespace
+
+TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallback]")
+{
+    // The primary is a monospaced terminal font with the letters but no prompt ornament: SF Mono.
+    auto primary = text::test::bdf_font { "primary", true, { { U'A', 8 }, { U'B', 8 } } };
+
+    // The fallback is proportional and covers everything the primary is missing -- DejaVu Sans. Its
+    // non-breaking space advances a mere 3px against a 10px cell, which is what used to round away to
+    // nothing and drag the rest of the run one cell to the left.
+    auto fallback = text::test::bdf_font {
+        "fallback", false, { { Ornament, 12 }, { NoBreakSpace, 3 }, { U'A', 7 }, { U'B', 7 } }
+    };
+
+    auto description = text::font_description {};
+    description.familyName = "primary";
+    description.spacing = text::font_spacing::mono;
+
+    auto fallbackDescription = description;
+    fallbackDescription.familyName = "fallback";
+
+    mock_font_locator::configure({
+        { .description = description, .source = primary.source() },
+        { .description = fallbackDescription, .source = fallback.source() },
+    });
+    auto const _ = crispy::finally { [] { mock_font_locator::configure({}); } };
+
+    auto locator = mock_font_locator {};
+    auto textShaper = open_shaper { text::test::bdf_font::Dpi, locator };
+
+    auto const fontKey = textShaper.load_font(description, text::test::bdf_font::Size);
+    REQUIRE(fontKey.has_value());
+
+    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = ImageSize { Width(CellWidth), Height(20) },
+                                           .baseline = 15,
+                                           .underline = { .position = 17, .thickness = 1 } };
+
+    auto fontDescriptions = FontDescriptions {};
+    fontDescriptions.dpi = text::test::bdf_font::Dpi;
+    fontDescriptions.size = text::test::bdf_font::Size;
+    fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
+
+    auto const fontKeys = FontKeys {
+        .regular = *fontKey, .bold = *fontKey, .italic = *fontKey, .boldItalic = *fontKey, .emoji = *fontKey
+    };
+
+    MockTextRendererEvents events;
+    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+
+    MockRenderTarget renderTarget;
+    vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
+    renderer.setRenderTarget(renderTarget, allocator);
+
+    auto const atlasProperties =
+        vtrasterizer::atlas::AtlasProperties { .format = vtrasterizer::atlas::Format::Red,
+                                               .tileSize = { Width(256), Height(256) },
+                                               .hashCount = { 1024 },
+                                               .tileCount = { 4096 },
+                                               .directMappingCount = 128 };
+    auto textureAtlas = TextureAtlas(renderTarget.getMockBackend(), atlasProperties);
+    renderer.setTextureAtlas(textureAtlas);
+
+    SECTION("a narrow fallback advance does not shift the rest of the run left")
+    {
+        // The prompt as Claude Code writes it: the ornament, a non-breaking space, then the first word.
+        // A plain space would end the text group; a non-breaking space does not, which is why all four
+        // cells are shaped as one run and why only the first word was ever affected.
+        auto const positions = renderedGlyphPositions(
+            renderer,
+            renderTarget,
+            { std::u32string { Ornament }, std::u32string { NoBreakSpace }, U"A", U"B" });
+
+        REQUIRE(positions.size() == 4);
+
+        // Every glyph sits on its own cell boundary. Before the fix the non-breaking space advanced the
+        // pen by nothing at all, and this came back as { 0, 10, 10, 20 } -- the letters a cell too far
+        // left, drawn over the space.
+        CHECK(positions[0] == 0);
+        CHECK(positions[1] == 1 * CellWidth);
+        CHECK(positions[2] == 2 * CellWidth);
+        CHECK(positions[3] == 3 * CellWidth);
+    }
+
+    SECTION("a run the primary font covers is unaffected")
+    {
+        auto const positions = renderedGlyphPositions(renderer, renderTarget, { U"A", U"B" });
+
+        REQUIRE(positions.size() == 2);
+        CHECK(positions[0] == 0);
+        CHECK(positions[1] == 1 * CellWidth);
+    }
+}
+
+// }}}
 
 int main(int argc, char* argv[])
 {

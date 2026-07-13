@@ -1,4 +1,5 @@
 set(text_shaper_SRC
+    cluster_spans.h
     font.cpp font.h
     font_locator.h
     font_locator_provider.cpp font_locator_provider.h
@@ -81,7 +82,7 @@ message(STATUS "[text_shaper] Libraries: ${TEXT_SHAPER_LIBS}")
 
 if(CONTOUR_TESTING)
     enable_testing()
-    add_executable(text_shaper_test test_main.cpp open_shaper_test.cpp scale_test.cpp)
+    add_executable(text_shaper_test test_main.cpp cluster_spans_test.cpp open_shaper_test.cpp scale_test.cpp)
     target_link_libraries(text_shaper_test PRIVATE text_shaper Catch2::Catch2 Microsoft.GSL::GSL unicode::unicode boxed-cpp::boxed-cpp crispy::core)
     add_test(NAME text_shaper_test COMMAND $<TARGET_FILE:text_shaper_test>)
     if(NOT WIN32)
