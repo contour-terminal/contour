@@ -1378,6 +1378,16 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
 
     if (auto const* actions = config::apply(
             _config.inputMappings.value().mouseMappings, button, sanitizedModifier, matchModeFlags()))
+    {
+        executeAllActions(*actions);
+        return;
+    }
+
+    // The user's mappings did not claim this button, so fall back to the built-in ones. They are consulted
+    // second on purpose: an explicit binding in the user's config always wins (see
+    // builtinFallbackMouseMappings for why a plain default could not reach an existing user at all).
+    if (auto const* actions = config::apply(
+            config::builtinFallbackMouseMappings(), button, sanitizedModifier, matchModeFlags()))
         executeAllActions(*actions);
 }
 
@@ -1509,6 +1519,105 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
 bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
 {
     crispy::locked(_terminal, [&]() { copyToClipboard(terminal().extractLastMarkRange()); });
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SelectAll)
+{
+    crispy::locked(_terminal, [&]() { terminal().selectAll(); });
+    return true;
+}
+
+bool TerminalSession::operator()(actions::OpenContextMenu)
+{
+    // Not while a left-drag selection is in flight. The popup takes the mouse grab, so the button-release
+    // that would end that drag never reaches the display: the selection would go on extending with every
+    // later hover, and the auto-scroll timer would go on firing, with no button held down at all.
+    if (crispy::locked(_terminal, [&]() { return terminal().leftMouseButtonPressed(); }))
+        return false;
+
+    _manager->openContextMenu(this);
+    return true;
+}
+
+ContextMenuState TerminalSession::contextMenuState()
+{
+    auto profileNames = std::vector<std::string> {};
+    for (auto const& name: _config.profiles.value() | std::views::keys)
+        profileNames.push_back(name);
+    // `profiles` is an unordered_map: without this the submenu would shuffle its rows between two opens.
+    std::ranges::sort(profileNames);
+
+    auto const* clipboard = QGuiApplication::clipboard();
+    auto const clipboardHasText = clipboard != nullptr && !clipboard->text(QClipboard::Clipboard).isEmpty();
+
+    // One lock for the whole snapshot. The parser thread mutates the grid concurrently, so a menu that
+    // asked the terminal a fresh question per row would be reading a moving target — and a QML binding
+    // that reached into the terminal on its own schedule would be a plain data race.
+    return crispy::locked(_terminal, [&]() {
+        auto const block = terminal().lastCommandBlock();
+
+        return ContextMenuState {
+            .hasSelection = terminal().selectionAvailable(),
+            .clipboardHasText = clipboardHasText,
+            // An empty block is no block. A shell that emits OSC 133;D at its very first prompt (tcsh
+            // cannot guard against that in an alias) reports a command that never ran, with no text to
+            // copy — offering the user three rows that would all yield nothing.
+            .hasLastCommand = block.has_value() && !(block->prompt.empty() && block->output.empty()),
+            .hasHyperlinkUnderCursor = terminal().tryGetHoveringHyperlink() != nullptr,
+            .hasWorkingDirectory = !terminal().currentWorkingDirectory().empty(),
+            // Left for the window to fill in: whether this tab holds more than one pane is not something
+            // a session knows about itself.
+            .hasSplits = false,
+            .activeProfile = profileName(),
+            .profileNames = std::move(profileNames),
+        };
+    });
+}
+
+bool TerminalSession::operator()(actions::SoftReset)
+{
+    sessionLog()("Performing terminal soft reset");
+
+    // Unlocked, mirroring operator()(ClearHistoryAndReset) above: reset() calls back into the event
+    // listener, and taking the lock around it here would be a new deadlock surface, not a fix.
+    _terminal.softReset();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CopyLastCommandPrompt)
+{
+    return copyLastCommandBlock(vtbackend::CommandBlockPart::Prompt);
+}
+
+bool TerminalSession::operator()(actions::CopyLastCommandOutput)
+{
+    return copyLastCommandBlock(vtbackend::CommandBlockPart::Output);
+}
+
+bool TerminalSession::operator()(actions::CopyLastCommandBlock)
+{
+    return copyLastCommandBlock(vtbackend::CommandBlockPart::PromptAndOutput);
+}
+
+bool TerminalSession::copyLastCommandBlock(vtbackend::CommandBlockPart part)
+{
+    auto const block = crispy::locked(_terminal, [&]() { return terminal().lastCommandBlock(); });
+    if (!block)
+        return false;
+
+    copyToClipboard(vtbackend::textOf(*block, part));
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CopyHyperlink)
+{
+    auto const l = scoped_lock { terminal() };
+    auto const hyperlink = terminal().tryGetHoveringHyperlink();
+    if (!hyperlink)
+        return false;
+
+    copyToClipboard(hyperlink->uri);
     return true;
 }
 

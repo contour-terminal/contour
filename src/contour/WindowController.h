@@ -59,6 +59,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// selection are things the user is doing IN this window; the recently-used list behind it is
     /// app-wide and lives on the manager.
     Q_PROPERTY(contour::CommandPaletteModel* commandPalette READ commandPalette CONSTANT)
+    Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
     Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
     Q_PROPERTY(contour::PaneProxy* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
@@ -188,6 +189,27 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// used. Unknown ids are ignored (a row can go stale between a refresh and a click).
     /// @param id The command id (CommandPaletteModel's `commandId` role).
     Q_INVOKABLE void runCommand(QString const& id);
+    // }}}
+
+    // {{{ Terminal context menu
+    /// Rebuilds the context menu against the CURRENT state of the active pane and asks the QML to pop it.
+    ///
+    /// Called by the manager for the OpenContextMenu action, which has already made the right-clicked
+    /// pane the active one — so "the active pane" here IS the pane the user clicked.
+    void openContextMenu();
+
+    /// The context menu, as QML consumes it: a list of rows, each a QVariantMap of
+    /// { kind, title, enabled, checkable, checked, actionId, children }.
+    ///
+    /// `actionId` indexes into this controller's own action list rather than naming a command, so a click
+    /// runs the exact action the row was built with. Nothing has to be looked up by name at click time,
+    /// and nothing depends on some other model having been populated first.
+    [[nodiscard]] QVariantList contextMenuModel() const { return _contextMenuModel; }
+
+    /// Runs the context-menu action with id @p actionId against the pane the menu was opened over.
+    /// Out-of-range ids are ignored.
+    /// @param actionId The row's `actionId`.
+    Q_INVOKABLE void triggerContextMenuAction(int actionId);
     // }}}
 
     /// The titles of this window's tabs, in tab order (TabTitleProvider, for TabCommandSource).
@@ -407,6 +429,11 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// Requests that this window show its command palette. Per-window (like tabTitleEditRequested), so
     /// the popup opens over the window the user pressed the chord in — not over every open window.
     void commandPaletteRequested();
+    /// The context menu's rows changed. Emitted before contextMenuRequested(), so the QML has already
+    /// rebuilt the menu by the time it is asked to pop it.
+    void contextMenuModelChanged();
+    /// Requests that this window pop its terminal context menu, at the mouse cursor.
+    void contextMenuRequested();
     void multimediaReadyChanged();
     void activeTabRootPaneChanged();
     void titleBarVisibleChanged();
@@ -468,6 +495,15 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     BoundCommandSource _boundCommands;
     ActionCommandSource _actionCommands;
     std::unique_ptr<CommandPaletteModel> _commandPalette;
+    // }}}
+
+    // {{{ Terminal context menu
+    /// The menu as QML sees it, rebuilt on every right-click.
+    QVariantList _contextMenuModel;
+
+    /// The actions those rows run, in the order the rows carry as `actionId`. Held here rather than in
+    /// the QML so a row runs the exact action it was built with — no lookup by name at click time.
+    std::vector<actions::Action> _contextMenuActions;
     // }}}
 
     display::TerminalDisplay* _activeDisplay = nullptr;

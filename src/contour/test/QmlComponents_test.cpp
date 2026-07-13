@@ -13,6 +13,8 @@
 #include <contour/CommandHistory.h>
 #include <contour/CommandPaletteModel.h>
 #include <contour/Config.h>
+#include <contour/ContextMenu.h>
+#include <contour/ContextMenuModel.h>
 #include <contour/Shortcut.h>
 #include <contour/TabColorScheme.h>
 #include <contour/test/QmlMessageCapture.h>
@@ -82,6 +84,11 @@ class MockTabController: public QAbstractListModel
     }
     /// Mirrors TerminalDisplay::toggleTitleBar(): flips the native-decoration axis.
     Q_INVOKABLE void toggleTitleBar() { setTitleBarVisible(!_titleBarVisible); }
+
+    /// Mirrors WindowController::triggerContextMenuAction(): what TerminalContextMenu.qml calls on a pick.
+    Q_INVOKABLE void triggerContextMenuAction(int actionId) { lastTriggeredActionId = actionId; }
+
+    int lastTriggeredActionId = -1;
 
     enum Roles : std::uint16_t
     {
@@ -476,6 +483,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/contour/ui/TitleBar.qml"),
         QStringLiteral("qrc:/contour/ui/SessionChrome.qml"),
         QStringLiteral("qrc:/contour/ui/CommandPalette.qml"),
+        QStringLiteral("qrc:/contour/ui/TerminalContextMenu.qml"),
     };
 
     for (auto const& url: components)
@@ -513,6 +521,67 @@ TEST_CASE("Tab context menu exposes all its actions (offscreen)", "[contour][gui
     auto const count = menu->property("count");
     REQUIRE(count.isValid());
     CHECK(count.toInt() >= 5);
+}
+
+TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)", "[contour][gui][qml]")
+{
+    // End-to-end over the real bridge: the pure table (ContextMenu.h) -> the Qt model (ContextMenuModel.h)
+    // -> the QML that turns rows into menu entries. Nothing is hand-rolled here except the state, so a row
+    // that the table stops producing, or an actionId that stops lining up, fails HERE rather than in a
+    // silent no-op at runtime.
+    //
+    // The menu is never popup()'d: offscreen there is no overlay to open into. That is exactly why
+    // TerminalContextMenu.qml populates on Component.onCompleted / model change rather than in an
+    // about-to-show hook — the rows are there to be asserted the moment the component is complete.
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    auto const state = contour::ContextMenuState {
+        .hasSelection = false, // Copy must come out present-but-disabled
+        .clipboardHasText = true,
+        .hasLastCommand = false, // the three "last command" rows must be absent
+        .hasHyperlinkUnderCursor = false,
+        .hasWorkingDirectory = true,
+        .hasSplits = false,
+        .activeProfile = "dark",
+        .profileNames = { "dark", "light" },
+    };
+
+    auto actions = std::vector<contour::actions::Action> {};
+    auto const model = contour::toContextMenuModel(contour::buildContextMenu(state), actions);
+    REQUIRE_FALSE(model.isEmpty());
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TerminalContextMenu.qml")));
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("entries", model);
+    std::unique_ptr<QObject> menu(component.createWithInitialProperties(initial));
+    REQUIRE(menu != nullptr);
+
+    // Every row became an entry: separators and the "Advanced"/"Change Profile" sub-menus included. A
+    // native popup (the Windows trap TabContextMenu documents) would have come up empty.
+    auto const count = menu->property("count");
+    REQUIRE(count.isValid());
+    CHECK(count.toInt() == model.size());
+
+    // Picking "Copy" must reach C++ carrying the action the row was BUILT with — the whole reason the row
+    // carries an actionId rather than a name to be looked up later. Copy is row 0, hence actionId 0.
+    QQuickItem* copyItem = nullptr;
+    REQUIRE(
+        QMetaObject::invokeMethod(menu.get(), "itemAt", Q_RETURN_ARG(QQuickItem*, copyItem), Q_ARG(int, 0)));
+    REQUIRE(copyItem != nullptr);
+    CHECK(copyItem->property("text").toString() == QStringLiteral("Copy"));
+    CHECK_FALSE(copyItem->property("enabled").toBool()); // no selection
+
+    // MenuItem exposes triggered() as a SIGNAL, and emitting it by name is what a click would do.
+    REQUIRE(QMetaObject::invokeMethod(copyItem, "triggered"));
+    CHECK(controller.lastTriggeredActionId == 0);
+    REQUIRE_FALSE(actions.empty());
+    CHECK(contour::commandId(actions[0]) == "CopySelection");
 }
 
 TEST_CASE("GUI tab strip instantiates and binds against a populated model (offscreen)", "[contour][gui][qml]")

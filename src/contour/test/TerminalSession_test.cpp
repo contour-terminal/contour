@@ -218,6 +218,51 @@ TEST_CASE("TerminalSession: mouse events without a mouse protocol write nothing 
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
 }
 
+TEST_CASE("TerminalSession: right-click opens the context menu exactly when a selection drag would work",
+          "[contour][session][input][contextmenu]")
+{
+    // The activation rule, pinned where it is actually decided. There is no new conditional behind it: the
+    // right button is a BUILT-IN FALLBACK mouse mapping, and TerminalSession::sendMousePressEvent consults
+    // that table only after vtbackend has declined the press. So the menu fires exactly when the terminal
+    // would have let the user drag a selection instead — the same gate, reused rather than restated.
+    //
+    // Observable without a window: if the application received the click, the report is in the PTY. An
+    // empty PTY therefore means the click fell through to the mapping — i.e. to the menu.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto const pixels = vtbackend::PixelCoordinate {};
+
+    SECTION("no mouse protocol: the application hears nothing, and the menu takes the click")
+    {
+        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pixels);
+        CHECK(mockPtyOf(*session).stdinBuffer().empty());
+    }
+
+    SECTION("mouse protocol on: the application gets its right-click and the menu stays shut")
+    {
+        // DECSET 1000 -- what vim and tmux turn on.
+        session->terminal().writeToScreen("\033[?1000h");
+        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pixels);
+        CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
+    }
+
+    SECTION("mouse protocol on, plus Shift: the bypass modifier hands the click back to the menu")
+    {
+        session->terminal().writeToScreen("\033[?1000h");
+        session->sendMousePressEvent(
+            Modifiers { vtbackend::Modifier::Shift }, vtbackend::MouseButton::Right, pixels);
+        // Shift is the bypass modifier, so the application is skipped and the bare `Right` fallback
+        // matches (sendMousePressEvent strips the bypass modifier before looking the mapping up).
+        CHECK(mockPtyOf(*session).stdinBuffer().empty());
+    }
+
+    SECTION("a middle-click still pastes: the fallback claims the right button and nothing else")
+    {
+        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Middle, pixels);
+        CHECK(mockPtyOf(*session).stdinBuffer().empty());
+    }
+}
+
 TEST_CASE("TerminalSession: SendChars and WriteScreen actions route to PTY and screen respectively",
           "[contour][session][actions]")
 {
@@ -230,6 +275,67 @@ TEST_CASE("TerminalSession: SendChars and WriteScreen actions route to PTY and s
     CHECK((*session)(contour::actions::WriteScreen { .chars = "hello" }));
     // The parser thread is not running; process the write synchronously.
     session->terminal().writeToScreen(""); // flush point (writeToScreen appends+processes when unstarted)
+}
+
+TEST_CASE("TerminalSession: the context-menu actions and the state they are gated on",
+          "[contour][session][actions][contextmenu]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+
+    SECTION("a fresh session offers nothing to copy")
+    {
+        auto const state = session->contextMenuState();
+        CHECK_FALSE(state.hasSelection);
+        CHECK_FALSE(state.hasLastCommand); // no OSC 133 marks in an empty scrollback
+        CHECK_FALSE(state.hasHyperlinkUnderCursor);
+        CHECK(state.activeProfile == session->profileName());
+        CHECK_FALSE(state.profileNames.empty());
+    }
+
+    SECTION("SelectAll selects, and the state says so")
+    {
+        for (int i = 0; i < 40; ++i)
+            session->terminal().writeToScreen(std::format("line {}\r\n", i));
+
+        CHECK((*session)(contour::actions::SelectAll {}));
+        CHECK(session->contextMenuState().hasSelection);
+        CHECK(session->terminal().extractSelectionText().find("line 0") != std::string::npos);
+    }
+
+    SECTION("a finished OSC 133 command block lights up the last-command rows")
+    {
+        session->terminal().writeToScreen("\033]133;A\033\\$ ls\r\n");
+        session->terminal().writeToScreen("\033]133;C\033\\file1\r\nfile2\r\n");
+        session->terminal().writeToScreen("\033]133;D;0\033\\\033]133;A\033\\$ ");
+
+        CHECK(session->contextMenuState().hasLastCommand);
+
+        auto const block = session->terminal().lastCommandBlock();
+        REQUIRE(block.has_value());
+        CHECK(block->prompt == "$ ls");
+        CHECK(block->output == "file1\nfile2");
+    }
+
+    SECTION("SoftReset keeps the scrollback that a hard reset would wipe")
+    {
+        for (int i = 0; i < 40; ++i)
+            session->terminal().writeToScreen(std::format("line {}\r\n", i));
+        REQUIRE(session->terminal().primaryScreen().historyLineCount() > vtbackend::LineCount(0));
+
+        // DECSTR resets the status display (setStatusDisplay(None)), which gives the main page back the
+        // row the profile's status line was using and so pulls exactly one line out of the history. That
+        // is the sequence doing its job -- what matters is that the scrollback SURVIVES.
+        CHECK((*session)(contour::actions::SoftReset {}));
+        CHECK(session->terminal().primaryScreen().historyLineCount() > vtbackend::LineCount(0));
+        CHECK(session->terminal().primaryScreen().grid().lineText(vtbackend::LineOffset(-1)).find("line")
+              != std::string::npos);
+
+        // A hard reset, by contrast, throws the whole scrollback away. That is the difference the
+        // Advanced submenu offers the user, so it is pinned here.
+        CHECK((*session)(contour::actions::ClearHistoryAndReset {}));
+        CHECK(session->terminal().primaryScreen().historyLineCount() == vtbackend::LineCount(0));
+    }
 }
 
 TEST_CASE("TerminalSession: scrollback actions move the viewport over seeded history",

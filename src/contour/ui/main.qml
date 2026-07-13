@@ -161,9 +161,21 @@ ApplicationWindow
         window: appWindow
     }
 
+    // The terminal pane's right-click menu. Per-window like the command palette: the OpenContextMenu
+    // action routes through the session manager to THIS window's controller, which first makes the
+    // right-clicked pane active, then republishes the model for the state under the cursor and asks us to
+    // pop it. popup() with no arguments opens at the mouse cursor — which is the click position, since the
+    // whole chain runs synchronously inside the mouse-press handler.
+    TerminalContextMenu {
+        id: terminalContextMenu
+        controller: appWindow.win
+        entries: appWindow.win ? appWindow.win.contextMenuModel : []
+    }
+
     Connections {
         target: appWindow.win
         function onCommandPaletteRequested() { commandPalette.open(); }
+        function onContextMenuRequested() { terminalContextMenu.popup(); }
     }
 
     // Frameless windows need their own edge/corner resize handles. With the native frame
