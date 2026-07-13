@@ -35,6 +35,7 @@
 #include <QtNetwork/QHostInfo>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -2366,6 +2367,32 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     }
 }
 
+void TerminalSession::emitProfileDerivedPropertiesChanged()
+{
+    // One row per Q_PROPERTY that is read out of the profile — directly (opacity, dim_unfocused,
+    // scrollbar.*) or out of the color palette that configureTerminal() re-seeds from it (the background
+    // image/blur/color). Adding a profile-derived property means adding a row here, rather than
+    // remembering to hand-write another `emit` at every site that swaps the profile.
+    //
+    // These signals carry no C++ slots: they exist purely so the QML bindings in TerminalPane.qml and
+    // SessionChrome.qml re-read the now-current profile. Emitting one whose value did not actually change
+    // therefore costs a binding re-evaluation and nothing else.
+    static constexpr auto Notifiers = std::array {
+        &TerminalSession::opacityChanged,
+        &TerminalSession::dimUnfocusedChanged,
+        &TerminalSession::pathToBackgroundChanged,
+        &TerminalSession::opacityBackgroundChanged,
+        &TerminalSession::isImageBackgroundChanged,
+        &TerminalSession::isBlurBackgroundChanged,
+        &TerminalSession::backgroundColorChanged,
+        &TerminalSession::isScrollbarRightChanged,
+        &TerminalSession::isScrollbarVisibleChanged,
+    };
+
+    for (auto const notify: Notifiers)
+        (this->*notify)();
+}
+
 void TerminalSession::activateProfile(string const& newProfileName, ProfileWindowSizePolicy windowSizePolicy)
 {
     // findProfile() (not profile()): the name comes from runtime input (a keybinding or the
@@ -2383,9 +2410,8 @@ void TerminalSession::activateProfile(string const& newProfileName, ProfileWindo
     _profile = *newProfile;
     configureTerminal();
 
-    // The unfocused-dim amount lives in the profile; a reload/switch may change it, and
-    // TerminalPane.qml's overlay binds to the property.
-    emit dimUnfocusedChanged();
+    // _profile was just replaced, so every QML binding reading a profile-derived property is now stale.
+    emitProfileDerivedPropertiesChanged();
 
     // An EXPLICIT profile switch (keybinding / OSC request) may change the configured grid
     // (terminal_size); ask the window to fit it — a content-driven grid->window request through the

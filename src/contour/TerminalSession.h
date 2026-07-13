@@ -572,6 +572,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     int executeAllActions(std::vector<actions::Action> const& actions);
     void spawnNewTerminal(std::string const& profileName);
 
+    /// Re-announces every Q_PROPERTY whose value is derived from the profile, so the QML bindings that
+    /// read them re-evaluate against the profile that was just swapped in. Call after every assignment
+    /// to _profile; without it a property keeps reporting the OLD profile's value until the app is
+    /// restarted (the signal is declared, simply never emitted), which is what made a reload of
+    /// scrollbar.position — and still, background_image and friends — a no-op.
+    void emitProfileDerivedPropertiesChanged();
+
     /// Whether activating a profile should also resize the window to the profile's configured
     /// terminal_size. Data-driven so the resize is tied to the *intent* of the activation, not to
     /// the activation itself: an explicit profile switch (a keybinding / OSC request) should fit the
