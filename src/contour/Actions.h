@@ -128,6 +128,8 @@ struct MovePaneDown{};      // re-parent the active pane past its lower neighbor
 struct ToggleSplitOrientation{}; // flip the active pane's split axis (H<->V)
 struct TogglePaneZoom{};    // give the active pane the whole tab area (hiding its siblings), and back
 struct ResizePane{ Direction direction; int percent = 5; }; // grow/shrink the active pane
+struct LaunchLayout{ std::string name; }; // open the named layout's tabs in the current window
+struct SaveLayout{ std::string name; };   // save the current window's tabs/panes as the named layout
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -210,7 +212,9 @@ using Action = std::variant<CancelSelection,
                             MovePaneDown,
                             ToggleSplitOrientation,
                             TogglePaneZoom,
-                            ResizePane>;
+                            ResizePane,
+                            LaunchLayout,
+                            SaveLayout>;
 
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
 ///
@@ -238,7 +242,9 @@ concept NonRepeatableActionConcept = crispy::one_of<T,
                                                     MovePaneUp,
                                                     MovePaneDown,
                                                     ToggleSplitOrientation,
-                                                    TogglePaneZoom>;
+                                                    TogglePaneZoom,
+                                                    LaunchLayout,
+                                                    SaveLayout>;
 
 /// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
 /// member), false otherwise.
@@ -433,6 +439,12 @@ namespace documentation
     constexpr inline std::string_view ResizePane {
         "Grows or shrinks the active pane in the given direction (by an optional percent)."
     };
+    constexpr inline std::string_view LaunchLayout {
+        "Opens a named layout, appending its tabs to the current window."
+    };
+    constexpr inline std::string_view SaveLayout {
+        "Saves the current window's tabs as a named layout in layouts.yml."
+    };
 } // namespace documentation
 
 constexpr inline auto getDocumentation()
@@ -519,6 +531,8 @@ constexpr inline auto getDocumentation()
         std::tuple { Action { ToggleSplitOrientation {} }, documentation::ToggleSplitOrientation },
         std::tuple { Action { TogglePaneZoom {} }, documentation::TogglePaneZoom },
         std::tuple { Action { ResizePane { Direction::Right } }, documentation::ResizePane },
+        std::tuple { Action { LaunchLayout {} }, documentation::LaunchLayout },
+        std::tuple { Action { SaveLayout {} }, documentation::SaveLayout },
     };
 }
 
@@ -636,6 +650,24 @@ struct std::formatter<contour::actions::SwitchToTab>: std::formatter<std::string
     auto format(contour::actions::SwitchToTab const& value, auto& ctx) const
     {
         return formatter<string>::format(std::format("SwitchToTab {{ position: {} }}", value.position), ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::actions::LaunchLayout>: std::formatter<std::string>
+{
+    auto format(contour::actions::LaunchLayout const& value, auto& ctx) const
+    {
+        return formatter<string>::format(std::format("LaunchLayout {{ name: {} }}", value.name), ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::actions::SaveLayout>: std::formatter<std::string>
+{
+    auto format(contour::actions::SaveLayout const& value, auto& ctx) const
+    {
+        return formatter<string>::format(std::format("SaveLayout {{ name: {} }}", value.name), ctx);
     }
 };
 
@@ -787,6 +819,16 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
             const auto createSelectionAction = std::get<contour::actions::CreateSelection>(_action);
             name =
                 std::format("{}, delimiters: '{}'", createSelectionAction, createSelectionAction.delimiters);
+        }
+        if (std::holds_alternative<contour::actions::LaunchLayout>(_action))
+        {
+            const auto action = std::get<contour::actions::LaunchLayout>(_action);
+            name = std::format("LaunchLayout, name: '{}'", action.name);
+        }
+        if (std::holds_alternative<contour::actions::SaveLayout>(_action))
+        {
+            const auto action = std::get<contour::actions::SaveLayout>(_action);
+            name = std::format("SaveLayout, name: '{}'", action.name);
         }
         // }}}
         return formatter<string>::format(name, ctx);

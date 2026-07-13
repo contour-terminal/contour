@@ -631,6 +631,11 @@ inline std::filesystem::path homeResolvedPath(std::string input, const std::file
     return std::filesystem::path(input);
 }
 
+/// Substitutes each `${NAME}` in @p text with `replace(NAME)`.
+///
+/// A `$${` sequence escapes substitution: it emits a literal `${` and leaves the rest of the
+/// would-be variable untouched, so machine-emitted config (e.g. SaveLayout) can round-trip values
+/// that contain literal `${...}` text without them being re-expanded on reload.
 template <typename VariableReplacer>
 inline std::string replaceVariables(std::string_view text, VariableReplacer replace)
 {
@@ -648,6 +653,16 @@ inline std::string replaceVariables(std::string_view text, VariableReplacer repl
         auto const markerStartOffset = text.find(MarkerStart, i);
         if (markerStartOffset == Npos)
             break;
+
+        // "$${" escapes expansion: drop the escaping '$', emit a literal "${", and continue
+        // scanning right after it (the variable body then flows through as plain text).
+        if (markerStartOffset > i && text[markerStartOffset - 1] == '$')
+        {
+            output += text.substr(i, markerStartOffset - 1 - i);
+            output += MarkerStart;
+            i = markerStartOffset + MarkerStart.size();
+            continue;
+        }
 
         auto const gapText = text.substr(i, markerStartOffset - i);
         output += gapText;

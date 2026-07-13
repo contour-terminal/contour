@@ -240,15 +240,40 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
      *        page size here so the terminal grid — not just the child PTY — is born at the current
      *        window size instead of the profile default (see
      *        TerminalSessionManager::createSessionInBackground).
+     * @param launchedCommand the command override this session's PTY was actually launched with, if
+     *        any. Empty (the default) means the session launched the profile's configured shell.
+     *        Recorded verbatim for later introspection (e.g. by layout tooling); does not affect the
+     *        PTY itself, which is already spawned by the caller.
      */
     TerminalSession(TerminalSessionManager* manager,
                     std::unique_ptr<vtpty::Pty> pty,
                     ContourGuiApp& app,
                     std::string profileName = {},
-                    std::optional<vtbackend::PageSize> initialPageSize = std::nullopt);
+                    std::optional<vtbackend::PageSize> initialPageSize = std::nullopt,
+                    std::optional<vtpty::Process::ExecInfo> launchedCommand = std::nullopt);
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
+
+    /// The command override this session was created with, if any (nullopt when it launched the
+    /// profile's configured shell instead of an explicit command).
+    [[nodiscard]] std::optional<vtpty::Process::ExecInfo> const& launchedCommand() const noexcept
+    {
+        return _launchedCommand;
+    }
+
+    /// The name of the profile this session was resolved against. Always a concrete profile: when
+    /// the session was created without an explicit profile, this is the application default.
+    [[nodiscard]] std::string const& profileName() const noexcept { return _profileName; }
+
+    /// The profile name this session was EXPLICITLY created under, if any (nullopt when it runs
+    /// the application's default profile). This is what SaveLayout persists: a saved pane must
+    /// keep following the user's default profile unless it genuinely overrode it, so the implicit
+    /// default must never be captured as if it were a per-pane choice.
+    [[nodiscard]] std::optional<std::string> const& profileOverride() const noexcept
+    {
+        return _profileOverride;
+    }
 
     /// The id by which the vtmux layout model refers to this session. Set when the manager mirrors
     /// the session into the model. Identifies the leaf pane that hosts this session.
@@ -468,6 +493,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ToggleSplitOrientation);
     bool operator()(actions::TogglePaneZoom);
     bool operator()(actions::ResizePane const& action);
+    bool operator()(actions::LaunchLayout const& event);
+    bool operator()(actions::SaveLayout const& event);
 
     void scheduleRedraw();
 
@@ -584,6 +611,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::chrono::steady_clock::time_point _startTime;
     config::Config _config;
     std::string _profileName;
+    // The ctor's explicit profile choice, verbatim (nullopt when the session runs the app
+    // default). Kept separate from _profileName, which always resolves to a concrete profile.
+    std::optional<std::string> _profileOverride;
+    std::optional<vtpty::Process::ExecInfo> _launchedCommand;
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;

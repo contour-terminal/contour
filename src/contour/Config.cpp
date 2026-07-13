@@ -18,8 +18,10 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <expected>
 #include <fstream>
 #include <iostream>
+#include <ranges>
 
 #if defined(_WIN32)
     #include <Windows.h>
@@ -314,7 +316,46 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
 
     auto yamlVisitor = YAMLConfigReader(config.configFile.string(), logger);
     yamlVisitor.load(config);
+
+    // Merge the machine-managed sibling layouts.yml (written by SaveLayout). Its entries override
+    // same-named inline layouts, since the file is the freshest SaveLayout output. A file that
+    // fails to parse is reported and skipped: a broken layouts.yml must not take the rest of the
+    // configuration down with it.
+    if (auto fileLayouts = loadLayoutsFile(config.configFile.parent_path() / "layouts.yml"))
+    {
+        for (auto& [name, layout]: *fileLayouts)
+            config.layouts.value()[name] = std::move(layout);
+    }
+    else
+        logger()("Failed to load layouts.yml: {}", fileLayouts.error());
+
     compareEntries(config, logger);
+}
+
+std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsFile(fs::path const& path)
+{
+    std::unordered_map<std::string, Layout> layouts;
+
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec)
+        return layouts; // nothing saved yet is not an error
+
+    // Surface YAML parse failures to the caller: YAMLConfigReader's constructor swallows them
+    // (by design, for the main config's "load defaults instead" path), but SaveLayout must NOT
+    // mistake an unreadable file for an empty one — rewriting it would destroy every layout it
+    // failed to read.
+    try
+    {
+        YAML::LoadFile(path.string());
+    }
+    catch (std::exception const& e)
+    {
+        return std::unexpected(std::string(e.what()));
+    }
+
+    auto reader = YAMLConfigReader(path.string(), configLog);
+    reader.loadLayoutsInto(layouts);
+    return layouts;
 }
 
 optional<std::string> readConfigFile(std::string const& filename)
@@ -413,6 +454,7 @@ void YAMLConfigReader::load(Config& c)
             c.platformPlugin = "";
         }
         loadFromEntry("default_profile", c.defaultProfileName);
+        loadFromEntry("default_layout", c.defaultLayoutName);
         loadFromEntry("renderer", c.renderer);
         loadFromEntry("word_delimiters", c.wordDelimiters);
         loadFromEntry("extended_word_delimiters", c.extendedWordDelimiters);
@@ -428,6 +470,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("on_mouse_select", c.onMouseSelection);
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
+        loadFromEntry("layouts", c.layouts);
         loadFromEntry("git_drawings", c.gitDrawings);
 #if defined(CONTOUR_FRONTEND_GUI)
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
@@ -547,6 +590,226 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
         loadFromEntry(child, "hyperlink_decoration", where.hyperlinkDecoration);
         loadFromEntry(child, "hint_patterns", where.hintPatterns);
+    }
+}
+
+std::vector<std::string> shellSplit(std::string_view commandLine)
+{
+    auto tokens = std::vector<std::string> {};
+    auto current = std::string {};
+    auto inToken = false;
+
+    // Consumes the quoted run whose opening quote is at rest.front(), appending its content to
+    // `current`. Single quotes are literal; inside double quotes, \" and \\ are escapes. An
+    // unterminated quote simply consumes the remainder.
+    auto const consumeQuoted = [&current](std::string_view& rest, char const quote) {
+        rest.remove_prefix(1); // the opening quote
+        while (!rest.empty() && rest.front() != quote)
+        {
+            if (quote == '"' && rest.front() == '\\' && rest.size() >= 2
+                && (rest[1] == '"' || rest[1] == '\\'))
+                rest.remove_prefix(1); // drop the backslash, take the escaped character below
+            current.push_back(rest.front());
+            rest.remove_prefix(1);
+        }
+        if (!rest.empty())
+            rest.remove_prefix(1); // the closing quote
+    };
+
+    auto const endToken = [&] {
+        if (!inToken)
+            return;
+        tokens.push_back(std::move(current));
+        current.clear();
+        inToken = false;
+    };
+
+    for (auto rest = commandLine; !rest.empty();)
+    {
+        auto const c = rest.front();
+        if (c == '\'' || c == '"')
+        {
+            inToken = true;
+            consumeQuoted(rest, c);
+        }
+        else if (c == '\\' && rest.size() >= 2)
+        {
+            // Outside quotes, a backslash escapes the next character (e.g. `a\ b` is one token).
+            inToken = true;
+            current.push_back(rest[1]);
+            rest.remove_prefix(2);
+        }
+        else if (c == ' ' || c == '\t')
+        {
+            endToken();
+            rest.remove_prefix(1);
+        }
+        else
+        {
+            inToken = true;
+            current.push_back(c);
+            rest.remove_prefix(1);
+        }
+    }
+    endToken();
+    return tokens;
+}
+
+std::string shellQuote(std::string_view token)
+{
+    auto const needsQuoting = token.empty() || std::ranges::any_of(token, [](char c) {
+                                  return c == ' ' || c == '\t' || c == '\'' || c == '"' || c == '\\';
+                              });
+    if (!needsQuoting)
+        return std::string { token };
+    std::string out = "'";
+    for (char const c: token)
+    {
+        if (c == '\'')
+            out += "'\\''"; // close quote, escaped literal ', reopen quote
+        else
+            out.push_back(c);
+    }
+    out += '\'';
+    return out;
+}
+
+void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPane& where)
+{
+    // Read `ratio:` FIRST: it applies to leaves and split nodes alike (a nested split is itself a
+    // child of its parent split and may carry a size), and the split branch below returns early.
+    // decode() (not as<double>()) so a typo like `ratio: half` is a logged, skipped field — not an
+    // exception that unwinds the whole config load.
+    if (auto const ratio = node["ratio"]; ratio && ratio.IsScalar())
+    {
+        double value = 0.0;
+        if (YAML::convert<double>::decode(ratio, value) && value > 0.0 && value <= 1.0)
+            where.ratio = value;
+        else
+            logger()("Invalid layout pane ratio '{}' (expected a number in (0, 1]); ignoring.",
+                     ratio.as<std::string>());
+    }
+
+    if (auto const split = node["split"]; split && split.IsMap())
+    {
+        if (auto const orientation = split["orientation"]; orientation && orientation.IsScalar())
+        {
+            auto const value = crispy::toLower(orientation.as<std::string>());
+            if (value == "horizontal")
+                where.orientation = vtmux::SplitState::Horizontal;
+            else if (value == "vertical")
+                where.orientation = vtmux::SplitState::Vertical;
+            else
+                logger()("Unknown split orientation '{}' (expected 'horizontal' or 'vertical'); "
+                         "using vertical.",
+                         orientation.as<std::string>());
+        }
+        if (auto const panes = split["panes"]; panes && panes.IsSequence())
+            for (auto const& paneNode: panes)
+            {
+                config::LayoutPane child;
+                parseLayoutPane(paneNode, child);
+                where.children.push_back(std::move(child));
+            }
+        // A single-child split has nothing to split against; collapse it into that one child so
+        // it behaves as a plain leaf instead of spawning a bogus uncommanded second pane.
+        if (where.children.size() == 1)
+        {
+            auto only = std::move(where.children.front());
+            where = std::move(only);
+        }
+        return;
+    }
+
+    if (auto const command = node["command"]; command && command.IsScalar())
+    {
+        // A command may be written as a full command line ("emacs -nw"): shell-split it into the program
+        // (the first token) and its arguments. Any explicit `arguments:` entries are appended after these.
+        auto tokens = shellSplit(resolveVariables(command.as<std::string>()));
+        if (!tokens.empty())
+        {
+            where.command = std::move(tokens.front());
+            for (auto& token: tokens | std::views::drop(1))
+                where.arguments.push_back(std::move(token));
+        }
+    }
+    if (auto const args = node["arguments"]; args && args.IsSequence())
+        for (auto const& argNode: args)
+        {
+            if (argNode.IsScalar())
+                where.arguments.emplace_back(resolveVariables(argNode.as<std::string>()));
+            else
+                logger()("Ignoring non-scalar layout pane argument.");
+        }
+    if (auto const directory = node["directory"]; directory && directory.IsScalar())
+        // resolvedPath (not bare homeResolvedPath): a layout's directory expands ${VAR} as well as
+        // ~, exactly like every other path in the configuration.
+        where.directory = resolvedPath(directory.as<std::string>());
+    if (auto const profile = node["profile"]; profile && profile.IsScalar())
+        where.profile = profile.as<std::string>();
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, config::Layout& where)
+{
+    auto const child = node[entry];
+    if (!child || !child.IsMap())
+        return;
+    parseLayoutNode(child, where);
+}
+
+void YAMLConfigReader::parseLayoutNode(YAML::Node const& layoutNode, config::Layout& where)
+{
+    auto const tabs = layoutNode["tabs"];
+    if (!tabs || !tabs.IsSequence())
+        return;
+    for (auto const& tabNode: tabs)
+    {
+        config::LayoutTab tab;
+        if (auto const title = tabNode["title"]; title && title.IsScalar())
+            tab.title = title.as<std::string>();
+        if (auto const color = tabNode["color"]; color && color.IsScalar())
+        {
+            // Validate the format RGBColor actually accepts ('#RRGGBB' or 0x-prefixed); its
+            // string assignment silently leaves the color black otherwise, which would render
+            // a wrong (and then re-saved) tab color with no hint at the cause.
+            auto const value = color.as<std::string>();
+            if ((value.size() == 7 && value.front() == '#') || value.starts_with("0x"))
+                tab.color = vtbackend::RGBColor { value };
+            else
+                logger()("Invalid layout tab color '{}' (expected '#RRGGBB'); ignoring.", value);
+        }
+        if (auto const profile = tabNode["profile"]; profile && profile.IsScalar())
+            tab.profile = profile.as<std::string>();
+        parseLayoutPane(tabNode, tab.root);
+        where.tabs.push_back(std::move(tab));
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::unordered_map<std::string, config::Layout>& where)
+{
+    if (auto const child = node[entry]; child && child.IsMap())
+    {
+        for (auto layoutEntry: child)
+        {
+            if (!layoutEntry.first.IsScalar())
+            {
+                logger()("Ignoring layout with a non-scalar name.");
+                continue;
+            }
+            auto const name = layoutEntry.first.as<std::string>();
+            // Parse THIS entry's value node, not a re-lookup by name: yaml-cpp yields duplicate
+            // keys once each, and a by-name lookup would find the first definition twice,
+            // doubling its tabs. Later duplicates deterministically replace earlier ones.
+            auto& layout = where[name];
+            if (!layout.tabs.empty())
+            {
+                logger()("Duplicate layout '{}'; the later definition wins.", name);
+                layout.tabs.clear();
+            }
+            parseLayoutNode(layoutEntry.second, layout);
+        }
     }
 }
 
@@ -2245,6 +2508,20 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 return std::nullopt;
         }
 
+        if (holds_alternative<actions::LaunchLayout>(action))
+        {
+            if (auto name = node["name"]; name && name.IsScalar())
+                return actions::LaunchLayout { name.as<std::string>() };
+            return std::nullopt;
+        }
+
+        if (holds_alternative<actions::SaveLayout>(action))
+        {
+            if (auto name = node["name"]; name && name.IsScalar())
+                return actions::SaveLayout { name.as<std::string>() };
+            return std::nullopt;
+        }
+
         if (holds_alternative<actions::CreateSelection>(action))
         {
             if (auto delimiters = node["delimiters"]; delimiters && delimiters.IsScalar())
@@ -2516,6 +2793,9 @@ std::string createForGlobal(Config const& c)
         [&]([[maybe_unused]] auto name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, TerminalProfile>,
                                          documentation::Profiles> const& v) {},
+        [&]([[maybe_unused]] auto name,
+            [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, config::Layout>,
+                                         documentation::Layouts> const& v) {},
         [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
     };
 

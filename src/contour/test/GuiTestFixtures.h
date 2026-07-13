@@ -3,26 +3,33 @@
 
 #include <contour/ContourGuiApp.h>
 #include <contour/ExternalLauncher.h>
+#include <contour/LayoutStore.h>
 #include <contour/SessionFactory.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
 
 #include <vtpty/MockPty.h>
+#include <vtpty/Process.h>
 #include <vtpty/Pty.h>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
+#include <QtCore/QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <expected>
+#include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <vtmux/Primitives.h>
@@ -43,12 +50,17 @@ class MockPtySessionFactory final: public contour::SessionFactory
         vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) };
 
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
-        std::optional<std::string> cwd, std::optional<vtbackend::PageSize> pageSize = std::nullopt) override
+        std::optional<std::string> cwd,
+        std::optional<vtbackend::PageSize> pageSize = std::nullopt,
+        std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
+        std::optional<std::string> profileName = std::nullopt) override
     {
         requestedCwds.push_back(std::move(cwd));
         // Record the size the manager asked for (nullopt == "use the profile default"), so a test can
         // assert that a new tab/split inherited the running window size instead of the default.
         requestedPageSizes.push_back(pageSize);
+        requestedCommandOverrides.push_back(std::move(commandOverride));
+        requestedProfileNames.push_back(std::move(profileName));
         auto const initialSize = pageSize.value_or(DefaultPageSize);
         auto pty = std::make_unique<vtpty::MockPty>(initialSize);
         createdPtys.push_back(pty.get());
@@ -58,8 +70,69 @@ class MockPtySessionFactory final: public contour::SessionFactory
     std::vector<std::optional<std::string>> requestedCwds;
     /// The @c pageSize argument of each createPty() call (nullopt when the caller requested the default).
     std::vector<std::optional<vtbackend::PageSize>> requestedPageSizes;
+    /// The @c commandOverride argument of each createPty() call.
+    std::vector<std::optional<vtpty::Process::ExecInfo>> requestedCommandOverrides;
+    /// The @c profileName argument of each createPty() call.
+    std::vector<std::optional<std::string>> requestedProfileNames;
     /// Non-owning observation pointers; valid while the owning session lives.
     std::vector<vtpty::MockPty*> createdPtys;
+};
+
+/// Loads @p yaml through the PRODUCTION config file loader (writing it to a throwaway temp file
+/// first), so a test asserts what a real user's configuration would parse to — including the
+/// sibling-layouts merge and every fallback loadConfigFromFile applies.
+/// @param yaml The inline configuration document.
+/// @return The parsed configuration.
+[[nodiscard]] inline contour::config::Config loadConfigFromYaml(std::string_view yaml)
+{
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
+    {
+        auto out = std::ofstream(path);
+        out << yaml;
+    }
+    auto config = contour::config::Config {};
+    contour::config::loadConfigFromFile(config, path);
+    return config;
+}
+
+/// An in-memory LayoutStore: SaveLayout runs end to end (serialize -> persist -> re-read) with no
+/// filesystem at all, and a test can inspect exactly what was handed to persistence. @c loadError
+/// makes the store report an unreadable backing file, to exercise the refuse-rather-than-destroy
+/// path without corrupting a real one.
+class InMemoryLayoutStore final: public contour::LayoutStore
+{
+  public:
+    [[nodiscard]] std::expected<contour::LayoutMap, std::string> load(
+        std::filesystem::path const& path) const override
+    {
+        loadedPaths.push_back(path);
+        if (loadError)
+            return std::unexpected(*loadError);
+        return layouts;
+    }
+
+    [[nodiscard]] std::expected<void, std::string> save(std::filesystem::path const& path,
+                                                        contour::LayoutMap const& newLayouts) override
+    {
+        savedPaths.push_back(path);
+        if (saveError)
+            return std::unexpected(*saveError);
+        layouts = newLayouts;
+        return {};
+    }
+
+    /// The store's contents (seed it to model a pre-existing layouts.yml; read it back to assert
+    /// what SaveLayout persisted).
+    contour::LayoutMap layouts;
+    /// When set, load() fails with this message (an unreadable/corrupt backing file).
+    std::optional<std::string> loadError;
+    /// When set, save() fails with this message (permissions, disk full, ...).
+    std::optional<std::string> saveError;
+    /// The path each load()/save() was asked for, so a test can assert WHERE layouts persist.
+    mutable std::vector<std::filesystem::path> loadedPaths;
+    std::vector<std::filesystem::path> savedPaths;
 };
 
 /// Records every URL-open / process-spawn request instead of launching it, so tests can assert the
@@ -245,8 +318,11 @@ class TestApp
   public:
     /// @param factory Optional PTY factory override; pass a MockPtySessionFactory (keep a raw
     ///                observation pointer first) to run session-creation paths headlessly.
-    explicit TestApp(std::unique_ptr<contour::SessionFactory> factory = nullptr):
-        _app(std::move(factory), makeRecordingLauncher())
+    /// @param layoutStore Optional layout-persistence override; pass an InMemoryLayoutStore (keep a
+    ///                raw observation pointer first) to drive SaveLayout without touching the disk.
+    explicit TestApp(std::unique_ptr<contour::SessionFactory> factory = nullptr,
+                     std::unique_ptr<contour::LayoutStore> layoutStore = nullptr):
+        _app(std::move(factory), makeRecordingLauncher(), std::move(layoutStore))
     {
         char const* argv[] = { "contour", "terminal" };
         // Parse the "terminal" subcommand so parameters() carries every contour.terminal.* default

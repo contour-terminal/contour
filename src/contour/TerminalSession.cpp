@@ -256,12 +256,15 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                  unique_ptr<vtpty::Pty> pty,
                                  ContourGuiApp& app,
                                  std::string profileName,
-                                 std::optional<vtbackend::PageSize> initialPageSize):
+                                 std::optional<vtbackend::PageSize> initialPageSize,
+                                 std::optional<vtpty::Process::ExecInfo> launchedCommand):
     _manager { manager },
     _id { createSessionId() },
     _startTime { steady_clock::now() },
     _config { app.config() },
     _profileName { resolveProfileName(_config, profileName, app.profileName()) },
+    _profileOverride { profileName.empty() ? std::optional<std::string> {} : std::optional { profileName } },
+    _launchedCommand { std::move(launchedCommand) },
     _profile { *_config.profile(_profileName) },
     _app { app },
     _currentColorPreference { app.colorPreference() },
@@ -2213,6 +2216,18 @@ bool TerminalSession::operator()(actions::ResizePane const& action)
     // percent is a whole-number step; convert to the (0, 1) ratio fraction the model nudges by.
     _manager->resizeActivePane(
         toFocusDirection(action.direction), static_cast<double>(action.percent) / 100.0, /*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::LaunchLayout const& event)
+{
+    _manager->launchLayout(event.name, this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SaveLayout const& event)
+{
+    _manager->saveLayout(event.name, this);
     return true;
 }
 

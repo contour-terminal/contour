@@ -45,6 +45,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <functional>
@@ -62,6 +63,7 @@
 #include <variant>
 
 #include <reflection-cpp/reflection.hpp>
+#include <vtmux/Primitives.h> // vtmux::SplitState for layout panes
 
 namespace contour::config
 {
@@ -424,6 +426,51 @@ const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDesc
     .builtinBoxDrawing = true,
     .maxFallbackCount = vtrasterizer::DefaultMaxFallbackCount,
     .textOutline = {},
+};
+
+/// A node in a layout tab's pane tree. It is EITHER a leaf (a terminal to open) OR a split (an
+/// orientation plus two or more children): an empty @c children means leaf.
+struct LayoutPane
+{
+    /// Program to run in this pane, replacing the profile's shell. Unset runs that shell.
+    std::optional<std::string> command;
+    /// Arguments passed to @c command.
+    std::vector<std::string> arguments;
+    /// Working directory the pane's shell starts in. Unset uses the profile's.
+    std::optional<std::filesystem::path> directory;
+    /// Per-pane profile override (terminal-level settings only — not window ones).
+    std::optional<std::string> profile;
+    /// Fraction (0, 1] of the parent split this pane occupies. Unset means "share whatever the
+    /// explicitly-sized siblings leave over, equally" (see contour::ratioForFirst).
+    std::optional<double> ratio;
+
+    /// How this pane's children are arranged (splits only).
+    vtmux::SplitState orientation = vtmux::SplitState::Vertical;
+    /// The child panes of a split, in layout order. Empty for a leaf.
+    std::vector<LayoutPane> children;
+
+    /// @return true when this node is a terminal pane rather than a split.
+    [[nodiscard]] bool isLeaf() const noexcept { return children.empty(); }
+};
+
+/// One tab of a layout: its name and color, plus the pane tree it opens with.
+struct LayoutTab
+{
+    /// Seeds the tab's name.
+    std::optional<std::string> title;
+    /// Sets the tab's User color.
+    std::optional<vtbackend::RGBColor> color;
+    /// Default profile for this tab's panes; a pane's own @c profile still wins.
+    std::optional<std::string> profile;
+    /// The tab's pane tree: a leaf for a plain single-pane tab, a split node otherwise.
+    LayoutPane root;
+};
+
+/// A named layout: the ordered tabs that LaunchLayout opens together.
+struct Layout
+{
+    /// The tabs to open, in order.
+    std::vector<LayoutTab> tabs;
 };
 
 struct TerminalProfile
@@ -944,6 +991,8 @@ struct Config
     ConfigEntry<std::unordered_map<std::string, TerminalProfile>, documentation::Profiles> profiles {
         { { "main", TerminalProfile {} } }
     };
+    ConfigEntry<std::unordered_map<std::string, Layout>, documentation::Layouts> layouts {};
+    ConfigEntry<std::string, documentation::DefaultLayout> defaultLayoutName { "" };
     ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>, documentation::ColorSchemes>
         colorschemes { { { "default", vtbackend::ColorPalette {} } } };
 
@@ -1032,6 +1081,9 @@ struct YAMLConfigReader
     /// Expands `${VAR}` tokens then resolves `~` to the home directory.
     [[nodiscard]] std::filesystem::path resolvedPath(std::string const& input) const;
 
+    /// Parses a single pane node. A node is a LEAF unless it carries a `split:` mapping.
+    void parseLayoutPane(YAML::Node const& node, LayoutPane& where);
+
     template <typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
     void loadFromEntry(YAML::Node const& node,
                        std::string const& entry,
@@ -1097,6 +1149,17 @@ struct YAMLConfigReader
             }
         }
     }
+
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       std::unordered_map<std::string, Layout>& where);
+
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, Layout& where);
+
+    /// Parses one layout's node (its `tabs:` sequence) into @p where. Never throws: malformed
+    /// scalars are logged and skipped, so one broken layout cannot unwind the whole config load
+    /// (which would silently drop every entry loaded after it, e.g. the user's input_mapping).
+    void parseLayoutNode(YAML::Node const& layoutNode, Layout& where);
 
     // Used for color scheme loading
     template <typename T>
@@ -1217,6 +1280,13 @@ struct YAMLConfigReader
     // clang-format on
 
     void load(Config& c);
+
+    /// Loads the `layouts:` entry of this reader's own document into @p where.
+    /// Used to merge a sibling layouts.yml on top of the already-loaded Config.
+    void loadLayoutsInto(std::unordered_map<std::string, Layout>& where)
+    {
+        loadFromEntry(doc, "layouts", where);
+    }
 
     std::optional<actions::Action> parseAction(YAML::Node const& node);
     std::optional<vtbackend::Modifiers> parseModifierKey(std::string const& key);
@@ -1769,6 +1839,28 @@ void loadConfigFromFile(Config& config, std::filesystem::path const& fileName);
 Config loadConfigFromFile(std::filesystem::path const& fileName);
 Config loadConfig();
 void compareEntries(Config& config, auto const& output);
+
+/// Loads ONLY the `layouts:` map contained in the single file at @p path (no sibling-merge, no
+/// inline-config layouts). A missing file yields an empty map (nothing saved yet is not an
+/// error); a file that fails to parse yields the parse error instead, so SaveLayout can REFUSE to
+/// rewrite — and thereby destroy — layouts it could not read back.
+/// Used by SaveLayout to read back layouts.yml's own prior contents before appending the new one,
+/// so the file is never overwritten with the merged (inline + file) in-memory view.
+std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsFile(
+    std::filesystem::path const& path);
+
+/// Splits a command line into tokens the way a shell would: whitespace separates tokens; single quotes
+/// ('...') quote a run literally; double quotes ("...") quote a run allowing \" and \\ escapes; a
+/// backslash outside quotes escapes the next character. Used so a layout `command:` may be written as a
+/// full command line ("emacs -nw") rather than requiring a separate `arguments:` list. Returns an empty
+/// vector for an empty/whitespace-only input.
+[[nodiscard]] std::vector<std::string> shellSplit(std::string_view commandLine);
+
+/// The inverse of shellSplit for a single token: returns @p token single-quoted when it contains
+/// whitespace or a shell-significant character (or is empty), so that shellSplit() reconstructs it as
+/// one token; embedded single quotes use the '\'' idiom. Used when serializing a layout's `command`
+/// program so a program path containing spaces survives the save/reload round-trip.
+[[nodiscard]] std::string shellQuote(std::string_view token);
 
 std::string defaultConfigString();
 std::error_code createDefaultConfig(std::filesystem::path const& path);

@@ -39,6 +39,11 @@ TEST_CASE("actions::isNonRepeatable flags the structural actions", "[actions][re
     // rather than the user.
     CHECK(actions::isNonRepeatable(actions::Action { actions::TogglePaneZoom {} }));
 
+    // LaunchLayout spawns a whole window's worth of tabs/panes per fire, and SaveLayout writes a
+    // file per fire; a held key must not amplify either into a burst.
+    CHECK(actions::isNonRepeatable(actions::Action { actions::LaunchLayout { .name = "work" } }));
+    CHECK(actions::isNonRepeatable(actions::Action { actions::SaveLayout { .name = "work" } }));
+
     // Repeatable: holding the key should keep firing these.
     CHECK_FALSE(actions::isNonRepeatable(actions::Action { actions::ScrollUp {} }));
     CHECK_FALSE(actions::isNonRepeatable(actions::Action { actions::MoveTabToLeft {} }));
@@ -103,4 +108,18 @@ TEST_CASE("actions::filterRepeatableActions on an all-repeatable list is identit
 {
     std::vector<actions::Action> const held { actions::ScrollUp {}, actions::ScrollUp {} };
     CHECK(actions::filterRepeatableActions(held).size() == 2);
+}
+
+TEST_CASE("Actions: LaunchLayout maps by name", "[actions][layout]")
+{
+    auto const action = contour::actions::fromString("LaunchLayout");
+    REQUIRE(action.has_value());
+    CHECK(std::holds_alternative<contour::actions::LaunchLayout>(*action));
+}
+
+TEST_CASE("Actions: SaveLayout maps by name", "[actions][layout]")
+{
+    auto const action = contour::actions::fromString("SaveLayout");
+    REQUIRE(action.has_value());
+    CHECK(std::holds_alternative<contour::actions::SaveLayout>(*action));
 }

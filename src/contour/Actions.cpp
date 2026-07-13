@@ -109,6 +109,8 @@ optional<Action> fromString(string const& name)
         mapAction<actions::ToggleSplitOrientation>("ToggleSplitOrientation"),
         mapAction<actions::TogglePaneZoom>("TogglePaneZoom"),
         mapAction<actions::ResizePane>("ResizePane"),
+        mapAction<actions::LaunchLayout>("LaunchLayout"),
+        mapAction<actions::SaveLayout>("SaveLayout"),
     };
 
     auto const lowerCaseName = toLower(name);

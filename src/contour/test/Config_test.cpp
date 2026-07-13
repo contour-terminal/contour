@@ -115,6 +115,380 @@ profiles:
     CHECK(profile->bell.value().alert == false);
 }
 
+TEST_CASE("Config: a layout with plain leaf tabs parses", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - title: "editor"
+              color: "#d75f00"
+              directory: "/tmp"
+              command: "nvim"
+              arguments: ["."]
+            - title: "claude"
+              command: "claude"
+)"sv);
+
+    auto const& layouts = config.layouts.value();
+    REQUIRE(layouts.contains("work"));
+    auto const& work = layouts.at("work");
+    REQUIRE(work.tabs.size() == 2);
+
+    auto const& t0 = work.tabs[0];
+    CHECK(t0.title == "editor");
+    REQUIRE(t0.color.has_value());
+    CHECK(*t0.color == vtbackend::RGBColor { "#d75f00" });
+    CHECK(t0.root.isLeaf());
+    REQUIRE(t0.root.command.has_value());
+    CHECK(*t0.root.command == "nvim");
+    REQUIRE(t0.root.arguments.size() == 1);
+    CHECK(t0.root.arguments[0] == ".");
+    REQUIRE(t0.root.directory.has_value());
+    CHECK(t0.root.directory->generic_string() == "/tmp");
+
+    auto const& t1 = work.tabs[1];
+    CHECK(t1.title == "claude");
+    CHECK(t1.root.isLeaf());
+    CHECK(*t1.root.command == "claude");
+    CHECK_FALSE(t1.root.directory.has_value());
+}
+
+TEST_CASE("Config: shellSplit tokenizes a command line respecting quotes", "[config][layout]")
+{
+    using contour::config::shellSplit;
+    using V = std::vector<std::string>;
+    CHECK(shellSplit("emacs -nw") == V { "emacs", "-nw" });
+    CHECK(shellSplit("  git   log --oneline ") == V { "git", "log", "--oneline" });
+    CHECK(shellSplit("nvim") == V { "nvim" });
+    CHECK(shellSplit("") == V {});
+    CHECK(shellSplit("   ") == V {});
+    // Double quotes group spaces into one token; the quotes themselves are stripped.
+    CHECK(shellSplit(R"("/opt/my app/emacs" -nw)") == V { "/opt/my app/emacs", "-nw" });
+    // Single quotes are literal (no inner processing).
+    CHECK(shellSplit(R"(sh -c 'echo hi there')") == V { "sh", "-c", "echo hi there" });
+    // A backslash escapes the next character outside quotes.
+    CHECK(shellSplit(R"(a\ b c)") == V { "a b", "c" });
+}
+
+TEST_CASE("Config: a layout command is shell-split into program and arguments", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - command: "/usr/bin/emacs -nw"
+            - command: "git log --oneline"
+              arguments: ["--graph"]
+)"sv);
+    auto const& work = config.layouts.value().at("work");
+    REQUIRE(work.tabs.size() == 2);
+
+    // The command string is split: the first word is the program, the rest are arguments.
+    REQUIRE(work.tabs[0].root.command.has_value());
+    CHECK(*work.tabs[0].root.command == "/usr/bin/emacs");
+    REQUIRE(work.tabs[0].root.arguments.size() == 1);
+    CHECK(work.tabs[0].root.arguments[0] == "-nw");
+
+    // Words from `command` come first, then any explicit `arguments:` entries are appended.
+    CHECK(*work.tabs[1].root.command == "git");
+    REQUIRE(work.tabs[1].root.arguments.size() == 3);
+    CHECK(work.tabs[1].root.arguments[0] == "log");
+    CHECK(work.tabs[1].root.arguments[1] == "--oneline");
+    CHECK(work.tabs[1].root.arguments[2] == "--graph");
+}
+
+TEST_CASE("Config: a layout tab with recursive splits parses", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    dev:
+        tabs:
+            - title: "servers"
+              split:
+                orientation: vertical
+                panes:
+                    - command: "npm run dev"
+                      ratio: 0.6
+                    - split:
+                        orientation: horizontal
+                        panes:
+                            - command: "htop"
+                            - command: "journalctl -f"
+)"sv);
+
+    auto const& tab = config.layouts.value().at("dev").tabs.at(0);
+    auto const& root = tab.root;
+    REQUIRE_FALSE(root.isLeaf());
+    CHECK(root.orientation == vtmux::SplitState::Vertical);
+    REQUIRE(root.children.size() == 2);
+
+    CHECK(root.children[0].isLeaf());
+    // `command` is shell-split into the program and its arguments.
+    CHECK(*root.children[0].command == "npm");
+    REQUIRE(root.children[0].arguments.size() == 2);
+    CHECK(root.children[0].arguments[0] == "run");
+    CHECK(root.children[0].arguments[1] == "dev");
+    REQUIRE(root.children[0].ratio.has_value());
+    CHECK(*root.children[0].ratio == Catch::Approx(0.6));
+    // The unspecified sibling stays unset (it shares the remaining space at realization time).
+    CHECK_FALSE(root.children[1].ratio.has_value());
+
+    auto const& nested = root.children[1];
+    REQUIRE_FALSE(nested.isLeaf());
+    CHECK(nested.orientation == vtmux::SplitState::Horizontal);
+    REQUIRE(nested.children.size() == 2);
+    CHECK(*nested.children[0].command == "htop");
+    CHECK(nested.children[0].arguments.empty());
+    CHECK(*nested.children[1].command == "journalctl");
+    REQUIRE(nested.children[1].arguments.size() == 1);
+    CHECK(nested.children[1].arguments[0] == "-f");
+}
+
+TEST_CASE("Config: a split with a single child collapses into a plain leaf", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    solo:
+        tabs:
+            - split:
+                orientation: vertical
+                panes:
+                    - command: "solo"
+)"sv);
+
+    auto const& tab = config.layouts.value().at("solo").tabs.at(0);
+    auto const& root = tab.root;
+    // A single-child split has nothing to split against: it must behave as a plain leaf, not
+    // spawn a bogus second (uncommanded) pane.
+    REQUIRE(root.isLeaf());
+    REQUIRE(root.command.has_value());
+    CHECK(*root.command == "solo");
+    CHECK(root.children.empty());
+}
+
+TEST_CASE("Config: default_layout scalar loads", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_layout: work
+layouts:
+    work:
+        tabs:
+            - command: "bash"
+)"sv);
+    CHECK(config.defaultLayoutName.value() == "work");
+}
+
+TEST_CASE("Config: a sibling layouts.yml merges and overrides inline layouts", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const configPath = writeConfig(dir, R"(
+layouts:
+    work:
+        tabs:
+            - command: "inline-shell"
+)"sv);
+    {
+        auto const siblingPath = std::filesystem::path(dir.path().toStdString()) / "layouts.yml";
+        std::ofstream(siblingPath) << R"(
+layouts:
+    work:
+        tabs:
+            - command: "file-shell"
+    extra:
+        tabs:
+            - command: "zsh"
+)";
+    }
+
+    auto config = contour::config::Config {};
+    contour::config::loadConfigFromFile(config, configPath);
+
+    auto const& layouts = config.layouts.value();
+    REQUIRE(layouts.contains("work"));
+    REQUIRE(layouts.contains("extra"));
+    // Sibling file wins the collision.
+    CHECK(*layouts.at("work").tabs.at(0).root.command == "file-shell");
+    CHECK(*layouts.at("extra").tabs.at(0).root.command == "zsh");
+}
+
+TEST_CASE("Config: a malformed layout field is skipped, not fatal to the rest of the config",
+          "[config][layout]")
+{
+    // A single typo in a layout must not unwind the whole config load: entries parsed AFTER
+    // `layouts` (most importantly input_mapping) and sibling layouts must still land.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    broken:
+        tabs:
+            - command: "top"
+              ratio: half
+    fine:
+        tabs:
+            - command: "bash"
+input_mapping:
+    - { mods: [Control], key: F5, action: LaunchLayout, name: fine }
+)"sv);
+
+    auto const& layouts = config.layouts.value();
+    // The broken layout still parses; only its malformed ratio is dropped.
+    REQUIRE(layouts.contains("broken"));
+    REQUIRE(layouts.at("broken").tabs.size() == 1);
+    CHECK(*layouts.at("broken").tabs.at(0).root.command == "top");
+    CHECK_FALSE(layouts.at("broken").tabs.at(0).root.ratio.has_value());
+    REQUIRE(layouts.contains("fine"));
+
+    // input_mapping (loaded after layouts) must not have been skipped: the custom binding is
+    // present in the key mappings.
+    auto const& bindings = config.inputMappings.value().keyMappings;
+    auto const hasLaunchLayoutBinding = std::ranges::any_of(bindings, [](auto const& mapping) {
+        auto const* launch = std::get_if<contour::actions::LaunchLayout>(&mapping.binding.at(0));
+        return launch != nullptr && launch->name == "fine";
+    });
+    CHECK(hasLaunchLayoutBinding);
+}
+
+TEST_CASE("Config: an out-of-range or non-numeric ratio is ignored", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - split:
+                orientation: vertical
+                panes:
+                    - { command: "a", ratio: 1.5 }
+                    - { command: "b", ratio: 0.4 }
+)"sv);
+    auto const& root = config.layouts.value().at("work").tabs.at(0).root;
+    REQUIRE(root.children.size() == 2);
+    CHECK_FALSE(root.children[0].ratio.has_value()); // 1.5 is not a fraction of the split
+    REQUIRE(root.children[1].ratio.has_value());
+    CHECK(*root.children[1].ratio == Catch::Approx(0.4));
+}
+
+TEST_CASE("Config: duplicate layout names resolve to the later definition", "[config][layout]")
+{
+    // yaml-cpp yields duplicate map keys once each; a naive by-name re-lookup would parse the
+    // FIRST definition twice, silently doubling its tabs.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - command: "first"
+            - command: "second"
+    work:
+        tabs:
+            - command: "winner"
+)"sv);
+    auto const& layouts = config.layouts.value();
+    REQUIRE(layouts.contains("work"));
+    REQUIRE(layouts.at("work").tabs.size() == 1);
+    CHECK(*layouts.at("work").tabs.at(0).root.command == "winner");
+}
+
+TEST_CASE("Config: split orientation parses case-insensitively", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - split:
+                orientation: Horizontal
+                panes:
+                    - command: "a"
+                    - command: "b"
+            - split:
+                orientation: bogus
+                panes:
+                    - command: "c"
+                    - command: "d"
+)"sv);
+    auto const& tabs = config.layouts.value().at("work").tabs;
+    REQUIRE(tabs.size() == 2);
+    // Natural capitalization must work like every other enum-ish config value.
+    CHECK(tabs.at(0).root.orientation == vtmux::SplitState::Horizontal);
+    // An unknown value falls back to the vertical default (with a log line, not silently).
+    CHECK(tabs.at(1).root.orientation == vtmux::SplitState::Vertical);
+}
+
+TEST_CASE("Config: an invalid tab color is ignored instead of turning black", "[config][layout]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - title: "named"
+              color: "green"
+              command: "a"
+            - title: "hex"
+              color: "#00ff00"
+              command: "b"
+)"sv);
+    auto const& tabs = config.layouts.value().at("work").tabs;
+    REQUIRE(tabs.size() == 2);
+    // RGBColor's string form only understands '#RRGGBB'; "green" would silently parse as black.
+    CHECK_FALSE(tabs.at(0).color.has_value());
+    REQUIRE(tabs.at(1).color.has_value());
+    CHECK(*tabs.at(1).color == vtbackend::RGBColor { "#00ff00" });
+}
+
+TEST_CASE("Config: $${ escapes environment-variable expansion in layout commands", "[config][layout]")
+{
+    // A saved command containing literal ${...} text (sed or template tooling) is emitted
+    // as $${...} by SaveLayout and must parse back to the literal text, not expand.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - command: "sed"
+              arguments: ["s/$${VERSION}/1.0/"]
+)"sv);
+    auto const& pane = config.layouts.value().at("work").tabs.at(0).root;
+    REQUIRE(pane.arguments.size() == 1);
+    CHECK(pane.arguments[0] == "s/${VERSION}/1.0/");
+}
+
+TEST_CASE("Config: a ratio on a nested split node parses", "[config][layout]")
+{
+    // The emitter writes `ratio:` on split children too (a nested split is itself a child of its
+    // parent split); the parser must read it back rather than silently dropping it.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - split:
+                orientation: vertical
+                panes:
+                    - { command: "left", ratio: 0.7 }
+                    - ratio: 0.3
+                      split:
+                        orientation: horizontal
+                        panes:
+                            - command: "top"
+                            - command: "bottom"
+)"sv);
+    auto const& root = config.layouts.value().at("work").tabs.at(0).root;
+    REQUIRE(root.children.size() == 2);
+    REQUIRE(root.children[0].ratio.has_value());
+    CHECK(*root.children[0].ratio == Catch::Approx(0.7));
+    REQUIRE_FALSE(root.children[1].isLeaf());
+    REQUIRE(root.children[1].ratio.has_value());
+    CHECK(*root.children[1].ratio == Catch::Approx(0.3));
+}
+
 TEST_CASE("Config: color scheme with background image loads from YAML", "[config]")
 {
     QTemporaryDir dir;

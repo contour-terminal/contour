@@ -259,6 +259,7 @@ class RoutingMockController: public QAbstractListModel
     Q_INVOKABLE QObject* createWindowController() { return this; }
     Q_INVOKABLE void bindWindow(QObject*) {}
     Q_INVOKABLE bool consumePendingTransplant(QObject*) { return false; }
+    Q_INVOKABLE bool consumeDefaultLayout(QObject*) { return false; }
     Q_INVOKABLE void createNewTab() {}
     Q_INVOKABLE void showInitial() {}
     Q_INVOKABLE void closeWindow() {}

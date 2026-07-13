@@ -155,6 +155,12 @@ class MockMainController: public QAbstractListModel
         calls << QStringLiteral("consumePendingTransplant");
         return false;
     }
+    // No startup layout is configured in these tests, so the window creates its own first tab.
+    Q_INVOKABLE bool consumeDefaultLayout(QObject*)
+    {
+        calls << QStringLiteral("consumeDefaultLayout");
+        return false;
+    }
 
     Q_INVOKABLE void closeWindow() { calls << QStringLiteral("closeWindow"); }
     Q_INVOKABLE [[nodiscard]] bool canCloseWindow() const noexcept { return true; }
@@ -274,6 +280,7 @@ TEST_CASE("main.qml startup: sized-before-shown ordering and declared chrome (of
           == QStringList { QStringLiteral("createWindowController"),
                            QStringLiteral("bindWindow"),
                            QStringLiteral("consumePendingTransplant"),
+                           QStringLiteral("consumeDefaultLayout"),
                            QStringLiteral("createNewTab"),
                            QStringLiteral("showInitial") });
     CHECK(controller.boundWindow == root.get());

@@ -65,11 +65,13 @@ namespace contour
 {
 
 ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
-                             std::unique_ptr<ExternalLauncher> externalLauncher):
+                             std::unique_ptr<ExternalLauncher> externalLauncher,
+                             std::unique_ptr<LayoutStore> layoutStore):
     _sessionFactory(sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this)),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : std::make_unique<QtExternalLauncher>()),
-    _sessionManager(*this, *_sessionFactory)
+    _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<FileLayoutStore>()),
+    _sessionManager(*this, *_sessionFactory, *_layoutStore)
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
@@ -138,6 +140,7 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
                               CLI::value { ""s },
                               "Sets initial working directory (overriding config).",
                               "DIRECTORY" },
+                CLI::option { "layout", CLI::value { ""s }, "Opens the named layout at startup.", "NAME" },
                 CLI::option {
                     "class",
                     CLI::value { ""s },
@@ -197,6 +200,13 @@ string ContourGuiApp::profileName() const
         return _config.profiles.value().begin()->first;
 
     return ""s;
+}
+
+std::string ContourGuiApp::layoutName() const
+{
+    if (auto name = parameters().get<std::string>("contour.terminal.layout"); !name.empty())
+        return name;
+    return config().defaultLayoutName.value();
 }
 
 std::optional<fs::path> ContourGuiApp::dumpStateAtExit() const
@@ -297,6 +307,7 @@ bool ContourGuiApp::loadConfig(string const& target)
     if (!flags.verbatim.empty() || !exe.empty())
     {
         auto& shell = profile->shell.value();
+        auto const profileShellProgram = shell.program;
         shell.arguments.clear();
         if (!exe.empty())
         {
@@ -329,6 +340,16 @@ bool ContourGuiApp::loadConfig(string const& target)
 
             for (size_t i = 1; i < flags.verbatim.size(); ++i)
                 shell.arguments.emplace_back(flags.verbatim.at(i));
+        }
+
+        // Record the effective CLI command (the directory-only branches above leave the shell
+        // program untouched and carry no command to record) — see cliCommand().
+        if (shell.program != profileShellProgram)
+        {
+            auto command = vtpty::Process::ExecInfo {};
+            command.program = shell.program;
+            command.arguments = shell.arguments;
+            _cliCommand = std::move(command);
         }
     }
 

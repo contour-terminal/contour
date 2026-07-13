@@ -16,12 +16,33 @@ using std::nullopt;
 namespace contour
 {
 
-std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(std::optional<std::string> cwd,
-                                                         std::optional<vtbackend::PageSize> pageSize)
+vtbackend::PageSize childPtyPageSize(vtbackend::PageSize total,
+                                     vtbackend::StatusDisplayType statusLine) noexcept
 {
-    auto const& profile = _app.config().profile(_app.profileName());
+    // The terminal reserves the bottom row(s) for the status line (height 1 for Indicator/HostWritable,
+    // 0 for None), so the child's usable area — and the winsize it must be born with — is the total page
+    // size minus the status line. Clamp so a degenerate 1-line total never underflows to 0.
+    auto const rows =
+        statusLine != vtbackend::StatusDisplayType::None ? vtbackend::LineCount(1) : vtbackend::LineCount(0);
+    if (total.lines > rows)
+        total.lines = total.lines - rows;
+    return total;
+}
+
+std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
+    std::optional<std::string> cwd,
+    std::optional<vtbackend::PageSize> pageSize,
+    std::optional<vtpty::Process::ExecInfo> commandOverride,
+    std::optional<std::string> profileName)
+{
+    auto const& profile = _app.config().profile(profileName.value_or(_app.profileName()));
 #if defined(VTPTY_LIBSSH2)
-    if (!profile->ssh.value().hostname.empty())
+    // A layout pane's command overrides the profile's shell and should run locally, not open the
+    // SSH session the profile would otherwise use. Only a REAL program override counts: a
+    // directory-only pane (engaged override, empty program) still runs the profile's shell and
+    // must honor its SSH configuration — silently opening a local shell instead would have the
+    // user typing on the wrong host.
+    if (!overridesShellProgram(commandOverride) && !profile->ssh.value().hostname.empty())
         return make_unique<vtpty::SshSession>(profile->ssh.value(),
                                               std::bind(&AppSessionFactory::requestSshHostkeyVerification,
                                                         this,
@@ -33,11 +54,28 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(std::optional<std::stri
     // one pane/tab's cwd into every later session created with no explicit cwd. The copy keeps the
     // override session-local.
     auto shell = profile->shell.value();
+    if (commandOverride)
+    {
+        // Replace the shell program/args with the layout pane's command; keep env from the profile.
+        // Only overlay when a program was actually given: a directory-only pane override has an empty
+        // program, and must not wipe the profile shell's default arguments.
+        if (!commandOverride->program.empty())
+        {
+            shell.program = commandOverride->program;
+            shell.arguments = commandOverride->arguments;
+        }
+        if (!commandOverride->workingDirectory.empty())
+            shell.workingDirectory = commandOverride->workingDirectory;
+    }
     if (cwd)
         shell.workingDirectory = std::filesystem::path(cwd.value());
     // Spawn the child at the caller's requested grid size when given (a new tab/split inherits the live
-    // window's page size), otherwise at the profile's configured terminalSize (a brand-new window).
-    auto const initialSize = pageSize.value_or(profile->terminalSize.value());
+    // window's page size), otherwise at the profile's configured terminalSize (a brand-new window). Both
+    // are TOTAL page sizes; childPtyPageSize() subtracts the status-line row(s) so the child is born at
+    // the terminal's MAIN-display size (see that function for why a background layout pane aborts without
+    // this).
+    auto const initialSize = childPtyPageSize(pageSize.value_or(profile->terminalSize.value()),
+                                              profile->statusLine.value().initialType);
     return make_unique<vtpty::Process>(
         shell, vtpty::createPty(initialSize, nullopt), profile->escapeSandbox.value());
 }

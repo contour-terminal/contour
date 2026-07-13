@@ -1,5 +1,6 @@
 #pragma once
 
+#include <contour/LayoutStore.h>
 #include <contour/SessionFactory.h>
 #include <contour/TerminalSession.h>
 #include <contour/WindowController.h>
@@ -11,6 +12,8 @@
 #include <QtQml/QQmlEngine>
 
 #include <algorithm>
+#include <expected>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -64,7 +67,9 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param factory The PTY factory backing new sessions (injected: production wires
     ///                AppSessionFactory, tests an in-memory MockPty factory). Must outlive this
     ///                manager (both live on ContourGuiApp, factory declared first).
-    TerminalSessionManager(ContourGuiApp& app, SessionFactory& factory);
+    /// @param layouts Persistence for named layouts, for SaveLayout (injected: production wires
+    ///                FileLayoutStore, tests an in-memory store). Must outlive this manager.
+    TerminalSessionManager(ContourGuiApp& app, SessionFactory& factory, LayoutStore& layouts);
 
     /// The owning application (spawn context, app-wide services). For the window controllers.
     [[nodiscard]] ContourGuiApp& app() noexcept { return _app; }
@@ -89,6 +94,48 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
 
     /// Creates and activates a new tab in the window hosting @p acting (the CreateNewTab keybinding).
     void createNewTab(TerminalSession* acting);
+
+    /// Looks up @p name in the app's configured layouts and appends its tabs to the window hosting
+    /// @p acting (the LaunchLayout action). Logs and no-ops if the layout is unknown or @p acting has
+    /// no hosting window.
+    /// @param name   The layout's key in config::Config::layouts.
+    /// @param acting The session that triggered the action; its hosting window is the target.
+    void launchLayout(std::string const& name, TerminalSession* acting);
+
+    /// Saves the window hosting @p acting as a named layout, persisted to layouts.yml (the SaveLayout
+    /// action). Thin wrapper around saveWindowLayout(); no-ops if @p acting has no hosting window.
+    /// @param name   The key to save the layout under in config::Config::layouts.
+    /// @param acting The session that triggered the action; its hosting window is serialized.
+    void saveLayout(std::string const& name, TerminalSession* acting);
+
+    /// Serializes @p window's live tab/pane tree into a config::Layout, persists it through the
+    /// injected LayoutStore, and — only once the store has accepted it, so runtime state can never
+    /// claim more than what is actually saved — stores it under @p name in the app's in-memory config.
+    /// @param window The window whose tabs/panes to serialize.
+    /// @param name   The key to save the layout under.
+    /// @return Nothing on success, or the reason the layout could not be saved.
+    [[nodiscard]] std::expected<void, LayoutSaveError> saveWindowLayout(vtmux::WindowId window,
+                                                                        std::string const& name);
+
+    /// Where layouts are persisted: the `layouts.yml` sibling of the loaded config file — which is
+    /// exactly where loadConfigFromFile() merges it back from, so saving and loading can never
+    /// disagree (a custom `--config` path moves both together).
+    /// @return The layout store's path for this run's configuration.
+    [[nodiscard]] std::filesystem::path layoutsFilePath() const;
+
+    /// Appends every tab of @p layout to @p window, building a real PTY-backed session for each leaf
+    /// pane (via createBackingSession) before handing the pane tree to realizeLayoutTab. Used by both
+    /// launchLayout and startup (--layout / default_layout).
+    /// @param window   The target window.
+    /// @param layout   The layout to realize (must have at least one tab).
+    /// @param pageSize The total page size each pane's grid and child PTY are born at. Pass the live
+    ///                 window's running size (LaunchLayout into an existing window) so commands that
+    ///                 read the terminal size at startup see the real one; @c std::nullopt (a
+    ///                 brand-new window at startup) uses the profile's configured terminalSize.
+    /// @return false if @p layout has no tabs (nothing to apply); true otherwise.
+    bool applyLayoutToWindow(vtmux::WindowId window,
+                             config::Layout const& layout,
+                             std::optional<vtbackend::PageSize> pageSize = std::nullopt);
 
     // Keyboard tab navigation/reordering. Every entry point takes the ACTING session (the one that
     // received the keybinding) and targets that session's hosting window, so a keybinding in any
@@ -253,6 +300,18 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @return true if a torn-off tab was adopted; false if the window should create its own first tab.
     Q_INVOKABLE bool consumePendingTransplant(contour::WindowController* newController);
 
+    /// Looks up the app's startup layout (ContourGuiApp::layoutName(), from `--layout` or the config's
+    /// `default_layout`) and, if found, applies it to @p controller's window. Called by main.qml right
+    /// after consumePendingTransplant() when no tab was transplanted, so a freshly-spawned window can
+    /// open pre-populated instead of falling back to a single blank tab. One-shot: only the FIRST
+    /// window of the process consumes the startup layout — every later window (NewTerminalWindow)
+    /// gets its usual single default tab instead of re-running all of the layout's commands.
+    /// @param controller The freshly-created controller of the just-spawned window.
+    /// @return true if a startup layout was found and applied; false if there is none configured, it is
+    ///         unknown, it has no tabs, or it was already consumed by an earlier window, in which case
+    ///         the window should create its usual first tab.
+    Q_INVOKABLE bool consumeDefaultLayout(contour::WindowController* controller);
+
     /// The controller adapting @p window, or nullptr. Used by the ModelEvents router to forward each Qt
     /// row/signal emission to the owning window's controller.
     [[nodiscard]] WindowController* controllerFor(vtmux::WindowId window) const noexcept;
@@ -348,10 +407,21 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param pageSize  Initial grid size for the child PTY, if the caller inherits the live window's
     ///                  page size (a new tab/split); @c std::nullopt lets the factory use the profile
     ///                  default (a brand-new window).
+    /// @param commandOverride Command to launch instead of the profile's configured shell, if any.
+    /// @param profileName Profile to run this session under, if any; @c std::nullopt (the default)
+    ///                    selects the application's default profile.
     contour::TerminalSession* createBackingSession(
         vtmux::SessionId sessionId,
         std::optional<std::string> cwd,
-        std::optional<vtbackend::PageSize> pageSize = std::nullopt);
+        std::optional<vtbackend::PageSize> pageSize = std::nullopt,
+        std::optional<vtpty::Process::ExecInfo> const& commandOverride = std::nullopt,
+        std::optional<std::string> const& profileName = std::nullopt);
+
+    /// Looks up a layout by name in the app's (inline + file) layout map, logging a miss.
+    /// @param name    The layout name to find.
+    /// @param context What is looking it up (e.g. "LaunchLayout"), for the log line.
+    /// @return The layout, or nullptr when no layout carries that name.
+    [[nodiscard]] config::Layout const* findLayout(std::string const& name, std::string_view context) const;
 
     /// The 0-based row of @p tab within its OWNING window, or -1. Window-agnostic: the owning
     /// window is resolved through the model (windowOfTab), so this is correct for any tab of any
@@ -448,6 +518,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
 
     ContourGuiApp& _app;
     SessionFactory& _sessionFactory;
+    LayoutStore& _layoutStore;
     std::chrono::seconds _earlyExitThreshold;
     // The process-wide "focused display". Session->display ownership lives on the pane tree; this is only
     // the currently-focused display, routed to its owning WindowController for window services.
@@ -478,6 +549,10 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     // The id pre-minted for the next tab the model is about to create, consumed by the model's
     // SessionAllocator so a model tab and its backing TerminalSession share one id.
     std::optional<vtmux::SessionId> _pendingSessionId;
+    // Whether a window already consumed the startup layout (--layout / default_layout). The app's
+    // layout name is stable for the whole process, but the layout must apply to the FIRST window
+    // only — not to every window spawned later (see consumeDefaultLayout()).
+    bool _startupLayoutConsumed = false;
 
     // A tab tear-off staged by tearOffTabToNewWindow(): the (source window, tab) the next spawned
     // window should adopt as its sole tab instead of creating a fresh one. Consumed exactly once by

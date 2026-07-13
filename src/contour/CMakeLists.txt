@@ -79,6 +79,7 @@ if(CONTOUR_FRONTEND_GUI)
         ExitCode.h
         ExternalLauncher.h
         FreeDesktopNotifier.h
+        LayoutStore.h
         NotificationRouter.h
         PaneProxy.h
         QtExternalLauncher.h
@@ -94,6 +95,8 @@ if(CONTOUR_FRONTEND_GUI)
         FreeDesktopNotifier.cpp
         PaneProxy.cpp
         QtExternalLauncher.cpp
+        LayoutBuilder.cpp
+        LayoutStore.cpp
         SessionFactory.cpp
         TerminalSession.cpp
         TerminalSessionManager.cpp
@@ -284,6 +287,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/CaptureScreen_test.cpp
             test/CatImageArgs_test.cpp
             test/Config_test.cpp
+            test/LayoutBuilder_test.cpp
             test/ContourGuiApp_test.cpp
             test/DisplayRendering_test.cpp
             test/ContentScale_test.cpp

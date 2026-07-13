@@ -5,6 +5,7 @@
 #include <contour/ContourApp.h>
 #include <contour/ExitCode.h>
 #include <contour/ExternalLauncher.h>
+#include <contour/LayoutStore.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/helper.h>
 
@@ -49,8 +50,12 @@ class ContourGuiApp: public QObject, public ContourApp
     ///                       wires the production QtExternalLauncher; tests pass a recording launcher
     ///                       to assert open-document / follow-hyperlink / spawn routing without
     ///                       actually launching anything.
+    /// @param layoutStore    Persistence for named layouts (SaveLayout). Null (the default) wires the
+    ///                       production FileLayoutStore (an atomically-replaced `layouts.yml`); tests
+    ///                       pass an in-memory store to drive SaveLayout without touching the disk.
     explicit ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory = nullptr,
-                           std::unique_ptr<ExternalLauncher> externalLauncher = nullptr);
+                           std::unique_ptr<ExternalLauncher> externalLauncher = nullptr,
+                           std::unique_ptr<LayoutStore> layoutStore = nullptr);
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
 
@@ -73,6 +78,19 @@ class ContourGuiApp: public QObject, public ContourApp
     [[nodiscard]] display::ForcedFontDpiProvider* forcedFontDpiProvider();
 
     [[nodiscard]] std::string profileName() const;
+
+    /// The layout to open at startup: `--layout NAME` if given, else config's `default_layout`.
+    /// Empty when neither is set (no startup layout).
+    [[nodiscard]] std::string layoutName() const;
+
+    /// The command the CLI asked this run to execute (`contour terminal PROGRAM ARGS...` or
+    /// `--execute`), if any. It is applied by MUTATING the startup profile's shell, so every
+    /// session on that profile runs it; recorded here so such sessions can report it as their
+    /// launched command (e.g. for SaveLayout), which the mutated profile alone cannot reveal.
+    [[nodiscard]] std::optional<vtpty::Process::ExecInfo> const& cliCommand() const noexcept
+    {
+        return _cliCommand;
+    }
 
     /// The session exit status (Process/SSH exit variant, or nullopt). Single source of truth in
     /// ExitCode.h, shared with the pure exitCodeFor() mapping used by run().
@@ -130,6 +148,8 @@ class ContourGuiApp: public QObject, public ContourApp
     std::unique_ptr<SessionFactory> _sessionFactory;
     // The external-resource launcher (URL open / process spawn), reached by sessions via _app.
     std::unique_ptr<ExternalLauncher> _externalLauncher;
+    // Declared before _sessionManager: the manager holds a reference to the store.
+    std::unique_ptr<LayoutStore> _layoutStore;
     TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Spawn context: the screen the next window should open on (QPointer: screens can be unplugged
@@ -139,6 +159,9 @@ class ContourGuiApp: public QObject, public ContourApp
     int _argc = 0;
     char const** _argv = nullptr;
     ExitStatus _exitStatus;
+
+    // The CLI-verbatim/--execute command of this run, if any (see cliCommand()).
+    std::optional<vtpty::Process::ExecInfo> _cliCommand;
 
     vtbackend::ColorPreference _colorPreference = vtbackend::ColorPreference::Dark;
 
