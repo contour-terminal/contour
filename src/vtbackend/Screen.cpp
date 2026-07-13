@@ -3811,14 +3811,43 @@ namespace
             outputLineCount);
     }
 
-    /// Prepends a line of text to an accumulator, inserting a newline separator.
-    void prependLine(std::string& accumulator, std::string_view lineText)
+    /// Feeds a Screen's grid to the command-block scanner, walking backwards from a starting line.
+    ///
+    /// The adapter half of the CommandBlockLineSource seam: the state machine itself lives in
+    /// CommandBlocks.cpp and knows nothing about a Grid, which is what lets it be tested against a plain
+    /// vector of lines.
+    class GridCommandBlockLines final: public CommandBlockLineSource
     {
-        if (!accumulator.empty())
-            accumulator = std::string(lineText).append(1, '\n').append(accumulator);
-        else
-            accumulator = lineText;
-    }
+      public:
+        /// @param grid The grid to walk. Must outlive this source.
+        /// @param fromLine The line to start at; the walk proceeds upwards from there into the history.
+        GridCommandBlockLines(Grid const& grid, LineOffset fromLine) noexcept:
+            _grid { grid }, _fromLine { fromLine }
+        {
+        }
+
+        [[nodiscard]] size_t lineCount() const override
+        {
+            auto const historyTop = -boxed_cast<LineOffset>(_grid.historyLineCount());
+            return static_cast<size_t>(std::max(*_fromLine - *historyTop + 1, 0));
+        }
+
+        [[nodiscard]] LineFlags flagsAt(size_t index) const override { return lineAt(index).flags(); }
+
+        [[nodiscard]] std::string textAt(size_t index) const override
+        {
+            return lineAt(index).toUtf8Trimmed(false, true);
+        }
+
+      private:
+        [[nodiscard]] Line const& lineAt(size_t index) const
+        {
+            return _grid.lineAt(_fromLine - LineOffset::cast_from(index));
+        }
+
+        Grid const& _grid;
+        LineOffset _fromLine;
+    };
 } // namespace
 
 void Screen::handleSemanticBlockQuery(Sequence const& seq)
@@ -3960,119 +3989,16 @@ void Screen::handleCompletedBlocksQuery(SemanticBlockTracker const& tracker,
         return;
     }
 
-    // Scan grid backward to find text regions for each block.
-    struct BlockTextInfo
-    {
-        std::string prompt;
-        std::string output;
-        int outputLineCount = 0;
-    };
-    auto blockTexts = std::vector<BlockTextInfo>(blocks.size());
-
-    auto const cursorLine = cursor().position.line;
-    auto const historyTop = -boxed_cast<LineOffset>(_grid.historyLineCount());
-
-    enum class ScanState : uint8_t
-    {
-        Searching,
-        InOutput,
-        InPrompt
-    };
-
-    auto state = ScanState::Searching;
-    auto blockIndex = 0;
-    auto currentOutput = std::string {};
-    auto currentPrompt = std::string {};
-    auto currentOutputLineCount = 0;
-
-    /// Finalizes the current block's text and advances to the next block.
-    auto const finalizeBlock = [&]() {
-        blockTexts[blockIndex].output = std::move(currentOutput);
-        blockTexts[blockIndex].outputLineCount = currentOutputLineCount;
-        blockTexts[blockIndex].prompt = std::move(currentPrompt);
-        currentOutput.clear();
-        currentPrompt.clear();
-        currentOutputLineCount = 0;
-        ++blockIndex;
-    };
-
-    /// Handles a grid line in the Searching state.
-    auto const handleSearching = [&](auto const& gridLine, auto flags) {
-        if (flags.contains(LineFlag::CommandEnd))
-        {
-            state = ScanState::InOutput;
-            currentOutput = gridLine.toUtf8Trimmed(false, true);
-            currentOutputLineCount = 1;
-        }
-    };
-
-    /// Handles a grid line in the InOutput state.
-    auto const handleInOutput = [&](auto const& gridLine, auto flags) {
-        auto const lineText = gridLine.toUtf8Trimmed(false, true);
-        if (flags.contains(LineFlag::OutputStart))
-        {
-            prependLine(currentOutput, lineText);
-            ++currentOutputLineCount;
-            state = ScanState::InPrompt;
-        }
-        else if (flags.contains(LineFlag::Marked))
-        {
-            currentPrompt = lineText;
-            finalizeBlock();
-            state = (flags.contains(LineFlag::CommandEnd) && blockIndex < static_cast<int>(blocks.size()))
-                        ? ScanState::InOutput
-                        : ScanState::Searching;
-        }
-        else
-        {
-            prependLine(currentOutput, lineText);
-            ++currentOutputLineCount;
-        }
-    };
-
-    /// Handles a grid line in the InPrompt state.
-    auto const handleInPrompt = [&](auto const& gridLine, auto flags) {
-        auto const lineText = gridLine.toUtf8Trimmed(false, true);
-        if (flags.contains(LineFlag::Marked))
-        {
-            prependLine(currentPrompt, lineText);
-            finalizeBlock();
-            state = (flags.contains(LineFlag::CommandEnd) && blockIndex < static_cast<int>(blocks.size()))
-                        ? ScanState::InOutput
-                        : ScanState::Searching;
-        }
-        else
-        {
-            prependLine(currentPrompt, lineText);
-        }
-    };
-
-    // Scan backward from cursor through main page and history.
-    for (auto line = cursorLine; line >= historyTop && blockIndex < static_cast<int>(blocks.size()); --line)
-    {
-        auto const& gridLine = _grid.lineAt(line);
-        auto const flags = gridLine.flags();
-
-        switch (state)
-        {
-            case ScanState::Searching: handleSearching(gridLine, flags); break;
-            case ScanState::InOutput: handleInOutput(gridLine, flags); break;
-            case ScanState::InPrompt: handleInPrompt(gridLine, flags); break;
-        }
-    }
-
-    // If we were still collecting when we ran out of lines, finalize.
-    if (blockIndex < static_cast<int>(blocks.size())
-        && (state == ScanState::InOutput || state == ScanState::InPrompt))
-    {
-        finalizeBlock();
-    }
+    // Reconstruct each block's text from the OSC 133 marks the shell left in the grid. The tracker knows
+    // HOW MANY blocks there are and what their metadata is; the grid is what still holds their text.
+    auto const blockTexts =
+        scanCommandBlocksBackward(GridCommandBlockLines { _grid, cursor().position.line }, blocks.size());
 
     // Build JSON response with blocks in chronological order (oldest first).
     auto json = std::string {};
-    json += "{\"version\":1,\"blocks\":[";
-    auto const actualCount = std::min(blockIndex, static_cast<int>(blocks.size()));
-    for (auto i = actualCount - 1; i >= 0; --i)
+    json += R"({"version":1,"blocks":[)";
+    auto const actualCount = std::min(blockTexts.size(), blocks.size());
+    for (auto i = actualCount; i-- > 0;)
     {
         if (i != actualCount - 1)
             json += ',';
@@ -4081,6 +4007,14 @@ void Screen::handleCompletedBlocksQuery(SemanticBlockTracker const& tracker,
     }
     json += "]}";
     reply("{}{}{}", SBQueryResponseSuccess, json, DcsTerminator);
+}
+
+std::optional<CommandBlockText> Screen::lastCommandBlock() const
+{
+    auto blocks = scanCommandBlocksBackward(GridCommandBlockLines { _grid, cursor().position.line }, 1);
+    if (blocks.empty())
+        return std::nullopt;
+    return std::move(blocks.front());
 }
 
 void Screen::setMark()
@@ -4123,8 +4057,13 @@ void Screen::processShellIntegration(Sequence const& seq)
             break;
         }
         case 'C': {
-            if (_terminal->isModeEnabled(DECMode::SemanticBlockProtocol))
-                enableLineFlags(cursor().position.line, LineFlag::OutputStart, true);
+            // The line flags are terminal MEMORY, and are recorded unconditionally — exactly as OSC 133;A's
+            // Marked flag always has been. The shell said where this command's output begins, so the
+            // terminal remembers it. DEC mode 2034 gates the semantic-block READER PROTOCOL (the block
+            // deque, the command metadata, the session token, the DCS query), not what the terminal knows
+            // about its own scrollback. Gating the flags too made every feature built on them — "copy last
+            // command output", precise mark navigation — impossible for a shell that speaks plain OSC 133.
+            enableLineFlags(cursor().position.line, LineFlag::OutputStart, true);
             std::optional<std::string> commandLine;
             auto const params = seq.intermediateCharacters().substr(1);
             forEachKeyValue(params, [&](std::string_view key, std::string_view value) {
@@ -4136,8 +4075,8 @@ void Screen::processShellIntegration(Sequence const& seq)
             break;
         }
         case 'D': {
-            if (_terminal->isModeEnabled(DECMode::SemanticBlockProtocol))
-                enableLineFlags(cursor().position.line, LineFlag::CommandEnd, true);
+            // Recorded unconditionally, for the reason given at ;C above.
+            enableLineFlags(cursor().position.line, LineFlag::CommandEnd, true);
             auto const exitCode = (cmd.size() > 2 && cmd[1] == ';')
                                       ? crispy::to_integer<10, int>(cmd.substr(2)).value_or(0)
                                       : 0;

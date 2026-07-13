@@ -2053,11 +2053,39 @@ string Terminal::extractSelectionText() const
     return se.finish();
 }
 
+void Terminal::selectAll()
+{
+    auto const& grid = _currentScreen->grid();
+
+    auto const top =
+        CellLocation { .line = -boxed_cast<LineOffset>(grid.historyLineCount()), .column = ColumnOffset(0) };
+    auto const bottom =
+        CellLocation { .line = boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1),
+                       .column = boxed_cast<ColumnOffset>(pageSize().columns) - ColumnOffset(1) };
+
+    // FullLineSelection rather than LinearSelection: it normalizes the columns to whole lines and follows
+    // wrapped ones, which is what "all" means here (and what ViMode's VisualLine already does).
+    setSelector(std::make_unique<FullLineSelection>(_selectionHelper, top, selectionUpdatedHelper()));
+    (void) _selection->extend(bottom);
+    _selection->complete();
+
+    updateSelectionMatches();
+    onSelectionUpdated();
+}
+
+std::optional<CommandBlockText> Terminal::lastCommandBlock() const
+{
+    return primaryScreen().lastCommandBlock();
+}
+
 string Terminal::extractLastMarkRange() const
 {
     // -1 because we always want to start extracting one line above the cursor by default.
+    // The cursor is read from the PRIMARY screen, which is also the grid the lines are read from below: an
+    // alt-screen app (vim, less) has a cursor of its own, and pairing it with the primary grid would slice
+    // a line range out of one screen using the other screen's cursor.
     auto const bottomLine =
-        _currentScreen->cursor().position.line + LineOffset(-1) + _settings.copyLastMarkRangeOffset;
+        primaryScreen().cursor().position.line + LineOffset(-1) + _settings.copyLastMarkRangeOffset;
 
     auto const marker1 = optional { bottomLine };
 

@@ -5,6 +5,7 @@
 #include <vtbackend/CellUtil.h>
 #include <vtbackend/Charset.h>
 #include <vtbackend/Color.h>
+#include <vtbackend/CommandBlocks.h>
 #include <vtbackend/Cursor.h>
 #include <vtbackend/Grid.h>
 #include <vtbackend/Hyperlink.h>
@@ -558,6 +559,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @return cursor position relative to screen origin (1, 1), that is, if line Number os >= 1, it's
     ///         in the screen area, and in the savedLines area otherwise.
     [[nodiscard]] std::optional<LineOffset> findMarkerUpwards(LineOffset startLine) const;
+
+    /// The most recently FINISHED shell command, reconstructed from the OSC 133 marks its shell left in
+    /// the scrollback.
+    ///
+    /// Reads the marks alone, so it works for any shell that speaks plain OSC 133 — the semantic-block
+    /// reader protocol (DEC mode 2034) is a separate, opt-in channel and is not required here.
+    ///
+    /// @return The block, or nullopt when the scrollback holds no finished command.
+    [[nodiscard]] std::optional<CommandBlockText> lastCommandBlock() const;
 
     void scrollUp(LineCount n) { scrollUp(n, margin()); }
     void scrollDown(LineCount n) { scrollDown(n, margin()); }
