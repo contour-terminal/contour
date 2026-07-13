@@ -113,6 +113,7 @@ NCommands
 ndelta
 ndrwxr
 nfile
+nfoo
 nforce
 NOGPFAULTERRORBOX
 nosuchshell
