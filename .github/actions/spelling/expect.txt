@@ -194,6 +194,9 @@ SIGABRTs
 soa
 soname
 sourced
+splitv
+splitvertical
+splitz
 srb
 srgb
 Subresource
@@ -206,6 +209,9 @@ tabinherit
 tablabel
 templ
 TOCTOU
+togglestatusline
+tpz
+tso
 UBO
 ubuf
 udk
@@ -237,3 +243,4 @@ xad
 Xorg
 XWayland
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+zzzznotacommand

@@ -65,6 +65,7 @@ struct IncreaseFontSize{};
 struct IncreaseOpacity{};
 struct NewTerminal{ std::optional<std::string> profileName; };
 struct NoSearchHighlight{};
+struct OpenCommandPalette{};
 struct OpenConfiguration{};
 struct OpenFileManager{};
 struct OpenSelection{};
@@ -150,6 +151,7 @@ using Action = std::variant<CancelSelection,
                             IncreaseOpacity,
                             NewTerminal,
                             NoSearchHighlight,
+                            OpenCommandPalette,
                             OpenConfiguration,
                             OpenFileManager,
                             OpenSelection,
@@ -225,6 +227,9 @@ using Action = std::variant<CancelSelection,
 /// burst of panes until they collapse — the same amplification the tab/pane actions guard against.
 /// The toggles belong here for the mirror-image reason: a held key would flip them back and forth
 /// once per repeat, so where the key lands would be decided by the repeat count rather than the user.
+/// Opening the command palette joins them because it is a one-shot UI gesture: the popup is already
+/// up (and holding the terminal's keyboard focus) by the second repeat, so re-firing could only ever
+/// re-open what is open.
 /// The keyboard dispatch (handleAction) consults this concept to filter such actions out of
 /// KeyboardEventType::Repeat events.
 template <typename T>
@@ -232,6 +237,7 @@ concept NonRepeatableActionConcept = crispy::one_of<T,
                                                     CreateNewTab,
                                                     CloseTab,
                                                     ClosePane,
+                                                    OpenCommandPalette,
                                                     SplitVertical,
                                                     SplitHorizontal,
                                                     SwapPaneLeft,
@@ -271,6 +277,44 @@ concept NonRepeatableActionConcept = crispy::one_of<T,
         if (!isNonRepeatable(action))
             result.push_back(action);
     return result;
+}
+
+/// Actions that carry a REQUIRED argument, so a default-constructed instance of them is not runnable.
+///
+/// A default-constructed ChangeProfile names no profile, a default-constructed SwitchToTab names tab
+/// 0 (there is no tab 0), a default-constructed SendChars sends nothing. Such an instance is a
+/// prototype for the YAML parser to fill in — never something to execute.
+///
+/// The command palette consults this concept to decide what it may offer straight from the catalog.
+/// The parameterized actions still reach the palette, but only as CONCRETE instances: one the user
+/// bound in their config (which carries real arguments), or one synthesized from live state (a
+/// configured profile, a saved layout, an open tab).
+///
+/// Deliberately excluded: CopySelection, PasteClipboard, PasteSelection, NewTerminal and ReloadConfig
+/// all default to a meaningful argument (copy as text, paste unstripped, current profile), so they
+/// run as-is.
+template <typename T>
+concept ParameterizedActionConcept = crispy::one_of<T,
+                                                    ChangeProfile,
+                                                    CreateSelection,
+                                                    HintMode,
+                                                    SendChars,
+                                                    WriteScreen,
+                                                    MoveTabTo,
+                                                    SwitchToTab,
+                                                    ResizePane,
+                                                    LaunchLayout,
+                                                    SaveLayout>;
+
+/// @returns true if @p action requires an argument that a bare catalog entry cannot supply (a
+/// ParameterizedActionConcept member), false if it is runnable as-is.
+[[nodiscard]] inline bool isParameterized(Action const& action) noexcept
+{
+    return std::visit(crispy::overloaded {
+                          [](ParameterizedActionConcept auto const&) { return true; },
+                          [](auto const&) { return false; },
+                      },
+                      action);
 }
 
 std::optional<Action> fromString(std::string const& name);
@@ -315,6 +359,11 @@ namespace documentation
     };
     constexpr inline std::string_view NoSearchHighlight {
         "Disables current search highlighting, if anything is still highlighted due to a prior search."
+    };
+    constexpr inline std::string_view OpenCommandPalette {
+        "Opens the command palette: a searchable popup listing every runnable command with its "
+        "description and key binding. Recently used commands are listed first, then all commands "
+        "alphabetically."
     };
     constexpr inline std::string_view OpenConfiguration { "Opens the configuration file." };
     constexpr inline std::string_view OpenFileManager {
@@ -457,7 +506,7 @@ namespace documentation
 struct ActionCatalogEntry
 {
     std::string_view name; ///< Canonical, YAML-facing name, e.g. "SplitVertical".
-    Action prototype;      ///< An instance; one carrying arguments still needs them filled in.
+    Action prototype;      ///< An instance; a ParameterizedActionConcept one still needs its argument.
     std::string_view documentation; ///< Human-readable description, for the docs and the command palette.
 };
 
@@ -506,7 +555,9 @@ struct ActionCatalogEntry
         ActionCatalogEntry { "NewTerminal", Action { NewTerminal {} }, documentation::NewTerminal },
         ActionCatalogEntry {
             "NoSearchHighlight", Action { NoSearchHighlight {} }, documentation::NoSearchHighlight },
-            ActionCatalogEntry {
+        ActionCatalogEntry {
+            "OpenCommandPalette", Action { OpenCommandPalette {} }, documentation::OpenCommandPalette },
+        ActionCatalogEntry {
             "OpenConfiguration", Action { OpenConfiguration {} }, documentation::OpenConfiguration },
         ActionCatalogEntry {
             "OpenFileManager", Action { OpenFileManager {} }, documentation::OpenFileManager },

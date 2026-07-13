@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/CommandPaletteModel.h>
 #include <contour/Config.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/PaneProxy.h>
@@ -66,12 +67,15 @@ namespace contour
 
 ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
                              std::unique_ptr<ExternalLauncher> externalLauncher,
-                             std::unique_ptr<LayoutStore> layoutStore):
+                             std::unique_ptr<LayoutStore> layoutStore,
+                             std::unique_ptr<CommandHistoryStore> commandHistoryStore):
     _sessionFactory(sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this)),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : std::make_unique<QtExternalLauncher>()),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<FileLayoutStore>()),
-    _sessionManager(*this, *_sessionFactory, *_layoutStore)
+    _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
+                                             : std::make_unique<FileCommandHistoryStore>()),
+    _sessionManager(*this, *_sessionFactory, *_layoutStore, *_commandHistoryStore)
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
@@ -536,9 +540,11 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<TerminalSessionManager>("Contour.Terminal", 1, 0, "TerminalSessionManager", "Do not use me directly.");
     qmlRegisterUncreatableType<PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
     qmlRegisterUncreatableType<WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
+    qmlRegisterUncreatableType<CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
     qRegisterMetaType<TerminalSession*>("TerminalSession*");
     qRegisterMetaType<PaneProxy*>("PaneProxy*");
     qRegisterMetaType<WindowController*>("WindowController*");
+    qRegisterMetaType<CommandPaletteModel*>("CommandPaletteModel*");
     // clang-format on
 
     {

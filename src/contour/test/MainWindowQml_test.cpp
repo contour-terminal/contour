@@ -85,6 +85,11 @@ class MockMainController: public QAbstractListModel
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QObject* activeTabRootPane READ activeTabRootPane CONSTANT)
     Q_PROPERTY(QObject* activeSession READ activeSession CONSTANT)
+    // Mirrors WindowController's command-palette surface. main.qml instantiates CommandPalette.qml
+    // against this controller and Connections-targets its commandPaletteRequested signal, so the mock
+    // must carry both — a missing signal is a QML warning, and the run-wide gate turns that into a
+    // failure of the whole suite. A null model is what an unopened palette shows anyway.
+    Q_PROPERTY(QObject* commandPalette READ commandPalette CONSTANT)
 
   public:
     enum Roles : std::uint16_t
@@ -135,6 +140,11 @@ class MockMainController: public QAbstractListModel
     }
     [[nodiscard]] QObject* activeTabRootPane() const noexcept { return nullptr; }
     [[nodiscard]] QObject* activeSession() const noexcept { return nullptr; }
+    [[nodiscard]] QObject* commandPalette() const noexcept { return nullptr; }
+    Q_INVOKABLE void runCommand(QString const&) {}
+    /// Mirrors WindowController::openCommandPalette(): what the manager calls for the
+    /// OpenCommandPalette action, and what makes main.qml's popup appear.
+    Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }
 
     // The startup sequence main.qml's Component.onCompleted drives, recorded for the order check.
     Q_INVOKABLE QObject* createWindowController()
@@ -214,6 +224,7 @@ class MockMainController: public QAbstractListModel
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
+    void commandPaletteRequested();
     void tabBarPositionChanged();
     void tabBarShouldShowChanged();
     void chromeHeightChanged();

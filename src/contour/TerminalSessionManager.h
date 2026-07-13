@@ -1,5 +1,7 @@
 #pragma once
 
+#include <contour/CommandHistory.h>
+#include <contour/CommandHistoryStore.h>
 #include <contour/LayoutStore.h>
 #include <contour/SessionFactory.h>
 #include <contour/TerminalSession.h>
@@ -69,7 +71,13 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     ///                manager (both live on ContourGuiApp, factory declared first).
     /// @param layouts Persistence for named layouts, for SaveLayout (injected: production wires
     ///                FileLayoutStore, tests an in-memory store). Must outlive this manager.
-    TerminalSessionManager(ContourGuiApp& app, SessionFactory& factory, LayoutStore& layouts);
+    /// @param commands Persistence for the command palette's most-recently-used list (injected:
+    ///                production wires FileCommandHistoryStore, tests an in-memory store). Must
+    ///                outlive this manager.
+    TerminalSessionManager(ContourGuiApp& app,
+                           SessionFactory& factory,
+                           LayoutStore& layouts,
+                           CommandHistoryStore& commands);
 
     /// The owning application (spawn context, app-wide services). For the window controllers.
     [[nodiscard]] ContourGuiApp& app() noexcept { return _app; }
@@ -122,6 +130,43 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// disagree (a custom `--config` path moves both together).
     /// @return The layout store's path for this run's configuration.
     [[nodiscard]] std::filesystem::path layoutsFilePath() const;
+
+    /// Opens the command palette over the window hosting @p acting (the OpenCommandPalette action).
+    /// No-ops if @p acting has no hosting window.
+    /// @param acting The session that triggered the action; its hosting window shows the palette.
+    void openCommandPalette(TerminalSession* acting);
+
+    /// Records that the command @p id was just run, and persists the updated list.
+    ///
+    /// App-wide, not per-window: "recently used" is a fact about the USER, so a command run in one
+    /// window is recent in all of them.
+    ///
+    /// Persisted on every run rather than at exit, so the list survives a crash or a kill -9 — the
+    /// file is a few hundred bytes and the write is atomic (see FileCommandHistoryStore).
+    ///
+    /// @param id The command id that was run (see commandId()).
+    void recordCommand(std::string const& id);
+
+    /// The app-wide most-recently-used command list, for the palette models to read.
+    [[nodiscard]] CommandHistory const& commandHistory() const noexcept { return _commandHistory; }
+
+    /// Brings the history into a usable state: re-applies the configured
+    /// `command_palette_recent_count` (so editing it and reloading the config takes effect without a
+    /// restart), and seeds the list from the store on first use.
+    ///
+    /// Idempotent, and called from BOTH entry points (openCommandPalette and recordCommand) rather than
+    /// only the first — see recordCommand() for why relying on the ordering would fail silently.
+    void ensureCommandHistoryReady();
+
+    /// Where the command palette's MRU list is persisted: the `command-history.yml` sibling of the
+    /// loaded config file, sited exactly like layoutsFilePath() so a custom `--config` moves it too.
+    /// @return The command-history store's path for this run's configuration.
+    [[nodiscard]] std::filesystem::path commandHistoryFilePath() const;
+
+    /// The path of @p fileName as a sibling of the loaded config file (the config home when no file was
+    /// loaded). The one place the machine-written stores' siting rule lives.
+    /// @param fileName The file's name, e.g. "layouts.yml".
+    [[nodiscard]] std::filesystem::path configSiblingPath(std::string_view fileName) const;
 
     /// Appends every tab of @p layout to @p window, building a real PTY-backed session for each leaf
     /// pane (via createBackingSession) before handing the pane tree to realizeLayoutTab. Used by both
@@ -519,6 +564,14 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     ContourGuiApp& _app;
     SessionFactory& _sessionFactory;
     LayoutStore& _layoutStore;
+    CommandHistoryStore& _commandHistoryStore;
+    /// The app-wide most-recently-used command list. Seeded from the store on the first palette open
+    /// (see openCommandPalette()); every window's palette model reads it, and recordCommand() writes it
+    /// back through the store.
+    CommandHistory _commandHistory;
+    /// Whether _commandHistory has been seeded from the store yet. The seeding is deferred rather than
+    /// done in the constructor because the configured capacity is not known that early — see there.
+    bool _commandHistoryLoaded = false;
     std::chrono::seconds _earlyExitThreshold;
     // The process-wide "focused display". Session->display ownership lives on the pane tree; this is only
     // the currently-focused display, routed to its owning WindowController for window services.

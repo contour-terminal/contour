@@ -458,6 +458,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("renderer", c.renderer);
         loadFromEntry("word_delimiters", c.wordDelimiters);
         loadFromEntry("extended_word_delimiters", c.extendedWordDelimiters);
+        loadFromEntry("command_palette_recent_count", c.commandPaletteRecentCount);
         loadFromEntry("read_buffer_size", c.ptyReadBufferSize);
         loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
         loadFromEntry("images", c.images);

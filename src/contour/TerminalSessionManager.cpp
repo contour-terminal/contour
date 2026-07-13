@@ -32,9 +32,22 @@ namespace contour
 
 TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
                                                SessionFactory& factory,
-                                               LayoutStore& layouts):
-    _app { app }, _sessionFactory { factory }, _layoutStore { layouts }, _earlyExitThreshold {}
+                                               LayoutStore& layouts,
+                                               CommandHistoryStore& commands):
+    _app { app },
+    _sessionFactory { factory },
+    _layoutStore { layouts },
+    _commandHistoryStore { commands },
+    // Not seeded here, and capacity deliberately left at 0: the config file has not been loaded yet at
+    // this point (ContourGuiApp constructs the manager before it reads the file), so the configured
+    // `command_palette_recent_count` is not yet known. Seeding now would read the stored list and
+    // truncate it to the DEFAULT capacity, permanently dropping entries a user with a larger
+    // recent_count had every right to keep. The history is therefore loaded lazily, on the first
+    // palette open, once the real capacity is known — see openCommandPalette().
+    _commandHistory { 0 },
+    _earlyExitThreshold {}
 {
+
     // The model allocates a fresh vtmux session id whenever it needs one (a new tab or a new split
     // pane). For tabs we pre-mint the id in createSessionInBackground() and hand it back here; for
     // splits (Phase 2) there is no pre-minted id, so we mint a fresh one. Either way the manager
@@ -379,14 +392,79 @@ void TerminalSessionManager::saveLayout(std::string const& name, TerminalSession
         managerLog()("SaveLayout '{}' failed ({}).", name, describe(saved.error()));
 }
 
+std::filesystem::path TerminalSessionManager::configSiblingPath(std::string_view fileName) const
+{
+    // Next to the loaded config file — which is exactly where loadConfigFromFile() merges these files
+    // back from, so a custom `--config` path moves the store with it instead of stranding saves in the
+    // default config home. An empty configFile (a default-constructed config, e.g. in tests) means no
+    // file was loaded: fall back to the config home the loader would have used.
+    auto const& configFile = _app.config().configFile;
+    return (configFile.empty() ? config::configHome() : configFile.parent_path()) / fileName;
+}
+
 std::filesystem::path TerminalSessionManager::layoutsFilePath() const
 {
-    // Next to the loaded config file — which is exactly where loadConfigFromFile() merges it back
-    // from, so a custom `--config` path moves the store with it instead of stranding saves in the
-    // default config home. An empty configFile (a default-constructed config, e.g. in tests) means
-    // no file was loaded: fall back to the config home the loader would have used.
-    auto const& configFile = _app.config().configFile;
-    return (configFile.empty() ? config::configHome() : configFile.parent_path()) / "layouts.yml";
+    return configSiblingPath("layouts.yml");
+}
+
+std::filesystem::path TerminalSessionManager::commandHistoryFilePath() const
+{
+    return configSiblingPath("command-history.yml");
+}
+
+void TerminalSessionManager::ensureCommandHistoryReady()
+{
+    // Capacity first, and on EVERY call: editing `command_palette_recent_count` and reloading the
+    // config then takes effect without a restart.
+    //
+    // A negative count is a typo, not a request for a negative list, so clamp rather than wrap into a
+    // huge size_t. Zero is meaningful and honored: it turns the "recently used" section off.
+    auto const configured = _app.config().commandPaletteRecentCount.value();
+    _commandHistory.setCapacity(static_cast<std::size_t>(std::max(0, configured)));
+
+    if (_commandHistoryLoaded)
+        return;
+    _commandHistoryLoaded = true;
+
+    // The lazy first load, now that the capacity is known — see the constructor for why it cannot
+    // happen there. A failure is not fatal: the palette simply starts with an empty "recently used"
+    // section, which is what a first run looks like anyway. It IS logged, because a corrupt file would
+    // otherwise silently keep losing the user's list on every run.
+    if (auto stored = _commandHistoryStore.load(commandHistoryFilePath()))
+        _commandHistory.reset(*stored);
+    else
+        managerLog()("Failed to load command history: {}", stored.error());
+}
+
+void TerminalSessionManager::openCommandPalette(TerminalSession* acting)
+{
+    auto* win = windowHostingSession(acting);
+    if (win == nullptr)
+        return;
+
+    ensureCommandHistoryReady();
+
+    if (auto* controller = controllerFor(win->id()); controller != nullptr)
+        controller->openCommandPalette();
+}
+
+void TerminalSessionManager::recordCommand(std::string const& id)
+{
+    // Prepared here too, not just in openCommandPalette(). Depending on the palette having been opened
+    // first would be true in the GUI and false for any other caller — and the failure would be SILENT:
+    // an unprepared history has capacity 0, so record() would quietly drop every command and then
+    // faithfully persist the empty list over whatever the user had.
+    ensureCommandHistoryReady();
+
+    _commandHistory.record(id);
+
+    if (auto const saved = _commandHistoryStore.save(commandHistoryFilePath(), _commandHistory.recent());
+        !saved)
+    {
+        // Losing the MRU costs the user some ordering, not their work, so a failed write is logged and
+        // shrugged off rather than being surfaced as a modal the user must dismiss mid-command.
+        managerLog()("Failed to save command history: {}", saved.error());
+    }
 }
 
 std::expected<void, LayoutSaveError> TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId,

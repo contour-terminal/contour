@@ -44,15 +44,22 @@ endif()
 
 set(_header_files
     Actions.h
+    AsciiText.h
     AtomicFileWrite.h
     CaptureScreen.h
+    Command.h
+    CommandCatalog.h
+    CommandHistory.h
+    CommandHistoryStore.h
     Config.h
     ContourApp.h
+    FuzzyFilter.h
+    Shortcut.h
     TabLabel.h
 )
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
 # point (main.cpp). The object library carries every translation unit of the frontend so that both
-# the `contour` executable AND the `contour_gui_test` target can link the exact same objects â€” this
+# the `contour` executable AND the `contour_gui_test` target can link the exact same objects — this
 # is what lets the GUI tests construct real TerminalSession/ContourGuiApp objects instead of only
 # Qt-free surrogates. An OBJECT library (not STATIC) is used deliberately: it shares the compiled
 # objects without a static archive's symbol-stripping, which would otherwise drop AUTOMOC/AUTORCC
@@ -61,8 +68,14 @@ set(_core_source_files
     Actions.cpp
     AtomicFileWrite.cpp
     CaptureScreen.cpp
+    Command.cpp
+    CommandCatalog.cpp
+    CommandHistory.cpp
+    CommandHistoryStore.cpp
     Config.cpp
     ContourApp.cpp
+    FuzzyFilter.cpp
+    Shortcut.cpp
     TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
@@ -77,6 +90,7 @@ if(CONTOUR_FRONTEND_GUI)
         AudioNote.h
         BlurBehind.h
         CatImageArgs.h
+        CommandPaletteModel.h
         ContourGuiApp.h
         ExitCode.h
         ExternalLauncher.h
@@ -93,6 +107,7 @@ if(CONTOUR_FRONTEND_GUI)
     list(APPEND _core_source_files
         Audio.cpp
         BlurBehind.cpp
+        CommandPaletteModel.cpp
         ContourGuiApp.cpp
         FreeDesktopNotifier.cpp
         PaneProxy.cpp
@@ -280,7 +295,7 @@ if(CONTOUR_FRONTEND_GUI)
         # The test links contour_core (the frontend object library) so it can construct real
         # TerminalSession / ContourGuiApp objects (TerminalSession_test) in addition to the Qt-free
         # surrogates. contour_core already compiles the QML resources, so the test must NOT compile
-        # resources.qrc again â€” doing so would duplicate the resource registration symbols.
+        # resources.qrc again — doing so would duplicate the resource registration symbols.
         add_executable(contour_gui_test
             test/test_main.cpp
             test/Actions_test.cpp
@@ -288,7 +303,12 @@ if(CONTOUR_FRONTEND_GUI)
             test/BenignQtMessages_test.cpp
             test/CaptureScreen_test.cpp
             test/CatImageArgs_test.cpp
+            test/CommandCatalog_test.cpp
+            test/CommandHistory_test.cpp
+            test/CommandPaletteModel_test.cpp
             test/Config_test.cpp
+            test/FuzzyFilter_test.cpp
+            test/Shortcut_test.cpp
             test/LayoutBuilder_test.cpp
             test/ContourGuiApp_test.cpp
             test/DisplayRendering_test.cpp
@@ -355,7 +375,7 @@ if(CONTOUR_FRONTEND_GUI)
             # (dump ordering: inspect() now runs BEFORE the model prune that tears the display down;
             # and the stale QOpenGLContext gate that skipped the whole dump under the RHI render loop
             # was removed), but the screenshot half rides a deferred RHI offscreen readback that
-            # only completes across scene-graph frames the offscreen platform does not schedule â€”
+            # only completes across scene-graph frames the offscreen platform does not schedule —
             # so the capture callback (which owns at-exit termination) never fires and the run hangs.
             # Driving that readback headlessly needs a render-loop change; tracked in ROADMAP.md.
             add_test(NAME contour_e2e_custom_config
@@ -594,7 +614,7 @@ else()
     )
 
     # yaml-cpp's runtime library soname is tied to the distro release: 0.6 on 20.04, 0.7 on 22.04,
-    # and 0.8 from 24.04 onward (24.04, 26.04, â€¦). Newer releases keep 0.8, so it is the default.
+    # and 0.8 from 24.04 onward (24.04, 26.04, …). Newer releases keep 0.8, so it is the default.
     set(DEPENDS_EXTRA ", libyaml-cpp0.8")
     if("${LSB_RELEASE_NUMBER}" STREQUAL "20.04")
         set(DEPENDS_EXTRA ", libyaml-cpp0.6")

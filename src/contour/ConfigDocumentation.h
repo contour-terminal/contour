@@ -647,6 +647,16 @@ constexpr StringLiteral RendererConfig {
     "\n"
 };
 
+constexpr StringLiteral CommandPaletteRecentCountConfig {
+    "{comment} How many recently used commands the command palette (OpenCommandPalette, bound to\n"
+    "{comment} Ctrl+Shift+P by default) pins above its alphabetical list.\n"
+    "{comment}\n"
+    "{comment} The list is remembered across restarts in the `command-history.yml` file next to this\n"
+    "{comment} one. Set to 0 to disable the \"recently used\" section (and stop recording it).\n"
+    "command_palette_recent_count: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral PTYReadBufferSizeConfig { "{comment} Default PTY read buffer size.\n"
                                                   "{comment}\n"
                                                   "{comment} This is an advance option. Use with care!\n"
@@ -1255,6 +1265,14 @@ constexpr StringLiteral WordDelimitersWeb {
 constexpr StringLiteral ExtendedWordDelimitersWeb {
     "option defines the delimiters to be used when selecting words in the second time. It is a string of "
     "characters that act as delimiters. By default word delimiters are used."
+};
+
+constexpr StringLiteral CommandPaletteRecentCountWeb {
+    "option sets how many recently used commands the command palette pins above its alphabetical list. The "
+    "palette is opened with the `OpenCommandPalette` action (bound to `Ctrl+Shift+P` by default), and the "
+    "list of recent commands is remembered across restarts in the `command-history.yml` file beside your "
+    "configuration file. Set it to `0` to turn the \"recently used\" section off entirely. The default value "
+    "is `5`."
 };
 
 constexpr StringLiteral PTYReadBufferSizeWeb {
@@ -2152,6 +2170,8 @@ using FrozenDecMode = DocumentationEntry<FrozenDecModeConfig, Dummy>;
 using Live = DocumentationEntry<LiveConfig, LiveWeb>;
 using PlatformPlugin = DocumentationEntry<PlatformPluginConfig, PlatformPluginWeb>;
 using Renderer = DocumentationEntry<RendererConfig, RendererWeb>;
+using CommandPaletteRecentCount =
+    DocumentationEntry<CommandPaletteRecentCountConfig, CommandPaletteRecentCountWeb>;
 using PTYReadBufferSize = DocumentationEntry<PTYReadBufferSizeConfig, PTYReadBufferSizeWeb>;
 using PTYBufferObjectSize = DocumentationEntry<PTYBufferObjectSizeConfig, PTYBufferObjectSizeWeb>;
 using ReflowOnResize = DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWeb>;

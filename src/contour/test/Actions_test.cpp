@@ -166,3 +166,34 @@ TEST_CASE("actions::fromString rejects a name no action has", "[actions][catalog
     CHECK_FALSE(contour::actions::fromString("NotAnAction").has_value());
     CHECK_FALSE(contour::actions::fromString("").has_value());
 }
+
+TEST_CASE("actions::isParameterized marks the actions the palette cannot run bare", "[actions][catalog]")
+{
+    using namespace contour::actions;
+
+    // These carry a REQUIRED argument: a default-constructed instance names no profile / no tab / no
+    // characters, so running one would do nothing (or something arbitrary).
+    CHECK(isParameterized(Action { ChangeProfile {} }));
+    CHECK(isParameterized(Action { SwitchToTab {} }));
+    CHECK(isParameterized(Action { SendChars {} }));
+    CHECK(isParameterized(Action { LaunchLayout {} }));
+    CHECK(isParameterized(Action { ResizePane {} }));
+
+    // These have a MEANINGFUL default (copy as text, paste unstripped, current profile), so they run
+    // as-is and the palette offers them.
+    CHECK_FALSE(isParameterized(Action { CopySelection {} }));
+    CHECK_FALSE(isParameterized(Action { PasteClipboard {} }));
+    CHECK_FALSE(isParameterized(Action { NewTerminal {} }));
+
+    // And the plain empty-struct actions, of course.
+    CHECK_FALSE(isParameterized(Action { SplitVertical {} }));
+    CHECK_FALSE(isParameterized(Action { OpenCommandPalette {} }));
+}
+
+TEST_CASE("actions: opening the command palette is not repeated by a held key", "[actions][repeat]")
+{
+    // The popup is up (and holding the terminal's keyboard focus) by the second repeat, so re-firing
+    // could only ever re-open what is already open.
+    CHECK(contour::actions::isNonRepeatable(
+        contour::actions::Action { contour::actions::OpenCommandPalette {} }));
+}

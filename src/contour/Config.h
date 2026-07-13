@@ -753,6 +753,13 @@ const InputMappings defaultInputMappings {
                            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                            .input = 'X',
                            .binding = { { actions::ClosePane {} } } },
+        // Ctrl+Shift+P: the command palette. A CharInputMapping (not a KeyInputMapping) because
+        // Qt::Key_P is not in helper.cpp's KeyMappings table: any Ctrl+printable is routed through
+        // sendCharEvent, so the chord arrives as the character 'P' — exactly like Ctrl+Shift+T above.
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'P',
+                           .binding = { { actions::OpenCommandPalette {} } } },
         // Ctrl+Shift+Backslash: flip the active pane's split orientation (horizontal <-> vertical).
         CharInputMapping { .modes { vtbackend::MatchModes {} },
                            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
@@ -969,6 +976,7 @@ struct Config
     ConfigEntry<std::string, documentation::ExtendedWordDelimiters> extendedWordDelimiters {
         " /\\()\"'-.,:;<>~!@#$%^&*+=[]{{}}~?|│"
     };
+    ConfigEntry<int, documentation::CommandPaletteRecentCount> commandPaletteRecentCount { 5 };
     ConfigEntry<int, documentation::PTYReadBufferSize> ptyReadBufferSize { 16384 };
     ConfigEntry<int, documentation::PTYBufferObjectSize> ptyBufferObjectSize { 1024 * 1024 };
     ConfigEntry<std::string, documentation::DefaultProfiles> defaultProfileName { "main" };
