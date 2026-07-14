@@ -1164,7 +1164,7 @@ TEST_CASE("InputGenerator.Win32InputMode.enter_key", "[terminal,input]")
     // Enter key: VK_RETURN=0x0D=13, unicode='\r'=13
     input.generate(Key::Enter, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[13;0;0;1;0;1_"); // VK_RETURN via Key path (no unicode char)
+    CHECK(seq == "\033[13;0;13;1;0;1_"); // VK_RETURN via Key path, UC='\r'
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1482,10 +1482,10 @@ TEST_CASE("InputGenerator.Win32InputMode.tab_key", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Tab: VK_TAB=0x09=9, NOT enhanced
+    // Tab: VK_TAB=0x09=9, UC=0x09='\t', NOT enhanced
     input.generate(Key::Tab, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[9;0;0;1;0;1_");
+    CHECK(seq == "\033[9;0;9;1;0;1_");
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1494,10 +1494,10 @@ TEST_CASE("InputGenerator.Win32InputMode.backspace_key", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Backspace: VK_BACK=0x08=8, NOT enhanced
+    // Backspace: VK_BACK=0x08=8, UC=0x08='\b', NOT enhanced
     input.generate(Key::Backspace, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[8;0;0;1;0;1_");
+    CHECK(seq == "\033[8;0;8;1;0;1_");
     input.consume(static_cast<int>(seq.size()));
 }
 
@@ -1648,10 +1648,10 @@ TEST_CASE("InputGenerator.Win32InputMode.enter_not_enhanced", "[terminal,input]"
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Main Enter key: VK_RETURN=0x0D=13, NOT enhanced (unlike Numpad Enter)
+    // Main Enter key: VK_RETURN=0x0D=13, UC=0x0D='\r', NOT enhanced (unlike Numpad Enter)
     input.generate(Key::Enter, Modifier::None, KeyboardEventType::Press);
     auto const seq = input.peek();
-    CHECK(seq == "\033[13;0;0;1;0;1_"); // CS=0, no ENHANCED_KEY
+    CHECK(seq == "\033[13;0;13;1;0;1_"); // CS=0, no ENHANCED_KEY
     input.consume(static_cast<int>(seq.size()));
 }
 

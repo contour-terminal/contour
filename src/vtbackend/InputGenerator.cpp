@@ -875,6 +875,10 @@ constexpr char32_t InputGenerator::keyToUnicodeChar(Key key, KeyboardModifiers m
     {
         case Key::Escape: return 0x1B;
 
+        case Key::Enter:     return 0x0D;
+        case Key::Tab:       return 0x09;
+        case Key::Backspace: return 0x08;
+
         case Key::Numpad_Enter:    return 0x0D;
         case Key::Numpad_Multiply: return U'*';
         case Key::Numpad_Add:      return U'+';
