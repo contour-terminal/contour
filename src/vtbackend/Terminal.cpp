@@ -2899,12 +2899,21 @@ void Terminal::softReset()
     // https://vt100.net/docs/vt510-rm/DECSTR.html
     setMode(DECMode::BatchedRendering, false);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
-    setGraphicsRendition(GraphicsRendition::Reset);    // SGR
-    _currentScreen->resetSavedCursorState();           // DECSC (Save cursor state)
-    setMode(DECMode::VisibleCursor, true);             // DECTCEM (Text cursor enable)
-    setMode(DECMode::Origin, false);                   // DECOM
-    setMode(AnsiMode::KeyboardAction, false);          // KAM
-    setMode(DECMode::AutoWrap, false);                 // DECAWM
+    setGraphicsRendition(GraphicsRendition::Reset); // SGR
+    _currentScreen->resetSavedCursorState();        // DECSC (Save cursor state)
+    setMode(DECMode::VisibleCursor, true);          // DECTCEM (Text cursor enable)
+    setMode(DECMode::Origin, false);                // DECOM
+    setMode(AnsiMode::KeyboardAction, false);       // KAM
+
+    // DECAWM. The VT510 manual has DECSTR RESET autowrap, and every terminal in the field declines to:
+    // xterm restores the bit to the value it was configured with rather than clearing it, foot turns
+    // auto-margin back on unconditionally, and wezterm says so in as many words — "xterm deviates from the
+    // documented DECSTR setting for dec auto wrap, so we do too". They are right to. A soft reset is what
+    // a user reaches for to REPAIR a garbled terminal, and no shell ever sends DECSET 7 on its own, so
+    // obeying the letter of the spec here hands back a terminal that no longer wraps — more broken than
+    // the one they started with. Restored, like TextReflow just above it, rather than cleared.
+    setMode(DECMode::AutoWrap, true);
+
     setMode(AnsiMode::Insert, false);                  // IRM
     setMode(DECMode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
     setTopBottomMargin({}, boxed_cast<LineOffset>(_settings.pageSize.lines) - LineOffset(1));       // DECSTBM
