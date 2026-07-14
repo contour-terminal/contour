@@ -306,6 +306,27 @@ void WindowController::beginActiveTabTitleEdit()
     emit tabTitleEditRequested(index);
 }
 
+void WindowController::beginActiveTabColorPick()
+{
+    auto const index = activeTabIndex();
+    if (index < 0)
+        return;
+    emit tabColorPickRequested(index);
+}
+
+// Both of these route through the row-based setters the color flyout already uses, so the keyboard and
+// the mouse write the identical TabColorSource::User slot. With no active tab the row is -1, which
+// tabAtRow() bounds-checks into a null tab — the no-op the header promises, without a second guard.
+void WindowController::setActiveTabColor(vtbackend::RGBColor color)
+{
+    setTabColor(activeTabIndex(), toQColor(color));
+}
+
+void WindowController::resetActiveTabColor()
+{
+    resetTabColor(activeTabIndex());
+}
+
 void WindowController::setTabColor(int index, QColor const& color)
 {
     if (auto* tab = tabAtRow(index); tab != nullptr)

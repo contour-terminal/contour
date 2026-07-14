@@ -188,6 +188,42 @@ TEST_CASE("actions::isParameterized marks the actions the palette cannot run bar
     // And the plain empty-struct actions, of course.
     CHECK_FALSE(isParameterized(Action { SplitVertical {} }));
     CHECK_FALSE(isParameterized(Action { OpenCommandPalette {} }));
+
+    // SetTabColor's color is OPTIONAL, and omitting it is a meaningful default: the action opens the
+    // tab's color picker. That is exactly what keeps it out of this set, and therefore what lets the
+    // palette offer it straight from the catalog rather than only once the user has bound it.
+    CHECK_FALSE(isParameterized(Action { SetTabColor {} }));
+    CHECK_FALSE(isParameterized(Action { SetTabColor { vtbackend::RGBColor { 0xFF, 0x00, 0x00 } } }));
+    CHECK_FALSE(isParameterized(Action { ResetTabColor {} }));
+}
+
+TEST_CASE("actions: every catalog row sits at its own variant index", "[actions][catalog]")
+{
+    // THE invariant behind catalogEntry(), which is `actionCatalog()[action.index()]` — a direct index,
+    // not a search. The static_assert next to it pins only the table's SIZE; nothing pinned its ORDER.
+    //
+    // That gap is silent and nasty: insert an alternative into the middle of the variant but append its
+    // row at the end of the catalog (or vice versa) and every action from that point on answers to the
+    // wrong name and carries the wrong documentation — while still compiling and still passing the
+    // round-trip test above, which only ever asks the catalog about its own rows.
+    auto index = size_t { 0 };
+    for (auto const& entry: contour::actions::actionCatalog())
+    {
+        INFO("catalog row " << index << ": " << entry.name);
+        CHECK(entry.prototype.index() == index);
+        ++index;
+    }
+}
+
+TEST_CASE("actions: picking a tab color is not repeated by a held key", "[actions][repeat]")
+{
+    // Bare, SetTabColor opens the color flyout: the same one-shot UI gesture as OpenCommandPalette, and
+    // the popup already holds the keyboard by the second repeat.
+    using namespace contour::actions;
+    CHECK(isNonRepeatable(Action { SetTabColor {} }));
+
+    // Clearing a color is idempotent and pops nothing up, so a held key may repeat it harmlessly.
+    CHECK_FALSE(isNonRepeatable(Action { ResetTabColor {} }));
 }
 
 TEST_CASE("actions: opening the command palette is not repeated by a held key", "[actions][repeat]")

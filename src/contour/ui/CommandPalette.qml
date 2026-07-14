@@ -59,21 +59,45 @@ Popup {
         list.currentIndex = list.count > 0 ? 0 : -1;
     }
 
-    // Whatever closed the palette — Escape, a pick, a click outside — the terminal must get the
-    // keyboard back, or the user is left typing into nothing.
+    // The command the user picked, held until this popup has actually closed — see onClosed.
+    property string pendingCommandId: ""
+
+    // Whatever closed the palette — Escape, a pick, a click outside — the terminal must get the keyboard
+    // back, or the user is left typing into nothing. Only THEN does the picked command run: a command
+    // that opens a keyboard-driven surface of its own (SetTabColor's swatch picker, SetTabTitle's rename
+    // field) takes the focus as it opens, and running it any earlier means this restore takes that focus
+    // straight back and the surface cannot be typed into at all. Same law, and the same shape, as
+    // TabContextMenu.qml's colorPending: act once the popup is genuinely gone.
+    //
+    // Qt.callLater, not a direct call: "genuinely gone" is not yet true INSIDE this handler. Qt emits
+    // closed() from within the popup's own exit transition, so a command that re-opens the palette —
+    // OpenCommandPalette, a row this palette itself always offers — would re-enter Popup.open() on top of
+    // the close that is still unwinding, and the palette would need dismissing twice. Deferring to the
+    // next event-loop turn dispatches the command with the popup's state machine at rest.
     onClosed: {
         if (root.window)
             root.window.restoreTerminalFocus();
+        const commandId = root.pendingCommandId;
+        root.pendingCommandId = ""; // cleared BEFORE dispatch: the command may re-open this palette
+        if (commandId && root.controller)
+            Qt.callLater(root.dispatch, commandId);
     }
 
-    // Runs the currently highlighted command and closes. Reads the id off the highlighted DELEGATE
-    // rather than indexing the model by role number, so there is no magic 257 here to drift out of
-    // step with CommandPaletteModel::Roles. A null currentItem (an empty filtered list, or a row not
-    // yet realized) does nothing rather than running an arbitrary command.
+    // The deferred half of onClosed. Re-checks the controller: the window can be torn down between the
+    // close and the event-loop turn that gets here.
+    function dispatch(commandId) {
+        if (root.controller)
+            root.controller.runCommand(commandId);
+    }
+
+    // Takes the currently highlighted command and closes; onClosed above is what runs it. Reads the id
+    // off the highlighted DELEGATE rather than indexing the model by role number, so there is no magic
+    // 257 here to drift out of step with CommandPaletteModel::Roles. A null currentItem (an empty
+    // filtered list, or a row not yet realized) does nothing rather than running an arbitrary command.
     function acceptCurrent() {
-        if (!root.controller || !list.currentItem)
+        if (!list.currentItem)
             return;
-        root.controller.runCommand(list.currentItem.commandId);
+        root.pendingCommandId = list.currentItem.commandId;
         root.close();
     }
 

@@ -82,6 +82,17 @@ TEST_CASE("A command's id encodes everything that distinguishes it", "[contour][
         CHECK(commandId(actions::CopySelection { .format = actions::CopyFormat::Text }) == "CopySelection");
         CHECK(commandId(actions::CopySelection { .format = actions::CopyFormat::HTML })
               == "CopySelection:HTML");
+
+        // Same story for the tab color: colorless is the default (it opens the picker), so it keeps the
+        // bare id, while a color names a genuinely different command and must not collide with it.
+        CHECK(commandId(actions::SetTabColor {}) == "SetTabColor");
+        CHECK(commandTitle(actions::SetTabColor {}) == "Set Tab Color");
+        CHECK(commandId(actions::SetTabColor { vtbackend::RGBColor { 0xFF, 0x00, 0x00 } })
+              == "SetTabColor:#FF0000");
+        CHECK(commandTitle(actions::SetTabColor { vtbackend::RGBColor { 0xFF, 0x00, 0x00 } })
+              == "Set Tab Color: #FF0000");
+        CHECK(commandId(actions::SetTabColor { vtbackend::RGBColor { 0x00, 0x80, 0xFF } })
+              == "SetTabColor:#0080FF");
     }
 }
 
@@ -97,6 +108,12 @@ TEST_CASE("ActionCommandSource offers every action that can run without an argum
         CHECK(hasCommand(commands, "ClearHistoryAndReset"));
         CHECK(hasCommand(commands, "SetTabTitle"));
         CHECK(hasCommand(commands, "ResetConfig"));
+
+        // Coloring a tab was mouse-only (right-click -> "Choose Color…") before these actions existed.
+        // Bare, SetTabColor opens that same picker, which is precisely why the palette may offer it
+        // without the user having bound anything.
+        CHECK(hasCommand(commands, "SetTabColor"));
+        CHECK(hasCommand(commands, "ResetTabColor"));
     }
 
     SECTION("an action needing an argument is NOT offered bare")
@@ -153,6 +170,30 @@ TEST_CASE("BoundCommandSource makes a parameterized action reachable via its bin
     {
         CHECK(hasCommand(commands, "OpenCommandPalette"));
     }
+}
+
+TEST_CASE("A bound SetTabColor reaches the palette as its own concrete row", "[contour][palette]")
+{
+    // The other half of the optional-argument design. The catalog offers the colorless SetTabColor (it
+    // opens the picker); a user who bound a SPECIFIC color gets a SECOND, distinct row for it — so
+    // "make this tab red" is one palette pick, not a pick plus a trip through the swatch grid.
+    auto mappings = config::InputMappings {};
+    mappings.keyMappings.push_back(config::KeyInputMapping {
+        .modes { vtbackend::MatchModes {} },
+        .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+        .input = vtbackend::Key::F5,
+        .binding = { { actions::SetTabColor { vtbackend::RGBColor { 0xFF, 0x00, 0x00 } } } } });
+
+    auto const commands = BoundCommandSource { mappings }.commands();
+
+    REQUIRE(hasCommand(commands, "SetTabColor:#FF0000"));
+    auto const* red = find(commands, "SetTabColor:#FF0000");
+    REQUIRE(red != nullptr);
+    CHECK(red->title == "Set Tab Color: #FF0000");
+    CHECK_FALSE(red->description.empty());
+
+    // And it did NOT collapse onto the colorless row: they are two commands, not one.
+    CHECK_FALSE(hasCommand(commands, "SetTabColor"));
 }
 
 TEST_CASE("The live-state sources offer what actually exists right now", "[contour][palette]")
