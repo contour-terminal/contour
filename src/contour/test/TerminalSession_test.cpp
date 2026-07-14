@@ -226,15 +226,25 @@ TEST_CASE("TerminalSession: right-click opens the context menu exactly when a se
     // that table only after vtbackend has declined the press. So the menu fires exactly when the terminal
     // would have let the user drag a selection instead — the same gate, reused rather than restated.
     //
-    // Observable without a window: if the application received the click, the report is in the PTY. An
-    // empty PTY therefore means the click fell through to the mapping — i.e. to the menu.
+    // Both halves are observed, and they have to be. An empty PTY says only that the APPLICATION did not
+    // get the click; it says nothing about where the click went instead, and it is just as empty when the
+    // fallback lookup is deleted outright. So the menu request is counted at its own seam
+    // (TerminalSessionManager::contextMenuRequested, emitted before the routing that needs a window), and
+    // the PTY is checked alongside it: together they distinguish "the menu took the click" from "the
+    // application took it" from "nothing took it at all".
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     auto const pixels = vtbackend::PixelCoordinate {};
 
+    auto menuRequests = 0;
+    QObject::connect(&testApp.app().sessionsManager(),
+                     &contour::TerminalSessionManager::contextMenuRequested,
+                     [&](contour::TerminalSession*) { ++menuRequests; });
+
     SECTION("no mouse protocol: the application hears nothing, and the menu takes the click")
     {
         session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pixels);
+        CHECK(menuRequests == 1);
         CHECK(mockPtyOf(*session).stdinBuffer().empty());
     }
 
@@ -243,6 +253,7 @@ TEST_CASE("TerminalSession: right-click opens the context menu exactly when a se
         // DECSET 1000 -- what vim and tmux turn on.
         session->terminal().writeToScreen("\033[?1000h");
         session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pixels);
+        CHECK(menuRequests == 0);
         CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
     }
 
@@ -253,12 +264,21 @@ TEST_CASE("TerminalSession: right-click opens the context menu exactly when a se
             Modifiers { vtbackend::Modifier::Shift }, vtbackend::MouseButton::Right, pixels);
         // Shift is the bypass modifier, so the application is skipped and the bare `Right` fallback
         // matches (sendMousePressEvent strips the bypass modifier before looking the mapping up).
+        CHECK(menuRequests == 1);
         CHECK(mockPtyOf(*session).stdinBuffer().empty());
+    }
+
+    SECTION("a left-drag in flight keeps the menu shut: the popup would steal the button-release")
+    {
+        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Left, pixels);
+        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pixels);
+        CHECK(menuRequests == 0);
     }
 
     SECTION("a middle-click still pastes: the fallback claims the right button and nothing else")
     {
         session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Middle, pixels);
+        CHECK(menuRequests == 0);
         CHECK(mockPtyOf(*session).stdinBuffer().empty());
     }
 }

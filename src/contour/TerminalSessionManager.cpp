@@ -450,6 +450,11 @@ void TerminalSessionManager::openCommandPalette(TerminalSession* acting)
 
 void TerminalSessionManager::openContextMenu(TerminalSession* acting)
 {
+    // Announced before the routing, which no-ops when there is no window to show a menu in. That makes the
+    // ARRIVAL of the request observable on its own — otherwise "the right-click reached this action" and
+    // "the right-click was swallowed on the way here" look exactly alike from outside.
+    emit contextMenuRequested(acting);
+
     auto* win = windowHostingSession(acting);
     if (win == nullptr)
         return;

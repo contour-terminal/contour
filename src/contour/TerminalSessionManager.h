@@ -440,6 +440,13 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
   signals:
     void multimediaReadyChanged();
 
+    /// A pane asked for its context menu, before the menu is routed to the window that hosts it.
+    ///
+    /// The routing itself no-ops without a window, so this is the one point at which "the right-click
+    /// reached the OpenContextMenu action" is observable independently of there being a GUI to show it in.
+    /// @param acting The session that was right-clicked.
+    void contextMenuRequested(TerminalSession* acting);
+
   private:
     /// Closes @p window if a tab transplant just emptied it — an empty window (no tabs) is not a valid
     /// state. Called after a cross-window tab move; MUST run after the transplant so removeWindow (via
