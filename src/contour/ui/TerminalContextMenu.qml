@@ -105,8 +105,17 @@ Menu {
         if (!root.controller)
             return;
 
-        while (root.count > 0)
-            root.takeItem(0);
+        while (root.count > 0) {
+            // A sub-menu does not sit in the content model itself — a Menu is a Popup, not an Item. Qt
+            // represents it there with a proxy MenuItem that addMenu() creates and Qt owns. takeItem()
+            // hands that proxy back WITHOUT destroying it, and it is not among the objects this file
+            // created, so nothing would ever destroy it: two fully-built controls leaked on every single
+            // right-click, for as long as the window lives. takeMenu() is the call that disposes of it.
+            if (root.menuAt(0))
+                root.takeMenu(0);
+            else
+                root.takeItem(0);
+        }
 
         for (let i = 0; i < root._created.length; ++i)
             root._created[i].destroy();

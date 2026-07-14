@@ -582,6 +582,36 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     CHECK(controller.lastTriggeredActionId == 0);
     REQUIRE_FALSE(actions.empty());
     CHECK(contour::commandId(actions[0]) == "CopySelection");
+
+    SECTION("rebuilding it, as every right-click does, leaks nothing")
+    {
+        // WindowController republishes the model on EVERY right-click, and each republish rebuilds the
+        // menu. A sub-menu does not sit in the content model itself — a Menu is a Popup, not an Item — so
+        // Qt represents it there with a proxy MenuItem that addMenu() creates and owns. takeItem() hands
+        // that proxy back WITHOUT destroying it, and it is not among the objects the QML tracks: nothing
+        // would ever destroy it. Two fully-built controls leaked per right-click, for the life of the
+        // window. takeMenu() is the call that disposes of it.
+        auto const settle = [] {
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            QCoreApplication::processEvents();
+        };
+
+        settle();
+        auto const baseline = menu->children().size();
+        REQUIRE(baseline > 0); // the two sub-menus are parented here
+
+        for (auto i = 0; i < 25; ++i)
+        {
+            REQUIRE(QMetaObject::invokeMethod(menu.get(), "rebuild"));
+            settle();
+        }
+
+        // The menu still holds exactly the rows it was built with...
+        CHECK(menu->property("count").toInt() == model.size());
+        // ...and not one object more than the first build left behind. Before the fix this grew by two on
+        // every single iteration.
+        CHECK(menu->children().size() == baseline);
+    }
 }
 
 TEST_CASE("GUI tab strip instantiates and binds against a populated model (offscreen)", "[contour][gui][qml]")
