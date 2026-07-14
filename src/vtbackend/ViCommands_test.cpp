@@ -432,3 +432,46 @@ TEST_CASE("vi.search: Meta-modified keys do not alias onto the unmodified key", 
     mock.sendKeyEvent(vtbackend::Key::Backspace);
     CHECK(mock.terminal.search().pattern == U"a");
 }
+
+// {{{ Select All under Vi mode
+// Select All reaches the terminal from the context menu, a key binding and the command palette — all of
+// which are consulted BEFORE the Vi handler. So it installs a selection while the Vi layer owns the input,
+// and it must honour the two invariants that layer only ever asserts.
+TEST_CASE("vi.selectAll: honours the Vi layer's selection invariants", "[vi]")
+{
+    SECTION("Visual mode: the selection stays InProgress, because every motion extends it")
+    {
+        auto mock = setupMockTerminal("one\r\n"
+                                      "two\r\n"
+                                      "three");
+        mock.sendCharEvent(U'v');
+        REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Visual);
+
+        mock.terminal.selectAll();
+
+        REQUIRE(mock.terminal.selectionAvailable());
+        // A Complete selection aborts on the very next keystroke: ViCommands::moveCursorTo() extends the
+        // selector, and Selection::extend() opens with `assert(_state != State::Complete)`.
+        CHECK_FALSE(mock.terminal.isSelectionComplete());
+
+        mock.sendCharEvent(U'j'); // the motion that used to abort
+        CHECK(mock.terminal.selectionAvailable());
+    }
+
+    SECTION("Normal mode: a yank replaces the standing selection rather than tripping over it")
+    {
+        auto mock = setupMockTerminal("one\r\n"
+                                      "two\r\n"
+                                      "three");
+        REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
+
+        mock.terminal.selectAll();
+        REQUIRE(mock.terminal.selectionAvailable());
+
+        // `yy` used to abort on extractTextAndHighlightRange()'s `assert(!_terminal->selector())`.
+        mock.sendCharEvent(U'y');
+        mock.sendCharEvent(U'y');
+        CHECK_FALSE(mock.terminal.selectionAvailable());
+    }
+}
+// }}}

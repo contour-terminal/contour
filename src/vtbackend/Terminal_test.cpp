@@ -3915,6 +3915,22 @@ TEST_CASE("Terminal.selectAll", "[terminal]")
     CHECK(text.find("page1") != std::string::npos);
     CHECK(text.find("page3") != std::string::npos);
 }
+
+TEST_CASE("Terminal.selectAll.completesInInsertMode", "[terminal]")
+{
+    // Insert mode is the only mode that may complete a selection — see sendMouseReleaseEvent(), and the Vi
+    // invariants pinned in ViCommands_test's "vi.selectAll" case.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(5) };
+    mock.writeToScreen("one\r\n"
+                       "two\r\n"
+                       "three");
+    REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Insert);
+
+    mock.terminal.selectAll();
+
+    REQUIRE(mock.terminal.selectionAvailable());
+    CHECK(mock.terminal.isSelectionComplete());
+}
 // }}}
 
 // NOLINTEND(misc-const-correctness)

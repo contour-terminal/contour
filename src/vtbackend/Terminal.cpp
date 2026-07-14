@@ -2067,9 +2067,19 @@ void Terminal::selectAll()
     // wrapped ones, which is what "all" means here (and what ViMode's VisualLine already does).
     setSelector(std::make_unique<FullLineSelection>(_selectionHelper, top, selectionUpdatedHelper()));
     (void) _selection->extend(bottom);
-    _selection->complete();
 
-    updateSelectionMatches();
+    // Completing a selection is Insert mode's business — exactly the gate sendMouseReleaseEvent() applies
+    // to a finished drag. In a Visual mode the Vi layer owns the selection and every motion extends it
+    // (ViCommands::moveCursorTo → Selection::extend, whose first statement is an assert that the state is
+    // not Complete), so handing it a completed one aborts on the next keystroke.
+    if (_inputHandler.mode() == ViMode::Insert)
+        _selection->complete();
+
+    // Deliberately NOT updateSelectionMatches(): that serializes the selection into a search pattern to
+    // highlight the other occurrences of a selected WORD. For a selection that spans the whole scrollback
+    // the pattern is the entire buffer — megabytes built under the terminal lock, for a search whose only
+    // match is what is already selected, and which then disables the trivial-line render fast path for
+    // every frame that follows. The quadruple-click full-line selection skips it for the same reason.
     onSelectionUpdated();
 }
 

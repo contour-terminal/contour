@@ -345,7 +345,12 @@ void ViCommands::executeYank(ViMotion motion, unsigned count)
 std::string ViCommands::extractTextAndHighlightRange(CellLocation from, CellLocation to)
 {
     assert(_terminal->inputHandler().mode() == ViMode::Normal);
-    assert(!_terminal->selector());
+
+    // A selection may well still be standing here, and it is not ours: a mouse drag in Normal mode leaves
+    // one behind (only Insert mode completes a drag), and so does "Select All". A yank operator selects
+    // its own range, so drop whatever was there rather than assert that nothing was.
+    if (_terminal->selectionAvailable())
+        _terminal->clearSelection();
 
     // TODO: ideally keep that selection for about N msecs,
     // such that it'll be visually rendered and the user has a feedback of what's
