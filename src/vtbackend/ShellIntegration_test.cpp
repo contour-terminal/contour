@@ -362,7 +362,7 @@ TEST_CASE("SemanticBlockProtocol.outputThatFitsOnTheLineItStartedOn")
     CHECK(block->prompt == "$ printf hello");
 }
 
-TEST_CASE("SemanticBlockProtocol.marksSurviveAResize")
+TEST_CASE("SemanticBlockProtocol.marksSurviveResize")
 {
     // The marks name the LOGICAL line, and the command-end offset counts that line's columns — so a resize,
     // which only re-chops a logical line into different physical pieces, must leave every block untouched.
