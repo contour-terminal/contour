@@ -3892,4 +3892,45 @@ TEST_CASE("Terminal.win32_input_mode_reports_unicode_for_escape_and_numpad", "[t
 
 // }}}
 
+// {{{ Select All
+TEST_CASE("Terminal.selectAll", "[terminal]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(5) };
+
+    // Push two lines into the scrollback, leaving three on the page.
+    for (auto const* text: { "hist1", "hist2", "page1", "page2" })
+        mock.writeToScreen(std::format("{}\r\n", text));
+    mock.writeToScreen("page3");
+    REQUIRE(mock.terminal.currentScreen().historyLineCount() == LineCount(2));
+
+    REQUIRE_FALSE(mock.terminal.selectionAvailable());
+    mock.terminal.selectAll();
+    REQUIRE(mock.terminal.selectionAvailable());
+    CHECK(mock.terminal.isSelectionComplete());
+
+    // "All" means the scrollback too, not merely the visible page.
+    auto const text = mock.terminal.extractSelectionText();
+    CHECK(text.find("hist1") != std::string::npos);
+    CHECK(text.find("hist2") != std::string::npos);
+    CHECK(text.find("page1") != std::string::npos);
+    CHECK(text.find("page3") != std::string::npos);
+}
+
+TEST_CASE("Terminal.selectAll.completesInInsertMode", "[terminal]")
+{
+    // Insert mode is the only mode that may complete a selection — see sendMouseReleaseEvent(), and the Vi
+    // invariants pinned in ViCommands_test's "vi.selectAll" case.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(5) };
+    mock.writeToScreen("one\r\n"
+                       "two\r\n"
+                       "three");
+    REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Insert);
+
+    mock.terminal.selectAll();
+
+    REQUIRE(mock.terminal.selectionAvailable());
+    CHECK(mock.terminal.isSelectionComplete());
+}
+// }}}
+
 // NOLINTEND(misc-const-correctness)

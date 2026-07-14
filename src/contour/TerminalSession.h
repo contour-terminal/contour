@@ -5,6 +5,7 @@
 #include <contour/Audio.h>
 #include <contour/ColorConversion.h>
 #include <contour/Config.h>
+#include <contour/ContextMenu.h>
 #if defined(__linux__)
     #include <contour/FreeDesktopNotifier.h>
 #endif
@@ -421,7 +422,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::CreateSelection const&);
     bool operator()(actions::DecreaseFontSize);
     bool operator()(actions::DecreaseOpacity);
-    bool operator()(actions::FollowHyperlink);
+    bool operator()(actions::FollowHyperlink const& action);
     bool operator()(actions::HintMode const&);
     bool operator()(actions::FocusNextSearchMatch);
     bool operator()(actions::FocusPreviousSearchMatch);
@@ -496,6 +497,23 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ResizePane const& action);
     bool operator()(actions::LaunchLayout const& event);
     bool operator()(actions::SaveLayout const& event);
+    bool operator()(actions::OpenContextMenu);
+    bool operator()(actions::SelectAll);
+    bool operator()(actions::SoftReset);
+    bool operator()(actions::CopyLastCommandPrompt);
+    bool operator()(actions::CopyLastCommandOutput);
+    bool operator()(actions::CopyLastCommandBlock);
+    bool operator()(actions::CopyHyperlink const& action);
+
+    /// The world as this pane's context menu needs to see it, snapshotted under a single terminal lock.
+    ///
+    /// The ONLY place that touches the ambient clipboard and the live terminal on the menu's behalf.
+    /// Everything downstream (buildContextMenu) is a pure function of the plain struct it returns, which
+    /// is what lets every row and every enable/hide rule be decided headlessly in ContextMenu_test.
+    ///
+    /// @return The snapshot, with `hasSplits` left for the window to fill in (a session does not know
+    ///         whether its tab holds siblings).
+    [[nodiscard]] ContextMenuState contextMenuState();
 
     /// Runs @p action against this session — the same dispatch a key binding takes.
     ///
@@ -599,6 +617,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool reloadConfigWithProfile(std::string const& profileName);
     bool resetConfig();
     void followHyperlink(vtbackend::HyperlinkInfo const& hyperlink);
+
+    /// Copies @p part of the most recently finished shell command into the clipboard.
+    /// @param part Which part of the command block to copy.
+    /// @return false when the scrollback holds no finished command (no OSC 133 shell integration).
+    bool copyLastCommandBlock(vtbackend::CommandBlockPart part);
+
     void setFontSize(text::font_size size);
 
     /// Posts a refresh of the indicator status-line tab info (tab names) to the GUI thread.

@@ -52,6 +52,8 @@ set(_header_files
     CommandHistory.h
     CommandHistoryStore.h
     Config.h
+    ContextMenu.h
+    ContextMenuModel.h
     ContourApp.h
     FuzzyFilter.h
     Shortcut.h
@@ -73,6 +75,8 @@ set(_core_source_files
     CommandHistory.cpp
     CommandHistoryStore.cpp
     Config.cpp
+    ContextMenu.cpp
+    ContextMenuModel.cpp
     ContourApp.cpp
     FuzzyFilter.cpp
     Shortcut.cpp
@@ -307,6 +311,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/CommandHistory_test.cpp
             test/CommandPaletteModel_test.cpp
             test/Config_test.cpp
+            test/ContextMenu_test.cpp
             test/FuzzyFilter_test.cpp
             test/Shortcut_test.cpp
             test/LayoutBuilder_test.cpp

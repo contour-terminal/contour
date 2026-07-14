@@ -136,6 +136,15 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param acting The session that triggered the action; its hosting window shows the palette.
     void openCommandPalette(TerminalSession* acting);
 
+    /// Opens the terminal context menu over the pane of @p acting (the OpenContextMenu action).
+    ///
+    /// Makes that pane active first, so the menu is built from the state of the pane the user actually
+    /// right-clicked and every row it offers runs against that same pane — not against whichever pane
+    /// happened to be active beforehand. No-ops if @p acting has no hosting window.
+    ///
+    /// @param acting The session that was right-clicked.
+    void openContextMenu(TerminalSession* acting);
+
     /// Records that the command @p id was just run, and persists the updated list.
     ///
     /// App-wide, not per-window: "recently used" is a fact about the USER, so a command run in one
@@ -430,6 +439,13 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
 
   signals:
     void multimediaReadyChanged();
+
+    /// A pane asked for its context menu, before the menu is routed to the window that hosts it.
+    ///
+    /// The routing itself no-ops without a window, so this is the one point at which "the right-click
+    /// reached the OpenContextMenu action" is observable independently of there being a GUI to show it in.
+    /// @param acting The session that was right-clicked.
+    void contextMenuRequested(TerminalSession* acting);
 
   private:
     /// Closes @p window if a tab transplant just emptied it — an empty window (no tabs) is not a valid

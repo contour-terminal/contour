@@ -65,6 +65,26 @@ namespace fs = std::filesystem;
 namespace contour::config
 {
 
+std::vector<MouseInputMapping> const& builtinFallbackMouseMappings()
+{
+    // The right mouse button opens the terminal's context menu. It is a fallback rather than a default
+    // (see the declaration for why): every contour.yml written before this existed enumerates the default
+    // mouse mappings without it, and would otherwise shadow it away.
+    //
+    // Nothing else is needed to get the behaviour right. TerminalSession::sendMousePressEvent consults
+    // this table only AFTER vtbackend has declined the press, so an application that asked for the mouse
+    // (vim, tmux) still receives its right-click and no menu opens; and only after the bypass modifier has
+    // been stripped, so Shift+Right opens the menu even then. That is the same gate that already decides
+    // whether the user may select cells with the mouse — reused, not restated.
+    static auto const mappings = std::vector<MouseInputMapping> {
+        MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
+                            .input = vtbackend::MouseButton::Right,
+                            .binding = { { actions::OpenContextMenu {} } } },
+    };
+    return mappings;
+}
+
 namespace
 {
 

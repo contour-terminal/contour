@@ -383,7 +383,27 @@ fi;
 
 preexec() {
     printf "\\e[?2028h";
+
+    # OSC 133;C -- the command's output begins on the line the cursor is on now.
+    printf "\\e]133;C\\e\\\\";
+
+    _contour_command_running=1
 }
 precmd() {
+    # Must be the very first line: anything else would clobber the exit status we are about to report.
+    local exit_status=$?
+
+    # OSC 133;D -- the command that just ran has finished. Only emitted once a command actually HAS run:
+    # an unconditional D would put a CommandEnd on the very first prompt and invent a command block that
+    # never existed.
+    if [[ -n "${_contour_command_running:-}" ]]; then
+        printf "\\e]133;D;%s\\e\\\\" "${exit_status}";
+        unset _contour_command_running
+    fi
+
     printf "\\e[?2028l\\e[>M\\e]7;$PWD\\e\\\\";
+
+    # OSC 133;A -- a new prompt starts on this line. Together with ;C above this is what lets the terminal
+    # tell a prompt apart from a command's output, which is what "copy last command output" reads.
+    printf "\\e]133;A\\e\\\\";
 }

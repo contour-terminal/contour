@@ -590,6 +590,24 @@ class Grid
     [[nodiscard]] bool isLineBlank(LineOffset line) const noexcept;
     [[nodiscard]] bool isLineWrapped(LineOffset line) const noexcept;
 
+    /// The first physical line of the logical line @p line belongs to.
+    ///
+    /// A logical line is what was actually written; the wrapped lines below its head are only where the
+    /// window happened to be too narrow. Semantic marks (HeadOnlyLineFlags) name the logical line, so
+    /// they are stamped here and read from here.
+    ///
+    /// @param line Any physical line of the logical line.
+    /// @return Its head, or @p line itself when it is not a continuation. Stops at the top of the
+    ///         history, so a logical line whose head has already scrolled away reports its oldest
+    ///         surviving piece as the head.
+    [[nodiscard]] LineOffset logicalLineHead(LineOffset line) const noexcept;
+
+    /// Where @p position sits within its logical line, counted in columns from that line's head.
+    ///
+    /// @param position A position in the grid.
+    /// @return The number of columns of the logical line that precede @p position.
+    [[nodiscard]] ColumnOffset logicalColumnOf(CellLocation position) const noexcept;
+
     [[nodiscard]] int computeLogicalLineNumberFromBottom(LineCount n) const noexcept;
 
     [[nodiscard]] size_t zero_index() const noexcept { return _lines.zero_index(); }

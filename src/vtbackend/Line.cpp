@@ -69,13 +69,25 @@ LineSoA Line::reflow(ColumnCount newColumnCount)
 
 std::string Line::toUtf8() const
 {
+    return toUtf8(ColumnOffset(0), ColumnOffset::cast_from(_columns));
+}
+
+std::string Line::toUtf8(ColumnOffset begin, ColumnOffset end) const
+{
     auto const cols = unbox<size_t>(_columns);
+    auto const first = std::min(static_cast<size_t>(std::max(*begin, 0)), cols);
+    auto const last = std::min(static_cast<size_t>(std::max(*end, 0)), cols);
+    if (first >= last)
+        return {};
+
     if (isBlank())
-        return std::string(cols, ' ');
+        return std::string(last - first, ' ');
 
     std::string str;
+    str.reserve(last - first); // exact for ASCII, a sound floor for anything wider
+
     int skipCount = 0;
-    for (size_t i = 0; i < cols; ++i)
+    for (auto i = first; i < last; ++i)
     {
         if (skipCount > 0)
         {

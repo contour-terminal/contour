@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ColorConversion.h>
+#include <contour/ContextMenu.h>
+#include <contour/ContextMenuModel.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/PaneProxy.h>
 #include <contour/Shortcut.h>
@@ -16,6 +18,7 @@
 #include <QtQml/QQmlEngine>
 
 #include <ranges>
+#include <utility>
 
 #include <vtmux/Pane.h>
 #include <vtmux/PaneLayout.h>
@@ -54,6 +57,55 @@ void WindowController::openCommandPalette()
     _commandPalette->refresh();
 
     emit commandPaletteRequested();
+}
+
+void WindowController::openContextMenu()
+{
+    auto* session = activeSession();
+    if (session == nullptr)
+        return;
+
+    // The manager has already made the right-clicked pane active, so this IS the pane the user clicked.
+    auto state = session->contextMenuState();
+
+    // The one fact the session cannot know: whether its tab holds more than one pane. That belongs to the
+    // window, so it is filled in here rather than reached for from the session.
+    auto const* tab = activeModelTab();
+    state.hasSplits = tab != nullptr && tab->hasMultiplePanes();
+
+    auto const entries = buildContextMenu(state);
+
+    _contextMenuActions.clear();
+    _contextMenuModel = toContextMenuModel(entries, _contextMenuActions);
+
+    // The pane the rows were built for. Held, so that picking one acts on it and not on whichever pane is
+    // active by the time the click lands.
+    _contextMenuSession = session;
+
+    // Model first, then the request to show: both are synchronous, so the QML has rebuilt the menu's rows
+    // by the time it is told to pop it.
+    emit contextMenuModelChanged();
+    emit contextMenuRequested();
+}
+
+void WindowController::triggerContextMenuAction(int actionId)
+{
+    // The session the menu was OPENED over, not whichever one is active now. Null when that pane has since
+    // died — its shell exited while the menu stood open — in which case the row has nothing left to act on.
+    auto* session = _contextMenuSession.data();
+    if (session == nullptr)
+        return;
+
+    if (actionId < 0 || std::cmp_greater_equal(actionId, _contextMenuActions.size()))
+        return;
+
+    // Copy the action out before running it, for the same reason runCommand() does: an action can rebuild
+    // this window (ClosePane, ChangeProfile) and free the vector it is standing in.
+    auto const action = _contextMenuActions[static_cast<size_t>(actionId)];
+
+    // Deliberately NOT recorded in the command history: that list is "commands the user reached for by
+    // name", and it exists to float them to the top of the palette. A right-click on "Copy" is not that.
+    session->executeAction(action);
 }
 
 void WindowController::runCommand(QString const& id)

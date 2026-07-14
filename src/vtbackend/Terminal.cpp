@@ -2053,11 +2053,49 @@ string Terminal::extractSelectionText() const
     return se.finish();
 }
 
+void Terminal::selectAll()
+{
+    auto const& grid = _currentScreen->grid();
+
+    auto const top =
+        CellLocation { .line = -boxed_cast<LineOffset>(grid.historyLineCount()), .column = ColumnOffset(0) };
+    auto const bottom =
+        CellLocation { .line = boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1),
+                       .column = boxed_cast<ColumnOffset>(pageSize().columns) - ColumnOffset(1) };
+
+    // FullLineSelection rather than LinearSelection: it normalizes the columns to whole lines and follows
+    // wrapped ones, which is what "all" means here (and what ViMode's VisualLine already does).
+    setSelector(std::make_unique<FullLineSelection>(_selectionHelper, top, selectionUpdatedHelper()));
+    (void) _selection->extend(bottom);
+
+    // Completing a selection is Insert mode's business — exactly the gate sendMouseReleaseEvent() applies
+    // to a finished drag. In a Visual mode the Vi layer owns the selection and every motion extends it
+    // (ViCommands::moveCursorTo → Selection::extend, whose first statement is an assert that the state is
+    // not Complete), so handing it a completed one aborts on the next keystroke.
+    if (_inputHandler.mode() == ViMode::Insert)
+        _selection->complete();
+
+    // Deliberately NOT updateSelectionMatches(): that serializes the selection into a search pattern to
+    // highlight the other occurrences of a selected WORD. For a selection that spans the whole scrollback
+    // the pattern is the entire buffer — megabytes built under the terminal lock, for a search whose only
+    // match is what is already selected, and which then disables the trivial-line render fast path for
+    // every frame that follows. The quadruple-click full-line selection skips it for the same reason.
+    onSelectionUpdated();
+}
+
+std::optional<CommandBlockText> Terminal::lastCommandBlock() const
+{
+    return primaryScreen().lastCommandBlock();
+}
+
 string Terminal::extractLastMarkRange() const
 {
     // -1 because we always want to start extracting one line above the cursor by default.
+    // The cursor is read from the PRIMARY screen, which is also the grid the lines are read from below: an
+    // alt-screen app (vim, less) has a cursor of its own, and pairing it with the primary grid would slice
+    // a line range out of one screen using the other screen's cursor.
     auto const bottomLine =
-        _currentScreen->cursor().position.line + LineOffset(-1) + _settings.copyLastMarkRangeOffset;
+        primaryScreen().cursor().position.line + LineOffset(-1) + _settings.copyLastMarkRangeOffset;
 
     auto const marker1 = optional { bottomLine };
 
@@ -2861,12 +2899,21 @@ void Terminal::softReset()
     // https://vt100.net/docs/vt510-rm/DECSTR.html
     setMode(DECMode::BatchedRendering, false);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
-    setGraphicsRendition(GraphicsRendition::Reset);    // SGR
-    _currentScreen->resetSavedCursorState();           // DECSC (Save cursor state)
-    setMode(DECMode::VisibleCursor, true);             // DECTCEM (Text cursor enable)
-    setMode(DECMode::Origin, false);                   // DECOM
-    setMode(AnsiMode::KeyboardAction, false);          // KAM
-    setMode(DECMode::AutoWrap, false);                 // DECAWM
+    setGraphicsRendition(GraphicsRendition::Reset); // SGR
+    _currentScreen->resetSavedCursorState();        // DECSC (Save cursor state)
+    setMode(DECMode::VisibleCursor, true);          // DECTCEM (Text cursor enable)
+    setMode(DECMode::Origin, false);                // DECOM
+    setMode(AnsiMode::KeyboardAction, false);       // KAM
+
+    // DECAWM. The VT510 manual has DECSTR RESET autowrap, and every terminal in the field declines to:
+    // xterm restores the bit to the value it was configured with rather than clearing it, foot turns
+    // auto-margin back on unconditionally, and wezterm says so in as many words — "xterm deviates from the
+    // documented DECSTR setting for dec auto wrap, so we do too". They are right to. A soft reset is what
+    // a user reaches for to REPAIR a garbled terminal, and no shell ever sends DECSET 7 on its own, so
+    // obeying the letter of the spec here hands back a terminal that no longer wraps — more broken than
+    // the one they started with. Restored, like TextReflow just above it, rather than cleared.
+    setMode(DECMode::AutoWrap, true);
+
     setMode(AnsiMode::Insert, false);                  // IRM
     setMode(DECMode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
     setTopBottomMargin({}, boxed_cast<LineOffset>(_settings.pageSize.lines) - LineOffset(1));       // DECSTBM

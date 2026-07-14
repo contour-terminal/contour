@@ -90,6 +90,10 @@ class MockMainController: public QAbstractListModel
     // must carry both — a missing signal is a QML warning, and the run-wide gate turns that into a
     // failure of the whole suite. A null model is what an unopened palette shows anyway.
     Q_PROPERTY(QObject* commandPalette READ commandPalette CONSTANT)
+    // Ditto for the context-menu surface: main.qml instantiates TerminalContextMenu.qml against this
+    // controller, binds its `entries` to contextMenuModel and Connections-targets contextMenuRequested.
+    // An empty model is what a menu that has never been opened holds anyway.
+    Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
 
   public:
     enum Roles : std::uint16_t
@@ -145,6 +149,12 @@ class MockMainController: public QAbstractListModel
     /// Mirrors WindowController::openCommandPalette(): what the manager calls for the
     /// OpenCommandPalette action, and what makes main.qml's popup appear.
     Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }
+
+    [[nodiscard]] QVariantList contextMenuModel() const { return {}; }
+    Q_INVOKABLE void triggerContextMenuAction(int) {}
+    /// Mirrors WindowController::openContextMenu(): what the manager calls for the OpenContextMenu
+    /// action, and what makes main.qml pop the terminal's right-click menu.
+    Q_INVOKABLE void openContextMenu() { emit contextMenuRequested(); }
 
     // The startup sequence main.qml's Component.onCompleted drives, recorded for the order check.
     Q_INVOKABLE QObject* createWindowController()
@@ -225,6 +235,8 @@ class MockMainController: public QAbstractListModel
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
     void commandPaletteRequested();
+    void contextMenuModelChanged();
+    void contextMenuRequested();
     void tabBarPositionChanged();
     void tabBarShouldShowChanged();
     void chromeHeightChanged();

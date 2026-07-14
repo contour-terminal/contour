@@ -40,6 +40,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <ranges>
 #include <regex>
 
 #if defined(__OpenBSD__)
@@ -1378,6 +1379,16 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
 
     if (auto const* actions = config::apply(
             _config.inputMappings.value().mouseMappings, button, sanitizedModifier, matchModeFlags()))
+    {
+        executeAllActions(*actions);
+        return;
+    }
+
+    // The user's mappings did not claim this button, so fall back to the built-in ones. They are consulted
+    // second on purpose: an explicit binding in the user's config always wins (see
+    // builtinFallbackMouseMappings for why a plain default could not reach an existing user at all).
+    if (auto const* actions = config::apply(
+            config::builtinFallbackMouseMappings(), button, sanitizedModifier, matchModeFlags()))
         executeAllActions(*actions);
 }
 
@@ -1502,13 +1513,145 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
 {
     sessionLog()("Clearing history and perform terminal hard reset");
 
-    _terminal.hardReset();
+    // Locked, for the reason spelled out at operator()(SoftReset) below.
+    crispy::locked(_terminal, [&]() { terminal().hardReset(); });
     return true;
 }
 
 bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
 {
     crispy::locked(_terminal, [&]() { copyToClipboard(terminal().extractLastMarkRange()); });
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SelectAll)
+{
+    crispy::locked(_terminal, [&]() { terminal().selectAll(); });
+    return true;
+}
+
+bool TerminalSession::operator()(actions::OpenContextMenu)
+{
+    // Not while a left-drag selection is in flight. The popup takes the mouse grab, so the button-release
+    // that would end that drag never reaches the display: the selection would go on extending with every
+    // later hover, and the auto-scroll timer would go on firing, with no button held down at all.
+    if (crispy::locked(_terminal, [&]() { return terminal().leftMouseButtonPressed(); }))
+        return false;
+
+    _manager->openContextMenu(this);
+    return true;
+}
+
+ContextMenuState TerminalSession::contextMenuState()
+{
+    auto profileNames = std::vector<std::string> {};
+    for (auto const& name: _config.profiles.value() | std::views::keys)
+        profileNames.push_back(name);
+    // `profiles` is an unordered_map: without this the submenu would shuffle its rows between two opens.
+    std::ranges::sort(profileNames);
+
+    // mimeData()->hasText(), not text(): the latter is a synchronous round-trip to whichever process owns
+    // the clipboard, and it drags the ENTIRE payload across — a 5 MB log, a huge listing — only for
+    // .isEmpty() to throw it away. On the GUI thread, inside a mouse-press handler. This is the very cost
+    // pasteFromClipboard() is written to avoid (it refuses above 1 MB and asks above 512 KB); asking for
+    // the available formats instead answers the same question without transferring a byte of content.
+    auto const* clipboard = QGuiApplication::clipboard();
+    auto const* mimeData = clipboard != nullptr ? clipboard->mimeData(QClipboard::Clipboard) : nullptr;
+    auto const clipboardHasText = mimeData != nullptr && mimeData->hasText();
+
+    // One lock for the whole snapshot. The parser thread mutates the grid concurrently, so a menu that
+    // asked the terminal a fresh question per row would be reading a moving target — and a QML binding
+    // that reached into the terminal on its own schedule would be a plain data race.
+    return crispy::locked(_terminal, [&]() {
+        auto const block = terminal().lastCommandBlock();
+        auto const hyperlink = terminal().tryGetHoveringHyperlink();
+
+        return ContextMenuState {
+            .hasSelection = terminal().selectionAvailable(),
+            .clipboardHasText = clipboardHasText,
+            // An empty block is no block. A shell that emits OSC 133;D at its very first prompt (tcsh
+            // cannot guard against that in an alias) reports a command that never ran, with no text to
+            // copy — offering the user three rows that would all yield nothing.
+            .hasLastCommand = block.has_value() && !(block->prompt.empty() && block->output.empty()),
+            .hasWorkingDirectory = !terminal().currentWorkingDirectory().empty(),
+            // Left for the window to fill in: whether this tab holds more than one pane is not something
+            // a session knows about itself.
+            .hasSplits = false,
+            // Taken now, while the pointer is still on the cell the user clicked. The rows built from this
+            // carry the URI with them, because by the time one is picked the pointer has moved to the menu.
+            .hyperlinkUnderCursor = hyperlink ? hyperlink->uri : std::string {},
+            .activeProfile = profileName(),
+            .profileNames = std::move(profileNames),
+        };
+    });
+}
+
+bool TerminalSession::operator()(actions::SoftReset)
+{
+    sessionLog()("Performing terminal soft reset");
+
+    // A soft reset is far from a handful of flags: it re-establishes the margins and drops the status
+    // display, which RESIZES the main page. Run bare on the GUI thread, that grid resize races the parser
+    // thread's line writes — a corrupted screen at best, a heap-buffer-overflow at worst.
+    //
+    // Taking the lock cannot deadlock: DECSTR (CSI ! p) already reaches Terminal::softReset() from the
+    // parser thread, from inside writeToScreen()'s own _stateMutex hold, so every callback the reset makes
+    // is exercised under this very lock every time an application asks for one. This path simply joins it.
+    crispy::locked(_terminal, [&]() { terminal().softReset(); });
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CopyLastCommandPrompt)
+{
+    return copyLastCommandBlock(vtbackend::CommandBlockPart::Prompt);
+}
+
+bool TerminalSession::operator()(actions::CopyLastCommandOutput)
+{
+    return copyLastCommandBlock(vtbackend::CommandBlockPart::Output);
+}
+
+bool TerminalSession::operator()(actions::CopyLastCommandBlock)
+{
+    return copyLastCommandBlock(vtbackend::CommandBlockPart::PromptAndOutput);
+}
+
+bool TerminalSession::copyLastCommandBlock(vtbackend::CommandBlockPart part)
+{
+    auto const block = crispy::locked(_terminal, [&]() { return terminal().lastCommandBlock(); });
+    if (!block)
+        return false;
+
+    // Copying nothing is not a copy — it is the destruction of whatever the user had on the clipboard.
+    // `cd /tmp` prints not one character, and its block's Output is empty; so is the Prompt of a block
+    // whose prompt line has already scrolled out of the history. QClipboard::setText("") would replace the
+    // URL the user copied a minute ago with nothing at all, and the menu row would look like it did
+    // nothing. Refusing leaves the clipboard alone, and tells the caller the row had nothing to give.
+    auto const text = vtbackend::textOf(*block, part);
+    if (text.empty())
+        return false;
+
+    copyToClipboard(text);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CopyHyperlink const& action)
+{
+    // A URI the caller pinned wins: the context menu captured the link the user right-clicked, and asking
+    // the terminal again now would answer about wherever the pointer has since wandered. A key binding
+    // pins nothing, and for it "the link under the cursor" is exactly the right question.
+    if (!action.uri.empty())
+    {
+        copyToClipboard(action.uri);
+        return true;
+    }
+
+    auto const l = scoped_lock { terminal() };
+    auto const hyperlink = terminal().tryGetHoveringHyperlink();
+    if (!hyperlink)
+        return false;
+
+    copyToClipboard(hyperlink->uri);
     return true;
 }
 
@@ -1595,8 +1738,16 @@ bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
     return true;
 }
 
-bool TerminalSession::operator()(actions::FollowHyperlink)
+bool TerminalSession::operator()(actions::FollowHyperlink const& action)
 {
+    // Pinned by the caller (the context menu, which captured the link the user right-clicked) beats asking
+    // the terminal where the pointer happens to rest now. See operator()(CopyHyperlink) above.
+    if (!action.uri.empty())
+    {
+        followHyperlink(vtbackend::HyperlinkInfo { .userId = {}, .uri = action.uri });
+        return true;
+    }
+
     auto const l = scoped_lock { terminal() };
     if (auto const hyperlink = terminal().tryGetHoveringHyperlink())
     {

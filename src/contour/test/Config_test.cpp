@@ -1723,3 +1723,32 @@ TEST_CASE("Config: command_palette_recent_count", "[config][palette]")
         CHECK(config.commandPaletteRecentCount.value() == 0);
     }
 }
+
+TEST_CASE("config.builtinFallbackMouseMappings", "[config]")
+{
+    auto const& fallbacks = contour::config::builtinFallbackMouseMappings();
+
+    SECTION("the right button opens the context menu")
+    {
+        REQUIRE(fallbacks.size() == 1);
+        auto const& mapping = fallbacks.front();
+
+        CHECK(mapping.input == vtbackend::MouseButton::Right);
+        CHECK(mapping.modifiers == vtbackend::Modifiers { vtbackend::Modifier::None });
+        REQUIRE(mapping.binding.size() == 1);
+        CHECK(std::holds_alternative<contour::actions::OpenContextMenu>(mapping.binding.front()));
+    }
+
+    SECTION("it is a FALLBACK, not a default")
+    {
+        // This is the whole point of the table, so it is pinned rather than left to a comment: the right
+        // button must NOT be in the default mouseMappings. Loading an `input_mapping:` section replaces
+        // those wholesale, and the contour.yml Contour generates on first run writes every one of them
+        // out — so a right-click binding placed there would be shadowed away by the config file of every
+        // user who already has one, forever.
+        auto const defaults = contour::config::Config {}.inputMappings.value().mouseMappings;
+        auto const bindsRight = std::ranges::any_of(
+            defaults, [](auto const& mapping) { return mapping.input == vtbackend::MouseButton::Right; });
+        CHECK_FALSE(bindsRight);
+    }
+}

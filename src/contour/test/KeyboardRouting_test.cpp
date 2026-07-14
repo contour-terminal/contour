@@ -212,6 +212,9 @@ class RoutingMockController: public QAbstractListModel
     // against this controller and Connections-targets its commandPaletteRequested signal, so the mock
     // must carry both or the run-wide QML message gate fails the suite.
     Q_PROPERTY(QObject* commandPalette READ commandPalette CONSTANT)
+    // Ditto for the context-menu surface: main.qml instantiates TerminalContextMenu.qml against this
+    // controller, binds its `entries` to contextMenuModel and Connections-targets contextMenuRequested.
+    Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
 
   public:
     enum Roles : std::uint16_t
@@ -265,6 +268,12 @@ class RoutingMockController: public QAbstractListModel
     /// Mirrors WindowController::openCommandPalette(): what the manager calls for the
     /// OpenCommandPalette action, and what makes main.qml's popup appear.
     Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }
+
+    [[nodiscard]] QVariantList contextMenuModel() const { return {}; }
+    Q_INVOKABLE void triggerContextMenuAction(int) {}
+    /// Mirrors WindowController::openContextMenu(): what the manager calls for the OpenContextMenu
+    /// action, and what makes main.qml pop the terminal's right-click menu.
+    Q_INVOKABLE void openContextMenu() { emit contextMenuRequested(); }
 
     Q_INVOKABLE QObject* createWindowController() { return this; }
     Q_INVOKABLE void bindWindow(QObject*) {}
@@ -324,6 +333,8 @@ class RoutingMockController: public QAbstractListModel
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
     void commandPaletteRequested();
+    void contextMenuModelChanged();
+    void contextMenuRequested();
     void tabBarPositionChanged();
     void tabBarShouldShowChanged();
     void chromeHeightChanged();

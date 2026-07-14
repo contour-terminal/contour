@@ -448,6 +448,28 @@ void TerminalSessionManager::openCommandPalette(TerminalSession* acting)
         controller->openCommandPalette();
 }
 
+void TerminalSessionManager::openContextMenu(TerminalSession* acting)
+{
+    // Announced before the routing, which no-ops when there is no window to show a menu in. That makes the
+    // ARRIVAL of the request observable on its own — otherwise "the right-click reached this action" and
+    // "the right-click was swallowed on the way here" look exactly alike from outside.
+    emit contextMenuRequested(acting);
+
+    auto* win = windowHostingSession(acting);
+    if (win == nullptr)
+        return;
+
+    // The menu belongs to the pane that was right-clicked, which is not necessarily the active one. Make
+    // it active first: the menu is then built from ITS state, and every row it offers runs against IT.
+    // This is also what gives the pane keyboard focus, which is what a user expects a right-click to do.
+    if (auto* tab = paneActionTargetTab(acting); tab != nullptr && tab->rootPane() != nullptr)
+        if (auto* leaf = tab->rootPane()->findLeaf(acting->modelSessionId()); leaf != nullptr)
+            activatePane(tab->id(), leaf->id());
+
+    if (auto* controller = controllerFor(win->id()); controller != nullptr)
+        controller->openContextMenu();
+}
+
 void TerminalSessionManager::recordCommand(std::string const& id)
 {
     // Prepared here too, not just in openCommandPalette(). Depending on the palette having been opened

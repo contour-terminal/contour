@@ -118,6 +118,18 @@ struct InputMappings
     std::vector<MouseInputMapping> mouseMappings;
 };
 
+/// Mouse mappings that apply when the user's `input_mapping:` does not claim the button itself.
+///
+/// A new DEFAULT cannot reach an existing user: loading an `input_mapping:` section REPLACES the built-in
+/// table wholesale (see YAMLConfigReader::loadFromEntry for InputMappings), and the contour.yml Contour
+/// generates on first run writes every default out into that section. So a mapping added to the defaults
+/// after a user's config was written would be shadowed by their own file, forever. Consulting this table
+/// *after* theirs is what lets a new default still reach them — while an explicit binding of the same
+/// button in their config continues to win, because that one is found first.
+///
+/// @return The fallback mappings, in match order.
+[[nodiscard]] std::vector<MouseInputMapping> const& builtinFallbackMouseMappings();
+
 namespace helper
 {
     inline bool testMatchMode(uint8_t actualModeFlags,

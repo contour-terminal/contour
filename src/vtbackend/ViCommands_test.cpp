@@ -432,3 +432,74 @@ TEST_CASE("vi.search: Meta-modified keys do not alias onto the unmodified key", 
     mock.sendKeyEvent(vtbackend::Key::Backspace);
     CHECK(mock.terminal.search().pattern == U"a");
 }
+
+// {{{ Select All under Vi mode
+// Select All reaches the terminal from the context menu, a key binding and the command palette — all of
+// which are consulted BEFORE the Vi handler. So it installs a selection while the Vi layer owns the input,
+// and it must honour the two invariants that layer only ever asserts.
+TEST_CASE("vi.selectAll: honours the Vi layer's selection invariants", "[vi]")
+{
+    SECTION("Visual mode: the selection stays InProgress, because every motion extends it")
+    {
+        auto mock = setupMockTerminal("one\r\n"
+                                      "two\r\n"
+                                      "three");
+        mock.sendCharEvent(U'v');
+        REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Visual);
+
+        mock.terminal.selectAll();
+
+        REQUIRE(mock.terminal.selectionAvailable());
+        // A Complete selection aborts on the very next keystroke: ViCommands::moveCursorTo() extends the
+        // selector, and Selection::extend() opens with `assert(_state != State::Complete)`.
+        CHECK_FALSE(mock.terminal.isSelectionComplete());
+
+        mock.sendCharEvent(U'j'); // the motion that used to abort
+        CHECK(mock.terminal.selectionAvailable());
+    }
+
+    SECTION("Normal mode: a yank replaces the standing selection rather than tripping over it")
+    {
+        auto mock = setupMockTerminal("one\r\n"
+                                      "two\r\n"
+                                      "three");
+        REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
+
+        mock.terminal.selectAll();
+        REQUIRE(mock.terminal.selectionAvailable());
+
+        // `yy` used to abort on extractTextAndHighlightRange()'s `assert(!_terminal->selector())`.
+        mock.sendCharEvent(U'y');
+        mock.sendCharEvent(U'y');
+        CHECK_FALSE(mock.terminal.selectionAvailable());
+    }
+}
+// }}}
+
+// {{{ Line marks belong to the logical line
+TEST_CASE("vi.mark: `mm` marks the LOGICAL line, not the wrapped piece the cursor sits in", "[vi]")
+{
+    // The Vi cursor moves by PHYSICAL line, so `j` walks it into the continuations of a wrapped line. A
+    // mark left on a continuation is one that a widening resize erases (growColumns rebuilds a joined
+    // logical line from its head alone) and one the command-block scan cannot see (it reads the head). It
+    // would not even toggle: reading a continuation never finds the mark sitting on the head.
+    auto mock =
+        setupMockTerminal(std::string(25, 'x'), // 25 columns on a 10-column page: two wraps
+                          vtbackend::PageSize { vtbackend::LineCount(6), vtbackend::ColumnCount(10) });
+
+    auto const& screen = mock.terminal.currentScreen();
+    REQUIRE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(1), vtbackend::LineFlag::Wrapped));
+
+    mock.sendCharEvent(U'j'); // onto the first continuation
+    mock.sendCharSequence("mm");
+
+    CHECK(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked));
+    CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(1), vtbackend::LineFlag::Marked));
+
+    SECTION("and toggles it off again from that same continuation")
+    {
+        mock.sendCharSequence("mm");
+        CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked));
+    }
+}
+// }}}

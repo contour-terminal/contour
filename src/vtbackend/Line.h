@@ -103,6 +103,7 @@ class Line
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
     {
         _flags = flags;
+        _commandEndOffset = {};
         if (isBlankWithFillAttrs(attributes))
             return;
         initializeBlankLineSoA(_storage, attributes);
@@ -111,6 +112,7 @@ class Line
     void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
     {
         _flags = flags;
+        _commandEndOffset = {};
         _columns = count;
         if (isBlankWithFillAttrs(attributes))
             return;
@@ -124,6 +126,7 @@ class Line
               uint8_t width) noexcept
     {
         _flags = flags;
+        _commandEndOffset = {};
         if (codepoint == 0)
         {
             initializeBlankLineSoA(_storage, attributes);
@@ -255,11 +258,30 @@ class Line
         return marked() ? LineFlag::Marked : LineFlag::None;
     }
 
+    /// The flags a continuation line inherits from the logical line it belongs to.
+    ///
+    /// Only the ones that describe a PHYSICAL line. The semantic marks (HeadOnlyLineFlags) deliberately
+    /// stay behind on the head: they say where a prompt or a command's output begins, and a wrap does not
+    /// begin a second one.
     [[nodiscard]] LineFlags inheritableFlags() const noexcept
     {
-        auto constexpr Inheritables = LineFlags({ LineFlag::Wrappable, LineFlag::Marked });
+        auto constexpr Inheritables = LineFlags { LineFlag::Wrappable };
         return _flags & Inheritables;
     }
+
+    /// How many columns of this LOGICAL line a finished command printed, when the shell closed that
+    /// command part-way into the line. Meaningful only on a head carrying LineFlag::CommandEnd.
+    ///
+    /// A shell's precmd emits OSC 133;D at the cursor, and the cursor is still sitting at the end of the
+    /// command's output whenever that output did not end in a newline — so the prompt printed next lands
+    /// on the very same line. One line, two owners; this offset is the border between them. Zero (the
+    /// common case) means the output did end in a newline and the whole line belongs to the prompt.
+    ///
+    /// Counted from the start of the LOGICAL line, not of the physical one it happens to fall in. That is
+    /// what makes it survive a resize: reflow re-chops a logical line into different physical pieces, but
+    /// it never changes the line's content, so the border does not move.
+    [[nodiscard]] ColumnOffset commandEndOffset() const noexcept { return _commandEndOffset; }
+    void setCommandEndOffset(ColumnOffset offset) noexcept { _commandEndOffset = offset; }
 
     void setFlag(LineFlags flags, bool enable) noexcept
     {
@@ -273,6 +295,12 @@ class Line
 
     [[nodiscard]] LineSoA reflow(ColumnCount newColumnCount);
     [[nodiscard]] std::string toUtf8() const;
+
+    /// The text of the columns [@p begin, @p end) of this line, blank cells rendered as spaces.
+    /// @param begin First column to render; clamped to the line.
+    /// @param end One past the last column to render; clamped to the line.
+    [[nodiscard]] std::string toUtf8(ColumnOffset begin, ColumnOffset end) const;
+
     [[nodiscard]] std::string toUtf8Trimmed() const;
     [[nodiscard]] std::string toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const;
 
@@ -418,6 +446,7 @@ class Line
     LineSoA _storage;
     ColumnCount _columns {};
     LineFlags _flags {};
+    ColumnOffset _commandEndOffset {};
 };
 
 } // namespace vtbackend

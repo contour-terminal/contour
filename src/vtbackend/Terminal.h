@@ -1126,12 +1126,26 @@ class Terminal
     /// Tests whether or not some grid cells are selected.
     bool selectionAvailable() const noexcept { return !!_selection; }
 
+    /// Selects everything the terminal holds: the whole scrollback and the whole screen.
+    void selectAll();
+
+    /// Whether the left mouse button is currently held down, i.e. a selection drag may be in progress.
+    [[nodiscard]] bool leftMouseButtonPressed() const noexcept { return _leftMouseButtonPressed; }
+
     bool visualizeSelectedWord() const noexcept { return _settings.visualizeSelectedWord; }
     void setVisualizeSelectedWord(bool enabled) noexcept { _settings.visualizeSelectedWord = enabled; }
     // }}}
 
     [[nodiscard]] std::string extractSelectionText() const;
     [[nodiscard]] std::string extractLastMarkRange() const;
+
+    /// The most recently finished shell command, reconstructed from the OSC 133 marks its shell left.
+    ///
+    /// Always read from the PRIMARY screen — that is where the history and the shell's prompt live — so it
+    /// keeps answering while an alt-screen app (vim, less) is on top.
+    ///
+    /// @return The block, or nullopt when the scrollback holds no finished command.
+    [[nodiscard]] std::optional<CommandBlockText> lastCommandBlock() const;
 
     HyperlinkStorage& hyperlinks() noexcept { return _hyperlinks; }
     HyperlinkStorage const& hyperlinks() const noexcept { return _hyperlinks; }

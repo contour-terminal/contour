@@ -20,6 +20,7 @@ set(vtbackend_HEADERS
     Charset.h
     Color.h
     ColorPalette.h
+    CommandBlocks.h
     Functions.h
     GraphicsAttributes.h
     Grid.h
@@ -60,6 +61,7 @@ set(vtbackend_SOURCES
     DesktopNotification.cpp
     Color.cpp
     ColorPalette.cpp
+    CommandBlocks.cpp
     Functions.cpp
     Grid.cpp
     HintModeHandler.cpp
@@ -137,6 +139,7 @@ if(LIBTERMINAL_TESTING)
         Capabilities_test.cpp
         DesktopNotification_test.cpp
         Color_test.cpp
+        CommandBlocks_test.cpp
         GoodImageProtocol_test.cpp
         InputGenerator_test.cpp
         Selector_test.cpp

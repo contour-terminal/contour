@@ -5,6 +5,7 @@
 #include <vtbackend/CellUtil.h>
 #include <vtbackend/Charset.h>
 #include <vtbackend/Color.h>
+#include <vtbackend/CommandBlocks.h>
 #include <vtbackend/Cursor.h>
 #include <vtbackend/Grid.h>
 #include <vtbackend/Hyperlink.h>
@@ -559,6 +560,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///         in the screen area, and in the savedLines area otherwise.
     [[nodiscard]] std::optional<LineOffset> findMarkerUpwards(LineOffset startLine) const;
 
+    /// The most recently FINISHED shell command, reconstructed from the OSC 133 marks its shell left in
+    /// the scrollback.
+    ///
+    /// Reads the marks alone, so it works for any shell that speaks plain OSC 133 — the semantic-block
+    /// reader protocol (DEC mode 2034) is a separate, opt-in channel and is not required here.
+    ///
+    /// @return The block, or nullopt when the scrollback holds no finished command.
+    [[nodiscard]] std::optional<CommandBlockText> lastCommandBlock() const;
+
     void scrollUp(LineCount n) { scrollUp(n, margin()); }
     void scrollDown(LineCount n) { scrollDown(n, margin()); }
     void scrollLeft(ColumnCount n);
@@ -616,6 +626,29 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void enableLineFlags(LineOffset lineOffset, LineFlags flags, bool enable) noexcept
     {
         _grid.lineAt(lineOffset).setFlag(flags, enable);
+    }
+
+    /// Sets or clears the semantic marks @p flags on the LOGICAL line that @p line belongs to.
+    ///
+    /// The one way these marks may be written. They name a logical line — the line the shell wrote, or the
+    /// line the user put a Vi mark on — and never the physical piece a wrap happened to chop it into.
+    /// Stamping a continuation is exactly where they cannot survive: see HeadOnlyLineFlags, and the
+    /// widening resize that rebuilds a joined logical line from its head alone.
+    void setLogicalLineFlags(LineOffset line, LineFlags flags, bool enable) noexcept
+    {
+        enableLineFlags(_grid.logicalLineHead(line), flags, enable);
+    }
+
+    /// Whether the LOGICAL line that @p line belongs to carries all of @p flags.
+    [[nodiscard]] bool isLogicalLineFlagEnabled(LineOffset line, LineFlags flags) const noexcept
+    {
+        return isLineFlagEnabledAt(_grid.logicalLineHead(line), flags);
+    }
+
+    /// Stamps the semantic marks @p flags onto the LOGICAL line the cursor is on.
+    void markLogicalLineAtCursor(LineFlags flags) noexcept
+    {
+        setLogicalLineFlags(cursor().position.line, flags, true);
     }
 
     [[nodiscard]] bool isLineFlagEnabledAt(LineOffset line, LineFlags flags) const noexcept

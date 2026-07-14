@@ -229,21 +229,190 @@ TEST_CASE("SemanticBlockProtocol.LineFlags")
         CHECK(mc.terminal.currentScreen().lineFlagsAt(LineOffset(1)).contains(LineFlag::CommandEnd));
     }
 
-    SECTION("Flags NOT set when mode 2034 is off")
+    SECTION("Flags are recorded even when mode 2034 is off")
     {
-        // Mode 2034 is off by default
-
-        // OSC 133;C should NOT set OutputStart
+        // Mode 2034 is off by default, and the line flags are recorded anyway: they are terminal MEMORY of
+        // what the shell said, exactly like OSC 133;A's Marked flag has always been. Mode 2034 gates the
+        // semantic-block READER PROTOCOL (see the section below), not what the terminal knows about its own
+        // scrollback -- gating the flags too would leave "copy last command output" with nothing to read
+        // for every shell that speaks plain OSC 133.
         mc.writeToScreen("\033]133;C\033\\");
-        CHECK_FALSE(mc.terminal.currentScreen().lineFlagsAt(LineOffset(0)).contains(LineFlag::OutputStart));
+        CHECK(mc.terminal.currentScreen().lineFlagsAt(LineOffset(0)).contains(LineFlag::OutputStart));
 
         mc.writeToScreen("output\n");
 
-        // OSC 133;D should NOT set CommandEnd
         mc.writeToScreen("\033]133;D\033\\");
-        CHECK_FALSE(mc.terminal.currentScreen().lineFlagsAt(LineOffset(1)).contains(LineFlag::CommandEnd));
+        CHECK(mc.terminal.currentScreen().lineFlagsAt(LineOffset(1)).contains(LineFlag::CommandEnd));
+    }
+
+    SECTION("What mode 2034 still gates: the tracker, not the flags")
+    {
+        // The other half of the split above, pinned so it cannot quietly drift: with mode 2034 off, the
+        // flags land but the block tracker records nothing at all.
+        mc.writeToScreen("\033]133;A\033\\");
+        mc.writeToScreen("$ ");
+        mc.writeToScreen("\033]133;C;cmdline_url=ls\033\\");
+        mc.writeToScreen("file1\n");
+        mc.writeToScreen("\033]133;D;0\033\\");
+
+        CHECK(mc.terminal.currentScreen().lineFlagsAt(LineOffset(0)).contains(LineFlag::Marked));
+        CHECK(mc.terminal.currentScreen().lineFlagsAt(LineOffset(0)).contains(LineFlag::OutputStart));
+        CHECK_FALSE(mc.terminal.semanticBlockTracker().currentBlock().has_value());
     }
 }
+
+TEST_CASE("SemanticBlockProtocol.lastCommandBlockWithoutMode2034")
+{
+    // The GUI scenario: a shell emits plain OSC 133 and never enables mode 2034 (nothing in the wild does),
+    // and the context menu's "Copy Last Command Output" must still have something to copy.
+    auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ls\r\n");
+    mc.writeToScreen("\033]133;C\033\\");
+    mc.writeToScreen("file1\r\n");
+    mc.writeToScreen("file2\r\n");
+    // precmd: the command ends and the next prompt starts on the very same line.
+    mc.writeToScreen("\033]133;D;0\033\\");
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+
+    auto const block = mc.terminal.lastCommandBlock();
+    REQUIRE(block.has_value());
+    CHECK(block->prompt == "$ ls");
+    CHECK(block->output == "file1\nfile2");
+    CHECK(block->outputLineCount == 2);
+
+    // The new prompt must not have leaked into the finished command's output.
+    CHECK(textOf(*block, CommandBlockPart::Output) == "file1\nfile2");
+    CHECK(textOf(*block, CommandBlockPart::PromptAndOutput) == "$ ls\nfile1\nfile2");
+}
+
+TEST_CASE("SemanticBlockProtocol.lastCommandBlockWithoutShellIntegration")
+{
+    // No OSC 133 anywhere: the menu entries must be hidden, so the answer has to be "nothing", not garbage.
+    auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+    mc.writeToScreen("just some plain output\n");
+
+    CHECK_FALSE(mc.terminal.lastCommandBlock().has_value());
+}
+
+// {{{ output that does not end in a newline
+namespace
+{
+/// What the bundled shell integration actually puts on the wire between two commands.
+///
+/// precmd emits ;D (the command finished), then SETMARK, then ;A (a new prompt starts) — all three at the
+/// cursor, back to back, before PS1 prints a single character. So whenever a command's output did not end
+/// in a newline, every one of those marks lands on the output's last line, and the prompt is painted onto
+/// it too.
+void writePrecmdAndPrompt(MockTerm<>& mc, std::string_view prompt, int exitCode = 0)
+{
+    mc.writeToScreen(std::format("\033]133;D;{}\033\\", exitCode));
+    mc.writeToScreen("\033[>M");
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen(prompt);
+}
+
+/// The other half: a prompt (;A), the command echoed and entered, then its output (;C).
+///
+/// Deliberately NOT the file's simulateCommand() above, which always terminates the output with a newline.
+/// These tests exist for the case where it does not.
+void writePromptAndRun(MockTerm<>& mc, std::string_view promptLine, std::string_view output)
+{
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen(promptLine);
+    mc.writeToScreen("\r\n"); // the Enter that runs it
+    mc.writeToScreen("\033]133;C\033\\");
+    mc.writeToScreen(output); // no trailing newline: that is the whole point
+}
+} // namespace
+
+TEST_CASE("SemanticBlockProtocol.outputWithoutTrailingNewline")
+{
+    // `printf 'a\nb\nc'` leaves the cursor after the `c`, so the new prompt shares that line with the
+    // command's last output line. Neither owner may swallow the other: dropping the line loses the `c`,
+    // taking all of it copies the next prompt along with the output.
+    auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+
+    writePromptAndRun(mc, R"($ printf 'a\nb\nc')", "a\r\nb\r\nc");
+    writePrecmdAndPrompt(mc, "$ ");
+
+    auto const block = mc.terminal.lastCommandBlock();
+    REQUIRE(block.has_value());
+    CHECK(block->output == "a\nb\nc");
+    CHECK(block->outputLineCount == 3);
+    CHECK(block->prompt == R"($ printf 'a\nb\nc')");
+}
+
+TEST_CASE("SemanticBlockProtocol.outputThatFitsOnTheLineItStartedOn")
+{
+    // `printf hello`: OutputStart, CommandEnd and the next prompt's Marked all land on one line, and the
+    // whole of the command's output is the five columns before the ;D. Getting this wrong loses the output
+    // in its entirety.
+    auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+
+    writePromptAndRun(mc, "$ printf hello", "hello");
+    writePrecmdAndPrompt(mc, "$ ");
+
+    auto const block = mc.terminal.lastCommandBlock();
+    REQUIRE(block.has_value());
+    CHECK(block->output == "hello");
+    CHECK(block->outputLineCount == 1);
+    CHECK(block->prompt == "$ printf hello");
+}
+
+TEST_CASE("SemanticBlockProtocol.marksSurviveResize")
+{
+    // The marks name the LOGICAL line, and the command-end offset counts that line's columns — so a resize,
+    // which only re-chops a logical line into different physical pieces, must leave every block untouched.
+    // Widening used to erase outright any mark that a wrap had left on a continuation line.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(10) } };
+
+    // 25 columns of output on a 10-column page: two wraps, so the cursor — and with it every mark precmd is
+    // about to emit — ends up on the second continuation line.
+    writePromptAndRun(mc, "$ wrap", std::string(25, 'x'));
+    writePrecmdAndPrompt(mc, "$ ");
+
+    auto const expectedOutput = std::string(25, 'x');
+
+    auto const before = mc.terminal.lastCommandBlock();
+    REQUIRE(before.has_value());
+    CHECK(before->output == expectedOutput);
+    CHECK(before->prompt == "$ wrap");
+
+    SECTION("widening the window")
+    {
+        mc.terminal.resizeScreen(PageSize { LineCount(10), ColumnCount(40) });
+
+        auto const after = mc.terminal.lastCommandBlock();
+        REQUIRE(after.has_value());
+        CHECK(after->output == expectedOutput);
+        CHECK(after->prompt == "$ wrap");
+    }
+
+    SECTION("narrowing the window")
+    {
+        mc.terminal.resizeScreen(PageSize { LineCount(10), ColumnCount(6) });
+
+        auto const after = mc.terminal.lastCommandBlock();
+        REQUIRE(after.has_value());
+        CHECK(after->output == expectedOutput);
+        CHECK(after->prompt == "$ wrap");
+    }
+}
+
+TEST_CASE("SemanticBlockProtocol.noCommandAtAllIsNoBlock")
+{
+    // A prompt carrying the CommandEnd of a command whose every line has scrolled away describes no
+    // command. Reporting it as a block would have "Copy Last Command Output" wipe the clipboard with "".
+    auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+
+    writePrecmdAndPrompt(mc, "$ ");
+
+    CHECK_FALSE(mc.terminal.lastCommandBlock().has_value());
+}
+// }}}
 
 TEST_CASE("SemanticBlockProtocol.TrackerMetadata")
 {

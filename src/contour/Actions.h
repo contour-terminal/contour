@@ -59,7 +59,7 @@ struct DecreaseFontSize{};
 struct DecreaseOpacity{};
 struct FocusNextSearchMatch{};
 struct FocusPreviousSearchMatch{};
-struct FollowHyperlink{};
+struct FollowHyperlink{ std::string uri; }; // empty uri => whatever lies under the mouse cursor right now
 struct HintMode{ std::string patterns; vtbackend::HintAction hintAction = vtbackend::HintAction::Copy; };
 struct IncreaseFontSize{};
 struct IncreaseOpacity{};
@@ -132,6 +132,13 @@ struct TogglePaneZoom{};    // give the active pane the whole tab area (hiding i
 struct ResizePane{ Direction direction; int percent = 5; }; // grow/shrink the active pane
 struct LaunchLayout{ std::string name; }; // open the named layout's tabs in the current window
 struct SaveLayout{ std::string name; };   // save the current window's tabs/panes as the named layout
+struct OpenContextMenu{};        // open the terminal pane's context menu (bound to the right button)
+struct SelectAll{};              // select the whole scrollback and screen
+struct SoftReset{};              // DECSTR: reset modes/rendition/cursor, keeping content and history
+struct CopyLastCommandPrompt{};  // OSC 133: the prompt line(s) of the last finished command
+struct CopyLastCommandOutput{};  // OSC 133: what the last finished command printed
+struct CopyLastCommandBlock{};   // OSC 133: both of the above
+struct CopyHyperlink{ std::string uri; }; // empty uri => whatever lies under the mouse cursor right now
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -217,7 +224,14 @@ using Action = std::variant<CancelSelection,
                             TogglePaneZoom,
                             ResizePane,
                             LaunchLayout,
-                            SaveLayout>;
+                            SaveLayout,
+                            OpenContextMenu,
+                            SelectAll,
+                            SoftReset,
+                            CopyLastCommandPrompt,
+                            CopyLastCommandOutput,
+                            CopyLastCommandBlock,
+                            CopyHyperlink>;
 
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
 ///
@@ -238,6 +252,7 @@ concept NonRepeatableActionConcept = crispy::one_of<T,
                                                     CloseTab,
                                                     ClosePane,
                                                     OpenCommandPalette,
+                                                    OpenContextMenu,
                                                     SplitVertical,
                                                     SplitHorizontal,
                                                     SwapPaneLeft,
@@ -495,6 +510,33 @@ namespace documentation
     constexpr inline std::string_view SaveLayout {
         "Saves the current window's tabs as a named layout in layouts.yml."
     };
+    constexpr inline std::string_view OpenContextMenu {
+        "Opens the terminal pane's context menu. Bound to the right mouse button by default, and only "
+        "fired when the running application has not asked for the mouse itself (hold Shift to open it "
+        "anyway)."
+    };
+    constexpr inline std::string_view SelectAll {
+        "Selects everything the terminal holds: the whole scrollback and the whole screen."
+    };
+    constexpr inline std::string_view SoftReset {
+        "Performs a terminal soft reset (DECSTR): resets modes, rendition and cursor state, while keeping "
+        "the screen contents and the scrollback."
+    };
+    constexpr inline std::string_view CopyLastCommandPrompt {
+        "Copies the prompt line(s) of the most recently finished command into the clipboard. Requires a "
+        "shell that emits OSC 133 marks (see Contour's shell integration)."
+    };
+    constexpr inline std::string_view CopyLastCommandOutput {
+        "Copies what the most recently finished command printed into the clipboard. Requires a shell that "
+        "emits OSC 133 marks (see Contour's shell integration)."
+    };
+    constexpr inline std::string_view CopyLastCommandBlock {
+        "Copies both the prompt and the output of the most recently finished command into the clipboard. "
+        "Requires a shell that emits OSC 133 marks (see Contour's shell integration)."
+    };
+    constexpr inline std::string_view CopyHyperlink {
+        "Copies the URI of the hyperlink under the mouse cursor into the clipboard."
+    };
 } // namespace documentation
 
 /// One row of the action catalog: everything that is generically known about an action.
@@ -641,6 +683,19 @@ struct ActionCatalogEntry
             "ResizePane", Action { ResizePane { Direction::Right } }, documentation::ResizePane },
         ActionCatalogEntry { "LaunchLayout", Action { LaunchLayout {} }, documentation::LaunchLayout },
         ActionCatalogEntry { "SaveLayout", Action { SaveLayout {} }, documentation::SaveLayout },
+        ActionCatalogEntry {
+            "OpenContextMenu", Action { OpenContextMenu {} }, documentation::OpenContextMenu },
+        ActionCatalogEntry { "SelectAll", Action { SelectAll {} }, documentation::SelectAll },
+        ActionCatalogEntry { "SoftReset", Action { SoftReset {} }, documentation::SoftReset },
+        ActionCatalogEntry { "CopyLastCommandPrompt",
+                             Action { CopyLastCommandPrompt {} },
+                             documentation::CopyLastCommandPrompt },
+        ActionCatalogEntry { "CopyLastCommandOutput",
+                             Action { CopyLastCommandOutput {} },
+                             documentation::CopyLastCommandOutput },
+        ActionCatalogEntry {
+            "CopyLastCommandBlock", Action { CopyLastCommandBlock {} }, documentation::CopyLastCommandBlock },
+        ActionCatalogEntry { "CopyHyperlink", Action { CopyHyperlink {} }, documentation::CopyHyperlink },
     };
     return catalog;
 }
