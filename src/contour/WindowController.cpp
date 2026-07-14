@@ -78,6 +78,10 @@ void WindowController::openContextMenu()
     _contextMenuActions.clear();
     _contextMenuModel = toContextMenuModel(entries, _contextMenuActions);
 
+    // The pane the rows were built for. Held, so that picking one acts on it and not on whichever pane is
+    // active by the time the click lands.
+    _contextMenuSession = session;
+
     // Model first, then the request to show: both are synchronous, so the QML has rebuilt the menu's rows
     // by the time it is told to pop it.
     emit contextMenuModelChanged();
@@ -86,7 +90,9 @@ void WindowController::openContextMenu()
 
 void WindowController::triggerContextMenuAction(int actionId)
 {
-    auto* session = activeSession();
+    // The session the menu was OPENED over, not whichever one is active now. Null when that pane has since
+    // died — its shell exited while the menu stood open — in which case the row has nothing left to act on.
+    auto* session = _contextMenuSession.data();
     if (session == nullptr)
         return;
 

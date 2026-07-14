@@ -59,7 +59,7 @@ struct DecreaseFontSize{};
 struct DecreaseOpacity{};
 struct FocusNextSearchMatch{};
 struct FocusPreviousSearchMatch{};
-struct FollowHyperlink{};
+struct FollowHyperlink{ std::string uri; }; // empty uri => whatever lies under the mouse cursor right now
 struct HintMode{ std::string patterns; vtbackend::HintAction hintAction = vtbackend::HintAction::Copy; };
 struct IncreaseFontSize{};
 struct IncreaseOpacity{};
@@ -138,7 +138,7 @@ struct SoftReset{};              // DECSTR: reset modes/rendition/cursor, keepin
 struct CopyLastCommandPrompt{};  // OSC 133: the prompt line(s) of the last finished command
 struct CopyLastCommandOutput{};  // OSC 133: what the last finished command printed
 struct CopyLastCommandBlock{};   // OSC 133: both of the above
-struct CopyHyperlink{};          // copy the URI of the hyperlink under the mouse cursor
+struct CopyHyperlink{ std::string uri; }; // empty uri => whatever lies under the mouse cursor right now
 // clang-format on
 
 using Action = std::variant<CancelSelection,

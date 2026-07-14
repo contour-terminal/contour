@@ -50,9 +50,9 @@ namespace
         .hasSelection = true,
         .clipboardHasText = true,
         .hasLastCommand = true,
-        .hasHyperlinkUnderCursor = true,
         .hasWorkingDirectory = true,
         .hasSplits = true,
+        .hyperlinkUnderCursor = "https://contour-terminal.org/",
         .activeProfile = "dark",
         .profileNames = { "dark", "light", "work" },
     };
@@ -104,9 +104,9 @@ TEST_CASE("ContextMenu.lastCommand.hiddenWithoutShellIntegration", "[contextmenu
     {
         state.hasLastCommand = true;
         auto const menu = buildContextMenu(state);
-        CHECK(find(menu, "Copy Last Command") != nullptr);
+        CHECK(find(menu, "Copy Last Prompt") != nullptr);
         CHECK(find(menu, "Copy Last Command Output") != nullptr);
-        CHECK(find(menu, "Copy Last Command and Output") != nullptr);
+        CHECK(find(menu, "Copy Last Prompt and Output") != nullptr);
     }
 
     SECTION("gone -- not merely grayed out -- when it does not")
@@ -115,9 +115,9 @@ TEST_CASE("ContextMenu.lastCommand.hiddenWithoutShellIntegration", "[contextmenu
         // simply never told the terminal where one command ended and the next began.
         state.hasLastCommand = false;
         auto const menu = buildContextMenu(state);
-        CHECK(find(menu, "Copy Last Command") == nullptr);
+        CHECK(find(menu, "Copy Last Prompt") == nullptr);
         CHECK(find(menu, "Copy Last Command Output") == nullptr);
-        CHECK(find(menu, "Copy Last Command and Output") == nullptr);
+        CHECK(find(menu, "Copy Last Prompt and Output") == nullptr);
     }
 }
 
@@ -125,12 +125,22 @@ TEST_CASE("ContextMenu.hyperlink.onlyUnderTheCursor", "[contextmenu]")
 {
     auto state = fullyEnabledState();
 
-    state.hasHyperlinkUnderCursor = true;
+    state.hyperlinkUnderCursor = "https://contour-terminal.org/";
     auto const hovering = buildContextMenu(state);
-    CHECK(find(hovering, "Open Link") != nullptr);
-    CHECK(find(hovering, "Copy Link Address") != nullptr);
+    REQUIRE(find(hovering, "Open Link") != nullptr);
+    REQUIRE(find(hovering, "Copy Link Address") != nullptr);
 
-    state.hasHyperlinkUnderCursor = false;
+    // The rows must CARRY the link, not go asking for it again when they are picked: by then the pointer
+    // has left the cell and is sitting on the menu row itself.
+    auto const* open = find(hovering, "Open Link");
+    REQUIRE(std::holds_alternative<actions::FollowHyperlink>(open->action));
+    CHECK(std::get<actions::FollowHyperlink>(open->action).uri == "https://contour-terminal.org/");
+
+    auto const* copy = find(hovering, "Copy Link Address");
+    REQUIRE(std::holds_alternative<actions::CopyHyperlink>(copy->action));
+    CHECK(std::get<actions::CopyHyperlink>(copy->action).uri == "https://contour-terminal.org/");
+
+    state.hyperlinkUnderCursor.clear();
     auto const elsewhere = buildContextMenu(state);
     CHECK(find(elsewhere, "Open Link") == nullptr);
     CHECK(find(elsewhere, "Copy Link Address") == nullptr);
@@ -277,9 +287,9 @@ TEST_CASE("ContextMenu.separators.neverLeadingTrailingOrDoubled", "[contextmenu]
                                 .hasSelection = selection,
                                 .clipboardHasText = clipboard,
                                 .hasLastCommand = lastCommand,
-                                .hasHyperlinkUnderCursor = hyperlink,
                                 .hasWorkingDirectory = true,
                                 .hasSplits = splits,
+                                .hyperlinkUnderCursor = hyperlink ? "https://example.org/" : "",
                                 .activeProfile = profiles ? "dark" : "",
                                 .profileNames = profiles ? std::vector<std::string> { "dark" }
                                                          : std::vector<std::string> {},

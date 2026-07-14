@@ -18,12 +18,19 @@ namespace contour
 /// with no terminal, no window, no clipboard and no Qt behind it.
 struct ContextMenuState
 {
-    bool hasSelection = false;            ///< Some grid cells are selected.
-    bool clipboardHasText = false;        ///< The system clipboard holds text.
-    bool hasLastCommand = false;          ///< A finished OSC 133 command block sits in the scrollback.
-    bool hasHyperlinkUnderCursor = false; ///< An OSC 8 hyperlink lies under the mouse cursor.
-    bool hasWorkingDirectory = false;     ///< The shell reported a working directory (OSC 7).
-    bool hasSplits = false;               ///< This tab holds more than one pane.
+    bool hasSelection = false;        ///< Some grid cells are selected.
+    bool clipboardHasText = false;    ///< The system clipboard holds text.
+    bool hasLastCommand = false;      ///< A finished OSC 133 command block sits in the scrollback.
+    bool hasWorkingDirectory = false; ///< The shell reported a working directory (OSC 7).
+    bool hasSplits = false;           ///< This tab holds more than one pane.
+
+    /// The OSC 8 hyperlink the user right-clicked, empty if there was none.
+    ///
+    /// The URI itself and not merely a bool, because the rows it gates must also CARRY it. The terminal's
+    /// idea of "the hyperlink under the cursor" tracks the live mouse position, and the mouse leaves the
+    /// clicked cell the instant it travels to the menu row the user is reaching for — so an action that
+    /// asked again at click time would answer about a cell nobody clicked.
+    std::string hyperlinkUnderCursor;
 
     std::string activeProfile;             ///< The profile this session runs under.
     std::vector<std::string> profileNames; ///< Every configured profile, in a stable order.

@@ -541,9 +541,9 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
         .hasSelection = false, // Copy must come out present-but-disabled
         .clipboardHasText = true,
         .hasLastCommand = false, // the three "last command" rows must be absent
-        .hasHyperlinkUnderCursor = false,
         .hasWorkingDirectory = true,
         .hasSplits = false,
+        .hyperlinkUnderCursor = "", // the two hyperlink rows must be absent
         .activeProfile = "dark",
         .profileNames = { "dark", "light" },
     };

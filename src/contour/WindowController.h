@@ -504,6 +504,14 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// The actions those rows run, in the order the rows carry as `actionId`. Held here rather than in
     /// the QML so a row runs the exact action it was built with — no lookup by name at click time.
     std::vector<actions::Action> _contextMenuActions;
+
+    /// The session the menu was BUILT over — the pane the user right-clicked.
+    ///
+    /// Pinned, not looked up again when a row is picked. The active pane can change while the menu stands
+    /// open (the clicked pane's shell exits, the model activates a sibling in its place), and "Close Pane"
+    /// or "Paste" would then land on a terminal the user never pointed at. A QPointer, so a pane that dies
+    /// under the open menu makes the row a no-op rather than a use-after-free.
+    QPointer<TerminalSession> _contextMenuSession;
     // }}}
 
     display::TerminalDisplay* _activeDisplay = nullptr;

@@ -35,7 +35,7 @@ namespace
 
     bool hasHyperlinkUnderCursor(ContextMenuState const& state) noexcept
     {
-        return state.hasHyperlinkUnderCursor;
+        return !state.hyperlinkUnderCursor.empty();
     }
 
     bool hasWorkingDirectory(ContextMenuState const& state) noexcept
@@ -57,6 +57,14 @@ namespace
     using Predicate = bool (*)(ContextMenuState const&) noexcept;
     using ChildBuilder = std::vector<ContextMenuEntry> (*)(ContextMenuState const&);
 
+    /// Fills in a row's action from the state, for the rows whose action carries something the menu only
+    /// learns when it is opened.
+    ///
+    /// The row must CARRY what it will act on, not go looking for it again when it is picked: by then the
+    /// pointer has travelled to the row, and every "…under the cursor" question answers about a different
+    /// cell. Same reasoning as ContextMenuEntry holding an action rather than a name.
+    using ActionBinder = actions::Action (*)(ContextMenuState const&);
+
     /// One row of the menu TEMPLATE — the menu described as data.
     ///
     /// Adding an entry to the context menu is adding one of these to the table below, and nothing else:
@@ -67,10 +75,11 @@ namespace
     {
         ContextMenuEntryKind kind = ContextMenuEntryKind::Command;
         actions::Action action {};
-        std::string_view title {};       ///< Empty on a Command row => commandTitle(action).
-        Predicate visible = always;      ///< When false, the row is not in the menu at all.
-        Predicate enabled = always;      ///< When false, the row is in the menu but grayed out.
-        ChildBuilder children = nullptr; ///< Submenu rows: what is inside.
+        std::string_view title {};         ///< Empty on a Command row => commandTitle(action).
+        Predicate visible = always;        ///< When false, the row is not in the menu at all.
+        Predicate enabled = always;        ///< When false, the row is in the menu but grayed out.
+        ChildBuilder children = nullptr;   ///< Submenu rows: what is inside.
+        ActionBinder bindAction = nullptr; ///< When set, supplies the action in place of @ref action.
 
         /// This row, shown only when @p predicate holds.
         [[nodiscard]] Row shownWhen(Predicate predicate) const
@@ -87,6 +96,20 @@ namespace
             row.enabled = predicate;
             return row;
         }
+
+        /// This row, running the action @p binder builds from the state rather than a fixed one.
+        [[nodiscard]] Row actionFrom(ActionBinder binder) const
+        {
+            auto row = *this;
+            row.bindAction = binder;
+            return row;
+        }
+
+        /// What this row runs, against @p state.
+        [[nodiscard]] actions::Action actionFor(ContextMenuState const& state) const
+        {
+            return bindAction ? bindAction(state) : action;
+        }
     };
 
     /// A row that runs @p action. @p title defaults to the action's own display name.
@@ -98,6 +121,18 @@ namespace
                      .visible = always,
                      .enabled = always,
                      .children = nullptr };
+    }
+
+    /// A row acting on the hyperlink that was RIGHT-CLICKED, carried with the row rather than looked up
+    /// again when it is picked — by then the pointer has left the link and is sitting on the menu itself.
+    template <typename HyperlinkAction>
+    [[nodiscard]] Row hyperlinkCommand(std::string_view title)
+    {
+        return command(HyperlinkAction {}, title)
+            .shownWhen(hasHyperlinkUnderCursor)
+            .actionFrom([](ContextMenuState const& state) -> actions::Action {
+                return HyperlinkAction { .uri = state.hyperlinkUnderCursor };
+            });
     }
 
     [[nodiscard]] Row separator()
@@ -175,14 +210,20 @@ namespace
             // Hidden rather than grayed out when the shell emits no OSC 133 marks: a permanently dead
             // "Copy Last Command Output" teaches the user the feature is broken, when in truth their
             // shell simply never told the terminal where one command ended and the next began.
-            command(CopyLastCommandPrompt {}, "Copy Last Command").shownWhen(hasLastCommand),
+            //
+            // "Prompt", not "Command", and deliberately so: OSC 133 marks LINES, so what there is to copy
+            // is the prompt line — prompt chrome, typed command and all ("user@host:~$ ls", or the whole
+            // two-line banner of a powerlevel10k). The bare command exists only when the shell sends it
+            // explicitly (OSC 133;C cmdline_url), which none of the bundled integrations do. A row named
+            // "Copy Last Command" that hands back a prompt is a row that lies.
+            command(CopyLastCommandPrompt {}, "Copy Last Prompt").shownWhen(hasLastCommand),
             command(CopyLastCommandOutput {}, "Copy Last Command Output").shownWhen(hasLastCommand),
-            command(CopyLastCommandBlock {}, "Copy Last Command and Output").shownWhen(hasLastCommand),
+            command(CopyLastCommandBlock {}, "Copy Last Prompt and Output").shownWhen(hasLastCommand),
 
             separator(),
 
-            command(FollowHyperlink {}, "Open Link").shownWhen(hasHyperlinkUnderCursor),
-            command(CopyHyperlink {}, "Copy Link Address").shownWhen(hasHyperlinkUnderCursor),
+            hyperlinkCommand<FollowHyperlink>("Open Link"),
+            hyperlinkCommand<CopyHyperlink>("Copy Link Address"),
             command(OpenFileManager {}, "Open Current Folder").enabledWhen(hasWorkingDirectory),
 
             separator(),
@@ -240,16 +281,18 @@ namespace
                     break;
                 }
 
-                case ContextMenuEntryKind::Command:
+                case ContextMenuEntryKind::Command: {
+                    auto action = row.actionFor(state);
                     entries.emplace_back(ContextMenuEntry {
                         .kind = ContextMenuEntryKind::Command,
-                        .title = row.title.empty() ? commandTitle(row.action) : std::string(row.title),
-                        .action = row.action,
+                        .title = row.title.empty() ? commandTitle(action) : std::string(row.title),
+                        .action = std::move(action),
                         .enabled = row.enabled(state),
                         .checkable = false,
                         .checked = false,
                         .children = {} });
                     break;
+                }
             }
         }
 

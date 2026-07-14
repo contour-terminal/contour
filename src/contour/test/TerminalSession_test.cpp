@@ -308,7 +308,7 @@ TEST_CASE("TerminalSession: the context-menu actions and the state they are gate
         auto const state = session->contextMenuState();
         CHECK_FALSE(state.hasSelection);
         CHECK_FALSE(state.hasLastCommand); // no OSC 133 marks in an empty scrollback
-        CHECK_FALSE(state.hasHyperlinkUnderCursor);
+        CHECK(state.hyperlinkUnderCursor.empty());
         CHECK(state.activeProfile == session->profileName());
         CHECK_FALSE(state.profileNames.empty());
     }
@@ -355,6 +355,50 @@ TEST_CASE("TerminalSession: the context-menu actions and the state they are gate
         // Advanced submenu offers the user, so it is pinned here.
         CHECK((*session)(contour::actions::ClearHistoryAndReset {}));
         CHECK(session->terminal().primaryScreen().historyLineCount() == vtbackend::LineCount(0));
+    }
+
+    SECTION("SoftReset leaves the terminal WRAPPING, or it has broken more than it repaired")
+    {
+        REQUIRE(session->terminal().isModeEnabled(vtbackend::DECMode::AutoWrap));
+
+        CHECK((*session)(contour::actions::SoftReset {}));
+
+        // The VT510 manual has DECSTR clear DECAWM; xterm, foot and wezterm all decline to, and so does
+        // Contour. A soft reset is the thing a user reaches for to FIX a garbled terminal, and no shell
+        // ever re-enables autowrap on its own — obeying the letter of the spec here would hand back a
+        // terminal whose every long line piles up in the last column.
+        CHECK(session->terminal().isModeEnabled(vtbackend::DECMode::AutoWrap));
+    }
+
+    SECTION("a command that printed nothing does not wipe the clipboard")
+    {
+        // `cd /tmp` prints not one character. The block exists, its Output is empty — and copying "" would
+        // silently replace whatever the user had on their clipboard with nothing at all.
+        session->terminal().writeToScreen("\033]133;A\033\\$ cd /tmp\r\n");
+        session->terminal().writeToScreen("\033]133;C\033\\");
+        session->terminal().writeToScreen("\033]133;D;0\033\\\033]133;A\033\\$ ");
+
+        auto const block = session->terminal().lastCommandBlock();
+        REQUIRE(block.has_value());
+        REQUIRE(block->output.empty()); // precondition: there IS a block, and it printed nothing
+
+        // Declined, rather than "copied" as an empty string.
+        CHECK_FALSE((*session)(contour::actions::CopyLastCommandOutput {}));
+
+        // The prompt is there, so that row still has something to give.
+        CHECK((*session)(contour::actions::CopyLastCommandPrompt {}));
+    }
+
+    SECTION("the hyperlink rows carry the link that was right-clicked, not the one under the pointer now")
+    {
+        // A menu row must act on what the user CLICKED. The terminal's own idea of "the hyperlink under
+        // the cursor" tracks the live mouse position, and the pointer leaves the link the moment it travels
+        // to the menu row — so the action carries the URI rather than asking again.
+        CHECK((*session)(contour::actions::CopyHyperlink { .uri = "https://contour-terminal.org/" }));
+
+        // Nothing is hovered in this headless session, so an unpinned CopyHyperlink has nothing to copy —
+        // which is exactly the state the context menu's rows would have found themselves in.
+        CHECK_FALSE((*session)(contour::actions::CopyHyperlink {}));
     }
 }
 

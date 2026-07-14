@@ -422,7 +422,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::CreateSelection const&);
     bool operator()(actions::DecreaseFontSize);
     bool operator()(actions::DecreaseOpacity);
-    bool operator()(actions::FollowHyperlink);
+    bool operator()(actions::FollowHyperlink const& action);
     bool operator()(actions::HintMode const&);
     bool operator()(actions::FocusNextSearchMatch);
     bool operator()(actions::FocusPreviousSearchMatch);
@@ -503,7 +503,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::CopyLastCommandPrompt);
     bool operator()(actions::CopyLastCommandOutput);
     bool operator()(actions::CopyLastCommandBlock);
-    bool operator()(actions::CopyHyperlink);
+    bool operator()(actions::CopyHyperlink const& action);
 
     /// The world as this pane's context menu needs to see it, snapshotted under a single terminal lock.
     ///
