@@ -43,8 +43,7 @@ string to_string(Color color)
                 case 8: return "DEFAULT";
                 default: return "?";
             }
-        case Type::RGB:
-            return std::format("'#{:02X}{:02X}{:02X}'", color.rgb().red, color.rgb().green, color.rgb().blue);
+        case Type::RGB: return std::format("'{}'", formatColor(color.rgb()));
         case Type::Undefined: break;
     }
     return "?";
@@ -119,9 +118,17 @@ RGBAColor& RGBAColor::operator=(string const& hexCode)
     return *this;
 }
 
+string formatColor(RGBColor color)
+{
+    return std::format("#{:02X}{:02X}{:02X}", color.red, color.green, color.blue);
+}
+
 string to_string(RGBColor c)
 {
-    return std::format("'#{:02X}{:02X}{:02X}'", c.red, c.green, c.blue);
+    // The quoted spelling of formatColor(), not a second copy of it: this is what the config emitter and
+    // the logs print, and parseColor() is documented as the inverse of formatColor() — a hex format that
+    // lived in two places would let those two drift apart silently.
+    return std::format("'{}'", formatColor(c));
 }
 
 string to_string(RGBAColor c)
