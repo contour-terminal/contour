@@ -298,9 +298,14 @@ void ViCommands::reverseSearchCurrentWord()
 
 void ViCommands::toggleLineMark()
 {
-    auto const currentLineFlags = _terminal->currentScreen().lineFlagsAt(cursorPosition.line);
-    _terminal->currentScreen().enableLineFlags(
-        cursorPosition.line, LineFlag::Marked, !(currentLineFlags & LineFlag::Marked));
+    // Through the LOGICAL line, exactly as OSC 133;A does. The Vi cursor moves by PHYSICAL line, so `j`
+    // walks it into the continuations of a wrapped line — and a mark left on a continuation is one the
+    // next widening resize erases, and one the command-block scan (which reads the head) cannot see. It
+    // would not even toggle: reading a continuation's flags never finds the mark that sits on the head, so
+    // `m` would keep adding a second one that could never be cleared from there.
+    auto& screen = _terminal->currentScreen();
+    auto const marked = screen.isLogicalLineFlagEnabled(cursorPosition.line, LineFlag::Marked);
+    screen.setLogicalLineFlags(cursorPosition.line, LineFlag::Marked, !marked);
 }
 
 void ViCommands::searchCurrentWord()

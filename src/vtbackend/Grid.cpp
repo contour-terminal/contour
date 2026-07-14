@@ -42,26 +42,36 @@ namespace detail
     }
 
     /// Splits a logical line (stored as a LineSoA) into fixed-width Line objects.
+    /// @param baseFlags The logical line's flags; only its head keeps the semantic marks among them.
+    /// @param commandEndOffset The logical line's command-end offset, likewise carried by the head alone.
     /// @returns number of inserted lines.
     LineCount addNewWrappedLines(Lines& targetLines,
                                  ColumnCount newColumnCount,
                                  LineSoA&& logicalLineBuffer,
                                  size_t usedColumns,
                                  LineFlags baseFlags,
+                                 ColumnOffset commandEndOffset,
                                  bool initialNoWrap)
     {
         auto const newCols = unbox<size_t>(newColumnCount);
         int i = 0;
         size_t offset = 0;
 
-        // The flags of the chunk at index @p index. Only the very first chunk of a logical line is that
-        // line's head, and only when the caller says the split starts one (a shrink hands us the OVERFLOW
-        // of a head it already emitted, so every chunk it asks for is a continuation). The head keeps the
-        // logical line's flags; a continuation keeps only those that describe a physical line, and is
-        // marked as wrapped.
-        auto const flagsOfChunk = [&](int index) {
-            auto const isHeadLine = index == 0 && initialNoWrap;
-            return isHeadLine ? baseFlags : (baseFlags.without(HeadOnlyLineFlags) | LineFlag::Wrapped);
+        // Only the very first chunk of a logical line is that line's head, and only when the caller says
+        // the split starts one (a shrink hands us the OVERFLOW of a head it already emitted, so every chunk
+        // it asks for is a continuation). The head keeps the logical line's semantic marks and its
+        // command-end offset — an offset into the LOGICAL line, so re-chopping that line into different
+        // physical pieces leaves it untouched. A continuation keeps only the flags that describe a physical
+        // line, and is marked as wrapped.
+        auto const emitChunk = [&](LineSoA&& chunk) {
+            auto const isHead = i == 0 && initialNoWrap;
+            targetLines.emplace_back(isHead ? baseFlags
+                                            : (baseFlags.without(HeadOnlyLineFlags) | LineFlag::Wrapped),
+                                     std::move(chunk),
+                                     newColumnCount);
+            if (isHead)
+                targetLines.back().setCommandEndOffset(commandEndOffset);
+            ++i;
         };
 
         while (offset + newCols <= usedColumns)
@@ -69,9 +79,8 @@ namespace detail
             LineSoA chunk;
             initializeLineSoA(chunk, newColumnCount);
             copyColumns(logicalLineBuffer, offset, chunk, 0, newCols);
-            targetLines.emplace_back(flagsOfChunk(i), std::move(chunk), newColumnCount);
+            emitChunk(std::move(chunk));
             offset += newCols;
-            ++i;
         }
 
         if (offset < usedColumns)
@@ -80,8 +89,7 @@ namespace detail
             LineSoA chunk;
             initializeLineSoA(chunk, newColumnCount);
             copyColumns(logicalLineBuffer, offset, chunk, 0, remaining);
-            targetLines.emplace_back(flagsOfChunk(i), std::move(chunk), newColumnCount);
-            ++i;
+            emitChunk(std::move(chunk));
         }
         return LineCount::cast_from(i);
     }
@@ -249,6 +257,21 @@ void Grid::setLineText(LineOffset line, std::string_view text)
 bool Grid::isLineBlank(LineOffset line) const noexcept
 {
     return lineAt(line).empty();
+}
+
+LineOffset Grid::logicalLineHead(LineOffset line) const noexcept
+{
+    auto const historyTop = -boxed_cast<LineOffset>(historyLineCount());
+    while (line > historyTop && lineAt(line).wrapped())
+        --line;
+    return line;
+}
+
+ColumnOffset Grid::logicalColumnOf(CellLocation position) const noexcept
+{
+    auto const head = logicalLineHead(position.line);
+    auto const wrappedLinesAbove = *position.line - *head;
+    return ColumnOffset::cast_from(wrappedLinesAbove * *_pageSize.columns) + position.column;
 }
 
 /**
@@ -671,6 +694,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             initializeLineSoA(logicalLineBuffer, ColumnCount(0));
             size_t logicalLineUsed = 0;
             LineFlags logicalLineFlags = LineFlag::None;
+            ColumnOffset logicalLineCommandEndOffset {};
 
             auto const appendToLogicalLine = [&logicalLineBuffer, &logicalLineUsed](Line const& line) {
                 auto const cols = unbox<size_t>(line.size());
@@ -684,20 +708,25 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                 }
             };
 
-            auto const flushLogicalLine =
-                [newColumnCount, &grownLines, &logicalLineBuffer, &logicalLineUsed, &logicalLineFlags]() {
-                    if (logicalLineUsed > 0)
-                    {
-                        detail::addNewWrappedLines(grownLines,
-                                                   newColumnCount,
-                                                   std::move(logicalLineBuffer),
-                                                   logicalLineUsed,
-                                                   logicalLineFlags,
-                                                   true);
-                        initializeLineSoA(logicalLineBuffer, ColumnCount(0));
-                        logicalLineUsed = 0;
-                    }
-                };
+            auto const flushLogicalLine = [newColumnCount,
+                                           &grownLines,
+                                           &logicalLineBuffer,
+                                           &logicalLineUsed,
+                                           &logicalLineFlags,
+                                           &logicalLineCommandEndOffset]() {
+                if (logicalLineUsed > 0)
+                {
+                    detail::addNewWrappedLines(grownLines,
+                                               newColumnCount,
+                                               std::move(logicalLineBuffer),
+                                               logicalLineUsed,
+                                               logicalLineFlags,
+                                               logicalLineCommandEndOffset,
+                                               true);
+                    initializeLineSoA(logicalLineBuffer, ColumnCount(0));
+                    logicalLineUsed = 0;
+                }
+            };
 
             for (int i = -*historyLineCount(); i < *_pageSize.lines; ++i)
             {
@@ -720,6 +749,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                     {
                         appendToLogicalLine(line);
                         logicalLineFlags = line.flags().without(LineFlag::Wrapped);
+                        logicalLineCommandEndOffset = line.commandEndOffset();
                     }
                 }
             }
@@ -796,15 +826,23 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                         copyColumns(wrappedColumns, 0, merged, 0, wrappedUsed);
                         if (used > 0)
                             copyColumns(line.storage(), 0, merged, wrappedUsed, used);
+
+                        // The one place a Line is rebuilt from its parts. It is a CONTINUATION (the branch
+                        // is guarded on it), so it carries no command-end offset to lose — but say so out
+                        // loud rather than let the constructor's default quietly stand in for the reason.
+                        Require(line.commandEndOffset() == ColumnOffset(0));
                         line = Line(line.flags(), std::move(merged), ColumnCount::cast_from(totalCols));
                     }
                     else
                     {
+                        // Every chunk here is the OVERFLOW of a head that was already emitted, so it is a
+                        // continuation: no semantic marks, and therefore no command-end offset either.
                         auto const numLinesInserted = detail::addNewWrappedLines(shrinkedLines,
                                                                                  newColumnCount,
                                                                                  std::move(wrappedColumns),
                                                                                  wrappedUsed,
                                                                                  previousFlags,
+                                                                                 ColumnOffset(0),
                                                                                  false);
                         numLinesWritten += numLinesInserted;
                         previousFlags = line.inheritableFlags();
@@ -837,6 +875,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                                                               std::move(wrappedColumns),
                                                               wrappedUsed,
                                                               previousFlags,
+                                                              ColumnOffset(0),
                                                               false);
             }
             Require(unbox<size_t>(numLinesWritten) == shrinkedLines.size());

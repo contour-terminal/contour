@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -13,7 +14,8 @@ namespace
 {
 
 /// A command-block line source backed by a plain vector — the whole point of the CommandBlockLineSource
-/// seam. Lines are given in the order the scan walks them: the cursor line first, then upwards.
+/// seam. Lines are given in the order the scan walks them: the cursor line first, then upwards, one entry
+/// per LOGICAL line.
 class FakeLines final: public CommandBlockLineSource
 {
   public:
@@ -21,11 +23,16 @@ class FakeLines final: public CommandBlockLineSource
     {
         LineFlags flags;
         std::string text;
+
+        /// How many columns of @ref text a finished command printed before the shell painted its next
+        /// prompt onto the very same line. Only meaningful together with LineFlag::CommandEnd, and zero in
+        /// the ordinary case, where the command's output ended in a newline and the whole line is prompt.
+        size_t commandEndOffset = 0;
     };
 
     explicit FakeLines(std::vector<Entry> lines): _lines { std::move(lines) } {}
 
-    [[nodiscard]] size_t lineCount() const override { return _lines.size(); }
+    [[nodiscard]] bool hasLineAt(size_t index) const override { return index < _lines.size(); }
     [[nodiscard]] LineFlags flagsAt(size_t index) const override { return _lines.at(index).flags; }
 
     [[nodiscard]] std::string textAt(size_t index) const override
@@ -34,10 +41,29 @@ class FakeLines final: public CommandBlockLineSource
         return _lines.at(index).text;
     }
 
+    [[nodiscard]] std::string textBeforeCommandEndAt(size_t index) const override
+    {
+        ++_textReads;
+        auto const& entry = _lines.at(index);
+        return entry.text.substr(0, splitOf(entry));
+    }
+
+    [[nodiscard]] std::string textFromCommandEndAt(size_t index) const override
+    {
+        ++_textReads;
+        auto const& entry = _lines.at(index);
+        return entry.text.substr(splitOf(entry));
+    }
+
     /// How many lines the scan actually read the text of — the flags-only-walk claim, made checkable.
     [[nodiscard]] size_t textReads() const noexcept { return _textReads; }
 
   private:
+    [[nodiscard]] static size_t splitOf(Entry const& entry) noexcept
+    {
+        return std::min(entry.commandEndOffset, entry.text.size());
+    }
+
     std::vector<Entry> _lines;
     mutable size_t _textReads = 0;
 };
@@ -50,10 +76,10 @@ TEST_CASE("CommandBlocks.scan.oneBlock", "[commandblocks]")
     // BOTH the finished command's CommandEnd and the new prompt's Marked, because precmd emits OSC 133;D
     // and ;A back to back and then prints the prompt onto that line.
     auto const lines = FakeLines { {
-        { LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, "$ " },
-        { LineFlags {}, "file2" },
-        { LineFlags { LineFlag::OutputStart }, "file1" },
-        { LineFlags { LineFlag::Marked }, "$ ls" },
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, .text = "$ " },
+        { .flags = LineFlags {}, .text = "file2" },
+        { .flags = LineFlags { LineFlag::OutputStart }, .text = "file1" },
+        { .flags = LineFlags { LineFlag::Marked }, .text = "$ ls" },
     } };
 
     auto const blocks = scanCommandBlocksBackward(lines, 1);
@@ -66,11 +92,13 @@ TEST_CASE("CommandBlocks.scan.oneBlock", "[commandblocks]")
 TEST_CASE("CommandBlocks.scan.doesNotLeakTheNextPromptIntoTheOutput", "[commandblocks]")
 {
     // The regression this scanner was extracted to fix: the CommandEnd line is also Marked and holds the
-    // NEXT prompt, so its text must not be taken as the finished command's last output line.
+    // NEXT prompt, so its text must not be taken as the finished command's last output line. The output
+    // ended in a newline, so the prompt got a line of its own and nothing on it belongs to the command —
+    // which is exactly what a command-end offset of zero says.
     auto const lines = FakeLines { {
-        { LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, "user@host:~$ " },
-        { LineFlags { LineFlag::OutputStart }, "hello" },
-        { LineFlags { LineFlag::Marked }, "user@host:~$ echo hello" },
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, .text = "user@host:~$ " },
+        { .flags = LineFlags { LineFlag::OutputStart }, .text = "hello" },
+        { .flags = LineFlags { LineFlag::Marked }, .text = "user@host:~$ echo hello" },
     } };
 
     auto const blocks = scanCommandBlocksBackward(lines, 1);
@@ -80,21 +108,73 @@ TEST_CASE("CommandBlocks.scan.doesNotLeakTheNextPromptIntoTheOutput", "[commandb
     CHECK(blocks[0].outputLineCount == 1);
 }
 
-TEST_CASE("CommandBlocks.scan.commandEndWithoutMarkIsRealOutput", "[commandblocks]")
+TEST_CASE("CommandBlocks.scan.outputWithoutTrailingNewlineSharesItsLineWithTheNextPrompt", "[commandblocks]")
 {
-    // The other side of that coin: a command whose output does not end in a newline (`printf foo`) leaves
-    // the cursor on its last output line, so CommandEnd lands there WITHOUT a Marked. That line's text is
-    // genuine output and must be kept.
+    // `printf 'a\nb\nc'` leaves the cursor sitting after the `c`, so precmd emits ;D and ;A right there and
+    // the shell paints the new prompt onto the same line. That one line has two owners: the `c` is the
+    // command's last output line, the `$ ` after it is the next prompt. Dropping the line loses the `c`;
+    // taking all of it leaks the prompt. The command-end offset is the border between them.
     auto const lines = FakeLines { {
-        { LineFlags { LineFlag::CommandEnd }, "foo" },
-        { LineFlags { LineFlag::OutputStart }, "bar" },
-        { LineFlags { LineFlag::Marked }, "$ printf two-lines" },
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked },
+          .text = "c$ ",
+          .commandEndOffset = 1 },
+        { .flags = LineFlags {}, .text = "b" },
+        { .flags = LineFlags { LineFlag::OutputStart }, .text = "a" },
+        { .flags = LineFlags { LineFlag::Marked }, .text = R"($ printf 'a\nb\nc')" },
     } };
 
     auto const blocks = scanCommandBlocksBackward(lines, 1);
     REQUIRE(blocks.size() == 1);
-    CHECK(blocks[0].output == "bar\nfoo");
-    CHECK(blocks[0].outputLineCount == 2);
+    CHECK(blocks[0].output == "a\nb\nc");
+    CHECK(blocks[0].outputLineCount == 3);
+    CHECK(blocks[0].prompt == R"($ printf 'a\nb\nc')");
+}
+
+TEST_CASE("CommandBlocks.scan.outputThatFitsOnTheLineItStartedOn", "[commandblocks]")
+{
+    // `printf hello`: the output begins and ends on the same line, and the prompt lands on it too. That one
+    // line therefore carries OutputStart, CommandEnd and Marked all at once — and the whole of the
+    // command's output is the handful of columns before the ;D.
+    auto const lines = FakeLines { {
+        { .flags = LineFlags { LineFlag::OutputStart, LineFlag::CommandEnd, LineFlag::Marked },
+          .text = "hello$ ",
+          .commandEndOffset = 5 },
+        { .flags = LineFlags { LineFlag::Marked }, .text = "$ printf hello" },
+    } };
+
+    auto const blocks = scanCommandBlocksBackward(lines, 1);
+    REQUIRE(blocks.size() == 1);
+    CHECK(blocks[0].output == "hello");
+    CHECK(blocks[0].outputLineCount == 1);
+    CHECK(blocks[0].prompt == "$ printf hello");
+}
+
+TEST_CASE("CommandBlocks.scan.aSharedLinesPromptHalfIsNotSwallowedByThePrompt", "[commandblocks]")
+{
+    // The mirror image, one block older: the line that BEGINS the newer block's prompt is the same line the
+    // older command ended part-way into. The prompt must take only its own half of it — otherwise every
+    // "copy last command" of the newer block starts with the tail of the older one's output.
+    auto const lines = FakeLines { {
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, .text = "$ " },
+        { .flags = LineFlags { LineFlag::OutputStart }, .text = "hi" },
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked },
+          .text = "tail$ echo hi",
+          .commandEndOffset = 4 },
+        { .flags = LineFlags { LineFlag::OutputStart }, .text = "head" },
+        { .flags = LineFlags { LineFlag::Marked }, .text = "$ print-two-lines" },
+    } };
+
+    auto const blocks = scanCommandBlocksBackward(lines, 2);
+    REQUIRE(blocks.size() == 2);
+
+    CHECK(blocks[0].prompt == "$ echo hi");
+    CHECK(blocks[0].output == "hi");
+
+    CHECK(blocks[1].prompt == "$ print-two-lines");
+    CHECK(blocks[1].output
+          == "head\n"
+             "tail");
+    CHECK(blocks[1].outputLineCount == 2);
 }
 
 TEST_CASE("CommandBlocks.scan.multiLinePrompt", "[commandblocks]")
@@ -102,10 +182,10 @@ TEST_CASE("CommandBlocks.scan.multiLinePrompt", "[commandblocks]")
     // A two-line prompt (powerlevel10k and friends): everything from the Marked head down to the
     // OutputStart is prompt. This is exactly what the coarse, mark-only extraction gets wrong.
     auto const lines = FakeLines { {
-        { LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, "~ " },
-        { LineFlags { LineFlag::OutputStart }, "out" },
-        { LineFlags {}, "> ls" },
-        { LineFlags { LineFlag::Marked }, "~/projects  main" },
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, .text = "~ " },
+        { .flags = LineFlags { LineFlag::OutputStart }, .text = "out" },
+        { .flags = LineFlags {}, .text = "> ls" },
+        { .flags = LineFlags { LineFlag::Marked }, .text = "~/projects  main" },
     } };
 
     auto const blocks = scanCommandBlocksBackward(lines, 1);
@@ -120,11 +200,11 @@ TEST_CASE("CommandBlocks.scan.chainsAcrossBlocks", "[commandblocks]")
     // older block's CommandEnd, so the walk must chain into it rather than resume searching one line up —
     // otherwise it steps over the boundary it is standing on and mis-attributes every older block.
     auto const lines = FakeLines { {
-        { LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, "$ " },
-        { LineFlags { LineFlag::OutputStart }, "second" },
-        { LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, "$ echo second" },
-        { LineFlags { LineFlag::OutputStart }, "first" },
-        { LineFlags { LineFlag::Marked }, "$ echo first" },
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, .text = "$ " },
+        { .flags = LineFlags { LineFlag::OutputStart }, .text = "second" },
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, .text = "$ echo second" },
+        { .flags = LineFlags { LineFlag::OutputStart }, .text = "first" },
+        { .flags = LineFlags { LineFlag::Marked }, .text = "$ echo first" },
     } };
 
     SECTION("the newest block alone")
@@ -150,8 +230,8 @@ TEST_CASE("CommandBlocks.scan.commandWithNoOutput", "[commandblocks]")
 {
     // `cd /tmp` prints nothing, so there is no OutputStart between the two prompts.
     auto const lines = FakeLines { {
-        { LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, "$ " },
-        { LineFlags { LineFlag::Marked }, "$ cd /tmp" },
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, .text = "$ " },
+        { .flags = LineFlags { LineFlag::Marked }, .text = "$ cd /tmp" },
     } };
 
     auto const blocks = scanCommandBlocksBackward(lines, 1);
@@ -167,21 +247,34 @@ TEST_CASE("CommandBlocks.scan.noShellIntegration", "[commandblocks]")
     // empty AND must not have read a single line's text — this is the cost of a right-click on a long
     // scrollback, so it stays a flags-only walk.
     auto const lines = FakeLines { {
-        { LineFlags {}, "some" },
-        { LineFlags {}, "plain" },
-        { LineFlags {}, "output" },
+        { .flags = LineFlags {}, .text = "some" },
+        { .flags = LineFlags {}, .text = "plain" },
+        { .flags = LineFlags {}, .text = "output" },
     } };
 
     CHECK(scanCommandBlocksBackward(lines, 1).empty());
     CHECK(lines.textReads() == 0);
 }
 
+TEST_CASE("CommandBlocks.scan.aWalkThatReconstructsNothingIsNoBlock", "[commandblocks]")
+{
+    // A freshly cleared screen: `clear` drops the history, and the only line left is the prompt, carrying
+    // the CommandEnd of a command that has just scrolled out of existence. There is no command here — and
+    // an all-empty block reported as one would have "Copy Last Command Output" put "" on the clipboard,
+    // wiping whatever the user had copied for a command that never was.
+    auto const lines = FakeLines { {
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, .text = "$ " },
+    } };
+
+    CHECK(scanCommandBlocksBackward(lines, 1).empty());
+}
+
 TEST_CASE("CommandBlocks.scan.truncatedHistory", "[commandblocks]")
 {
     // The block's prompt scrolled off the top of the history. Keep what is left rather than dropping it.
     auto const lines = FakeLines { {
-        { LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, "$ " },
-        { LineFlags {}, "tail of a long output" },
+        { .flags = LineFlags { LineFlag::CommandEnd, LineFlag::Marked }, .text = "$ " },
+        { .flags = LineFlags {}, .text = "tail of a long output" },
     } };
 
     auto const blocks = scanCommandBlocksBackward(lines, 1);
@@ -192,7 +285,7 @@ TEST_CASE("CommandBlocks.scan.truncatedHistory", "[commandblocks]")
 
 TEST_CASE("CommandBlocks.scan.degenerateRequests", "[commandblocks]")
 {
-    auto const lines = FakeLines { { { LineFlags { LineFlag::CommandEnd }, "x" } } };
+    auto const lines = FakeLines { { { .flags = LineFlags { LineFlag::CommandEnd }, .text = "x" } } };
     CHECK(scanCommandBlocksBackward(lines, 0).empty());
     CHECK(scanCommandBlocksBackward(FakeLines { {} }, 4).empty());
 }

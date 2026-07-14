@@ -3816,37 +3816,118 @@ namespace
     /// The adapter half of the CommandBlockLineSource seam: the state machine itself lives in
     /// CommandBlocks.cpp and knows nothing about a Grid, which is what lets it be tested against a plain
     /// vector of lines.
+    ///
+    /// It presents the grid's physical lines as the LOGICAL lines the shell actually wrote: a head plus
+    /// the continuations a wrap chopped it into are one line here, which is the only unit the OSC 133
+    /// marks are stamped on and therefore the only unit a resize cannot disturb.
+    ///
+    /// The walk is LAZY, and that is the whole point of hasLineAt() being a predicate rather than a count:
+    /// this runs on the GUI thread, under the terminal lock, on every right-click. Counting the logical
+    /// lines up front would mean climbing the entire scrollback — 100'000 lines at the configurable limit —
+    /// before the scan had looked at a single flag, when the scan wants the handful of lines above the
+    /// cursor that hold the last command. So it climbs exactly as far as it is asked to, and keeps nothing
+    /// but the line it is standing on: the scan is a single forward pass, so nothing older is ever needed.
     class GridCommandBlockLines final: public CommandBlockLineSource
     {
       public:
         /// @param grid The grid to walk. Must outlive this source.
         /// @param fromLine The line to start at; the walk proceeds upwards from there into the history.
-        GridCommandBlockLines(Grid const& grid, LineOffset fromLine) noexcept:
-            _grid { grid }, _fromLine { fromLine }
+        GridCommandBlockLines(Grid const& grid, LineOffset fromLine):
+            _grid { grid },
+            _fromLine { fromLine },
+            _historyTop { -boxed_cast<LineOffset>(grid.historyLineCount()) },
+            _head { grid.logicalLineHead(fromLine) }
         {
         }
 
-        [[nodiscard]] size_t lineCount() const override
-        {
-            auto const historyTop = -boxed_cast<LineOffset>(_grid.historyLineCount());
-            return static_cast<size_t>(std::max(*_fromLine - *historyTop + 1, 0));
-        }
+        [[nodiscard]] bool hasLineAt(size_t index) const override { return seekTo(index); }
 
-        [[nodiscard]] LineFlags flagsAt(size_t index) const override { return lineAt(index).flags(); }
+        [[nodiscard]] LineFlags flagsAt(size_t index) const override { return headAt(index).flags(); }
 
         [[nodiscard]] std::string textAt(size_t index) const override
         {
-            return lineAt(index).toUtf8Trimmed(false, true);
+            return textOfLogicalLine(index, ColumnOffset(0), std::nullopt);
+        }
+
+        [[nodiscard]] std::string textBeforeCommandEndAt(size_t index) const override
+        {
+            return textOfLogicalLine(index, ColumnOffset(0), headAt(index).commandEndOffset());
+        }
+
+        [[nodiscard]] std::string textFromCommandEndAt(size_t index) const override
+        {
+            return textOfLogicalLine(index, headAt(index).commandEndOffset(), std::nullopt);
         }
 
       private:
-        [[nodiscard]] Line const& lineAt(size_t index) const
+        /// Climbs to the logical line @p index, one line at a time, and stands there.
+        /// @return false once the walk has run past the top of the history — there is no such line.
+        [[nodiscard]] bool seekTo(size_t index) const
         {
-            return _grid.lineAt(_fromLine - LineOffset::cast_from(index));
+            Require(index >= _index); // the scan only ever walks forwards
+
+            while (_index < index)
+            {
+                if (_head <= _historyTop)
+                    return false;
+                _previousHead = _head;
+                _head = _grid.logicalLineHead(_head - LineOffset(1));
+                ++_index;
+            }
+            return true;
+        }
+
+        [[nodiscard]] Line const& headAt(size_t index) const
+        {
+            Require(index == _index); // always preceded by the hasLineAt() that walked us here
+            return _grid.lineAt(_head);
+        }
+
+        /// The physical lines the logical line @p index is chopped into: its head, and everything below it
+        /// up to the head of the logical line after it.
+        [[nodiscard]] std::pair<LineOffset, LineOffset> extentOf(size_t index) const
+        {
+            Require(index == _index);
+            auto const last = _index == 0 ? _fromLine : _previousHead - LineOffset(1);
+            return { _head, std::max(_head, last) };
+        }
+
+        /// The text of the logical line @p index over its columns [@p begin, @p end), trailing blanks
+        /// dropped. Columns are counted across the whole logical line, so they run straight through the
+        /// wraps — which is exactly what makes a command-end offset survive a resize.
+        [[nodiscard]] std::string textOfLogicalLine(size_t index,
+                                                    ColumnOffset begin,
+                                                    std::optional<ColumnOffset> end) const
+        {
+            auto const [first, last] = extentOf(index);
+            auto const width = _grid.pageSize().columns;
+
+            auto text = std::string {};
+            for (auto line = first; line <= last; ++line)
+            {
+                auto const lineBegin = ColumnOffset::cast_from((*line - *first) * *width);
+                auto const lineEnd = lineBegin + boxed_cast<ColumnOffset>(width);
+                if (end.has_value() && lineBegin >= *end)
+                    break;
+                auto const from = std::max(begin, lineBegin) - lineBegin;
+                auto const to = (end.has_value() ? std::min(*end, lineEnd) : lineEnd) - lineBegin;
+                if (from < to)
+                    text += _grid.lineAt(line).toUtf8(from, to);
+            }
+
+            text.resize(crispy::trimRight(text).size());
+            return text;
         }
 
         Grid const& _grid;
         LineOffset _fromLine;
+        LineOffset _historyTop;
+
+        // Where the lazy walk currently stands. Mutable because the source is handed to the scan as a
+        // const&: climbing is how it ANSWERS, not a change to what it says.
+        mutable size_t _index = 0;        ///< The logical line _head refers to.
+        mutable LineOffset _head;         ///< Its first physical line.
+        mutable LineOffset _previousHead; ///< The head of the logical line below it (unused at index 0).
     };
 } // namespace
 
@@ -4019,7 +4100,7 @@ std::optional<CommandBlockText> Screen::lastCommandBlock() const
 
 void Screen::setMark()
 {
-    currentLine().setMarked(true);
+    markLogicalLineAtCursor(LineFlag::Marked);
 }
 
 void Screen::processShellIntegration(Sequence const& seq)
@@ -4063,7 +4144,7 @@ void Screen::processShellIntegration(Sequence const& seq)
             // deque, the command metadata, the session token, the DCS query), not what the terminal knows
             // about its own scrollback. Gating the flags too made every feature built on them — "copy last
             // command output", precise mark navigation — impossible for a shell that speaks plain OSC 133.
-            enableLineFlags(cursor().position.line, LineFlag::OutputStart, true);
+            markLogicalLineAtCursor(LineFlag::OutputStart);
             std::optional<std::string> commandLine;
             auto const params = seq.intermediateCharacters().substr(1);
             forEachKeyValue(params, [&](std::string_view key, std::string_view value) {
@@ -4076,7 +4157,17 @@ void Screen::processShellIntegration(Sequence const& seq)
         }
         case 'D': {
             // Recorded unconditionally, for the reason given at ;C above.
-            enableLineFlags(cursor().position.line, LineFlag::CommandEnd, true);
+            //
+            // Along with WHERE on that line the command's output actually stopped. The shell emits ;D from
+            // its precmd hook, so the cursor is still standing wherever the output left it — and when that
+            // output did not end in a newline, the prompt about to be printed lands on the very same line.
+            // Remembering the column is what later tells the two apart; without it a copy of the command's
+            // output either swallows the next prompt or loses its own last line.
+            auto const cursorPosition = cursor().position;
+            auto& head = _grid.lineAt(_grid.logicalLineHead(cursorPosition.line));
+            head.setFlag(LineFlag::CommandEnd, true);
+            head.setCommandEndOffset(_grid.logicalColumnOf(cursorPosition));
+
             auto const exitCode = (cmd.size() > 2 && cmd[1] == ';')
                                       ? crispy::to_integer<10, int>(cmd.substr(2)).value_or(0)
                                       : 0;

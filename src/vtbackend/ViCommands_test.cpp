@@ -475,3 +475,31 @@ TEST_CASE("vi.selectAll: honours the Vi layer's selection invariants", "[vi]")
     }
 }
 // }}}
+
+// {{{ Line marks belong to the logical line
+TEST_CASE("vi.mark: `mm` marks the LOGICAL line, not the wrapped piece the cursor sits in", "[vi]")
+{
+    // The Vi cursor moves by PHYSICAL line, so `j` walks it into the continuations of a wrapped line. A
+    // mark left on a continuation is one that a widening resize erases (growColumns rebuilds a joined
+    // logical line from its head alone) and one the command-block scan cannot see (it reads the head). It
+    // would not even toggle: reading a continuation never finds the mark sitting on the head.
+    auto mock =
+        setupMockTerminal(std::string(25, 'x'), // 25 columns on a 10-column page: two wraps
+                          vtbackend::PageSize { vtbackend::LineCount(6), vtbackend::ColumnCount(10) });
+
+    auto const& screen = mock.terminal.currentScreen();
+    REQUIRE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(1), vtbackend::LineFlag::Wrapped));
+
+    mock.sendCharEvent(U'j'); // onto the first continuation
+    mock.sendCharSequence("mm");
+
+    CHECK(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked));
+    CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(1), vtbackend::LineFlag::Marked));
+
+    SECTION("and toggles it off again from that same continuation")
+    {
+        mock.sendCharSequence("mm");
+        CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked));
+    }
+}
+// }}}

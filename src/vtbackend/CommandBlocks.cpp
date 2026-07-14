@@ -1,22 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/CommandBlocks.h>
 
-#include <string_view>
+#include <crispy/utils.h>
+
+#include <ranges>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace vtbackend
 {
 
 namespace
 {
-    /// Prepends @p lineText to @p accumulator, which is being filled backwards.
-    void prependLine(std::string& accumulator, std::string_view lineText)
+    /// A block being reconstructed: its lines are collected newest-first and joined exactly once.
+    ///
+    /// Collecting and joining once is what keeps the walk linear. Growing a string by prepending each
+    /// line to it instead copies the whole text accumulated so far, twice, for every line — quadratic in
+    /// the size of the block. This walk runs on the GUI thread, under the terminal lock, every time the
+    /// user right-clicks, over a block that may be the entire scrollback.
+    struct BlockUnderConstruction
     {
-        if (accumulator.empty())
-            accumulator = lineText;
-        else
-            accumulator = std::string(lineText).append(1, '\n').append(accumulator);
-    }
+        std::vector<std::string> promptLines; ///< Newest first.
+        std::vector<std::string> outputLines; ///< Newest first.
+
+        [[nodiscard]] bool empty() const noexcept { return promptLines.empty() && outputLines.empty(); }
+
+        [[nodiscard]] CommandBlockText finish() &&
+        {
+            return CommandBlockText {
+                // Reversed, because the walk collected them bottom-up and the screen reads top-down.
+                .prompt = crispy::join_with(promptLines | std::views::reverse, "\n"),
+                .output = crispy::join_with(outputLines | std::views::reverse, "\n"),
+                .outputLineCount = static_cast<int>(outputLines.size()),
+            };
+        }
+    };
 
     /// Where a backward walk stands between two command blocks.
     enum class ScanState : uint8_t
@@ -50,11 +69,26 @@ std::vector<CommandBlockText> scanCommandBlocksBackward(CommandBlockLineSource c
         return blocks;
 
     auto state = ScanState::Searching;
-    auto current = CommandBlockText {};
+    auto current = BlockUnderConstruction {};
+
+    /// Opens the block that the CommandEnd on line @p index closes.
+    auto const openBlockAt = [&](size_t index, LineFlags flags) {
+        // The line a command was closed on is not necessarily a line of its own. When the output did not
+        // end in a newline the cursor never left it, so the shell's next prompt is painted onto the same
+        // line, and only the columns BEFORE the ;D belong to the command. In the ordinary case — output
+        // ended in a newline, the prompt got a fresh line — there is nothing before the ;D and the whole
+        // line belongs to the prompt.
+        if (auto tail = lines.textBeforeCommandEndAt(index); !tail.empty())
+            current.outputLines.push_back(std::move(tail));
+
+        // The line may carry the OutputStart of the very command it also ends: a command whose output fits
+        // on the line it started on (`printf hello`), or one that printed nothing at all.
+        state = flags.contains(LineFlag::OutputStart) ? ScanState::InPrompt : ScanState::InOutput;
+    };
 
     /// Closes the block just reconstructed and decides where the walk stands afterwards.
-    auto const finalizeBlock = [&](LineFlags flags) {
-        blocks.push_back(std::move(current));
+    auto const finalizeBlock = [&](size_t index, LineFlags flags) {
+        blocks.push_back(std::move(current).finish());
         current = {};
 
         // The line that begins this block's prompt may ALSO carry the CommandEnd of the block before it —
@@ -62,64 +96,56 @@ std::vector<CommandBlockText> scanCommandBlocksBackward(CommandBlockLineSource c
         // starts) back to back, so both land on the same line. Chain straight into that older block's
         // output rather than resuming the search one line further up, which would step clean over the
         // boundary we are already standing on.
-        state = flags.contains(LineFlag::CommandEnd) && blocks.size() < maxBlocks ? ScanState::InOutput
-                                                                                  : ScanState::Searching;
+        if (flags.contains(LineFlag::CommandEnd) && blocks.size() < maxBlocks)
+            openBlockAt(index, flags);
+        else
+            state = ScanState::Searching;
     };
 
-    for (auto index = size_t { 0 }; index < lines.lineCount() && blocks.size() < maxBlocks; ++index)
+    // A single forward pass, asking for each logical line only once and only as far as it needs to go: the
+    // source walks the grid lazily behind hasLineAt(), so a "copy the last command" over a 100'000-line
+    // scrollback reads the handful of lines above the cursor and stops.
+    for (auto index = size_t { 0 }; lines.hasLineAt(index) && blocks.size() < maxBlocks; ++index)
     {
         auto const flags = lines.flagsAt(index);
 
         switch (state)
         {
             case ScanState::Searching:
-                if (!flags.contains(LineFlag::CommandEnd))
-                    break;
-                state = ScanState::InOutput;
-                // A CommandEnd line that is ALSO Marked belongs to the NEXT prompt (see finalizeBlock): the
-                // shell printed the new prompt onto it, so its text is that prompt and not the last line of
-                // the output that just ended. Taking it would leak the new prompt into every copied command
-                // output. A CommandEnd line that is NOT Marked, on the other hand, is a genuine last output
-                // line — a command whose output did not end in a newline, so the cursor never left it.
-                if (!flags.contains(LineFlag::Marked))
-                {
-                    current.output = lines.textAt(index);
-                    current.outputLineCount = 1;
-                }
+                if (flags.contains(LineFlag::CommandEnd))
+                    openBlockAt(index, flags);
                 break;
 
             case ScanState::InOutput:
-                if (flags.contains(LineFlag::OutputStart))
-                {
-                    prependLine(current.output, lines.textAt(index));
-                    ++current.outputLineCount;
-                    state = ScanState::InPrompt;
-                }
-                else if (flags.contains(LineFlag::Marked))
+                if (flags.contains(LineFlag::Marked) && !flags.contains(LineFlag::OutputStart))
                 {
                     // A prompt with no OutputStart below it: the command printed nothing at all, so this
                     // line is its prompt and the block is already complete.
-                    current.prompt = lines.textAt(index);
-                    finalizeBlock(flags);
+                    current.promptLines.push_back(lines.textFromCommandEndAt(index));
+                    finalizeBlock(index, flags);
+                    break;
                 }
-                else
-                {
-                    prependLine(current.output, lines.textAt(index));
-                    ++current.outputLineCount;
-                }
+                current.outputLines.push_back(lines.textAt(index));
+                if (flags.contains(LineFlag::OutputStart))
+                    state = ScanState::InPrompt;
                 break;
 
             case ScanState::InPrompt:
-                prependLine(current.prompt, lines.textAt(index));
+                // Only the prompt's half of the line: the Marked line that begins a prompt is the very
+                // line the previous command may have ended part-way into.
+                current.promptLines.push_back(lines.textFromCommandEndAt(index));
                 if (flags.contains(LineFlag::Marked))
-                    finalizeBlock(flags);
+                    finalizeBlock(index, flags);
                 break;
         }
     }
 
-    // The walk ran out of lines mid-block: keep whatever it did manage to reconstruct.
-    if (state != ScanState::Searching && blocks.size() < maxBlocks)
-        blocks.push_back(std::move(current));
+    // The walk ran out of lines mid-block: keep whatever it did manage to reconstruct, but only if that is
+    // something. A walk that collected nothing at all — a freshly cleared screen, whose only line is the
+    // prompt carrying the CommandEnd of a command that has scrolled away — describes no command, and an
+    // all-empty block would have callers copy "" to the clipboard for a command that never existed.
+    if (state != ScanState::Searching && blocks.size() < maxBlocks && !current.empty())
+        blocks.push_back(std::move(current).finish());
 
     return blocks;
 }
