@@ -316,6 +316,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/CommandPaletteModel_test.cpp
             test/Config_test.cpp
             test/SettingsController_test.cpp
+            test/SettingsPageQml_test.cpp
             test/ContextMenu_test.cpp
             test/FuzzyFilter_test.cpp
             test/Shortcut_test.cpp
