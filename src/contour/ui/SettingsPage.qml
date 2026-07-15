@@ -77,6 +77,9 @@ Rectangle {
             // {{{ Left navigation
             ColumnLayout {
                 Layout.preferredWidth: 260
+                Layout.minimumWidth: 260
+                Layout.maximumWidth: 260
+                Layout.fillWidth: false
                 Layout.fillHeight: true
                 spacing: 8
 
@@ -165,14 +168,18 @@ Rectangle {
             ToolSeparator { Layout.fillHeight: true }
 
             // {{{ Right content pane
-            ScrollView {
+            // A plain Item (not a ScrollView): it hosts three mutually-exclusive, visible-toggled
+            // editors, and its Layout.fillWidth cleanly claims the row's remaining width. A ScrollView
+            // here would size itself to its (multiple) children and collapse the pane.
+            Item {
+                id: rightPane
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
 
                 // Profile editor.
                 ColumnLayout {
-                    width: parent.width
+                    width: rightPane.width
                     visible: root.editorMode === "profile"
                     spacing: 12
 
