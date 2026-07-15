@@ -511,6 +511,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/contour/ui/TitleBar.qml"),
         QStringLiteral("qrc:/contour/ui/SessionChrome.qml"),
         QStringLiteral("qrc:/contour/ui/CommandPalette.qml"),
+        QStringLiteral("qrc:/contour/ui/SaveLayoutDialog.qml"),
         QStringLiteral("qrc:/contour/ui/TerminalContextMenu.qml"),
     };
 
@@ -2807,6 +2808,229 @@ TEST_CASE("The palette survives controller destruction without QML errors (offsc
     host.palette->setProperty("controller", QVariant::fromValue<QObject*>(nullptr));
     QCoreApplication::processEvents();
     engine.rootContext()->setContextProperty("paletteController", nullptr);
+    controller.reset();
+    QCoreApplication::processEvents();
+
+    CHECK(capture.count([](QString const& m) { return m.contains(QStringLiteral("TypeError")); }) == 0);
+
+    host.window.reset();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCoreApplication::processEvents();
+}
+
+// ============================================================================================
+// SaveLayoutDialog: the "save layout as" name prompt a nameless SaveLayout action opens. The exact
+// mirror of the TabColorFlyout tests above — a bare action opens a surface that supplies the
+// argument — and of the command-palette focus tests: the prompt hands the keyboard back on close.
+// ============================================================================================
+
+namespace
+{
+
+/// A stand-in for WindowController exposing exactly the save-layout surface SaveLayoutDialog.qml binds:
+/// the saveLayoutRequested signal main.qml opens the dialog on, and the saveLayoutAs() the dialog calls
+/// back with the typed name.
+class MockSaveLayoutController: public QObject
+{
+    Q_OBJECT
+
+  public:
+    /// Mirrors WindowController::beginSaveLayoutPrompt(): what the manager calls for a nameless
+    /// SaveLayout action, and what makes main.qml's prompt appear.
+    Q_INVOKABLE void beginSaveLayoutPrompt() { emit saveLayoutRequested(); }
+
+    /// Records the name the dialog accepted, so a test can assert the accept routed through with it.
+    Q_INVOKABLE void saveLayoutAs(QString const& name) { saved << name; }
+    QStringList saved;
+
+  signals:
+    /// What WindowController raises to ask its window to open the prompt; main.qml answers with open().
+    void saveLayoutRequested();
+};
+
+/// Hosts SaveLayoutDialog.qml in a Window mirroring main.qml's ApplicationWindow — it declares
+/// restoreTerminalFocus() (which the dialog calls on close) and wires saveLayoutRequested -> open(),
+/// exactly as main.qml does, so the open path and the focus-restore contract are both exercised.
+struct SaveLayoutHost
+{
+    std::unique_ptr<QObject> window; //!< The wrapper Window.
+    QObject* dialog = nullptr;       //!< The SaveLayoutDialog inside it (owned by the window).
+
+    [[nodiscard]] int focusRestores() const { return window->property("focusRestores").toInt(); }
+    [[nodiscard]] bool opened() const { return dialog != nullptr && dialog->property("opened").toBool(); }
+    [[nodiscard]] QQuickItem* nameField() const
+    {
+        return dialog != nullptr ? dialog->findChild<QQuickItem*>(QStringLiteral("saveLayoutNameField"))
+                                 : nullptr;
+    }
+};
+
+/// Builds the host and locates the dialog (not yet opened — the tests open it via the controller's
+/// request, which is the path main.qml takes).
+[[nodiscard]] SaveLayoutHost makeSaveLayoutHost(QQmlEngine& engine, MockSaveLayoutController& controller)
+{
+    engine.rootContext()->setContextProperty("saveLayoutController", &controller);
+
+    QQmlComponent component(&engine);
+    component.setData(QByteArrayLiteral("import QtQuick\n"
+                                        "import QtQuick.Window\n"
+                                        "import \"qrc:/contour/ui\"\n"
+                                        "Window {\n"
+                                        "  id: host\n"
+                                        "  width: 800; height: 600; visible: true\n"
+                                        "  property int focusRestores: 0\n"
+                                        "  property alias saveLayoutDialogItem: dialogItem\n"
+                                        "  function restoreTerminalFocus() { host.focusRestores++; }\n"
+                                        "  SaveLayoutDialog {\n"
+                                        "    id: dialogItem\n"
+                                        "    controller: saveLayoutController\n"
+                                        "    window: host\n"
+                                        "  }\n"
+                                        // main.qml's wiring, verbatim: the controller asks, the window
+                                        // opens the prompt.
+                                        "  Connections {\n"
+                                        "    target: saveLayoutController\n"
+                                        "    function onSaveLayoutRequested() { dialogItem.open(); }\n"
+                                        "  }\n"
+                                        "}\n"),
+                      QUrl(QStringLiteral("qrc:/contour/ui/SaveLayoutTestHost.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+
+    auto host = SaveLayoutHost {};
+    {
+        INFO("SaveLayoutTestHost errors: " << component.errorString().toStdString());
+        if (!component.isReady())
+            return host;
+    }
+
+    host.window.reset(component.create());
+    if (host.window == nullptr)
+        return host;
+
+    host.dialog = host.window->property("saveLayoutDialogItem").value<QObject*>();
+    return host;
+}
+
+/// Opens the dialog the way a nameless SaveLayout action does (controller request -> main.qml open()) and
+/// pumps the loop so the Popup materializes its field.
+void openSaveLayoutPrompt(MockSaveLayoutController& controller)
+{
+    controller.beginSaveLayoutPrompt();
+    QCoreApplication::processEvents();
+}
+
+} // namespace
+
+TEST_CASE("The save-layout prompt opens on the controller's request (offscreen)",
+          "[contour][gui][qml][layout]")
+{
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockSaveLayoutController controller;
+
+    auto host = makeSaveLayoutHost(engine, controller);
+    REQUIRE(host.dialog != nullptr);
+    REQUIRE_FALSE(host.opened()); // nothing has asked for it yet
+
+    openSaveLayoutPrompt(controller);
+    CHECK(host.opened());
+    CHECK(host.nameField() != nullptr);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("Accepting the save-layout prompt saves the typed name and gives the keyboard back (offscreen)",
+          "[contour][gui][qml][layout]")
+{
+    // The typed name has to route all the way to the controller — the field is decoration otherwise — and
+    // the terminal has to get the keyboard back, or the user is left typing into a dismissed prompt.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockSaveLayoutController controller;
+
+    auto host = makeSaveLayoutHost(engine, controller);
+    REQUIRE(host.dialog != nullptr);
+    openSaveLayoutPrompt(controller);
+    REQUIRE(host.opened());
+    REQUIRE(host.nameField() != nullptr);
+
+    host.nameField()->setProperty("text", QStringLiteral("dev"));
+    QMetaObject::invokeMethod(host.dialog, "accept");
+    QCoreApplication::processEvents();
+
+    REQUIRE(controller.saved.size() == 1);
+    CHECK(controller.saved.front() == QStringLiteral("dev"));
+    CHECK_FALSE(host.opened());
+    CHECK(host.focusRestores() == 1);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("A blank save-layout name is a no-op that keeps the prompt open (offscreen)",
+          "[contour][gui][qml][layout]")
+{
+    // Enter on an empty (or whitespace-only) field must neither save a nameless layout nor silently
+    // dismiss the dialog — the user is asked to type a name or press Escape.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockSaveLayoutController controller;
+
+    auto host = makeSaveLayoutHost(engine, controller);
+    REQUIRE(host.dialog != nullptr);
+    openSaveLayoutPrompt(controller);
+    REQUIRE(host.opened());
+    REQUIRE(host.nameField() != nullptr);
+
+    host.nameField()->setProperty("text", QStringLiteral("   "));
+    QMetaObject::invokeMethod(host.dialog, "accept");
+    QCoreApplication::processEvents();
+
+    CHECK(controller.saved.isEmpty());
+    CHECK(host.opened()); // still up, nothing saved
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("Dismissing the save-layout prompt saves nothing and gives the keyboard back (offscreen)",
+          "[contour][gui][qml][layout]")
+{
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockSaveLayoutController controller;
+
+    auto host = makeSaveLayoutHost(engine, controller);
+    REQUIRE(host.dialog != nullptr);
+    openSaveLayoutPrompt(controller);
+    REQUIRE(host.opened());
+
+    QMetaObject::invokeMethod(host.dialog, "close");
+    QCoreApplication::processEvents();
+
+    CHECK(controller.saved.isEmpty());
+    CHECK_FALSE(host.opened());
+    CHECK(host.focusRestores() == 1);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("The save-layout prompt survives controller destruction without QML errors (offscreen)",
+          "[contour][gui][qml][layout]")
+{
+    // Same teardown hazard the command palette guards against: the C++ controller is destroyed before the
+    // QML tree on window close, and an unguarded `controller.` in the dialog would raise a TypeError that
+    // the run-wide gate turns into a failure of the whole suite.
+    contour::test::QmlMessageCapture capture;
+    QQmlEngine engine;
+    auto controller = std::make_unique<MockSaveLayoutController>();
+
+    auto host = makeSaveLayoutHost(engine, *controller);
+    REQUIRE(host.dialog != nullptr);
+    openSaveLayoutPrompt(*controller);
+
+    host.dialog->setProperty("controller", QVariant::fromValue<QObject*>(nullptr));
+    QCoreApplication::processEvents();
+    engine.rootContext()->setContextProperty("saveLayoutController", nullptr);
     controller.reset();
     QCoreApplication::processEvents();
 

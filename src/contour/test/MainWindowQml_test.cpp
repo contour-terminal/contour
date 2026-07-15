@@ -195,6 +195,8 @@ class MockMainController: public QAbstractListModel
     Q_INVOKABLE void resetTabTitle(int) {}
     Q_INVOKABLE void beginActiveTabTitleEdit() { emit tabTitleEditRequested(0); }
     Q_INVOKABLE void beginActiveTabColorPick() { emit tabColorPickRequested(0); }
+    Q_INVOKABLE void beginSaveLayoutPrompt() { emit saveLayoutRequested(); }
+    Q_INVOKABLE void saveLayoutAs(QString const&) {}
     Q_INVOKABLE void setTabColor(int, QColor const&) {}
     Q_INVOKABLE void resetTabColor(int) {}
     Q_INVOKABLE void closeTabAtIndex(int) {}
@@ -244,6 +246,9 @@ class MockMainController: public QAbstractListModel
     void tabTitleEditRequested(int index);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
     void tabColorPickRequested(int index);
+    // Matches main.qml's Connections handler for the save-layout prompt; a missing signal here is a QML
+    // warning, and the run-wide gate turns that into a failure of the whole suite.
+    void saveLayoutRequested();
 
   private:
     int _chromeHeight = 0;

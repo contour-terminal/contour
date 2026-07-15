@@ -1015,6 +1015,41 @@ input_mapping:
     CHECK(std::get<SetTabColor>(action).color == red); // what went out came back
 }
 
+TEST_CASE("Config: a nameless SaveLayout binding is kept and round-trips as 'SaveLayout'", "[config]")
+{
+    // The layout-side mirror of the SetTabColor round-trip. A nameless SaveLayout opens the save-as prompt,
+    // so — like a colorless SetTabColor — it writes no argument, must survive the config it writes, and
+    // (unlike a nameless LaunchLayout) must NOT be dropped on parse. A named one still carries its name.
+    using namespace contour::actions;
+
+    CHECK(std::format("{}", Action { SaveLayout {} }) == "SaveLayout"); // the prompt writes no name
+    CHECK(std::format("{}", Action { SaveLayout { .name = "dev" } }) == "SaveLayout, name: 'dev'");
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: F2, action: SaveLayout }
+    - { mods: [Control, Shift], key: F3, action: SaveLayout, name: dev }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value().keyMappings;
+    // Both bindings survived: the nameless one is no longer dropped for want of a name.
+    auto const nameless = std::ranges::any_of(mappings, [](auto const& m) {
+        auto const* s = std::get_if<SaveLayout>(&m.binding.at(0));
+        return s != nullptr && s->name.empty();
+    });
+    auto const named = std::ranges::any_of(mappings, [](auto const& m) {
+        auto const* s = std::get_if<SaveLayout>(&m.binding.at(0));
+        return s != nullptr && s->name == "dev";
+    });
+    CHECK(nameless);
+    CHECK(named);
+}
+
 TEST_CASE("Config: font features, text shaping engine, frozen DEC modes and hint patterns load", "[config]")
 {
     QTemporaryDir dir;

@@ -116,6 +116,12 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param acting The session that triggered the action; its hosting window is serialized.
     void saveLayout(std::string const& name, TerminalSession* acting);
 
+    /// Opens the save-as name prompt over the window hosting @p acting (a nameless `SaveLayout` action),
+    /// routed exactly like beginTabColorPick(). The window then calls back into saveLayout() with the
+    /// name the user typed. No-ops if @p acting has no hosting window.
+    /// @param acting The session that triggered the action; its hosting window shows the prompt.
+    void beginSaveLayoutPrompt(TerminalSession* acting);
+
     /// Serializes @p window's live tab/pane tree into a config::Layout, persists it through the
     /// injected LayoutStore, and — only once the store has accepted it, so runtime state can never
     /// claim more than what is actually saved — stores it under @p name in the app's in-memory config.

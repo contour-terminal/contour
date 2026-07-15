@@ -195,6 +195,13 @@ TEST_CASE("actions::isParameterized marks the actions the palette cannot run bar
     CHECK_FALSE(isParameterized(Action { SetTabColor {} }));
     CHECK_FALSE(isParameterized(Action { SetTabColor { vtbackend::RGBColor { 0xFF, 0x00, 0x00 } } }));
     CHECK_FALSE(isParameterized(Action { ResetTabColor {} }));
+
+    // SaveLayout is the layout-side mirror of SetTabColor: a nameless instance opens the save-as name
+    // prompt rather than doing nothing, so it too stays out of this set and the palette offers it
+    // straight from the catalog. (LaunchLayout above stays IN — a nameless "launch which layout?" has no
+    // default, and its per-name rows already reach the palette from the saved-layout source.)
+    CHECK_FALSE(isParameterized(Action { SaveLayout {} }));
+    CHECK_FALSE(isParameterized(Action { SaveLayout { "dev" } }));
 }
 
 TEST_CASE("actions: every catalog row sits at its own variant index", "[actions][catalog]")

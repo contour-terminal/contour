@@ -106,6 +106,12 @@ CommandArguments commandArguments(actions::Action const& action)
                 return { .id = std::move(hex), .title = std::move(title) };
             },
             [](SaveLayout const& a) -> CommandArguments {
+                // A nameless SaveLayout opens the save-as prompt (the same shape as a colorless
+                // SetTabColor above), so it carries no arguments: the row keeps the plain "SaveLayout"
+                // id and the palette can offer it straight from the catalog. A bound instance that
+                // already names a layout is a different command, and says so.
+                if (a.name.empty())
+                    return {};
                 return { .id = a.name, .title = std::format(": {}", a.name) };
             },
             // The defaulted-argument actions. Their argument only enters the identity when it is NOT the

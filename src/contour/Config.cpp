@@ -2569,9 +2569,12 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::SaveLayout>(action))
         {
+            // The name is OPTIONAL, unlike LaunchLayout above: with one, SaveLayout saves straight to it;
+            // without, it opens the save-as prompt (the mirror of a colorless SetTabColor). So a nameless
+            // binding is kept, not dropped.
             if (auto name = node["name"]; name && name.IsScalar())
                 return actions::SaveLayout { name.as<std::string>() };
-            return std::nullopt;
+            return actions::SaveLayout {};
         }
 
         if (holds_alternative<actions::CreateSelection>(action))

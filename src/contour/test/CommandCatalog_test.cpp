@@ -93,6 +93,13 @@ TEST_CASE("A command's id encodes everything that distinguishes it", "[contour][
               == "Set Tab Color: #FF0000");
         CHECK(commandId(actions::SetTabColor { vtbackend::RGBColor { 0x00, 0x80, 0xFF } })
               == "SetTabColor:#0080FF");
+
+        // SaveLayout mirrors SetTabColor from the layout side: a nameless instance opens the save-as
+        // prompt and keeps the bare id, while a named one is a genuinely different command.
+        CHECK(commandId(actions::SaveLayout {}) == "SaveLayout");
+        CHECK(commandTitle(actions::SaveLayout {}) == "Save Layout");
+        CHECK(commandId(actions::SaveLayout { .name = "dev" }) == "SaveLayout:dev");
+        CHECK(commandTitle(actions::SaveLayout { .name = "dev" }) == "Save Layout: dev");
     }
 }
 
@@ -114,6 +121,12 @@ TEST_CASE("ActionCommandSource offers every action that can run without an argum
         // without the user having bound anything.
         CHECK(hasCommand(commands, "SetTabColor"));
         CHECK(hasCommand(commands, "ResetTabColor"));
+
+        // Saving a layout had no palette entry at all before this — SaveLayout needed a name and so was
+        // skipped like any parameterized action. Bare, it now opens the save-as name prompt, so the
+        // palette offers it from the catalog. That is what lets a user create the FIRST layout (and hence
+        // any LaunchLayout rows) from the palette rather than only from a hand-written key binding.
+        CHECK(hasCommand(commands, "SaveLayout"));
     }
 
     SECTION("an action needing an argument is NOT offered bare")
@@ -194,6 +207,30 @@ TEST_CASE("A bound SetTabColor reaches the palette as its own concrete row", "[c
 
     // And it did NOT collapse onto the colorless row: they are two commands, not one.
     CHECK_FALSE(hasCommand(commands, "SetTabColor"));
+}
+
+TEST_CASE("A bound SaveLayout with a name reaches the palette as its own concrete row", "[contour][palette]")
+{
+    // The layout-side mirror of the SetTabColor case above. The catalog offers the nameless SaveLayout
+    // (it opens the save-as prompt); a user who bound SaveLayout to a SPECIFIC name gets a SECOND,
+    // distinct row that saves straight to that name without the prompt.
+    auto mappings = config::InputMappings {};
+    mappings.keyMappings.push_back(
+        config::KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                                  .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                                  .input = vtbackend::Key::F6,
+                                  .binding = { { actions::SaveLayout { .name = "dev" } } } });
+
+    auto const commands = BoundCommandSource { mappings }.commands();
+
+    REQUIRE(hasCommand(commands, "SaveLayout:dev"));
+    auto const* dev = find(commands, "SaveLayout:dev");
+    REQUIRE(dev != nullptr);
+    CHECK(dev->title == "Save Layout: dev");
+    CHECK_FALSE(dev->description.empty());
+
+    // And it did NOT collapse onto the nameless row: they are two commands, not one.
+    CHECK_FALSE(hasCommand(commands, "SaveLayout"));
 }
 
 TEST_CASE("The live-state sources offer what actually exists right now", "[contour][palette]")

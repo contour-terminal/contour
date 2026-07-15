@@ -611,6 +611,12 @@ void TerminalSessionManager::beginTabColorPick(TerminalSession* acting)
         controller->beginActiveTabColorPick();
 }
 
+void TerminalSessionManager::beginSaveLayoutPrompt(TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
+        controller->beginSaveLayoutPrompt();
+}
+
 void TerminalSessionManager::setActiveTabColor(vtbackend::RGBColor color, TerminalSession* acting)
 {
     if (auto* controller = controllerHostingSession(acting); controller != nullptr)

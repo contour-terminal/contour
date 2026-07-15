@@ -161,6 +161,15 @@ ApplicationWindow
         window: appWindow
     }
 
+    // The "save layout as" name prompt. Opened by a nameless SaveLayout action (the command-palette row
+    // or a key bound to bare SaveLayout), routed per-window exactly like the command palette above, so
+    // the prompt appears over the window the action fired in.
+    SaveLayoutDialog {
+        id: saveLayoutDialog
+        controller: appWindow.win
+        window: appWindow
+    }
+
     // The terminal pane's right-click menu. Per-window like the command palette: the OpenContextMenu
     // action routes through the session manager to THIS window's controller, which first makes the
     // right-clicked pane active, then republishes the model for the state under the cursor and asks us to
@@ -175,6 +184,7 @@ ApplicationWindow
     Connections {
         target: appWindow.win
         function onCommandPaletteRequested() { commandPalette.open(); }
+        function onSaveLayoutRequested() { saveLayoutDialog.open(); }
         function onContextMenuRequested() { terminalContextMenu.popup(); }
     }
 

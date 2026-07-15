@@ -314,7 +314,11 @@ concept NonRepeatableActionConcept = crispy::one_of<T,
 ///
 /// Deliberately excluded: CopySelection, PasteClipboard, PasteSelection, NewTerminal and ReloadConfig
 /// all default to a meaningful argument (copy as text, paste unstripped, current profile), so they
-/// run as-is.
+/// run as-is. SetTabColor and SaveLayout are excluded for the same reason from the other direction:
+/// a bare SetTabColor opens the color picker and a bare SaveLayout opens the save-as name prompt, so
+/// the bare form is a meaningful gesture the palette SHOULD offer from the catalog. LaunchLayout
+/// stays in the list — a nameless "launch which layout?" has no default; its per-name rows already
+/// reach the palette through the saved-layout source.
 template <typename T>
 concept ParameterizedActionConcept = crispy::one_of<T,
                                                     ChangeProfile,
@@ -325,8 +329,7 @@ concept ParameterizedActionConcept = crispy::one_of<T,
                                                     MoveTabTo,
                                                     SwitchToTab,
                                                     ResizePane,
-                                                    LaunchLayout,
-                                                    SaveLayout>;
+                                                    LaunchLayout>;
 
 /// @returns true if @p action requires an argument that a bare catalog entry cannot supply (a
 /// ParameterizedActionConcept member), false if it is runnable as-is.
@@ -523,7 +526,8 @@ namespace documentation
         "Opens a named layout, appending its tabs to the current window."
     };
     constexpr inline std::string_view SaveLayout {
-        "Saves the current window's tabs as a named layout in layouts.yml."
+        "Saves the current window's tabs as a named layout in layouts.yml. Without a name it opens a "
+        "prompt to type one in (which is how the command palette offers it)."
     };
     constexpr inline std::string_view OpenContextMenu {
         "Opens the terminal pane's context menu. Bound to the right mouse button by default, and only "
@@ -802,7 +806,11 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
             [](WriteScreen const& a) { return std::format(", chars: '{}'", a.chars); },
             [](CreateSelection const& a) { return std::format(", delimiters: '{}'", a.delimiters); },
             [](LaunchLayout const& a) { return std::format(", name: '{}'", a.name); },
-            [](SaveLayout const& a) { return std::format(", name: '{}'", a.name); },
+            [](SaveLayout const& a) {
+                // A nameless SaveLayout opens the save-as prompt, so — like a colorless SetTabColor below
+                // — it has no argument to write; a named one round-trips its name.
+                return a.name.empty() ? std::string {} : std::format(", name: '{}'", a.name);
+            },
             [](SetTabColor const& a) {
                 // A colorless SetTabColor opens the picker, so it has no argument to write. The color
                 // needs no hand-quoting: std::formatter<RGBColor> already renders it as '#RRGGBB', and

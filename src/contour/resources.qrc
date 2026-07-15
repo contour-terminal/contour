@@ -22,6 +22,7 @@
         <file>ui/TerminalPane.qml</file>
         <file>ui/TerminalContextMenu.qml</file>
         <file>ui/CommandPalette.qml</file>
+        <file>ui/SaveLayoutDialog.qml</file>
         <file>ui/main.qml</file>
     </qresource>
 </RCC>
