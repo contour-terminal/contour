@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <string>
+#include <variant>
 #include <vector>
 
 using namespace contour;
@@ -206,6 +207,37 @@ TEST_CASE("ContextMenu.profiles.oneRowEachWithTheActiveOneChecked", "[contextmen
         CHECK(child.checked == (child.title == "light"));
         // The row carries the concrete, argument-bearing action; nothing has to re-parse its name later.
         CHECK(commandId(child.action) == "ChangeProfile:" + child.title);
+    }
+}
+
+TEST_CASE("ContextMenu.readOnly.reflectsInputProtection", "[contextmenu]")
+{
+    // The row is always present and always checkable; its check mirrors the pane's input-protection
+    // (read-only) state at the moment the menu was opened.
+    SECTION("unchecked while input is allowed")
+    {
+        auto state = fullyEnabledState();
+        state.inputProtected = false;
+
+        auto const menu = buildContextMenu(state);
+        auto const* readOnly = find(menu, "Read-Only Mode");
+        REQUIRE(readOnly != nullptr);
+        CHECK(readOnly->checkable);
+        CHECK_FALSE(readOnly->checked);
+        // Picking it flips the very state the check reflects.
+        CHECK(std::holds_alternative<actions::ToggleInputProtection>(readOnly->action));
+    }
+
+    SECTION("checked while input is protected")
+    {
+        auto state = fullyEnabledState();
+        state.inputProtected = true;
+
+        auto const menu = buildContextMenu(state);
+        auto const* readOnly = find(menu, "Read-Only Mode");
+        REQUIRE(readOnly != nullptr);
+        CHECK(readOnly->checkable);
+        CHECK(readOnly->checked);
     }
 }
 

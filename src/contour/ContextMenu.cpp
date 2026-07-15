@@ -52,6 +52,11 @@ namespace
     {
         return !state.profileNames.empty();
     }
+
+    bool inputProtected(ContextMenuState const& state) noexcept
+    {
+        return state.inputProtected;
+    }
     // }}}
 
     using Predicate = bool (*)(ContextMenuState const&) noexcept;
@@ -78,6 +83,7 @@ namespace
         std::string_view title {};         ///< Empty on a Command row => commandTitle(action).
         Predicate visible = always;        ///< When false, the row is not in the menu at all.
         Predicate enabled = always;        ///< When false, the row is in the menu but grayed out.
+        Predicate checked = nullptr;       ///< When set, the row is checkable; checked when it holds.
         ChildBuilder children = nullptr;   ///< Submenu rows: what is inside.
         ActionBinder bindAction = nullptr; ///< When set, supplies the action in place of @ref action.
 
@@ -94,6 +100,14 @@ namespace
         {
             auto row = *this;
             row.enabled = predicate;
+            return row;
+        }
+
+        /// This row, drawn with a check column that is ticked exactly when @p predicate holds.
+        [[nodiscard]] Row checkedWhen(Predicate predicate) const
+        {
+            auto row = *this;
+            row.checked = predicate;
             return row;
         }
 
@@ -237,6 +251,12 @@ namespace
 
             separator(),
 
+            // Read-only == input protection (KAM). The check reflects the pane's state at open time;
+            // picking it runs ToggleInputProtection, which flips it for the next open.
+            command(ToggleInputProtection {}, "Read-Only Mode").checkedWhen(inputProtected),
+
+            separator(),
+
             submenu("Change Profile", profileRows).shownWhen(hasProfiles),
             submenu("Advanced", advancedRows),
         };
@@ -288,8 +308,8 @@ namespace
                         .title = row.title.empty() ? commandTitle(action) : std::string(row.title),
                         .action = std::move(action),
                         .enabled = row.enabled(state),
-                        .checkable = false,
-                        .checked = false,
+                        .checkable = row.checked != nullptr,
+                        .checked = row.checked != nullptr && row.checked(state),
                         .children = {} });
                     break;
                 }

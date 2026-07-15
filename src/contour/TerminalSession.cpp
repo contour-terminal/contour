@@ -1577,6 +1577,7 @@ ContextMenuState TerminalSession::contextMenuState()
             // Left for the window to fill in: whether this tab holds more than one pane is not something
             // a session knows about itself.
             .hasSplits = false,
+            .inputProtected = !terminal().allowInput(),
             // Taken now, while the pointer is still on the cell the user clicked. The rows built from this
             // carry the URI with them, because by the time one is picked the pointer has moved to the menu.
             .hyperlinkUnderCursor = hyperlink ? hyperlink->uri : std::string {},

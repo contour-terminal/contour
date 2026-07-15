@@ -23,6 +23,7 @@ struct ContextMenuState
     bool hasLastCommand = false;      ///< A finished OSC 133 command block sits in the scrollback.
     bool hasWorkingDirectory = false; ///< The shell reported a working directory (OSC 7).
     bool hasSplits = false;           ///< This tab holds more than one pane.
+    bool inputProtected = false;      ///< Input protection (KAM / read-only) is on for this pane.
 
     /// The OSC 8 hyperlink the user right-clicked, empty if there was none.
     ///
