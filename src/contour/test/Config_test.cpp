@@ -8,7 +8,9 @@
 
 #include <contour/Actions.h>
 #include <contour/Config.h>
+#include <contour/GuiConfigStore.h>
 
+#include <vtbackend/Color.h>
 #include <vtbackend/primitives.h>
 
 #include <QtCore/QTemporaryDir>
@@ -46,6 +48,16 @@ namespace
     auto config = contour::config::Config {};
     contour::config::loadConfigFromFile(config, writeConfig(dir, yaml));
     return config;
+}
+
+/// Writes @p content to a GUI side file at @p relativePath under @p dir (the config directory),
+/// creating intermediate directories (e.g. `profiles/`, `colorschemes/`) as needed.
+void writeSideFile(QTemporaryDir& dir, std::filesystem::path const& relativePath, std::string_view content)
+{
+    auto const path = std::filesystem::path(dir.path().toStdString()) / relativePath;
+    std::filesystem::create_directories(path.parent_path());
+    auto out = std::ofstream(path);
+    out << content;
 }
 
 } // namespace
@@ -1913,3 +1925,163 @@ TEST_CASE("config.builtinFallbackMouseMappings", "[config]")
         CHECK_FALSE(bindsRight);
     }
 }
+
+// {{{ GUI-managed side files (profiles/*.yml, colorschemes/*.yml, settings.yml) and the lock key.
+
+TEST_CASE("Config: gui_config_locked loads and defaults to false", "[config][gui]")
+{
+    QTemporaryDir dir;
+    CHECK_FALSE(loadFromYaml(dir, "default_profile: main\n").guiConfigLocked.value());
+
+    QTemporaryDir dir2;
+    CHECK(loadFromYaml(dir2, "gui_config_locked: true\n").guiConfigLocked.value());
+}
+
+TEST_CASE("Config: a profiles/<name>.yml side file merges as an editable GUI profile", "[config][gui]")
+{
+    QTemporaryDir dir;
+    // The side file overrides only show_title_bar; every other field must inherit the default profile.
+    writeSideFile(dir, "profiles/work.yml", "show_title_bar: false\n");
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        show_title_bar: true
+        wm_class: inherited-value
+)");
+
+    auto const* work = config.findProfile("work");
+    REQUIRE(work != nullptr);
+    CHECK(work->showTitleBar.value() == false);        // overridden by the side file
+    CHECK(work->wmClass.value() == "inherited-value"); // inherited from the default profile
+
+    // Provenance gates GUI editability: inline entries are read-only, side-file entries are editable.
+    CHECK(config.profileOrigins.at("main") == contour::config::SettingsOrigin::MainConfig);
+    CHECK(config.profileOrigins.at("work") == contour::config::SettingsOrigin::SideFile);
+}
+
+TEST_CASE("Config: settings.yml default_profile overrides contour.yml's", "[config][gui]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "profiles/work.yml", "show_title_bar: false\n");
+    writeSideFile(dir, "settings.yml", "default_profile: work\n");
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        show_title_bar: true
+)");
+
+    CHECK(config.defaultProfileName.value() == "work");
+    REQUIRE(config.guiManagedSettings.defaultProfile.has_value());
+    CHECK(config.guiManagedSettings.defaultProfile.value() == "work");
+}
+
+TEST_CASE("Config: settings.yml default_profile naming a missing profile is ignored", "[config][gui]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "default_profile: ghost\n");
+    auto const config = loadFromYaml(dir, "default_profile: main\n");
+    CHECK(config.defaultProfileName.value() == "main");
+}
+
+TEST_CASE("Config: a malformed profiles/<name>.yml is skipped, not fatal to the rest", "[config][gui]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "profiles/broken.yml", "colors: [1, 2\n"); // unterminated flow sequence
+    writeSideFile(dir, "profiles/ok.yml", "show_title_bar: false\n");
+    auto const config = loadFromYaml(dir, "default_profile: main\n");
+
+    CHECK(config.findProfile("ok") != nullptr);     // the valid side file still loaded
+    CHECK(config.findProfile("broken") == nullptr); // the broken one was skipped
+    CHECK(config.findProfile("main") != nullptr);   // the rest of the config is intact
+}
+
+TEST_CASE("Config: a profile round-trips through emitProfileYaml and the side-file loader", "[config][gui]")
+{
+    QTemporaryDir dir;
+    auto const source = loadFromYaml(dir, "default_profile: main\n");
+    auto profile = *source.findProfile("main");
+    profile.showTitleBar = false;
+    profile.dimUnfocused = true;
+
+    writeSideFile(dir, "profiles/roundtrip.yml", contour::config::emitProfileYaml(profile));
+
+    auto const reloaded = loadFromYaml(dir, "default_profile: main\n");
+    auto const* rt = reloaded.findProfile("roundtrip");
+    REQUIRE(rt != nullptr);
+    CHECK(rt->showTitleBar.value() == false);
+    CHECK(rt->dimUnfocused.value() == true);
+}
+
+TEST_CASE("Config: a colorschemes/<name>.yml written via emitColorSchemeYaml is resolved by a profile",
+          "[config][gui]")
+{
+    QTemporaryDir dir;
+    auto palette = vtbackend::ColorPalette {};
+    palette.defaultBackground = vtbackend::RGBColor { 0x12, 0x34, 0x56 };
+    writeSideFile(dir, "colorschemes/mono.yml", contour::config::emitColorSchemeYaml(palette));
+
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        colors: mono
+)");
+
+    auto const* main = config.findProfile("main");
+    REQUIRE(main != nullptr);
+    auto const* simple = std::get_if<contour::config::SimpleColorConfig>(&main->colors.value());
+    REQUIRE(simple != nullptr);
+    CHECK(simple->colors.defaultBackground == vtbackend::RGBColor { 0x12, 0x34, 0x56 });
+}
+
+TEST_CASE("Config: GUI settings round-trip through emitGuiSettingsYaml / loadGuiSettingsFile",
+          "[config][gui]")
+{
+    QTemporaryDir dir;
+    auto const path = std::filesystem::path(dir.path().toStdString()) / "settings.yml";
+    {
+        auto out = std::ofstream(path);
+        out << contour::config::emitGuiSettingsYaml({ .defaultProfile = "work" });
+    }
+
+    auto const loaded = contour::config::loadGuiSettingsFile(path);
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded->defaultProfile.has_value());
+    CHECK(loaded->defaultProfile.value() == "work");
+
+    // A missing file is default (all-unset), not an error.
+    auto const missing = contour::config::loadGuiSettingsFile(std::filesystem::path(dir.path().toStdString())
+                                                              / "does-not-exist.yml");
+    REQUIRE(missing.has_value());
+    CHECK_FALSE(missing->defaultProfile.has_value());
+}
+
+TEST_CASE("Config: FileGuiConfigStore writes and removes side files the loader picks up", "[config][gui]")
+{
+    QTemporaryDir dir;
+    auto const configDir = std::filesystem::path(dir.path().toStdString());
+
+    auto const base = loadFromYaml(dir, "default_profile: main\n");
+    auto profile = *base.findProfile("main");
+    profile.showTitleBar = false;
+
+    auto store = contour::FileGuiConfigStore(configDir);
+    REQUIRE(store.saveProfile("saved", profile).has_value());
+    REQUIRE(
+        store.saveGuiSettings(contour::config::GuiManagedSettings { .defaultProfile = "saved" }).has_value());
+
+    auto const afterSave = loadFromYaml(dir, "default_profile: main\n");
+    auto const* saved = afterSave.findProfile("saved");
+    REQUIRE(saved != nullptr);
+    CHECK(saved->showTitleBar.value() == false);
+    CHECK(afterSave.defaultProfileName.value() == "saved");
+    CHECK(afterSave.profileOrigins.at("saved") == contour::config::SettingsOrigin::SideFile);
+
+    REQUIRE(store.deleteProfile("saved").has_value());
+    auto const afterDelete = loadFromYaml(dir, "default_profile: main\n");
+    CHECK(afterDelete.findProfile("saved") == nullptr);
+}
+
+// }}}

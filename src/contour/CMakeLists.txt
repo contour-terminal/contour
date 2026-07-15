@@ -56,6 +56,7 @@ set(_header_files
     ContextMenuModel.h
     ContourApp.h
     FuzzyFilter.h
+    GuiConfigStore.h
     Shortcut.h
     TabLabel.h
 )
@@ -79,6 +80,7 @@ set(_core_source_files
     ContextMenuModel.cpp
     ContourApp.cpp
     FuzzyFilter.cpp
+    GuiConfigStore.cpp
     Shortcut.cpp
     TabLabel.cpp
 )

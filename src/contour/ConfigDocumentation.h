@@ -677,6 +677,14 @@ constexpr StringLiteral ReflowOnResizeConfig {
     "reflow_on_resize: {}\n"
 };
 
+constexpr StringLiteral GuiConfigLockedConfig {
+    "\n"
+    "{comment} When set to true, the in-app graphical settings page is opened read-only and Contour\n"
+    "{comment} will not write any GUI-managed side files (profiles/, colorschemes/, settings.yml).\n"
+    "{comment} Use this to keep this hand-maintained configuration the single source of truth.\n"
+    "gui_config_locked: {}\n"
+};
+
 constexpr StringLiteral ColorSchemesConfig {
     "{comment} Color Profiles\n"
     "{comment} --------------\n"
@@ -1304,6 +1312,12 @@ constexpr StringLiteral SpawnNewProcessWeb { "flag determines whether a new proc
 constexpr StringLiteral ReflowOnResizeWeb {
     "option controls whether or not the lines in the terminal should be reflowed when a resize event occurs. "
     "The default value is `true`."
+};
+
+constexpr StringLiteral GuiConfigLockedWeb {
+    "flag, when `true`, opens the in-app settings page read-only and prevents the GUI from writing any "
+    "of its side files (`profiles/`, `colorschemes/`, `settings.yml`), so this hand-maintained "
+    "configuration file stays the single source of truth. The default value is `false`."
 };
 
 constexpr StringLiteral BypassMouseProtocolModifiersWeb {
@@ -2178,6 +2192,7 @@ using CommandPaletteRecentCount =
 using PTYReadBufferSize = DocumentationEntry<PTYReadBufferSizeConfig, PTYReadBufferSizeWeb>;
 using PTYBufferObjectSize = DocumentationEntry<PTYBufferObjectSizeConfig, PTYBufferObjectSizeWeb>;
 using ReflowOnResize = DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWeb>;
+using GuiConfigLocked = DocumentationEntry<GuiConfigLockedConfig, GuiConfigLockedWeb>;
 using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
 using Profiles = DocumentationEntry<ProfilesConfig, ProfilesWeb>;
 using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;

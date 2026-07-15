@@ -325,6 +325,92 @@ void compareEntries(Config& config, auto const& output)
     }
 }
 
+/// Records the provenance of every profile and color scheme the main parse produced, so that anything
+/// the GUI side-file scan adds on top is distinguishable as GUI-owned (and therefore editable in the
+/// settings page) from the hand-maintained inline entries, which stay read-only there.
+/// @param config The just-parsed configuration to annotate.
+void recordMainConfigOrigins(Config& config)
+{
+    for (auto const& [name, _]: config.profiles.value())
+        config.profileOrigins.emplace(name, SettingsOrigin::MainConfig);
+    for (auto const& [name, _]: config.colorschemes.value())
+        config.colorSchemeOrigins.emplace(
+            name, name == "default" ? SettingsOrigin::Builtin : SettingsOrigin::MainConfig);
+}
+
+/// Merges the GUI-managed side files over the just-parsed configuration, mirroring the layouts.yml
+/// merge: the freshest (GUI) content wins, and a broken file is logged and skipped rather than taking
+/// the whole configuration down. Color scheme side files (colorschemes/<name>.yml) are already
+/// resolved lazily by the reader when a profile references them, so only the per-profile files and the
+/// global settings.yml are handled here.
+/// @param config The configuration to augment in place (its @c configFile locates the side files).
+/// @param reader The reader used for the main config; reused to parse profile bodies (it carries the
+///               logger and ${VAR} replacer, and loadProfileBody takes its node explicitly).
+void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
+{
+    auto const dir = config.configFile.parent_path();
+
+    // Inheritance base for GUI profiles: the resolved default profile, captured BEFORE any side file
+    // can replace it in the map, so a GUI profile inherits the same defaults an inline one would.
+    auto base = TerminalProfile {};
+    if (auto const* def = config.findProfile(config.defaultProfileName.value()))
+        base = *def;
+
+    auto const profilesDir = dir / "profiles";
+    std::error_code ec;
+    if (std::filesystem::is_directory(profilesDir, ec))
+    {
+        auto files = std::vector<std::filesystem::path> {};
+        for (auto const& entry: std::filesystem::directory_iterator(profilesDir, ec))
+            if (entry.is_regular_file() && entry.path().extension() == ".yml")
+                files.push_back(entry.path());
+        std::ranges::sort(files); // deterministic load order across filesystems
+
+        for (auto const& path: files)
+        {
+            auto const name = path.stem().string();
+            auto const contents = readFile(path);
+            if (!contents)
+            {
+                configLog()("Skipping unreadable profile side file: {}", path.string());
+                continue;
+            }
+            auto root = YAML::Node {};
+            try
+            {
+                root = YAML::Load(*contents);
+            }
+            catch (std::exception const& e)
+            {
+                configLog()("Skipping malformed profile side file {}: {}", path.string(), e.what());
+                continue;
+            }
+            auto profile = base; // inherit the default profile's values, then overlay the file's keys
+            reader.loadProfileBody(root, profile);
+            config.profiles.value()[name] = std::move(profile);
+            config.profileOrigins[name] = SettingsOrigin::SideFile;
+        }
+    }
+
+    // settings.yml — GUI-owned global overrides (currently only default_profile). Applied last so it
+    // can select a profile the scan above just introduced.
+    if (auto loaded = loadGuiSettingsFile(dir / "settings.yml"))
+    {
+        config.guiManagedSettings = *loaded;
+        if (auto const& defaultProfile = loaded->defaultProfile)
+        {
+            if (config.findProfile(*defaultProfile))
+                config.defaultProfileName = *defaultProfile;
+            else
+                configLog()("settings.yml default_profile '{}' is not a known profile; keeping '{}'.",
+                            *defaultProfile,
+                            config.defaultProfileName.value());
+        }
+    }
+    else
+        configLog()("Failed to load settings.yml: {}", loaded.error());
+}
+
 /**
  * @return success or failure of loading the config file.
  */
@@ -349,6 +435,11 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     }
     else
         logger()("Failed to load layouts.yml: {}", fileLayouts.error());
+
+    // Provenance first, then the GUI side files (profiles/*.yml, settings.yml) on top — the same
+    // freshest-wins, broken-file-tolerant merge philosophy the layouts.yml merge above uses.
+    recordMainConfigOrigins(config);
+    mergeGuiManagedSideFiles(config, yamlVisitor);
 
     compareEntries(config, logger);
 }
@@ -487,6 +578,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("early_exit_threshold", c.earlyExitThreshold);
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
+        loadFromEntry("gui_config_locked", c.guiConfigLocked);
         loadFromEntry("experimental", c.experimentalFeatures);
         loadFromEntry("bypass_mouse_protocol_modifier", c.bypassMouseProtocolModifiers);
         loadFromEntry("on_mouse_select", c.onMouseSelection);
@@ -515,7 +607,11 @@ void YAMLConfigReader::load(Config& c)
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TerminalProfile& where)
 {
     logger()("loading profile {}\n", entry);
-    auto const child = node[entry];
+    loadProfileBody(node[entry], where);
+}
+
+void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile& where)
+{
     if (child)
     {
         if (child["ssh"])
@@ -2859,12 +2955,17 @@ std::string createForGlobal(Config const& c)
     return doc;
 }
 
+/// Appends one profile's body (every ConfigEntry member, walked via reflection) to @p doc using
+/// @p writer. The single source of truth for profile serialization, shared by createForProfile
+/// (which wraps it in `profiles:`/name scopes) and createForSingleProfile (which emits it bare for a
+/// profiles/<name>.yml side file). Because it is a reflection walk, a newly-added profile field is
+/// serialized here automatically — there is nothing to hand-list.
+/// @param writer The writer providing indentation and value formatting.
+/// @param doc The output buffer to append to.
+/// @param profile The profile to serialize.
 template <typename Writer>
-std::string createForProfile(Config const& c)
+void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile const& profile)
 {
-    auto doc = std::string {};
-    Writer writer;
-
     auto const processConfigEntry =
         [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
             auto name,
@@ -2902,6 +3003,26 @@ std::string createForProfile(Config const& c)
         [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
     };
 
+    Reflection::CallOnMembers(profile, completeOverload);
+}
+
+/// Serializes one profile's body as a bare top-level map for a `profiles/<name>.yml` GUI side file
+/// (no `profiles:`/name wrapper), so the same reader that parses an inline profile parses it back.
+template <typename Writer>
+std::string createForSingleProfile(TerminalProfile const& profile)
+{
+    auto doc = std::string {};
+    Writer writer;
+    emitProfileBody(writer, doc, profile);
+    return doc;
+}
+
+template <typename Writer>
+std::string createForProfile(Config const& c)
+{
+    auto doc = std::string {};
+    Writer writer;
+
     // inside profiles:
     doc.append(writer.replaceCommentPlaceholder(std::string { writer.whichDoc(c.profiles) }));
     {
@@ -2911,9 +3032,140 @@ std::string createForProfile(Config const& c)
             if constexpr (std::same_as<Writer, YAMLConfigWriter>)
                 doc.append(std::format("    {}: \n", name));
 
-            writer.scoped([&]() { Reflection::CallOnMembers(entry, completeOverload); });
+            writer.scoped([&]() { emitProfileBody(writer, doc, entry); });
         }
     }
+    return doc;
+}
+
+/// Appends one color palette's body (every colored slot: defaults, decorations, highlights, the
+/// 3×8 ANSI colors) to @p doc via @p writer. The single source of truth for palette serialization,
+/// shared by createForColorScheme (which wraps it in `color_schemes:`/name scopes) and
+/// createForSingleColorScheme (which emits it bare for a colorschemes/<name>.yml side file), so a new
+/// palette slot is added in exactly one place.
+/// @param writer The writer providing indentation and value formatting.
+/// @param doc The output buffer to append to.
+/// @param entry The palette to serialize.
+template <typename Writer>
+void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::ColorPalette const& entry)
+{
+    auto const processWithDoc = [&](auto&& docString, auto... val) {
+        doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
+    };
+
+    processWithDoc(documentation::DefaultColors {},
+                   entry.defaultBackground,
+                   entry.defaultForeground,
+                   entry.defaultForegroundBright,
+                   entry.defaultForegroundDimmed);
+
+    processWithDoc(documentation::HyperlinkDecoration {},
+                   entry.hyperlinkDecoration.normal,
+                   entry.hyperlinkDecoration.hover);
+
+    processWithDoc(documentation::YankHighlight {},
+                   entry.yankHighlight.foreground,
+                   entry.yankHighlight.foregroundAlpha,
+                   entry.yankHighlight.background,
+                   entry.yankHighlight.backgroundAlpha);
+
+    processWithDoc(documentation::NormalModeCursorline {},
+                   entry.normalModeCursorline.foreground,
+                   entry.normalModeCursorline.foregroundAlpha,
+                   entry.normalModeCursorline.background,
+                   entry.normalModeCursorline.backgroundAlpha);
+
+    processWithDoc(documentation::Selection {},
+                   entry.selection.foreground,
+                   entry.selection.foregroundAlpha,
+                   entry.selection.background,
+                   entry.selection.backgroundAlpha);
+
+    processWithDoc(documentation::SearchHighlight {},
+                   entry.searchHighlight.foreground,
+                   entry.searchHighlight.foregroundAlpha,
+                   entry.searchHighlight.background,
+                   entry.searchHighlight.backgroundAlpha);
+
+    processWithDoc(documentation::SearchHighlightFocused {},
+                   entry.searchHighlightFocused.foreground,
+                   entry.searchHighlightFocused.foregroundAlpha,
+                   entry.searchHighlightFocused.background,
+                   entry.searchHighlightFocused.backgroundAlpha);
+
+    processWithDoc(documentation::WordHighlightCurrent {},
+                   entry.wordHighlightCurrent.foreground,
+                   entry.wordHighlightCurrent.foregroundAlpha,
+                   entry.wordHighlightCurrent.background,
+                   entry.wordHighlightCurrent.backgroundAlpha);
+
+    processWithDoc(documentation::WordHighlight {},
+                   entry.wordHighlight.foreground,
+                   entry.wordHighlight.foregroundAlpha,
+                   entry.wordHighlight.background,
+                   entry.wordHighlight.backgroundAlpha);
+
+    processWithDoc(documentation::HintLabel {},
+                   entry.hintLabel.foreground,
+                   entry.hintLabel.foregroundAlpha,
+                   entry.hintLabel.background,
+                   entry.hintLabel.backgroundAlpha);
+
+    processWithDoc(documentation::HintMatch {},
+                   entry.hintMatch.foreground,
+                   entry.hintMatch.foregroundAlpha,
+                   entry.hintMatch.background,
+                   entry.hintMatch.backgroundAlpha);
+
+    processWithDoc(documentation::IndicatorStatusLine {},
+                   entry.indicatorStatusLineInsertMode.foreground,
+                   entry.indicatorStatusLineInsertMode.background,
+                   entry.indicatorStatusLineInactive.foreground,
+                   entry.indicatorStatusLineInactive.background);
+
+    processWithDoc(documentation::InputMethodEditor {},
+                   entry.inputMethodEditor.foreground,
+                   entry.inputMethodEditor.background);
+
+    processWithDoc(documentation::NormalColors {},
+                   entry.normalColor(0),
+                   entry.normalColor(1),
+                   entry.normalColor(2),
+                   entry.normalColor(3),
+                   entry.normalColor(4),
+                   entry.normalColor(5),
+                   entry.normalColor(6),
+                   entry.normalColor(7));
+
+    processWithDoc(documentation::BrightColors {},
+                   entry.brightColor(0),
+                   entry.brightColor(1),
+                   entry.brightColor(2),
+                   entry.brightColor(3),
+                   entry.brightColor(4),
+                   entry.brightColor(5),
+                   entry.brightColor(6),
+                   entry.brightColor(7));
+
+    processWithDoc(documentation::DimColors {},
+                   entry.dimColor(0),
+                   entry.dimColor(1),
+                   entry.dimColor(2),
+                   entry.dimColor(3),
+                   entry.dimColor(4),
+                   entry.dimColor(5),
+                   entry.dimColor(6),
+                   entry.dimColor(7));
+}
+
+/// Serializes one color palette as a bare top-level body for a `colorschemes/<name>.yml` GUI side
+/// file (no `color_schemes:`/name wrapper), matching that file's lazy read path.
+template <typename Writer>
+std::string createForSingleColorScheme(vtbackend::ColorPalette const& palette)
+{
+    auto doc = std::string {};
+    Writer writer;
+    emitColorPaletteBody(writer, doc, palette);
     return doc;
 }
 
@@ -2923,10 +3175,6 @@ std::string createForColorScheme(Config const& c)
     auto doc = std::string {};
     Writer writer;
 
-    auto const processWithDoc = [&](auto&& docString, auto... val) {
-        doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
-    };
-
     doc.append(writer.replaceCommentPlaceholder(c.colorschemes.documentation));
     writer.scoped([&]() {
         for (auto&& [name, entry]: c.colorschemes.value())
@@ -2934,139 +3182,7 @@ std::string createForColorScheme(Config const& c)
             doc.append(std::format("    {}: \n", name));
             {
                 const auto _ = typename Writer::Offset {};
-                processWithDoc(documentation::DefaultColors {},
-                               entry.defaultBackground,
-                               entry.defaultForeground,
-                               entry.defaultForegroundBright,
-                               entry.defaultForegroundDimmed);
-
-                // processWithDoc("# Background image support.\n"
-                //                "background_image:\n"
-                //                "    # Full path to the image to use as background.\n"
-                //                "    #\n"
-                //                "    # Default: empty string (disabled)\n"
-                //                "    # path: '/Users/trapni/Pictures/bg.png'\n"
-                //                "\n"
-                //                "    # Image opacity to be applied to make the image not look to
-                //                intense\n" "    # and not get too distracted by the background
-                //                image.\n" "    opacity: {}\n"
-                //                "\n"
-                //                "    # Optionally blurs background image to make it less
-                //                distracting\n" "    # and keep the focus on the actual terminal
-                //                contents.\n" "    #\n" "    blur: {}\n",
-                //                entry.backgroundImage->opacity,
-                //                entry.backgroundImage->blur);
-
-                // processWithDoc("# Mandates the color of the cursor and potentially overridden
-                // text.\n"
-                //                "#\n"
-                //                "# The color can be specified in RGB as usual, plus\n"
-                //                "# - CellForeground: Selects the cell's foreground color.\n"
-                //                "# - CellBackground: Selects the cell's background color.\n"
-                //                "cursor:\n"
-                //                "    # Specifies the color to be used for the actual cursor
-                //                shape.\n" "    #\n" "    default: {}\n" "    # Specifies the
-                //                color to be used for the characters that would\n" "    # be
-                //                covered otherwise.\n" "    #\n" "    text: {}\n",
-                //                entry.cursor.color, entry.cursor.textOverrideColor);
-
-                processWithDoc(documentation::HyperlinkDecoration {},
-                               entry.hyperlinkDecoration.normal,
-                               entry.hyperlinkDecoration.hover);
-
-                processWithDoc(documentation::YankHighlight {},
-                               entry.yankHighlight.foreground,
-                               entry.yankHighlight.foregroundAlpha,
-                               entry.yankHighlight.background,
-                               entry.yankHighlight.backgroundAlpha);
-
-                processWithDoc(documentation::NormalModeCursorline {},
-                               entry.normalModeCursorline.foreground,
-                               entry.normalModeCursorline.foregroundAlpha,
-                               entry.normalModeCursorline.background,
-                               entry.normalModeCursorline.backgroundAlpha);
-
-                processWithDoc(documentation::Selection {},
-                               entry.selection.foreground,
-                               entry.selection.foregroundAlpha,
-                               entry.selection.background,
-                               entry.selection.backgroundAlpha);
-
-                processWithDoc(documentation::SearchHighlight {},
-                               entry.searchHighlight.foreground,
-                               entry.searchHighlight.foregroundAlpha,
-                               entry.searchHighlight.background,
-                               entry.searchHighlight.backgroundAlpha);
-
-                processWithDoc(documentation::SearchHighlightFocused {},
-                               entry.searchHighlightFocused.foreground,
-                               entry.searchHighlightFocused.foregroundAlpha,
-                               entry.searchHighlightFocused.background,
-                               entry.searchHighlightFocused.backgroundAlpha);
-
-                processWithDoc(documentation::WordHighlightCurrent {},
-                               entry.wordHighlightCurrent.foreground,
-                               entry.wordHighlightCurrent.foregroundAlpha,
-                               entry.wordHighlightCurrent.background,
-                               entry.wordHighlightCurrent.backgroundAlpha);
-
-                processWithDoc(documentation::WordHighlight {},
-                               entry.wordHighlight.foreground,
-                               entry.wordHighlight.foregroundAlpha,
-                               entry.wordHighlight.background,
-                               entry.wordHighlight.backgroundAlpha);
-
-                processWithDoc(documentation::HintLabel {},
-                               entry.hintLabel.foreground,
-                               entry.hintLabel.foregroundAlpha,
-                               entry.hintLabel.background,
-                               entry.hintLabel.backgroundAlpha);
-
-                processWithDoc(documentation::HintMatch {},
-                               entry.hintMatch.foreground,
-                               entry.hintMatch.foregroundAlpha,
-                               entry.hintMatch.background,
-                               entry.hintMatch.backgroundAlpha);
-
-                processWithDoc(documentation::IndicatorStatusLine {},
-                               entry.indicatorStatusLineInsertMode.foreground,
-                               entry.indicatorStatusLineInsertMode.background,
-                               entry.indicatorStatusLineInactive.foreground,
-                               entry.indicatorStatusLineInactive.background);
-
-                processWithDoc(documentation::InputMethodEditor {},
-                               entry.inputMethodEditor.foreground,
-                               entry.inputMethodEditor.background);
-
-                processWithDoc(documentation::NormalColors {},
-                               entry.normalColor(0),
-                               entry.normalColor(1),
-                               entry.normalColor(2),
-                               entry.normalColor(3),
-                               entry.normalColor(4),
-                               entry.normalColor(5),
-                               entry.normalColor(6),
-                               entry.normalColor(7));
-
-                processWithDoc(documentation::BrightColors {},
-                               entry.brightColor(0),
-                               entry.brightColor(1),
-                               entry.brightColor(2),
-                               entry.brightColor(3),
-                               entry.brightColor(4),
-                               entry.brightColor(5),
-                               entry.brightColor(6),
-                               entry.brightColor(7));
-
-                processWithDoc(documentation::DimColors {},
-                               entry.dimColor(0),
-                               entry.dimColor(1),
-                               entry.dimColor(2),
-                               entry.dimColor(3),
-                               entry.dimColor(4),
-                               entry.dimColor(5),
-                               entry.dimColor(6),
-                               entry.dimColor(7));
+                emitColorPaletteBody(writer, doc, entry);
             }
         }
     });
@@ -3113,6 +3229,50 @@ std::string createString(Config const& c)
 {
     return createForGlobal<Writer>(c) + createForProfile<Writer>(c) + createForColorScheme<Writer>(c)
            + createKeyMapping<Writer>(c);
+}
+
+std::string emitProfileYaml(TerminalProfile const& profile)
+{
+    return createForSingleProfile<YAMLConfigWriter>(profile);
+}
+
+std::string emitColorSchemeYaml(vtbackend::ColorPalette const& palette)
+{
+    return createForSingleColorScheme<YAMLConfigWriter>(palette);
+}
+
+std::string emitGuiSettingsYaml(GuiManagedSettings const& settings)
+{
+    YAML::Emitter out;
+    out << YAML::BeginMap;
+    if (settings.defaultProfile)
+        out << YAML::Key << "default_profile" << YAML::Value << *settings.defaultProfile;
+    out << YAML::EndMap;
+    return std::string { out.c_str() } + '\n';
+}
+
+std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesystem::path const& path)
+{
+    auto settings = GuiManagedSettings {};
+
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec)
+        return settings; // nothing saved yet is not an error
+
+    auto doc = YAML::Node {};
+    try
+    {
+        doc = YAML::LoadFile(path.string());
+    }
+    catch (std::exception const& e)
+    {
+        return std::unexpected(std::string(e.what()));
+    }
+
+    if (auto const node = doc["default_profile"]; node && node.IsScalar())
+        settings.defaultProfile = node.as<std::string>();
+
+    return settings;
 }
 
 } // namespace contour::config

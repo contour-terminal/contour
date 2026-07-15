@@ -282,6 +282,28 @@ struct SimpleColorConfig
 
 using ColorConfig = std::variant<SimpleColorConfig, DualColorConfig>;
 
+/// Where a named profile or color scheme was defined, so the GUI can decide whether it may edit it.
+///
+/// contour.yml-defined and built-in entities are shown but read-only in the settings page (editing
+/// them would mean the GUI silently shadowing the hand-maintained file); only @ref SideFile entities,
+/// which the GUI itself created, are editable.
+enum class SettingsOrigin : uint8_t
+{
+    Builtin,    //!< A built-in default (e.g. the "default" color palette shipped with Contour).
+    MainConfig, //!< Defined inline in the hand-maintained contour.yml.
+    SideFile,   //!< Stored in a GUI-managed side file (profiles/<name>.yml, colorschemes/<name>.yml).
+};
+
+/// GUI-owned global overrides, persisted to the sibling `settings.yml` and merged over the
+/// hand-maintained contour.yml at load (freshest wins, exactly like `layouts.yml`).
+///
+/// Kept deliberately small: it holds only what the settings page can currently edit at global scope,
+/// and grows a field at a time as that surface widens. An unset optional means "defer to contour.yml".
+struct GuiManagedSettings
+{
+    std::optional<std::string> defaultProfile; //!< Overrides contour.yml's `default_profile` when set.
+};
+
 /// Selects which Qt RHI graphics API drives the terminal display.
 ///
 /// @c Auto lets Qt resolve the platform-native backend (Direct3D 11 on Windows, Metal on macOS,
@@ -997,6 +1019,7 @@ struct Config
     };
     ConfigEntry<bool, documentation::SpawnNewProcess> spawnNewProcess { false };
     ConfigEntry<bool, documentation::ReflowOnResize> reflowOnResize { true };
+    ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
     ConfigEntry<vtbackend::Modifiers, documentation::BypassMouseProtocolModifiers>
         bypassMouseProtocolModifiers { vtbackend::Modifier::Shift };
     ConfigEntry<vtbackend::Modifiers, documentation::MouseBlockSelectionModifiers>
@@ -1015,6 +1038,19 @@ struct Config
     ConfigEntry<std::string, documentation::DefaultLayout> defaultLayoutName { "" };
     ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>, documentation::ColorSchemes>
         colorschemes { { { "default", vtbackend::ColorPalette {} } } };
+
+    /// Runtime-only provenance of each entry in @ref profiles / @ref colorschemes, populated by the
+    /// loader (never serialized). The GUI consults these to gate editability: a name absent from the
+    /// map, or mapped to anything other than SettingsOrigin::SideFile, is read-only in the settings page.
+    /// @{
+    std::unordered_map<std::string, SettingsOrigin> profileOrigins {};
+    std::unordered_map<std::string, SettingsOrigin> colorSchemeOrigins {};
+    /// @}
+
+    /// GUI-owned global overrides loaded from the sibling `settings.yml` (see GuiManagedSettings).
+    /// Runtime-only mirror of that file; the resolved values have already been applied to the fields
+    /// above (e.g. @ref defaultProfileName), this simply records what the GUI had persisted.
+    GuiManagedSettings guiManagedSettings {};
 
     ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings };
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle, documentation::GitDrawings>
@@ -1279,6 +1315,15 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ColorPalette& where);
     void loadFromEntry(YAML::Node const& node, vtbackend::ColorPalette& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TerminalProfile& where);
+
+    /// Parses a profile body map (a profile's `shell`, `font`, `colors`, ... keys) directly into
+    /// @p where. This is the shared core of profile parsing: the `loadFromEntry(node, entry, profile)`
+    /// overload above resolves `node[entry]` to the body and delegates here, and the GUI side-file
+    /// loader (whose `profiles/<name>.yml` document root IS the body) calls it directly.
+    /// @param profileNode The profile body map; a null node is a no-op (@p where keeps its base values).
+    /// @param where The profile to populate; pre-seed it with an inheritance base before calling.
+    void loadProfileBody(YAML::Node const& profileNode, TerminalProfile& where);
+
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);
@@ -1867,6 +1912,34 @@ void compareEntries(Config& config, auto const& output);
 /// Used by SaveLayout to read back layouts.yml's own prior contents before appending the new one,
 /// so the file is never overwritten with the merged (inline + file) in-memory view.
 std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsFile(
+    std::filesystem::path const& path);
+
+/// Serializes a single profile's body as the exact text written to a `profiles/<name>.yml` GUI side
+/// file: a bare top-level map of the profile's fields (no `profiles:`/name wrapper), so the same
+/// reader that parses an inline profile parses it back. Produced by the reflection-driven config
+/// writer, so every profile field serializes here identically to how it appears in contour.yml and is
+/// covered without hand-listing.
+/// @param profile The profile to serialize.
+/// @return The complete YAML document text for the side file.
+[[nodiscard]] std::string emitProfileYaml(TerminalProfile const& profile);
+
+/// Serializes a single color palette as the exact text written to a `colorschemes/<name>.yml` GUI
+/// side file: a bare top-level palette body, matching the existing lazy read path for that file.
+/// @param palette The palette to serialize.
+/// @return The complete YAML document text for the side file.
+[[nodiscard]] std::string emitColorSchemeYaml(vtbackend::ColorPalette const& palette);
+
+/// Serializes the GUI-owned global overrides as the text written to the sibling `settings.yml`.
+/// @param settings The overrides to persist (unset fields are omitted, i.e. "defer to contour.yml").
+/// @return The complete YAML document text.
+[[nodiscard]] std::string emitGuiSettingsYaml(GuiManagedSettings const& settings);
+
+/// Loads ONLY the GUI-owned `settings.yml` at @p path (no merge). A missing file yields default
+/// (all-unset) settings — nothing saved yet is not an error; a file that fails to parse yields the
+/// parse error, so a caller about to rewrite it can refuse rather than destroy it.
+/// @param path The `settings.yml` path (sibling of contour.yml).
+/// @return The parsed overrides, or a human-readable parse error.
+[[nodiscard]] std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(
     std::filesystem::path const& path);
 
 /// Splits a command line into tokens the way a shell would: whitespace separates tokens; single quotes
