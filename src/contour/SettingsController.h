@@ -143,6 +143,9 @@ class SettingsController: public QObject
     Q_INVOKABLE bool saveProfileAs(QString const& newName);
     /// Removes profile @p name's side file. @return true on success.
     Q_INVOKABLE bool deleteProfile(QString const& name);
+    /// Renames a GUI-created profile's side file from @p oldName to @p newName, moving the default-profile
+    /// pointer and the open draft with it. Only side-file profiles can be renamed. @return success.
+    Q_INVOKABLE bool renameProfile(QString const& oldName, QString const& newName);
     // }}}
 
     /// Sets the default profile (persisted to settings.yml, overriding contour.yml). @return success.
@@ -164,6 +167,9 @@ class SettingsController: public QObject
     Q_INVOKABLE bool saveColorScheme(QString const& name);
     /// Removes color scheme @p name's side file. @return true on success.
     Q_INVOKABLE bool deleteColorScheme(QString const& name);
+    /// Renames a GUI-created color scheme's side file from @p oldName to @p newName, moving the open
+    /// scheme draft with it. Only side-file schemes can be renamed. @return success.
+    Q_INVOKABLE bool renameColorScheme(QString const& oldName, QString const& newName);
     // }}}
 
   signals:

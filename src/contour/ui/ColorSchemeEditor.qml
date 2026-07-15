@@ -138,13 +138,8 @@ Item {
                     onClicked: root.controller.saveColorScheme(schemeNameField.text.trim())
                 }
                 Item { Layout.fillWidth: true }
-                Button {
-                    objectName: "deleteSchemeButton"
-                    text: qsTr("Delete scheme")
-                    enabled: root.controller && !root.controller.locked
-                             && root.controller.editingScheme.length > 0
-                    onClicked: root.controller.deleteColorScheme(root.controller.editingScheme)
-                }
+                // Delete lives on the color-scheme list row (hover trashcan / right-click), routed
+                // through the settings page's confirmation dialog.
             }
         }
     }

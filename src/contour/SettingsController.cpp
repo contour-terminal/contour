@@ -669,6 +669,46 @@ bool SettingsController::deleteProfile(QString const& name)
 
 // }}}
 
+bool SettingsController::renameProfile(QString const& oldName, QString const& newName)
+{
+    if (_locked)
+        return fail("The settings page is read-only.");
+    if (profileOrigin(oldName.toStdString()) != SettingsOrigin::SideFile)
+        return fail("Only GUI-created profiles can be renamed here.");
+    auto const trimmed = newName.trimmed();
+    if (trimmed.isEmpty())
+        return fail("Enter a name for the profile.");
+    if (trimmed == oldName)
+        return true; // nothing to do
+    if (_config().findProfile(trimmed.toStdString()) != nullptr)
+        return fail("A profile with that name already exists.");
+
+    // Copy the profile out: findProfile's pointer is invalidated by _apply()'s in-place config reload.
+    auto const* profile = _config().findProfile(oldName.toStdString());
+    if (profile == nullptr)
+        return fail("Profile not found.");
+    auto const profileCopy = *profile;
+    bool const wasDefault = (_defaultProfile == oldName);
+
+    if (auto const result = _store->saveProfile(trimmed.toStdString(), profileCopy); !result)
+        return fail(result.error());
+    if (auto const result = _store->deleteProfile(oldName.toStdString()); !result)
+        return fail(result.error());
+    if (wasDefault)
+    {
+        auto settings = _config().guiManagedSettings;
+        settings.defaultProfile = trimmed.toStdString();
+        if (auto const result = _store->saveGuiSettings(settings); !result)
+            return fail(result.error());
+    }
+
+    _apply();
+    refresh();
+    if (_editingProfile == oldName)
+        editProfile(trimmed);
+    return true;
+}
+
 bool SettingsController::setDefaultProfile(QString const& name)
 {
     if (_locked)
@@ -795,6 +835,41 @@ void SettingsController::setSchemeColor(QString const& key, QString const& color
             emit schemeDraftChanged();
             return;
         }
+}
+
+bool SettingsController::renameColorScheme(QString const& oldName, QString const& newName)
+{
+    if (_locked)
+        return fail("The settings page is read-only.");
+    auto const schemesDir = _config().configFile.parent_path() / "colorschemes";
+    if (!std::filesystem::exists(schemesDir / (oldName.toStdString() + ".yml")))
+        return fail("Only GUI-created color schemes can be renamed here.");
+    auto const trimmed = newName.trimmed();
+    if (trimmed.isEmpty())
+        return fail("Enter a name for the color scheme.");
+    if (trimmed == oldName)
+        return true; // nothing to do
+    if (std::filesystem::exists(schemesDir / (trimmed.toStdString() + ".yml")))
+        return fail("A color scheme with that name already exists.");
+
+    // Load the old palette (config-known or from its side file), then write it under the new name.
+    auto palette = vtbackend::ColorPalette {};
+    if (auto const it = _config().colorschemes.value().find(oldName.toStdString());
+        it != _config().colorschemes.value().end())
+        palette = it->second;
+    else if (auto const loaded = config::loadColorSchemeFile(schemesDir / (oldName.toStdString() + ".yml")))
+        palette = *loaded;
+
+    if (auto const result = _store->saveColorScheme(trimmed.toStdString(), palette); !result)
+        return fail(result.error());
+    if (auto const result = _store->deleteColorScheme(oldName.toStdString()); !result)
+        return fail(result.error());
+
+    _apply();
+    refresh();
+    if (_editingScheme == oldName)
+        editColorScheme(trimmed);
+    return true;
 }
 
 bool SettingsController::saveColorScheme(QString const& name)

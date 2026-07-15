@@ -35,13 +35,6 @@ Rectangle {
 
     color: sys.window
 
-    readonly property var profileNameList: {
-        var out = []
-        if (controller)
-            for (var i = 0; i < controller.profiles.length; ++i)
-                out.push(controller.profiles[i].name)
-        return out
-    }
     readonly property var schemeNameList: {
         var out = []
         if (controller)
@@ -76,6 +69,32 @@ Rectangle {
         if (root.editorMode === "keybindings")
             return qsTr("Configured in contour.yml (read-only here).")
         return ""
+    }
+
+    // Delete is confirmed through a modal dialog; the row that asked stashes its target here first.
+    property string pendingDeleteKind: "" // "profile" | "scheme"
+    property string pendingDeleteName: ""
+
+    function requestDelete(kind, name) {
+        root.pendingDeleteKind = kind
+        root.pendingDeleteName = name
+        deleteDialog.open()
+    }
+
+    ConfirmDialog {
+        id: deleteDialog
+        heading: qsTr("Delete “%1”").arg(root.pendingDeleteName)
+        confirmText: qsTr("Delete")
+        message: root.pendingDeleteKind === "profile"
+                 ? qsTr("Delete the profile “%1”? This removes its GUI side file and cannot be undone.").arg(root.pendingDeleteName)
+                 : qsTr("Delete the color scheme “%1”? This removes its GUI side file and cannot be undone.").arg(root.pendingDeleteName)
+        onConfirmed: {
+            if (!root.controller) return
+            if (root.pendingDeleteKind === "profile")
+                root.controller.deleteProfile(root.pendingDeleteName)
+            else
+                root.controller.deleteColorScheme(root.pendingDeleteName)
+        }
     }
 
     ColumnLayout {
@@ -195,44 +214,28 @@ Rectangle {
                             Layout.leftMargin: 16
                             Layout.topMargin: 14
                         }
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 16
-                            Layout.rightMargin: 16
-                            spacing: 8
-                            Label {
-                                text: qsTr("Default")
-                                color: root.subtleText
-                                Layout.alignment: Qt.AlignVCenter
-                            }
-                            ComboBox {
-                                id: defaultProfileCombo
-                                objectName: "defaultProfileCombo"
-                                Layout.fillWidth: true
-                                model: root.profileNameList
-                                enabled: root.controller && !root.controller.locked
-                                currentIndex: root.controller ? root.profileNameList.indexOf(root.controller.defaultProfile) : -1
-                                onActivated: if (root.controller) root.controller.setDefaultProfile(currentText)
-                            }
-                        }
                         Repeater {
                             model: root.controller ? root.controller.profiles : []
-                            delegate: SettingsNavItem {
+                            delegate: SettingsListItem {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 Layout.leftMargin: 8
                                 Layout.rightMargin: 8
-                                text: modelData.name
-                                showDot: true
-                                dotColor: modelData.isDefault ? sys.highlight : root.subtleText
-                                badge: modelData.origin === "side" ? (modelData.isDefault ? "★" : "") : "🔒"
+                                entryName: modelData.name
+                                showHome: true
+                                isDefault: modelData.isDefault === true
+                                editable: modelData.editable === true
+                                locked: root.controller && root.controller.locked
                                 selected: root.editorMode === "profile" && root.controller
                                           && root.controller.editingProfile === modelData.name
-                                onClicked: {
+                                onActivated: {
                                     if (!root.controller) return
                                     root.controller.editProfile(modelData.name)
                                     root.editorMode = "profile"
                                 }
+                                onSetDefaultRequested: if (root.controller) root.controller.setDefaultProfile(modelData.name)
+                                onRenameRequested: (newName) => { if (root.controller) root.controller.renameProfile(modelData.name, newName) }
+                                onDeleteRequested: root.requestDelete("profile", modelData.name)
                             }
                         }
                         SettingsNavItem {
@@ -262,22 +265,24 @@ Rectangle {
                         }
                         Repeater {
                             model: root.controller ? root.controller.colorSchemes : []
-                            delegate: SettingsNavItem {
+                            delegate: SettingsListItem {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 Layout.leftMargin: 8
                                 Layout.rightMargin: 8
-                                text: modelData.name
-                                showDot: true
-                                dotColor: root.subtleText
-                                badge: modelData.editable ? "" : "🔒"
+                                entryName: modelData.name
+                                showHome: false
+                                editable: modelData.editable === true
+                                locked: root.controller && root.controller.locked
                                 selected: root.editorMode === "scheme" && root.controller
                                           && root.controller.editingScheme === modelData.name
-                                onClicked: {
+                                onActivated: {
                                     if (!root.controller) return
                                     root.controller.editColorScheme(modelData.name)
                                     root.editorMode = "scheme"
                                 }
+                                onRenameRequested: (newName) => { if (root.controller) root.controller.renameColorScheme(modelData.name, newName) }
+                                onDeleteRequested: root.requestDelete("scheme", modelData.name)
                             }
                         }
                         SettingsNavItem {
@@ -518,14 +523,8 @@ Rectangle {
                                     }
                                 }
                                 Item { Layout.fillWidth: true }
-                                Button {
-                                    objectName: "deleteProfileButton"
-                                    text: qsTr("Delete")
-                                    enabled: root.controller && !root.controller.locked
-                                             && !root.controller.editingReadOnly
-                                             && root.controller.editingProfile.length > 0
-                                    onClicked: root.controller.deleteProfile(root.controller.editingProfile)
-                                }
+                                // Delete lives on the profile list row (hover trashcan / right-click),
+                                // routed through the page's confirmation dialog.
                             }
                         }
                     }

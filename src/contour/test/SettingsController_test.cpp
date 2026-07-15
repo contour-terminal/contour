@@ -169,6 +169,59 @@ TEST_CASE("SettingsController: setDefaultProfile persists to settings.yml and ov
     CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "settings.yml"));
 }
 
+TEST_CASE("SettingsController: rename moves a side-file profile and follows the default + draft",
+          "[settings]")
+{
+    auto fx = Fixture(kBasicConfig);
+    fx.controller->newProfile("main");
+    REQUIRE(fx.controller->saveProfileAs("work"));
+    REQUIRE(fx.controller->setDefaultProfile("work"));
+    fx.controller->editProfile("work"); // the profile we are about to rename is the open draft
+
+    auto const dir = std::filesystem::path(fx.dir.path().toStdString());
+    REQUIRE(fx.controller->renameProfile("work", "office"));
+
+    // The side file moved, and the reloaded config carries the new name only.
+    CHECK(std::filesystem::exists(dir / "profiles" / "office.yml"));
+    CHECK_FALSE(std::filesystem::exists(dir / "profiles" / "work.yml"));
+    CHECK(fx.cfg.findProfile("office") != nullptr);
+    CHECK(fx.cfg.findProfile("work") == nullptr);
+
+    // The default pointer and the open draft both followed the rename.
+    CHECK(fx.controller->defaultProfile() == "office");
+    CHECK(fx.cfg.defaultProfileName.value() == "office");
+    CHECK(fx.controller->editingProfile() == "office");
+}
+
+TEST_CASE("SettingsController: rename refuses contour.yml profiles and name collisions", "[settings]")
+{
+    auto fx = Fixture(kBasicConfig);
+    fx.controller->newProfile("main");
+    REQUIRE(fx.controller->saveProfileAs("work"));
+
+    CHECK(fx.controller->renameProfile("main", "whatever") == false); // 'main' is from contour.yml
+    CHECK(fx.controller->renameProfile("work", "main") == false);     // collides with contour.yml 'main'
+    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "profiles"
+                                  / "work.yml"));
+}
+
+TEST_CASE("SettingsController: rename moves a side-file color scheme with its draft", "[settings]")
+{
+    auto fx = Fixture(kBasicConfig);
+    fx.controller->newColorScheme("");
+    fx.controller->setSchemeColor("background", "#101010");
+    REQUIRE(fx.controller->saveColorScheme("midnight"));
+
+    auto const dir = std::filesystem::path(fx.dir.path().toStdString());
+    REQUIRE(std::filesystem::exists(dir / "colorschemes" / "midnight.yml"));
+
+    fx.controller->editColorScheme("midnight");
+    REQUIRE(fx.controller->renameColorScheme("midnight", "nightfall"));
+    CHECK(std::filesystem::exists(dir / "colorschemes" / "nightfall.yml"));
+    CHECK_FALSE(std::filesystem::exists(dir / "colorschemes" / "midnight.yml"));
+    CHECK(fx.controller->editingScheme() == "nightfall");
+}
+
 TEST_CASE("SettingsController: enum and integer profile fields round-trip", "[settings]")
 {
     auto fx = Fixture(kBasicConfig);
