@@ -155,7 +155,7 @@ ApplicationWindow
         }
 
         // The in-app settings page, shown in place of the terminal when the WindowController's
-        // settingsActive flag is set (the tab-strip gear, or the OpenSettings action). A peer of the
+        // settingsActive flag is set (the tab-strip gear, or the OpenConfiguration action). A peer of the
         // pane-tree Loader, honoring the "single renderer" architecture — settings is not a pane.
         Loader {
             id: settingsPageLoader

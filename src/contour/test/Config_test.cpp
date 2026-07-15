@@ -366,6 +366,27 @@ input_mapping:
     CHECK(hasLaunchLayoutBinding);
 }
 
+TEST_CASE("Config: OpenConfiguration in_editor parameter parses", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+input_mapping:
+    - { mods: [Control], key: F1, action: OpenConfiguration }
+    - { mods: [Control], key: F2, action: OpenConfiguration, in_editor: true }
+)"sv);
+
+    // The defaults bind OpenConfiguration as CHAR mappings, so the two custom KEY mappings are ours.
+    auto flags = std::vector<bool> {};
+    for (auto const& mapping: config.inputMappings.value().keyMappings)
+        if (auto const* oc = std::get_if<contour::actions::OpenConfiguration>(&mapping.binding.at(0)))
+            flags.push_back(oc->inEditor);
+
+    REQUIRE(flags.size() == 2);
+    CHECK(std::ranges::count(flags, false) == 1); // default -> in-app settings dialog
+    CHECK(std::ranges::count(flags, true) == 1);  // in_editor: true -> external editor
+}
+
 TEST_CASE("Config: an out-of-range or non-numeric ratio is ignored", "[config][layout]")
 {
     QTemporaryDir dir;

@@ -432,7 +432,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::NoSearchHighlight);
     bool operator()(actions::OpenCommandPalette);
     bool operator()(actions::OpenConfiguration);
-    bool operator()(actions::OpenSettings);
     bool operator()(actions::OpenFileManager);
     bool operator()(actions::OpenSelection);
     bool operator()(actions::PasteClipboard);

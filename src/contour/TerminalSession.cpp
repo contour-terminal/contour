@@ -1868,8 +1868,17 @@ bool TerminalSession::operator()(actions::NoSearchHighlight)
     return true;
 }
 
-bool TerminalSession::operator()(actions::OpenConfiguration)
+bool TerminalSession::operator()(actions::OpenConfiguration event)
 {
+    // By default open the in-app settings page over this session's window (routed through the manager
+    // like every window-scoped op). The explicit `in_editor: true` opt-in instead opens the raw
+    // configuration file in the OS's external editor — the historical behavior.
+    if (!event.inEditor)
+    {
+        _manager->openSettings(/*acting*/ this);
+        return true;
+    }
+
     if (!_app.externalLauncher().openUrl(QUrl(QString::fromUtf8(_config.configFile.string().c_str()))))
         errorLog()("Could not open configuration file \"{}\".", _config.configFile.generic_string());
 
@@ -2260,14 +2269,6 @@ bool TerminalSession::operator()(actions::OpenCommandPalette)
     // Open the GUI-native command palette over this session's window. Routed through the manager like
     // every other window-scoped op so it targets the window this session is actually in.
     _manager->openCommandPalette(/*acting*/ this);
-    return true;
-}
-
-bool TerminalSession::operator()(actions::OpenSettings)
-{
-    // Show the in-app settings page over this session's window. Routed through the manager (like the
-    // command palette) so it targets the window this session actually lives in.
-    _manager->openSettings(/*acting*/ this);
     return true;
 }
 

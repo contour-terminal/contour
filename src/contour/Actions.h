@@ -67,8 +67,7 @@ struct IncreaseOpacity{};
 struct NewTerminal{ std::optional<std::string> profileName; };
 struct NoSearchHighlight{};
 struct OpenCommandPalette{};
-struct OpenConfiguration{};
-struct OpenSettings{};            // open the in-app settings page as a tab in this window
+struct OpenConfiguration{ bool inEditor = false; }; // GUI settings page by default; in_editor opens the file
 struct OpenFileManager{};
 struct OpenSelection{};
 struct PasteClipboard{ bool strip = false; };
@@ -165,7 +164,6 @@ using Action = std::variant<CancelSelection,
                             NoSearchHighlight,
                             OpenCommandPalette,
                             OpenConfiguration,
-                            OpenSettings,
                             OpenFileManager,
                             OpenSelection,
                             PasteClipboard,
@@ -392,10 +390,9 @@ namespace documentation
         "description and key binding. Recently used commands are listed first, then all commands "
         "alphabetically."
     };
-    constexpr inline std::string_view OpenConfiguration { "Opens the configuration file." };
-    constexpr inline std::string_view OpenSettings {
-        "Opens the in-app settings page as a tab in the current window, where profiles, color schemes "
-        "and the default profile can be edited via the GUI."
+    constexpr inline std::string_view OpenConfiguration {
+        "Opens the in-app settings page (profiles, color schemes, global settings). Set `in_editor: true` "
+        "on the binding to instead open the configuration file in an external editor."
     };
     constexpr inline std::string_view OpenFileManager {
         "Opens the current working directory in a system file manager."
@@ -626,7 +623,6 @@ struct ActionCatalogEntry
             "OpenCommandPalette", Action { OpenCommandPalette {} }, documentation::OpenCommandPalette },
         ActionCatalogEntry {
             "OpenConfiguration", Action { OpenConfiguration {} }, documentation::OpenConfiguration },
-        ActionCatalogEntry { "OpenSettings", Action { OpenSettings {} }, documentation::OpenSettings },
         ActionCatalogEntry {
             "OpenFileManager", Action { OpenFileManager {} }, documentation::OpenFileManager },
         ActionCatalogEntry { "OpenSelection", Action { OpenSelection {} }, documentation::OpenSelection },

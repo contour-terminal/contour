@@ -142,8 +142,8 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param acting The session that triggered the action; its hosting window shows the palette.
     void openCommandPalette(TerminalSession* acting);
 
-    /// Shows the in-app settings page over the window hosting @p acting (the OpenSettings action).
-    /// No-ops if @p acting has no hosting window.
+    /// Shows the in-app settings page over the window hosting @p acting (the OpenConfiguration action's
+    /// default, and the tab-strip gear). No-ops if @p acting has no hosting window.
     /// @param acting The session that triggered the action; its hosting window shows the settings page.
     void openSettings(TerminalSession* acting);
 

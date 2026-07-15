@@ -2655,6 +2655,14 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             }
         }
 
+        if (holds_alternative<actions::OpenConfiguration>(action))
+        {
+            // Default opens the in-app settings page; `in_editor: true` opens the config file instead.
+            if (auto inEditor = node["in_editor"]; inEditor && inEditor.IsScalar())
+                return actions::OpenConfiguration { inEditor.as<bool>() };
+            return action;
+        }
+
         if (holds_alternative<actions::PasteSelection>(action))
         {
             if (auto eval = node["evaluate_in_shell"]; eval && eval.IsScalar())

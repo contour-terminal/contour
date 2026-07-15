@@ -229,8 +229,8 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
         return _settingsController.get();
     }
 
-    /// Shows the settings page over this window (the OpenSettings action, and the tab-strip gear).
-    /// Idempotent: showing it while already shown does nothing.
+    /// Shows the settings page over this window (the OpenConfiguration action's default, and the
+    /// tab-strip gear). Idempotent: showing it while already shown does nothing.
     void openSettings();
 
     /// Returns from the settings page to the active tab's terminal content. A no-op if not showing it.
