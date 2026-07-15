@@ -2404,7 +2404,12 @@ bool TerminalSession::operator()(actions::LaunchLayout const& event)
 
 bool TerminalSession::operator()(actions::SaveLayout const& event)
 {
-    _manager->saveLayout(event.name, this);
+    // Naming no layout means "ask me for one": open the save-as prompt (the mirror of a colorless
+    // SetTabColor opening the color picker). Naming one means the user already decided, so save directly.
+    if (event.name.empty())
+        _manager->beginSaveLayoutPrompt(/*acting*/ this);
+    else
+        _manager->saveLayout(event.name, this);
     return true;
 }
 

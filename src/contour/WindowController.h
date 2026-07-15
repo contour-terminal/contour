@@ -141,6 +141,15 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// SetTabColor action when it names no color). No-op when this window has no active tab. Emits
     /// tabColorPickRequested() with the active tab's row so exactly that TabItem opens its flyout.
     Q_INVOKABLE void beginActiveTabColorPick();
+    /// Asks the QML to open this window's "save layout as" name prompt (the keyboard/palette entry point
+    /// for a nameless SaveLayout action). Emits saveLayoutRequested(); the dialog calls saveLayoutAs()
+    /// back with the name the user types.
+    Q_INVOKABLE void beginSaveLayoutPrompt();
+    /// Saves this window's tabs as the layout named @p name (the "save layout as" prompt's accept), via
+    /// the manager's saveLayout(). A blank name or a window with no active session is a no-op, so an
+    /// empty prompt never writes a nameless layout.
+    /// @param name The layout name the user typed.
+    Q_INVOKABLE void saveLayoutAs(QString const& name);
     /// Colors the ACTIVE tab (the keyboard entry point for `SetTabColor` carrying a color). Recorded
     /// as the user's own choice, so it outranks any color the application assigned via DECAC.
     /// @param color The color to apply.
@@ -445,6 +454,9 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// Requests that this window show its command palette. Per-window (like tabTitleEditRequested), so
     /// the popup opens over the window the user pressed the chord in — not over every open window.
     void commandPaletteRequested();
+    /// Requests that this window open its "save layout as" name prompt. Per-window, exactly like
+    /// commandPaletteRequested: the prompt opens over the window the SaveLayout action fired in.
+    void saveLayoutRequested();
     /// The context menu's rows changed. Emitted before contextMenuRequested(), so the QML has already
     /// rebuilt the menu by the time it is asked to pop it.
     void contextMenuModelChanged();

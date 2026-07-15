@@ -314,6 +314,26 @@ void WindowController::beginActiveTabColorPick()
     emit tabColorPickRequested(index);
 }
 
+void WindowController::beginSaveLayoutPrompt()
+{
+    // Window-scoped, not tab-scoped: the layout is the whole window's tab set, so unlike the tab-title /
+    // tab-color prompts there is no row to name — the dialog just opens over this window.
+    emit saveLayoutRequested();
+}
+
+void WindowController::saveLayoutAs(QString const& name)
+{
+    // A blank prompt must never write a nameless layout (see the header). Trim first, so trailing
+    // whitespace neither passes the guard nor lands in the saved key.
+    auto const trimmed = name.trimmed();
+    if (trimmed.isEmpty())
+        return;
+    // Route through the same manager entry point the SaveLayout keybinding uses, targeting THIS window's
+    // active session — saveLayout() resolves the hosting window from it and serializes that window.
+    if (auto* session = activeSession(); session != nullptr)
+        _manager.saveLayout(trimmed.toStdString(), session);
+}
+
 // Both of these route through the row-based setters the color flyout already uses, so the keyboard and
 // the mouse write the identical TabColorSource::User slot. With no active tab the row is -1, which
 // tabAtRow() bounds-checks into a null tab — the no-op the header promises, without a second guard.

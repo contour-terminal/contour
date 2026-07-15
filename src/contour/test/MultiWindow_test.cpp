@@ -573,6 +573,82 @@ TEST_CASE("beginActiveTabColorPick requests the active tab's picker, per window"
     }
 }
 
+TEST_CASE("the SaveLayout action saves the acting window, and nameless opens the prompt",
+          "[contour][multiwindow][layout]")
+{
+    // The layout-side mirror of the SetTabColor chain: a named SaveLayout runs the whole keybinding path
+    // headless (action -> TerminalSession::operator() -> the manager -> the injected LayoutStore), while a
+    // nameless one opens the save-as prompt instead of saving anything — exactly as a colorless SetTabColor
+    // opens the picker rather than coloring.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto storeOwned = std::make_unique<contour::test::InMemoryLayoutStore>();
+    auto* store = storeOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned), std::move(storeOwned) };
+    auto& manager = app.manager();
+    ScopedController window { manager };
+
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+
+    auto* tab = manager.model().window(window.id)->tabAt(0);
+    REQUIRE(tab != nullptr);
+    auto* session = manager.sessionForId(tab->activePane()->session());
+    REQUIRE(session != nullptr);
+
+    SECTION("a named SaveLayout persists the window's tabs through the store")
+    {
+        CHECK((*session)(contour::actions::SaveLayout { .name = "dev" }));
+
+        REQUIRE(store->savedPaths.size() == 1);
+        CHECK(store->layouts.contains("dev"));
+        // The live config sees it too, so a LaunchLayout later in this run finds it.
+        CHECK(app.app().config().layouts.value().contains("dev"));
+    }
+
+    SECTION("a nameless SaveLayout opens the save-as prompt instead of saving anything")
+    {
+        auto spy = QSignalSpy(window.controller, &contour::WindowController::saveLayoutRequested);
+
+        CHECK((*session)(contour::actions::SaveLayout {}));
+
+        CHECK(spy.count() == 1);          // it asked for a name
+        CHECK(store->savedPaths.empty()); // and wrote nothing until it has one
+    }
+
+    SECTION("saveLayoutAs persists under the typed name, and a blank name is a no-op")
+    {
+        window->saveLayoutAs(QStringLiteral("  from-dialog  ")); // the prompt's accept, whitespace and all
+        REQUIRE(store->savedPaths.size() == 1);
+        CHECK(store->layouts.contains("from-dialog")); // trimmed before it lands as the key
+
+        window->saveLayoutAs(QStringLiteral("   ")); // a blank field must never write a nameless layout
+        CHECK(store->savedPaths.size() == 1);        // still just the one save
+    }
+
+    for (int row = window->count() - 1; row >= 0; --row)
+        window->closeTabAtIndex(row);
+}
+
+TEST_CASE("beginSaveLayoutPrompt requests the save-as prompt, per window", "[contour][multiwindow]")
+{
+    // The same per-window routing the color picker gets: the request must reach only the window whose
+    // controller was asked, or a chord pressed in window B pops a prompt over window A.
+    TestApp app;
+    auto& manager = app.manager();
+    ScopedController windowA { manager };
+    ScopedController windowB { manager };
+    createTabs(manager, *windowA, 2);
+    createTabs(manager, *windowB, 1);
+
+    auto spyB = QSignalSpy(windowB.controller, &contour::WindowController::saveLayoutRequested);
+    auto spyA = QSignalSpy(windowA.controller, &contour::WindowController::saveLayoutRequested);
+
+    windowB->beginSaveLayoutPrompt();
+
+    CHECK(spyB.count() == 1);
+    CHECK(spyA.count() == 0);
+}
+
 TEST_CASE("a user's tab color outranks DECAC and survives a terminal reset", "[contour][multiwindow][model]")
 {
     // The user's choice always wins, and no escape sequence can take it away: a DECAC reset — which is
