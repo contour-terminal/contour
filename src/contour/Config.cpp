@@ -3251,6 +3251,26 @@ std::string emitGuiSettingsYaml(GuiManagedSettings const& settings)
     return std::string { out.c_str() } + '\n';
 }
 
+std::optional<vtbackend::ColorPalette> loadColorSchemeFile(std::filesystem::path const& path)
+{
+    auto const contents = readFile(path);
+    if (!contents)
+        return std::nullopt;
+
+    try
+    {
+        auto reader = YAMLConfigReader(path.string(), configLog);
+        auto palette = vtbackend::ColorPalette {};
+        reader.loadFromEntry(YAML::Load(*contents), palette);
+        return palette;
+    }
+    catch (std::exception const& e)
+    {
+        configLog()("Could not read color scheme {}: {}", path.string(), e.what());
+        return std::nullopt;
+    }
+}
+
 std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesystem::path const& path)
 {
     auto settings = GuiManagedSettings {};

@@ -513,6 +513,9 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/contour/ui/CommandPalette.qml"),
         QStringLiteral("qrc:/contour/ui/SaveLayoutDialog.qml"),
         QStringLiteral("qrc:/contour/ui/TerminalContextMenu.qml"),
+        QStringLiteral("qrc:/contour/ui/SettingRow.qml"),
+        QStringLiteral("qrc:/contour/ui/ColorSchemeEditor.qml"),
+        QStringLiteral("qrc:/contour/ui/SettingsPage.qml"),
     };
 
     for (auto const& url: components)

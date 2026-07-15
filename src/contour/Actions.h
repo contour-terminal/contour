@@ -68,6 +68,7 @@ struct NewTerminal{ std::optional<std::string> profileName; };
 struct NoSearchHighlight{};
 struct OpenCommandPalette{};
 struct OpenConfiguration{};
+struct OpenSettings{};            // open the in-app settings page as a tab in this window
 struct OpenFileManager{};
 struct OpenSelection{};
 struct PasteClipboard{ bool strip = false; };
@@ -164,6 +165,7 @@ using Action = std::variant<CancelSelection,
                             NoSearchHighlight,
                             OpenCommandPalette,
                             OpenConfiguration,
+                            OpenSettings,
                             OpenFileManager,
                             OpenSelection,
                             PasteClipboard,
@@ -391,6 +393,10 @@ namespace documentation
         "alphabetically."
     };
     constexpr inline std::string_view OpenConfiguration { "Opens the configuration file." };
+    constexpr inline std::string_view OpenSettings {
+        "Opens the in-app settings page as a tab in the current window, where profiles, color schemes "
+        "and the default profile can be edited via the GUI."
+    };
     constexpr inline std::string_view OpenFileManager {
         "Opens the current working directory in a system file manager."
     };
@@ -620,6 +626,7 @@ struct ActionCatalogEntry
             "OpenCommandPalette", Action { OpenCommandPalette {} }, documentation::OpenCommandPalette },
         ActionCatalogEntry {
             "OpenConfiguration", Action { OpenConfiguration {} }, documentation::OpenConfiguration },
+        ActionCatalogEntry { "OpenSettings", Action { OpenSettings {} }, documentation::OpenSettings },
         ActionCatalogEntry {
             "OpenFileManager", Action { OpenFileManager {} }, documentation::OpenFileManager },
         ActionCatalogEntry { "OpenSelection", Action { OpenSelection {} }, documentation::OpenSelection },

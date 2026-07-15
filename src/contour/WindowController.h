@@ -31,6 +31,7 @@ namespace contour
 class TerminalSessionManager;
 class TerminalSession;
 class PaneProxy;
+class SettingsController;
 
 /// Per-OS-window Qt/QML adapter over one vtmux::Window.
 ///
@@ -74,6 +75,8 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     Q_PROPERTY(int tabBarVisibility READ tabBarVisibility NOTIFY tabBarVisibilityChanged)
     Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
+    Q_PROPERTY(bool settingsActive READ settingsActive NOTIFY settingsActiveChanged)
+    Q_PROPERTY(contour::SettingsController* settingsController READ settingsController CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
 
@@ -211,6 +214,30 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// used. Unknown ids are ignored (a row can go stale between a refresh and a click).
     /// @param id The command id (CommandPaletteModel's `commandId` role).
     Q_INVOKABLE void runCommand(QString const& id);
+    // }}}
+
+    // {{{ Settings page
+    /// Whether this window's content area currently shows the in-app settings page instead of the
+    /// active tab's terminal pane tree. The content Loader in main.qml switches on this, so the settings
+    /// page and the terminal are mutually-exclusive views of the same region (Windows-Terminal style).
+    [[nodiscard]] bool settingsActive() const noexcept { return _settingsActive; }
+
+    /// This window's editable settings bridge (never null; owned by this controller). The QML settings
+    /// page binds to it for the profile/color-scheme/default-profile models and the save/delete actions.
+    [[nodiscard]] SettingsController* settingsController() const noexcept
+    {
+        return _settingsController.get();
+    }
+
+    /// Shows the settings page over this window (the OpenSettings action, and the tab-strip gear).
+    /// Idempotent: showing it while already shown does nothing.
+    void openSettings();
+
+    /// Returns from the settings page to the active tab's terminal content. A no-op if not showing it.
+    Q_INVOKABLE void closeSettings();
+
+    /// Toggles between the settings page and the terminal content — the tab-strip gear affordance.
+    Q_INVOKABLE void toggleSettings();
     // }}}
 
     // {{{ Terminal context menu
@@ -470,8 +497,16 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     void tabBarShouldShowChanged();
     void activeSessionChanged();
     void chromeHeightChanged();
+    /// The content area switched between the settings page and the terminal (settingsActive changed).
+    void settingsActiveChanged();
 
   private:
+    /// Sets whether the settings page is shown, emitting settingsActiveChanged only on a real change.
+    /// Centralizes the notify so every entry point (openSettings/closeSettings/toggleSettings and the
+    /// tab-activation reset) stays consistent.
+    /// @param active The new settings-page visibility.
+    void setSettingsActive(bool active);
+
     /// The backing vtmux::Window, or nullptr if it has been removed.
     [[nodiscard]] vtmux::Window* window() const noexcept;
     /// The active tab of this window's vtmux::Window, or nullptr.
@@ -523,6 +558,13 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     BoundCommandSource _boundCommands;
     ActionCommandSource _actionCommands;
     std::unique_ptr<CommandPaletteModel> _commandPalette;
+    // }}}
+
+    // {{{ Settings page
+    /// Whether the content area currently shows the settings page instead of the terminal pane tree.
+    bool _settingsActive = false;
+    /// The editable settings bridge for this window (created in the constructor; never null).
+    std::unique_ptr<SettingsController> _settingsController;
     // }}}
 
     // {{{ Terminal context menu

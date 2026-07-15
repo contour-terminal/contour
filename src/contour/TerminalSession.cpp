@@ -2263,6 +2263,14 @@ bool TerminalSession::operator()(actions::OpenCommandPalette)
     return true;
 }
 
+bool TerminalSession::operator()(actions::OpenSettings)
+{
+    // Show the in-app settings page over this session's window. Routed through the manager (like the
+    // command palette) so it targets the window this session actually lives in.
+    _manager->openSettings(/*acting*/ this);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::SetTabTitle)
 {
     // Open the GUI-native inline tab-title editor for the active tab. Routed through the manager

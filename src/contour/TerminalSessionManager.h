@@ -142,6 +142,16 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param acting The session that triggered the action; its hosting window shows the palette.
     void openCommandPalette(TerminalSession* acting);
 
+    /// Shows the in-app settings page over the window hosting @p acting (the OpenSettings action).
+    /// No-ops if @p acting has no hosting window.
+    /// @param acting The session that triggered the action; its hosting window shows the settings page.
+    void openSettings(TerminalSession* acting);
+
+    /// Re-reads the master configuration from disk (picking up any GUI side-file changes) and pushes
+    /// it to every live session. The apply step the settings page runs after a Save/Delete so the
+    /// change takes effect immediately, without waiting for the optional live-reload file watcher.
+    void reloadAllSessions();
+
     /// Opens the terminal context menu over the pane of @p acting (the OpenContextMenu action).
     ///
     /// Makes that pane active first, so the menu is built from the state of the pane the user actually

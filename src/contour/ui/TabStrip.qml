@@ -156,4 +156,30 @@ Row {
                                         : "transparent"
         }
     }
+
+    // The settings "tab": a pinned gear affordance that toggles the settings page in the content area.
+    // It reads as a tab (it sits in the strip) but is managed by the WindowController, not vtmux, so the
+    // Qt-free core stays untouched. Highlighted while the settings page is showing.
+    ToolButton {
+        id: settingsButton
+        objectName: "settingsButton"
+        height: root.height
+        text: "⚙" // gear
+        font.pointSize: 12
+        focusPolicy: Qt.NoFocus
+        ToolTip.visible: hovered
+        ToolTip.text: qsTr("Settings")
+        onClicked: if (root.controller) root.controller.toggleSettings()
+        background: Rectangle {
+            // `=== true` coerces a missing/undefined property (e.g. a lightweight mock controller in the
+            // offscreen tests) to a real bool, so the binding never assigns `undefined` to `active`.
+            readonly property bool active: root.controller !== null && root.controller.settingsActive === true
+            color: (settingsButton.hovered || active)
+                   ? Qt.rgba(settingsButton.palette.highlight.r,
+                             settingsButton.palette.highlight.g,
+                             settingsButton.palette.highlight.b,
+                             active ? 0.4 : 0.25)
+                   : "transparent"
+        }
+    }
 }

@@ -141,12 +141,30 @@ ApplicationWindow
         anchors.left: parent.left
         anchors.right: parent.right
 
+        // The terminal content. Kept ACTIVE (so the pane tree and its PTYs keep running) even while the
+        // settings page is shown, just hidden — flipping back is instant and nothing is torn down.
         Loader {
             id: paneContentLoader
             anchors.fill: parent
             active: appWindow.win !== null && appWindow.win.activeTabRootPane !== null
+            // `=== true` coerces a missing/undefined property (lightweight mock `win` in tests) to a bool.
+            visible: !(appWindow.win !== null && appWindow.win.settingsActive === true)
             sourceComponent: PaneNode {
                 node: appWindow.win ? appWindow.win.activeTabRootPane : null
+            }
+        }
+
+        // The in-app settings page, shown in place of the terminal when the WindowController's
+        // settingsActive flag is set (the tab-strip gear, or the OpenSettings action). A peer of the
+        // pane-tree Loader, honoring the "single renderer" architecture — settings is not a pane.
+        Loader {
+            id: settingsPageLoader
+            anchors.fill: parent
+            active: appWindow.win !== null && appWindow.win.settingsActive === true
+            visible: active
+            sourceComponent: SettingsPage {
+                controller: appWindow.win ? appWindow.win.settingsController : null
+                windowController: appWindow.win
             }
         }
     }

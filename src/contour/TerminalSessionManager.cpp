@@ -446,6 +446,25 @@ void TerminalSessionManager::openCommandPalette(TerminalSession* acting)
     controller->openCommandPalette();
 }
 
+void TerminalSessionManager::openSettings(TerminalSession* acting)
+{
+    auto* controller = controllerHostingSession(acting);
+    if (controller == nullptr)
+        return;
+
+    controller->openSettings();
+}
+
+void TerminalSessionManager::reloadAllSessions()
+{
+    // Refresh the master config first, so the app — and the settings page that reads it — see the new
+    // side files immediately. Then have each live session re-read and re-apply, updating the terminals.
+    config::loadConfigFromFile(_app.config(), _app.config().configFile);
+    for (auto& [id, session]: _sessionsById)
+        if (session != nullptr)
+            session->onConfigReload();
+}
+
 void TerminalSessionManager::openContextMenu(TerminalSession* acting)
 {
     // Announced before the routing, which no-ops when there is no window to show a menu in. That makes the

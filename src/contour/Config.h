@@ -1934,6 +1934,13 @@ std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsF
 /// @return The complete YAML document text.
 [[nodiscard]] std::string emitGuiSettingsYaml(GuiManagedSettings const& settings);
 
+/// Loads a single bare-body `colorschemes/<name>.yml` palette file at @p path (the same file the lazy
+/// scheme resolver reads). Used by the GUI scheme editor to load an existing scheme's colors for
+/// editing, independently of whether any profile currently references it.
+/// @param path The color scheme file to read.
+/// @return The parsed palette, or nullopt if the file is missing or unreadable.
+[[nodiscard]] std::optional<vtbackend::ColorPalette> loadColorSchemeFile(std::filesystem::path const& path);
+
 /// Loads ONLY the GUI-owned `settings.yml` at @p path (no merge). A missing file yields default
 /// (all-unset) settings — nothing saved yet is not an error; a file that fails to parse yields the
 /// parse error, so a caller about to rewrite it can refuse rather than destroy it.
