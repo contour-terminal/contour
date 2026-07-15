@@ -9,6 +9,7 @@ actionlint
 affordance
 agentic
 argless
+asprintf
 AWriter
 axb
 backbuffer
@@ -62,6 +63,7 @@ dri
 drv
 Dscs
 ecmascript
+editability
 eeeh
 EGL
 ellips
@@ -77,6 +79,7 @@ FDiag
 FFFFF
 FFFFFFC
 fiddliest
+flyouts
 FRENCHCANADIAN
 GGGGG
 gitbranch
@@ -85,11 +88,13 @@ Gles
 HCenter
 headlessly
 HHHHH
+HHHHHH
 HTP
 imagesize
 invokables
 isakbm
 journalctl
+keysym
 libcuda
 libva
 LMENU
@@ -156,6 +161,7 @@ qmljsdebugger
 qobject
 QPalette
 qputenv
+qqmlregistration
 QRegular
 qrhi
 qrhigles
@@ -214,6 +220,7 @@ templ
 TOCTOU
 togglestatusline
 tpz
+trashcan
 tso
 UBO
 ubuf

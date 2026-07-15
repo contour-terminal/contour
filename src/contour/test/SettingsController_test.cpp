@@ -281,7 +281,8 @@ TEST_CASE("SettingsController: create, edit and reload a color scheme", "[settin
 
 TEST_CASE("SettingsController: global overrides write settings.yml, apply, and reset", "[settings]")
 {
-    auto fx = Fixture("default_profile: main\nreflow_on_resize: true\n");
+    auto fx = Fixture("default_profile: main\n"
+                      "reflow_on_resize: true\n");
     auto const configDir = std::filesystem::path(fx.dir.path().toStdString());
 
     REQUIRE(fx.controller->setGlobalField("reflow_on_resize", false));
