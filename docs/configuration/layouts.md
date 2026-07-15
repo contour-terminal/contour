@@ -106,7 +106,7 @@ launched the window itself.
 
 ## Opening a layout
 
-There are three ways to open a layout:
+There are four ways to open a layout:
 
 ### At startup
 
@@ -137,6 +137,12 @@ input_mapping:
 Unlike the startup and CLI cases, `LaunchLayout` **appends** the layout's tabs to the
 current window rather than opening a new one.
 
+### From the command palette
+
+Open the command palette (`Ctrl+Shift+P` by default) and pick the **Launch Layout: _name_**
+entry — one is listed for every saved layout, so no keybinding is required. Picking one
+appends that layout's tabs to the current window, exactly like the `LaunchLayout` action.
+
 ## Saving the current window as a layout
 
 The `SaveLayout` action captures the active window's current tabs and panes — their
@@ -153,3 +159,8 @@ machine-managed `layouts.yml` file next to your main configuration file, in the 
 directory. Layouts from `layouts.yml` are merged with any `layouts` defined inline in
 your main configuration; if a name exists in both, the `layouts.yml` version wins, since
 it reflects the most recently saved state.
+
+You don't need a keybinding to save: open the command palette (`Ctrl+Shift+P`) and pick
+**Save Layout**. Because saving needs a name, that entry opens a small prompt for you to
+type one in, then saves exactly as the `SaveLayout` action does. A key bound to
+`SaveLayout` with no `name` opens the same prompt.
