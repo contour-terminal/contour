@@ -2043,7 +2043,7 @@ TEST_CASE("Config: GUI settings round-trip through emitGuiSettingsYaml / loadGui
     auto const path = std::filesystem::path(dir.path().toStdString()) / "settings.yml";
     {
         auto out = std::ofstream(path);
-        out << contour::config::emitGuiSettingsYaml({ .defaultProfile = "work" });
+        out << contour::config::emitGuiSettingsYaml({ .defaultProfile = "work", .globalOverrides = {} });
     }
 
     auto const loaded = contour::config::loadGuiSettingsFile(path);
@@ -2069,8 +2069,10 @@ TEST_CASE("Config: FileGuiConfigStore writes and removes side files the loader p
 
     auto store = contour::FileGuiConfigStore(configDir);
     REQUIRE(store.saveProfile("saved", profile).has_value());
-    REQUIRE(
-        store.saveGuiSettings(contour::config::GuiManagedSettings { .defaultProfile = "saved" }).has_value());
+    REQUIRE(store
+                .saveGuiSettings(
+                    contour::config::GuiManagedSettings { .defaultProfile = "saved", .globalOverrides = {} })
+                .has_value());
 
     auto const afterSave = loadFromYaml(dir, "default_profile: main\n");
     auto const* saved = afterSave.findProfile("saved");

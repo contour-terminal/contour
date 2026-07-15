@@ -50,6 +50,15 @@ class SettingsController: public QObject
     /// The name of the current default profile (settings.yml override, else contour.yml).
     Q_PROPERTY(QString defaultProfile READ defaultProfile NOTIFY changed)
 
+    /// The configured key/mouse bindings, read-only: one QVariantMap per binding
+    /// { trigger, action, mode }. Editing bindings stays in contour.yml for now (this is a viewer).
+    Q_PROPERTY(QVariantList keybindings READ keybindings NOTIFY changed)
+
+    /// The editable global (application-scope) settings: one QVariantMap per field
+    /// { key, label, help, type, value, options, overridden }. Edits are written to settings.yml as
+    /// overrides on contour.yml — the same side-file discipline the rest of the page uses.
+    Q_PROPERTY(QVariantList globalFields READ globalFields NOTIFY changed)
+
     /// The scalar fields of the profile currently being edited: one QVariantMap per field
     /// { key, label, help, type ("bool"|"int"|"double"|"string"), value }. Empty when nothing is open.
     Q_PROPERTY(QVariantList profileFields READ profileFields NOTIFY draftChanged)
@@ -96,6 +105,8 @@ class SettingsController: public QObject
     [[nodiscard]] QVariantList profiles() const { return _profiles; }
     [[nodiscard]] QVariantList colorSchemes() const { return _colorSchemes; }
     [[nodiscard]] QString defaultProfile() const { return _defaultProfile; }
+    [[nodiscard]] QVariantList keybindings() const { return _keybindings; }
+    [[nodiscard]] QVariantList globalFields() const;
 
     [[nodiscard]] QVariantList profileFields() const;
     [[nodiscard]] QString editingProfile() const { return _editingProfile; }
@@ -137,6 +148,11 @@ class SettingsController: public QObject
     /// Sets the default profile (persisted to settings.yml, overriding contour.yml). @return success.
     Q_INVOKABLE bool setDefaultProfile(QString const& name);
 
+    /// Overrides a global setting (persisted to settings.yml over contour.yml). @return success.
+    Q_INVOKABLE bool setGlobalField(QString const& key, QVariant const& value);
+    /// Clears a global override, so the setting falls back to contour.yml/default. @return success.
+    Q_INVOKABLE bool resetGlobalField(QString const& key);
+
     // {{{ Color-scheme draft
     /// Opens color scheme @p name for editing (loads its colors into the scheme draft).
     Q_INVOKABLE void editColorScheme(QString const& name);
@@ -173,6 +189,7 @@ class SettingsController: public QObject
     bool _locked = false;
     QVariantList _profiles;
     QVariantList _colorSchemes;
+    QVariantList _keybindings;
     QString _defaultProfile;
 
     // The profile draft (Windows-Terminal "edit a clone").

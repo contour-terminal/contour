@@ -17,6 +17,7 @@ RowLayout {
     property string help: ""
     property string type: "string"
     property var value: null
+    property var options: []
     property bool editable: true
 
     // Emitted when the user commits a change; the page forwards it to SettingsController.setProfileField.
@@ -44,7 +45,19 @@ RowLayout {
         sourceComponent: root.type === "bool" ? boolEditor
                        : root.type === "double" ? doubleEditor
                        : root.type === "int" ? intEditor
+                       : root.type === "enum" ? enumEditor
                        : stringEditor
+    }
+
+    Component {
+        id: enumEditor
+        ComboBox {
+            Layout.fillWidth: true
+            enabled: root.editable
+            model: root.options
+            currentIndex: Math.max(0, root.options.indexOf(root.value))
+            onActivated: root.edited(root.fieldKey, currentText)
+        }
     }
 
     Component {

@@ -169,6 +169,24 @@ TEST_CASE("SettingsController: setDefaultProfile persists to settings.yml and ov
     CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "settings.yml"));
 }
 
+TEST_CASE("SettingsController: enum and integer profile fields round-trip", "[settings]")
+{
+    auto fx = Fixture(kBasicConfig);
+    fx.controller->newProfile("main");
+    fx.controller->setProfileField("tab_bar_position", "Bottom");
+    fx.controller->setProfileField("tab_bar_visibility", "Never");
+    fx.controller->setProfileField("slow_scrolling_time", 250);
+    fx.controller->setProfileField("maximized", true);
+    REQUIRE(fx.controller->saveProfileAs("work"));
+
+    auto const* work = fx.cfg.findProfile("work");
+    REQUIRE(work != nullptr);
+    CHECK(work->tabBarPosition.value() == config::TabBarPosition::Bottom);
+    CHECK(work->tabBarVisibility.value() == config::TabBarVisibility::Never);
+    CHECK(work->smoothLineScrolling.value() == std::chrono::milliseconds(250));
+    CHECK(work->maximized.value() == true);
+}
+
 TEST_CASE("SettingsController: color-scheme selection supports a dark/light pair", "[settings]")
 {
     auto fx = Fixture(kBasicConfig);
@@ -206,6 +224,41 @@ TEST_CASE("SettingsController: create, edit and reload a color scheme", "[settin
     CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "colorschemes"
                                   / "mono.yml")
           == false);
+}
+
+TEST_CASE("SettingsController: global overrides write settings.yml, apply, and reset", "[settings]")
+{
+    auto fx = Fixture("default_profile: main\nreflow_on_resize: true\n");
+    auto const configDir = std::filesystem::path(fx.dir.path().toStdString());
+
+    REQUIRE(fx.controller->setGlobalField("reflow_on_resize", false));
+    CHECK(fx.cfg.reflowOnResize.value() == false);
+    REQUIRE(fx.controller->setGlobalField("read_buffer_size", 32768));
+    CHECK(fx.cfg.ptyReadBufferSize.value() == 32768);
+    REQUIRE(fx.controller->setGlobalField("word_delimiters", "abc"));
+    CHECK(fx.cfg.wordDelimiters.value() == "abc");
+    CHECK(std::filesystem::exists(configDir / "settings.yml"));
+
+    // The overridden field is flagged as such in the model.
+    auto overridden = false;
+    for (auto const& row: fx.controller->globalFields())
+        if (row.toMap().value("key").toString() == "reflow_on_resize")
+            overridden = row.toMap().value("overridden").toBool();
+    CHECK(overridden);
+
+    // Reset falls back to the contour.yml value.
+    REQUIRE(fx.controller->resetGlobalField("reflow_on_resize"));
+    CHECK(fx.cfg.reflowOnResize.value() == true);
+}
+
+TEST_CASE("SettingsController: exposes the configured keybindings read-only", "[settings]")
+{
+    auto fx = Fixture(kBasicConfig);
+    auto const bindings = fx.controller->keybindings();
+    REQUIRE(!bindings.isEmpty()); // the default config ships input mappings
+    auto const first = bindings.first().toMap();
+    CHECK(!first.value("trigger").toString().isEmpty());
+    CHECK(!first.value("action").toString().isEmpty());
 }
 
 TEST_CASE("SettingsController: gui_config_locked makes the page read-only", "[settings]")

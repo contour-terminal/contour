@@ -302,6 +302,12 @@ enum class SettingsOrigin : uint8_t
 struct GuiManagedSettings
 {
     std::optional<std::string> defaultProfile; //!< Overrides contour.yml's `default_profile` when set.
+
+    /// GUI-set global overrides, keyed by the contour.yml top-level key, valued as the YAML scalar to
+    /// write (e.g. "reflow_on_resize" -> "false"). Present here == overridden by the GUI; the on-load
+    /// merge re-applies each through the same per-key loader contour.yml uses, so the value is typed
+    /// correctly. Absent keys defer to contour.yml.
+    std::map<std::string, std::string> globalOverrides;
 };
 
 /// Selects which Qt RHI graphics API drives the terminal display.

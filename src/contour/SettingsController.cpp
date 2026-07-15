@@ -3,11 +3,13 @@
 
 #include <text_shaper/font.h>
 
+#include <QtCore/QStringList>
 #include <QtGui/QColor>
 
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <format>
 #include <set>
 #include <utility>
 
@@ -23,31 +25,93 @@ namespace
     /// page is adding a row here, not editing logic in three places.
     struct ProfileFieldDescriptor
     {
-        QString key;                                                //!< Stable identifier / QML key.
-        QString label;                                              //!< Human-readable label.
-        QString help;                                               //!< One-line help text.
-        QString type;                                               //!< "bool" | "double" | "string".
+        QString key;   //!< Stable identifier / QML key.
+        QString label; //!< Human-readable label.
+        QString help;  //!< One-line help text.
+        QString type;  //!< "bool" | "int" | "double" | "string" | "enum".
         std::function<QVariant(TerminalProfile const&)> get;        //!< Reads the field as a QVariant.
         std::function<void(TerminalProfile&, QVariant const&)> set; //!< Writes the field from QVariant.
+        QStringList options {}; //!< For "enum": the allowed values (the combo model + accepted set).
     };
 
-    /// The editable scalar profile fields. Kept intentionally small for the first version; it grows one
-    /// row at a time toward full parity without touching any other code.
+    /// Builds a bool profile-field descriptor from a ConfigEntry member accessor.
+    template <typename Accessor>
+    ProfileFieldDescriptor boolField(QString key, QString label, QString help, Accessor accessor)
+    {
+        return { std::move(key),
+                 std::move(label),
+                 std::move(help),
+                 "bool",
+                 [accessor](TerminalProfile const& p) { return QVariant(accessor(p).value()); },
+                 [accessor](TerminalProfile& p, QVariant const& v) { accessor(p) = v.toBool(); } };
+    }
+
+    /// The editable scalar profile fields. Data-driven: it grows one row at a time toward full parity
+    /// without touching any other code (the QML renders each row by its `type`).
     std::vector<ProfileFieldDescriptor> const& profileFieldDescriptors()
     {
+        using vtbackend::LineCount;
+        using vtbackend::LineOffset;
+        using Ms = std::chrono::milliseconds;
         static auto const descriptors = std::vector<ProfileFieldDescriptor> {
-            { "show_title_bar",
-              "Show title bar",
-              "Whether the window shows its title bar.",
-              "bool",
-              [](TerminalProfile const& p) { return QVariant(p.showTitleBar.value()); },
-              [](TerminalProfile& p, QVariant const& v) { p.showTitleBar = v.toBool(); } },
+            // {{{ Appearance / window
+            boolField("show_title_bar",
+                      "Show title bar",
+                      "Whether the window shows its title bar.",
+                      [](auto& p) -> auto& { return p.showTitleBar; }),
+            boolField("maximized",
+                      "Start maximized",
+                      "Open the window maximized.",
+                      [](auto& p) -> auto& { return p.maximized; }),
+            boolField("fullscreen",
+                      "Start fullscreen",
+                      "Open the window in fullscreen.",
+                      [](auto& p) -> auto& { return p.fullscreen; }),
+            boolField("size_indicator_on_resize",
+                      "Show size on resize",
+                      "Briefly show the terminal dimensions when the window is resized.",
+                      [](auto& p) -> auto& { return p.sizeIndicatorOnResize; }),
             { "dim_unfocused",
               "Dim when unfocused",
               "How much to dim a pane while it is not focused (0.0 = off, 1.0 = fully dimmed).",
               "double",
               [](TerminalProfile const& p) { return QVariant(p.dimUnfocused.value()); },
               [](TerminalProfile& p, QVariant const& v) { p.dimUnfocused = v.toDouble(); } },
+            { "tab_bar_position",
+              "Tab bar position",
+              "Where the tab strip sits relative to the terminal content.",
+              "enum",
+              [](TerminalProfile const& p) {
+                  return QVariant(p.tabBarPosition.value() == config::TabBarPosition::Bottom ? "Bottom"
+                                                                                             : "Top");
+              },
+              [](TerminalProfile& p, QVariant const& v) {
+                  p.tabBarPosition =
+                      v.toString() == "Bottom" ? config::TabBarPosition::Bottom : config::TabBarPosition::Top;
+              },
+              { "Top", "Bottom" } },
+            { "tab_bar_visibility",
+              "Tab bar visibility",
+              "When the tab strip is shown.",
+              "enum",
+              [](TerminalProfile const& p) {
+                  switch (p.tabBarVisibility.value())
+                  {
+                      case config::TabBarVisibility::Never: return QVariant("Never");
+                      case config::TabBarVisibility::Multiple: return QVariant("Multiple");
+                      case config::TabBarVisibility::Always: break;
+                  }
+                  return QVariant("Always");
+              },
+              [](TerminalProfile& p, QVariant const& v) {
+                  auto const s = v.toString();
+                  p.tabBarVisibility = s == "Never"      ? config::TabBarVisibility::Never
+                                       : s == "Multiple" ? config::TabBarVisibility::Multiple
+                                                         : config::TabBarVisibility::Always;
+              },
+              { "Always", "Never", "Multiple" } },
+            // }}}
+            // {{{ Font
             { "font_family",
               "Font family",
               "The regular font family name.",
@@ -66,12 +130,85 @@ namespace
               [](TerminalProfile& p, QVariant const& v) {
                   p.fonts.value().size = text::font_size { v.toDouble() };
               } },
-            { "size_indicator_on_resize",
-              "Show size on resize",
-              "Briefly show the terminal dimensions when the window is resized.",
-              "bool",
-              [](TerminalProfile const& p) { return QVariant(p.sizeIndicatorOnResize.value()); },
-              [](TerminalProfile& p, QVariant const& v) { p.sizeIndicatorOnResize = v.toBool(); } },
+            boolField("draw_bold_text_with_bright_colors",
+                      "Bold text uses bright colors",
+                      "Render bold text using the bright ANSI colors.",
+                      [](auto& p) -> auto& { return p.drawBoldTextWithBrightColors; }),
+            // }}}
+            // {{{ Scrolling
+            boolField("smooth_scrolling",
+                      "Smooth scrolling",
+                      "Animate scrolling between lines.",
+                      [](auto& p) -> auto& { return p.smoothScrolling; }),
+            boolField("momentum_scrolling",
+                      "Momentum scrolling",
+                      "Continue scrolling with momentum.",
+                      [](auto& p) -> auto& { return p.momentumScrolling; }),
+            { "slow_scrolling_time",
+              "Slow scrolling time (ms)",
+              "Duration of one smooth line-scroll step, in milliseconds.",
+              "int",
+              [](TerminalProfile const& p) {
+                  return QVariant(static_cast<int>(p.smoothLineScrolling.value().count()));
+              },
+              [](TerminalProfile& p, QVariant const& v) { p.smoothLineScrolling = Ms { v.toInt() }; } },
+            { "vi_mode_scrolloff",
+              "Vi mode scroll-off",
+              "Minimum lines kept above/below the cursor while scrolling in Vi mode.",
+              "int",
+              [](TerminalProfile const& p) {
+                  return QVariant(static_cast<int>(unbox(p.modalCursorScrollOff.value())));
+              },
+              [](TerminalProfile& p, QVariant const& v) { p.modalCursorScrollOff = LineCount(v.toInt()); } },
+            { "copy_last_mark_range_offset",
+              "Copy last-mark range offset",
+              "Line offset applied to the CopyPreviousMarkRange action.",
+              "int",
+              [](TerminalProfile const& p) {
+                  return QVariant(static_cast<int>(unbox(p.copyLastMarkRangeOffset.value())));
+              },
+              [](TerminalProfile& p, QVariant const& v) {
+                  p.copyLastMarkRangeOffset = LineOffset(v.toInt());
+              } },
+            // }}}
+            // {{{ Behavior / timings
+            boolField("escape_sandbox",
+                      "Escape sandbox",
+                      "Escape a Flatpak/Snap sandbox when spawning.",
+                      [](auto& p) -> auto& { return p.escapeSandbox; }),
+            boolField("search_mode_switch",
+                      "Search mode switch",
+                      "Switch to Vi normal mode when a search starts.",
+                      [](auto& p) -> auto& { return p.searchModeSwitch; }),
+            boolField("insert_after_yank",
+                      "Insert after yank",
+                      "Enter insert mode after yanking in Vi mode.",
+                      [](auto& p) -> auto& { return p.insertAfterYank; }),
+            boolField("input_method_editor",
+                      "Input method editor",
+                      "Enable IME (input method) support.",
+                      [](auto& p) -> auto& { return p.inputMethodEditor; }),
+            boolField("highlight_word_and_matches_on_double_click",
+                      "Highlight word on double-click",
+                      "Highlight the double-clicked word and its other occurrences.",
+                      [](auto& p) -> auto& { return p.highlightDoubleClickedWord; }),
+            { "vi_mode_highlight_timeout",
+              "Vi highlight timeout (ms)",
+              "How long a Vi-mode yank highlight stays visible, in milliseconds.",
+              "int",
+              [](TerminalProfile const& p) {
+                  return QVariant(static_cast<int>(p.highlightTimeout.value().count()));
+              },
+              [](TerminalProfile& p, QVariant const& v) { p.highlightTimeout = Ms { v.toInt() }; } },
+            { "screen_transition_duration",
+              "Screen transition (ms)",
+              "Duration of the alt-screen transition animation, in milliseconds.",
+              "int",
+              [](TerminalProfile const& p) {
+                  return QVariant(static_cast<int>(p.screenTransitionDuration.value().count()));
+              },
+              [](TerminalProfile& p, QVariant const& v) { p.screenTransitionDuration = Ms { v.toInt() }; } },
+            // }}}
         };
         return descriptors;
     }
@@ -118,6 +255,65 @@ namespace
         return descriptors;
     }
 
+    /// A data-driven descriptor for one editable global (application-scope) setting. `toYaml` turns the
+    /// edited value into the YAML scalar written to settings.yml; the load-time merge re-applies it
+    /// through the typed per-key loader, so this side needs no parsing.
+    struct GlobalFieldDescriptor
+    {
+        QString key;
+        QString label;
+        QString help;
+        QString type;
+        std::function<QVariant(config::Config const&)> get;
+        std::function<std::string(QVariant const&)> toYaml;
+    };
+
+    QString boolToYaml(QVariant const& v)
+    {
+        return v.toBool() ? "true" : "false";
+    }
+
+    /// The editable global settings. The keys match contour.yml's top-level keys AND the loader lines in
+    /// mergeGuiManagedSideFiles, so an override round-trips as the right type.
+    std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
+    {
+        static auto const descriptors = std::vector<GlobalFieldDescriptor> {
+            { "reflow_on_resize",
+              "Reflow on resize",
+              "Reflow lines when the terminal is resized.",
+              "bool",
+              [](config::Config const& c) { return QVariant(c.reflowOnResize.value()); },
+              [](QVariant const& v) { return boolToYaml(v).toStdString(); } },
+            { "spawn_new_process",
+              "Spawn new process",
+              "Spawn a separate process for each new terminal window.",
+              "bool",
+              [](config::Config const& c) { return QVariant(c.spawnNewProcess.value()); },
+              [](QVariant const& v) { return boolToYaml(v).toStdString(); } },
+            { "read_buffer_size",
+              "PTY read buffer size",
+              "Number of bytes read from the pseudo-terminal per read.",
+              "int",
+              [](config::Config const& c) { return QVariant(c.ptyReadBufferSize.value()); },
+              [](QVariant const& v) { return std::to_string(v.toInt()); } },
+            { "command_palette_recent_count",
+              "Recent commands",
+              "How many recently-used commands the command palette lists first.",
+              "int",
+              [](config::Config const& c) { return QVariant(c.commandPaletteRecentCount.value()); },
+              [](QVariant const& v) { return std::to_string(v.toInt()); } },
+            { "word_delimiters",
+              "Word delimiters",
+              "Characters that separate words when selecting by double-click.",
+              "string",
+              [](config::Config const& c) {
+                  return QVariant(QString::fromStdString(c.wordDelimiters.value()));
+              },
+              [](QVariant const& v) { return v.toString().toStdString(); } },
+        };
+        return descriptors;
+    }
+
     /// "#rrggbb" for @p color, the format the QML color pickers exchange.
     QString rgbToHex(vtbackend::RGBColor color)
     {
@@ -131,6 +327,39 @@ namespace
         return vtbackend::RGBColor { static_cast<uint8_t>(color.red()),
                                      static_cast<uint8_t>(color.green()),
                                      static_cast<uint8_t>(color.blue()) };
+    }
+
+    /// Formats a modifier chord as "Ctrl+Shift" (the individual Modifier has a formatter, the set does
+    /// not), mirroring the config writer's bit walk.
+    QString formatModifiers(vtbackend::Modifiers modifiers)
+    {
+        auto parts = QStringList {};
+        for (auto bit = 0u; bit < sizeof(vtbackend::Modifier) * 8; ++bit)
+        {
+            auto const flag = static_cast<vtbackend::Modifier>(1u << bit);
+            if (!modifiers.test(flag))
+                continue;
+            auto const name = std::format("{}", flag);
+            if (!name.empty())
+                parts << QString::fromStdString(name);
+        }
+        return parts.join('+');
+    }
+
+    /// Builds a read-only display row { trigger, action, mode } for one input binding, or an empty map
+    /// when the binding carries no action.
+    template <typename Binding>
+    QVariantMap keybindingRow(Binding const& binding, QString const& inputLabel)
+    {
+        if (binding.binding.empty())
+            return {};
+        auto const mods = formatModifiers(binding.modifiers);
+        auto row = QVariantMap {};
+        row[QStringLiteral("trigger")] = mods.isEmpty() ? inputLabel : mods + '+' + inputLabel;
+        row[QStringLiteral("action")] = QString::fromStdString(std::format("{}", binding.binding.front()));
+        row[QStringLiteral("mode")] =
+            binding.modes.any() ? QString::fromStdString(std::format("{}", binding.modes)) : QString {};
+        return row;
     }
 
     /// The QML-facing token for a provenance value.
@@ -219,6 +448,22 @@ void SettingsController::refresh()
         _colorSchemes.push_back(row);
     }
 
+    // Keybindings (read-only): key, character and mouse mappings, each as { trigger, action, mode }.
+    _keybindings.clear();
+    auto const& mappings = cfg.inputMappings.value();
+    for (auto const& binding: mappings.keyMappings)
+        if (auto row = keybindingRow(binding, QString::fromStdString(std::format("{}", binding.input)));
+            !row.isEmpty())
+            _keybindings.push_back(row);
+    for (auto const& binding: mappings.charMappings)
+        if (auto row = keybindingRow(binding, QString(QChar(static_cast<char16_t>(binding.input))));
+            !row.isEmpty())
+            _keybindings.push_back(row);
+    for (auto const& binding: mappings.mouseMappings)
+        if (auto row = keybindingRow(binding, QString::fromStdString(std::format("{}", binding.input)));
+            !row.isEmpty())
+            _keybindings.push_back(row);
+
     emit changed();
 }
 
@@ -237,6 +482,7 @@ QVariantList SettingsController::profileFields() const
         row[QStringLiteral("help")] = descriptor.help;
         row[QStringLiteral("type")] = descriptor.type;
         row[QStringLiteral("value")] = descriptor.get(_draft);
+        row[QStringLiteral("options")] = descriptor.options;
         fields.push_back(row);
     }
     return fields;
@@ -433,6 +679,57 @@ bool SettingsController::setDefaultProfile(QString const& name)
     if (auto const result = _store->saveGuiSettings(settings); !result)
         return fail(result.error());
 
+    _apply();
+    refresh();
+    return true;
+}
+
+QVariantList SettingsController::globalFields() const
+{
+    auto const& cfg = _config();
+    auto const& overrides = cfg.guiManagedSettings.globalOverrides;
+    auto fields = QVariantList {};
+    for (auto const& descriptor: globalFieldDescriptors())
+    {
+        auto row = QVariantMap {};
+        row[QStringLiteral("key")] = descriptor.key;
+        row[QStringLiteral("label")] = descriptor.label;
+        row[QStringLiteral("help")] = descriptor.help;
+        row[QStringLiteral("type")] = descriptor.type;
+        row[QStringLiteral("value")] = descriptor.get(cfg);
+        row[QStringLiteral("options")] = QStringList {};
+        row[QStringLiteral("overridden")] = overrides.contains(descriptor.key.toStdString());
+        fields.push_back(row);
+    }
+    return fields;
+}
+
+bool SettingsController::setGlobalField(QString const& key, QVariant const& value)
+{
+    if (_locked)
+        return fail("The settings page is read-only.");
+    for (auto const& descriptor: globalFieldDescriptors())
+        if (descriptor.key == key)
+        {
+            auto settings = _config().guiManagedSettings;
+            settings.globalOverrides[key.toStdString()] = descriptor.toYaml(value);
+            if (auto const result = _store->saveGuiSettings(settings); !result)
+                return fail(result.error());
+            _apply();
+            refresh();
+            return true;
+        }
+    return fail("Unknown global setting.");
+}
+
+bool SettingsController::resetGlobalField(QString const& key)
+{
+    if (_locked)
+        return fail("The settings page is read-only.");
+    auto settings = _config().guiManagedSettings;
+    settings.globalOverrides.erase(key.toStdString());
+    if (auto const result = _store->saveGuiSettings(settings); !result)
+        return fail(result.error());
     _apply();
     refresh();
     return true;

@@ -162,6 +162,21 @@ Rectangle {
                         root.editorMode = "scheme"
                     }
                 }
+
+                Button {
+                    objectName: "globalSettingsButton"
+                    Layout.fillWidth: true
+                    Layout.topMargin: 8
+                    text: qsTr("Global settings…")
+                    onClicked: root.editorMode = "globals"
+                }
+
+                Button {
+                    objectName: "keybindingsButton"
+                    Layout.fillWidth: true
+                    text: qsTr("Keybindings…")
+                    onClicked: root.editorMode = "keybindings"
+                }
             }
             // }}}
 
@@ -177,11 +192,15 @@ Rectangle {
                 Layout.fillHeight: true
                 clip: true
 
-                // Profile editor.
-                ColumnLayout {
-                    width: rightPane.width
+                // Profile editor (scrollable — the field list is long).
+                ScrollView {
+                    anchors.fill: parent
                     visible: root.editorMode === "profile"
-                    spacing: 12
+                    clip: true
+                    contentWidth: availableWidth
+                    ColumnLayout {
+                        width: rightPane.width - 24
+                        spacing: 12
 
                     Label {
                         text: (root.controller && root.controller.editingProfile.length > 0)
@@ -210,6 +229,7 @@ Rectangle {
                             help: modelData.help
                             type: modelData.type
                             value: modelData.value
+                            options: modelData.options
                             editable: root.controller && !root.controller.editingReadOnly
                             onEdited: (key, value) => root.controller.setProfileField(key, value)
                         }
@@ -311,13 +331,87 @@ Rectangle {
                             onClicked: root.controller.deleteProfile(root.controller.editingProfile)
                         }
                     }
-                }
+                    } // ColumnLayout (profile editor)
+                } // ScrollView
 
                 // Color-scheme editor.
                 ColorSchemeEditor {
                     width: parent.width
                     visible: root.editorMode === "scheme"
                     controller: root.controller
+                }
+
+                // Global (application-scope) settings, editable — written to settings.yml as overrides.
+                ScrollView {
+                    anchors.fill: parent
+                    visible: root.editorMode === "globals"
+                    clip: true
+                    contentWidth: availableWidth
+                    ColumnLayout {
+                        width: rightPane.width - 24
+                        spacing: 12
+                        Label { text: qsTr("Global settings"); font.pointSize: 14; font.bold: true }
+                        Label {
+                            text: qsTr("These override contour.yml application-wide, saved to settings.yml.")
+                            opacity: 0.7
+                        }
+                        Repeater {
+                            model: root.controller ? root.controller.globalFields : []
+                            delegate: RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: 8
+                                SettingRow {
+                                    Layout.fillWidth: true
+                                    fieldKey: modelData.key
+                                    label: modelData.label
+                                    help: modelData.help
+                                    type: modelData.type
+                                    value: modelData.value
+                                    editable: root.controller && !root.controller.locked
+                                    onEdited: (key, value) => root.controller.setGlobalField(key, value)
+                                }
+                                Button {
+                                    text: qsTr("Reset")
+                                    visible: modelData.overridden
+                                    enabled: root.controller && !root.controller.locked
+                                    onClicked: root.controller.resetGlobalField(modelData.key)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Keybindings (read-only viewer).
+                ColumnLayout {
+                    anchors.fill: parent
+                    visible: root.editorMode === "keybindings"
+                    spacing: 8
+                    Label { text: qsTr("Keybindings"); font.pointSize: 14; font.bold: true }
+                    Label {
+                        text: qsTr("Key bindings are configured in contour.yml (read-only here).")
+                        opacity: 0.7
+                    }
+                    ListView {
+                        objectName: "keybindingsList"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        model: root.controller ? root.controller.keybindings : []
+                        delegate: RowLayout {
+                            required property var modelData
+                            width: ListView.view.width
+                            spacing: 12
+                            Label {
+                                text: modelData.trigger
+                                Layout.preferredWidth: 200
+                                font.family: "monospace"
+                                elide: Text.ElideRight
+                            }
+                            Label { text: modelData.action; Layout.fillWidth: true; elide: Text.ElideRight }
+                            Label { text: modelData.mode; opacity: 0.6; Layout.preferredWidth: 90 }
+                        }
+                    }
                 }
 
                 // Empty state.

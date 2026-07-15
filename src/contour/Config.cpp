@@ -392,9 +392,10 @@ void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
         }
     }
 
-    // settings.yml — GUI-owned global overrides (currently only default_profile). Applied last so it
-    // can select a profile the scan above just introduced.
-    if (auto loaded = loadGuiSettingsFile(dir / "settings.yml"))
+    // settings.yml — GUI-owned globals. Applied last so a default_profile can name a profile the scan
+    // above just introduced.
+    auto const settingsPath = dir / "settings.yml";
+    if (auto loaded = loadGuiSettingsFile(settingsPath))
     {
         config.guiManagedSettings = *loaded;
         if (auto const& defaultProfile = loaded->defaultProfile)
@@ -405,6 +406,22 @@ void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
                 configLog()("settings.yml default_profile '{}' is not a known profile; keeping '{}'.",
                             *defaultProfile,
                             config.defaultProfileName.value());
+        }
+
+        // Apply any GUI global overrides present in settings.yml through the SAME typed per-key loaders
+        // contour.yml uses (an absent key is a no-op), so the GUI never needs its own parse logic and a
+        // new overridable global is just another loadFromEntry line here.
+        std::error_code ec;
+        if (!loaded->globalOverrides.empty() && std::filesystem::exists(settingsPath, ec) && !ec)
+        {
+            auto overrides = YAMLConfigReader(settingsPath.string(), configLog);
+            overrides.loadFromEntry("word_delimiters", config.wordDelimiters);
+            overrides.loadFromEntry("read_buffer_size", config.ptyReadBufferSize);
+            overrides.loadFromEntry("pty_buffer_size", config.ptyBufferObjectSize);
+            overrides.loadFromEntry("command_palette_recent_count", config.commandPaletteRecentCount);
+            overrides.loadFromEntry("spawn_new_process", config.spawnNewProcess);
+            overrides.loadFromEntry("reflow_on_resize", config.reflowOnResize);
+            overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
         }
     }
     else
@@ -3247,6 +3264,8 @@ std::string emitGuiSettingsYaml(GuiManagedSettings const& settings)
     out << YAML::BeginMap;
     if (settings.defaultProfile)
         out << YAML::Key << "default_profile" << YAML::Value << *settings.defaultProfile;
+    for (auto const& [key, value]: settings.globalOverrides)
+        out << YAML::Key << key << YAML::Value << value;
     out << YAML::EndMap;
     return std::string { out.c_str() } + '\n';
 }
@@ -3291,6 +3310,16 @@ std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesyst
 
     if (auto const node = doc["default_profile"]; node && node.IsScalar())
         settings.defaultProfile = node.as<std::string>();
+
+    // Every other top-level scalar is a GUI global override, kept as its YAML scalar text so it can be
+    // re-emitted verbatim and re-applied through the typed per-key loader on the next load.
+    if (doc.IsMap())
+        for (auto const& entry: doc)
+        {
+            auto const key = entry.first.as<std::string>();
+            if (key != "default_profile" && entry.second.IsScalar())
+                settings.globalOverrides[key] = entry.second.as<std::string>();
+        }
 
     return settings;
 }
