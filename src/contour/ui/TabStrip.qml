@@ -1,8 +1,10 @@
 // vim:syntax=qml
-// The horizontal tab strip plus the new-tab ("+") button.
+// The horizontal tab strip plus the new-tab split button ("+" and a "▾" profile dropdown).
 //
-// The model is the TerminalSessionManager (exposed to QML as `terminalSessions`), whose rows are
-// the tabs and whose roles (title, accentColor, isActive, paneCount) drive each TabItem delegate.
+// The model is this window's WindowController (passed in as `controller`), whose rows are the tabs and
+// whose roles (title, accentColor, isActive, paneCount) drive each TabItem delegate. Alongside the tabs
+// the strip hosts a Qt-layer settings "tab" (shown while the settings page is open) and the new-tab
+// dropdown (NewTabMenu) — neither is a row of the tab model.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -139,6 +141,67 @@ Row {
         }
     }
 
+    // The settings "tab": shown in the strip while the settings page is open (settingsActive), reading
+    // and behaving like a tab — highlighted as the active view, with a close button that leaves settings.
+    // It is a Qt-layer affordance (vtmux untouched), so it is a pinned item here rather than a model row.
+    Item {
+        id: settingsTab
+        objectName: "settingsTab"
+        height: root.height
+        // `=== true` coerces a missing/undefined property (a lightweight mock controller in the offscreen
+        // tests) to a real bool, so the binding never assigns undefined.
+        visible: root.controller !== null && root.controller.settingsActive === true
+        width: visible ? settingsTabRow.implicitWidth + 20 : 0
+
+        SystemPalette {
+            id: settingsTabPalette
+            colorGroup: SystemPalette.Active
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            // It exists only while active, so it always wears the active (OS highlight) fill.
+            color: settingsTabPalette.highlight
+        }
+
+        Row {
+            id: settingsTabRow
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left
+            anchors.leftMargin: 10
+            spacing: 6
+
+            Label {
+                text: qsTr("⚙ Settings")
+                color: settingsTabPalette.highlightedText
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            ToolButton {
+                id: settingsTabClose
+                objectName: "settingsTabClose"
+                width: 20
+                height: 20
+                anchors.verticalCenter: parent.verticalCenter
+                focusPolicy: Qt.NoFocus
+                onClicked: if (root.controller) root.controller.closeSettings()
+                contentItem: Label {
+                    text: "✕"
+                    color: settingsTabPalette.highlightedText
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    radius: 3
+                    color: settingsTabClose.hovered
+                           ? Qt.rgba(settingsTabPalette.highlightedText.r,
+                                     settingsTabPalette.highlightedText.g,
+                                     settingsTabPalette.highlightedText.b, 0.25)
+                           : "transparent"
+                }
+            }
+        }
+    }
+
     ToolButton {
         id: newTabButton
         height: root.height
@@ -157,29 +220,29 @@ Row {
         }
     }
 
-    // The settings "tab": a pinned gear affordance that toggles the settings page in the content area.
-    // It reads as a tab (it sits in the strip) but is managed by the WindowController, not vtmux, so the
-    // Qt-free core stays untouched. Highlighted while the settings page is showing.
+    // The new-tab profile dropdown: the "▾" beside "+". Opens NewTabMenu — one entry per configured
+    // profile (open a new tab with it) plus a "Settings" entry — the Windows-Terminal split-button idiom.
     ToolButton {
-        id: settingsButton
-        objectName: "settingsButton"
+        id: newTabMenuButton
+        objectName: "newTabMenuButton"
         height: root.height
-        text: "⚙" // gear
-        font.pointSize: 12
+        text: "▾"
+        font.pointSize: 10
         focusPolicy: Qt.NoFocus
         ToolTip.visible: hovered
-        ToolTip.text: qsTr("Settings")
-        onClicked: if (root.controller) root.controller.toggleSettings()
+        ToolTip.text: qsTr("New tab with profile…")
+        onClicked: newTabMenu.popup(newTabMenuButton, 0, newTabMenuButton.height)
         background: Rectangle {
-            // `=== true` coerces a missing/undefined property (e.g. a lightweight mock controller in the
-            // offscreen tests) to a real bool, so the binding never assigns `undefined` to `active`.
-            readonly property bool active: root.controller !== null && root.controller.settingsActive === true
-            color: (settingsButton.hovered || active)
-                   ? Qt.rgba(settingsButton.palette.highlight.r,
-                             settingsButton.palette.highlight.g,
-                             settingsButton.palette.highlight.b,
-                             active ? 0.4 : 0.25)
-                   : "transparent"
+            color: newTabMenuButton.hovered ? Qt.rgba(newTabMenuButton.palette.highlight.r,
+                                                      newTabMenuButton.palette.highlight.g,
+                                                      newTabMenuButton.palette.highlight.b,
+                                                      0.25)
+                                            : "transparent"
+        }
+
+        NewTabMenu {
+            id: newTabMenu
+            controller: root.controller
         }
     }
 }

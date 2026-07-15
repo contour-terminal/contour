@@ -117,7 +117,8 @@ WindowController* TerminalSessionManager::controllerForDisplay(
     return _controllersByWindow.begin()->second;
 }
 
-TerminalSession* TerminalSessionManager::createSessionInBackground(vtmux::WindowId window)
+TerminalSession* TerminalSessionManager::createSessionInBackground(vtmux::WindowId window,
+                                                                   std::optional<std::string> profileName)
 {
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessible from within QML.
@@ -154,7 +155,7 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(vtmux::Window
     // Pre-mint the session id so the model's allocator (see ctor) hands it back, keeping the model
     // tab/pane and the Qt session on one id.
     auto const sessionId = vtmux::SessionId { _nextSessionId++ };
-    auto* session = createBackingSession(sessionId, ptyPath, pageSize);
+    auto* session = createBackingSession(sessionId, ptyPath, pageSize, std::nullopt, profileName);
 
     // Mirror this new session into the vtmux model as a new single-pane tab.
     if (auto* tab = _model->createTab(window))
@@ -272,12 +273,13 @@ void TerminalSessionManager::syncFocusForWindow(WindowController* controller)
         setFocusedSession(controller->activeSession());
 }
 
-TerminalSession* TerminalSessionManager::createSession(vtmux::WindowId window)
+TerminalSession* TerminalSessionManager::createSession(vtmux::WindowId window,
+                                                       std::optional<std::string> profileName)
 {
     // Just create the backing session + its model tab. The model's activeTabChanged fires the owning
     // controller's proxy rebuild, and the pane tree's `session:` binding attaches the session to its
     // display — no legacy activateSession display-assignment.
-    return createSessionInBackground(window);
+    return createSessionInBackground(window, std::move(profileName));
 }
 
 void TerminalSessionManager::createNewTab(TerminalSession* acting)

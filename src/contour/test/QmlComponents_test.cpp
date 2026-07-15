@@ -505,6 +505,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/contour/ui/TabItem.qml"),
         QStringLiteral("qrc:/contour/ui/TabContextMenu.qml"),
         QStringLiteral("qrc:/contour/ui/TabColorFlyout.qml"),
+        QStringLiteral("qrc:/contour/ui/NewTabMenu.qml"),
         QStringLiteral("qrc:/contour/ui/TabStrip.qml"),
         QStringLiteral("qrc:/contour/ui/WindowControls.qml"),
         QStringLiteral("qrc:/contour/ui/ResizeBorder.qml"),

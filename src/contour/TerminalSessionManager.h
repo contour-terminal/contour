@@ -92,13 +92,24 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     }
 
     /// Creates a backing session + its model tab in @p window (the calling controller's window).
-    contour::TerminalSession* createSessionInBackground(vtmux::WindowId window);
+    /// @param window      The target window.
+    /// @param profileName Profile to launch the session with, or std::nullopt for the app default.
+    contour::TerminalSession* createSessionInBackground(
+        vtmux::WindowId window, std::optional<std::string> profileName = std::nullopt);
 
     /// Creates a new tab in @p window (the GUI "+" button entry point, via WindowController).
-    contour::TerminalSession* createSession(vtmux::WindowId window);
+    /// @param window      The target window.
+    /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
+    contour::TerminalSession* createSession(vtmux::WindowId window,
+                                            std::optional<std::string> profileName = std::nullopt);
 
     /// Creates and activates a new tab in @p window.
-    void createNewTab(vtmux::WindowId window) { createSession(window); }
+    /// @param window      The target window.
+    /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
+    void createNewTab(vtmux::WindowId window, std::optional<std::string> profileName = std::nullopt)
+    {
+        createSession(window, std::move(profileName));
+    }
 
     /// Creates and activates a new tab in the window hosting @p acting (the CreateNewTab keybinding).
     void createNewTab(TerminalSession* acting);

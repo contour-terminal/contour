@@ -119,7 +119,10 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     [[nodiscard]] int activeTabIndex() const noexcept;
 
     // {{{ GUI tab-strip invokables (delegated to the manager, tagged with _windowId)
-    Q_INVOKABLE void createNewTab();
+    /// Opens a new tab. With an empty @p profileName the app-default profile is used; otherwise the
+    /// named profile is launched (the new-tab profile dropdown). The default argument keeps the bare
+    /// `createNewTab()` call site (the "+" button) working.
+    Q_INVOKABLE void createNewTab(QString const& profileName = {});
     Q_INVOKABLE void activateTab(int index);
     Q_INVOKABLE void moveTab(int fromIndex, int toIndex);
     /// The raw id of the window this controller adapts, so a QML drag payload can name its source
@@ -230,13 +233,13 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     }
 
     /// Shows the settings page over this window (the OpenConfiguration action's default, and the
-    /// tab-strip gear). Idempotent: showing it while already shown does nothing.
-    void openSettings();
+    /// new-tab dropdown's "Settings" entry). Idempotent: showing it while already shown does nothing.
+    Q_INVOKABLE void openSettings();
 
     /// Returns from the settings page to the active tab's terminal content. A no-op if not showing it.
     Q_INVOKABLE void closeSettings();
 
-    /// Toggles between the settings page and the terminal content — the tab-strip gear affordance.
+    /// Toggles between the settings page and the terminal content.
     Q_INVOKABLE void toggleSettings();
     // }}}
 

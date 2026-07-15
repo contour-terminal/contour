@@ -94,6 +94,9 @@ void WindowController::setSettingsActive(bool active)
         return;
     _settingsActive = active;
     emit settingsActiveChanged();
+    // Toggling the settings view flips whether a terminal tab reads as active (see IsActiveRole), so
+    // repaint the strip: the active tab de-highlights on open and re-highlights on close.
+    refreshActiveTabHighlight();
 }
 
 void WindowController::openContextMenu()
@@ -241,7 +244,9 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
             auto const color = tab != nullptr ? tab->color() : std::nullopt;
             return color.has_value() ? toQColor(*color) : QColor(Qt::transparent);
         }
-        case IsActiveRole: return row == activeTabIndex();
+        // No terminal tab reads as active while the settings "tab" is showing — the settings tab is the
+        // active view then, so the strip must not highlight two tabs at once.
+        case IsActiveRole: return !_settingsActive && row == activeTabIndex();
         case PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
         case ZoomedRole: return tab != nullptr && tab->isZoomed();
         default: return {};
@@ -296,11 +301,13 @@ QString WindowController::resolvedTabLabel(vtmux::Tab* tab, TerminalSession* ses
 // {{{ Tab-strip invokables — structural/session-lifetime ops delegate to the manager, tagged with
 // THIS window's id, so the same operation issued from any OS window targets that window's tabs.
 // Pure per-tab attributes (title, color) resolve the tab locally and write the model directly.
-void WindowController::createNewTab()
+void WindowController::createNewTab(QString const& profileName)
 {
     // A new terminal tab is a terminal view: leave the settings page so the content area shows it.
     setSettingsActive(false);
-    _manager.createNewTab(_windowId);
+    auto profile = profileName.isEmpty() ? std::optional<std::string> { std::nullopt }
+                                         : std::optional<std::string> { profileName.toStdString() };
+    _manager.createNewTab(_windowId, std::move(profile));
 }
 
 void WindowController::activateTab(int index)
