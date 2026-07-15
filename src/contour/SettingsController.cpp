@@ -105,9 +105,12 @@ namespace
               },
               [](TerminalProfile& p, QVariant const& v) {
                   auto const s = v.toString();
-                  p.tabBarVisibility = s == "Never"      ? config::TabBarVisibility::Never
-                                       : s == "Multiple" ? config::TabBarVisibility::Multiple
-                                                         : config::TabBarVisibility::Always;
+                  if (s == "Never")
+                      p.tabBarVisibility = config::TabBarVisibility::Never;
+                  else if (s == "Multiple")
+                      p.tabBarVisibility = config::TabBarVisibility::Multiple;
+                  else
+                      p.tabBarVisibility = config::TabBarVisibility::Always;
               },
               { "Always", "Never", "Multiple" } },
             // }}}
@@ -236,17 +239,17 @@ namespace
                              "Foreground",
                              [](auto const& p) { return p.defaultForeground; },
                              [](auto& p, auto c) { p.defaultForeground = c; } });
-            static constexpr auto ansiNames =
+            static constexpr auto AnsiNames =
                 std::array<std::string_view, 8> { "black", "red",     "green", "yellow",
                                                   "blue",  "magenta", "cyan",  "white" };
             for (auto const bright: { false, true })
-                for (auto i = size_t { 0 }; i < ansiNames.size(); ++i)
+                for (auto i = size_t { 0 }; i < AnsiNames.size(); ++i)
                 {
                     auto const slot = bright ? i + 8 : i;
                     list.push_back({ QString::fromStdString((bright ? "bright_" : "normal_")
-                                                            + std::string(ansiNames[i])),
+                                                            + std::string(AnsiNames[i])),
                                      QString::fromStdString((bright ? "Bright " : "Normal ")
-                                                            + std::string(ansiNames[i])),
+                                                            + std::string(AnsiNames[i])),
                                      [slot](auto const& p) { return p.palette.at(slot); },
                                      [slot](auto& p, auto c) { p.palette.at(slot) = c; } });
                 }
