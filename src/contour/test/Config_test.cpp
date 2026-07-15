@@ -889,6 +889,132 @@ input_mapping:
     }));
 }
 
+TEST_CASE("Config: SetTabColor's color is optional, and a bad one is not fatal", "[config]")
+{
+    // SetTabColor is the one action whose argument is optional AND meaningful when absent: no color
+    // means "open the tab's color picker". Both spellings must therefore bind, which is also what keeps
+    // the action out of ParameterizedActionConcept and thus IN the command palette.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], key: F1, action: SetTabColor }
+    - { mods: [Control], key: F2, action: SetTabColor, color: '#ff0000' }
+    - { mods: [Control], key: F3, action: SetTabColor, color: '#0f0' }
+    - { mods: [Control], key: F4, action: SetTabColor, color: 'rgb:00/80/FF' }
+    - { mods: [Control], key: F5, action: SetTabColor, color: 'not-a-color' }
+    - { mods: [Control], key: F6, action: ResetTabColor }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value();
+
+    auto const colorFor = [&](vtbackend::Key key) -> std::optional<vtbackend::RGBColor> {
+        auto const found = std::ranges::find_if(mappings.keyMappings, [&](auto const& m) {
+            return m.input == key && std::holds_alternative<contour::actions::SetTabColor>(m.binding.at(0));
+        });
+        REQUIRE(found != mappings.keyMappings.end());
+        return std::get<contour::actions::SetTabColor>(found->binding.at(0)).color;
+    };
+
+    // No color at all: bound, and colorless. This is the picker.
+    CHECK_FALSE(colorFor(vtbackend::Key::F1).has_value());
+
+    // Every spelling vtbackend::parseColor() already understands is reused verbatim.
+    CHECK(colorFor(vtbackend::Key::F2) == vtbackend::RGBColor { 0xFF, 0x00, 0x00 });
+    CHECK(colorFor(vtbackend::Key::F3) == vtbackend::RGBColor { 0x00, 0xF0, 0x00 });
+    CHECK(colorFor(vtbackend::Key::F4) == vtbackend::RGBColor { 0x00, 0x80, 0xFF });
+
+    // A color that does not parse is NOT fatal: the binding survives, colorless, and opens the picker.
+    // Deliberate (it mirrors CopySelection's bad `format`), so pin it — otherwise someone "fixes" it
+    // into a dropped binding and a user's typo silently costs them their key.
+    CHECK_FALSE(colorFor(vtbackend::Key::F5).has_value());
+
+    CHECK(std::ranges::any_of(mappings.keyMappings, [](auto const& m) {
+        return std::holds_alternative<contour::actions::ResetTabColor>(m.binding.at(0));
+    }));
+}
+
+TEST_CASE("Config: an unquoted SetTabColor color is a YAML comment, and does not take the binding with it",
+          "[config]")
+{
+    // The spelling a user reaches for first, in the block style the generated contour.yml is written in:
+    //
+    //     color: #ff0000
+    //
+    // YAML eats `#ff0000` as a COMMENT (the `#` follows a space), so the key is defined but its value is
+    // null — not a scalar at all. That must still leave a usable binding (the picker), and it is warned
+    // about in the log, since the value is gone by the time the parser sees it and nothing else would
+    // point the user at the quoting. Pinned because the guard here is a NON-scalar test: an `IsScalar()`
+    // check alone cannot tell "the user wrote no color" from "the user wrote one and YAML ate it".
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - mods: [Control]
+      key: F2
+      action: SetTabColor
+      color: #ff0000
+    - mods: [Control]
+      key: F3
+      action: SetTabColor
+      color: '#ff0000'
+)"sv);
+
+    auto const& mappings = config.inputMappings.value();
+
+    auto const colorFor = [&](vtbackend::Key key) -> std::optional<vtbackend::RGBColor> {
+        auto const found = std::ranges::find_if(mappings.keyMappings, [&](auto const& m) {
+            return m.input == key && std::holds_alternative<contour::actions::SetTabColor>(m.binding.at(0));
+        });
+        REQUIRE(found != mappings.keyMappings.end());
+        return std::get<contour::actions::SetTabColor>(found->binding.at(0)).color;
+    };
+
+    // The binding survives, colorless: the key opens the picker rather than being dropped on the floor.
+    CHECK_FALSE(colorFor(vtbackend::Key::F2).has_value());
+    // ... and the quoted spelling right next to it, which is what the user should have written, colors.
+    CHECK(colorFor(vtbackend::Key::F3) == vtbackend::RGBColor { 0xFF, 0x00, 0x00 });
+}
+
+TEST_CASE("Config: a SetTabColor binding survives the round-trip through the config it writes", "[config]")
+{
+    // std::formatter<Action> is what Contour writes into the contour.yml it generates, and parseAction()
+    // is what reads it back. Closing that loop for real — feeding the formatter's OWN output to the
+    // parser rather than a hand-written copy of it — is what catches the quoting hazard: unquoted,
+    // `color: #FF0000` is a YAML COMMENT, and the color would silently vanish on the next start.
+    using namespace contour::actions;
+
+    auto const red = vtbackend::RGBColor { 0xFF, 0x00, 0x00 };
+    auto const written = std::format("{}", Action { SetTabColor { red } });
+    CHECK(written == "SetTabColor, color: '#FF0000'");
+    CHECK(std::format("{}", Action { SetTabColor {} }) == "SetTabColor"); // the picker writes no color
+    CHECK(std::format("{}", Action { ResetTabColor {} }) == "ResetTabColor");
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir,
+                                     std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - {{ mods: [Control], key: F2, action: {} }}
+)",
+                                                 written));
+
+    auto const& mappings = config.inputMappings.value();
+    REQUIRE(mappings.keyMappings.size() == 1);
+    auto const& action = mappings.keyMappings.at(0).binding.at(0);
+    REQUIRE(std::holds_alternative<SetTabColor>(action));
+    CHECK(std::get<SetTabColor>(action).color == red); // what went out came back
+}
+
 TEST_CASE("Config: font features, text shaping engine, frozen DEC modes and hint patterns load", "[config]")
 {
     QTemporaryDir dir;

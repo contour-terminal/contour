@@ -283,16 +283,40 @@ Item {
         controller: root.controller
         tabIndex: root.tabIndex
         onRenameRequested: renameLoader.start()
+        // The menu only raises this once it has closed, so the mouse path and the keyboard path below
+        // are the same one-liner: ask this tab's flyout to open.
+        onColorRequested: colorFlyout.open()
     }
 
-    // Keyboard entry point (the SetTabTitle action): the WindowController emits
-    // tabTitleEditRequested(index) for the active tab; the matching delegate opens its editor.
-    // The active tab's delegate is always realized, so an in-delegate Connections reliably fires.
+    // The swatch-grid color picker (WT-style quick coloring). It lives HERE rather than inside the
+    // context menu because it has two entry points that must share one instance: "Choose Color…" in
+    // the menu, and the SetTabColor action below (which fires with no menu open at all).
+    //
+    // A Popup positions itself against its PARENT, which is now this tab rather than the menu that used
+    // to own it. The flyout places itself against that parent (below the tab, or above it when the tab
+    // strip sits at the bottom of the window) — see TabColorFlyout's own placement block.
+    TabColorFlyout {
+        id: colorFlyout
+        objectName: "tabColorFlyout"
+        controller: root.controller
+        tabIndex: root.tabIndex
+        // Which swatch the keyboard cursor starts on when the flyout opens.
+        currentColor: root.tabColor
+    }
+
+    // Keyboard entry points (the SetTabTitle / SetTabColor actions): the WindowController emits
+    // tabTitleEditRequested(index) / tabColorPickRequested(index) for the active tab; the matching
+    // delegate opens its editor or its flyout. The active tab's delegate is always realized, so an
+    // in-delegate Connections reliably fires.
     Connections {
         target: root.controller
         function onTabTitleEditRequested(index) {
             if (index === root.tabIndex)
                 renameLoader.start()
+        }
+        function onTabColorPickRequested(index) {
+            if (index === root.tabIndex)
+                colorFlyout.open()
         }
     }
 }

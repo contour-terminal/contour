@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/LayoutBuilder.h>
 
+#include <vtbackend/Color.h>
+
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
@@ -164,16 +166,6 @@ namespace
         return out;
     }
 
-    /// Formats @p color as the exact "#RRGGBB" form the parser accepts. `std::format("{}", color)`
-    /// would instead yield `'#RRGGBB'` (to_string(RGBColor) wraps the hex in literal single
-    /// quotes), which RGBColor's string assignment does not understand.
-    /// @param color The color to format.
-    /// @return The color as "#RRGGBB".
-    [[nodiscard]] std::string colorHex(vtbackend::RGBColor color)
-    {
-        return std::format("#{:02X}{:02X}{:02X}", color.red, color.green, color.blue);
-    }
-
     void emitPane(YAML::Emitter& out, config::LayoutPane const& pane, bool emitRatio);
 
     /// Emits @p pane's keys into the mapping the caller has already opened. A tab's root pane and a
@@ -238,7 +230,7 @@ namespace
         if (tab.title)
             out << YAML::Key << "title" << YAML::Value << *tab.title;
         if (tab.color)
-            out << YAML::Key << "color" << YAML::Value << colorHex(*tab.color);
+            out << YAML::Key << "color" << YAML::Value << vtbackend::formatColor(*tab.color);
         if (tab.profile)
             out << YAML::Key << "profile" << YAML::Value << *tab.profile;
         emitPaneBody(out, tab.root, /* emitRatio */ false);

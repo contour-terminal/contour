@@ -2,6 +2,7 @@
 #include <contour/Actions.h>
 #include <contour/Config.h>
 
+#include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
 
 #include <vtpty/ImageSize.h>
@@ -2432,6 +2433,36 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             }
             else
                 return std::nullopt;
+        }
+
+        if (holds_alternative<actions::SetTabColor>(action))
+        {
+            // `color` is OPTIONAL: without it the action opens the tab's color picker, which is a
+            // perfectly good thing to bind a key to. A color that does not parse is therefore not fatal —
+            // like CopySelection's bad `format`, it warns and falls back to the default (the picker)
+            // rather than dropping the whole binding on the floor.
+            if (auto const colorNode = node["color"]; colorNode)
+            {
+                // A color key that YAML did not hand us as a scalar is the unquoted `color: #ff0000`,
+                // whose `#` starts a COMMENT — leaving a null node here and the user with a key that
+                // silently opens the picker instead of coloring the tab. Warn: the value is gone by the
+                // time it reaches us, so this diagnostic is the only thing pointing at the quoting.
+                if (!colorNode.IsScalar())
+                {
+                    logger()("Non-scalar color in SetTabColor action (an unquoted '#rrggbb' is a YAML "
+                             "comment — quote it). Falling back to opening the color picker.");
+                    return action;
+                }
+
+                auto const colorText = colorNode.as<std::string>();
+                if (auto const color = vtbackend::parseColor(colorText); color.has_value())
+                    return actions::SetTabColor { color };
+
+                logger()(
+                    "Invalid color '{}' in SetTabColor action. Falling back to opening the color picker.",
+                    colorText);
+            }
+            return action; // colorless => the picker
         }
 
         if (holds_alternative<actions::ResizePane>(action))

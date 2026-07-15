@@ -2,6 +2,8 @@
 #include <contour/AsciiText.h>
 #include <contour/Command.h>
 
+#include <vtbackend/Color.h>
+
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
@@ -92,6 +94,16 @@ CommandArguments commandArguments(actions::Action const& action)
             },
             [](LaunchLayout const& a) -> CommandArguments {
                 return { .id = a.name, .title = std::format(": {}", a.name) };
+            },
+            [](SetTabColor const& a) -> CommandArguments {
+                // Colorless is the DEFAULT (it opens the picker), so it carries no arguments: the row
+                // keeps the plain "SetTabColor" id, and the palette can offer it straight from the
+                // catalog. A bound instance that names a color is a different command, and says so.
+                if (!a.color)
+                    return {};
+                auto hex = vtbackend::formatColor(*a.color);
+                auto title = std::format(": {}", hex);
+                return { .id = std::move(hex), .title = std::move(title) };
             },
             [](SaveLayout const& a) -> CommandArguments {
                 return { .id = a.name, .title = std::format(": {}", a.name) };

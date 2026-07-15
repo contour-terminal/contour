@@ -341,6 +341,15 @@ std::string to_string(BrightColor color);
 std::string to_string(RGBColor c);
 std::string to_string(RGBAColor c);
 
+/// Renders @p color as a bare hex literal, e.g. "#FF0000" — the exact inverse of parseColor().
+///
+/// Deliberately NOT to_string(RGBColor), which wraps the same value in single quotes: those are what a
+/// YAML emitter wants, and exactly what a value being handed back to parseColor(), or shown to a human
+/// as a command-palette row, must not have.
+/// @param color The color to render.
+/// @return Its "#RRGGBB" form, in upper case.
+[[nodiscard]] std::string formatColor(RGBColor color);
+
 inline std::ostream& operator<<(std::ostream& os, vtbackend::Color value)
 {
     return os << to_string(value);

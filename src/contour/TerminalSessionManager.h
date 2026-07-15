@@ -206,6 +206,19 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// SetTabTitle keybinding), routed like the other tab ops via the acting session's window.
     /// @param acting The session that received the keybinding; its hosting window is the target.
     void beginTabTitleEdit(TerminalSession* acting);
+    /// Opens the color picker for the active tab of the window hosting @p acting (a `SetTabColor`
+    /// keybinding that names no color), routed exactly like beginTabTitleEdit().
+    /// @param acting The session that received the keybinding; its hosting window is the target.
+    void beginTabColorPick(TerminalSession* acting);
+    /// Colors the active tab of the window hosting @p acting (a `SetTabColor` keybinding that names a
+    /// color) as the user's own choice, so it outranks an application's DECAC color.
+    /// @param color The color to apply.
+    /// @param acting The session that received the keybinding; its hosting window is the target.
+    void setActiveTabColor(vtbackend::RGBColor color, TerminalSession* acting);
+    /// Drops the user's color from the active tab of the window hosting @p acting (the `ResetTabColor`
+    /// keybinding), letting an application-assigned DECAC color resurface.
+    /// @param acting The session that received the keybinding; its hosting window is the target.
+    void resetActiveTabColor(TerminalSession* acting);
 
     void removeSession(TerminalSession&);
     void currentSessionIsTerminated();
@@ -538,6 +551,20 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     {
         auto* tab = tabHostingSession(session);
         return tab != nullptr ? _model->window(_model->windowOfTab(tab->id())) : nullptr;
+    }
+
+    /// Resolves the QML-facing controller of the window hosting @p session, or nullptr.
+    ///
+    /// The routing every keybinding that targets "my window's UI" needs: a session receives the chord,
+    /// but the tab strip / palette / context menu it must act on belongs to the window that session
+    /// happens to sit in.
+    /// @param session The backing session that received the keybinding.
+    /// @return The hosting window's controller, or nullptr when the session has no window (or no
+    ///         controller has been registered for it).
+    [[nodiscard]] WindowController* controllerHostingSession(TerminalSession* session) const noexcept
+    {
+        auto* win = windowHostingSession(session);
+        return win != nullptr ? controllerFor(win->id()) : nullptr;
     }
 
     /// Shared move primitive for the public move-tab entry points: reorders the tab hosting @p session to

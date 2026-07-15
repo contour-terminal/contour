@@ -5,6 +5,8 @@
 #include <contour/CommandPaletteModel.h>
 #include <contour/display/TerminalDisplay.h>
 
+#include <vtbackend/Color.h>
+
 #include <QtCore/QAbstractListModel>
 #include <QtGui/QColor>
 #include <QtQml/QtQml>
@@ -135,6 +137,17 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// for the SetTabTitle action). No-op when this window has no active tab. Emits
     /// tabTitleEditRequested() with the active tab's row so exactly that TabItem starts editing.
     Q_INVOKABLE void beginActiveTabTitleEdit();
+    /// Asks the active tab's QML delegate to open its color picker (the keyboard entry point for the
+    /// SetTabColor action when it names no color). No-op when this window has no active tab. Emits
+    /// tabColorPickRequested() with the active tab's row so exactly that TabItem opens its flyout.
+    Q_INVOKABLE void beginActiveTabColorPick();
+    /// Colors the ACTIVE tab (the keyboard entry point for `SetTabColor` carrying a color). Recorded
+    /// as the user's own choice, so it outranks any color the application assigned via DECAC.
+    /// @param color The color to apply.
+    void setActiveTabColor(vtbackend::RGBColor color);
+    /// Returns the ACTIVE tab to its default color (the `ResetTabColor` action): drops the user's
+    /// choice, letting an application-assigned DECAC color resurface. No-op without an active tab.
+    void resetActiveTabColor();
     /// Colors the tab at @p index on the user's behalf. A user color outranks any color the application
     /// assigned via DECAC, so this always takes visible effect.
     /// @param index The tab's row in this window.
@@ -426,6 +439,9 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// is the tab-strip model), so it only reaches this window's TabItems; the delegate whose row
     /// matches @p index starts editing.
     void tabTitleEditRequested(int index);
+    /// Requests that the tab at @p index open its color picker. Per-window, exactly like
+    /// tabTitleEditRequested: the delegate whose row matches @p index opens its TabColorFlyout.
+    void tabColorPickRequested(int index);
     /// Requests that this window show its command palette. Per-window (like tabTitleEditRequested), so
     /// the popup opens over the window the user pressed the chord in — not over every open window.
     void commandPaletteRequested();

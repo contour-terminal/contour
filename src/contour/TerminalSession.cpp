@@ -2251,6 +2251,23 @@ bool TerminalSession::operator()(actions::SetTabTitle)
     return true;
 }
 
+bool TerminalSession::operator()(actions::SetTabColor const& action)
+{
+    // Naming no color means "let me pick one": open the same flyout the tab's context menu opens.
+    // Naming one means the user already decided, so skip the popup and apply it.
+    if (action.color.has_value())
+        _manager->setActiveTabColor(*action.color, /*acting*/ this);
+    else
+        _manager->beginTabColorPick(/*acting*/ this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::ResetTabColor)
+{
+    _manager->resetActiveTabColor(/*acting*/ this);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::SplitVertical)
 {
     _manager->splitActivePane(/*vertical*/ true, /*acting*/ this);

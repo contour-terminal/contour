@@ -295,6 +295,7 @@ class RoutingMockController: public QAbstractListModel
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
     Q_INVOKABLE void resetTabTitle(int) {}
     Q_INVOKABLE void beginActiveTabTitleEdit() { emit tabTitleEditRequested(_activeTabIndex); }
+    Q_INVOKABLE void beginActiveTabColorPick() { emit tabColorPickRequested(_activeTabIndex); }
     Q_INVOKABLE void setTabColor(int, QColor const&) {}
     Q_INVOKABLE void resetTabColor(int) {}
     Q_INVOKABLE void closeTabAtIndex(int) {}
@@ -340,6 +341,8 @@ class RoutingMockController: public QAbstractListModel
     void chromeHeightChanged();
     void activeTabRootPaneChanged();
     void tabTitleEditRequested(int index);
+    // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
+    void tabColorPickRequested(int index);
 
   private:
     int _chromeHeight = 0;

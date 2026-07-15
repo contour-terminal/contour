@@ -438,14 +438,12 @@ void TerminalSessionManager::ensureCommandHistoryReady()
 
 void TerminalSessionManager::openCommandPalette(TerminalSession* acting)
 {
-    auto* win = windowHostingSession(acting);
-    if (win == nullptr)
+    auto* controller = controllerHostingSession(acting);
+    if (controller == nullptr)
         return;
 
     ensureCommandHistoryReady();
-
-    if (auto* controller = controllerFor(win->id()); controller != nullptr)
-        controller->openCommandPalette();
+    controller->openCommandPalette();
 }
 
 void TerminalSessionManager::openContextMenu(TerminalSession* acting)
@@ -455,8 +453,8 @@ void TerminalSessionManager::openContextMenu(TerminalSession* acting)
     // "the right-click was swallowed on the way here" look exactly alike from outside.
     emit contextMenuRequested(acting);
 
-    auto* win = windowHostingSession(acting);
-    if (win == nullptr)
+    auto* controller = controllerHostingSession(acting);
+    if (controller == nullptr)
         return;
 
     // The menu belongs to the pane that was right-clicked, which is not necessarily the active one. Make
@@ -466,8 +464,7 @@ void TerminalSessionManager::openContextMenu(TerminalSession* acting)
         if (auto* leaf = tab->rootPane()->findLeaf(acting->modelSessionId()); leaf != nullptr)
             activatePane(tab->id(), leaf->id());
 
-    if (auto* controller = controllerFor(win->id()); controller != nullptr)
-        controller->openContextMenu();
+    controller->openContextMenu();
 }
 
 void TerminalSessionManager::recordCommand(std::string const& id)
@@ -604,11 +601,26 @@ void TerminalSessionManager::switchToTabRight(TerminalSession* acting)
 
 void TerminalSessionManager::beginTabTitleEdit(TerminalSession* acting)
 {
-    auto* win = windowHostingSession(acting);
-    if (win == nullptr)
-        return;
-    if (auto* controller = controllerFor(win->id()); controller != nullptr)
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
         controller->beginActiveTabTitleEdit();
+}
+
+void TerminalSessionManager::beginTabColorPick(TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
+        controller->beginActiveTabColorPick();
+}
+
+void TerminalSessionManager::setActiveTabColor(vtbackend::RGBColor color, TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
+        controller->setActiveTabColor(color);
+}
+
+void TerminalSessionManager::resetActiveTabColor(TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
+        controller->resetActiveTabColor();
 }
 
 void TerminalSessionManager::switchToTab(int position, TerminalSession* acting)

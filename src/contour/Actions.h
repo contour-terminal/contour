@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/Color.h>
 #include <vtbackend/HintModeHandler.h>
 
 #include <crispy/assert.h>
@@ -139,6 +140,9 @@ struct CopyLastCommandPrompt{};  // OSC 133: the prompt line(s) of the last fini
 struct CopyLastCommandOutput{};  // OSC 133: what the last finished command printed
 struct CopyLastCommandBlock{};   // OSC 133: both of the above
 struct CopyHyperlink{ std::string uri; }; // empty uri => whatever lies under the mouse cursor right now
+// Colorize the active tab. No color => open the tab's color picker; a color => apply it right away.
+struct SetTabColor{ std::optional<vtbackend::RGBColor> color; };
+struct ResetTabColor{}; // drop the user's tab color, revealing any color the application assigned
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -231,7 +235,9 @@ using Action = std::variant<CancelSelection,
                             CopyLastCommandPrompt,
                             CopyLastCommandOutput,
                             CopyLastCommandBlock,
-                            CopyHyperlink>;
+                            CopyHyperlink,
+                            SetTabColor,
+                            ResetTabColor>;
 
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
 ///
@@ -253,6 +259,7 @@ concept NonRepeatableActionConcept = crispy::one_of<T,
                                                     ClosePane,
                                                     OpenCommandPalette,
                                                     OpenContextMenu,
+                                                    SetTabColor,
                                                     SplitVertical,
                                                     SplitHorizontal,
                                                     SwapPaneLeft,
@@ -473,6 +480,14 @@ namespace documentation
     constexpr inline std::string_view SwitchToTabRight { "Switch to tab to the right" };
     constexpr inline std::string_view SetTabTitle {
         "Rename the current tab inline (opens the tab-title editor)"
+    };
+    constexpr inline std::string_view SetTabColor {
+        "Colorize the current tab. Without a color, this opens the tab's color picker; with one (e.g. "
+        "color: '#ff0000') it applies that color right away."
+    };
+    constexpr inline std::string_view ResetTabColor {
+        "Removes the color you gave the current tab, restoring its default look (or the color the "
+        "running application assigned, if it assigned one)."
     };
     constexpr inline std::string_view SplitVertical {
         "Splits the active pane into two side-by-side panes (a vertical divider)."
@@ -696,6 +711,8 @@ struct ActionCatalogEntry
         ActionCatalogEntry {
             "CopyLastCommandBlock", Action { CopyLastCommandBlock {} }, documentation::CopyLastCommandBlock },
         ActionCatalogEntry { "CopyHyperlink", Action { CopyHyperlink {} }, documentation::CopyHyperlink },
+        ActionCatalogEntry { "SetTabColor", Action { SetTabColor {} }, documentation::SetTabColor },
+        ActionCatalogEntry { "ResetTabColor", Action { ResetTabColor {} }, documentation::ResetTabColor },
     };
     return catalog;
 }
@@ -786,6 +803,12 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
             [](CreateSelection const& a) { return std::format(", delimiters: '{}'", a.delimiters); },
             [](LaunchLayout const& a) { return std::format(", name: '{}'", a.name); },
             [](SaveLayout const& a) { return std::format(", name: '{}'", a.name); },
+            [](SetTabColor const& a) {
+                // A colorless SetTabColor opens the picker, so it has no argument to write. The color
+                // needs no hand-quoting: std::formatter<RGBColor> already renders it as '#RRGGBB', and
+                // unquoted a leading '#' would start a YAML COMMENT and swallow the rest of the line.
+                return a.color ? std::format(", color: {}", *a.color) : std::string {};
+            },
             [](auto const&) { return std::string {}; },
         },
         action);

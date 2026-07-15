@@ -481,6 +481,98 @@ TEST_CASE("setTabColorForSession routes a DECAC frame color to the session's tab
         window->closeTabAtIndex(row);
 }
 
+TEST_CASE("the SetTabColor / ResetTabColor actions color the acting session's tab",
+          "[contour][multiwindow][model]")
+{
+    // The whole keybinding chain, headless: action -> TerminalSession::operator() -> the manager ->
+    // the hosting window's controller -> SessionModel, landing in TabColorSource::User. That last part
+    // is the contract worth pinning: a key bound to SetTabColor must behave exactly like picking the
+    // same color in the flyout, DECAC precedence and all.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+
+    auto* tab = manager.model().window(window.id)->tabAt(0);
+    REQUIRE(tab != nullptr);
+    auto const sessionId = tab->activePane()->session();
+    auto* session = manager.sessionForId(sessionId);
+    REQUIRE(session != nullptr);
+    REQUIRE_FALSE(tab->color().has_value());
+
+    auto const red = vtbackend::RGBColor { 0xFF, 0x00, 0x00 };
+    auto const appColor = vtbackend::RGBColor { 0x11, 0x22, 0x33 };
+
+    SECTION("a color-carrying SetTabColor applies it directly, outranking the application's")
+    {
+        manager.setTabColorForSession(sessionId, appColor); // as if the app had sent DECAC
+        REQUIRE(tab->color() == appColor);
+
+        CHECK((*session)(contour::actions::SetTabColor { red }));
+        CHECK(tab->color() == red); // the user's choice wins
+
+        // ResetTabColor drops only what the user chose, so the application's color resurfaces — the
+        // same "default means whatever I did not choose" rule the flyout's Reset button follows.
+        CHECK((*session)(contour::actions::ResetTabColor {}));
+        CHECK(tab->color() == appColor);
+    }
+
+    SECTION("a colorless SetTabColor opens the picker instead of coloring anything")
+    {
+        auto spy = QSignalSpy(window.controller, &contour::WindowController::tabColorPickRequested);
+
+        CHECK((*session)(contour::actions::SetTabColor {}));
+
+        REQUIRE(spy.count() == 1);
+        CHECK(spy.takeFirst().at(0).toInt() == window->activeTabIndex());
+        CHECK_FALSE(tab->color().has_value()); // it asked; it did not decide
+    }
+
+    for (int row = window->count() - 1; row >= 0; --row)
+        window->closeTabAtIndex(row);
+}
+
+TEST_CASE("beginActiveTabColorPick requests the active tab's picker, per window", "[contour][multiwindow]")
+{
+    // Same per-window routing the title editor gets: the signal must carry the ACTIVE row and reach only
+    // the window whose controller was asked, or a chord pressed in window B pops a picker in window A.
+    TestApp app;
+    auto& manager = app.manager();
+    ScopedController windowA { manager };
+    ScopedController windowB { manager };
+    createTabs(manager, *windowA, 2);
+    createTabs(manager, *windowB, 3);
+
+    windowB->activateTab(2);
+    REQUIRE(windowB->activeTabIndex() == 2);
+
+    auto spyB = QSignalSpy(windowB.controller, &contour::WindowController::tabColorPickRequested);
+    auto spyA = QSignalSpy(windowA.controller, &contour::WindowController::tabColorPickRequested);
+
+    windowB->beginActiveTabColorPick();
+
+    REQUIRE(spyB.count() == 1);
+    CHECK(spyB.takeFirst().at(0).toInt() == 2);
+    CHECK(spyA.count() == 0);
+
+    SECTION("with no tabs there is nothing to color, so nothing is asked")
+    {
+        ScopedController empty { manager };
+        REQUIRE(empty->activeTabIndex() < 0);
+
+        auto spy = QSignalSpy(empty.controller, &contour::WindowController::tabColorPickRequested);
+        empty->beginActiveTabColorPick();
+        CHECK(spy.count() == 0);
+
+        // And the row-less setters stay no-ops rather than reaching for tab -1.
+        CHECK_NOTHROW(empty->setActiveTabColor(vtbackend::RGBColor { 0xFF, 0x00, 0x00 }));
+        CHECK_NOTHROW(empty->resetActiveTabColor());
+    }
+}
+
 TEST_CASE("a user's tab color outranks DECAC and survives a terminal reset", "[contour][multiwindow][model]")
 {
     // The user's choice always wins, and no escape sequence can take it away: a DECAC reset — which is

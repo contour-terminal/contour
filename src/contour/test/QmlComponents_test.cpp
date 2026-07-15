@@ -38,12 +38,16 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <ranges>
 
+#include <QtTest/QTest>
 #include <vtmux/PaneLayout.h>
 
 namespace
@@ -153,18 +157,38 @@ class MockTabController: public QAbstractListModel
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
     Q_INVOKABLE void resetTabTitle(int) {}
     Q_INVOKABLE void beginActiveTabTitleEdit() { emit tabTitleEditRequested(0); }
-    Q_INVOKABLE void setTabColor(int, QColor const&) {}
-    Q_INVOKABLE void resetTabColor(int) {}
+    Q_INVOKABLE void beginActiveTabColorPick() { emit tabColorPickRequested(0); }
+    Q_INVOKABLE void setTabColor(int index, QColor const& color)
+    {
+        ++setTabColorCalls;
+        lastTabColorIndex = index;
+        lastTabColor = color;
+    }
+    Q_INVOKABLE void resetTabColor(int index)
+    {
+        ++resetTabColorCalls;
+        lastTabColorIndex = index;
+    }
+    int setTabColorCalls = 0;
+    int resetTabColorCalls = 0;
+    int lastTabColorIndex = -1;
+    QColor lastTabColor;
     Q_INVOKABLE void closeTabAtIndex(int) {}
     Q_INVOKABLE void closeOtherTabs(int) {}
     Q_INVOKABLE void closeTabsToRight(int) {}
+    /// Sixteen distinct colors, matching the SHAPE of the real palette (vtmux SessionModel's
+    /// DefaultPalette): two full rows of the flyout's 8-column grid. The count is what makes vertical
+    /// keyboard navigation testable at all — a shorter palette has no second row to move down into.
+    /// Built once, like the real TerminalSessionManager's cached list, since QML re-reads it per binding.
     Q_INVOKABLE [[nodiscard]] QVariantList tabColorPalette() const
     {
-        QVariantList list;
-        list.append(QColor(Qt::red));
-        list.append(QColor(Qt::green));
-        list.append(QColor(Qt::blue));
-        return list;
+        static auto const colors = [] {
+            QVariantList list;
+            for (auto const i: std::views::iota(0, 16))
+                list.append(QColor::fromHsv(i * 20, 200, 220));
+            return list;
+        }();
+        return colors;
     }
     // Mirror WindowController's tab-color helpers so a colored TabItem's fill/text bindings resolve
     // (the delegate calls these once accentColor is non-transparent). Same pure math as the real one.
@@ -194,6 +218,10 @@ class MockTabController: public QAbstractListModel
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
     void tabTitleEditRequested(int index);
+    // TabItem's Connections declares onTabColorPickRequested; without the matching signal HERE, every
+    // test that instantiates a TabItem earns a "no signal of the target matches" QML warning — which the
+    // suite's message capture turns into a failure.
+    void tabColorPickRequested(int index);
 
   private:
     int _count = 3;
@@ -500,9 +528,11 @@ TEST_CASE("Tab context menu exposes all its actions (offscreen)", "[contour][gui
 {
     // Regression guard for the Windows empty-menu bug: since Qt 6.8 a Controls Menu defaults to a
     // native OS popup where one exists, and the native Windows menu could not represent this menu's
-    // custom background and nested color-flyout Popup, so it came up EMPTY. TabContextMenu forces the
-    // in-scene popup (popupType: Popup.Item); this test asserts the five actionable items are present
-    // once instantiated, which the empty native popup would have failed.
+    // custom surface, so it came up EMPTY. TabContextMenu forces the in-scene popup (popupType:
+    // Popup.Item); this test asserts the five actionable items are present once instantiated, which the
+    // empty native popup would have failed. (The color flyout that originally provoked the bug now lives
+    // on the TabItem — see the SetTabColor tests — but the in-scene popup is still what gives the menu an
+    // opaque, themed surface, so the pin stays.)
     QQmlEngine engine;
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
@@ -680,6 +710,488 @@ TEST_CASE("A colored TabItem fills with the user color and picks contrasting tex
     tab->setProperty("tabActive", false);
     auto const inactiveFill = tab->property("effectiveBackground").value<QColor>();
     CHECK(inactiveFill != red);
+
+    // The tab hands its color down to its color picker, which is what lands the keyboard cursor on the
+    // swatch the tab already wears when the flyout opens (see the h/j/k/l navigation test).
+    auto* flyout = tab->findChild<QObject*>(QStringLiteral("tabColorFlyout"));
+    REQUIRE(flyout != nullptr);
+    CHECK(flyout->property("currentColor").value<QColor>() == red);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+namespace
+{
+/// Where the host puts its TabItem — i.e. where the tab strip sits in the window (`tab_bar_position`).
+/// Which one is in force decides whether there is room BELOW the tab for the color flyout, so it is the
+/// hinge of the flyout's placement, and both must be drivable from a test.
+enum class TabStripAt : std::uint8_t
+{
+    Top,   //!< The default: the strip is the top-most chrome, with the whole window below it.
+    Bottom //!< `tab_bar_position: Bottom`: the tab's bottom edge IS the window's bottom edge.
+};
+
+/// Hosts TabItem.qml inside a real Window, which is what its TabColorFlyout Popup needs: a Popup opens
+/// into its window's overlay, and a TabItem created bare (as the tests above do) has no window at all —
+/// open() would then leave the flyout invisible and prove nothing.
+///
+/// The window is deliberately small in the Bottom case only in the sense that the tab is flush with its
+/// bottom edge; the size is otherwise the same, so the two cases differ in exactly the one thing under
+/// test.
+///
+/// @param engine     The engine to build in.
+/// @param controller The mock the TabItem binds to.
+/// @param stripAt    Where in the window to put the tab (mirrors the `tab_bar_position` option).
+/// @param windowWidth The host window's width; a narrow one is what makes a right-edge overflow testable.
+/// @return The host Window; the TabItem is reachable as its `tabItem` property.
+[[nodiscard]] std::unique_ptr<QObject> makeTabItemHost(QQmlEngine& engine,
+                                                       MockTabController& controller,
+                                                       TabStripAt stripAt = TabStripAt::Top,
+                                                       int windowWidth = 800)
+{
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    // `y` mirrors main.qml, which anchors the TitleBar to the bottom edge under `tab_bar_position: Bottom`
+    // (`y: parent.height - titleBar.height`). `x` puts the tab at the window's RIGHT edge in that case
+    // too, so one host covers both axes a popup can overflow on.
+    auto const bottom = stripAt == TabStripAt::Bottom;
+    auto const source = QStringLiteral("import QtQuick\n"
+                                       "import QtQuick.Window\n"
+                                       "import \"qrc:/contour/ui\"\n"
+                                       "Window {\n"
+                                       "  id: host\n"
+                                       "  width: %1; height: 600; visible: true\n"
+                                       "  property alias tabItem: item\n"
+                                       "  TabItem {\n"
+                                       "    id: item\n"
+                                       "    x: %2 ? host.width - width : 0\n"
+                                       "    y: %2 ? host.height - height : 0\n"
+                                       "    controller: terminalSessions\n"
+                                       "    window: host\n"
+                                       "    tabIndex: 0\n"
+                                       "    tabTitle: \"shell\"\n"
+                                       "    tabRawTitle: \"\"\n"
+                                       "    tabColor: \"transparent\"\n"
+                                       "    tabActive: true\n"
+                                       "    tabPaneCount: 1\n"
+                                       "    tabZoomed: false\n"
+                                       "  }\n"
+                                       "}\n")
+                            .arg(windowWidth)
+                            .arg(bottom ? QStringLiteral("true") : QStringLiteral("false"));
+
+    QQmlComponent component(&engine);
+    component.setData(source.toUtf8(), QUrl(QStringLiteral("qrc:/contour/ui/TabItemTestHost.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+
+    INFO("TabItemTestHost errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+
+    std::unique_ptr<QObject> host(component.create());
+    REQUIRE(host != nullptr);
+    QCoreApplication::processEvents();
+    return host;
+}
+
+/// The rectangle the flyout actually occupies in its window — which is NOT what its `y` property says.
+/// A Popup's x/y are the position REQUESTED against its parent; Qt then clamps the popup item itself back
+/// inside the window (for a popup whose `margins` are >= 0) without touching those properties. Only the
+/// item's own geometry says what the user can see, so every placement assertion below reads it.
+[[nodiscard]] QRectF flyoutWindowRect(QObject* flyout)
+{
+    auto* content = flyout->property("contentItem").value<QQuickItem*>();
+    if (content == nullptr || content->parentItem() == nullptr)
+        return {};
+    auto* popupItem = content->parentItem(); // the Popup's own item; the content sits inside it
+    return { popupItem->mapToScene(QPointF(0, 0)), QSizeF(popupItem->width(), popupItem->height()) };
+}
+} // namespace
+
+TEST_CASE("The SetTabColor action opens the tab's color flyout (offscreen)", "[contour][gui][qml]")
+{
+    // The keyboard half of the tab-color feature, end to end through the QML: the controller emits
+    // tabColorPickRequested(row) and the delegate whose row matches opens the ONE flyout it owns. This
+    // is the reason the flyout was hoisted out of TabContextMenu — there is no menu open here at all.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTabItemHost(engine, controller);
+    auto* tab = host->property("tabItem").value<QObject*>();
+    REQUIRE(tab != nullptr);
+
+    auto* flyout = tab->findChild<QObject*>(QStringLiteral("tabColorFlyout"));
+    REQUIRE(flyout != nullptr);
+    REQUIRE_FALSE(flyout->property("opened").toBool());
+
+    SECTION("the request reaches the delegate whose row it names, and picking there colors that row")
+    {
+        // What the action does: WindowController::beginActiveTabColorPick() -> tabColorPickRequested(0).
+        controller.beginActiveTabColorPick();
+        QCoreApplication::processEvents();
+
+        CHECK(flyout->property("opened").toBool());
+
+        // It drops BELOW the tab. A Popup positions itself against its parent, which is now the tab
+        // rather than the menu that used to own it, so without a placement of its own it would open at the
+        // tab's own origin — covering the very tab strip the user is picking a color for. (This is the
+        // strip-at-the-top case, where there is room below; the placement test below drives the other.)
+        auto* tabItem = qobject_cast<QQuickItem*>(tab);
+        REQUIRE(tabItem != nullptr);
+        CHECK(tabItem->height() > 0);
+        CHECK(flyout->property("y").toReal() == tabItem->height());
+
+        // And a color picked in it lands on THIS tab, through the very same controller call the mouse
+        // path makes — the flyout the keyboard opened is the one the context menu opens, bound to row 0.
+        auto* hexField = flyout->findChild<QObject*>(QStringLiteral("customColorField"));
+        REQUIRE(hexField != nullptr);
+        hexField->setProperty("text", QStringLiteral("FF0000"));
+        QMetaObject::invokeMethod(flyout, "applyCustomColor");
+        QCoreApplication::processEvents();
+
+        CHECK(controller.setTabColorCalls == 1);
+        CHECK(controller.lastTabColorIndex == 0);
+        CHECK(controller.lastTabColor == QColor(0xFF, 0x00, 0x00));
+        CHECK_FALSE(flyout->property("opened").toBool()); // applying closes it
+    }
+
+    SECTION("a request naming ANOTHER row leaves this tab's flyout shut")
+    {
+        // Every realized delegate hears the same signal, so the row check is the only thing keeping the
+        // wrong tab from popping its picker in the user's face.
+        emit controller.tabColorPickRequested(1); // this TabItem is row 0
+        QCoreApplication::processEvents();
+
+        CHECK_FALSE(flyout->property("opened").toBool());
+    }
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("The tab color flyout opens inside the window, wherever the tab strip sits (offscreen)",
+          "[contour][gui][qml]")
+{
+    // The picker is MODAL: one that opens outside the window is not merely misplaced, it is invisible AND
+    // still eats every click — the user presses SetTabColor, sees nothing, and cannot color the tab at all
+    // until they guess at Escape. So the contract is not "below the tab", it is "on screen"; below the tab
+    // is only how it is honored when there is room there.
+    //
+    // The tab is hosted at the window's edge here, which is exactly what `tab_bar_position: Bottom` does
+    // (main.qml anchors the TitleBar at `parent.height - titleBar.height`) — and what the tests above, all
+    // of which host the tab at 0,0 in a big window, structurally cannot see.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const stripAt = GENERATE(TabStripAt::Top, TabStripAt::Bottom);
+    // Narrow enough that a flyout hanging off the right-hand tab would overflow the right edge.
+    auto const host = makeTabItemHost(engine, controller, stripAt, /* windowWidth: */ 420);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = qobject_cast<QQuickItem*>(host->property("tabItem").value<QObject*>());
+    REQUIRE(tab != nullptr);
+
+    auto* flyout = tab->findChild<QObject*>(QStringLiteral("tabColorFlyout"));
+    REQUIRE(flyout != nullptr);
+
+    controller.beginActiveTabColorPick(); // what the SetTabColor action does
+    QCoreApplication::processEvents();
+    REQUIRE(flyout->property("opened").toBool());
+
+    auto const windowRect = QRectF(0, 0, window->width(), window->height());
+    auto const flyoutRect = flyoutWindowRect(flyout);
+    INFO("strip at " << (stripAt == TabStripAt::Bottom ? "bottom" : "top") << ", flyout at " << flyoutRect.x()
+                     << "," << flyoutRect.y() << " " << flyoutRect.width() << "x" << flyoutRect.height()
+                     << " in a " << window->width() << "x" << window->height() << " window");
+
+    REQUIRE(flyoutRect.height() > 0); // i.e. the popup materialized at all
+    CHECK(windowRect.contains(flyoutRect));
+
+    // And it still hugs the tab it belongs to: above it when it cannot go below, rather than being parked
+    // in some arbitrary corner that happens to be on screen.
+    auto const tabRect = QRectF(tab->mapToScene(QPointF(0, 0)), QSizeF(tab->width(), tab->height()));
+    if (stripAt == TabStripAt::Bottom)
+        CHECK(flyoutRect.bottom() <= tabRect.top());
+    else
+        CHECK(flyoutRect.top() >= tabRect.bottom());
+
+    // Modal popup still up at window teardown => Qt's overlay/grab machinery leaks, and LeakSanitizer
+    // fails the run on it (see the keyboard test below).
+    QMetaObject::invokeMethod(flyout, "close");
+    QCoreApplication::processEvents();
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("Tab color flyout picks a swatch with the cursor keys and with h/j/k/l (offscreen)",
+          "[contour][gui][qml][keyboard]")
+{
+    // The keyboard half of the picker: a SetTabColor bound to a key is useless if the flyout it opens
+    // can only be finished with the mouse. Real key events go into the real window (QTest::keyClick ->
+    // QWindowSystemInterface), so this exercises the same focus/grab path the user's keystrokes take —
+    // an offscreen platform still delivers keys, it just draws nowhere.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTabItemHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = host->property("tabItem").value<QObject*>();
+    REQUIRE(tab != nullptr);
+
+    auto* flyout = tab->findChild<QObject*>(QStringLiteral("tabColorFlyout"));
+    REQUIRE(flyout != nullptr);
+
+    auto const palette = controller.tabColorPalette();
+    REQUIRE(palette.size() == 16); // 8 columns x 2 rows: enough to move in both axes
+
+    // The grid materializes with the flyout, so every section opens first and looks it up after. Each
+    // opens exactly ONCE: a picker that is closed and re-opened within one window leaks Qt-internal
+    // overlay state, which LeakSanitizer (rightly) reports and which is not this test's subject.
+    QQuickItem* grid = nullptr;
+    auto const openPicker = [&] {
+        controller.beginActiveTabColorPick(); // what the SetTabColor action does
+        QCoreApplication::processEvents();
+        REQUIRE(flyout->property("opened").toBool());
+        grid = flyout->findChild<QQuickItem*>(QStringLiteral("tabColorGrid"));
+        REQUIRE(grid != nullptr);
+    };
+
+    auto const press = [&](Qt::Key key) {
+        QTest::keyClick(window, key);
+        QCoreApplication::processEvents();
+        return grid->property("currentIndex").toInt();
+    };
+
+    SECTION("opening arms the keyboard: the grid holds the focus, on the first swatch")
+    {
+        openPicker();
+
+        // The grid, not the hex field, holds the focus — so the first keystroke navigates rather than
+        // being swallowed — and it starts on the first swatch, this tab wearing no color of its own.
+        CHECK(grid->hasActiveFocus());
+        CHECK(grid->property("currentIndex").toInt() == 0);
+    }
+
+    SECTION("cursor keys and vim motions move the same cursor, and stop at the edges")
+    {
+        openPicker();
+
+        CHECK(press(Qt::Key_Right) == 1);
+        CHECK(press(Qt::Key_L) == 2); // the vim motion is an alias, not a second cursor
+        CHECK(press(Qt::Key_Down) == 10);
+        CHECK(press(Qt::Key_J) == 10); // already on the last row: nothing below to move to
+        CHECK(press(Qt::Key_K) == 2);
+        CHECK(press(Qt::Key_H) == 1);
+        CHECK(press(Qt::Key_Left) == 0);
+
+        // Clamped, not wrapped: h at the left edge must not teleport the cursor to the far end of the
+        // palette, which is where an off-by-one in either direction would land it.
+        CHECK(press(Qt::Key_Left) == 0);
+        CHECK(press(Qt::Key_H) == 0);
+        CHECK(press(Qt::Key_Up) == 0);
+
+        CHECK(controller.setTabColorCalls == 0); // navigating alone colors nothing
+    }
+
+    SECTION("horizontal motion stays in its row rather than wrapping into the neighbouring one")
+    {
+        openPicker();
+
+        // The edge above (index 0) is the ONE place a flat ±1 step over the model happens to clamp on its
+        // own, so it proves nothing about the rows in between. GridView's own moveCurrentIndexLeft/Right
+        // step ±1 through the FLAT model index: `h` on the first swatch of the second row lands on the LAST
+        // swatch of the first — a color from a row the user never navigated to, one Enter from being
+        // applied to their tab.
+        REQUIRE(press(Qt::Key_Down) == 8); // first swatch of the second row
+        CHECK(press(Qt::Key_H) == 8);      // nothing to its left: stay
+        CHECK(press(Qt::Key_Left) == 8);
+
+        // And the mirror image, at the right edge of the first row.
+        REQUIRE(press(Qt::Key_Up) == 0);
+        for ([[maybe_unused]] auto const step: std::views::iota(0, 7))
+            press(Qt::Key_L);
+        REQUIRE(grid->property("currentIndex").toInt() == 7); // last swatch of the first row
+        CHECK(press(Qt::Key_L) == 7);                         // nothing to its right: stay
+        CHECK(press(Qt::Key_Right) == 7);
+    }
+
+    SECTION("a modifier chord is not a motion")
+    {
+        openPicker();
+
+        REQUIRE(press(Qt::Key_Right) == 1);
+
+        // Qt reports the same event.key for Ctrl+L as for a bare `l`. Reading the key alone, the picker
+        // would answer a user's reflexive Ctrl+L (clear screen) or Shift+J by moving the keyboard cursor —
+        // and would swallow the chord — leaving the next Enter to apply a swatch they never aimed at.
+        auto const chord = [&](Qt::Key key, Qt::KeyboardModifier modifier) {
+            QTest::keyClick(window, key, modifier);
+            QCoreApplication::processEvents();
+            return grid->property("currentIndex").toInt();
+        };
+
+        CHECK(chord(Qt::Key_L, Qt::ControlModifier) == 1);
+        CHECK(chord(Qt::Key_H, Qt::ControlModifier) == 1);
+        CHECK(chord(Qt::Key_J, Qt::ShiftModifier) == 1);
+        CHECK(chord(Qt::Key_Down, Qt::AltModifier) == 1);
+        CHECK(chord(Qt::Key_Right, Qt::MetaModifier) == 1);
+
+        // ... while the bare key still moves, i.e. the mask rejects the chord, not the key.
+        CHECK(press(Qt::Key_L) == 2);
+    }
+
+    SECTION("Enter applies the swatch the cursor navigated to, and closes")
+    {
+        openPicker();
+
+        REQUIRE(press(Qt::Key_L) == 1);
+        REQUIRE(press(Qt::Key_J) == 9);
+
+        QTest::keyClick(window, Qt::Key_Return);
+        QCoreApplication::processEvents();
+
+        CHECK(controller.setTabColorCalls == 1);
+        CHECK(controller.lastTabColorIndex == 0); // this tab's row
+        CHECK(controller.lastTabColor == palette[9].value<QColor>());
+        CHECK_FALSE(flyout->property("opened").toBool());
+    }
+
+    SECTION("Space applies too — the other conventional 'activate what is focused' key")
+    {
+        openPicker();
+
+        REQUIRE(press(Qt::Key_Right) == 1);
+
+        QTest::keyClick(window, Qt::Key_Space);
+        QCoreApplication::processEvents();
+
+        CHECK(controller.setTabColorCalls == 1);
+        CHECK(controller.lastTabColor == palette[1].value<QColor>());
+        CHECK_FALSE(flyout->property("opened").toBool());
+    }
+
+    SECTION("Escape dismisses the flyout without coloring anything")
+    {
+        openPicker();
+
+        REQUIRE(press(Qt::Key_Right) == 1);
+
+        QTest::keyClick(window, Qt::Key_Escape);
+        QCoreApplication::processEvents();
+
+        CHECK_FALSE(flyout->property("opened").toBool());
+        CHECK(controller.setTabColorCalls == 0);
+    }
+
+    SECTION("the cursor starts on the color the tab already wears")
+    {
+        // Otherwise re-coloring a tab always begins from the far corner of the palette, and the keyboard
+        // user has to count their way back to the color they are changing.
+        //
+        // Set on the flyout, not on the tab: coloring a WINDOWED tab re-grabs its drag pixmap
+        // (TabItem.onTabColorChanged -> grabToImage), an async grab that the offscreen platform never
+        // renders and so never completes — its pending result then shows up as a leak. The binding that
+        // feeds this property from the tab's color is pinned by the colored-TabItem test above.
+        flyout->setProperty("currentColor", palette[11]);
+        openPicker();
+
+        CHECK(grid->property("currentIndex").toInt() == 11);
+        CHECK(press(Qt::Key_K) == 3); // ... and it moves on from there
+    }
+
+    // Teardown, run after every section: destroying the window while a MODAL popup is still up leaks Qt's
+    // overlay/grab machinery, and LeakSanitizer duly fails the run on it. The sections that pick a color
+    // or press Escape already closed the flyout; the ones that only navigate have not.
+    QMetaObject::invokeMethod(flyout, "close");
+    QCoreApplication::processEvents();
+    CHECK_FALSE(flyout->property("opened").toBool());
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("The tab color flyout's Reset Color button drops the tab's color (offscreen)",
+          "[contour][gui][qml]")
+{
+    // The ONE path in the GUI that clears a user's tab color, so that whatever color the application gave
+    // the tab (DECAC) resurfaces. Every sibling path through this flyout — a clicked swatch, Enter on the
+    // keyboard cursor, the hex field — is pinned by a setTabColorCalls assertion; this one had a call
+    // counter on the mock that nothing ever read, so a Reset that quietly stopped resetting (or stopped
+    // closing, or reset the wrong tab) would have shipped with the suite green.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTabItemHost(engine, controller);
+    auto* tab = host->property("tabItem").value<QObject*>();
+    REQUIRE(tab != nullptr);
+    auto* flyout = tab->findChild<QObject*>(QStringLiteral("tabColorFlyout"));
+    REQUIRE(flyout != nullptr);
+
+    controller.beginActiveTabColorPick();
+    QCoreApplication::processEvents();
+    REQUIRE(flyout->property("opened").toBool());
+
+    // Through the Button the user actually clicks, not the function behind it: the wiring between the two
+    // is half of what can break here.
+    auto* resetButton = flyout->findChild<QQuickItem*>(QStringLiteral("tabColorResetButton"));
+    REQUIRE(resetButton != nullptr);
+    QMetaObject::invokeMethod(resetButton, "clicked");
+    QCoreApplication::processEvents();
+
+    CHECK(controller.resetTabColorCalls == 1);
+    CHECK(controller.lastTabColorIndex == 0); // this tab's row, not some other tab's
+    CHECK(controller.setTabColorCalls == 0);  // a reset is not a set
+    CHECK_FALSE(flyout->property("opened").toBool());
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("The tab color flyout forgets an abandoned hex value between opens (offscreen)",
+          "[contour][gui][qml]")
+{
+    // The picker is re-opened by a keystroke now, so what it carries over from the last visit matters.
+    // A hex value typed and then abandoned with Escape must not still be sitting in the field on the next
+    // open: its live preview swatch is enabled whenever the field parses, so one click on it — or one
+    // Tab+Enter — would color the tab with the value from the session the user cancelled.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTabItemHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = host->property("tabItem").value<QObject*>();
+    REQUIRE(tab != nullptr);
+    auto* flyout = tab->findChild<QObject*>(QStringLiteral("tabColorFlyout"));
+    REQUIRE(flyout != nullptr);
+
+    controller.beginActiveTabColorPick();
+    QCoreApplication::processEvents();
+    REQUIRE(flyout->property("opened").toBool());
+
+    auto* hexField = flyout->findChild<QQuickItem*>(QStringLiteral("customColorField"));
+    REQUIRE(hexField != nullptr);
+    hexField->setProperty("text", QStringLiteral("00FF00"));
+    REQUIRE(hexField->property("acceptableInput").toBool()); // i.e. it WOULD be applicable
+
+    // Abandon it, the way the flyout documents: Escape dismisses.
+    QTest::keyClick(window, Qt::Key_Escape);
+    QCoreApplication::processEvents();
+    REQUIRE_FALSE(flyout->property("opened").toBool());
+    REQUIRE(controller.setTabColorCalls == 0);
+
+    controller.beginActiveTabColorPick(); // the user comes back
+    QCoreApplication::processEvents();
+    REQUIRE(flyout->property("opened").toBool());
+
+    CHECK(hexField->property("text").toString().isEmpty());
+    CHECK_FALSE(hexField->property("acceptableInput").toBool()); // so the preview cannot be applied
+
+    QMetaObject::invokeMethod(flyout, "close"); // a modal popup left up at teardown leaks Qt's overlay
+    QCoreApplication::processEvents();
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
@@ -1980,8 +2492,29 @@ class MockPaletteController: public QObject
     [[nodiscard]] contour::CommandPaletteModel& model() noexcept { return *_model; }
 
     /// Records what the popup asked to run, so a test can assert the pick actually routed.
-    Q_INVOKABLE void runCommand(QString const& id) { ran << id; }
+    ///
+    /// OpenCommandPalette is dispatched for real, not just recorded: that is the one command the palette
+    /// offers that re-enters the palette (WindowController::runCommand -> executeAction -> the manager ->
+    /// WindowController::openCommandPalette -> commandPaletteRequested -> main.qml's `open()`), and the
+    /// re-entry is only reproducible if this mock closes that loop the way the real chain does.
+    Q_INVOKABLE void runCommand(QString const& id)
+    {
+        ran << id;
+        if (observeOnRun)
+            observeOnRun();
+        if (id == QStringLiteral("OpenCommandPalette"))
+            emit commandPaletteRequested();
+    }
     QStringList ran;
+
+    /// Called from within runCommand(), so a test can observe the palette's state at the exact moment
+    /// the command fires — which is the whole contract for commands that open a keyboard-driven surface
+    /// of their own (SetTabColor's picker): they must run once the palette is out of the way.
+    std::function<void()> observeOnRun;
+
+  signals:
+    /// What WindowController raises to ask its window to show the palette; main.qml answers it with open().
+    void commandPaletteRequested();
 
   private:
     contour::CommandHistory _history;
@@ -2025,6 +2558,14 @@ struct PaletteHost
                                         "    id: paletteItem\n"
                                         "    controller: paletteController\n"
                                         "    window: host\n"
+                                        "  }\n"
+                                        // main.qml's wiring, verbatim: the controller asks, the window
+                                        // opens the palette. Without it here, the one command that re-opens
+                                        // the palette (OpenCommandPalette) would look inert in a test and
+                                        // its re-entry could not be tested at all.
+                                        "  Connections {\n"
+                                        "    target: paletteController\n"
+                                        "    function onCommandPaletteRequested() { paletteItem.open(); }\n"
                                         "  }\n"
                                         "}\n"),
                       QUrl(QStringLiteral("qrc:/contour/ui/PaletteTestHost.qml")));
@@ -2151,14 +2692,78 @@ TEST_CASE("Accepting a palette row runs that command and gives the keyboard back
     QCoreApplication::processEvents();
     REQUIRE(controller.model().rowCount() > 0);
 
+    // Asserted from INSIDE the command, the only place the ordering is observable — by the time
+    // acceptCurrent() returns, everything has already happened. The command must run LAST: one that opens
+    // a keyboard-driven surface of its own (SetTabColor's swatch picker, SetTabTitle's rename field)
+    // takes the focus as it opens, so running it any earlier lets the palette's own dismissal reclaim
+    // that focus, and the surface cannot be typed into at all.
+    controller.observeOnRun = [&] {
+        CHECK_FALSE(host.palette->property("visible").toBool()); // the palette is already gone
+        CHECK(host.focusRestores() == 1);                        // and has handed the keyboard back
+    };
+
     QMetaObject::invokeMethod(host.palette, "acceptCurrent");
     QCoreApplication::processEvents();
 
+    // (Which also proves the observer above ran at all.)
     REQUIRE(controller.ran.size() == 1);
     CHECK(controller.ran.front() == QStringLiteral("SplitVertical"));
     // Picking a command dismisses the popup and hands the keyboard back to the terminal.
     CHECK_FALSE(host.palette->property("visible").toBool());
     CHECK(host.focusRestores() == 1);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("Picking OpenCommandPalette re-opens the palette cleanly, not on top of its own close (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    // The palette offers "Open Command Palette" as a row — it is a plain command taking no argument, so the
+    // catalog lists it like any other. Picking it therefore runs a command that re-opens the very popup
+    // that is closing: WindowController::runCommand -> the manager -> openCommandPalette -> the window's
+    // open(). The pick must not re-enter Popup.open() from INSIDE the popup's own closed() emission —
+    // there, Qt is still unwinding the exit transition, and the palette ends up needing two dismissals.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+
+    auto* filter = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+
+    filter->setProperty("text", QStringLiteral("OpenCommandPalette"));
+    QCoreApplication::processEvents();
+    REQUIRE(controller.model().rowCount() > 0);
+    REQUIRE(controller.model()
+                .data(controller.model().index(0, 0), contour::CommandPaletteModel::IdRole)
+                .toString()
+            == QStringLiteral("OpenCommandPalette"));
+
+    QMetaObject::invokeMethod(host.palette, "acceptCurrent");
+
+    // THE PIN, asserted before the event loop gets a turn: the popup has closed, and the command has NOT
+    // run. That gap is the fix. Closing is synchronous, so a command dispatched straight from onClosed
+    // would already be on `ran` here — running while Qt is still inside the popup's own closed() emission,
+    // which for this command means calling Popup.open() on top of a close that has not finished unwinding.
+    REQUIRE_FALSE(host.palette->property("opened").toBool());
+    CHECK(controller.ran.isEmpty());
+
+    QCoreApplication::processEvents(); // ... and now, with the popup at rest, it runs
+
+    // It ran, exactly once, and re-opened the palette — a fresh open rather than one stacked on a close.
+    REQUIRE(controller.ran.size() == 1);
+    CHECK(controller.ran.front() == QStringLiteral("OpenCommandPalette"));
+    CHECK(host.palette->property("opened").toBool());
+
+    // And one dismissal dismisses it.
+    QMetaObject::invokeMethod(host.palette, "close");
+    QCoreApplication::processEvents();
+
+    CHECK_FALSE(host.palette->property("opened").toBool());
+    CHECK_FALSE(host.palette->property("visible").toBool());
+    CHECK(controller.ran.size() == 1); // closing runs nothing further
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
