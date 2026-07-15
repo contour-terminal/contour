@@ -1559,6 +1559,10 @@ ContextMenuState TerminalSession::contextMenuState()
     auto const* mimeData = clipboard != nullptr ? clipboard->mimeData(QClipboard::Clipboard) : nullptr;
     auto const clipboardHasText = mimeData != nullptr && mimeData->hasText();
 
+    // This machine's host name, so the working-directory row can be grayed out for a remote (SSH) cwd
+    // whose path the local file manager cannot open. Read outside the terminal lock (it is not grid state).
+    auto const localHost = QHostInfo::localHostName().toStdString();
+
     // One lock for the whole snapshot. The parser thread mutates the grid concurrently, so a menu that
     // asked the terminal a fresh question per row would be reading a moving target — and a QML binding
     // that reached into the terminal on its own schedule would be a plain data race.
@@ -1573,7 +1577,10 @@ ContextMenuState TerminalSession::contextMenuState()
             // cannot guard against that in an alias) reports a command that never ran, with no text to
             // copy — offering the user three rows that would all yield nothing.
             .hasLastCommand = block.has_value() && !(block->prompt.empty() && block->output.empty()),
-            .hasWorkingDirectory = !terminal().currentWorkingDirectory().empty(),
+            // Only a working directory on this host can be opened by the local file manager. OSC 7 gives a
+            // file://HOST/PATH; a remote (SSH) cwd resolves to nullopt and grays the "Open Current Folder".
+            .hasLocalWorkingDirectory =
+                vtbackend::localWorkingDirectory(terminal().currentWorkingDirectory(), localHost).has_value(),
             // Left for the window to fill in: whether this tab holds more than one pane is not something
             // a session knows about itself.
             .hasSplits = false,
@@ -1871,10 +1878,22 @@ bool TerminalSession::operator()(actions::OpenConfiguration)
 
 bool TerminalSession::operator()(actions::OpenFileManager)
 {
-    auto const l = scoped_lock { terminal() };
-    auto const& cwd = terminal().currentWorkingDirectory();
-    if (!_app.externalLauncher().openUrl(QUrl(QString::fromUtf8(cwd.c_str()))))
-        errorLog()("Could not open file \"{}\".", cwd);
+    // OSC 7 advertises the cwd as a file://HOST/PATH URL. Hand the raw URL to the file manager and its
+    // host authority is read as a network share ("//fedora/home/..."), which does not exist locally.
+    // Resolve it to a plain local path first, and only when it is on THIS host — a remote (SSH) cwd is
+    // not openable here (its menu row is grayed out, but a keybinding could still reach this handler).
+    auto const localHost = QHostInfo::localHostName().toStdString();
+    auto localPath = std::optional<std::string> {};
+    {
+        auto const l = scoped_lock { terminal() };
+        localPath = vtbackend::localWorkingDirectory(terminal().currentWorkingDirectory(), localHost);
+    }
+
+    if (!localPath)
+        return true;
+
+    if (!_app.externalLauncher().openUrl(QUrl::fromLocalFile(QString::fromStdString(*localPath))))
+        errorLog()("Could not open folder \"{}\".", *localPath);
 
     return true;
 }

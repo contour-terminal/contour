@@ -51,7 +51,7 @@ namespace
         .hasSelection = true,
         .clipboardHasText = true,
         .hasLastCommand = true,
-        .hasWorkingDirectory = true,
+        .hasLocalWorkingDirectory = true,
         .hasSplits = true,
         .hyperlinkUnderCursor = "https://contour-terminal.org/",
         .activeProfile = "dark",
@@ -147,17 +147,19 @@ TEST_CASE("ContextMenu.hyperlink.onlyUnderTheCursor", "[contextmenu]")
     CHECK(find(elsewhere, "Copy Link Address") == nullptr);
 }
 
-TEST_CASE("ContextMenu.openCurrentFolder.requiresWorkingDirectory", "[contextmenu]")
+TEST_CASE("ContextMenu.openCurrentFolder.requiresLocalWorkingDirectory", "[contextmenu]")
 {
+    // Grayed out unless the cwd is on this host: a remote (SSH) working directory cannot be opened by the
+    // local file manager, so resolving it to a local path is what gates the row (see localWorkingDirectory).
     auto state = fullyEnabledState();
 
-    state.hasWorkingDirectory = false;
+    state.hasLocalWorkingDirectory = false;
     auto const unknown = buildContextMenu(state);
     auto const* whenUnknown = find(unknown, "Open Current Folder");
     REQUIRE(whenUnknown != nullptr);
     CHECK_FALSE(whenUnknown->enabled);
 
-    state.hasWorkingDirectory = true;
+    state.hasLocalWorkingDirectory = true;
     auto const known = buildContextMenu(state);
     auto const* whenKnown = find(known, "Open Current Folder");
     REQUIRE(whenKnown != nullptr);
@@ -319,7 +321,7 @@ TEST_CASE("ContextMenu.separators.neverLeadingTrailingOrDoubled", "[contextmenu]
                                 .hasSelection = selection,
                                 .clipboardHasText = clipboard,
                                 .hasLastCommand = lastCommand,
-                                .hasWorkingDirectory = true,
+                                .hasLocalWorkingDirectory = true,
                                 .hasSplits = splits,
                                 .hyperlinkUnderCursor = hyperlink ? "https://example.org/" : "",
                                 .activeProfile = profiles ? "dark" : "",

@@ -38,9 +38,9 @@ namespace
         return !state.hyperlinkUnderCursor.empty();
     }
 
-    bool hasWorkingDirectory(ContextMenuState const& state) noexcept
+    bool hasLocalWorkingDirectory(ContextMenuState const& state) noexcept
     {
-        return state.hasWorkingDirectory;
+        return state.hasLocalWorkingDirectory;
     }
 
     bool hasSplits(ContextMenuState const& state) noexcept
@@ -238,7 +238,7 @@ namespace
 
             hyperlinkCommand<FollowHyperlink>("Open Link"),
             hyperlinkCommand<CopyHyperlink>("Copy Link Address"),
-            command(OpenFileManager {}, "Open Current Folder").enabledWhen(hasWorkingDirectory),
+            command(OpenFileManager {}, "Open Current Folder").enabledWhen(hasLocalWorkingDirectory),
 
             separator(),
 

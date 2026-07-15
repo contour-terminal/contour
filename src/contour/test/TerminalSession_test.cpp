@@ -518,11 +518,17 @@ TEST_CASE("TerminalSession: opener, paste and reload actions run without a displ
     namespace actions = contour::actions;
     auto& launcher = testApp.launcher();
 
+    // A working directory on this host, so OpenFileManager has a local folder to open (it now refuses a
+    // remote or absent one).
+    session->terminal().setCurrentWorkingDirectory("file://" + QHostInfo::localHostName().toStdString()
+                                                   + "/tmp");
+
     // The document/URL openers route through the injected ExternalLauncher (no desktop touched).
     CHECK((*session)(actions::OpenConfiguration {}));
     CHECK((*session)(actions::OpenFileManager {}));
     CHECK((*session)(actions::OpenSelection {}));
-    // OpenConfiguration opens the config file URL; the other two open the (empty) cwd/selection.
+    // OpenConfiguration opens the config file URL, OpenFileManager the local cwd, OpenSelection the
+    // (empty) selection.
     CHECK(launcher.openedUrls.size() == 3);
 
     // FollowHyperlink with nothing hovered/selected returns false (no target).
@@ -1523,10 +1529,45 @@ TEST_CASE("TerminalSession: the opener actions log (do not crash) when the launc
     namespace actions = contour::actions;
     testApp.launcher().openUrlResult = false;
 
+    // A local cwd, so OpenFileManager reaches its openUrl() (and thus the failure branch) rather than
+    // short-circuiting on an absent/remote directory.
+    session->terminal().setCurrentWorkingDirectory("file://" + QHostInfo::localHostName().toStdString()
+                                                   + "/tmp");
+
     CHECK((*session)(actions::OpenConfiguration {}));
     CHECK((*session)(actions::OpenFileManager {}));
     CHECK((*session)(actions::OpenSelection {}));
     CHECK(testApp.launcher().openedUrls.size() == 3); // all attempted despite the failure
+}
+
+TEST_CASE("TerminalSession: OpenFileManager strips the OSC 7 host and skips remote directories",
+          "[contour][session][actions]")
+{
+    // OSC 7 reports the cwd as file://HOST/PATH. Handing that raw URL to the file manager makes its host
+    // authority read as a network share ("//host/path"); it must be resolved to a plain local path, and
+    // only for a directory on THIS host — a remote (SSH) cwd is not openable here.
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    namespace actions = contour::actions;
+    auto& launcher = testApp.launcher();
+
+    SECTION("a working directory on this host opens as a plain local path")
+    {
+        session->terminal().setCurrentWorkingDirectory("file://" + QHostInfo::localHostName().toStdString()
+                                                       + "/home/user/proj");
+        CHECK((*session)(actions::OpenFileManager {}));
+        REQUIRE(launcher.openedUrls.size() == 1);
+        // The host authority is gone: a local file URL, not a //host network path.
+        CHECK(launcher.openedUrls.back().isLocalFile());
+        CHECK(launcher.openedUrls.back().toLocalFile() == QStringLiteral("/home/user/proj"));
+    }
+
+    SECTION("a remote (SSH) working directory is not opened")
+    {
+        session->terminal().setCurrentWorkingDirectory("file://some-remote-host/home/user");
+        CHECK((*session)(actions::OpenFileManager {}));
+        CHECK(launcher.openedUrls.empty()); // nothing local to open
+    }
 }
 
 TEST_CASE("TerminalSessionManager::setFocusedSession moves terminal focus symmetrically",
