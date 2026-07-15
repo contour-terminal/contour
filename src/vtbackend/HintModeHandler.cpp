@@ -301,7 +301,7 @@ auto extractPathFromFileUrl(std::string const& url) -> std::string
 namespace
 {
     /// The DNS label before the first '.', lower-cased: the bare machine name of a possibly-qualified
-    /// host, so "fedora" and "fedora.localdomain" compare equal.
+    /// host, so "fedora" and "fedora.corp.example" compare equal.
     [[nodiscard]] std::string bareHostLabel(std::string_view host)
     {
         auto label = std::string(host.substr(0, host.find('.')));
