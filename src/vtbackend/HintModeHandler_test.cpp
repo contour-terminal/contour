@@ -576,6 +576,42 @@ TEST_CASE("extractPathFromFileUrl.WindowsDriveLetterWithHost", "[hintmode]")
     CHECK(extractPathFromFileUrl("file://MYPC/d:/temp/x") == "d:/temp/x");
 }
 
+TEST_CASE("localWorkingDirectory.localHostIsOpenable", "[hintmode]")
+{
+    // The pane's own host: strip the scheme and authority down to a plain local path.
+    CHECK(localWorkingDirectory("file://fedora/home/user/proj", "fedora") == "/home/user/proj");
+    // Case-insensitively, and tolerant of a fully-qualified name on either side (same machine).
+    CHECK(localWorkingDirectory("file://FEDORA/home/user", "fedora") == "/home/user");
+    CHECK(localWorkingDirectory("file://fedora.corp.example/home/user", "fedora") == "/home/user");
+    CHECK(localWorkingDirectory("file://fedora/home/user", "fedora.corp.example") == "/home/user");
+    // An empty authority (file:///path) and an explicit "localhost" are this machine too.
+    CHECK(localWorkingDirectory("file:///home/user", "fedora") == "/home/user");
+    CHECK(localWorkingDirectory("file://localhost/home/user", "fedora") == "/home/user");
+    // A bare path (a shell that emits OSC 7 without the file:// wrapper) is local as-is.
+    CHECK(localWorkingDirectory("/home/user", "fedora") == "/home/user");
+}
+
+TEST_CASE("localWorkingDirectory.remoteHostIsRejected", "[hintmode]")
+{
+    // A different host is a remote (e.g. SSH) working directory: its path does not exist here.
+    CHECK(localWorkingDirectory("file://remotehost/home/user", "fedora") == std::nullopt);
+    CHECK(localWorkingDirectory("file://remotehost/C:/Users/user", "fedora") == std::nullopt);
+    // A host with no path at all has nothing to open.
+    CHECK(localWorkingDirectory("file://fedora", "fedora") == std::nullopt);
+    // Nothing reported yet.
+    CHECK(localWorkingDirectory("", "fedora") == std::nullopt);
+}
+
+TEST_CASE("localWorkingDirectory.windowsDriveLetterIsLocal", "[hintmode]")
+{
+    // A drive-letter authority is a path, not a host, so it is this machine's.
+    CHECK(localWorkingDirectory("file://C:/Users/user", "laptop") == "C:/Users/user");
+    CHECK(localWorkingDirectory("file:///C:/Users/user", "laptop") == "C:/Users/user");
+    // A real host in front of a drive path is still local only when the host matches.
+    CHECK(localWorkingDirectory("file://laptop/C:/Users/user", "laptop") == "C:/Users/user");
+    CHECK(localWorkingDirectory("file://desktop/C:/Users/user", "laptop") == std::nullopt);
+}
+
 TEST_CASE("HintModeHandler.CwdRelativeFilesystemValidation", "[hintmode]")
 {
     namespace fs = std::filesystem;

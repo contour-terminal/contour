@@ -8,6 +8,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <cstddef>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -129,5 +132,84 @@ TEST_CASE("fuzzyScore ranks the command the user meant first", "[contour][palett
         auto const order = ranked("close", { "Cancel Long Selection Everywhere", "Close Tab" });
         REQUIRE(order.size() == 2);
         CHECK(order.front() == "Close Tab");
+    }
+}
+
+TEST_CASE("fuzzyMatch reports the exact characters the best alignment landed on", "[contour][palette]")
+{
+    // The palette bolds these positions, so they must be the SAME alignment fuzzyScore ranks by — a
+    // second, differently-scored scan could highlight characters that had nothing to do with the rank.
+
+    SECTION("initials land on the word starts they stand for")
+    {
+        auto const match = fuzzyMatch("sv", "Split Vertical");
+        REQUIRE(match.has_value());
+        CHECK(match->positions == std::vector<int> { 0, 6 });
+    }
+
+    SECTION("a contiguous prefix lands on adjacent characters")
+    {
+        auto const match = fuzzyMatch("spl", "Split Vertical");
+        REQUIRE(match.has_value());
+        CHECK(match->positions == std::vector<int> { 0, 1, 2 });
+    }
+
+    SECTION("a query straddling a space skips the gap")
+    {
+        // "splitv" is "Split V…" with the space typed through: the last char lands past the space.
+        auto const match = fuzzyMatch("splitv", "Split Vertical");
+        REQUIRE(match.has_value());
+        CHECK(match->positions == std::vector<int> { 0, 1, 2, 3, 4, 6 });
+    }
+
+    SECTION("the reported score is byte-for-byte the one fuzzyScore ranks by")
+    {
+        for (auto const candidate: { "Toggle Pane Zoom", "Split Vertical", "Toggle Status Line" })
+        {
+            auto const match = fuzzyMatch("tpz", candidate);
+            auto const score = fuzzyScore("tpz", candidate);
+            CHECK(match.has_value() == score.has_value());
+            if (match && score)
+                CHECK(match->score == *score);
+        }
+    }
+
+    SECTION("positions are strictly ascending and each lands on the query's character")
+    {
+        // The regression shape from fuzzyScore's own tests: nothing greedy may strand the tail.
+        auto const query = std::string { "togglestatusline" };
+        auto const candidate = std::string { "Toggle Status Line" };
+        auto const match = fuzzyMatch(query, candidate);
+        REQUIRE(match.has_value());
+        REQUIRE(match->positions.size() == query.size());
+
+        auto previous = -1;
+        for (auto const i: std::views::iota(std::size_t { 0 }, query.size()))
+        {
+            auto const at = match->positions[i];
+            INFO("query[" << i << "]='" << query[i] << "' -> candidate index " << at);
+            CHECK(at > previous); // strictly ascending
+            REQUIRE(at >= 0);
+            REQUIRE(at < static_cast<int>(candidate.size()));
+            auto const folded = [](char c) {
+                return std::tolower(static_cast<unsigned char>(c));
+            };
+            CHECK(folded(candidate[static_cast<std::size_t>(at)]) == folded(query[i]));
+            previous = at;
+        }
+    }
+
+    SECTION("a non-subsequence yields nullopt, exactly like fuzzyScore")
+    {
+        CHECK_FALSE(fuzzyMatch("vs", "Split Vertical").has_value());
+        CHECK_FALSE(fuzzyMatch("quit", "Split Vertical").has_value());
+    }
+
+    SECTION("an empty query matches with score 0 and no positions to highlight")
+    {
+        auto const match = fuzzyMatch("", "Split Vertical");
+        REQUIRE(match.has_value());
+        CHECK(match->score == 0);
+        CHECK(match->positions.empty());
     }
 }

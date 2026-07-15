@@ -38,9 +38,9 @@ namespace
         return !state.hyperlinkUnderCursor.empty();
     }
 
-    bool hasWorkingDirectory(ContextMenuState const& state) noexcept
+    bool hasLocalWorkingDirectory(ContextMenuState const& state) noexcept
     {
-        return state.hasWorkingDirectory;
+        return state.hasLocalWorkingDirectory;
     }
 
     bool hasSplits(ContextMenuState const& state) noexcept
@@ -51,6 +51,11 @@ namespace
     bool hasProfiles(ContextMenuState const& state) noexcept
     {
         return !state.profileNames.empty();
+    }
+
+    bool inputProtected(ContextMenuState const& state) noexcept
+    {
+        return state.inputProtected;
     }
     // }}}
 
@@ -78,6 +83,7 @@ namespace
         std::string_view title {};         ///< Empty on a Command row => commandTitle(action).
         Predicate visible = always;        ///< When false, the row is not in the menu at all.
         Predicate enabled = always;        ///< When false, the row is in the menu but grayed out.
+        Predicate checked = nullptr;       ///< When set, the row is checkable; checked when it holds.
         ChildBuilder children = nullptr;   ///< Submenu rows: what is inside.
         ActionBinder bindAction = nullptr; ///< When set, supplies the action in place of @ref action.
 
@@ -94,6 +100,14 @@ namespace
         {
             auto row = *this;
             row.enabled = predicate;
+            return row;
+        }
+
+        /// This row, drawn with a check column that is ticked exactly when @p predicate holds.
+        [[nodiscard]] Row checkedWhen(Predicate predicate) const
+        {
+            auto row = *this;
+            row.checked = predicate;
             return row;
         }
 
@@ -224,7 +238,7 @@ namespace
 
             hyperlinkCommand<FollowHyperlink>("Open Link"),
             hyperlinkCommand<CopyHyperlink>("Copy Link Address"),
-            command(OpenFileManager {}, "Open Current Folder").enabledWhen(hasWorkingDirectory),
+            command(OpenFileManager {}, "Open Current Folder").enabledWhen(hasLocalWorkingDirectory),
 
             separator(),
 
@@ -234,6 +248,12 @@ namespace
             command(ToggleSplitOrientation {}, "Toggle Split Orientation").shownWhen(hasSplits),
             command(ClosePane {}, "Close Pane"),
             command(CreateNewTab {}, "New Tab"),
+
+            separator(),
+
+            // Read-only == input protection (KAM). The check reflects the pane's state at open time;
+            // picking it runs ToggleInputProtection, which flips it for the next open.
+            command(ToggleInputProtection {}, "Read-Only Mode").checkedWhen(inputProtected),
 
             separator(),
 
@@ -288,8 +308,8 @@ namespace
                         .title = row.title.empty() ? commandTitle(action) : std::string(row.title),
                         .action = std::move(action),
                         .enabled = row.enabled(state),
-                        .checkable = false,
-                        .checked = false,
+                        .checkable = row.checked != nullptr,
+                        .checked = row.checked != nullptr && row.checked(state),
                         .children = {} });
                     break;
                 }

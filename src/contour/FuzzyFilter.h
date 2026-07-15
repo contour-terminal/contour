@@ -3,6 +3,7 @@
 
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace contour
 {
@@ -46,5 +47,31 @@ struct FuzzyWeights
 [[nodiscard]] std::optional<int> fuzzyScore(std::string_view query,
                                             std::string_view candidate,
                                             FuzzyWeights const& weights = {});
+
+/// The score of a fuzzy match together with the exact characters it landed on.
+///
+/// @c positions carries one candidate index per query character, in ascending order — the winning
+/// alignment fuzzyScore() ranks by. That is what lets the command palette bold the very characters
+/// that earned the ranking, rather than guessing at them with a second, possibly different, scan.
+struct FuzzyMatch
+{
+    int score;                  ///< Identical to what fuzzyScore() returns for the same arguments.
+    std::vector<int> positions; ///< Candidate index each query character matched, strictly ascending.
+};
+
+/// Scores @p query against @p candidate exactly as fuzzyScore() does, and additionally reports which
+/// characters of @p candidate the best alignment matched.
+///
+/// Shares the alignment with fuzzyScore() (the score is byte-for-byte identical); the extra work is a
+/// single backtrack over the alignment table, so it is only paid by callers that need the positions.
+///
+/// @param query     What the user typed.
+/// @param candidate The text to match against.
+/// @param weights   How to score the match.
+/// @return The score and the matched positions, or nullopt when @p query is not a subsequence of
+///         @p candidate. An empty @p query yields score 0 and no positions.
+[[nodiscard]] std::optional<FuzzyMatch> fuzzyMatch(std::string_view query,
+                                                   std::string_view candidate,
+                                                   FuzzyWeights const& weights = {});
 
 } // namespace contour

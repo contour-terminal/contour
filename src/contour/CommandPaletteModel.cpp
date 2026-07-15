@@ -4,8 +4,10 @@
 #include <contour/FuzzyFilter.h>
 
 #include <algorithm>
+#include <optional>
 #include <ranges>
 #include <utility>
+#include <vector>
 
 namespace contour
 {
@@ -81,11 +83,11 @@ void CommandPaletteModel::rebuildRows()
         // entry simply stops appearing, with no stale row and no migration of the stored file.
         for (auto const& id: _history.recent())
             if (auto const* command = commandById(id))
-                _rows.push_back(Row { .command = command, .section = Section::Recent });
+                _rows.push_back(Row { .command = command, .section = Section::Recent, .titleMatches = {} });
 
         auto const firstAll = _rows.size();
         for (auto const& command: _commands)
-            _rows.push_back(Row { .command = &command, .section = Section::All });
+            _rows.push_back(Row { .command = &command, .section = Section::All, .titleMatches = {} });
 
         // Sort just the freshly-appended stretch, leaving the recent rows pinned above it.
         std::ranges::sort(_rows.begin() + static_cast<std::ptrdiff_t>(firstAll),
@@ -101,6 +103,7 @@ void CommandPaletteModel::rebuildRows()
             Command const* command;
             int score;
             int recency; //!< Position in the MRU list; lower is more recent. Absent -> past the end.
+            std::vector<int> titleMatches; //!< Title indices this query matched; empty if matched via id.
         };
 
         auto const recencyOf = [this](std::string const& id) {
@@ -116,15 +119,27 @@ void CommandPaletteModel::rebuildRows()
         for (auto const& command: _commands)
         {
             // Match against the title (what the user sees and therefore types at), falling back to the
-            // id — so "splitv" still finds "Split Vertical" even though its title has a space there.
-            auto score = fuzzyScore(query, command.title);
-            if (!score)
+            // id — so "splitv" still finds "Split Vertical" even though its title has a space there. A
+            // title hit also hands back the matched positions, so QML can bold exactly those characters;
+            // an id-only hit highlights nothing, there being no id text on screen to mark.
+            auto score = std::optional<int> {};
+            auto titleMatches = std::vector<int> {};
+            if (auto match = fuzzyMatch(query, command.title))
+            {
+                score = match->score;
+                titleMatches = std::move(match->positions);
+            }
+            else
+            {
                 score = fuzzyScore(query, command.id);
+            }
             if (!score)
                 continue;
 
-            scored.push_back(
-                Scored { .command = &command, .score = *score, .recency = recencyOf(command.id) });
+            scored.push_back(Scored { .command = &command,
+                                      .score = *score,
+                                      .recency = recencyOf(command.id),
+                                      .titleMatches = std::move(titleMatches) });
         }
 
         std::ranges::stable_sort(scored, [](Scored const& a, Scored const& b) {
@@ -135,8 +150,10 @@ void CommandPaletteModel::rebuildRows()
             return byTitle(*a.command, *b.command);
         });
 
-        for (auto const& entry: scored)
-            _rows.push_back(Row { .command = entry.command, .section = Section::All });
+        for (auto& entry: scored)
+            _rows.push_back(Row { .command = entry.command,
+                                  .section = Section::All,
+                                  .titleMatches = std::move(entry.titleMatches) });
     }
 
     endResetModel();
@@ -177,6 +194,15 @@ QVariant CommandPaletteModel::data(QModelIndex const& index, int role) const
             return QString::fromStdString(shortcut->second);
         }
         case SectionRole: return static_cast<int>(entry.section);
+        case TitleMatchesRole: {
+            // The matched title indices as a plain list of ints, which QML reads as a JS array to decide
+            // which characters to bold. Empty on an unfiltered or id-only-matched row.
+            auto matches = QVariantList {};
+            matches.reserve(static_cast<qsizetype>(entry.titleMatches.size()));
+            for (auto const position: entry.titleMatches)
+                matches.append(position);
+            return matches;
+        }
         case SectionStartRole:
             // Answers the whole question the view asks — "draw a header above this row?" — rather than
             // half of it. A filtered list has no sections, so no row starts one; otherwise a header goes
@@ -192,8 +218,13 @@ QVariant CommandPaletteModel::data(QModelIndex const& index, int role) const
 QHash<int, QByteArray> CommandPaletteModel::roleNames() const
 {
     return {
-        { IdRole, "commandId" },      { TitleRole, "title" },     { DescriptionRole, "description" },
-        { ShortcutRole, "shortcut" }, { SectionRole, "section" }, { SectionStartRole, "sectionStart" },
+        { IdRole, "commandId" },
+        { TitleRole, "title" },
+        { DescriptionRole, "description" },
+        { ShortcutRole, "shortcut" },
+        { SectionRole, "section" },
+        { SectionStartRole, "sectionStart" },
+        { TitleMatchesRole, "titleMatches" },
     };
 }
 

@@ -47,6 +47,24 @@ namespace
     return roleAt(model, row, CommandPaletteModel::SectionRole).toInt();
 }
 
+/// The title character indices the current filter matched on a row, as the QML delegate reads them.
+[[nodiscard]] std::vector<int> titleMatchesAt(CommandPaletteModel const& model, int row)
+{
+    auto result = std::vector<int> {};
+    for (auto const& entry: roleAt(model, row, CommandPaletteModel::TitleMatchesRole).toList())
+        result.push_back(entry.toInt());
+    return result;
+}
+
+/// The row index of the command with @p id, or -1 if it is not present.
+[[nodiscard]] int rowOf(CommandPaletteModel const& model, std::string const& id)
+{
+    for (auto row = 0; row < model.rowCount(); ++row)
+        if (idAt(model, row) == id)
+            return row;
+    return -1;
+}
+
 /// The ids of the rows in the Recent section, in order.
 [[nodiscard]] std::vector<std::string> recentRows(CommandPaletteModel const& model)
 {
@@ -204,6 +222,46 @@ TEST_CASE("Typing collapses the sections into one ranked list", "[contour][palet
     {
         model.setFilter(QStringLiteral("zzzznotacommand"));
         CHECK(model.rowCount() == 0);
+    }
+}
+
+TEST_CASE("The palette reports which title characters the filter matched", "[contour][palette]")
+{
+    // These indices are what QML bolds; they must point at the characters the filter actually landed on.
+    auto history = CommandHistory { 3 };
+    auto const actionCommands = ActionCommandSource {};
+
+    auto model = CommandPaletteModel { history };
+    model.setSources({ &actionCommands });
+    model.refresh();
+
+    SECTION("an unfiltered row highlights nothing")
+    {
+        REQUIRE(model.rowCount() > 0);
+        CHECK(titleMatchesAt(model, 0).empty());
+    }
+
+    SECTION("a filtered row marks exactly the matched title characters")
+    {
+        model.setFilter(QStringLiteral("splitv"));
+        auto const row = rowOf(model, "SplitVertical");
+        REQUIRE(row >= 0);
+        REQUIRE(titleAt(model, row) == "Split Vertical");
+        // "splitv" over "Split Vertical": S p l i t (0..4), then V (6) past the space.
+        CHECK(titleMatchesAt(model, row) == std::vector<int> { 0, 1, 2, 3, 4, 6 });
+    }
+
+    SECTION("clearing the filter clears the highlight again")
+    {
+        model.setFilter(QStringLiteral("split"));
+        auto const filtered = rowOf(model, "SplitVertical");
+        REQUIRE(filtered >= 0);
+        REQUIRE_FALSE(titleMatchesAt(model, filtered).empty());
+
+        model.setFilter(QString {});
+        auto const cleared = rowOf(model, "SplitVertical");
+        REQUIRE(cleared >= 0);
+        CHECK(titleMatchesAt(model, cleared).empty());
     }
 }
 

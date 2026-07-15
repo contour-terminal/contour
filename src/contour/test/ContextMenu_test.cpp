@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <string>
+#include <variant>
 #include <vector>
 
 using namespace contour;
@@ -50,7 +51,7 @@ namespace
         .hasSelection = true,
         .clipboardHasText = true,
         .hasLastCommand = true,
-        .hasWorkingDirectory = true,
+        .hasLocalWorkingDirectory = true,
         .hasSplits = true,
         .hyperlinkUnderCursor = "https://contour-terminal.org/",
         .activeProfile = "dark",
@@ -146,17 +147,19 @@ TEST_CASE("ContextMenu.hyperlink.onlyUnderTheCursor", "[contextmenu]")
     CHECK(find(elsewhere, "Copy Link Address") == nullptr);
 }
 
-TEST_CASE("ContextMenu.openCurrentFolder.requiresWorkingDirectory", "[contextmenu]")
+TEST_CASE("ContextMenu.openCurrentFolder.requiresLocalWorkingDirectory", "[contextmenu]")
 {
+    // Grayed out unless the cwd is on this host: a remote (SSH) working directory cannot be opened by the
+    // local file manager, so resolving it to a local path is what gates the row (see localWorkingDirectory).
     auto state = fullyEnabledState();
 
-    state.hasWorkingDirectory = false;
+    state.hasLocalWorkingDirectory = false;
     auto const unknown = buildContextMenu(state);
     auto const* whenUnknown = find(unknown, "Open Current Folder");
     REQUIRE(whenUnknown != nullptr);
     CHECK_FALSE(whenUnknown->enabled);
 
-    state.hasWorkingDirectory = true;
+    state.hasLocalWorkingDirectory = true;
     auto const known = buildContextMenu(state);
     auto const* whenKnown = find(known, "Open Current Folder");
     REQUIRE(whenKnown != nullptr);
@@ -206,6 +209,37 @@ TEST_CASE("ContextMenu.profiles.oneRowEachWithTheActiveOneChecked", "[contextmen
         CHECK(child.checked == (child.title == "light"));
         // The row carries the concrete, argument-bearing action; nothing has to re-parse its name later.
         CHECK(commandId(child.action) == "ChangeProfile:" + child.title);
+    }
+}
+
+TEST_CASE("ContextMenu.readOnly.reflectsInputProtection", "[contextmenu]")
+{
+    // The row is always present and always checkable; its check mirrors the pane's input-protection
+    // (read-only) state at the moment the menu was opened.
+    SECTION("unchecked while input is allowed")
+    {
+        auto state = fullyEnabledState();
+        state.inputProtected = false;
+
+        auto const menu = buildContextMenu(state);
+        auto const* readOnly = find(menu, "Read-Only Mode");
+        REQUIRE(readOnly != nullptr);
+        CHECK(readOnly->checkable);
+        CHECK_FALSE(readOnly->checked);
+        // Picking it flips the very state the check reflects.
+        CHECK(std::holds_alternative<actions::ToggleInputProtection>(readOnly->action));
+    }
+
+    SECTION("checked while input is protected")
+    {
+        auto state = fullyEnabledState();
+        state.inputProtected = true;
+
+        auto const menu = buildContextMenu(state);
+        auto const* readOnly = find(menu, "Read-Only Mode");
+        REQUIRE(readOnly != nullptr);
+        CHECK(readOnly->checkable);
+        CHECK(readOnly->checked);
     }
 }
 
@@ -287,7 +321,7 @@ TEST_CASE("ContextMenu.separators.neverLeadingTrailingOrDoubled", "[contextmenu]
                                 .hasSelection = selection,
                                 .clipboardHasText = clipboard,
                                 .hasLastCommand = lastCommand,
-                                .hasWorkingDirectory = true,
+                                .hasLocalWorkingDirectory = true,
                                 .hasSplits = splits,
                                 .hyperlinkUnderCursor = hyperlink ? "https://example.org/" : "",
                                 .activeProfile = profiles ? "dark" : "",

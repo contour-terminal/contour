@@ -18,11 +18,12 @@ namespace contour
 /// with no terminal, no window, no clipboard and no Qt behind it.
 struct ContextMenuState
 {
-    bool hasSelection = false;        ///< Some grid cells are selected.
-    bool clipboardHasText = false;    ///< The system clipboard holds text.
-    bool hasLastCommand = false;      ///< A finished OSC 133 command block sits in the scrollback.
-    bool hasWorkingDirectory = false; ///< The shell reported a working directory (OSC 7).
-    bool hasSplits = false;           ///< This tab holds more than one pane.
+    bool hasSelection = false;             ///< Some grid cells are selected.
+    bool clipboardHasText = false;         ///< The system clipboard holds text.
+    bool hasLastCommand = false;           ///< A finished OSC 133 command block sits in the scrollback.
+    bool hasLocalWorkingDirectory = false; ///< OSC 7 reported a working directory on THIS host (openable).
+    bool hasSplits = false;                ///< This tab holds more than one pane.
+    bool inputProtected = false;           ///< Input protection (KAM / read-only) is on for this pane.
 
     /// The OSC 8 hyperlink the user right-clicked, empty if there was none.
     ///
