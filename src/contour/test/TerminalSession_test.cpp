@@ -1637,6 +1637,26 @@ TEST_CASE("TerminalSession: Ctrl+Shift+P opens the palette instead of reaching t
     CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
 }
 
+TEST_CASE("TerminalSession: Ctrl+Shift+, fires despite Qt delivering the shifted '<'",
+          "[contour][session][input]")
+{
+    // The default binds Ctrl+Shift+',' to OpenConfiguration, but Qt reports a Shift+punctuation chord as
+    // the shifted keysym — comma+Shift arrives as '<' (Qt::Key_Less). Without base-char normalization the
+    // chord would miss its binding and fall through to the shell (a stray '<'). It must be CONSUMED.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto const now = std::chrono::steady_clock::now();
+    auto const ctrlShift = Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
+
+    session->sendCharEvent(U'<', 0, ctrlShift, KeyboardEventType::Press, now);
+    CHECK(mockPtyOf(*session).stdinBuffer().empty()); // consumed by the ',' binding via its base char
+
+    // A shifted symbol whose base key has no binding still reaches the terminal (retry misses, falls
+    // through) — the normalization only rescues chords that are actually bound.
+    session->sendCharEvent(U'~', 0, ctrlShift, KeyboardEventType::Press, now); // base '`', unbound
+    CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
+}
+
 TEST_CASE("TerminalSession: executeAction runs a palette-picked command", "[contour][session][palette]")
 {
     // The palette does not synthesize key events — it hands the chosen action straight to the session

@@ -1343,10 +1343,20 @@ void TerminalSession::sendCharEvent(char32_t value,
 
     if (eventType != KeyboardEventType::Release)
     {
-        // find if action exist for the given key, and ignore if editing search prompt
-        if (auto const* actions = config::apply(
-                _config.inputMappings.value().charMappings, value, modifiers.chord, matchModeFlags());
-            actions && !_terminal.inputHandler().isEditingSearch())
+        // Find a char binding for this key (ignored while editing the search prompt).
+        auto const& charMappings = _config.inputMappings.value().charMappings;
+        auto const flags = matchModeFlags();
+        auto const* actions = config::apply(charMappings, value, modifiers.chord, flags);
+
+        // A shortcut written with the base key label (e.g. `Ctrl+Shift+,`) is stored under the base
+        // character, but Qt delivers a Shift+punctuation chord as the *shifted* symbol ('<' here). When
+        // the direct lookup misses and Shift is held, retry under the un-shifted base so the binding
+        // fires as the user intended — letters already match (their codepoint is shift-invariant).
+        if (actions == nullptr && modifiers.chord.test(vtbackend::Modifier::Shift))
+            if (auto const base = unshiftedCodepoint(value); base != value)
+                actions = config::apply(charMappings, base, modifiers.chord, flags);
+
+        if (actions != nullptr && !_terminal.inputHandler().isEditingSearch())
         {
             auto executionCount = 0;
             handleAction(actions, eventType, [&](auto const& actions) {

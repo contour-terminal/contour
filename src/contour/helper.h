@@ -145,6 +145,18 @@ constexpr inline vtbackend::MouseButton makeMouseButton(Qt::MouseButton button)
     }
 }
 
+/// Maps a US-ASCII "shifted" character back to the base character its physical key produces without
+/// Shift (e.g. '<' -> ',', '?' -> '/', '_' -> '-', '@' -> '2'). Returns @p ch unchanged when it is not
+/// a shifted symbol.
+///
+/// Keyboard shortcuts are written with the base key label (e.g. `Ctrl+Shift+,`) and stored as the base
+/// character, but a Shift+punctuation chord is delivered by Qt as the *shifted* symbol (comma+Shift is
+/// reported as '<' on a US layout). Matching the delivered shifted codepoint against the base char a
+/// binding is stored under is what lets such shortcuts fire as the user intended.
+/// @param ch The (possibly shifted) input codepoint.
+/// @return The un-shifted base codepoint, or @p ch if it is not a recognized shifted symbol.
+[[nodiscard]] char32_t unshiftedCodepoint(char32_t ch) noexcept;
+
 class TerminalSession;
 bool sendKeyEvent(QKeyEvent* keyEvent, vtbackend::KeyboardEventType eventType, TerminalSession& session);
 void sendWheelEvent(QWheelEvent* event, TerminalSession& session);
