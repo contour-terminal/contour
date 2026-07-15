@@ -3041,4 +3041,98 @@ TEST_CASE("The save-layout prompt survives controller destruction without QML er
     QCoreApplication::processEvents();
 }
 
+TEST_CASE("Ctrl+J and Ctrl+K walk the palette selection, vim-style (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    // The keyboard-only path: Ctrl+J/Ctrl+K move the selection down/up without the caret ever leaving
+    // the filter box, mirroring the arrow keys the palette already handled.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+
+    auto* filter = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+    auto* list = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteList"));
+    REQUIRE(list != nullptr);
+    REQUIRE(list->property("count").toInt() > 2);
+
+    // The chords are handled on the filter field, so the caret must be there — as it is on open. Key
+    // events route to the window's focus item, which forceActiveFocus makes the filter.
+    QMetaObject::invokeMethod(filter, "forceActiveFocus");
+    QCoreApplication::processEvents();
+    REQUIRE(list->property("currentIndex").toInt() == 0);
+    auto* const keyWindow = filter->window();
+    REQUIRE(keyWindow != nullptr);
+
+    QTest::keyClick(keyWindow, Qt::Key_J, Qt::ControlModifier);
+    QCoreApplication::processEvents();
+    CHECK(list->property("currentIndex").toInt() == 1);
+
+    QTest::keyClick(keyWindow, Qt::Key_J, Qt::ControlModifier);
+    QCoreApplication::processEvents();
+    CHECK(list->property("currentIndex").toInt() == 2);
+
+    QTest::keyClick(keyWindow, Qt::Key_K, Qt::ControlModifier);
+    QCoreApplication::processEvents();
+    CHECK(list->property("currentIndex").toInt() == 1);
+
+    // The chord drives the list, it must not leak a character into the filter text.
+    CHECK(filter->property("text").toString().isEmpty());
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("The palette bolds matched characters and tints only unselected rows (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    // The title label renders StyledText so the filter's matches stand out: bold everywhere, and accent
+    // coloured too — except on the selected row, whose accent background would swallow the tint.
+    contour::test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+
+    auto* filter = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+    auto* list = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteList"));
+    REQUIRE(list != nullptr);
+
+    // "spl" keeps several title-matched rows, the two Split commands on top; row 0 is the selection.
+    filter->setProperty("text", QStringLiteral("spl"));
+    QCoreApplication::processEvents();
+    QMetaObject::invokeMethod(list, "forceLayout");
+    QCoreApplication::processEvents();
+    REQUIRE(list->property("count").toInt() > 1);
+    REQUIRE(list->property("currentIndex").toInt() == 0);
+
+    auto titleTextAt = [&](int index) -> QString {
+        QQuickItem* rowItem = nullptr;
+        QMetaObject::invokeMethod(list, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, rowItem), Q_ARG(int, index));
+        if (rowItem == nullptr)
+            return {};
+        auto* title = rowItem->findChild<QQuickItem*>(QStringLiteral("commandPaletteTitle"));
+        return title != nullptr ? title->property("text").toString() : QString {};
+    };
+
+    auto const selectedTitle = titleTextAt(0);   // the current row
+    auto const unselectedTitle = titleTextAt(1); // another matched row
+    INFO("row0='" << selectedTitle.toStdString() << "' row1='" << unselectedTitle.toStdString() << "'");
+    REQUIRE_FALSE(selectedTitle.isEmpty());
+    REQUIRE_FALSE(unselectedTitle.isEmpty());
+
+    // Both rows bold their matched characters...
+    CHECK(selectedTitle.contains(QStringLiteral("<b>")));
+    CHECK(unselectedTitle.contains(QStringLiteral("<b>")));
+    // ...but only the unselected row tints them with the accent colour.
+    CHECK(unselectedTitle.contains(QStringLiteral("<font color=\"")));
+    CHECK_FALSE(selectedTitle.contains(QStringLiteral("<font color=\"")));
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
 #include <QmlComponents_test.moc>

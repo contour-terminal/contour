@@ -101,6 +101,41 @@ Popup {
         root.close();
     }
 
+    // Renders a command title as StyledText with the filter's matched characters emphasized, so the user
+    // sees WHY a row matched. `matches` is the ascending list of title indices the model's fuzzy filter
+    // landed on (empty when unfiltered). Matched characters are always bold; on an unselected row they
+    // also take the accent colour, but on the SELECTED row — whose background is already that accent —
+    // bold alone is used, since a tint there would wash out. The colour is chosen here, in the view,
+    // because only QML knows the live OS accent and which row is current.
+    //
+    // The whole string is HTML-escaped (a live tab title can contain & < >), so it is always valid
+    // StyledText. Indices are byte offsets from the model, exact for the ASCII command titles shown.
+    function highlightedTitle(text, matches, selected) {
+        var open = selected ? "<b>" : "<b><font color=\"" + systemPalette.highlight.toString() + "\">";
+        var close = selected ? "</b>" : "</font></b>";
+        var next = 0;
+        var result = "";
+        for (var i = 0; i < text.length; ++i) {
+            var hit = matches && next < matches.length && matches[next] === i;
+            if (hit) {
+                result += open;
+                ++next;
+            }
+            var c = text.charAt(i);
+            if (c === "&")
+                result += "&amp;";
+            else if (c === "<")
+                result += "&lt;";
+            else if (c === ">")
+                result += "&gt;";
+            else
+                result += c;
+            if (hit)
+                result += close;
+        }
+        return result;
+    }
+
     contentItem: Column {
         spacing: 0
 
@@ -132,6 +167,22 @@ Popup {
                 Keys.onReturnPressed: root.acceptCurrent()
                 Keys.onEnterPressed: root.acceptCurrent()
                 Keys.onEscapePressed: root.close()
+
+                // Vim-style navigation: Ctrl+J/Ctrl+K move the selection down/up, the same as the arrow
+                // keys, so a home-row user never reaches for them. Accepted explicitly so Ctrl+J cannot
+                // fall through as a line feed into the filter text. Other keys are left unaccepted here
+                // and reach the named handlers above and normal text entry.
+                Keys.onPressed: (event) => {
+                    if (event.modifiers & Qt.ControlModifier) {
+                        if (event.key === Qt.Key_J) {
+                            list.incrementCurrentIndex();
+                            event.accepted = true;
+                        } else if (event.key === Qt.Key_K) {
+                            list.decrementCurrentIndex();
+                            event.accepted = true;
+                        }
+                    }
+                }
             }
         }
 
@@ -171,6 +222,7 @@ Popup {
                 required property string shortcut
                 required property int section
                 required property bool sectionStart
+                required property var titleMatches
 
                 width: ListView.view.width
                 height: header.height + entry.height
@@ -218,7 +270,13 @@ Popup {
                         // Yields to the shortcut rather than overrunning it: the shortcut is short and
                         // fixed, the title is the part that can be arbitrarily long.
                         width: parent.width - 24 - shortcutLabel.width - 8
-                        text: row.title
+                        // StyledText so the filter's matched characters can be bolded/accented; the raw
+                        // title and its matched indices come from the model, the styling is chosen here.
+                        // Re-evaluates when the selection moves, flipping the accent tint off the current
+                        // row (see highlightedTitle).
+                        textFormat: Text.StyledText
+                        text: root.highlightedTitle(row.title, row.titleMatches,
+                                                    row.index === list.currentIndex)
                         elide: Text.ElideRight
                         color: entry.textColor
                     }
