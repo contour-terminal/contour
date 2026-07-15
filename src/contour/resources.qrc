@@ -24,6 +24,7 @@
         <file>ui/CommandPalette.qml</file>
         <file>ui/SaveLayoutDialog.qml</file>
         <file>ui/SettingsPage.qml</file>
+        <file>ui/SettingsNavItem.qml</file>
         <file>ui/SettingRow.qml</file>
         <file>ui/ColorSchemeEditor.qml</file>
         <file>ui/main.qml</file>
