@@ -405,7 +405,20 @@ PageSize UnixPty::pageSize() const noexcept
 void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
     if (_masterFd < 0)
+    {
+        // Not started yet: remember the size rather than drop it, so start() can bake it into the
+        // winsize the child is born with. Dropping it meant the child saw ws_xpixel = 0 until an
+        // asynchronous SIGWINCH corrected it -- and an application that reads TIOCGWINSZ once at
+        // startup, which is what img2sixel and chafa do, never sees the correction.
+        ptyLog()("Recording pre-start terminal size: {}x{} / {}",
+                 cells.columns,
+                 cells.lines,
+                 pixels.value_or(ImageSize {}));
+        _pageSize = cells;
+        if (pixels)
+            _pixels = pixels;
         return;
+    }
 
     ptyLog()("Sending terminal size: {}x{} / {}", cells.columns, cells.lines, pixels.value_or(ImageSize {}));
 

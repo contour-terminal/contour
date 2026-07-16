@@ -33,6 +33,7 @@ set(_test_files
     TextClusterGrouper_test.cpp
     BoxDrawingRenderer_test.cpp
     GlyphAdvance_test.cpp
+    GridMetrics_test.cpp
     ImageRenderer_test.cpp
     TextRenderer_test.cpp
 )

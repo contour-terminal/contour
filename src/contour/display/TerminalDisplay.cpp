@@ -245,11 +245,6 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     setFlag(Flag::ItemAcceptsInputMethod, imeEnabled);
     displayLog()("IME enabled: {}", imeEnabled);
 
-    {
-        auto const timer = ScopedTimer(startupLog, "Session start");
-        _session->start();
-    }
-
     // NB: The window frame is owned by QML now. main.qml makes the window frameless on the platforms
     // that use the custom client-side TitleBar (the tab strip + window controls). The profile's
     // show_title_bar setting controls the *custom* bar's visibility (not the native frame, which
@@ -284,6 +279,18 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     }
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
+
+    // Only now fork the child, and deliberately so: attachDisplay() above is what first tells the PTY
+    // its pixel size, and that needs the Renderer's grid metrics, which need the font. Starting before
+    // it meant openpty() baked ws_xpixel = 0 into the winsize the child was born with, and the real
+    // size only arrived afterwards as a SIGWINCH. An application that reads TIOCGWINSZ once at startup
+    // -- img2sixel, chafa, termbench-pro's image-bench -- never sees that correction and falls back to
+    // guessing a cell size. UnixPty::resizeScreen() stashes a size reported before start() precisely so
+    // this ordering works.
+    {
+        auto const timer = ScopedTimer(startupLog, "Session start");
+        _session->start();
+    }
 
     // Reconcile a session re-bound onto a display that is ALREADY rendering (a new tab, or switching to a
     // background tab) to the INCOMING session's own state — the single TerminalDisplay/_renderer is reused
