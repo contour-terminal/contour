@@ -265,6 +265,39 @@ TEST_CASE("The palette reports which title characters the filter matched", "[con
     }
 }
 
+TEST_CASE("Title-match highlight indices are UTF-16 code units, not UTF-8 byte offsets", "[contour][palette]")
+{
+    // Regression guard: the fuzzy filter reports matched positions as UTF-8 byte offsets, but the QML
+    // delegate indexes the title as a UTF-16 string. A tab title can carry any UTF-8 (a shell sets it), so
+    // a multibyte character before a match would otherwise shift — or drop — every highlight after it.
+    // U+2192 (→) is 3 UTF-8 bytes but a single UTF-16 code unit, so raw byte offsets run two ahead of the
+    // indices QML needs.
+    auto tabs = test::StubTabs { { "→zephyr" } }; // → then a run of letters unique to the title
+    auto const tabCommands = TabCommandSource { tabs };
+
+    auto history = CommandHistory { 3 };
+    auto model = CommandPaletteModel { history };
+    model.setSources({ &tabCommands });
+    model.refresh();
+
+    model.setFilter(QStringLiteral("zephyr"));
+    auto const row = rowOf(model, "SwitchToTab:1");
+    REQUIRE(row >= 0);
+    auto const title = QString::fromStdString(titleAt(model, row));
+    REQUIRE(title == QString::fromUtf8("Switch To Tab 1: →zephyr"));
+
+    // "zephyr" occurs exactly once, contiguously, right after the → at UTF-16 index 18. As raw byte
+    // offsets these would be 20..25 (two higher, and 25 is past the string's end).
+    auto const matches = titleMatchesAt(model, row);
+    CHECK(matches == std::vector<int> { 18, 19, 20, 21, 22, 23 });
+
+    // Each reported index must land on the matched character in the UTF-16 string — the property the QML
+    // highlighter relies on. Byte offsets would index the wrong characters (and run off the end) here.
+    auto const query = QStringLiteral("zephyr");
+    for (auto i = 0; i < static_cast<int>(matches.size()); ++i)
+        CHECK(title.at(matches[static_cast<std::size_t>(i)]) == query.at(i));
+}
+
 TEST_CASE("Recency breaks a tie between two equally good matches", "[contour][palette]")
 {
     // Two commands score the same against "toggle"; the one the user reached for last time should be
