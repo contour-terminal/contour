@@ -70,7 +70,7 @@ struct Fixture
     return {};
 }
 
-constexpr auto kBasicConfig = std::string_view { R"(
+constexpr auto BasicConfig = std::string_view { R"(
 default_profile: main
 profiles:
     main:
@@ -81,7 +81,7 @@ profiles:
 
 TEST_CASE("SettingsController: lists profiles with provenance", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     auto const main = rowNamed(fx.controller->profiles(), "main");
     REQUIRE(!main.isEmpty());
     CHECK(main.value("origin").toString() == "main");
@@ -91,7 +91,7 @@ TEST_CASE("SettingsController: lists profiles with provenance", "[settings]")
 
 TEST_CASE("SettingsController: a contour.yml profile is read-only; Save is refused", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->editProfile("main");
     CHECK(fx.controller->editingReadOnly() == true);
     CHECK(fx.controller->saveProfile() == false); // refused: would shadow the hand-maintained file
@@ -99,7 +99,7 @@ TEST_CASE("SettingsController: a contour.yml profile is read-only; Save is refus
 
 TEST_CASE("SettingsController: new profile -> Save As creates an editable side-file profile", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newProfile("main");
     fx.controller->setProfileField("show_title_bar", false);
     fx.controller->setProfileField("dim_unfocused", 0.5);
@@ -121,14 +121,14 @@ TEST_CASE("SettingsController: new profile -> Save As creates an editable side-f
 
 TEST_CASE("SettingsController: Save As refuses to shadow a contour.yml profile", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newProfile("main");
     CHECK(fx.controller->saveProfileAs("main") == false); // 'main' is defined in contour.yml
 }
 
 TEST_CASE("SettingsController: edit then Save updates a side-file profile in place", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newProfile("main");
     REQUIRE(fx.controller->saveProfileAs("work"));
 
@@ -139,7 +139,7 @@ TEST_CASE("SettingsController: edit then Save updates a side-file profile in pla
 
 TEST_CASE("SettingsController: delete removes a side-file profile", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newProfile("main");
     REQUIRE(fx.controller->saveProfileAs("work"));
     REQUIRE(fx.cfg.findProfile("work") != nullptr);
@@ -153,13 +153,13 @@ TEST_CASE("SettingsController: delete removes a side-file profile", "[settings]"
 
 TEST_CASE("SettingsController: a contour.yml profile cannot be deleted", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     CHECK(fx.controller->deleteProfile("main") == false);
 }
 
 TEST_CASE("SettingsController: setDefaultProfile persists to settings.yml and overrides", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newProfile("main");
     REQUIRE(fx.controller->saveProfileAs("work"));
 
@@ -172,7 +172,7 @@ TEST_CASE("SettingsController: setDefaultProfile persists to settings.yml and ov
 TEST_CASE("SettingsController: rename moves a side-file profile and follows the default + draft",
           "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newProfile("main");
     REQUIRE(fx.controller->saveProfileAs("work"));
     REQUIRE(fx.controller->setDefaultProfile("work"));
@@ -195,7 +195,7 @@ TEST_CASE("SettingsController: rename moves a side-file profile and follows the 
 
 TEST_CASE("SettingsController: rename refuses contour.yml profiles and name collisions", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newProfile("main");
     REQUIRE(fx.controller->saveProfileAs("work"));
 
@@ -207,7 +207,7 @@ TEST_CASE("SettingsController: rename refuses contour.yml profiles and name coll
 
 TEST_CASE("SettingsController: rename moves a side-file color scheme with its draft", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newColorScheme("");
     fx.controller->setSchemeColor("background", "#101010");
     REQUIRE(fx.controller->saveColorScheme("midnight"));
@@ -224,7 +224,7 @@ TEST_CASE("SettingsController: rename moves a side-file color scheme with its dr
 
 TEST_CASE("SettingsController: enum and integer profile fields round-trip", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newProfile("main");
     fx.controller->setProfileField("tab_bar_position", "Bottom");
     fx.controller->setProfileField("tab_bar_visibility", "Never");
@@ -242,7 +242,7 @@ TEST_CASE("SettingsController: enum and integer profile fields round-trip", "[se
 
 TEST_CASE("SettingsController: color-scheme selection supports a dark/light pair", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newProfile("main");
 
     fx.controller->setColorSchemeMode("dual");
@@ -258,7 +258,7 @@ TEST_CASE("SettingsController: color-scheme selection supports a dark/light pair
 
 TEST_CASE("SettingsController: create, edit and reload a color scheme", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     fx.controller->newColorScheme("");
     fx.controller->setSchemeColor("background", "#123456");
     REQUIRE(fx.controller->saveColorScheme("mono"));
@@ -307,7 +307,7 @@ TEST_CASE("SettingsController: global overrides write settings.yml, apply, and r
 
 TEST_CASE("SettingsController: exposes the configured keybindings read-only", "[settings]")
 {
-    auto fx = Fixture(kBasicConfig);
+    auto fx = Fixture(BasicConfig);
     auto const bindings = fx.controller->keybindings();
     REQUIRE(!bindings.isEmpty()); // the default config ships input mappings
     auto const first = bindings.first().toMap();
