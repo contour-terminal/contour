@@ -529,25 +529,29 @@ void SixelImageBuilder::render(int8_t sixel)
         if (y + _aspectRatio > canvasHeight)
             break; // bits only climb, so nothing above this fits either
 
-        auto* pixel = _buffer.data() + (y * rowBytes) + (static_cast<size_t>(x) * 4);
+        paintBit(_buffer.data() + (y * rowBytes) + (static_cast<size_t>(x) * 4), rowBytes, color);
+    }
+
+    _sixelCursor.column++;
+}
+
+void SixelImageBuilder::paintBit(uint8_t* pixel, size_t rowBytes, RGBColor color) const noexcept
+{
+    pixel[0] = color.red;
+    pixel[1] = color.green;
+    pixel[2] = color.blue;
+    pixel[3] = 0xFF;
+
+    // Aspect ratio 1 is the norm and means one pixel row per bit; only a stretched image repeats,
+    // and paying a loop for the common case cost more than the store it guarded.
+    for ([[maybe_unused]] auto const row: std::views::iota(1u, _aspectRatio))
+    {
+        pixel += rowBytes;
         pixel[0] = color.red;
         pixel[1] = color.green;
         pixel[2] = color.blue;
         pixel[3] = 0xFF;
-
-        // Aspect ratio 1 is the norm and means one pixel row per bit; only a stretched image
-        // repeats, and paying a loop for the common case cost more than the store it guarded.
-        for ([[maybe_unused]] auto const row: std::views::iota(1u, _aspectRatio))
-        {
-            pixel += rowBytes;
-            pixel[0] = color.red;
-            pixel[1] = color.green;
-            pixel[2] = color.blue;
-            pixel[3] = 0xFF;
-        }
     }
-
-    _sixelCursor.column++;
 }
 
 void SixelImageBuilder::renderRun(std::string_view sixels)
@@ -604,22 +608,7 @@ void SixelImageBuilder::renderRun(std::string_view sixels)
         for (auto remaining = bits; remaining != 0; remaining &= remaining - 1)
         {
             auto const bit = static_cast<unsigned>(std::countr_zero(remaining));
-            auto* pixel = base + rowOffsets[bit] + (static_cast<size_t>(x) * 4);
-            pixel[0] = color.red;
-            pixel[1] = color.green;
-            pixel[2] = color.blue;
-            pixel[3] = 0xFF;
-
-            // Aspect ratio 1 is the norm and means one pixel row per bit; only a stretched image
-            // repeats.
-            for ([[maybe_unused]] auto const row: std::views::iota(1u, _aspectRatio))
-            {
-                pixel += rowBytes;
-                pixel[0] = color.red;
-                pixel[1] = color.green;
-                pixel[2] = color.blue;
-                pixel[3] = 0xFF;
-            }
+            paintBit(base + rowOffsets[bit] + (static_cast<size_t>(x) * 4), rowBytes, color);
         }
         ++x;
     }

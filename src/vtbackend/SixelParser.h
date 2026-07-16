@@ -457,6 +457,16 @@ class SixelImageBuilder: public SixelParser::Events
     /// @param color the color to write.
     static void fillRun(std::span<uint8_t> dst, RGBAColor color) noexcept;
 
+    /// Paints the pixel rows one set sixel bit covers, starting at @p pixel.
+    ///
+    /// The single pixel-writing path: both the per-column render() and the batched renderRun()
+    /// reduce to this once each has worked out where the bit's first row begins. A bit covers one
+    /// row at aspect ratio 1 -- the norm -- and a column of them only when the image is stretched.
+    /// @param pixel the bit's first row, already offset to the target column.
+    /// @param rowBytes distance between consecutive pixel rows.
+    /// @param color the color to write.
+    void paintBit(uint8_t* pixel, size_t rowBytes, RGBColor color) const noexcept;
+
   private:
     ImageSize const _maxSize;
     std::shared_ptr<SixelColorPalette> _colors;
