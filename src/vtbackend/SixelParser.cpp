@@ -204,6 +204,17 @@ void SixelParser::parse(char value)
 
 void SixelParser::fallback(char value)
 {
+    // Pixel data first: it is the overwhelming majority of a sixel stream, and every introducer
+    // below is a punctuation byte well under 63, so the ranges cannot overlap. Testing the five
+    // introducers first meant five comparisons that fail on almost every byte of the image.
+    if (isSixel(value))
+    {
+        if (_state != State::Ground)
+            transitionTo(State::Ground);
+        _events.render(toSixel(value));
+        return;
+    }
+
     if (value == '#')
         transitionTo(State::ColorIntroducer);
     else if (value == '!')
@@ -220,14 +231,8 @@ void SixelParser::fallback(char value)
         transitionTo(State::Ground);
         _events.newline();
     }
-    else
-    {
-        if (_state != State::Ground)
-            transitionTo(State::Ground);
-
-        if (isSixel(value))
-            _events.render(toSixel(value));
-    }
+    else if (_state != State::Ground)
+        transitionTo(State::Ground);
 
     // ignore any other input value
 }
