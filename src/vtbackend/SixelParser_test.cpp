@@ -759,8 +759,18 @@ TEST_CASE("SixelParser.run_matches_per_byte", "[sixel]")
     }
     SECTION("a run overhanging the canvas bottom")
     {
-        // The bottom band's high bits paint nothing; the batched path must clip exactly as render().
-        CHECK(agree("#1;2;100;100;0~~~---~~~", ImageSize { Width(8), Height(9) }, explicitRaster));
+        // A canvas height that is not a multiple of the six-row band is what makes bits overhang at
+        // all: newline() only advances while line + bandHeight < canvasHeight, so on a 12-high
+        // canvas every bit of every reachable band lands inside and nothing is ever clipped.
+        auto const shortCanvas = ImageSize { Width(8), Height(9) };
+
+        // Band 0 deliberately paints nothing. A clipped bit that wrongly painted row 0 would
+        // otherwise land on pixels band 0 had already set to the very same colour, and the bug
+        // would be invisible -- which is exactly what the first case below used to hide.
+        CHECK(agree("#1;2;100;100;0---~~~", shortCanvas, explicitRaster));
+        // And with band 0 painted, in a different colour and different columns.
+        CHECK(agree("#1;2;100;100;0~~~---#2;2;0;100;100!3?~~~", shortCanvas, explicitRaster));
+        CHECK(agree("#1;2;100;100;0~~~---~~~", shortCanvas, explicitRaster));
     }
 }
 
@@ -815,55 +825,98 @@ TEST_CASE("SixelParser.param_count_saturates", "[sixel]")
 TEST_CASE("SixelParser.rep_matches_unrolled", "[sixel]")
 {
     // The '!' repeat introducer must be exactly equivalent to writing the sixel out N times.
-    // Stated as an equivalence rather than against hand-computed pixels, so it keeps pinning the
-    // semantics if the repeat path is ever batched.
-    auto const build = [](std::string_view input) {
-        auto ib = SixelImageBuilder(ImageSize { Width(8), Height(12) },
-                                    1,
-                                    1,
-                                    RGBAColor { 0, 0, 0, 0xFF },
-                                    std::make_shared<SixelColorPalette>(16, 256));
+    //
+    // The repeat path *is* batched now: with an explicit raster a repeat paints each set bit as one
+    // horizontal fill, which shares no code at all with the per-column render() the unrolled side
+    // drives. So the two sides are deliberately driven differently -- the repeat through
+    // parseFragment(), the unrolled reference through parse() byte by byte, which is what still
+    // reaches render(). Comparing whole buffers rather than hand-computed pixels is what keeps this
+    // pinning the equivalence rather than one side's idea of the answer.
+    auto const build = [](std::string_view input, bool batched, bool explicitRaster, ImageSize canvas) {
+        auto ib = SixelImageBuilder(
+            canvas, 1, 1, RGBAColor { 0, 0, 0, 0xFF }, std::make_shared<SixelColorPalette>(16, 256));
+        if (explicitRaster)
+            ib.setRaster(1, 1, canvas);
         auto sp = SixelParser { ib };
         sp.parseFragment("#1;2;100;100;0");
-        sp.parseFragment(input);
+        if (batched)
+            sp.parseFragment(input);
+        else
+            for (auto const ch: input)
+                sp.parse(ch);
         sp.done();
         return std::tuple { ib.size(), ib.sixelCursor(), ib.data() };
     };
 
+    // Both rasters: only the explicit one takes the batched fill, and it is what every real encoder
+    // emits -- so without this the fill would be the one path nothing covers.
+    auto const explicitRaster = GENERATE(true, false);
+    CAPTURE(explicitRaster);
+
+    // Both a canvas height that is a multiple of the six-row band and one that is not. This is not
+    // decoration: newline() only advances while line + bandHeight < canvasHeight, so on a 12-high
+    // canvas the sixel cursor only ever reaches y0 = 0 or 6, and from either every bit of the band
+    // lands inside. The clipping that the batched paths' fitting-bit mask exists for cannot happen
+    // there at all -- a 9-high canvas is what makes bits 3..5 of the second band overhang.
+    auto const canvasHeight = GENERATE(12, 9);
+    CAPTURE(canvasHeight);
+    auto const canvas = ImageSize { Width(8), Height(canvasHeight) };
+
+    auto const rep = [&](std::string_view s) {
+        return build(s, true, explicitRaster, canvas);
+    };
+    auto const unrolled = [&](std::string_view s) {
+        return build(s, false, explicitRaster, canvas);
+    };
+
     SECTION("exact run")
     {
-        CHECK(build("!5~") == build("~~~~~"));
+        CHECK(rep("!5~") == unrolled("~~~~~"));
     }
     SECTION("saturating run")
     {
-        CHECK(build("!99~") == build("~~~~~~~~"));
+        CHECK(rep("!99~") == unrolled("~~~~~~~~"));
     } // cursor stops at width 8
     SECTION("zero run")
     {
-        CHECK(build("!0~") == build(""));
+        CHECK(rep("!0~") == unrolled(""));
     }
     SECTION("bare introducer")
     {
-        CHECK(build("!~") == build(""));
+        CHECK(rep("!~") == unrolled(""));
     }
     SECTION("blank run")
     {
-        CHECK(build("!5?") == build("?????"));
+        CHECK(rep("!5?") == unrolled("?????"));
     } // advances but must not widen
     SECTION("run then more")
     {
-        CHECK(build("!3~@@") == build("~~~@@"));
+        CHECK(rep("!3~@@") == unrolled("~~~@@"));
     }
     SECTION("a huge run costs no more than the canvas width")
     {
         // The repeat count comes straight off the wire, and repetitions past the canvas edge
         // cannot change the image. Walking them anyway means four billion no-op calls -- a hang
         // from nothing but `cat`-ing a crafted file. This case would not terminate before the fix.
-        CHECK(build("!4294967295~") == build("~~~~~~~~"));
+        CHECK(rep("!4294967295~") == unrolled("~~~~~~~~"));
     }
 
     SECTION("run across bands")
     {
-        CHECK(build("!3~-!3~") == build("~~~-~~~"));
+        CHECK(rep("!3~-!3~") == unrolled("~~~-~~~"));
+    }
+
+    SECTION("every bit pattern repeats the same way it unrolls")
+    {
+        // Walks all 64 patterns through the fill, including the ones whose high bits overhang the
+        // bottom band and must paint nothing.
+        for (auto const ch: std::views::iota(63, 127))
+        {
+            auto const sixel = static_cast<char>(ch);
+            CAPTURE(ch);
+            CHECK(rep(std::string { "!4" } + sixel) == unrolled(std::string(4, sixel)));
+            CHECK(rep(std::string { "--!4" } + sixel)
+                  == unrolled(std::string { "--" } + std::string(4, sixel)));
+        }
     }
 }

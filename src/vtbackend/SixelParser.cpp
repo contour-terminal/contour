@@ -579,41 +579,43 @@ void SixelImageBuilder::renderRun(std::string_view sixels)
     // geometry are all fixed until a '-', '$', '#' or '!' ends the run -- and any of those would
     // have ended it before this call. On a real frame that setup measured 9.8 instructions per
     // painted column against 2.7 for the pixel stores it guarded.
-    auto const canvasHeight = unbox<unsigned>(canvas.height);
-    auto const y0 = _sixelCursor.line.as<unsigned>();
     auto const color = currentColor();
     auto const rowBytes = static_cast<size_t>(_stride) * 4;
     // An explicit raster is exactly what storage covers -- setRaster() reshapes to it -- so the
     // reserve() render() calls here can only ever early-return.
     auto* const base = _buffer.data();
-
-    // Which of the band's six bits land on the canvas, and where each one's first row begins. Both
-    // are properties of the band, not of the column, yet render() re-derives them per set bit.
-    auto rowOffsets = std::array<size_t, SixelBitCount> {};
-    auto fittingBits = 0u;
-    for (auto const bit: std::views::iota(0u, SixelBitCount))
-    {
-        auto const y = y0 + (bit * _aspectRatio);
-        if (y + _aspectRatio > canvasHeight)
-            break; // bits only climb, so nothing above this fits either
-        fittingBits |= 1u << bit;
-        rowOffsets[bit] = static_cast<size_t>(y) * rowBytes;
-    }
+    auto const band = bandRows();
 
     for (auto const ch: sixels.substr(0, run))
     {
-        // Masking by fittingBits here is what replaces render()'s per-bit bounds check: a bit that
-        // would overhang the canvas simply is not in the set to walk.
-        auto const bits = static_cast<unsigned>(static_cast<int>(ch) - 63) & SixelBitMask & fittingBits;
+        auto const bits = static_cast<unsigned>(static_cast<int>(ch) - 63) & SixelBitMask & band.fittingBits;
         for (auto remaining = bits; remaining != 0; remaining &= remaining - 1)
         {
             auto const bit = static_cast<unsigned>(std::countr_zero(remaining));
-            paintBit(base + rowOffsets[bit] + (static_cast<size_t>(x) * 4), rowBytes, color);
+            paintBit(base + band.rowOffsets[bit] + (static_cast<size_t>(x) * 4), rowBytes, color);
         }
         ++x;
     }
 
     _sixelCursor.column = ColumnOffset::cast_from(x);
+}
+
+SixelImageBuilder::BandRows SixelImageBuilder::bandRows() const noexcept
+{
+    auto result = BandRows {};
+    auto const canvasHeight = unbox<unsigned>(canvasSize().height);
+    auto const y0 = _sixelCursor.line.as<unsigned>();
+    auto const rowBytes = static_cast<size_t>(_stride) * 4;
+
+    for (auto const bit: std::views::iota(0u, SixelBitCount))
+    {
+        auto const y = y0 + (bit * _aspectRatio);
+        if (y + _aspectRatio > canvasHeight)
+            break; // bits only climb, so nothing above this fits either
+        result.fittingBits |= 1u << bit;
+        result.rowOffsets[bit] = static_cast<size_t>(y) * rowBytes;
+    }
+    return result;
 }
 
 void SixelImageBuilder::renderRepeated(int8_t sixel, unsigned count)
@@ -631,14 +633,46 @@ void SixelImageBuilder::renderRepeated(int8_t sixel, unsigned count)
     // A run of blanks paints nothing at all, so it is exactly a cursor advance -- no need to walk
     // it. This is the common case by a wide margin: encoders emit one colour plane per pass, so a
     // 256-colour image is mostly '!<n>?' runs, and n can be a whole image width.
-    if ((static_cast<unsigned>(sixel) & SixelBitMask) == 0)
+    auto const sixelBits = static_cast<unsigned>(sixel) & SixelBitMask;
+    if (sixelBits == 0)
     {
         _sixelCursor.column = ColumnOffset::cast_from(cursorX + run);
         return;
     }
 
-    for ([[maybe_unused]] auto const repetition: std::views::iota(0u, run))
-        render(sixel);
+    // Without an explicit raster each repetition may grow the image, so what one column writes
+    // depends on the one before it and none of the below holds. See renderRun().
+    if (!_explicitSize)
+    {
+        for ([[maybe_unused]] auto const repetition: std::views::iota(0u, run))
+            render(sixel);
+        return;
+    }
+
+    // A repeat is the same bits in every column of the run, so a set bit is one *horizontal* run of
+    // pixels rather than `run` separate four-byte stores at a stride. That is a different shape from
+    // renderRun(), which walks distinct bytes: here the buffer is written contiguously, one fill per
+    // set bit, instead of scattered per column.
+    auto const color = currentColor();
+    auto const fill = RGBAColor { color.red, color.green, color.blue, 0xFF };
+    auto const rowBytes = static_cast<size_t>(_stride) * 4;
+    auto const runBytes = static_cast<size_t>(run) * 4;
+    auto* const base = _buffer.data();
+    auto const band = bandRows();
+
+    for (auto remaining = sixelBits & band.fittingBits; remaining != 0; remaining &= remaining - 1)
+    {
+        auto const bit = static_cast<unsigned>(std::countr_zero(remaining));
+        auto* dst = base + band.rowOffsets[bit] + (static_cast<size_t>(cursorX) * 4);
+        // Aspect ratio 1 is the norm: one pixel row per bit, so one fill.
+        for ([[maybe_unused]] auto const row: std::views::iota(0u, _aspectRatio))
+        {
+            fillRun({ dst, runBytes }, fill);
+            dst += rowBytes;
+        }
+    }
+
+    _sixelCursor.column = ColumnOffset::cast_from(cursorX + run);
 }
 
 void SixelImageBuilder::finalize()

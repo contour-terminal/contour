@@ -467,6 +467,23 @@ class SixelImageBuilder: public SixelParser::Events
     /// @param color the color to write.
     void paintBit(uint8_t* pixel, size_t rowBytes, RGBColor color) const noexcept;
 
+    /// Where the current sixel band's six bits land in the pixel buffer.
+    struct BandRows
+    {
+        /// The bits whose pixel rows all fall inside the canvas. Masking a sixel by this is what
+        /// replaces a per-bit bounds check: an overhanging bit is simply not in the set to walk.
+        unsigned fittingBits = 0;
+        /// Byte offset of each fitting bit's first pixel row from the buffer's start.
+        std::array<size_t, SixelBitCount> rowOffsets {};
+    };
+
+    /// Works out which of the band's bits land on the canvas, and where each one's rows begin.
+    ///
+    /// Both answers depend only on the sixel cursor's line and the canvas, so they hold for every
+    /// column of a run. Establishing them once per run is what the batched paths exist to do --
+    /// render() re-derives them per set bit per column.
+    [[nodiscard]] BandRows bandRows() const noexcept;
+
   private:
     ImageSize const _maxSize;
     std::shared_ptr<SixelColorPalette> _colors;
