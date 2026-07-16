@@ -34,104 +34,101 @@ void ImageRenderer::setCellSize(ImageSize cellSize)
     // TODO: recompute rasterized images slices here?
 }
 
+atlas::ImageTextureId ImageRenderer::textureFor(vtbackend::RasterizedImage const& rasterizedImage)
+{
+    // Keyed on the image, not on the rasterization: cell size and policies change where the image is
+    // sampled, never what the texture holds.
+    auto const imageId = rasterizedImage.image().id().value;
+    if (auto const known = _imageTextureIds.find(imageId); known != _imageTextureIds.end())
+        return known->second;
+
+    auto const id = atlas::ImageTextureId { _nextImageTextureId++ };
+    _imageTextureIds.emplace(imageId, id);
+    imageScheduler().createImageTexture(atlas::CreateImageTexture {
+        .id = id,
+        .size = rasterizedImage.image().size(),
+        .format = atlas::Format::RGBA,
+        .data = rasterizedImage.image().data(),
+    });
+    return id;
+}
+
 void ImageRenderer::renderImage(crispy::point pos, vtbackend::ImageFragment const& fragment)
 {
-    AtlasTileAttributes const* tileAttributes = getOrCreateCachedTileAttributes(fragment);
-    if (!tileAttributes)
-        return;
+    auto const& rasterizedImage = fragment.rasterizedImage();
+    auto const placement = rasterizedImage.fragmentPlacement(fragment.offset(), _cellSize);
+    if (!placement.hasImage)
+        return; // the cell lies wholly in the alignment gap
 
-    auto const tile = createRenderTile(atlas::RenderTile::X { pos.x },
-                                       atlas::RenderTile::Y { pos.y },
-                                       vtbackend::RGBAColor::White,
-                                       *tileAttributes);
+    auto const quad = atlas::RenderImageQuad {
+        .texture = textureFor(rasterizedImage),
+        .x = pos.x + placement.targetX,
+        .y = pos.y + placement.targetY,
+        .targetSize = placement.targetSize,
+        .source = atlas::NormalizedTileLocation { .x = placement.sourceX,
+                                                  .y = placement.sourceY,
+                                                  .width = placement.sourceWidth,
+                                                  .height = placement.sourceHeight },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .aboveText = rasterizedImage.layer() != vtbackend::ImageLayer::Below,
+    };
 
-    // Route to below-text or above-text queue based on the image layer.
-    auto const layer = fragment.rasterizedImage().layer();
-    if (layer == vtbackend::ImageLayer::Below)
-        _pendingRenderTilesBelowText.emplace_back(tile);
+    // Deliberately mirrors the previous routing, including that ImageLayer::Replace lands above the
+    // text: this change is about how an image reaches the GPU, not about what composites over what.
+    if (quad.aboveText)
+        _pendingQuadsAboveText.emplace_back(quad);
     else
-        _pendingRenderTilesAboveText.emplace_back(tile);
+        _pendingQuadsBelowText.emplace_back(quad);
+}
+
+void ImageRenderer::flushQuads(std::vector<atlas::RenderImageQuad>& quads)
+{
+    // Quads arrive per cell and in order, so a run along one line is contiguous in this vector.
+    // Coalescing is left to the backend, which is where the run becomes a draw call.
+    for (auto const& quad: quads)
+        imageScheduler().renderImageQuad(quad);
+    quads.clear();
 }
 
 void ImageRenderer::onBeforeRenderingText()
 {
-    // Render images that should go below text (ImageLayer::Below).
-    for (auto const& tile: _pendingRenderTilesBelowText)
-        textureScheduler().renderTile(tile);
-    _pendingRenderTilesBelowText.clear();
+    flushQuads(_pendingQuadsBelowText);
 }
 
 void ImageRenderer::onAfterRenderingText()
 {
-    // We render here the images that should go above text.
-
-    for (auto const& tile: _pendingRenderTilesAboveText)
-        textureScheduler().renderTile(tile);
-
-    _pendingRenderTilesAboveText.clear();
+    flushQuads(_pendingQuadsAboveText);
 }
 
 void ImageRenderer::beginFrame()
 {
-    if (!SoftRequire(_pendingRenderTilesBelowText.empty()))
-        _pendingRenderTilesBelowText.clear();
-    if (!SoftRequire(_pendingRenderTilesAboveText.empty()))
-        _pendingRenderTilesAboveText.clear();
+    if (!SoftRequire(_pendingQuadsBelowText.empty()))
+        _pendingQuadsBelowText.clear();
+    if (!SoftRequire(_pendingQuadsAboveText.empty()))
+        _pendingQuadsAboveText.clear();
 }
 
 void ImageRenderer::endFrame()
 {
-    // Flush any remaining tiles that were not rendered during the text pass.
-    if (!_pendingRenderTilesBelowText.empty())
-    {
-        for (auto const& tile: _pendingRenderTilesBelowText)
-            textureScheduler().renderTile(tile);
-        _pendingRenderTilesBelowText.clear();
-    }
-    if (!_pendingRenderTilesAboveText.empty())
-    {
-        for (auto const& tile: _pendingRenderTilesAboveText)
-            textureScheduler().renderTile(tile);
-        _pendingRenderTilesAboveText.clear();
-    }
+    // Flush anything the text pass did not pick up (a frame with images but no text).
+    flushQuads(_pendingQuadsBelowText);
+    flushQuads(_pendingQuadsAboveText);
 }
 
-Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttributes(
-    vtbackend::ImageFragment const& fragment)
+void ImageRenderer::discardImage(vtbackend::ImageId imageId)
 {
-    // using crispy::StrongHash;
-    // auto const hash = StrongHash::compute(fragment.rasterizedImage().image().id().value)
-    //                   * fragment.offset().column.value * fragment.offset().line.value
-    //                   * fragment.rasterizedImage().cellSize().width.value
-    //                   * fragment.rasterizedImage().cellSize().height.value;
-    auto const key = ImageFragmentKey { .imageId = fragment.rasterizedImage().image().id(),
-                                        .offset = fragment.offset(),
-                                        .size = _cellSize };
-    auto const hash = crispy::strong_hash::compute(key);
-
-    return textureAtlas().get_or_try_emplace(
-        hash, [&](atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
-            return createTileData(tileLocation,
-                                  fragment.rasterizedImage().fragment(fragment.offset(), _cellSize),
-                                  atlas::Format::RGBA,
-                                  _cellSize,
-                                  _cellSize,
-                                  RenderTileAttributes::X { 0 },
-                                  RenderTileAttributes::Y { 0 },
-                                  FRAGMENT_SELECTOR_IMAGE_BGRA);
-        });
-}
-
-void ImageRenderer::discardImage(vtbackend::ImageId /*imageId*/)
-{
-    // We currently don't really discard.
-    // Because the GPU texture atlas is resource-guarded by an LRU hashtable.
+    auto const known = _imageTextureIds.find(imageId.value);
+    if (known == _imageTextureIds.end())
+        return;
+    imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = known->second });
+    _imageTextureIds.erase(known);
 }
 
 void ImageRenderer::clearCache()
 {
-    // We currently don't really clean up anything.
-    // Because the GPU texture atlas is resource-guarded by an LRU hashtable.
+    // The textures belong to the render target; a new one starts with none of them, so only the
+    // id mapping has to go. Issuing destroys here would name resources of a target that is gone.
+    _imageTextureIds.clear();
 }
 
 void ImageRenderer::inspect(std::ostream& /*output*/) const

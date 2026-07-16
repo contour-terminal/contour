@@ -188,6 +188,7 @@ repointed
 repointing
 repoints
 REPORTFAULT
+resampler
 retargeted
 retargets
 rewatch
@@ -210,6 +211,7 @@ splitz
 srb
 srgb
 Subresource
+subresource
 subspan
 supersampled
 swapchain

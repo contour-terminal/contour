@@ -59,7 +59,10 @@ struct RhiPipeline
     QRhiResourcePtr<QRhiBuffer> uniformBuffer; ///< Dynamic std140 uniform buffer (shared by both stages).
 };
 
-class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer::atlas::AtlasBackend
+class RhiRenderer final:
+    public vtrasterizer::RenderTarget,
+    public vtrasterizer::atlas::AtlasBackend,
+    public vtrasterizer::atlas::ImageTextureBackend
 {
     using ImageSize = vtbackend::ImageSize;
 
@@ -148,6 +151,12 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     void configureAtlas(ConfigureAtlas atlas) override;
     void uploadTile(UploadTile tile) override;
     void renderTile(RenderTile tile) override;
+
+    // ImageTextureBackend implementation
+    void createImageTexture(vtrasterizer::atlas::CreateImageTexture param) override;
+    void destroyImageTexture(vtrasterizer::atlas::DestroyImageTexture param) override;
+    void renderImageQuad(vtrasterizer::atlas::RenderImageQuad param) override;
+    vtrasterizer::atlas::ImageTextureBackend& imageScheduler() override;
 
     // RenderTarget implementation
     void setRenderSize(vtbackend::ImageSize targetSurfaceSize) override;
@@ -398,6 +407,23 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     void executeConfigureAtlas(ConfigureAtlas const& param);
     void executeUploadTile(QRhiResourceUpdateBatch& updates, UploadTile const& param);
 
+    /// One run of quads sampling a single image texture.
+    ///
+    /// A run rather than a quad, because a full-screen image is thousands of quads that all sample
+    /// the same texture: one draw item per run instead of one per cell.
+    struct ImageQuadBatch
+    {
+        vtrasterizer::atlas::ImageTextureId texture {};
+        std::vector<float> buffer;
+    };
+
+    /// Creates the texture and binding sets for one whole image, and queues its pixel upload.
+    void executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
+                                   vtrasterizer::atlas::CreateImageTexture& param);
+
+    /// Appends one draw item per image-texture run of @p batches to the frame.
+    void recordImagePass(std::vector<ImageQuadBatch> const& batches);
+
     // -------------------------------------------------------------------------------------------
     // private data members
     //
@@ -421,12 +447,23 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
         std::optional<vtrasterizer::atlas::ConfigureAtlas> configureAtlas = std::nullopt;
         std::vector<vtrasterizer::atlas::UploadTile> uploadTiles {};
         RenderBatch renderBatch {};
+        std::vector<vtrasterizer::atlas::CreateImageTexture> imageCreates {};
+        std::vector<vtrasterizer::atlas::DestroyImageTexture> imageDestroys {};
+        /// Image quads that composite under the text, and over it. Two lists rather than a layer tag
+        /// per quad: the pass order [rect][image-below][text][image-above] is what expresses z here,
+        /// since every vertex sits at the same depth and only draw order composites.
+        std::vector<ImageQuadBatch> imageQuadsBelowText {};
+        std::vector<ImageQuadBatch> imageQuadsAboveText {};
 
         void clear()
         {
             configureAtlas.reset();
             uploadTiles.clear();
             renderBatch.clear();
+            imageCreates.clear();
+            imageDestroys.clear();
+            imageQuadsBelowText.clear();
+            imageQuadsAboveText.clear();
         }
     };
 
@@ -488,8 +525,9 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     /// One queued draw call captured during the prepare phase, replayed in recordDraws().
     enum class FramePass : uint8_t
     {
-        Rect, ///< Background/filled-rect pipeline.
-        Text, ///< Text/glyph pipeline (samples the atlas).
+        Rect,  ///< Background/filled-rect pipeline.
+        Text,  ///< Text/glyph pipeline (samples the atlas).
+        Image, ///< Text pipeline, but sampling one whole-image texture instead of the atlas.
     };
     struct FrameDrawItem
     {
@@ -497,7 +535,24 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
         quint32 firstVertex = 0;            ///< First vertex (into the pass's per-frame vertex buffer).
         quint32 vertexCount = 0;            ///< Number of vertices to draw.
         std::optional<ScissorRect> scissor; ///< Transient inner scissor for this draw (raw; pre node-clip).
+        /// For FramePass::Image: which image texture this draw samples. Images share the text
+        /// pipeline and its vertex layout — only the bound texture differs — so the pass carries the
+        /// texture rather than owning a pipeline of its own.
+        vtrasterizer::atlas::ImageTextureId imageTexture {};
     };
+
+    /// GPU resources backing one whole image.
+    ///
+    /// Two binding sets, because the on-screen and off-screen (screenshot) pipelines feed different
+    /// uniform buffers: binding 0 must name the right one, binding 1 this image's texture.
+    struct ImageTextureResources
+    {
+        QRhiResourcePtr<QRhiTexture> texture;
+        QRhiResourcePtr<QRhiShaderResourceBindings> srb;
+        QRhiResourcePtr<QRhiShaderResourceBindings> screenshotSrb;
+        vtbackend::ImageSize size;
+    };
+    std::unordered_map<uint32_t, ImageTextureResources> _imageTextures;
 
     std::vector<float> _frameRectVertices;      ///< Accumulated rect-pass vertices for the current frame.
     std::vector<float> _frameTextVertices;      ///< Accumulated text-pass vertices for the current frame.

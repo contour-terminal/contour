@@ -8,7 +8,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <map>
 #include <ranges>
 
 using namespace vtbackend;
@@ -17,26 +16,19 @@ using namespace vtrasterizer;
 namespace
 {
 
-/// Builds a rasterized image spanning @p cellSpan cells, each pixel row carrying a distinct value so
-/// that any two cells of the image have provably different content.
-std::shared_ptr<RasterizedImage> makeGradientImage(GridSize cellSpan, ImageSize cellSize)
+auto constexpr CellSize = ImageSize { Width(10), Height(20) };
+
+auto const testGridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = CellSize,
+                                           .baseline = 15,
+                                           .underline = { .position = 17, .thickness = 1 } };
+
+/// A rasterized image spanning @p cellSpan cells at exactly one image pixel per target pixel.
+std::shared_ptr<RasterizedImage> makeImage(GridSize cellSpan, ImageLayer layer = ImageLayer::Replace)
 {
-    auto const imageSize = ImageSize { Width::cast_from(unbox(cellSpan.columns) * unbox(cellSize.width)),
-                                       Height::cast_from(unbox(cellSpan.lines) * unbox(cellSize.height)) };
-    auto data = Image::Data(imageSize.area() * 4, 0);
-
-    // A vertical gradient: every pixel row gets its own byte value, so a cell taking another cell's
-    // texels shows up as a wrong value rather than as a coincidence.
-    for (auto const y: std::views::iota(0u, unbox<unsigned>(imageSize.height)))
-        for (auto const x: std::views::iota(0u, unbox<unsigned>(imageSize.width)))
-        {
-            auto const base = ((y * unbox<unsigned>(imageSize.width)) + x) * 4;
-            data[base + 0] = static_cast<uint8_t>(y & 0xFF);
-            data[base + 1] = static_cast<uint8_t>(x & 0xFF);
-            data[base + 2] = 0x40;
-            data[base + 3] = 0xFF;
-        }
-
+    auto const imageSize = ImageSize { Width::cast_from(unbox(cellSpan.columns) * unbox(CellSize.width)),
+                                       Height::cast_from(unbox(cellSpan.lines) * unbox(CellSize.height)) };
+    auto data = Image::Data(imageSize.area() * 4, 0x7F);
     auto image =
         std::make_shared<Image>(ImageId(1), ImageFormat::RGBA, std::move(data), imageSize, [](auto) {});
 
@@ -45,94 +37,124 @@ std::shared_ptr<RasterizedImage> makeGradientImage(GridSize cellSpan, ImageSize 
                                              ImageResize::NoResize,
                                              RGBAColor { 0, 0, 0, 0xFF },
                                              cellSpan,
-                                             cellSize);
+                                             CellSize,
+                                             layer);
+}
+
+/// Drives one frame's worth of cells through the renderer, left to right along a single line.
+void renderRow(ImageRenderer& renderer, std::shared_ptr<RasterizedImage> const& image, unsigned cellCount)
+{
+    renderer.beginFrame();
+    for (auto const column: std::views::iota(0u, cellCount))
+    {
+        auto const fragment = ImageFragment {
+            image, CellLocation { .line = LineOffset(0), .column = ColumnOffset::cast_from(column) }
+        };
+        renderer.renderImage(
+            crispy::point { .x = static_cast<int>(column * unbox<unsigned>(CellSize.width)), .y = 0 },
+            fragment);
+    }
+    renderer.endFrame();
 }
 
 } // namespace
 
-TEST_CASE("ImageRenderer.atlas_reuses_tile_locations_within_a_frame", "[image][renderer]")
+TEST_CASE("ImageRenderer.uploads an image once, however many cells it spans", "[image][renderer]")
 {
-    // An image is sliced into one atlas tile per grid cell, and those tiles live in an LRU whose
-    // capacity is the atlas texture divided by the cell size. An image needing more cells than the
-    // atlas holds therefore evicts its own tiles while drawing itself -- and eviction hands the
-    // evicted entry's tile LOCATION straight to the next tile.
-    //
-    // That would be survivable if each quad were drawn against the atlas as it stood when the quad
-    // was scheduled. It is not: renderTile() only queues, and the backend applies every upload of
-    // the frame before any draw of that frame. So two cells sharing a location both sample whatever
-    // was written there last, and all but the final writer render the wrong pixels.
-    //
-    // This is what makes a full-screen sixel come out as a repeating garble rather than an image.
-    // It documents current behaviour and must be rewritten once images no longer go through the
-    // per-cell atlas.
-    auto constexpr CellSize = ImageSize { Width(10), Height(20) };
-    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
-                                           .cellSize = CellSize,
-                                           .baseline = 15,
-                                           .underline = { .position = 17, .thickness = 1 } };
-
+    // The whole point of the whole-image texture: the cost of showing an image is its pixels, not
+    // its cell count. Slicing it per cell made a full-screen image thousands of uploads AND made it
+    // evict its own tiles mid-frame, so most cells sampled another cell's pixels.
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
-
-    // A deliberately small atlas: tileCount is only a floor on the texture size, so the capacity
-    // that actually applies is (tilesInX * tilesInY) - directMappingCount - 1.
-    auto atlas = Renderable::TextureAtlas { renderTarget.textureScheduler(),
-                                            atlas::AtlasProperties {
-                                                .format = atlas::Format::RGBA,
-                                                .tileSize = CellSize,
-                                                .hashCount = crispy::strong_hashtable_size { 64 },
-                                                .tileCount = crispy::lru_capacity { 4 },
-                                                .directMappingCount = 0,
-                                            } };
-
-    auto const capacity = static_cast<unsigned>(atlas.capacity());
-    INFO("atlas capacity: " << capacity);
-    REQUIRE(capacity > 0);
-
-    // Ask for more cells than the atlas can hold, exactly as a full-screen image does.
-    auto const cellCount = capacity * 2;
-    auto const cellSpan = GridSize { .lines = LineCount(1), .columns = ColumnCount::cast_from(cellCount) };
-    auto const rasterizedImage = makeGradientImage(cellSpan, CellSize);
-
-    auto imageRenderer = ImageRenderer { gridMetrics, CellSize };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
     imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
-    imageRenderer.setTextureAtlas(atlas);
 
-    imageRenderer.beginFrame();
-    for (auto const column: std::views::iota(0u, cellCount))
+    auto constexpr CellCount = 64u;
+    auto const image = makeImage(GridSize { .lines = LineCount(1), .columns = ColumnCount(CellCount) });
+    renderRow(imageRenderer, image, CellCount);
+
+    auto& backend = renderTarget.getMockImageBackend();
+    CHECK(backend.createCommands.size() == 1);
+    CHECK(backend.quadCommands.size() == CellCount);
+
+    // Nothing goes through the tile atlas any more, so no tile location can be handed to two cells.
+    CHECK(renderTarget.getMockBackend().uploadCommands.empty());
+
+    // A second frame reuses the texture rather than re-uploading it.
+    renderRow(imageRenderer, image, CellCount);
+    CHECK(backend.createCommands.size() == 1);
+}
+
+TEST_CASE("ImageRenderer.each cell samples its own slice of the image", "[image][renderer]")
+{
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto constexpr CellCount = 4u;
+    auto const image = makeImage(GridSize { .lines = LineCount(1), .columns = ColumnCount(CellCount) });
+    renderRow(imageRenderer, image, CellCount);
+
+    auto const& quads = renderTarget.getMockImageBackend().quadCommands;
+    REQUIRE(quads.size() == CellCount);
+
+    // Every quad names the same texture, lands at its own target x, and samples its own quarter.
+    for (auto const [index, quad]: crispy::views::enumerate(quads))
     {
-        auto const fragment = ImageFragment {
-            rasterizedImage, CellLocation { .line = LineOffset(0), .column = ColumnOffset::cast_from(column) }
-        };
-        imageRenderer.renderImage(crispy::point { .x = static_cast<int>(column * 10), .y = 0 }, fragment);
+        INFO("cell " << index);
+        CHECK(quad.texture == quads.front().texture);
+        CHECK(quad.x == static_cast<int>(index) * unbox<int>(CellSize.width));
+        CHECK(quad.y == 0);
+        CHECK(quad.targetSize == CellSize);
+        CHECK(quad.source.width > 0.0f);
+        if (index > 0)
+            CHECK(quad.source.x > quads[static_cast<size_t>(index) - 1].source.x);
     }
-    imageRenderer.endFrame();
+}
 
-    auto& backend = renderTarget.getMockBackend();
+TEST_CASE("ImageRenderer.routes layers to either side of the text", "[image][renderer]")
+{
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
 
-    // Every cell is a unique key, so every cell misses and uploads.
-    CHECK(backend.uploadCommands.size() == cellCount);
+    auto const below =
+        makeImage(GridSize { .lines = LineCount(1), .columns = ColumnCount(1) }, ImageLayer::Below);
+    renderRow(imageRenderer, below, 1);
+    REQUIRE(renderTarget.getMockImageBackend().quadCommands.size() == 1);
+    CHECK_FALSE(renderTarget.getMockImageBackend().quadCommands.front().aboveText);
 
-    // The atlas cannot hold them: at least two uploads in this one frame landed on the same texels,
-    // carrying different pixels. Whichever quad drew first now samples the other's content.
-    auto uploadsByLocation = std::map<std::pair<uint32_t, uint32_t>, std::vector<size_t>> {};
-    for (auto const [index, upload]: crispy::views::enumerate(backend.uploadCommands))
-        uploadsByLocation[{ upload.location.x.value, upload.location.y.value }].emplace_back(
-            static_cast<size_t>(index));
+    // Replace deliberately draws ABOVE the text, matching the behaviour this path replaced.
+    auto renderTarget2 = MockRenderTarget {};
+    auto imageRenderer2 = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer2.setRenderTarget(renderTarget2, directMappingAllocator);
+    auto const replace =
+        makeImage(GridSize { .lines = LineCount(1), .columns = ColumnCount(1) }, ImageLayer::Replace);
+    renderRow(imageRenderer2, replace, 1);
+    REQUIRE(renderTarget2.getMockImageBackend().quadCommands.size() == 1);
+    CHECK(renderTarget2.getMockImageBackend().quadCommands.front().aboveText);
+}
 
-    auto collidingLocations = 0u;
-    for (auto const& [location, uploadIndices]: uploadsByLocation)
-    {
-        if (uploadIndices.size() < 2)
-            continue;
-        ++collidingLocations;
-        // The colliding uploads carry genuinely different pixels -- this is data loss, not a
-        // harmless re-upload of identical content.
-        auto const& first = backend.uploadCommands[uploadIndices.front()].bitmap;
-        auto const& last = backend.uploadCommands[uploadIndices.back()].bitmap;
-        CHECK(first != last);
-    }
+TEST_CASE("ImageRenderer.discardImage releases the texture", "[image][renderer]")
+{
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
 
-    INFO("colliding tile locations: " << collidingLocations);
-    CHECK(collidingLocations > 0);
+    auto const image = makeImage(GridSize { .lines = LineCount(1), .columns = ColumnCount(2) });
+    renderRow(imageRenderer, image, 2);
+
+    auto& backend = renderTarget.getMockImageBackend();
+    REQUIRE(backend.createCommands.size() == 1);
+
+    imageRenderer.discardImage(image->image().id());
+    REQUIRE(backend.destroyCommands.size() == 1);
+    CHECK(backend.destroyCommands.front().id == backend.createCommands.front().id);
+
+    // Discarding twice must not double-destroy.
+    imageRenderer.discardImage(image->image().id());
+    CHECK(backend.destroyCommands.size() == 1);
 }

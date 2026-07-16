@@ -10,34 +10,21 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 
+#include <unordered_map>
 #include <vector>
 
 namespace vtrasterizer
 {
 
-// NB: Ensure this struct does NOT contain padding (or adapt strong hash creation).
-struct ImageFragmentKey
-{
-    vtbackend::ImageId imageId;
-    vtbackend::CellLocation offset;
-    ImageSize size;
-
-    bool operator==(ImageFragmentKey const& b) const noexcept
-    {
-        return imageId == b.imageId && offset == b.offset && size == b.size;
-    }
-
-    bool operator!=(ImageFragmentKey const& b) const noexcept { return !(*this == b); }
-
-    bool operator<(ImageFragmentKey const& b) const noexcept
-    {
-        return (imageId < b.imageId) || (imageId == b.imageId && offset < b.offset);
-    }
-};
-
 /// Image Rendering API.
 ///
 /// Can render any arbitrary RGBA image (for example Sixel Graphics images).
+///
+/// An image is held as one whole texture and sampled per cell, rather than sliced into one
+/// fixed-size atlas tile per cell. The atlas is a glyph cache: a few hundred distinct tiles, each
+/// reused constantly. An image inverts every one of those assumptions -- each tile is unique, used
+/// once, and a full-screen image needs more of them than the atlas can hold, so it evicted its own
+/// tiles while drawing itself and most cells ended up sampling another cell's pixels.
 class ImageRenderer: public Renderable, public TextRendererEvents
 {
   public:
@@ -64,13 +51,23 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     void onAfterRenderingText() override;
 
   private:
-    AtlasTileAttributes const* getOrCreateCachedTileAttributes(vtbackend::ImageFragment const& fragment);
-    std::vector<atlas::RenderTile> _pendingRenderTilesBelowText;
-    std::vector<atlas::RenderTile> _pendingRenderTilesAboveText;
+    /// The texture holding @p rasterizedImage's pixels, creating and uploading it on first sight.
+    atlas::ImageTextureId textureFor(vtbackend::RasterizedImage const& rasterizedImage);
+
+    /// Hands @p quads to the backend and empties them.
+    void flushQuads(std::vector<atlas::RenderImageQuad>& quads);
+
+    std::vector<atlas::RenderImageQuad> _pendingQuadsBelowText;
+    std::vector<atlas::RenderImageQuad> _pendingQuadsAboveText;
 
     // private data
     //
     ImageSize _cellSize;
+
+    /// vtbackend ImageId -> the texture holding it. Keyed on the image rather than on the
+    /// rasterization: policies and cell size change where an image is sampled, not what it contains.
+    std::unordered_map<uint32_t, atlas::ImageTextureId> _imageTextureIds;
+    uint32_t _nextImageTextureId = 1;
 };
 
 } // namespace vtrasterizer

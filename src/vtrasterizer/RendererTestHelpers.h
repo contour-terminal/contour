@@ -40,6 +40,28 @@ class MockAtlasBackend: public vtrasterizer::atlas::AtlasBackend
     void renderTile(vtrasterizer::atlas::RenderTile tile) override { renderCommands.emplace_back(tile); }
 };
 
+/// Records every whole-image command a Renderable schedules.
+class MockImageTextureBackend: public vtrasterizer::atlas::ImageTextureBackend
+{
+  public:
+    std::vector<vtrasterizer::atlas::CreateImageTexture> createCommands;
+    std::vector<vtrasterizer::atlas::DestroyImageTexture> destroyCommands;
+    std::vector<vtrasterizer::atlas::RenderImageQuad> quadCommands;
+
+    void createImageTexture(vtrasterizer::atlas::CreateImageTexture param) override
+    {
+        createCommands.emplace_back(std::move(param));
+    }
+    void destroyImageTexture(vtrasterizer::atlas::DestroyImageTexture param) override
+    {
+        destroyCommands.emplace_back(param);
+    }
+    void renderImageQuad(vtrasterizer::atlas::RenderImageQuad param) override
+    {
+        quadCommands.emplace_back(param);
+    }
+};
+
 /// A headless RenderTarget whose texture scheduler is a MockAtlasBackend.
 class MockRenderTarget: public vtrasterizer::RenderTarget
 {
@@ -48,7 +70,9 @@ class MockRenderTarget: public vtrasterizer::RenderTarget
     [[nodiscard]] vtbackend::ImageSize renderSize() const noexcept override { return _size; }
     void setMargin(vtrasterizer::PageMargin) override {}
     vtrasterizer::atlas::AtlasBackend& textureScheduler() override { return _textureScheduler; }
+    vtrasterizer::atlas::ImageTextureBackend& imageScheduler() override { return _imageScheduler; }
     MockAtlasBackend& getMockBackend() { return _textureScheduler; }
+    MockImageTextureBackend& getMockImageBackend() { return _imageScheduler; }
 
     void renderRectangle(int, int, vtbackend::Width, vtbackend::Height, vtbackend::RGBAColor) override {}
     void setScissorRect(int, int, int, int) override {}
@@ -62,6 +86,7 @@ class MockRenderTarget: public vtrasterizer::RenderTarget
   private:
     vtbackend::ImageSize _size {};
     MockAtlasBackend _textureScheduler;
+    MockImageTextureBackend _imageScheduler;
 };
 
 template <typename TileCreateData>

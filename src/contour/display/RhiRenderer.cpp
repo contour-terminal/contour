@@ -504,6 +504,69 @@ void RhiRenderer::renderTile(atlas::RenderTile tile)
     batch.renderTiles.emplace_back(tile);
     crispy::copy(vertices, back_inserter(batch.buffer));
 }
+
+void RhiRenderer::createImageTexture(atlas::CreateImageTexture param)
+{
+    // Deferred like every other GPU-touching command: this is called while the frame is being
+    // scheduled, which may be before a QRhi exists at all.
+    _scheduledExecutions.imageCreates.emplace_back(std::move(param));
+}
+
+void RhiRenderer::destroyImageTexture(atlas::DestroyImageTexture param)
+{
+    _scheduledExecutions.imageDestroys.emplace_back(param);
+}
+
+vtrasterizer::atlas::ImageTextureBackend& RhiRenderer::imageScheduler()
+{
+    return *this;
+}
+
+void RhiRenderer::renderImageQuad(atlas::RenderImageQuad param)
+{
+    // Same quad the atlas path builds, against a whole-image texture instead of a tile. Quads are
+    // appended to the current run while they sample the same texture, so a full-screen image costs
+    // one draw item rather than one per cell.
+    auto& batches =
+        param.aboveText ? _scheduledExecutions.imageQuadsAboveText : _scheduledExecutions.imageQuadsBelowText;
+    if (batches.empty() || batches.back().texture != param.texture)
+        batches.emplace_back(ImageQuadBatch { .texture = param.texture, .buffer = {} });
+    auto& buffer = batches.back().buffer;
+
+    auto const x = static_cast<float>(param.x);
+    auto const y = static_cast<float>(param.y);
+    auto const z = ZAxisDepths::Text;
+    auto const r = unbox<float>(param.targetSize.width);
+    auto const s = unbox<float>(param.targetSize.height);
+
+    auto const nx = param.source.x;
+    auto const ny = param.source.y;
+    auto const nw = param.source.width;
+    auto const nh = param.source.height;
+
+    float const i = 0;
+    auto const u = static_cast<float>(FRAGMENT_SELECTOR_IMAGE_BGRA);
+
+    float const cr = param.color[0];
+    float const cg = param.color[1];
+    float const cb = param.color[2];
+    float const ca = param.color[3];
+
+    // clang-format off
+    float const vertices[6 * 11] = {
+    // <X      Y      Z> <X        Y        I  U>  <R   G   B   A>
+        x,     y + s, z,  nx,      ny + nh, i, u,  cr, cg, cb, ca, // left top
+        x,     y,     z,  nx,      ny,      i, u,  cr, cg, cb, ca, // left bottom
+        x + r, y,     z,  nx + nw, ny,      i, u,  cr, cg, cb, ca, // right bottom
+
+        x,     y + s, z,  nx,      ny + nh, i, u,  cr, cg, cb, ca, // left top
+        x + r, y,     z,  nx + nw, ny,      i, u,  cr, cg, cb, ca, // right bottom
+        x + r, y + s, z,  nx + nw, ny + nh, i, u,  cr, cg, cb, ca, // right top
+    };
+    // clang-format on
+
+    crispy::copy(vertices, back_inserter(buffer));
+}
 // }}}
 
 // {{{ executor impl
@@ -540,9 +603,17 @@ void RhiRenderer::execute(std::chrono::steady_clock::time_point now)
     for (auto const& tile: _scheduledExecutions.uploadTiles)
         executeUploadTile(*_frameUpdates, tile);
 
-    // Append this step's vertex geometry + draw items (with the active inner scissor).
+    for (auto& create: _scheduledExecutions.imageCreates)
+        executeCreateImageTexture(*_frameUpdates, create);
+    for (auto const& destroy: _scheduledExecutions.imageDestroys)
+        _imageTextures.erase(destroy.id.value);
+
+    // Append this step's vertex geometry + draw items (with the active inner scissor). The order
+    // here IS the z-order: every vertex sits at the same depth, so only draw order composites.
     recordRectPass();
+    recordImagePass(_scheduledExecutions.imageQuadsBelowText);
     recordTextPass();
+    recordImagePass(_scheduledExecutions.imageQuadsAboveText);
 
     // A pending screenshot is serviced in the render phase (recordScreenshotPass), where the frame's draw
     // items are replayed into an owned offscreen texture and read back deferred — not here in the staging
@@ -615,6 +686,83 @@ void RhiRenderer::recordTextPass()
         .vertexCount = static_cast<quint32>(batch.renderTiles.size() * rhilayout::VerticesPerTile),
         .scissor = _innerScissor,
     });
+}
+
+void RhiRenderer::executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
+                                            atlas::CreateImageTexture& param)
+{
+    if (_rhi == nullptr)
+        return;
+
+    auto const pixelSize = QSize(unbox<int>(param.size.width), unbox<int>(param.size.height));
+    auto resources =
+        ImageTextureResources { .texture = {}, .srb = {}, .screenshotSrb = {}, .size = param.size };
+
+    resources.texture.reset(_rhi->newTexture(QRhiTexture::RGBA8, pixelSize, 1, {}));
+    if (!resources.texture->create())
+    {
+        errorLog()("Failed to create RHI image texture of size {}.", param.size);
+        return;
+    }
+
+    auto subresource =
+        QRhiTextureSubresourceUploadDescription(param.data.data(), static_cast<int>(param.data.size()));
+    subresource.setDataStride(unbox<quint32>(param.size.width) * 4);
+    updates.uploadTexture(resources.texture.get(), QRhiTextureUploadDescription({ 0, 0, subresource }));
+
+    // Binding 1 names this image instead of the atlas; binding 0 must name the uniform buffer of
+    // whichever pipeline ends up drawing, hence one set per pipeline.
+    auto const makeSrb = [&](QRhiBuffer* uniformBuffer) -> QRhiShaderResourceBindings* {
+        auto* srb = _rhi->newShaderResourceBindings();
+        srb->setBindings(
+            { QRhiShaderResourceBinding::uniformBuffer(0,
+                                                       QRhiShaderResourceBinding::VertexStage
+                                                           | QRhiShaderResourceBinding::FragmentStage,
+                                                       uniformBuffer),
+              QRhiShaderResourceBinding::sampledTexture(1,
+                                                        QRhiShaderResourceBinding::FragmentStage,
+                                                        resources.texture.get(),
+                                                        _atlasSampler.get()) });
+        if (!srb->create())
+        {
+            errorLog()("Failed to create RHI image shader resource bindings.");
+            delete srb;
+            return nullptr;
+        }
+        return srb;
+    };
+
+    // The atlas sampler is Nearest + ClampToEdge, which is exactly what the CPU resampler this
+    // replaces did (it truncates the source coordinate). Anything else would move pixels.
+    if (_textPipeline.uniformBuffer)
+        resources.srb.reset(makeSrb(_textPipeline.uniformBuffer.get()));
+    if (_screenshotTextPipeline.uniformBuffer)
+        resources.screenshotSrb.reset(makeSrb(_screenshotTextPipeline.uniformBuffer.get()));
+
+    _imageTextures.insert_or_assign(param.id.value, std::move(resources));
+}
+
+void RhiRenderer::recordImagePass(std::vector<ImageQuadBatch> const& batches)
+{
+    for (auto const& batch: batches)
+    {
+        if (batch.buffer.empty())
+            continue;
+
+        // Images ride the text pass's vertex buffer: identical layout, so the only thing that makes
+        // this a separate draw is which texture binding 1 names.
+        auto const firstVertex =
+            static_cast<quint32>(_frameTextVertices.size() / rhilayout::TextVertexFloats);
+        _frameTextVertices.reserve(_frameTextVertices.size() + batch.buffer.size());
+        _frameTextVertices.insert(_frameTextVertices.end(), batch.buffer.begin(), batch.buffer.end());
+        _frameDrawItems.push_back(FrameDrawItem {
+            .pass = FramePass::Image,
+            .firstVertex = firstVertex,
+            .vertexCount = static_cast<quint32>(batch.buffer.size() / rhilayout::TextVertexFloats),
+            .scissor = _innerScissor,
+            .imageTexture = batch.texture,
+        });
+    }
 }
 
 void RhiRenderer::flushFrame()
@@ -701,10 +849,24 @@ void RhiRenderer::replayDrawItems(QRhiCommandBuffer* cb, QSize targetPixelSize, 
         auto const& geometry = isRect ? _rectPipeline : _textPipeline;
         auto const vertexStride = isRect ? RectVertexStride : TextVertexStride;
 
+        // An image draw is a text draw whose binding 1 names one whole image instead of the atlas.
+        // Same pipeline, same vertex layout, same buffer — only the resource set differs.
+        auto* const shaderResources = [&]() -> QRhiShaderResourceBindings* {
+            if (item.pass != FramePass::Image)
+                return drawPipeline.srb.get();
+            auto const resources = _imageTextures.find(item.imageTexture.value);
+            if (resources == _imageTextures.end())
+                return nullptr;
+            auto const& srb = offscreen ? resources->second.screenshotSrb : resources->second.srb;
+            return srb.get();
+        }();
+        if (shaderResources == nullptr)
+            continue; // the texture went away before its quads were drawn
+
         cb->setGraphicsPipeline(drawPipeline.pipeline.get());
         cb->setViewport(viewport);
         applyScissor(drawPipeline.pipeline.get(), item.scissor, targetPixelSize, offscreen);
-        cb->setShaderResources(drawPipeline.srb.get());
+        cb->setShaderResources(shaderResources);
         QRhiCommandBuffer::VertexInput const vertexBinding(geometry.vertexBuffer.get(),
                                                            item.firstVertex * vertexStride);
         cb->setVertexInput(0, 1, &vertexBinding);
