@@ -691,6 +691,54 @@ TEST_CASE("SixelParser.storage_is_right_sized", "[sixel]")
     }
 }
 
+TEST_CASE("SixelParser.param_count_saturates", "[sixel]")
+{
+    // The parameter list is a fixed array whose count saturates one past the five any sixel command
+    // distinguishes. That is only safe because every reader tests the count against a value of at
+    // most five, so six must answer identically to seven, or to the thousands an untrusted stream
+    // can send. Stated as equivalences rather than against hand-computed pixels: what matters is
+    // that a saturated list decides the same way a longer one would.
+    auto const build = [](std::string_view input) {
+        auto ib = SixelImageBuilder(ImageSize { Width(8), Height(12) },
+                                    1,
+                                    1,
+                                    RGBAColor { 0, 0, 0, 0xFF },
+                                    std::make_shared<SixelColorPalette>(16, 256));
+        auto sp = SixelParser { ib };
+        sp.parseFragment(input);
+        sp.done();
+        return std::tuple { ib.size(), ib.sixelCursor(), ib.data() };
+    };
+
+    SECTION("a colour past five parameters defines nothing, however far past")
+    {
+        // Six parameters is not a colour definition, so it must leave the painting colour exactly as
+        // if the command had never been sent. This is the assertion that pins the saturation point:
+        // comparing six against seven would pass even if the count saturated at five, because both
+        // would then define the same wrong colour. Only "defines nothing" tells the two apart.
+        CHECK(build("#1;2;100;0;0;7~") == build("~"));
+        CHECK(build("#1;2;100;0;0;7;7;7;7~") == build("~"));
+    }
+
+    SECTION("an untrusted flood of separators cannot corrupt the decision")
+    {
+        auto flood = std::string { "#1;2;100;0;0" };
+        for ([[maybe_unused]] auto const i: std::views::iota(0, 5000))
+            flood += ";7";
+        flood += "~";
+        CHECK(build(flood) == build("~"));
+    }
+
+    SECTION("the counts that do mean something still do")
+    {
+        // Guards the saturation from swallowing the real cases: five parameters define a colour, so
+        // this pair must differ. Note the raster predicate (> 1 && < 5) cannot distinguish where the
+        // count saturates -- five and six both fail it -- so only the colour cases above pin that.
+        CHECK(build("#1;2;100;0;0~") != build("~"));
+        CHECK(build("\"1;1;8;12#1;2;100;0;0~") != build("#1;2;100;0;0~"));
+    }
+}
+
 TEST_CASE("SixelParser.rep_matches_unrolled", "[sixel]")
 {
     // The '!' repeat introducer must be exactly equivalent to writing the sixel out N times.

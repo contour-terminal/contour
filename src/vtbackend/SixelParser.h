@@ -251,7 +251,27 @@ class SixelParser: public ParserExtension
 
   private:
     State _state = State::Ground;
-    std::vector<unsigned> _params;
+
+    /// The largest parameter count any sixel command tells apart.
+    ///
+    /// A colour definition takes five; a raster attribute four. Every reader tests the gathered
+    /// count against a value no larger than this, which is what makes saturating at it safe.
+    static constexpr size_t MaxParams = 5;
+
+    /// Parameters gathered for the current introducer, plus one slot that absorbs the overflow.
+    ///
+    /// Fixed rather than a std::vector: the list is reset once per introducer -- over a million
+    /// times on a single frame -- and a vector pays a capacity branch per digit and a pointer chase
+    /// per access for a list that is never longer than six.
+    std::array<unsigned, MaxParams + 1> _params {};
+
+    /// Parameters gathered, saturating at @c MaxParams + 1.
+    ///
+    /// Saturating cannot change a decision. Every reader tests this against a value of at most five
+    /// (@c ==1, @c >1&&<5, @c >3, @c ==5), and six answers all of them identically to seven, or to
+    /// the thousands of ';' an untrusted stream may send. The spare slot is where a digit lands once
+    /// saturated, which is what keeps a clamp off the digit path -- 30% of a sixel stream's bytes.
+    size_t _paramCount = 0;
 
     Events& _events;
     OnFinalize _finalizer;

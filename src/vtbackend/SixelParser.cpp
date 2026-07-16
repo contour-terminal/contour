@@ -153,10 +153,7 @@ namespace
     /// The Sixel state machine. Built once at compile time; 5 states x 256 bytes x 2 matrices is
     /// ~2.5 KB, so the whole machine stays L1-resident.
     constexpr auto SixelTable = SixelParser::Table::get();
-} // namespace
 
-namespace
-{
     /// @return true if @p action asks for no work at all.
     ///
     /// Most cells of a 5-state machine are inert -- Ground has neither entry nor exit action, and an
@@ -197,12 +194,17 @@ void SixelParser::handle(Action action, uint8_t ch)
             _events.renderRepeated(toSixel(static_cast<char>(ch)), _params[0]);
             break;
         case Action::Param: paramShiftAndAddDigit(toDigit(static_cast<char>(ch))); break;
-        case Action::ParamSeparator: _params.push_back(0); break;
+        case Action::ParamSeparator:
+            // Saturates rather than grows: the new slot is zeroed either way, so a stream past the
+            // sixth parameter keeps overwriting the spare one and no reader can tell.
+            _paramCount = std::min(_paramCount + 1, _params.size());
+            _params[_paramCount - 1] = 0;
+            break;
         case Action::Rewind: _events.rewind(); break;
         case Action::Newline: _events.newline(); break;
         case Action::ResetParams:
-            _params.clear();
-            _params.push_back(0);
+            _paramCount = 1;
+            _params[0] = 0;
             break;
         case Action::SubmitRaster: submitRaster(); break;
         case Action::SubmitColor: submitColor(); break;
@@ -224,20 +226,22 @@ void SixelParser::done()
 
 void SixelParser::paramShiftAndAddDigit(unsigned value)
 {
-    unsigned& number = _params.back();
-    number = number * 10 + value;
+    // _paramCount is never 0 here: a digit is only ever reachable from a state whose entry action
+    // opened the list, and the count saturates one slot short of the array's end.
+    unsigned& number = _params[_paramCount - 1];
+    number = (number * 10) + value;
 }
 
 void SixelParser::submitRaster()
 {
     // Fewer than two parameters says nothing, and more than four is not a raster attribute at all.
-    if (!(_params.size() > 1 && _params.size() < 5))
+    if (!(_paramCount > 1 && _paramCount < 5))
         return;
 
     auto const pan = _params[0];
     auto const pad = _params[1];
 
-    auto const imageSize = _params.size() > 3
+    auto const imageSize = _paramCount > 3
                                ? optional<ImageSize> { ImageSize { Width(_params[2]), Height(_params[3]) } }
                                : std::nullopt;
 
@@ -246,13 +250,13 @@ void SixelParser::submitRaster()
 
 void SixelParser::submitColor()
 {
-    if (_params.size() == 1)
+    if (_paramCount == 1)
     {
         auto const index = _params[0];
         _events.useColor(index); // TODO: move color palette into image builder (to have access to it
                                  // during clear!)
     }
-    else if (_params.size() == 5)
+    else if (_paramCount == 5)
     {
         auto constexpr ConvertValue = [](unsigned value) {
             // converts a color from range 0..100 to 0..255
