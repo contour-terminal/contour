@@ -918,7 +918,10 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     if (oldPageSize.columns != fit.pageSize.columns)
         emit session.columnsCountChanged(fit.pageSize.columns.as<int>());
 
-    auto const viewSize = cellSize * fit.pageSize;
+    // What the child is told, which is not the same question as how big the window is: the profile
+    // decides whether the display's content scale is divided out first, and margins are excluded
+    // because resizeScreen() divides this by the page to recover the cell size.
+    auto const viewSize = session.display()->reportedPixelSize(fit.pageSize);
     displayLog()("Applying resize {}/{} pixels (margins {}) and {} -> {} cells.",
                  viewSize,
                  newPixelSize,

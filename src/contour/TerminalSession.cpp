@@ -337,7 +337,8 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
     {
         // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
         auto const l = scoped_lock { _terminal };
-        _terminal.resizeScreen(_terminal.totalPageSize(), _display->pixelSize());
+        _terminal.resizeScreen(_terminal.totalPageSize(),
+                               _display->reportedPixelSize(_terminal.totalPageSize()));
         // refreshRate() dereferences window()->screen(); pre-window (see below) the posted
         // configureDisplay() sets it once the window exists.
         if (_display->window() != nullptr)

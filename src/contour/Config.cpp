@@ -699,6 +699,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "bell", where.bell);
         loadFromEntry(child, "wm_class", where.wmClass);
         loadFromEntry(child, "tab_label", where.tabLabel);
+        loadFromEntry(child, "pixel_reporting", where.pixelReporting);
         loadFromEntry(child, "tab_bar_position", where.tabBarPosition);
         loadFromEntry(child, "tab_bar_visibility", where.tabBarVisibility);
         loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
@@ -1979,6 +1980,31 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         auto opt = parseModifierKey(child.as<std::string>());
         if (opt.has_value())
             where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, PixelReporting& where)
+{
+    // Case-insensitive. Unlike the other enum readers this reports an unrecognized value: the whole
+    // point of the setting is to correct a visibly wrong image size, so a typo that silently leaves
+    // the default would leave the user staring at the very symptom they were trying to fix.
+    auto parseReporting = [&](std::string const& key) -> std::optional<PixelReporting> {
+        auto const literal = crispy::toLower(key);
+        logger()("Loading entry: {}, value {}", entry, literal);
+        if (literal == "logical")
+            return PixelReporting::Logical;
+        if (literal == "device")
+            return PixelReporting::Device;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto const rawValue = child.as<std::string>();
+        if (auto const opt = parseReporting(rawValue))
+            where = opt.value();
+        else
+            errorLog()("Unknown pixel_reporting value '{}'; keeping {}.", rawValue, where);
     }
 }
 

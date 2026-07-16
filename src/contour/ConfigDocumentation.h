@@ -175,6 +175,19 @@ constexpr StringLiteral TabLabelConfig {
     "{comment} Split tabs show \"Multiple panes\" instead.\n"
 };
 
+constexpr StringLiteral PixelReportingConfig {
+    "{comment} The unit pixel sizes are reported to applications in (ignore-case).\n"
+    "{comment} Applications divide a reported extent by the grid to learn the cell size, and size\n"
+    "{comment} image canvases (sixel, for one) from it. On a display scaled by other than 1 the two\n"
+    "{comment} answers differ by that scale:\n"
+    "{comment}   Logical = what every other terminal reports; images are scaled to the display\n"
+    "{comment}             like the rest of the UI (default).\n"
+    "{comment}   Device  = images land 1:1 on the display's own pixels, at the cost of an\n"
+    "{comment}             application drawing scale-times more pixels per axis.\n"
+    "pixel_reporting: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionConfig {
     "{comment} Where the GUI tab strip (tab bar) is placed within the window (ignore-case):\n"
     "{comment}   Top    = above the terminal content (default).\n"
@@ -1497,6 +1510,25 @@ constexpr StringLiteral TabLabelWeb {
     "\n"
 };
 
+constexpr StringLiteral PixelReportingWeb {
+    "\n"
+    "Selects the unit Contour reports pixel sizes to applications in, via `TIOCGWINSZ`\n"
+    "(`ws_xpixel`/`ws_ypixel`), `CSI 14 t`, `CSI 16 t` and `XTSMGRAPHICS`.\n"
+    "\n"
+    "Applications derive the cell size by dividing a reported extent by the grid and size image\n"
+    "canvases from it, so on a scaled display this decides how large an image an application draws\n"
+    "into a given area. Valid values (ignore-case):\n"
+    "\n"
+    "- `Logical` — report logical pixels, as every other terminal does. An image is scaled to the\n"
+    "  display along with the rest of the interface. This is the default.\n"
+    "- `Device` — report device pixels. An image then lands 1:1 on the display's own pixels and is\n"
+    "  not resampled, which is sharper on a HiDPI screen; the cost is that the application draws\n"
+    "  as many times more pixels per axis as the display is scaled by.\n"
+    "\n"
+    "On an unscaled display the two are identical.\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionWeb {
     "\n"
     "Selects where the GUI tab strip (tab bar) is placed within the window. Valid values (ignore-case):\n"
@@ -2045,6 +2077,7 @@ using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYan
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
 using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
+using PixelReporting = DocumentationEntry<PixelReportingConfig, PixelReportingWeb>;
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
 using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;

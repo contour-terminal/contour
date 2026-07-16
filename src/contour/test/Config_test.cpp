@@ -1202,6 +1202,7 @@ TEST_CASE("Config: generated default config round-trips through the loader", "[c
     // assert the rendered document actually carries the keys below).
     CHECK(profile->tabBarPosition.value() == defaults.profile().tabBarPosition.value());
     CHECK(profile->tabBarVisibility.value() == defaults.profile().tabBarVisibility.value());
+    CHECK(rendered.find("pixel_reporting:") != std::string::npos);
     CHECK(rendered.find("tab_bar_position:") != std::string::npos);
     CHECK(rendered.find("tab_bar_visibility:") != std::string::npos);
 }
@@ -1431,6 +1432,74 @@ profiles:
     CHECK(profile->modeInsert.value().cursor.cursorShape == vtbackend::CursorShape::Rectangle);
     CHECK(profile->blinkStyle.value() == vtbackend::BlinkStyle::Linger);
     CHECK(profile->screenTransitionStyle.value() == vtbackend::ScreenTransitionStyle::Classic);
+}
+
+TEST_CASE("Config: pixel_reporting parses each value (ignore-case)", "[config]")
+{
+    using contour::config::PixelReporting;
+
+    SECTION("default is Logical, i.e. what every other terminal reports")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->pixelReporting.value() == PixelReporting::Logical);
+    }
+
+    SECTION("device")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        pixel_reporting: Device
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->pixelReporting.value() == PixelReporting::Device);
+    }
+
+    SECTION("lower-case logical")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        pixel_reporting: logical
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->pixelReporting.value() == PixelReporting::Logical);
+    }
+}
+
+TEST_CASE("Config: an invalid pixel_reporting value falls back to the default", "[config]")
+{
+    using contour::config::PixelReporting;
+
+    QTemporaryDir dir;
+    // Unlike the tab_bar_* readers this one also errorLog()s: a typo here leaves the user looking at
+    // the oversized image the setting exists to fix, with nothing to connect the two.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        pixel_reporting: Physical
+)"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->pixelReporting.value() == PixelReporting::Logical);
 }
 
 TEST_CASE("Config: tab_bar_position and tab_bar_visibility parse each value (ignore-case)", "[config]")

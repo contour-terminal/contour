@@ -1403,6 +1403,18 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
         geometry::scaled(toGeometryMargins(_session->profile().margins.value()), contentScale()));
 }
 
+vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const
+{
+    assert(_session);
+    // Device pixels are what the renderer works in; the profile decides whether an application is
+    // told the same or has the display's scale divided out first. Reporting device pixels makes an
+    // application derive a cell contentScale() times too large on every axis and draw an image that
+    // much oversized -- which is why Logical is the default and what every other terminal reports.
+    auto const scale =
+        _session->profile().pixelReporting.value() == config::PixelReporting::Device ? 1.0 : contentScale();
+    return geometry::reportedPixelsForPage(totalPageSize, _renderer->publishedCellSize(), scale);
+}
+
 vtbackend::ImageSize TerminalDisplay::cellSize() const
 {
     // Lock-free published cell-size read; avoids taking the renderer's reconfig mutex and copying the

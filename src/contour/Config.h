@@ -75,6 +75,18 @@ enum class ScrollBarPosition : uint8_t
     Right
 };
 
+/// The unit Contour reports pixel sizes to applications in.
+///
+/// Applications learn the cell size by dividing a reported pixel extent by the grid
+/// (`ws_ypixel / ws_row`, or a `CSI 14 t` reply over `CSI 18 t`) and size image canvases from it.
+/// On a display with a content scale other than 1 the two answers differ by that scale, so this
+/// decides how large a sixel an application draws into a given area.
+enum class PixelReporting : uint8_t
+{
+    Logical, //!< Report logical pixels: what every other terminal reports (default).
+    Device,  //!< Report device pixels: images land 1:1 on the display's own pixels.
+};
+
 /// Where the GUI tab strip (tab bar) is placed within the window.
 /// @note Exposed to QML as an @c int (0 = Top, 1 = Bottom); keep the enumerator order in sync
 ///       with the literals in @c main.qml if this is ever extended or reordered.
@@ -543,6 +555,7 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::InsertAfterYank> insertAfterYank { false };
     ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };
     ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };
+    ConfigEntry<PixelReporting, documentation::PixelReporting> pixelReporting { PixelReporting::Logical };
     ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> frozenModes {};
     ConfigEntry<std::chrono::milliseconds, documentation::SmoothLineScrolling> smoothLineScrolling { 100 };
     ConfigEntry<bool, documentation::SmoothScrolling> smoothScrolling { true };
@@ -1284,6 +1297,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, std::string& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::StatusDisplayPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarPosition& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, PixelReporting& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarVisibility& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
@@ -2098,6 +2112,21 @@ struct std::formatter<contour::config::ScrollBarPosition>: formatter<std::string
             case contour::config::ScrollBarPosition::Hidden: name = "Hidden"; break;
             case contour::config::ScrollBarPosition::Left: name = "Left"; break;
             case contour::config::ScrollBarPosition::Right: name = "Right"; break;
+        }
+        return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::config::PixelReporting>: formatter<std::string_view>
+{
+    auto format(contour::config::PixelReporting value, auto& ctx) const
+    {
+        std::string_view name;
+        switch (value)
+        {
+            case contour::config::PixelReporting::Logical: name = "Logical"; break;
+            case contour::config::PixelReporting::Device: name = "Device"; break;
         }
         return formatter<std::string_view>::format(name, ctx);
     }
