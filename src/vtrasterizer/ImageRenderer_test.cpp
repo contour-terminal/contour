@@ -137,6 +137,49 @@ TEST_CASE("ImageRenderer.routes layers to either side of the text", "[image][ren
     CHECK(renderTarget2.getMockImageBackend().quadCommands.front().aboveText);
 }
 
+TEST_CASE("ImageRenderer.widens a 24-bit RGB image for upload", "[image][renderer]")
+{
+    // An Image keeps whatever the protocol sent, and GIP's f=2 really is three bytes per pixel.
+    // Handing that to the GPU as RGBA makes the driver read a quarter more than exists -- an
+    // out-of-bounds memcpy inside the graphics driver, which is a crash rather than a wrong colour.
+    auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(2) };
+    auto const imageSize = ImageSize { Width::cast_from(unbox(Span.columns) * unbox(CellSize.width)),
+                                       Height::cast_from(unbox(Span.lines) * unbox(CellSize.height)) };
+    auto const pixelCount = imageSize.area();
+
+    auto rgb = Image::Data(pixelCount * 3);
+    for (auto const pixel: std::views::iota(size_t { 0 }, pixelCount))
+    {
+        rgb[(pixel * 3) + 0] = 0x11;
+        rgb[(pixel * 3) + 1] = 0x22;
+        rgb[(pixel * 3) + 2] = 0x33;
+    }
+    auto image =
+        std::make_shared<Image>(ImageId(2), ImageFormat::RGB, std::move(rgb), imageSize, [](auto) {});
+    auto const rasterized = std::make_shared<RasterizedImage>(std::move(image),
+                                                              ImageAlignment::TopStart,
+                                                              ImageResize::NoResize,
+                                                              RGBAColor { 0, 0, 0, 0xFF },
+                                                              Span,
+                                                              CellSize);
+
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+    renderRow(imageRenderer, rasterized, 2);
+
+    auto const& creates = renderTarget.getMockImageBackend().createCommands;
+    REQUIRE(creates.size() == 1);
+    CHECK(creates.front().format == atlas::Format::RGBA);
+    // The texture must hold exactly four bytes per pixel, and the alpha must be opaque.
+    REQUIRE(creates.front().data.size() == pixelCount * 4);
+    CHECK(creates.front().data[0] == 0x11);
+    CHECK(creates.front().data[1] == 0x22);
+    CHECK(creates.front().data[2] == 0x33);
+    CHECK(creates.front().data[3] == 0xFF);
+}
+
 TEST_CASE("ImageRenderer.discardImage releases the texture", "[image][renderer]")
 {
     auto renderTarget = MockRenderTarget {};

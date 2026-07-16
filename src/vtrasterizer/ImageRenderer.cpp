@@ -6,6 +6,8 @@
 #include <crispy/times.h>
 
 #include <array>
+#include <ranges>
+#include <span>
 
 using crispy::times;
 
@@ -34,11 +36,34 @@ void ImageRenderer::setCellSize(ImageSize cellSize)
     // TODO: recompute rasterized images slices here?
 }
 
+namespace
+{
+    /// Widens packed 24-bit RGB to 32-bit RGBA with an opaque alpha.
+    ///
+    /// An Image keeps whatever the protocol sent -- GIP's `f=2` really is three bytes per pixel --
+    /// while the GPU wants a four-byte format (RGB8 is not a texture format the RHI can rely on).
+    /// @param rgb Packed RGB, three bytes per pixel.
+    /// @return The same pixels as RGBA, four bytes per pixel.
+    [[nodiscard]] vtbackend::Image::Data widenToRgba(std::span<uint8_t const> rgb)
+    {
+        auto rgba = vtbackend::Image::Data(rgb.size() / 3 * 4);
+        for (auto const pixel: std::views::iota(size_t { 0 }, rgb.size() / 3))
+        {
+            rgba[(pixel * 4) + 0] = rgb[(pixel * 3) + 0];
+            rgba[(pixel * 4) + 1] = rgb[(pixel * 3) + 1];
+            rgba[(pixel * 4) + 2] = rgb[(pixel * 3) + 2];
+            rgba[(pixel * 4) + 3] = 0xFF;
+        }
+        return rgba;
+    }
+} // namespace
+
 atlas::ImageTextureId ImageRenderer::textureFor(vtbackend::RasterizedImage const& rasterizedImage)
 {
     // Keyed on the image, not on the rasterization: cell size and policies change where the image is
     // sampled, never what the texture holds.
-    auto const imageId = rasterizedImage.image().id().value;
+    auto const& image = rasterizedImage.image();
+    auto const imageId = image.id().value;
     if (auto const known = _imageTextureIds.find(imageId); known != _imageTextureIds.end())
         return known->second;
 
@@ -46,9 +71,9 @@ atlas::ImageTextureId ImageRenderer::textureFor(vtbackend::RasterizedImage const
     _imageTextureIds.emplace(imageId, id);
     imageScheduler().createImageTexture(atlas::CreateImageTexture {
         .id = id,
-        .size = rasterizedImage.image().size(),
+        .size = image.size(),
         .format = atlas::Format::RGBA,
-        .data = rasterizedImage.image().data(),
+        .data = image.format() == vtbackend::ImageFormat::RGB ? widenToRgba(image.data()) : image.data(),
     });
     return id;
 }
