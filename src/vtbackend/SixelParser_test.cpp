@@ -642,6 +642,14 @@ TEST_CASE("SixelParser.rep_matches_unrolled", "[sixel]")
     {
         CHECK(build("!3~@@") == build("~~~@@"));
     }
+    SECTION("a huge run costs no more than the canvas width")
+    {
+        // The repeat count comes straight off the wire, and repetitions past the canvas edge
+        // cannot change the image. Walking them anyway means four billion no-op calls -- a hang
+        // from nothing but `cat`-ing a crafted file. This case would not terminate before the fix.
+        CHECK(build("!4294967295~") == build("~~~~~~~~"));
+    }
+
     SECTION("run across bands")
     {
         CHECK(build("!3~-!3~") == build("~~~-~~~"));

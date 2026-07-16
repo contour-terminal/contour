@@ -11,6 +11,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -78,6 +79,20 @@ class SixelParser: public ParserExtension
 
         /// renders a given sixel at the current sixel-cursor position.
         virtual void render(int8_t sixel) = 0;
+
+        /// Renders @p sixel @p count times horizontally, starting at the sixel-cursor.
+        ///
+        /// The default implementation simply loops over render(). Implementers that know their
+        /// canvas bounds should override it to skip repetitions that would fall outside: the
+        /// repeat count comes straight off the wire, so an untrusted stream can otherwise ask for
+        /// billions of no-op calls.
+        /// @param sixel the six-bit vertical pixel pattern.
+        /// @param count number of horizontal repetitions; 0 renders nothing.
+        virtual void renderRepeated(int8_t sixel, unsigned count)
+        {
+            for ([[maybe_unused]] auto const repetition: std::views::iota(0u, count))
+                render(sixel);
+        }
 
         /// Finalizes the image by optimizing the underlying storage to its minimal dimension in storage.
         virtual void finalize() = 0;
@@ -192,6 +207,7 @@ class SixelImageBuilder: public SixelParser::Events
     void newline() override;
     void setRaster(unsigned int pan, unsigned int pad, std::optional<ImageSize> imageSize) override;
     void render(int8_t sixel) override;
+    void renderRepeated(int8_t sixel, unsigned count) override;
     void finalize() override;
 
     [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return _sixelCursor; }

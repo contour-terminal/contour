@@ -164,9 +164,7 @@ void SixelParser::parse(char value)
                 paramShiftAndAddDigit(toDigit(value));
             else if (isSixel(value))
             {
-                auto const sixel = toSixel(value);
-                for (unsigned i = 0; i < _params[0]; ++i)
-                    _events.render(sixel);
+                _events.renderRepeated(toSixel(value), _params[0]);
                 transitionTo(State::Ground);
             }
             else
@@ -496,6 +494,20 @@ void SixelImageBuilder::render(int8_t sixel)
         }
         _sixelCursor.column++;
     }
+}
+
+void SixelImageBuilder::renderRepeated(int8_t sixel, unsigned count)
+{
+    // render() is a no-op once the cursor has reached the canvas edge, so repetitions beyond it
+    // cannot change anything -- and the count is attacker-controlled: '!4294967295~' would
+    // otherwise spin through four billion calls that each do nothing but fail a bounds check.
+    auto const canvasWidth = unbox<unsigned>(canvasSize().width);
+    auto const cursorX = _sixelCursor.column.as<unsigned>();
+    if (cursorX >= canvasWidth)
+        return;
+
+    for ([[maybe_unused]] auto const repetition: std::views::iota(0u, std::min(count, canvasWidth - cursorX)))
+        render(sixel);
 }
 
 void SixelImageBuilder::finalize()
