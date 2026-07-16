@@ -20,11 +20,6 @@ namespace vtbackend
 
 namespace
 {
-    constexpr bool isDigit(char value) noexcept
-    {
-        return value >= '0' && value <= '9';
-    }
-
     constexpr uint8_t toDigit(char value) noexcept
     {
         return static_cast<uint8_t>(value) - '0';
@@ -153,93 +148,75 @@ SixelParser::SixelParser(Events& events, OnFinalize finalizer):
 {
 }
 
+namespace
+{
+    /// The Sixel state machine. Built once at compile time; 5 states x 256 bytes x 2 matrices is
+    /// ~2.5 KB, so the whole machine stays L1-resident.
+    constexpr auto SixelTable = SixelParser::Table::get();
+} // namespace
+
+namespace
+{
+    /// @return true if @p action asks for no work at all.
+    ///
+    /// Most cells of a 5-state machine are inert -- Ground has neither entry nor exit action, and an
+    /// introducer's transition carries none -- so testing here keeps the dispatcher from paying a
+    /// call to reach a @c break.
+    constexpr bool isInert(SixelParser::Action action) noexcept
+    {
+        return action == SixelParser::Action::Ignore || action == SixelParser::Action::Undefined;
+    }
+} // namespace
+
 void SixelParser::parse(char value)
 {
-    switch (_state)
+    auto const ch = static_cast<uint8_t>(value);
+    auto const s = Table::index(_state);
+
+    // The table is total -- every cell carries at least an action -- so there is no error branch.
+    if (auto const next = SixelTable.transitions[s][ch]; next != State::Undefined)
     {
-        case State::Ground: fallback(value); break;
-
-        case State::RepeatIntroducer:
-            // '!' NUMBER BYTE
-            if (isDigit(value))
-                paramShiftAndAddDigit(toDigit(value));
-            else if (isSixel(value))
-            {
-                _events.renderRepeated(toSixel(value), _params[0]);
-                transitionTo(State::Ground);
-            }
-            else
-                fallback(value);
-            break;
-
-        case State::ColorIntroducer:
-            if (isDigit(value))
-            {
-                paramShiftAndAddDigit(toDigit(value));
-                transitionTo(State::ColorParam);
-            }
-            else
-                fallback(value);
-            break;
-
-        case State::ColorParam:
-            if (isDigit(value))
-                paramShiftAndAddDigit(toDigit(value));
-            else if (value == ';')
-                _params.push_back(0);
-            else
-                fallback(value);
-            break;
-
-        case State::RasterSettings:
-            if (isDigit(value))
-                paramShiftAndAddDigit(toDigit(value));
-            else if (value == ';')
-                _params.push_back(0);
-            else
-                fallback(value);
-            break;
+        if (auto const action = SixelTable.exitEvents[s]; !isInert(action))
+            handle(action, ch);
+        if (auto const action = SixelTable.events[s][ch]; !isInert(action))
+            handle(action, ch);
+        _state = next;
+        if (auto const action = SixelTable.entryEvents[Table::index(next)]; !isInert(action))
+            handle(action, ch);
     }
+    else if (auto const action = SixelTable.events[s][ch]; !isInert(action))
+        handle(action, ch);
 }
 
-void SixelParser::fallback(char value)
+void SixelParser::handle(Action action, uint8_t ch)
 {
-    // Pixel data first: it is the overwhelming majority of a sixel stream, and every introducer
-    // below is a punctuation byte well under 63, so the ranges cannot overlap. Testing the five
-    // introducers first meant five comparisons that fail on almost every byte of the image.
-    if (isSixel(value))
+    switch (action)
     {
-        if (_state != State::Ground)
-            transitionTo(State::Ground);
-        _events.render(toSixel(value));
-        return;
+        case Action::Render: _events.render(toSixel(static_cast<char>(ch))); break;
+        case Action::RenderRepeated:
+            _events.renderRepeated(toSixel(static_cast<char>(ch)), _params[0]);
+            break;
+        case Action::Param: paramShiftAndAddDigit(toDigit(static_cast<char>(ch))); break;
+        case Action::ParamSeparator: _params.push_back(0); break;
+        case Action::Rewind: _events.rewind(); break;
+        case Action::Newline: _events.newline(); break;
+        case Action::ResetParams:
+            _params.clear();
+            _params.push_back(0);
+            break;
+        case Action::SubmitRaster: submitRaster(); break;
+        case Action::SubmitColor: submitColor(); break;
+        case Action::Ignore:
+        case Action::Undefined: break;
     }
-
-    if (value == '#')
-        transitionTo(State::ColorIntroducer);
-    else if (value == '!')
-        transitionTo(State::RepeatIntroducer);
-    else if (value == '"')
-        transitionTo(State::RasterSettings);
-    else if (value == '$')
-    {
-        transitionTo(State::Ground);
-        _events.rewind();
-    }
-    else if (value == '-')
-    {
-        transitionTo(State::Ground);
-        _events.newline();
-    }
-    else if (_state != State::Ground)
-        transitionTo(State::Ground);
-
-    // ignore any other input value
 }
 
 void SixelParser::done()
 {
-    transitionTo(State::Ground); // this also ensures current state's leave action is invoked
+    // A sequence may end mid-introducer, so the current state's exit action still has to run: it is
+    // what submits the parameters gathered so far, exactly as an aborting byte would have.
+    handle(SixelTable.exitEvents[Table::index(_state)], 0);
+    _state = State::Ground;
     _events.finalize();
     if (_finalizer)
         _finalizer();
@@ -251,98 +228,66 @@ void SixelParser::paramShiftAndAddDigit(unsigned value)
     number = number * 10 + value;
 }
 
-void SixelParser::transitionTo(State newState)
+void SixelParser::submitRaster()
 {
-    leaveState();
-    _state = newState;
-    enterState();
+    // Fewer than two parameters says nothing, and more than four is not a raster attribute at all.
+    if (!(_params.size() > 1 && _params.size() < 5))
+        return;
+
+    auto const pan = _params[0];
+    auto const pad = _params[1];
+
+    auto const imageSize = _params.size() > 3
+                               ? optional<ImageSize> { ImageSize { Width(_params[2]), Height(_params[3]) } }
+                               : std::nullopt;
+
+    _events.setRaster(pan, pad, imageSize);
 }
 
-void SixelParser::enterState()
+void SixelParser::submitColor()
 {
-    switch (_state)
+    if (_params.size() == 1)
     {
-        case State::ColorIntroducer:
-        case State::RepeatIntroducer:
-        case State::RasterSettings:
-            _params.clear();
-            _params.push_back(0);
-            break;
-
-        case State::Ground:
-        case State::ColorParam: break;
+        auto const index = _params[0];
+        _events.useColor(index); // TODO: move color palette into image builder (to have access to it
+                                 // during clear!)
     }
-}
-
-void SixelParser::leaveState()
-{
-    switch (_state)
+    else if (_params.size() == 5)
     {
-        case State::Ground:
-        case State::ColorIntroducer:
-        case State::RepeatIntroducer: break;
-
-        case State::RasterSettings:
-            if (_params.size() > 1 && _params.size() < 5)
-            {
-                auto const pan = _params[0];
-                auto const pad = _params[1];
-
-                auto const imageSize =
-                    _params.size() > 3
-                        ? optional<ImageSize> { ImageSize { Width(_params[2]), Height(_params[3]) } }
-                        : std::nullopt;
-
-                _events.setRaster(pan, pad, imageSize);
-                _state = State::Ground;
+        auto constexpr ConvertValue = [](unsigned value) {
+            // converts a color from range 0..100 to 0..255
+            return static_cast<uint8_t>(static_cast<int>((static_cast<float>(value) * 255.0f) / 100.0f)
+                                        % 256);
+        };
+        auto const index = _params[0];
+        auto const colorSpace = _params[1] == 2 ? Colorspace::RGB : Colorspace::HSL;
+        switch (colorSpace)
+        {
+            case Colorspace::RGB: {
+                auto const p1 = ConvertValue(_params[2]);
+                auto const p2 = ConvertValue(_params[3]);
+                auto const p3 = ConvertValue(_params[4]);
+                auto const color = RGBColor { p1, p2, p3 }; // TODO: convert HSL if requested
+                _events.setColor(index, color);
+                break;
             }
-            break;
-
-        case State::ColorParam:
-            if (_params.size() == 1)
-            {
-                auto const index = _params[0];
-                _events.useColor(index); // TODO: move color palette into image builder (to have access to it
-                                         // during clear!)
+            case Colorspace::HSL: {
+                // HLS Values
+                // Px 	0 to 360 degrees 	Hue angle
+                // Py 	0 to 100 percent 	Lightness
+                // Pz 	0 to 100 percent 	Saturation
+                //
+                // (Hue angle seems to be shifted by 120 deg in other Sixel implementations.)
+                auto const h = static_cast<double>(_params[2]) - 120.0;
+                auto const hc = (h < 0 ? 360 + h : h) / 360.0;
+                auto const sc = static_cast<double>(_params[3]) / 100.0;
+                auto const ls = static_cast<double>(_params[3]) / 100.0;
+                auto const rgb = hsl2rgb(hc, sc, ls);
+                _events.setColor(index, rgb);
+                break;
             }
-            else if (_params.size() == 5)
-            {
-                auto constexpr ConvertValue = [](unsigned value) {
-                    // converts a color from range 0..100 to 0..255
-                    return static_cast<uint8_t>(
-                        static_cast<int>((static_cast<float>(value) * 255.0f) / 100.0f) % 256);
-                };
-                auto const index = _params[0];
-                auto const colorSpace = _params[1] == 2 ? Colorspace::RGB : Colorspace::HSL;
-                switch (colorSpace)
-                {
-                    case Colorspace::RGB: {
-                        auto const p1 = ConvertValue(_params[2]);
-                        auto const p2 = ConvertValue(_params[3]);
-                        auto const p3 = ConvertValue(_params[4]);
-                        auto const color = RGBColor { p1, p2, p3 }; // TODO: convert HSL if requested
-                        _events.setColor(index, color);
-                        break;
-                    }
-                    case Colorspace::HSL: {
-                        // HLS Values
-                        // Px 	0 to 360 degrees 	Hue angle
-                        // Py 	0 to 100 percent 	Lightness
-                        // Pz 	0 to 100 percent 	Saturation
-                        //
-                        // (Hue angle seems to be shifted by 120 deg in other Sixel implementations.)
-                        auto const h = static_cast<double>(_params[2]) - 120.0;
-                        auto const hc = (h < 0 ? 360 + h : h) / 360.0;
-                        auto const sc = static_cast<double>(_params[3]) / 100.0;
-                        auto const ls = static_cast<double>(_params[3]) / 100.0;
-                        auto const rgb = hsl2rgb(hc, sc, ls);
-                        _events.setColor(index, rgb);
-                        break;
-                    }
-                }
-                _events.useColor(index); // Also use the specified color.
-            }
-            break;
+        }
+        _events.useColor(index); // Also use the specified color.
     }
 }
 

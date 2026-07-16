@@ -23,6 +23,97 @@ SixelImageBuilder sixelImageBuilder(ImageSize size, RGBAColor defaultColor)
     return ib;
 }
 
+// {{{ State table properties
+//
+// The table is constexpr, so these cost nothing at runtime and fail the build rather than a test
+// run. vtparser's equivalent table carries a standing "TODO: verify the above is correct
+// (programatically as much as possible)" and never got these; the point of writing them here is that
+// a mis-tabled cell is otherwise silent.
+
+using Table = SixelParser::Table;
+using State = SixelParser::State;
+using Action = SixelParser::Action;
+
+constexpr auto TheTable = Table::get();
+
+/// Every real state, i.e. every enumerator past the Undefined sentinel.
+constexpr auto realStates() noexcept
+{
+    return std::views::iota(size_t { 1 }, SixelParser::StateCount)
+           | std::views::transform([](size_t s) { return static_cast<State>(s); });
+}
+
+/// @return true if every (state, byte) pair names an action.
+///
+/// This is what lets the dispatcher omit an error branch: there is no hole to fall into.
+constexpr bool isTotal() noexcept
+{
+    for (auto const state: realStates())
+        for (auto const ch: std::views::iota(0u, 256u))
+            if (TheTable.events[Table::index(state)][ch] == Action::Undefined)
+                return false;
+    return true;
+}
+
+/// @return true if a sixel data byte always paints and always ends up in Ground, from every state.
+///
+/// This is the property the old fallback()'s "test isSixel first" ordering hand-maintained. As a
+/// table it is checkable rather than merely intended.
+constexpr bool sixelsAlwaysPaintAndGround() noexcept
+{
+    for (auto const state: realStates())
+    {
+        for (auto const ch: std::views::iota(63u, 127u))
+        {
+            auto const next = TheTable.transitions[Table::index(state)][ch];
+            auto const action = TheTable.events[Table::index(state)][ch];
+            // Ground stays put (Undefined == no move), which is already being in Ground.
+            auto const endsInGround =
+                next == State::Ground || (state == State::Ground && next == State::Undefined);
+            auto const paints = action == Action::Render || action == Action::RenderRepeated;
+            if (!endsInGround || !paints)
+                return false;
+        }
+    }
+    return true;
+}
+
+/// @return true if every real state is entered by some (state, byte) pair, Ground aside -- it is
+/// where the parser starts.
+constexpr bool everyStateReachable() noexcept
+{
+    for (auto const target: realStates())
+    {
+        if (target == State::Ground)
+            continue;
+        auto reachable = false;
+        for (auto const from: realStates())
+            for (auto const ch: std::views::iota(0u, 256u))
+                if (TheTable.transitions[Table::index(from)][ch] == target)
+                    reachable = true;
+        if (!reachable)
+            return false;
+    }
+    return true;
+}
+
+static_assert(isTotal(), "every (state, byte) must name an action, or the dispatcher needs an error branch");
+static_assert(sixelsAlwaysPaintAndGround(), "a sixel byte must paint and land in Ground from every state");
+static_assert(everyStateReachable(), "a state nothing transitions to is dead weight");
+
+// The builder writes Ground -> Ground self-transitions for '$' and '-' rather than in-state events.
+// That is only equivalent to firing the action alone because Ground has neither an entry nor an exit
+// action -- so pin it here rather than leave it as a silent assumption.
+static_assert(TheTable.entryEvents[Table::index(State::Ground)] == Action::Undefined
+                  && TheTable.exitEvents[Table::index(State::Ground)] == Action::Undefined,
+              "Ground must stay action-free, or its self-transitions would fire side effects");
+
+// The Undefined sentinel row must stay empty: it is what "no entry" means.
+static_assert(TheTable.entryEvents[Table::index(State::Undefined)] == Action::Undefined
+                  && TheTable.exitEvents[Table::index(State::Undefined)] == Action::Undefined,
+              "the Undefined sentinel is not a state and must carry no actions");
+// }}}
+
 } // namespace
 
 TEST_CASE("SixelParser.ground_000000", "[sixel]")
