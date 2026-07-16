@@ -3,6 +3,7 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/LayoutBuilder.h>
 #include <contour/PaneProxy.h>
+#include <contour/SettingsController.h>
 #include <contour/TabLabel.h>
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
@@ -465,6 +466,15 @@ void TerminalSessionManager::reloadAllSessions()
     for (auto& [id, session]: _sessionsById)
         if (session != nullptr)
             session->onConfigReload();
+
+    // The settings page reads through the app config just reloaded above, but each OS window owns its
+    // own SettingsController with model caches rebuilt only by refresh(). The controller that triggered
+    // the save refreshes itself; refresh every OTHER window's too, so a settings page open in a second
+    // window reflects the change immediately instead of serving stale caches until it is reopened.
+    for (auto& [windowId, controller]: _controllersByWindow)
+        if (controller != nullptr)
+            if (auto* settings = controller->settingsController(); settings != nullptr)
+                settings->refresh();
 }
 
 void TerminalSessionManager::openContextMenu(TerminalSession* acting)

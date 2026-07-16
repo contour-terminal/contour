@@ -338,13 +338,27 @@ void compareEntries(Config& config, auto const& output)
 /// the GUI side-file scan adds on top is distinguishable as GUI-owned (and therefore editable in the
 /// settings page) from the hand-maintained inline entries, which stay read-only there.
 /// @param config The just-parsed configuration to annotate.
-void recordMainConfigOrigins(Config& config)
+/// @param reader The reader that parsed contour.yml; its @c doc supplies the inline `color_schemes:` node.
+void recordMainConfigOrigins(Config& config, YAMLConfigReader const& reader)
 {
     for (auto const& [name, _]: config.profiles.value())
         config.profileOrigins.emplace(name, SettingsOrigin::MainConfig);
     for (auto const& [name, _]: config.colorschemes.value())
         config.colorSchemeOrigins.emplace(
             name, name == "default" ? SettingsOrigin::Builtin : SettingsOrigin::MainConfig);
+
+    // Inline color schemes are resolved lazily INTO the referencing profile, not into the colorschemes
+    // map, so their names never reach the loop above. Record them straight from the contour.yml
+    // `color_schemes:` node: without this the settings page cannot tell that a GUI scheme name collides
+    // with a hand-maintained inline scheme (which shadows a side file at load), and would let the user
+    // write a dead colorschemes/<name>.yml that never takes effect.
+    if (auto const node = reader.doc["color_schemes"]; node && node.IsMap())
+        for (auto const& entry: node)
+        {
+            auto const name = entry.first.as<std::string>();
+            config.colorSchemeOrigins.emplace(
+                name, name == "default" ? SettingsOrigin::Builtin : SettingsOrigin::MainConfig);
+        }
 }
 
 /// Merges the GUI-managed side files over the just-parsed configuration, mirroring the layouts.yml
@@ -447,6 +461,18 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     config.configFile = fileName;
     createFileIfNotExists(config.configFile);
 
+    // A live reload reuses the same Config object rather than a fresh one (see reloadAllSessions), so the
+    // collections rebuilt wholesale from the file plus the GUI side-file scan below must be reset to their
+    // default-constructed starting state first. Otherwise a profile or color scheme that was deleted from
+    // disk (e.g. a GUI entity removed in the settings page) would linger from the previous load, and its
+    // stale provenance would keep the settings page treating a contour.yml entry as GUI-owned. The loaders
+    // assume the built-in seeds exist (the "main" profile is the inheritance base; the "default" color
+    // palette is the fallback), so restore those — exactly a first load's initial Config state.
+    config.profiles.value() = { { "main", TerminalProfile {} } };
+    config.colorschemes.value() = { { "default", vtbackend::ColorPalette {} } };
+    config.profileOrigins.clear();
+    config.colorSchemeOrigins.clear();
+
     auto yamlVisitor = YAMLConfigReader(config.configFile.string(), logger);
     yamlVisitor.load(config);
 
@@ -464,7 +490,7 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
 
     // Provenance first, then the GUI side files (profiles/*.yml, settings.yml) on top — the same
     // freshest-wins, broken-file-tolerant merge philosophy the layouts.yml merge above uses.
-    recordMainConfigOrigins(config);
+    recordMainConfigOrigins(config, yamlVisitor);
     mergeGuiManagedSideFiles(config, yamlVisitor);
 
     compareEntries(config, logger);
@@ -521,7 +547,16 @@ YAMLConfigReader::YAMLConfigReader(std::string const& filename,
     }
     try
     {
-        doc = YAML::LoadFile(configFile.string());
+        // Read through readFile (binary + CRLF->LF normalization) rather than YAML::LoadFile, so every
+        // config document — contour.yml, the settings.yml global-override reader, and the color-scheme
+        // files — is parsed identically regardless of how it was saved. YAML::LoadFile is CRLF-safe only
+        // on Windows (its text-mode ifstream strips '\r' at the OS layer); a CRLF file synced onto
+        // Linux/macOS would otherwise leave a trailing '\r' on plain scalar values and fail typed
+        // conversion. This is the same normalization the GUI profile side files already rely on.
+        if (auto const contents = readFile(configFile))
+            doc = YAML::Load(*contents);
+        else
+            errorLog()("Configuration file could not be read.\nDefault config will be loaded.");
     }
     catch (std::exception const& e)
     {
@@ -3315,10 +3350,17 @@ std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesyst
     if (!std::filesystem::exists(path, ec) || ec)
         return settings; // nothing saved yet is not an error
 
+    // Read through readFile (binary + CRLF->LF normalization) so a settings.yml saved with Windows line
+    // endings parses identically on every platform — matching the profile side files, and closing the
+    // cross-platform CRLF gap YAML::LoadFile leaves open off Windows.
+    auto const contents = readFile(path);
+    if (!contents)
+        return std::unexpected(std::string("Could not read settings file: ") + path.string());
+
     auto doc = YAML::Node {};
     try
     {
-        doc = YAML::LoadFile(path.string());
+        doc = YAML::Load(*contents);
     }
     catch (std::exception const& e)
     {

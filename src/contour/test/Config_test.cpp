@@ -2006,6 +2006,63 @@ TEST_CASE("Config: a profiles/<name>.yml with CRLF line endings still loads", "[
     CHECK(crlf->wmClass.value() == "contour-crlf");
 }
 
+TEST_CASE("Config: an in-place reload drops a removed side-file profile and its stale origin",
+          "[config][gui]")
+{
+    // Production reloads config in place (reloadAllSessions reuses the live Config object), unlike a fresh
+    // load. A profiles map that only ever accreted entries — and a provenance map that only ever emplaced
+    // — would keep a GUI profile alive after its side file was deleted, so the settings page would still
+    // offer it and a later Save would shadow contour.yml. The loader must reconcile both on every load.
+    QTemporaryDir dir;
+    writeSideFile(dir, "profiles/work.yml", "show_title_bar: false\n");
+    auto const configPath = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        show_title_bar: true
+)");
+
+    contour::config::Config config;
+    contour::config::loadConfigFromFile(config, configPath);
+    REQUIRE(config.findProfile("work") != nullptr);
+    REQUIRE(config.profileOrigins.at("work") == contour::config::SettingsOrigin::SideFile);
+
+    // Delete the side file and reload INTO THE SAME Config object.
+    std::filesystem::remove(std::filesystem::path(dir.path().toStdString()) / "profiles" / "work.yml");
+    contour::config::loadConfigFromFile(config, configPath);
+
+    CHECK(config.findProfile("work") == nullptr);    // no longer in the profiles map
+    CHECK(config.profileOrigins.count("work") == 0); // and no stale SideFile provenance left behind
+    REQUIRE(config.findProfile("main") != nullptr);  // the contour.yml profile is intact
+    CHECK(config.profileOrigins.at("main") == contour::config::SettingsOrigin::MainConfig);
+}
+
+TEST_CASE("Config: a settings.yml with CRLF line endings still applies", "[config][gui]")
+{
+    // settings.yml is read through the same CRLF-normalizing reader as the profile side files, so a file
+    // saved with Windows line endings must round-trip on every platform: a stray '\r' left on a scalar
+    // would make default_profile name an unknown "work\r" and fail the typed int global override. Written
+    // as explicit CRLF bytes in binary to exercise the path regardless of host line-ending conventions.
+    QTemporaryDir dir;
+    writeSideFile(dir, "profiles/work.yml", "show_title_bar: false\n");
+    {
+        auto const path = std::filesystem::path(dir.path().toStdString()) / "settings.yml";
+        auto out = std::ofstream(path, std::ios::binary);
+        out << "default_profile: work\r\n"
+               "read_buffer_size: 32768\r\n";
+    }
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+read_buffer_size: 16384
+profiles:
+    main:
+        show_title_bar: true
+)");
+
+    CHECK(config.defaultProfileName.value() == "work"); // CRLF did not corrupt the profile name
+    CHECK(config.ptyReadBufferSize.value() == 32768);   // the int global override applied through CRLF
+}
+
 TEST_CASE("Config: settings.yml default_profile overrides contour.yml's", "[config][gui]")
 {
     QTemporaryDir dir;
