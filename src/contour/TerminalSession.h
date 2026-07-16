@@ -547,6 +547,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void requestPermission(config::Permission allowedByConfig, GuardedRole role);
     void executeRole(GuardedRole role, bool allow, bool remember);
 
+    /// Derives the terminal's image canvas ceiling from the monitor the display currently sits on.
+    ///
+    /// The single writer of that ceiling; call it whenever the display attaches or changes monitor.
+    /// The cap is the monitor rather than the window, so an ordinary resize needs no update. No-op
+    /// while no window/screen is available — the caller re-runs once one is.
+    void updateImageCanvasCeiling();
+
   signals:
     void sessionClosed(TerminalSession&);
     void profileNameChanged(QString newValue);

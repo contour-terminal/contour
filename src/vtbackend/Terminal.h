@@ -502,14 +502,51 @@ class Terminal
     bool handleLocatorMouseEvent(int button, bool press, CellLocation pos);
     // }}}
 
-    void setMaxImageSize(ImageSize size) noexcept { _effectiveImageCanvasSize = size; }
-    ImageSize maxImageSize() const noexcept { return _effectiveImageCanvasSize; }
+    // {{{ Image canvas size
+    //
+    // Two layered authorities, so that "what the frontend allows" and "what the application asked
+    // for" cannot be confused:
+    //
+    //   ceiling   -- the hard cap, derived from the monitor. Only the frontend sets it.
+    //   effective -- what images are actually clamped to. An application may lower it via
+    //                XTSMGRAPHICS, never raise it above the ceiling.
+    //
+    // These deliberately do not share a name: the previous setMaxImageSize() overload pair differed
+    // only in arity, and the one-argument form silently set the effective size alone -- leaving the
+    // ceiling stale and, on the config-reload path, the canvas at 0x0.
 
-    void setMaxImageSize(ImageSize effective, ImageSize limit)
+    /// Sets the hard cap on image size, and resets the effective size to it.
+    /// This is the only entry point for the frontend.
+    /// @param ceiling the monitor-derived maximum.
+    void setImageCanvasCeiling(ImageSize ceiling) noexcept
     {
-        _effectiveImageCanvasSize = effective;
-        _settings.maxImageSize = limit;
+        _settings.maxImageSize = ceiling;
+        _effectiveImageCanvasSize = ceiling;
     }
+
+    /// @return the hard cap an application may not exceed.
+    [[nodiscard]] ImageSize imageCanvasCeiling() const noexcept { return _settings.maxImageSize; }
+
+    /// Clamps @p requested to the ceiling. The single clamp rule; component-wise by construction.
+    /// @param requested the size an application asked for.
+    /// @return the largest permitted size not exceeding @p requested.
+    [[nodiscard]] ImageSize clampedImageCanvasSize(ImageSize requested) const noexcept
+    {
+        return vtpty::min(requested, _settings.maxImageSize);
+    }
+
+    /// Sets the effective canvas size, clamped to the ceiling. For XTSMGRAPHICS only.
+    /// @param requested the size an application asked for.
+    /// @return the size actually applied.
+    ImageSize setEffectiveImageCanvasSize(ImageSize requested) noexcept
+    {
+        _effectiveImageCanvasSize = clampedImageCanvasSize(requested);
+        return _effectiveImageCanvasSize;
+    }
+
+    /// @return the size images are currently clamped to.
+    [[nodiscard]] ImageSize maxImageSize() const noexcept { return _effectiveImageCanvasSize; }
+    // }}}
 
     // {{{ Modes handling
     bool isModeEnabled(AnsiMode m) const noexcept { return _modes.enabled(m); }

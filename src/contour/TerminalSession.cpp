@@ -159,7 +159,6 @@ namespace
         settings.momentumScrolling = profile.momentumScrolling.value();
         settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
-        settings.maxImageSize = config.images.value().maxImageSize;
         settings.maxImageRegisterCount = config.images.value().maxImageColorRegisters;
         settings.goodImageProtocol = config.images.value().goodImageProtocol;
         settings.statusDisplayType = profile.statusLine.value().initialType;
@@ -345,30 +344,9 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
             _terminal.setRefreshRate(_display->refreshRate());
     }
 
-    // Ensure max image size is based on the actual display dimensions,
-    // not just the (possibly zero) config default.
-    // This is needed because configureDisplay() is only called from createRenderer(),
-    // which only runs once for the first session.
-    // setSession() (our caller) may run before the item is parented into a window (URL-loaded PaneNode
-    // children during a split rebuild) — skip the screen-derived part then: renderer creation requires a
-    // window and re-derives it via the posted configureDisplay(), as does onScreenChanged().
-    if (_display->window() != nullptr && _display->window()->screen() != nullptr)
-    {
-        auto const dpr = _display->contentScale();
-        auto const qActualScreenSize = _display->window()->screen()->size() * dpr;
-        auto const actualScreenSize = ImageSize { Width::cast_from(qActualScreenSize.width()),
-                                                  Height::cast_from(qActualScreenSize.height()) };
-        auto const configuredMaxImageSize = _config.images.value().maxImageSize;
-        auto const _ = std::scoped_lock { _terminal };
-        // clang-format off
-        auto const maxImageSize = ImageSize {
-            .width = unbox(configuredMaxImageSize.width) == 0 ? actualScreenSize.width : configuredMaxImageSize.width,
-            .height = unbox(configuredMaxImageSize.height) == 0 ? actualScreenSize.height : configuredMaxImageSize.height,
-        };
-        // clang-format on
-
-        _terminal.setMaxImageSize(maxImageSize, maxImageSize);
-    }
+    // configureDisplay() only runs from createRenderer(), i.e. once for the first session, so the
+    // ceiling has to be (re)derived here too. See updateImageCanvasCeiling() for the null-checks.
+    updateImageCanvasCeiling();
 
     {
         auto const _ = std::scoped_lock { _onClosedMutex };
@@ -2673,12 +2651,15 @@ void TerminalSession::configureTerminal()
     sessionLog()("Setting terminal ID to {}.", _profile.terminalId.value());
     _terminal.setTerminalId(_profile.terminalId.value());
     _terminal.setMaxSixelColorRegisters(_config.images.value().maxImageColorRegisters);
-    _terminal.setMaxImageSize(_config.images.value().maxImageSize);
+    // NB: the image canvas ceiling is deliberately NOT touched here. It is monitor-derived, and
+    // configureTerminal() runs on every config reload and profile switch -- paths that
+    // configureDisplay() is not on. Re-deriving it needs a window; assigning the config value here
+    // is what used to reset the canvas to 0x0 and make sixel images vanish until the next resize.
     _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.images.value().sixelScrolling);
     _terminal.settings().goodImageProtocol = _config.images.value().goodImageProtocol;
     _terminal.setStatusDisplay(_profile.statusLine.value().initialType);
-    sessionLog()("maxImageSize={}, sixelScrolling={}, goodImageProtocol={}",
-                 _config.images.value().maxImageSize,
+    sessionLog()("imageCanvasCeiling={}, sixelScrolling={}, goodImageProtocol={}",
+                 _terminal.imageCanvasCeiling(),
                  _config.images.value().sixelScrolling,
                  _config.images.value().goodImageProtocol);
 
@@ -2715,6 +2696,21 @@ void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)
     scheduleRedraw();
 }
 
+void TerminalSession::updateImageCanvasCeiling()
+{
+    // The cap is the monitor, not the window: a window resize cannot change what an image may be,
+    // so only attach and monitor-change need to re-derive it.
+    if (!_display || _display->window() == nullptr || _display->window()->screen() == nullptr)
+        return;
+
+    auto const screenSize = _display->window()->screen()->size();
+    auto const ceiling =
+        geometry::availableDevicePixels(screenSize.width(), screenSize.height(), _display->contentScale());
+
+    auto const _ = std::scoped_lock { _terminal };
+    _terminal.setImageCanvasCeiling(ceiling);
+}
+
 void TerminalSession::configureDisplay()
 {
     if (!_display)
@@ -2739,13 +2735,7 @@ void TerminalSession::configureDisplay()
     sessionLog()("Configuring display.");
     _display->setBlurBehind(_profile.background.value().blur);
 
-    {
-        auto const dpr = _display->contentScale();
-        auto const qActualScreenSize = _display->window()->screen()->size() * dpr;
-        auto const actualScreenSize = ImageSize { Width::cast_from(qActualScreenSize.width()),
-                                                  Height::cast_from(qActualScreenSize.height()) };
-        _terminal.setMaxImageSize(actualScreenSize, actualScreenSize);
-    }
+    updateImageCanvasCeiling();
 
     // NB: The profile's window show-mode (maximized/fullscreen/normal) is deliberately NOT applied
     // here. Window-state authority belongs solely to WindowController::showInitial() — which maps

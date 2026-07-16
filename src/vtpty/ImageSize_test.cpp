@@ -68,14 +68,19 @@ TEST_CASE("ImageSize.scalar division rounds up", "[vtpty][imagesize]")
     }
 }
 
-TEST_CASE("ImageSize.comparisons and area", "[vtpty][imagesize]")
+TEST_CASE("ImageSize.equality and area", "[vtpty][imagesize]")
 {
     CHECK(imageSize(1, 2) == imageSize(1, 2));
     CHECK(imageSize(1, 2) != imageSize(2, 1));
-    CHECK(imageSize(1, 5) < imageSize(2, 1));
-    CHECK(imageSize(2, 1) < imageSize(2, 5));
     CHECK(imageSize(3, 4).area() == 12);
+}
 
+TEST_CASE("ImageSize.min and max clamp each axis independently", "[vtpty][imagesize]")
+{
     CHECK(min(imageSize(3, 9), imageSize(5, 4)) == imageSize(3, 4));
     CHECK(max(imageSize(3, 9), imageSize(5, 4)) == imageSize(5, 9));
+
+    // The case a lexicographic order gets wrong: width already fits, so an ordering that compares
+    // width first returns the left operand whole and never clamps the height.
+    CHECK(min(imageSize(100, 999999), imageSize(1920, 1080)) == imageSize(100, 1080));
 }

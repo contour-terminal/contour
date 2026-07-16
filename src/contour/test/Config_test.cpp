@@ -1334,7 +1334,7 @@ profiles:
     CHECK_FALSE(cwd.empty());
 }
 
-TEST_CASE("Config: image max size parses from YAML", "[config]")
+TEST_CASE("Config: deprecated image max size keys are accepted and ignored", "[config]")
 {
     QTemporaryDir dir;
     auto const config = loadFromYaml(dir, R"(
@@ -1342,15 +1342,17 @@ default_profile: main
 images:
     max_width: 640
     max_height: 480
+    sixel_scrolling: false
 profiles:
     main:
         shell: /bin/sh
 )"sv);
 
-    // images: max_width/max_height feed the maxImageSize (0 means "screen default", so a non-zero
-    // value exercises the loadFromEntry(ImageSize) branch).
-    CHECK(config.images.value().maxImageSize.width == vtbackend::Width(640));
-    CHECK(config.images.value().maxImageSize.height == vtbackend::Height(480));
+    // max_width/max_height no longer exist: the image canvas is derived from the screen. They must
+    // still parse, so configurations carrying them keep loading -- including their neighbours in the
+    // same section, which is what would break if the keys made the section fail. The loader warns
+    // about them so the setting does not just quietly stop meaning something.
+    CHECK_FALSE(config.images.value().sixelScrolling);
 }
 
 TEST_CASE("Config: text_outline accepts the scalar thickness-only form", "[config]")
@@ -1749,8 +1751,7 @@ profiles:
         shell: /bin/sh
 )"sv);
 
-    CHECK(unbox(config.images.value().maxImageSize.width) == 640);
-    CHECK(unbox(config.images.value().maxImageSize.height) == 480);
+    // max_width/max_height are deprecated no-ops; the neighbouring keys must still load.
     CHECK(config.images.value().sixelScrolling == false);
 }
 

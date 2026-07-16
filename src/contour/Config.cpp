@@ -1633,11 +1633,19 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     {
         loadFromEntry(child, "sixel_scrolling", where.sixelScrolling);
         loadFromEntry(child, "sixel_register_count", where.maxImageColorRegisters);
-        uint width = 0;
-        loadFromEntry(child, "max_width", width);
-        uint height = 0;
-        loadFromEntry(child, "max_height", height);
-        where.maxImageSize = { .width = vtpty::Width { width }, .height = vtpty::Height { height } };
+
+        // max_width/max_height are deprecated: the image canvas is derived from the screen. The
+        // keys still parse so existing configurations keep loading, but a silently ignored setting
+        // is worse than a removed one -- the user has no way to learn it stopped meaning anything.
+        // Warn on presence rather than on value: writing an explicit 0 is just as much a statement
+        // about a key that no longer exists.
+        for (auto const* deprecatedKey: { "max_width", "max_height" })
+            if (child[deprecatedKey])
+                errorLog()("Config entry images.{} is deprecated and has no effect. The maximum image "
+                           "size is derived from the screen size. Remove the entry to silence this "
+                           "warning.",
+                           deprecatedKey);
+
         loadFromEntry(child, "good_image_protocol", where.goodImageProtocol);
     }
 }

@@ -524,11 +524,7 @@ void TerminalDisplay::onScreenChanged()
     if (_session != nullptr && window() != nullptr && window()->screen() != nullptr)
     {
         _session->terminal().setRefreshRate(refreshRate());
-        auto const dpr = contentScale();
-        auto const screenSize = window()->screen()->size() * dpr;
-        auto const maxImageSize =
-            ImageSize { Width::cast_from(screenSize.width()), Height::cast_from(screenSize.height()) };
-        _session->terminal().setMaxImageSize(maxImageSize, maxImageSize);
+        _session->updateImageCanvasCeiling();
     }
 }
 

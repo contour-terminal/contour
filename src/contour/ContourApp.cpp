@@ -317,8 +317,6 @@ live_config: false
 images:
     sixel_scrolling: true
     sixel_register_count: 4096
-    max_width: 0
-    max_height: 0
 
 ```
 

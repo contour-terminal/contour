@@ -1917,14 +1917,22 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
     _atomicTotalPageSize.store(totalPageSize, std::memory_order_release);
     _currentMousePosition = clampToScreen(_currentMousePosition);
     if (pixels)
-        setCellPixelSize(pixels.value() / mainDisplayPageSize);
+        // Divide the total page's pixels by the total page. Dividing by mainDisplayPageSize would
+        // mix bases -- `pixels` spans the status line, mainDisplayPageSize does not -- inflating the
+        // cell height. forceRedraw() feeds cellPixelSize() * totalPageSize back through here, so
+        // that error compounded by roughly a pixel per call.
+        setCellPixelSize(pixels.value() / totalPageSize);
 
     // Reset margins for all pages to defaults on resize.
     _pageMargins.fill(makeDefaultMargin(mainDisplayPageSize));
 
     applyPageSizeToCurrentBuffer();
 
-    _pty->resizeScreen(mainDisplayPageSize, pixels);
+    // Report the main page in both units. ws_row already excluded the status line, so passing the
+    // full display's pixels alongside it made ws_ypixel/ws_row disagree with the real cell height --
+    // and that division is exactly how applications derive cell size to size an image canvas.
+    _pty->resizeScreen(mainDisplayPageSize,
+                       pixels ? std::optional { cellPixelSize() * mainDisplayPageSize } : std::nullopt);
 
     // Adjust Normal-mode's cursor in order to avoid drift when growing/shrinking in main page line count.
     if (mainDisplayPageSize.lines > oldMainDisplayPageSize.lines)
