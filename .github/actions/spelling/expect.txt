@@ -217,6 +217,7 @@ tabcolor
 tabinherit
 tablabel
 templ
+texels
 TOCTOU
 togglestatusline
 tpz

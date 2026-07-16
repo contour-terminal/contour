@@ -264,44 +264,6 @@ ENDCHAR
 ENDFONT
 )";
 
-class MockAtlasBackend: public vtrasterizer::atlas::AtlasBackend
-{
-  public:
-    std::vector<vtrasterizer::atlas::RenderTile> renderCommands;
-
-    [[nodiscard]] vtbackend::ImageSize atlasSize() const noexcept override
-    {
-        return vtbackend::ImageSize { vtbackend::Width(1024), vtbackend::Height(1024) };
-    }
-
-    void configureAtlas(vtrasterizer::atlas::ConfigureAtlas) override {}
-    void uploadTile(vtrasterizer::atlas::UploadTile) override {}
-    void renderTile(vtrasterizer::atlas::RenderTile tile) override { renderCommands.push_back(tile); }
-};
-
-class MockRenderTarget: public vtrasterizer::RenderTarget
-{
-  public:
-    void setRenderSize(vtbackend::ImageSize size) override { _size = size; }
-    [[nodiscard]] vtbackend::ImageSize renderSize() const noexcept override { return _size; }
-    void setMargin(vtrasterizer::PageMargin) override {}
-    vtrasterizer::atlas::AtlasBackend& textureScheduler() override { return _textureScheduler; }
-    MockAtlasBackend& getMockBackend() { return _textureScheduler; }
-
-    void renderRectangle(int, int, vtbackend::Width, vtbackend::Height, vtbackend::RGBAColor) override {}
-    void setScissorRect(int, int, int, int) override {}
-    void clearScissorRect() override {}
-    void scheduleScreenshot(ScreenshotCallback) override {}
-    void execute(std::chrono::steady_clock::time_point) override {}
-    void clearCache() override {}
-    std::optional<vtrasterizer::AtlasTextureScreenshot> readAtlas() override { return std::nullopt; }
-    void inspect(std::ostream&) const override {}
-
-  private:
-    vtbackend::ImageSize _size {};
-    MockAtlasBackend _textureScheduler;
-};
-
 std::optional<TextureAtlas::TileCreateData> renderSingleGlyph(TextRenderer& renderer,
                                                               text::shaper& textShaper,
                                                               text::font_key fontKey,
