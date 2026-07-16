@@ -8,13 +8,27 @@
 
 #include <crispy/range.h>
 
+#include <array>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <vector>
 
 namespace vtbackend
 {
+
+/// VT340 vertical aspect ratio (Pan) by sixel DCS parameter P1.
+/// @see https://vt100.net/docs/vt3xx-gp/chapter14.html
+constexpr inline std::array<int, 10> SixelAspectVerticalByP1 = { 2, 2, 5, 3, 3, 2, 2, 1, 1, 1 };
+
+/// Maps a sixel DCS P1 parameter to its vertical aspect ratio.
+/// @param p1 the DCS P1 parameter.
+/// @return the vertical aspect ratio; 1 for values outside the defined range.
+[[nodiscard]] constexpr int sixelAspectVertical(unsigned p1) noexcept
+{
+    return p1 < SixelAspectVerticalByP1.size() ? SixelAspectVerticalByP1[p1] : 1;
+}
 
 /// Sixel Stream Parser API.
 ///
@@ -157,7 +171,13 @@ class SixelImageBuilder: public SixelParser::Events
     /// pixel buffer's own geometry always follows it, never the other way round.
     [[nodiscard]] ImageSize canvasSize() const noexcept { return _explicitSize ? _size : _maxSize; }
     [[nodiscard]] unsigned int aspectRatio() const noexcept { return _aspectRatio; }
-    [[nodiscard]] RGBColor currentColor() const noexcept { return _colors->at(_currentColor); }
+
+    /// The color pixels are currently painted with.
+    ///
+    /// Resolved once in setColor()/useColor() rather than per pixel: this sits in the innermost
+    /// loop, where looking it up cost a shared_ptr dereference, a size() load and an integer
+    /// division for a value that only changes on a '#'.
+    [[nodiscard]] RGBColor currentColor() const noexcept { return _currentColorValue; }
 
     [[nodiscard]] RGBAColor at(CellLocation coord) const noexcept;
 
@@ -187,6 +207,18 @@ class SixelImageBuilder: public SixelParser::Events
     /// @param newRows number of rows the new layout must back.
     void reshape(unsigned newStride, unsigned newRows);
 
+    /// Ensures the buffer physically backs pixel (@p columns - 1, @p rows - 1), growing it
+    /// geometrically if not.
+    ///
+    /// On the explicit-raster path this always early-returns: the write guard has already
+    /// established that the pixel lies inside the raster, which storage exactly covers.
+    void reserve(unsigned columns, unsigned rows);
+
+    /// Fills @p dst, a run of consecutive RGBA pixels, with @p color.
+    /// @param dst destination run; its size must be a multiple of 4.
+    /// @param color the color to write.
+    static void fillRun(std::span<uint8_t> dst, RGBAColor color) noexcept;
+
   private:
     ImageSize const _maxSize;
     std::shared_ptr<SixelColorPalette> _colors;
@@ -197,8 +229,12 @@ class SixelImageBuilder: public SixelParser::Events
     unsigned _stride = 0;
     /// Rows currently backed by _buffer. The single authority for what storage exists.
     unsigned _allocatedHeight = 0;
+    /// The background last passed to clear(); newly exposed storage is filled with it.
+    RGBAColor _fillColor {};
     CellLocation _sixelCursor {};
     unsigned _currentColor = 0;
+    /// _colors->at(_currentColor), memoized. Stable while the palette only grows.
+    RGBColor _currentColorValue {};
     bool _explicitSize = false;
     /// Guards against finalize() running twice: SixelParser::done() calls it unconditionally, and
     /// re-compacting an already-compacted buffer would read past its end.

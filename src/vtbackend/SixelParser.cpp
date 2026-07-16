@@ -139,6 +139,10 @@ void SixelColorPalette::setColor(unsigned int index, RGBColor const& color)
 
 RGBColor SixelColorPalette::at(unsigned int index) const noexcept
 {
+    // A palette may legitimately be empty: SixelColorPalette(0, max) only resizes when size > 0,
+    // and the register count comes from a settings value.
+    if (_palette.empty())
+        return RGBColor {};
     return _palette[index % _palette.size()];
 }
 // }}}
@@ -358,31 +362,34 @@ SixelImageBuilder::SixelImageBuilder(ImageSize maxSize,
     _maxSize { maxSize },
     _colors { std::move(colorPalette) },
     _size { ImageSize { Width { 1 }, Height { 1 } } },
-    _buffer(_maxSize.area() * 4),
-    _stride { unbox<unsigned>(_maxSize.width) },
-    _allocatedHeight { unbox<unsigned>(_maxSize.height) },
     _sixelCursor {},
     _aspectRatio(static_cast<unsigned int>(
         std::ceil(static_cast<float>(aspectVertical) / static_cast<float>(aspectHorizontal)))),
     _sixelBandHeight(6 * _aspectRatio)
 {
     clear(backgroundColor);
+    _currentColorValue = _colors->at(_currentColor);
+}
+
+void SixelImageBuilder::fillRun(std::span<uint8_t> dst, RGBAColor color) noexcept
+{
+    for (auto const pixel: std::views::iota(size_t { 0 }, dst.size() / 4))
+    {
+        auto* const p = dst.data() + (pixel * 4);
+        p[0] = color.red();
+        p[1] = color.green();
+        p[2] = color.blue();
+        p[3] = color.alpha();
+    }
 }
 
 void SixelImageBuilder::clear(RGBAColor fillColor)
 {
     _sixelCursor = {};
     _finalized = false;
-
-    auto* p = _buffer.data();
-    auto* const e = p + (_maxSize.area() * 4);
-    while (p != e)
-    {
-        *p++ = fillColor.red();
-        *p++ = fillColor.green();
-        *p++ = fillColor.blue();
-        *p++ = fillColor.alpha();
-    }
+    // Memoized so storage grown later is background-filled rather than zero-filled.
+    _fillColor = fillColor;
+    fillRun(_buffer, fillColor);
 }
 
 RGBAColor SixelImageBuilder::at(CellLocation coord) const noexcept
@@ -410,6 +417,8 @@ void SixelImageBuilder::write(CellLocation const& coord, RGBColor const& value) 
                 _size.width = Width::cast_from(coord.column + 1);
         }
 
+        reserve(unbox<unsigned>(coord.column) + 1, coord.line.as<unsigned int>() + _aspectRatio);
+
         for (unsigned int i = 0; i < _aspectRatio; ++i)
         {
             auto const base = ((coord.line.as<unsigned int>() + i) * _stride * 4u)
@@ -425,11 +434,17 @@ void SixelImageBuilder::write(CellLocation const& coord, RGBColor const& value) 
 void SixelImageBuilder::setColor(unsigned index, RGBColor const& color)
 {
     _colors->setColor(index, color);
+    // Compare the raw index: useColor() already reduced _currentColor modulo the palette size, and
+    // setColor() may have just grown the palette and changed that modulus. Redefining the register
+    // currently in use must be visible without an intervening useColor().
+    if (index == _currentColor)
+        _currentColorValue = color;
 }
 
 void SixelImageBuilder::useColor(unsigned index)
 {
-    _currentColor = index % _colors->size();
+    _currentColor = _colors->size() != 0 ? index % _colors->size() : 0;
+    _currentColorValue = _colors->at(_currentColor);
 }
 
 void SixelImageBuilder::rewind()
@@ -455,10 +470,10 @@ void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<I
         imageSize->height = Height::cast_from(imageSize->height.value * _aspectRatio);
         _size.width = clamp(imageSize->width, Width(0), _maxSize.width);
         _size.height = clamp(imageSize->height, Height(0), _maxSize.height);
-        _buffer.resize(_size.area() * 4);
-        _stride = unbox<unsigned>(_size.width);
-        _allocatedHeight = unbox<unsigned>(_size.height);
         _explicitSize = true;
+        // Exactly the declared raster, background-filled: a plain resize() would zero-fill any
+        // grown region, leaving a black band when a raster attribute widens the image.
+        reshape(unbox<unsigned>(_size.width), unbox<unsigned>(_size.height));
         // A raster attribute redefines the image, so a previously finalized builder is live again.
         _finalized = false;
     }
@@ -492,9 +507,7 @@ void SixelImageBuilder::finalize()
     if (unbox(_size.height) == 1)
     {
         _size.height = Height::cast_from(_sixelCursor.line.as<unsigned int>() * _aspectRatio);
-        _buffer.resize(_size.area() * 4);
-        _stride = unbox<unsigned>(_size.width);
-        _allocatedHeight = unbox<unsigned>(_size.height);
+        reshape(unbox<unsigned>(_size.width), unbox<unsigned>(_size.height));
         return;
     }
     if (!_explicitSize)
@@ -512,15 +525,53 @@ void SixelImageBuilder::reshape(unsigned newStride, unsigned newRows)
     auto tempBuffer = Buffer(static_cast<size_t>(newStride) * newRows * 4);
     auto const rowsToCopy = std::min(newRows, _allocatedHeight);
     auto const pixelsPerRow = std::min(newStride, _stride);
+    auto const rowBytes = static_cast<size_t>(newStride) * 4;
 
+    // Every byte is written at most once: carried-over pixels are copied, and only genuinely new
+    // area is background-filled. Filling the whole buffer first would re-do the copied region --
+    // and background, not std::vector's zero-fill, is what newly exposed image area must show.
     for (auto const row: std::views::iota(0u, rowsToCopy))
-        std::copy_n(_buffer.begin() + (static_cast<size_t>(row) * _stride * 4),
+    {
+        auto* const dst = tempBuffer.data() + (row * rowBytes);
+        std::copy_n(_buffer.data() + (static_cast<size_t>(row) * _stride * 4),
                     static_cast<size_t>(pixelsPerRow) * 4,
-                    tempBuffer.begin() + (static_cast<size_t>(row) * newStride * 4));
+                    dst);
+        if (pixelsPerRow < newStride)
+            fillRun({ dst + (static_cast<size_t>(pixelsPerRow) * 4),
+                      static_cast<size_t>(newStride - pixelsPerRow) * 4 },
+                    _fillColor);
+    }
+
+    if (rowsToCopy < newRows)
+        fillRun({ tempBuffer.data() + (rowsToCopy * rowBytes), (newRows - rowsToCopy) * rowBytes },
+                _fillColor);
 
     _buffer.swap(tempBuffer);
     _stride = newStride;
     _allocatedHeight = newRows;
+}
+
+namespace
+{
+    /// Rounds @p required up to the next geometric growth step, capped at @p limit.
+    constexpr unsigned grownTo(unsigned current, unsigned required, unsigned limit) noexcept
+    {
+        auto constexpr MinGrowth = 16u;
+        auto value = std::max(current, MinGrowth);
+        while (value < required)
+            value *= 2;
+        return std::min(value, limit);
+    }
+} // namespace
+
+void SixelImageBuilder::reserve(unsigned columns, unsigned rows)
+{
+    if (columns <= _stride && rows <= _allocatedHeight)
+        return;
+
+    auto const canvas = canvasSize();
+    reshape(std::max(_stride, grownTo(_stride, columns, unbox<unsigned>(canvas.width))),
+            std::max(_allocatedHeight, grownTo(_allocatedHeight, rows, unbox<unsigned>(canvas.height))));
 }
 
 } // namespace vtbackend

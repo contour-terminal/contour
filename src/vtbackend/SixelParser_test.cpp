@@ -506,6 +506,100 @@ TEST_CASE("SixelParser.finalize_compacts_rows", "[sixel]")
         }
 }
 
+TEST_CASE("SixelParser.sixelAspectVertical", "[sixel]")
+{
+    STATIC_CHECK(sixelAspectVertical(0) == 2);
+    STATIC_CHECK(sixelAspectVertical(1) == 2);
+    STATIC_CHECK(sixelAspectVertical(2) == 5);
+    STATIC_CHECK(sixelAspectVertical(3) == 3);
+    STATIC_CHECK(sixelAspectVertical(4) == 3);
+    STATIC_CHECK(sixelAspectVertical(5) == 2);
+    STATIC_CHECK(sixelAspectVertical(6) == 2);
+    STATIC_CHECK(sixelAspectVertical(7) == 1);
+    STATIC_CHECK(sixelAspectVertical(8) == 1);
+    STATIC_CHECK(sixelAspectVertical(9) == 1);
+    STATIC_CHECK(sixelAspectVertical(10) == 1); // out of range
+    STATIC_CHECK(sixelAspectVertical(9999) == 1);
+}
+
+TEST_CASE("SixelParser.currentColor_tracks_palette", "[sixel]")
+{
+    auto constexpr A = RGBColor { 1, 2, 3 };
+    auto constexpr B = RGBColor { 4, 5, 6 };
+    auto constexpr C = RGBColor { 7, 8, 9 };
+    auto ib = SixelImageBuilder(ImageSize { Width(4), Height(6) },
+                                1,
+                                1,
+                                RGBAColor { 0, 0, 0, 0xFF },
+                                std::make_shared<SixelColorPalette>(16, 256));
+
+    SECTION("redefining the selected register is visible immediately")
+    {
+        // No useColor() in between: the ground_* cases paint straight after a bare setColor().
+        ib.setColor(0, A);
+        CHECK(ib.currentColor() == A);
+        ib.setColor(0, B);
+        CHECK(ib.currentColor() == B);
+    }
+
+    SECTION("useColor selects")
+    {
+        ib.setColor(3, C);
+        ib.useColor(3);
+        CHECK(ib.currentColor() == C);
+        ib.setColor(2, A); // a different register must not disturb the selection
+        CHECK(ib.currentColor() == C);
+    }
+
+    SECTION("useColor wraps modulo the palette size")
+    {
+        ib.setColor(4, A);
+        ib.useColor(20); // 20 % 16 == 4
+        CHECK(ib.currentColor() == A);
+    }
+}
+
+TEST_CASE("SixelParser.storage_is_right_sized", "[sixel]")
+{
+    // Storage must track the image, never the max canvas. The builder is constructed with the
+    // terminal's maximum image size -- in practice the whole monitor -- once per sixel sequence,
+    // so allocating (and background-filling) that up front costs ~33 MB per image on a 4K display
+    // even for a tiny one.
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    auto constexpr MaxSize = ImageSize { Width(3840), Height(2160) }; // 33 MB if allocated eagerly
+    auto const palette = [] {
+        return std::make_shared<SixelColorPalette>(16, 256);
+    };
+
+    SECTION("the constructor allocates nothing")
+    {
+        auto ib = SixelImageBuilder(MaxSize, 1, 1, DefaultColor, palette());
+        CHECK(ib.data().empty());
+        CHECK(ib.canvasSize() == MaxSize); // bounds still span the full canvas
+    }
+
+    SECTION("an explicit raster allocates exactly")
+    {
+        auto ib = SixelImageBuilder(MaxSize, 1, 1, DefaultColor, palette());
+        ib.setRaster(1, 1, ImageSize { Width(20), Height(20) });
+        CHECK(ib.data().size() == 20u * 20u * 4u);
+        CHECK(ib.canvasSize() == ImageSize { Width(20), Height(20) });
+    }
+
+    SECTION("an implicit raster grows on demand")
+    {
+        auto ib = SixelImageBuilder(MaxSize, 1, 1, DefaultColor, palette());
+        auto sp = SixelParser { ib };
+        sp.parseFragment("#1;2;100;100;0");
+        sp.parseFragment("!20~-!20~-!20~");    // 20 x 18 pixels
+        CHECK(ib.data().size() < 64u * 1024u); // peak tracks the image, not MaxSize
+        sp.done();
+        CHECK(ib.size() == ImageSize { Width(20), Height(18) });
+        // The contract Screen::sixelImage() relies on when it moves the buffer into an Image.
+        CHECK(ib.data().size() == 20u * 18u * 4u);
+    }
+}
+
 TEST_CASE("SixelParser.rep_matches_unrolled", "[sixel]")
 {
     // The '!' repeat introducer must be exactly equivalent to writing the sixel out N times.

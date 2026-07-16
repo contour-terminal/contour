@@ -4987,23 +4987,7 @@ unique_ptr<ParserExtension> Screen::hookSixel(Sequence const& seq)
     auto const pa = seq.param_or(0, 1);
     auto const pb = seq.param_or(1, 2);
 
-    auto const aspectVertical = [](int pA) {
-        switch (pA)
-        {
-            case 9:
-            case 8:
-            case 7: return 1;
-            case 6:
-            case 5: return 2;
-            case 4:
-            case 3: return 3;
-            case 2: return 5;
-            case 1:
-            case 0: return 2;
-            default: return 1;
-        }
-    }(pa);
-
+    auto const aspectVertical = sixelAspectVertical(pa);
     auto const aspectHorizontal = 1;
     auto const transparentBackground = pb == 1;
 
