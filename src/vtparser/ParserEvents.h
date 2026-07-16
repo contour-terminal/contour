@@ -147,6 +147,21 @@ class ParserEvents
     virtual void put(char value) = 0;
 
     /**
+     * Passes a whole run of device-control-string payload bytes at once.
+     *
+     * The bulk counterpart of put(char). A sixel image is megabytes of payload, and walking the
+     * state machine per byte to hand each one on unchanged costs more than decoding them; the
+     * default simply loops, so an implementer only overrides this if it can do better.
+     *
+     * @param bytes Payload bytes, none of which the state machine needs to act on.
+     */
+    virtual void put(std::string_view bytes)
+    {
+        for (auto const ch: bytes)
+            put(ch);
+    }
+
+    /**
      * When a device control string is terminated by ST, CAN, SUB or ESC, this action calls the
      * previously selected handler function with an “end of data” parameter. This allows the
      * handler to finish neatly.

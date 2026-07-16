@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <ranges>
 
 using std::clamp;
@@ -479,24 +480,79 @@ void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<I
 
 void SixelImageBuilder::render(int8_t sixel)
 {
-    // TODO: respect aspect ratio!
-    auto const x = _sixelCursor.column;
-    if (unbox(x) >= unbox<int>(canvasSize().width))
+    auto const canvas = canvasSize();
+    auto const x = _sixelCursor.column.as<unsigned>();
+    if (x >= unbox<unsigned>(canvas.width))
         return;
+
+    auto const bits = static_cast<unsigned>(sixel) & SixelBitMask;
 
     // A blank sixel paints nothing, so it is only cursor movement -- and it dominates the stream.
     // Encoders emit one colour plane per pass, so on a 256-colour image roughly every column is
     // blank in all but one plane: measured on a plasma frame, 94% of all columns decoded are blank.
-    // Walking six bit tests to discover that is the single biggest cost in decoding a sixel image.
-    if ((static_cast<unsigned>(sixel) & SixelBitMask) != 0)
-        for (auto const bit: std::views::iota(0u, SixelBitCount))
+    if (bits == 0)
+    {
+        _sixelCursor.column++;
+        return;
+    }
+
+    // Everything a write needs is the same for all six bits, so it is established once here rather
+    // than re-derived per pixel: the column bound, the storage, and the colour.
+    auto const y0 = _sixelCursor.line.as<unsigned>();
+    auto const canvasHeight = unbox<unsigned>(canvas.height);
+
+    // The last row this sixel actually reaches: the highest set bit whose rows all fit the canvas.
+    // A bit that would overhang the bottom paints nothing and so cannot grow the image either --
+    // taking the highest SET bit instead would grow it by the very rows that get clipped.
+    auto const topBit = static_cast<unsigned>(std::bit_width(bits)) - 1;
+    auto lastRowExclusive = 0u;
+    for (auto const bit: std::views::iota(0u, topBit + 1) | std::views::reverse)
+    {
+        if ((bits & (1u << bit)) == 0)
+            continue;
+        if (auto const y = y0 + (bit * _aspectRatio); y + _aspectRatio <= canvasHeight)
         {
-            if ((static_cast<unsigned>(sixel) & (1u << bit)) == 0)
-                continue;
-            write(CellLocation { .line = _sixelCursor.line + static_cast<int>(bit * _aspectRatio),
-                                 .column = x },
-                  currentColor());
+            lastRowExclusive = y + _aspectRatio;
+            break;
         }
+    }
+
+    if (lastRowExclusive == 0)
+    {
+        _sixelCursor.column++; // every set bit overhangs the canvas
+        return;
+    }
+
+    if (!_explicitSize)
+    {
+        if (lastRowExclusive > unbox<unsigned>(_size.height))
+            _size.height = Height::cast_from(lastRowExclusive);
+        if (x >= unbox<unsigned>(_size.width))
+            _size.width = Width::cast_from(x + 1);
+    }
+    reserve(x + 1, lastRowExclusive);
+
+    auto const color = currentColor();
+    auto const rowBytes = static_cast<size_t>(_stride) * 4;
+
+    for (auto const bit: std::views::iota(0u, SixelBitCount))
+    {
+        if ((bits & (1u << bit)) == 0)
+            continue;
+        auto const y = y0 + (bit * _aspectRatio);
+        if (y + _aspectRatio > canvasHeight)
+            break; // bits only climb, so nothing above this fits either
+
+        auto* pixel = _buffer.data() + (y * rowBytes) + (static_cast<size_t>(x) * 4);
+        for ([[maybe_unused]] auto const row: std::views::iota(0u, _aspectRatio))
+        {
+            pixel[0] = color.red;
+            pixel[1] = color.green;
+            pixel[2] = color.blue;
+            pixel[3] = 0xFF;
+            pixel += rowBytes;
+        }
+    }
 
     _sixelCursor.column++;
 }

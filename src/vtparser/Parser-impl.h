@@ -392,7 +392,9 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
 
     while (input != end)
     {
-        auto const [processKind, processedByteCount] = parseBulkText(input, end);
+        auto const [processKind, processedByteCount] = _state == State::DCS_PassThrough
+                                                           ? parseBulkDcsPassThrough(input, end)
+                                                           : parseBulkText(input, end);
         switch (processKind)
         {
             case ProcessKind::ContinueBulk:
@@ -405,6 +407,36 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
                 break;
         }
     }
+}
+
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
+auto Parser<EventListener, TraceStateChanges>::parseBulkDcsPassThrough(char const* begin,
+                                                                       char const* end) noexcept
+    -> std::tuple<ProcessKind, size_t>
+{
+    // The passthrough state hands every printable byte to the handler unchanged and acts on nothing
+    // else, so a run of them needs no per-byte decision at all. Only these are plain payload:
+    // anything below 0x20 can terminate or be executed, and 0x7F is ignored rather than passed --
+    // so both stop the run and let the state machine have the byte.
+    auto const* input = begin;
+    while (input != end && static_cast<uint8_t>(*input) >= 0x20 && static_cast<uint8_t>(*input) < 0x7F)
+        ++input;
+
+    auto const byteCount = static_cast<size_t>(std::distance(begin, input));
+    if (byteCount == 0)
+        return { ProcessKind::FallbackToFSM, 0 };
+
+    auto const payload = std::string_view { begin, byteCount };
+    // Offering the bulk form is optional: the concept only asks for put(char), so a listener that
+    // has nothing better to do with a run still gets it a byte at a time -- just without the state
+    // machine in between, which is where the cost was.
+    if constexpr (requires { _eventListener.put(payload); })
+        _eventListener.put(payload);
+    else
+        for (auto const ch: payload)
+            _eventListener.put(ch);
+
+    return { ProcessKind::ContinueBulk, byteCount };
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>

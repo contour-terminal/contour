@@ -12,14 +12,18 @@
 #include <crispy/CLI.h>
 #include <crispy/utils.h>
 
+#include <chrono>
 #include <format>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <thread>
 
 #include <libtermbench/termbench.h>
 
 using namespace std;
+using namespace std::string_literals;
 
 namespace
 {
@@ -95,6 +99,72 @@ int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
     return EXIT_SUCCESS;
 }
 
+/// Reads a whole file into memory.
+/// @param path File to read.
+/// @return Its bytes, or nullopt when it cannot be read.
+std::optional<std::string> readWholeFile(std::string const& path)
+{
+    auto file = std::ifstream(path, std::ios::binary);
+    if (!file)
+        return std::nullopt;
+    return std::string { std::istreambuf_iterator<char> { file }, std::istreambuf_iterator<char> {} };
+}
+
+/// Feeds one sixel frame through a headless terminal repeatedly, reporting decode throughput.
+///
+/// This is where a terminal spends its time while an application streams sixel at it: VT parse,
+/// sixel decode, and placement into the grid. Rendering is deliberately excluded, which makes the
+/// number stable across runs and the binary small enough to profile under callgrind.
+///
+/// @param sixelData    One complete sixel sequence (DCS ... ST).
+/// @param iterations   How many times to feed it.
+/// @param pageSize     The grid to decode into.
+/// @param cellSize     Pixel size of one grid cell.
+/// @param maxImageSize The image canvas ceiling, as a display would set it.
+/// @return EXIT_SUCCESS.
+int benchSixelStream(std::string const& sixelData,
+                     unsigned iterations,
+                     vtbackend::PageSize pageSize,
+                     vtbackend::ImageSize cellSize,
+                     vtbackend::ImageSize maxImageSize)
+{
+    auto vt = vtbackend::MockTerm<>(pageSize, vtbackend::LineCount(0), 1'000'000);
+    vt.terminal.setCellPixelSize(cellSize);
+    vt.terminal.setImageCanvasCeiling(maxImageSize);
+
+    auto const start = std::chrono::steady_clock::now();
+    for ([[maybe_unused]] auto const iteration: crispy::times(iterations))
+    {
+        vt.writeToScreen("\033[H");
+        vt.writeToScreen(sixelData);
+    }
+    auto const elapsed = std::chrono::steady_clock::now() - start;
+
+    auto const seconds = std::chrono::duration<double>(elapsed).count();
+    auto const totalBytes = static_cast<double>(sixelData.size()) * iterations;
+    auto const msPerFrame = (seconds * 1000.0) / iterations;
+
+    cout << std::format("Sixel decode throughput\n"
+                        "-----------------------\n"
+                        "  frame size    : {} bytes\n"
+                        "  grid          : {} x {} cells of {} x {} px\n"
+                        "  iterations    : {}\n"
+                        "  elapsed       : {:.3f} s\n"
+                        "  per frame     : {:.3f} ms ({:.1f} fps equivalent)\n"
+                        "  throughput    : {:.2f} MiB/s\n",
+                        sixelData.size(),
+                        pageSize.columns,
+                        pageSize.lines,
+                        cellSize.width,
+                        cellSize.height,
+                        iterations,
+                        seconds,
+                        msPerFrame,
+                        1000.0 / msPerFrame,
+                        totalBytes / seconds / (1024.0 * 1024.0));
+    return EXIT_SUCCESS;
+}
+
 namespace CLI = crispy::cli;
 
 class ContourHeadlessBench: public crispy::app
@@ -113,6 +183,7 @@ class ContourHeadlessBench: public crispy::app
             Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });
         link("bench-headless.parser", bind(&ContourHeadlessBench::benchParserOnly, this));
         link("bench-headless.grid", bind(&ContourHeadlessBench::benchGrid, this));
+        link("bench-headless.sixel", bind(&ContourHeadlessBench::benchSixel, this));
         link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
@@ -166,6 +237,32 @@ class ContourHeadlessBench: public crispy::app
                     CLI::command { .name = "pty",
                                    .helpText = "Performs performance tests utilizing the underlying "
                                                "operating system's PTY only." },
+                    CLI::command {
+                        .name = "sixel",
+                        .helpText = "Measures sixel decode throughput: VT parse, sixel decode and "
+                                    "placement into the grid, with no rendering.",
+                        .options =
+                            CLI::option_list {
+                                CLI::option { .name = "file",
+                                              .v = CLI::value { ""s },
+                                              .helpText = "File holding one complete sixel sequence.",
+                                              .placeholder = "PATH" },
+                                CLI::option { .name = "iterations",
+                                              .v = CLI::value { 100u },
+                                              .helpText = "How many times to feed the frame." },
+                                CLI::option { .name = "columns",
+                                              .v = CLI::value { 240u },
+                                              .helpText = "Grid width in cells." },
+                                CLI::option { .name = "lines",
+                                              .v = CLI::value { 63u },
+                                              .helpText = "Grid height in cells." },
+                                CLI::option { .name = "cell-width",
+                                              .v = CLI::value { 8u },
+                                              .helpText = "Cell width in pixels." },
+                                CLI::option { .name = "cell-height",
+                                              .v = CLI::value { 17u },
+                                              .helpText = "Cell height in pixels." },
+                            } },
                 }
         };
     }
@@ -190,6 +287,50 @@ class ContourHeadlessBench: public crispy::app
         opts.sgr = parameters().boolean(prefix + "sgr");
         opts.binary = parameters().boolean(prefix + "binary");
         return opts;
+    }
+
+    int benchSixel()
+    {
+        auto const path = parameters().get<std::string>("bench-headless.sixel.file");
+        if (path.empty())
+        {
+            cerr << "No sixel file given. Use: bench-headless sixel file PATH\n"
+                    "Produce one with termbench-pro, e.g.\n"
+                    "  image-bench --protocol sixel --width 800 --height 600 --duration 0.05 > frame.six\n";
+            return EXIT_FAILURE;
+        }
+
+        auto const data = readWholeFile(path);
+        if (!data)
+        {
+            cerr << std::format("Cannot read '{}'.\n", path);
+            return EXIT_FAILURE;
+        }
+
+        // A capture may hold several frames; one is enough and keeps the measurement per-frame.
+        auto const begin = data->find("\033P");
+        auto const end = data->find("\033\\", begin);
+        if (begin == std::string::npos || end == std::string::npos)
+        {
+            cerr << std::format("'{}' holds no complete sixel sequence (DCS ... ST).\n", path);
+            return EXIT_FAILURE;
+        }
+        auto const frame = data->substr(begin, (end + 2) - begin);
+
+        auto const columns = parameters().get<unsigned>("bench-headless.sixel.columns");
+        auto const lines = parameters().get<unsigned>("bench-headless.sixel.lines");
+        auto const cellWidth = parameters().get<unsigned>("bench-headless.sixel.cell-width");
+        auto const cellHeight = parameters().get<unsigned>("bench-headless.sixel.cell-height");
+        auto const iterations = parameters().get<unsigned>("bench-headless.sixel.iterations");
+        auto const cellSize =
+            vtbackend::ImageSize { vtbackend::Width(cellWidth), vtbackend::Height(cellHeight) };
+        auto const pageSize = vtbackend::PageSize { vtbackend::LineCount::cast_from(lines),
+                                                    vtbackend::ColumnCount::cast_from(columns) };
+        // What a display would set it to: the monitor the window sits on.
+        auto const maxImageSize = vtbackend::ImageSize { vtbackend::Width(columns * cellWidth),
+                                                         vtbackend::Height(lines * cellHeight) };
+
+        return benchSixelStream(frame, iterations, pageSize, cellSize, maxImageSize);
     }
 
     int benchGrid()
