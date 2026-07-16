@@ -19,6 +19,12 @@
 namespace vtbackend
 {
 
+/// Bits one sixel character carries; each is one pixel row of the band.
+constexpr inline unsigned SixelBitCount = 6;
+
+/// Mask of the meaningful bits of a decoded sixel. Zero means the column paints nothing.
+constexpr inline unsigned SixelBitMask = (1u << SixelBitCount) - 1u;
+
 /// VT340 vertical aspect ratio (Pan) by sixel DCS parameter P1.
 /// @see https://vt100.net/docs/vt3xx-gp/chapter14.html
 constexpr inline std::array<int, 10> SixelAspectVerticalByP1 = { 2, 2, 5, 3, 3, 2, 2, 1, 1, 1 };
