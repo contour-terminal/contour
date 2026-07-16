@@ -95,6 +95,7 @@ invokables
 isakbm
 journalctl
 keysym
+letterbox
 libcuda
 libva
 LMENU

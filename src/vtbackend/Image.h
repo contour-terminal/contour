@@ -122,6 +122,33 @@ enum class ImageAlignment : uint8_t
     BottomEnd
 };
 
+/// Where one grid cell's image content lies, expressed as geometry.
+///
+/// The alignment and resize policies can letterbox an image inside its cell span, so a cell may be
+/// covered entirely, partially, or not at all. Everything here is in the coordinate system a
+/// renderer needs: target in cell-local pixels, source normalized against the image.
+struct FragmentPlacement
+{
+    /// False when the cell holds no image pixels at all, i.e. it lies wholly in the gap.
+    bool hasImage = false;
+
+    /// Cell-local pixel offset of the covered area.
+    int targetX = 0;
+    int targetY = 0;
+
+    /// Size of the covered area, in pixels.
+    ImageSize targetSize {};
+
+    /// Normalized (0..1) source rectangle into the image backing the covered area.
+    float sourceX = 0.0f;
+    float sourceY = 0.0f;
+    float sourceWidth = 0.0f;
+    float sourceHeight = 0.0f;
+
+    /// True when the covered area is the whole cell, i.e. there is no gap left to fill.
+    bool coversCell = false;
+};
+
 /**
  * RasterizedImage wraps an Image into a fixed-size grid with some additional graphical properties for
  * rasterization.
@@ -175,6 +202,17 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     /// @param targetCellSize Optional target cell size in pixels; if not given, the cell size
     ///                       as given at construction time is used.
     Image::Data fragment(CellLocation pos, ImageSize targetCellSize = {}) const;
+
+    /// @returns where a grid cell's image content lies, as geometry rather than as pixels.
+    ///
+    /// fragment() answers the same question one pixel at a time and materializes an RGBA buffer for
+    /// it. This answers it once per cell, as a source rectangle and a target rectangle, so a
+    /// renderer can sample the image directly instead of resampling it on the CPU.
+    ///
+    /// @param pos            0-based cell location inside the rasterized image.
+    /// @param targetCellSize Optional target cell size in pixels; if not given, the cell size
+    ///                       as given at construction time is used.
+    [[nodiscard]] FragmentPlacement fragmentPlacement(CellLocation pos, ImageSize targetCellSize = {}) const;
 
   private:
     std::shared_ptr<Image const> _image; //!< Reference to the Image to be rasterized.
