@@ -38,44 +38,26 @@ namespace vtrasterizer
 namespace
 {
 
-    /// @return the display's content scale, which the font DPI carries: TerminalDisplay::fontDPI()
-    ///         is defined as `DPI{96,96} * contentScale()`, so dividing it back out recovers the
-    ///         scale exactly -- without the rasterizer having to learn what a window is.
-    [[nodiscard]] double contentScaleOf(text::DPI dpi) noexcept
-    {
-        auto constexpr BaseDPI = 96.0;
-        return dpi.x > 0 ? static_cast<double>(dpi.x) / BaseDPI : 1.0;
-    }
-
-    void loadGridMetricsFromFont(text::font_key font,
-                                 GridMetrics& gm,
-                                 text::shaper& textShaper,
-                                 double contentScale)
+    void loadGridMetricsFromFont(text::font_key font, GridMetrics& gm, text::shaper& textShaper)
     {
         auto const m = textShaper.metrics(font);
 
-        // Snapped so the cell has a whole size in logical pixels as well as device ones. The
-        // terminal reports logical pixels to applications, and a cell that only exists as a
-        // fraction of one cannot be reported: an application drops the fraction on every column and
-        // draws an image visibly short of the window. See snapToWholeLogicalPixel().
-        gm.cellSize.width = vtbackend::Width::cast_from(snapToWholeLogicalPixel(m.advance, contentScale));
-        gm.cellSize.height =
-            vtbackend::Height::cast_from(snapToWholeLogicalPixel(m.lineHeight, contentScale));
+        // The font's own advance, unrounded. Snapping this to a whole logical pixel -- so that the
+        // cell size could be reported to applications exactly -- was tried and reverted: at a
+        // fractional content scale the quantum is the scale's numerator, so at 1.75 (= 7/4) the cell
+        // must be a multiple of 7 device pixels and a 17px advance becomes 21. That is 4px of dead
+        // space on every column, and it looks it. Text spacing is not negotiable for the sake of an
+        // image canvas measured in whole cells.
+        gm.cellSize.width = vtbackend::Width::cast_from(m.advance);
+        gm.cellSize.height = vtbackend::Height::cast_from(m.lineHeight);
         gm.baseline = m.lineHeight - m.ascender;
         gm.underline.position = gm.baseline + m.underlinePosition;
         gm.underline.thickness = m.underlineThickness;
 
-        rendererLog()("Loading grid metrics {} (font advance {}x{}, content scale {})",
-                      gm,
-                      m.advance,
-                      m.lineHeight,
-                      contentScale);
+        rendererLog()("Loading grid metrics {}", gm);
     }
 
-    GridMetrics loadGridMetrics(text::font_key font,
-                                vtbackend::PageSize pageSize,
-                                text::shaper& textShaper,
-                                double contentScale)
+    GridMetrics loadGridMetrics(text::font_key font, vtbackend::PageSize pageSize, text::shaper& textShaper)
     {
         auto gm = GridMetrics {};
 
@@ -85,7 +67,7 @@ namespace
         }; // TODO (pass as args, and make use of them)
         gm.pageMargin = { .left = 0, .top = 0, .bottom = 0 }; // TODO (fill early)
 
-        loadGridMetricsFromFont(font, gm, textShaper, contentScale);
+        loadGridMetricsFromFont(font, gm, textShaper);
 
         return gm;
     }
@@ -169,8 +151,7 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
         return shaper;
     }() },
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
-    _gridMetrics { loadGridMetrics(
-        _fonts.regular, pageSize, *_textShaper, contentScaleOf(_fontDescriptions.dpi)) },
+    _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
     _publishedMetrics { _gridMetrics },
     _publishedFontDescriptions { _fontDescriptions },
     _publishedCellSize { _gridMetrics.cellSize },
@@ -407,8 +388,7 @@ void Renderer::updateFontMetrics()
     // Update only the font-derived fields (cellSize, baseline, underline) in place. Page geometry
     // (pageSize, pageMargin, cellMargin) is owned by the geometry path, not the font, so leave it
     // untouched — this is what lets callers avoid manually saving/restoring it around a font rebuild.
-    loadGridMetricsFromFont(
-        _fonts.regular, _gridMetrics, *_textShaper, contentScaleOf(_fontDescriptions.dpi));
+    loadGridMetricsFromFont(_fonts.regular, _gridMetrics, *_textShaper);
 
     if (_renderTarget)
         configureTextureAtlas();
