@@ -1438,8 +1438,11 @@ TEST_CASE("Config: pixel_reporting parses each value (ignore-case)", "[config]")
 {
     using contour::config::PixelReporting;
 
-    SECTION("default is Logical, i.e. what every other terminal reports")
+    SECTION("default is Device, the unit the cell is an integer in")
     {
+        // Not a preference: the cell is the font's advance in device pixels, so only a device-pixel
+        // report divides back to it exactly. Reporting logical floors each axis on its own, changing
+        // the cell's aspect ratio, and a full-page image is then letterboxed by the difference.
         QTemporaryDir dir;
         auto const config = loadFromYaml(dir, R"(
 default_profile: main
@@ -1449,7 +1452,7 @@ profiles:
 )"sv);
         auto const* profile = config.profile("main");
         REQUIRE(profile != nullptr);
-        CHECK(profile->pixelReporting.value() == PixelReporting::Logical);
+        CHECK(profile->pixelReporting.value() == PixelReporting::Device);
     }
 
     SECTION("device")
@@ -1499,7 +1502,7 @@ profiles:
 )"sv);
     auto const* profile = config.profile("main");
     REQUIRE(profile != nullptr);
-    CHECK(profile->pixelReporting.value() == PixelReporting::Logical);
+    CHECK(profile->pixelReporting.value() == PixelReporting::Device);
 }
 
 TEST_CASE("Config: tab_bar_position and tab_bar_visibility parse each value (ignore-case)", "[config]")

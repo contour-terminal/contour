@@ -51,20 +51,52 @@ static_assert(pageSizeForPixels(imageSize(800, 600), imageSize(10, 20), Margins 
 static_assert(requiredPixelsForPage(pageSize(30, 80), imageSize(10, 20), Margins {}) == imageSize(800, 600));
 static_assert(resolveContentScale(144.0, 2.0, std::nullopt) == 1.5);
 
-// What applications are told a cell is. Scale 1.0 reports the renderer's own device-pixel cell; a
-// scaled display divides it out, which is what every other terminal reports and what an application
-// needs for `ws_ypixel / ws_row` to mean anything.
+// What applications are told a cell is. An application recovers the cell by dividing a reported extent
+// by the grid (`ws_ypixel / ws_row`), so a report is only usable where that division is exact.
 static_assert(reportedCellSize(imageSize(10, 20), 1.0) == imageSize(10, 20));
 static_assert(reportedCellSize(imageSize(20, 40), 2.0) == imageSize(10, 20));
-// The measured case: a 19x44 device cell on a 1.75-scaled display reads as 10x25, against KDE
-// Konsole's 10x21 on the same screen -- i.e. the scale factor, not the font, was the whole gap.
 static_assert(reportedCellSize(imageSize(19, 44), 1.75) == imageSize(10, 25));
-// FLOOR, not ceil: a report of available space must never promise more than exists.
+// Scale 1.0 -- PixelReporting::Device -- reports the renderer's own cell untouched. Since that cell IS
+// the font's advance in device pixels, this is the one setting that round-trips for every font.
 static_assert(reportedCellSize(imageSize(19, 44), 1.0) == imageSize(19, 44));
+static_assert(reportedCellSize(imageSize(17, 39), 1.0) == imageSize(17, 39));
+// FLOOR, not ceil: a report of available space must never promise more than exists.
+static_assert(reportedCellSize(imageSize(19, 44), 2.0) == imageSize(9, 22));
 // A cell never floors to nothing, or the report could not be divided back into one.
 static_assert(reportedCellSize(imageSize(1, 1), 4.0) == imageSize(1, 1));
 // A degenerate scale reports what the renderer uses rather than collapsing.
 static_assert(reportedCellSize(imageSize(10, 20), 0.0) == imageSize(10, 20));
+
+/// Whether reporting @p cell under @p scale keeps the cell's ASPECT RATIO, compared exactly by
+/// cross-multiplication rather than by dividing.
+///
+/// This is the property that decides whether a full-screen image has a gap. An application sizes its
+/// canvas from the REPORTED cell, but RasterizedImage::fragmentPlacement aspect-fits that canvas
+/// (ImageResize::ResizeToFit) into the grid measured in DEVICE cells. When the two aspects disagree,
+/// ResizeToFit's std::min() honors whichever axis lost less to the floor and letterboxes the other.
+/// @param cell  Cell size in device pixels, as the renderer works in.
+/// @param scale Device pixels per logical pixel to divide out; 1.0 reports device pixels as-is.
+/// @return Whether the reported cell is similar to @p cell.
+[[nodiscard]] constexpr bool preservesAspect(ImageSize cell, double scale) noexcept
+{
+    auto const reported = reportedCellSize(cell, scale);
+    return unbox<int>(cell.width) * unbox<int>(reported.height)
+           == unbox<int>(cell.height) * unbox<int>(reported.width);
+}
+
+// Device reporting is exact, so the aspect survives for EVERY cell: the fit scale is 1.0 and the image
+// lands 1:1, gapless on both axes. This is why Device is the default.
+static_assert(preservesAspect(imageSize(17, 39), 1.0));
+static_assert(preservesAspect(imageSize(19, 44), 1.0));
+static_assert(preservesAspect(imageSize(11, 25), 1.0));
+// Logical reporting survives only where the scale divides both axes evenly.
+static_assert(preservesAspect(imageSize(20, 40), 2.0));
+// ... and at a fractional scale it does not, which IS the ~6% gap down the right of a full-screen
+// sixel: 17/1.75 = 9.714 -> 9 loses 7.4% of the width, but 39/1.75 = 22.29 -> 22 loses only 1.3% of
+// the height, so min() fills the height and letterboxes the width. No rounding mode fixes this --
+// only reporting the unit the cell is an integer in does.
+static_assert(!preservesAspect(imageSize(17, 39), 1.75));
+static_assert(!preservesAspect(imageSize(19, 44), 1.75));
 
 // The report divides back to exactly the cell it was built from -- which is the whole contract, since
 // Terminal::resizeScreen recovers the cell size by dividing this by the page.

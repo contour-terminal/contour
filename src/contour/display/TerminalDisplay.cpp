@@ -1413,10 +1413,24 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
 vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const
 {
     assert(_session);
-    // Device pixels are what the renderer works in; the profile decides whether an application is
-    // told the same or has the display's scale divided out first. Reporting device pixels makes an
-    // application derive a cell contentScale() times too large on every axis and draw an image that
-    // much oversized -- which is why Logical is the default and what every other terminal reports.
+    // Report the unit the cell is an integer in -- for this renderer, device pixels.
+    //
+    // An application divides a reported extent by the grid to recover the cell, so the report is only
+    // usable if that division is exact. Our cell is the font's advance in device pixels (an int), and
+    // at a fractional scale it has no exact logical counterpart: 17 / 1.75 = 9.714. Dividing the scale
+    // out floors each axis on its own, which does not merely shrink the report -- it changes the cell's
+    // ASPECT RATIO (17x39 -> 9x22 loses 7.4% of the width but 1.3% of the height). A full-page image
+    // sized from that cell is then aspect-fitted (ImageResize::ResizeToFit) into the device grid, and
+    // its std::min() honors the less-damaged axis and letterboxes the other -- a ~6% gap down one side.
+    //
+    // Device reporting makes the round-trip exact, so the fit scale is 1.0 and the image lands 1:1 at
+    // the display's own resolution. Konsole reports logical for the same reason in reverse: its cell is
+    // QFontMetrics::horizontalAdvance(), an int in LOGICAL pixels (it ignores the scale when drawing
+    // images, so they blur but never mis-size). The unit is not the principle; exactness is.
+    //
+    // Logical stays available for comparing against such a terminal at an equal canvas size. It is exact
+    // only where the scale divides both cell axes evenly (e.g. 1.0, or 20x40 at 2.0), and letterboxes by
+    // the floor error otherwise.
     auto const scale =
         _session->profile().pixelReporting.value() == config::PixelReporting::Device ? 1.0 : contentScale();
     return geometry::reportedPixelsForPage(totalPageSize, _renderer->publishedCellSize(), scale);

@@ -38,7 +38,74 @@ std::shared_ptr<Image> makeCoordinateImage(ImageSize size)
     return std::make_shared<Image>(ImageId(1), ImageFormat::RGBA, std::move(data), size, [](auto) {});
 }
 
+/// Counts the cells of a full-page sixel's span that the image fails to cover -- i.e. the gap.
+///
+/// Drives the live composition rather than a model of it: an application is told the cell is
+/// @p reportedCell (it divides what TerminalDisplay::reportedPixelSize reports by the grid to get it)
+/// and sizes its canvas to `reportedCell * page`. Screen::sixelImage spans that canvas across the page
+/// and builds the RasterizedImage with the REPORTED cell -- but ImageRenderer::renderImage then asks
+/// for the placement with the DEVICE cell, and that is what fragmentPlacement aspect-fits it into.
+///
+/// So the two cells must be SIMILAR, not merely close: ImageResize::ResizeToFit scales by
+/// std::min(gridW/imageW, gridH/imageH), which honors whichever axis lost less and letterboxes the
+/// other. Only a reported cell that is exactly the device cell makes that scale 1.0 on both axes.
+///
+/// @param deviceCell   The renderer's own cell, in device pixels (GridMetrics::cellSize).
+/// @param reportedCell The cell an application was told about.
+/// @param page         Total page size the image is drawn across.
+/// @return The number of cells in the span not fully covered by the image; 0 means no gap.
+[[nodiscard]] int uncoveredCells(ImageSize deviceCell, ImageSize reportedCell, PageSize page)
+{
+    auto const canvas = reportedCell * page; // what the application draws
+    // Screen::sixelImage derives the span as ceil(canvas / reportedCell); a canvas that is a whole
+    // number of reported cells -- which a full-page image is, by construction -- ceils to exactly the
+    // page. Stated as the page rather than re-deriving it, so this test does not carry its own second
+    // copy of that rounding rule to drift from Screen.cpp's.
+    auto const span = GridSize { .lines = page.lines, .columns = page.columns };
+    auto const rasterized = std::make_shared<RasterizedImage>(makeCoordinateImage(canvas),
+                                                              ImageAlignment::TopStart,
+                                                              ImageResize::ResizeToFit,
+                                                              TestBackground,
+                                                              span,
+                                                              reportedCell);
+
+    auto uncovered = 0;
+    for (auto const line: std::views::iota(0, unbox<int>(span.lines)))
+        for (auto const column: std::views::iota(0, unbox<int>(span.columns)))
+        {
+            auto const pos = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
+            if (!rasterized->fragmentPlacement(pos, deviceCell).coversCell)
+                ++uncovered;
+        }
+    return uncovered;
+}
+
 } // namespace
+
+TEST_CASE("RasterizedImage.fullPageSixel leaves no gap when the reported cell is the device cell",
+          "[RasterizedImage]")
+{
+    // The measured cell of a real display scaled by 1.75 (2560x1600 native, 1463x915 logical).
+    auto constexpr DeviceCell = ImageSize { Width(17), Height(39) };
+    auto constexpr Page = PageSize { .lines = LineCount(4), .columns = ColumnCount(8) };
+
+    SECTION("Device reporting: the reported cell IS the device cell, so every cell is covered")
+    {
+        // The fit scale is exactly 1.0 on both axes: the image lands 1:1, unresampled and gapless.
+        // This is the whole reason PixelReporting::Device is the default -- the cell is the font's
+        // advance in device pixels, so only a device-pixel report divides back to it exactly.
+        CHECK(uncoveredCells(DeviceCell, DeviceCell, Page) == 0);
+    }
+
+    SECTION("Logical reporting at a fractional scale letterboxes, which is why it is not the default")
+    {
+        // reportedCellSize(17x39, 1.75) floors each axis on its own: floor(9.714)=9, floor(22.29)=22.
+        // The width loses 7.4% but the height only 1.3%, so ResizeToFit fills the height and leaves
+        // the width short -- a gap down the right of a full-screen image. Asserted rather than merely
+        // tolerated, so that quietly routing the default back through a non-similar cell cannot pass.
+        CHECK(uncoveredCells(DeviceCell, ImageSize { Width(9), Height(22) }, Page) > 0);
+    }
+}
 
 TEST_CASE("RasterizedImage.fragmentPlacement agrees with fragment", "[RasterizedImage]")
 {

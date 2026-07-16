@@ -98,6 +98,7 @@ isakbm
 journalctl
 keysym
 letterbox
+letterboxes
 libcuda
 libva
 LMENU
@@ -238,6 +239,7 @@ unflipped
 ungrabbable
 unparents
 unregisters
+unresampled
 unscroll
 unstartable
 unsyncs
