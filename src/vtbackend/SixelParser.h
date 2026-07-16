@@ -148,6 +148,14 @@ class SixelImageBuilder: public SixelParser::Events
 
     [[nodiscard]] ImageSize maxSize() const noexcept { return _maxSize; }
     [[nodiscard]] ImageSize size() const noexcept { return _size; }
+
+    /// The bounds every pixel write is clamped against.
+    ///
+    /// Once a raster attribute has declared an explicit size, that size *is* the canvas and nothing
+    /// may be written outside it. Without one the image grows on demand, so the canvas is the
+    /// maximum permitted image size. This is the single authority for "may I write here?" — the
+    /// pixel buffer's own geometry always follows it, never the other way round.
+    [[nodiscard]] ImageSize canvasSize() const noexcept { return _explicitSize ? _size : _maxSize; }
     [[nodiscard]] unsigned int aspectRatio() const noexcept { return _aspectRatio; }
     [[nodiscard]] RGBColor currentColor() const noexcept { return _colors->at(_currentColor); }
 
@@ -171,14 +179,30 @@ class SixelImageBuilder: public SixelParser::Events
   private:
     void write(CellLocation const& coord, RGBColor const& value) noexcept;
 
+    /// Re-lays the pixel buffer out to @p newStride pixels per row and @p newRows rows.
+    ///
+    /// Overlapping pixel content is preserved. This is the only function that moves pixels, so the
+    /// buffer's geometry can only ever change through it.
+    /// @param newStride pixels per row of the new layout.
+    /// @param newRows number of rows the new layout must back.
+    void reshape(unsigned newStride, unsigned newRows);
+
   private:
     ImageSize const _maxSize;
     std::shared_ptr<SixelColorPalette> _colors;
     ImageSize _size;
     Buffer _buffer; /// RGBA buffer
+    /// Pixels per buffer row. The single authority for "where does row y start?".
+    /// Invariant: _buffer.size() == _stride * _allocatedHeight * 4.
+    unsigned _stride = 0;
+    /// Rows currently backed by _buffer. The single authority for what storage exists.
+    unsigned _allocatedHeight = 0;
     CellLocation _sixelCursor {};
     unsigned _currentColor = 0;
     bool _explicitSize = false;
+    /// Guards against finalize() running twice: SixelParser::done() calls it unconditionally, and
+    /// re-compacting an already-compacted buffer would read past its end.
+    bool _finalized = false;
     // This is an int because vt3xx takes the given ratio pan/pad and rounds up the ratio
     // to nearest integers. So 1:3 = 0.33 and it  becomes 1;
     unsigned int _aspectRatio;

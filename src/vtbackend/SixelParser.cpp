@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <ranges>
 
 using std::clamp;
 using std::fill;
@@ -358,6 +359,8 @@ SixelImageBuilder::SixelImageBuilder(ImageSize maxSize,
     _colors { std::move(colorPalette) },
     _size { ImageSize { Width { 1 }, Height { 1 } } },
     _buffer(_maxSize.area() * 4),
+    _stride { unbox<unsigned>(_maxSize.width) },
+    _allocatedHeight { unbox<unsigned>(_maxSize.height) },
     _sixelCursor {},
     _aspectRatio(static_cast<unsigned int>(
         std::ceil(static_cast<float>(aspectVertical) / static_cast<float>(aspectHorizontal)))),
@@ -369,6 +372,7 @@ SixelImageBuilder::SixelImageBuilder(ImageSize maxSize,
 void SixelImageBuilder::clear(RGBAColor fillColor)
 {
     _sixelCursor = {};
+    _finalized = false;
 
     auto* p = _buffer.data();
     auto* const e = p + (_maxSize.area() * 4);
@@ -385,30 +389,30 @@ RGBAColor SixelImageBuilder::at(CellLocation coord) const noexcept
 {
     auto const line = unbox(coord.line) % unbox(_size.height);
     auto const col = unbox(coord.column) % unbox(_size.width);
-    auto const base = (line * unbox(_size.width) * 4) + (col * 4);
+    auto const base = (line * _stride * 4) + (col * 4);
     const auto* const color = &_buffer[base];
     return RGBAColor { color[0], color[1], color[2], color[3] };
 }
 
 void SixelImageBuilder::write(CellLocation const& coord, RGBColor const& value) noexcept
 {
+    auto const canvas = canvasSize();
     if (unbox(coord.line) >= 0
-        && unbox(coord.line) + static_cast<int>(_aspectRatio) <= unbox<int>(_maxSize.height)
-        && unbox(coord.column) >= 0 && unbox(coord.column) < unbox<int>(_maxSize.width))
+        && unbox(coord.line) + static_cast<int>(_aspectRatio) <= unbox<int>(canvas.height)
+        && unbox(coord.column) >= 0 && unbox(coord.column) < unbox<int>(canvas.width))
     {
         if (!_explicitSize)
         {
             if (unbox(coord.line) >= unbox<int>(_size.height))
                 _size.height = Height::cast_from(std::min(coord.line.as<unsigned int>() + _aspectRatio,
-                                                          unbox<unsigned int>(_maxSize.height)));
+                                                          unbox<unsigned int>(canvas.height)));
             if (unbox(coord.column) >= unbox<int>(_size.width))
                 _size.width = Width::cast_from(coord.column + 1);
         }
 
         for (unsigned int i = 0; i < _aspectRatio; ++i)
         {
-            auto const base = ((coord.line.as<unsigned int>() + i)
-                               * unbox((_explicitSize ? _size.width : _maxSize.width)) * 4u)
+            auto const base = ((coord.line.as<unsigned int>() + i) * _stride * 4u)
                               + (unbox<unsigned int>(coord.column) * 4u);
             _buffer[base + 0] = value.red;
             _buffer[base + 1] = value.green;
@@ -436,8 +440,7 @@ void SixelImageBuilder::rewind()
 void SixelImageBuilder::newline()
 {
     _sixelCursor.column = {};
-    if (unbox<unsigned int>(_sixelCursor.line) + _sixelBandHeight
-        < unbox(_explicitSize ? _size.height : _maxSize.height))
+    if (unbox<unsigned int>(_sixelCursor.line) + _sixelBandHeight < unbox<unsigned int>(canvasSize().height))
         _sixelCursor.line = LineOffset::cast_from(_sixelCursor.line.as<unsigned int>() + _sixelBandHeight);
 }
 
@@ -453,7 +456,11 @@ void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<I
         _size.width = clamp(imageSize->width, Width(0), _maxSize.width);
         _size.height = clamp(imageSize->height, Height(0), _maxSize.height);
         _buffer.resize(_size.area() * 4);
+        _stride = unbox<unsigned>(_size.width);
+        _allocatedHeight = unbox<unsigned>(_size.height);
         _explicitSize = true;
+        // A raster attribute redefines the image, so a previously finalized builder is live again.
+        _finalized = false;
     }
 }
 
@@ -461,7 +468,7 @@ void SixelImageBuilder::render(int8_t sixel)
 {
     // TODO: respect aspect ratio!
     auto const x = _sixelCursor.column;
-    if (unbox(x) < unbox<int>((_explicitSize ? _size.width : _maxSize.width)))
+    if (unbox(x) < unbox<int>(canvasSize().width))
     {
         for (unsigned int i = 0; i < 6; ++i)
         {
@@ -478,27 +485,42 @@ void SixelImageBuilder::render(int8_t sixel)
 
 void SixelImageBuilder::finalize()
 {
+    if (_finalized)
+        return;
+    _finalized = true;
+
     if (unbox(_size.height) == 1)
     {
         _size.height = Height::cast_from(_sixelCursor.line.as<unsigned int>() * _aspectRatio);
         _buffer.resize(_size.area() * 4);
+        _stride = unbox<unsigned>(_size.width);
+        _allocatedHeight = unbox<unsigned>(_size.height);
         return;
     }
     if (!_explicitSize)
     {
-        Buffer tempBuffer(static_cast<size_t>(_size.height.value * _size.width.value) * 4);
-        for (auto i = 0u; i < unbox(_size.height); ++i)
-        {
-            for (auto j = 0u; j < unbox(_size.width); ++j)
-            {
-                std::copy_n(_buffer.begin() + i * unbox<long>(_maxSize.width) * 4,
-                            _size.width.value * 4,
-                            tempBuffer.begin() + i * unbox<long>(_size.width) * 4);
-            }
-        }
-        _buffer.swap(tempBuffer);
-        _explicitSize = false;
+        reshape(unbox<unsigned>(_size.width), unbox<unsigned>(_size.height));
+        _explicitSize = true;
     }
+}
+
+void SixelImageBuilder::reshape(unsigned newStride, unsigned newRows)
+{
+    if (newStride == _stride && newRows == _allocatedHeight)
+        return;
+
+    auto tempBuffer = Buffer(static_cast<size_t>(newStride) * newRows * 4);
+    auto const rowsToCopy = std::min(newRows, _allocatedHeight);
+    auto const pixelsPerRow = std::min(newStride, _stride);
+
+    for (auto const row: std::views::iota(0u, rowsToCopy))
+        std::copy_n(_buffer.begin() + (static_cast<size_t>(row) * _stride * 4),
+                    static_cast<size_t>(pixelsPerRow) * 4,
+                    tempBuffer.begin() + (static_cast<size_t>(row) * newStride * 4));
+
+    _buffer.swap(tempBuffer);
+    _stride = newStride;
+    _allocatedHeight = newRows;
 }
 
 } // namespace vtbackend
