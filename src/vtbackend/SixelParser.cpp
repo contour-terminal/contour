@@ -532,15 +532,20 @@ void SixelImageBuilder::render(int8_t sixel)
     // A bit that would overhang the bottom paints nothing and so cannot grow the image either --
     // taking the highest SET bit instead would grow it by the very rows that get clipped.
     auto const topBit = static_cast<unsigned>(std::bit_width(bits)) - 1;
-    auto lastRowExclusive = 0u;
-    for (auto const bit: std::views::iota(0u, topBit + 1) | std::views::reverse)
+    auto lastRowExclusive = y0 + ((topBit + 1) * _aspectRatio);
+    if (lastRowExclusive > canvasHeight)
     {
-        if ((bits & (1u << bit)) == 0)
-            continue;
-        if (auto const y = y0 + (bit * _aspectRatio); y + _aspectRatio <= canvasHeight)
+        // Only when the sixel overhangs is it worth hunting for the highest bit that still fits.
+        lastRowExclusive = 0;
+        for (auto const bit: std::views::iota(0u, topBit + 1) | std::views::reverse)
         {
-            lastRowExclusive = y + _aspectRatio;
-            break;
+            if ((bits & (1u << bit)) == 0)
+                continue;
+            if (auto const y = y0 + (bit * _aspectRatio); y + _aspectRatio <= canvasHeight)
+            {
+                lastRowExclusive = y + _aspectRatio;
+                break;
+            }
         }
     }
 
@@ -562,22 +567,29 @@ void SixelImageBuilder::render(int8_t sixel)
     auto const color = currentColor();
     auto const rowBytes = static_cast<size_t>(_stride) * 4;
 
-    for (auto const bit: std::views::iota(0u, SixelBitCount))
+    // Walk the set bits rather than all six: a column of a colour plane usually carries one or two.
+    for (auto remaining = bits; remaining != 0; remaining &= remaining - 1)
     {
-        if ((bits & (1u << bit)) == 0)
-            continue;
+        auto const bit = static_cast<unsigned>(std::countr_zero(remaining));
         auto const y = y0 + (bit * _aspectRatio);
         if (y + _aspectRatio > canvasHeight)
             break; // bits only climb, so nothing above this fits either
 
         auto* pixel = _buffer.data() + (y * rowBytes) + (static_cast<size_t>(x) * 4);
-        for ([[maybe_unused]] auto const row: std::views::iota(0u, _aspectRatio))
+        pixel[0] = color.red;
+        pixel[1] = color.green;
+        pixel[2] = color.blue;
+        pixel[3] = 0xFF;
+
+        // Aspect ratio 1 is the norm and means one pixel row per bit; only a stretched image
+        // repeats, and paying a loop for the common case cost more than the store it guarded.
+        for ([[maybe_unused]] auto const row: std::views::iota(1u, _aspectRatio))
         {
+            pixel += rowBytes;
             pixel[0] = color.red;
             pixel[1] = color.green;
             pixel[2] = color.blue;
             pixel[3] = 0xFF;
-            pixel += rowBytes;
         }
     }
 
