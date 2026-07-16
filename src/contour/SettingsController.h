@@ -82,7 +82,7 @@ class SettingsController: public QObject
     /// { key, label, color ("#rrggbb") }. Empty when no scheme is open for editing.
     Q_PROPERTY(QVariantList schemeColors READ schemeColors NOTIFY schemeDraftChanged)
     /// The name of the color-scheme draft being edited ("" for an unsaved new scheme).
-    Q_PROPERTY(QString editingScheme READ editingScheme NOTIFY schemeDraftChanged)
+    Q_PROPERTY(QString editingScheme READ editingScheme NOTIFY editingSchemeChanged)
 
   public:
     /// Returns the current, already-side-file-merged configuration. Called on every refresh, so a
@@ -179,12 +179,25 @@ class SettingsController: public QObject
     void draftChanged();
     /// The color-scheme draft changed.
     void schemeDraftChanged();
+    /// The IDENTITY of the color scheme being edited changed (a different scheme selected, a new one
+    /// started, or the current one saved/deleted) — but NOT a mere color tweak. Kept separate from
+    /// @ref schemeDraftChanged so the editor's name field can re-seed on an identity change without being
+    /// wiped every time the user adjusts a color while typing a new name.
+    void editingSchemeChanged();
     /// A user-facing error occurred (e.g. a write failed); @p message is human-readable.
     void errorOccurred(QString const& message);
 
   private:
     /// The origin of @p name among the current profiles, defaulting to Builtin if unknown.
     [[nodiscard]] config::SettingsOrigin profileOrigin(std::string const& name) const;
+    /// Whether a GUI-owned side file @c colorschemes/<name>.yml exists on disk. This is the editability
+    /// ground truth the color-scheme list uses: only such schemes can be edited, renamed or deleted.
+    /// @param name The color scheme name. @return true if the side file exists.
+    [[nodiscard]] bool colorSchemeSideFileExists(std::string const& name) const;
+    /// Whether @p name is a color scheme declared inline in contour.yml with no GUI side file backing it.
+    /// Such a name would shadow a @c colorschemes/<name>.yml side file at load time (the inline node wins),
+    /// so the GUI must refuse to write one. @param name The color scheme name. @return true if inline.
+    [[nodiscard]] bool isInlineColorScheme(std::string const& name) const;
     /// Reports @p error to the UI and returns false, for the `return fail(...)` idiom on write errors.
     bool fail(std::string const& error);
 

@@ -126,6 +126,24 @@ TEST_CASE("SettingsController: Save As refuses to shadow a contour.yml profile",
     CHECK(fx.controller->saveProfileAs("main") == false); // 'main' is defined in contour.yml
 }
 
+TEST_CASE("SettingsController: Save As refuses an existing GUI profile name and does not clobber it",
+          "[settings]")
+{
+    // 'work' is a GUI (side-file) profile, not a contour.yml one: Save As under that name must still be
+    // refused, otherwise the existing work.yml is silently overwritten with the current draft.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    REQUIRE(fx.controller->saveProfileAs("work")); // creates work.yml (show_title_bar inherited: true)
+
+    fx.controller->newProfile("main");
+    fx.controller->setProfileField("show_title_bar", false);
+    CHECK(fx.controller->saveProfileAs("work") == false); // refused: 'work' already exists
+
+    auto const* work = fx.cfg.findProfile("work");
+    REQUIRE(work != nullptr);
+    CHECK(work->showTitleBar.value() == true); // the original side file was NOT clobbered
+}
+
 TEST_CASE("SettingsController: edit then Save updates a side-file profile in place", "[settings]")
 {
     auto fx = Fixture(BasicConfig);
@@ -220,6 +238,58 @@ TEST_CASE("SettingsController: rename moves a side-file color scheme with its dr
     CHECK(std::filesystem::exists(dir / "colorschemes" / "nightfall.yml"));
     CHECK_FALSE(std::filesystem::exists(dir / "colorschemes" / "midnight.yml"));
     CHECK(fx.controller->editingScheme() == "nightfall");
+}
+
+// A contour.yml with an inline color scheme; the settings page must treat that name as read-only, since
+// an inline scheme shadows a same-named side file at load time.
+constexpr auto InlineSchemeConfig = std::string_view { R"(
+default_profile: main
+color_schemes:
+    solarized:
+        default:
+            background: '#002b36'
+profiles:
+    main:
+        show_title_bar: true
+)" };
+
+TEST_CASE("SettingsController: saving a color scheme named like a contour.yml scheme is refused",
+          "[settings]")
+{
+    // An inline scheme shadows a side file at load, so a GUI save under that name would silently have no
+    // effect. Refuse it (and write nothing), mirroring Save As's contour.yml guard for profiles.
+    auto fx = Fixture(InlineSchemeConfig);
+    fx.controller->newColorScheme("");
+    fx.controller->setSchemeColor("background", "#111111");
+    CHECK(fx.controller->saveColorScheme("solarized") == false);
+    CHECK_FALSE(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "colorschemes"
+                                        / "solarized.yml"));
+}
+
+TEST_CASE("SettingsController: renaming a color scheme onto a contour.yml scheme name is refused",
+          "[settings]")
+{
+    auto fx = Fixture(InlineSchemeConfig);
+    fx.controller->newColorScheme("");
+    fx.controller->setSchemeColor("background", "#101010");
+    REQUIRE(fx.controller->saveColorScheme("midnight")); // a real GUI side-file scheme
+
+    // Renaming it onto the inline 'solarized' would write a dead colorschemes/solarized.yml the loader
+    // never resolves (the inline node wins); refuse it, and leave the source scheme untouched.
+    fx.controller->editColorScheme("midnight");
+    CHECK(fx.controller->renameColorScheme("midnight", "solarized") == false);
+    auto const dir = std::filesystem::path(fx.dir.path().toStdString());
+    CHECK_FALSE(std::filesystem::exists(dir / "colorschemes" / "solarized.yml"));
+    CHECK(std::filesystem::exists(dir / "colorschemes" / "midnight.yml"));
+}
+
+TEST_CASE("SettingsController: a non-side-file color scheme cannot be deleted", "[settings]")
+{
+    // deleteColorScheme must refuse a builtin/inline scheme (no side file): removeFile treats an absent
+    // file as success, so without the guard the controller would report a false 'deleted'.
+    auto fx = Fixture(InlineSchemeConfig);
+    CHECK(fx.controller->deleteColorScheme("default") == false);   // builtin
+    CHECK(fx.controller->deleteColorScheme("solarized") == false); // contour.yml inline
 }
 
 TEST_CASE("SettingsController: enum and integer profile fields round-trip", "[settings]")

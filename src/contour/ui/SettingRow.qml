@@ -126,8 +126,11 @@ Item {
         id: intEditor
         SpinBox {
             enabled: root.editable
-            from: -1000000
-            to: 1000000
+            // Full 32-bit signed range: the config fields this drives are plain ints (e.g.
+            // read_buffer_size, which can legitimately exceed a megabyte), and a narrower cap would
+            // silently clamp such a value on display and then persist the clamped number on the next edit.
+            from: -2147483647
+            to: 2147483647
             value: root.value !== null && root.value !== undefined ? root.value : 0
             onValueModified: root.edited(root.fieldKey, value)
         }

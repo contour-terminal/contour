@@ -127,8 +127,20 @@ Item {
                     objectName: "schemeNameField"
                     Layout.preferredWidth: 200
                     placeholderText: qsTr("Scheme name")
+                    // The initial value; a one-way binding to editingScheme would break the moment the user
+                    // types, and then selecting a different scheme would leave the stale typed name — so
+                    // Save would write the newly selected scheme's colors under the wrong name. Re-seed
+                    // imperatively, but only when the edited scheme's IDENTITY changes (editingSchemeChanged
+                    // fires for select/new/save/delete, NOT for color tweaks), so a name being typed for a
+                    // new or renamed scheme survives while its colors are edited.
                     text: root.controller ? root.controller.editingScheme : ""
                     selectByMouse: true
+                    Connections {
+                        target: root.controller
+                        function onEditingSchemeChanged() {
+                            schemeNameField.text = root.controller ? root.controller.editingScheme : ""
+                        }
+                    }
                 }
                 Button {
                     objectName: "saveSchemeButton"

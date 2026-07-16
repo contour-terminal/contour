@@ -397,6 +397,24 @@ SettingsOrigin SettingsController::profileOrigin(std::string const& name) const
     return it != origins.end() ? it->second : SettingsOrigin::Builtin;
 }
 
+bool SettingsController::colorSchemeSideFileExists(std::string const& name) const
+{
+    auto ec = std::error_code {};
+    auto const path = _config().configFile.parent_path() / "colorschemes" / (name + ".yml");
+    return std::filesystem::exists(path, ec) && !ec;
+}
+
+bool SettingsController::isInlineColorScheme(std::string const& name) const
+{
+    // "Inline" means declared in contour.yml (origin MainConfig) with no GUI side file backing it. A side
+    // file always wins editability regardless of a stale MainConfig marking (a side-file scheme referenced
+    // by a profile is loaded into the config map and recorded MainConfig), so exclude it explicitly.
+    auto const& origins = _config().colorSchemeOrigins;
+    auto const it = origins.find(name);
+    return it != origins.end() && it->second == SettingsOrigin::MainConfig
+           && !colorSchemeSideFileExists(name);
+}
+
 bool SettingsController::fail(std::string const& error)
 {
     emit errorOccurred(QString::fromStdString(error));
@@ -635,17 +653,21 @@ bool SettingsController::saveProfileAs(QString const& newName)
 {
     if (!_hasDraft || _locked)
         return fail("The settings page is read-only.");
-    if (newName.trimmed().isEmpty())
+    auto const trimmed = newName.trimmed();
+    if (trimmed.isEmpty())
         return fail("Enter a name for the new profile.");
-    if (profileOrigin(newName.toStdString()) == SettingsOrigin::MainConfig)
-        return fail("A profile with that name is defined in contour.yml; choose another name.");
+    // Reject ANY existing name, not just contour.yml ones: an existing GUI (side-file) profile of the
+    // same name would otherwise be silently overwritten with the current draft. findProfile covers both
+    // inline and side-file profiles, matching renameProfile's collision guard.
+    if (_config().findProfile(trimmed.toStdString()) != nullptr)
+        return fail("A profile with that name already exists; choose another name.");
 
-    if (auto const result = _store->saveProfile(newName.toStdString(), _draft); !result)
+    if (auto const result = _store->saveProfile(trimmed.toStdString(), _draft); !result)
         return fail(result.error());
 
     _apply();
     refresh();
-    editProfile(newName);
+    editProfile(trimmed);
     return true;
 }
 
@@ -811,6 +833,7 @@ void SettingsController::editColorScheme(QString const& name)
     _editingScheme = name;
     _hasSchemeDraft = true;
     emit schemeDraftChanged();
+    emit editingSchemeChanged();
 }
 
 void SettingsController::newColorScheme(QString const& basedOn)
@@ -825,6 +848,7 @@ void SettingsController::newColorScheme(QString const& basedOn)
     _editingScheme.clear();
     _hasSchemeDraft = true;
     emit schemeDraftChanged();
+    emit editingSchemeChanged();
 }
 
 void SettingsController::setSchemeColor(QString const& key, QString const& color)
@@ -845,14 +869,19 @@ bool SettingsController::renameColorScheme(QString const& oldName, QString const
     if (_locked)
         return fail("The settings page is read-only.");
     auto const schemesDir = _config().configFile.parent_path() / "colorschemes";
-    if (!std::filesystem::exists(schemesDir / (oldName.toStdString() + ".yml")))
+    if (!colorSchemeSideFileExists(oldName.toStdString()))
         return fail("Only GUI-created color schemes can be renamed here.");
     auto const trimmed = newName.trimmed();
     if (trimmed.isEmpty())
         return fail("Enter a name for the color scheme.");
     if (trimmed == oldName)
         return true; // nothing to do
-    if (std::filesystem::exists(schemesDir / (trimmed.toStdString() + ".yml")))
+    // Reject a destination naming ANY existing scheme: a side file, a contour.yml inline scheme (which
+    // would shadow the written side file at load, leaving a dead file), or a config-known scheme such as
+    // the builtin "default". Mirrors renameProfile's guard, and uses the non-throwing exists() overload
+    // (via the helper) so an I/O error cannot throw out of a slot.
+    if (colorSchemeSideFileExists(trimmed.toStdString()) || isInlineColorScheme(trimmed.toStdString())
+        || _config().colorschemes.value().contains(trimmed.toStdString()))
         return fail("A color scheme with that name already exists.");
 
     // Load the old palette (config-known or from its side file), then write it under the new name.
@@ -881,6 +910,10 @@ bool SettingsController::saveColorScheme(QString const& name)
         return fail("The settings page is read-only.");
     if (name.trimmed().isEmpty())
         return fail("Enter a name for the color scheme.");
+    // A contour.yml inline scheme of the same name shadows a side file at load (the inline node wins), so
+    // writing one would silently have no effect. Refuse it, mirroring saveProfileAs's contour.yml guard.
+    if (isInlineColorScheme(name.trimmed().toStdString()))
+        return fail("A color scheme with that name is defined in contour.yml; choose another name.");
 
     if (auto const result = _store->saveColorScheme(name.toStdString(), _schemeDraft); !result)
         return fail(result.error());
@@ -889,6 +922,7 @@ bool SettingsController::saveColorScheme(QString const& name)
     refresh();
     _editingScheme = name;
     emit schemeDraftChanged();
+    emit editingSchemeChanged();
     return true;
 }
 
@@ -896,6 +930,11 @@ bool SettingsController::deleteColorScheme(QString const& name)
 {
     if (_locked)
         return fail("The settings page is read-only.");
+    // Only GUI-created (side-file) schemes can be deleted; a builtin/inline scheme has no side file, and
+    // removeFile treats an absent file as success, so without this guard we would report a false delete of
+    // a scheme that is actually still present. Mirrors deleteProfile's origin guard.
+    if (!colorSchemeSideFileExists(name.toStdString()))
+        return fail("Only GUI-created color schemes can be deleted here.");
 
     if (auto const result = _store->deleteColorScheme(name.toStdString()); !result)
         return fail(result.error());
@@ -905,6 +944,7 @@ bool SettingsController::deleteColorScheme(QString const& name)
         _hasSchemeDraft = false;
         _editingScheme.clear();
         emit schemeDraftChanged();
+        emit editingSchemeChanged();
     }
     _apply();
     refresh();
